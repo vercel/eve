@@ -138,6 +138,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
           kind: "append",
           delta: event.data.reasoningDelta,
+          id: event.meta?.id,
           stepIndex: event.data.stepIndex,
           type: "reasoning",
         }),
@@ -149,6 +150,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
           kind: "complete",
           stepIndex: event.data.stepIndex,
           text: event.data.reasoning,
+          id: event.meta?.id,
           type: "reasoning",
         }),
       );
@@ -346,6 +348,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
           kind: "append",
           delta: event.data.messageDelta,
+          id: event.meta?.id,
           stepIndex: event.data.stepIndex,
           type: "text",
         }),
@@ -357,6 +360,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
           kind: "complete",
           stepIndex: event.data.stepIndex,
           text: event.data.message,
+          id: event.meta?.id,
           type: "text",
         }),
       );

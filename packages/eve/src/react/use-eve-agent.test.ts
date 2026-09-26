@@ -125,6 +125,7 @@ function completedTurnData(input: {
               parts: [
                 { type: "step-start" as const },
                 {
+                  id: expect.stringMatching(/^evt_/),
                   state: "done" as const,
                   stepIndex: 0,
                   text: input.assistantMessage,

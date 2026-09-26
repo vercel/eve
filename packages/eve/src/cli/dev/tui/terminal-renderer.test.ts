@@ -269,6 +269,45 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("It's 73°F in SF.");
   });
 
+  it("reconciles content runs by ID across replacement and removal without changing surviving blocks", async () => {
+    const { screen, renderer } = makeRenderer();
+    const content = (
+      parts: Array<{ id: string; text: string; state: "streaming" | "done" }>,
+    ): AgentTUIStreamEvent => ({
+      type: "content-state",
+      data: {
+        messages: [
+          {
+            id: "turn:assistant",
+            role: "assistant",
+            parts: parts.map((part) => ({ ...part, type: "text" })),
+          },
+        ],
+      },
+    });
+    await renderer.renderStream(
+      streamOf([
+        content([{ id: "a", text: "First.", state: "done" }]),
+        content([
+          { id: "a", text: "First.", state: "done" },
+          { id: "marker", text: "<eve-empty-delivery/>", state: "streaming" },
+          { id: "answer", text: "Draft", state: "streaming" },
+        ]),
+        content([
+          { id: "a", text: "First.", state: "done" },
+          { id: "answer", text: "Revised", state: "done" },
+        ]),
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "continue", continueSession: false },
+    );
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("First.");
+    expect(snapshot).toContain("Revised");
+    expect(snapshot).not.toContain("<eve-empty-delivery/>");
+    expect(snapshot).not.toContain("Draft");
+  });
+
   it("replaces discarded retry text with the authoritative completed message", async () => {
     const { screen, renderer } = makeRenderer();
     await renderer.renderStream(
@@ -1572,6 +1611,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       finalized: true,
     });
     renderer.completeSubagent({ authoritative: false, callId: "s1" });
+    expect(screen.rawOutput()).not.toContain("\x1b[32m※");
     await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
 
     renderer.beginSubagent({ callId: "s1", name: "researcher" });

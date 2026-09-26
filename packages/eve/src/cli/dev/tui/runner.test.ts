@@ -25,17 +25,15 @@ import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
 
 import {
   EveTUIRunner,
-  parsePromptCommand,
   registryHandoffAddress,
   type AgentTUIAgentHeader,
   type AgentTUIRenderer,
   type AgentTUISessionOptions,
   type AgentTUIStreamEvent,
-  type PromptCommand,
   type PromptCommandOutcome,
 } from "./runner.js";
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
-import { promptCommandsFor } from "./prompt-commands.js";
+import { parsePromptCommand, promptCommandsFor, type PromptCommand } from "./prompt-commands.js";
 import { interruptedError } from "./errors.js";
 import type { RemoteAuthFlow } from "./remote-auth.js";
 import type { RemoteAuthCompletedMutation } from "./remote-auth-result.js";
@@ -892,7 +890,13 @@ function sessionYieldingTurns(turns: ReadonlyArray<readonly unknown[]>): ClientS
   const nextResponse = async () => {
     const events = turns[index] ?? [];
     index += 1;
-    return messageResponseOf(events);
+    return messageResponseOf(
+      events.map((event, offset) =>
+        isStamped(event)
+          ? event
+          : stampTestEvent(event as UnstampedMessageStreamEvent, index * 100 + offset),
+      ),
+    );
   };
   vi.spyOn(session, "send").mockImplementation(nextResponse);
   vi.spyOn(session, "respond").mockImplementation(nextResponse);
@@ -990,11 +994,12 @@ describe("EveTUIRunner idle session follow", () => {
       expect(connections).toBeGreaterThanOrEqual(8);
       expect(idleEvents).toContainEqual({ type: "turn-start", turnId: "wake-turn" });
       expect(idleEvents).toContainEqual({ type: "step-start", modelId: "test-model" });
-      expect(idleEvents).toContainEqual({
-        type: "assistant-complete",
-        id: "text:wake-turn:0",
-        text: "Alice's background review is ready for Bob.",
-      });
+      expect(contentParts(idleEvents)).toContainEqual(
+        expect.objectContaining({
+          type: "text",
+          text: "Alice's background review is ready for Bob.",
+        }),
+      );
       expect(send).not.toHaveBeenCalled();
     } finally {
       prompt.resolve(undefined);
@@ -1153,7 +1158,12 @@ describe("EveTUIRunner idle session follow", () => {
         .mockResolvedValueOnce(undefined),
       renderIdleStream: vi.fn(async (result) => {
         for await (const event of result.events) idleEvents.push(event);
-        if (idleEvents.some((event) => event.type === "assistant-delta")) wakeRendered.resolve();
+        if (
+          contentParts(idleEvents).some(
+            (part) => part.type === "text" && part.text === "Background research finished.",
+          )
+        )
+          wakeRendered.resolve();
       }),
       renderStream: vi.fn(async (result) => {
         for await (const event of result.events) sendEvents.push(event);
@@ -1167,20 +1177,21 @@ describe("EveTUIRunner idle session follow", () => {
     await running;
 
     expect(send).toHaveBeenCalledOnce();
-    expect(idleEvents.filter((event) => event.type === "assistant-delta")).toEqual([
-      {
-        delta: "Background research finished.",
-        id: "text:wake-turn:1",
-        type: "assistant-delta",
-      },
-    ]);
-    expect(sendEvents.filter((event) => event.type === "assistant-delta")).toEqual([
-      {
-        delta: "Follow-up answer.",
-        id: "text:follow-up-turn:0",
-        type: "assistant-delta",
-      },
-    ]);
+    expect(
+      contentParts(idleEvents)
+        .filter((part) => part.type === "text")
+        .at(-1),
+    ).toEqual(
+      expect.objectContaining({
+        id: wakeEvents[2]?.meta.id,
+        text: "Background research finished.",
+      }),
+    );
+    expect(
+      contentParts(sendEvents)
+        .filter((part) => part.type === "text")
+        .at(-1),
+    ).toEqual(expect.objectContaining({ id: "evt_test_0006", text: "Follow-up answer." }));
   });
 
   it("reconnects idle following when a transport stream ends before an approval arrives", async () => {
@@ -1286,9 +1297,13 @@ describe("EveTUIRunner idle session follow", () => {
     }
 
     expect(streamCalls).toBeGreaterThanOrEqual(2);
-    expect(idleEvents.filter((event) => event.type === "assistant-delta")).toEqual([
-      { delta: "Still working.", id: "text:progress-turn:0", type: "assistant-delta" },
-    ]);
+    expect(
+      new Set(
+        contentParts(idleEvents)
+          .filter((part) => part.type === "text")
+          .map((part) => part.id),
+      ),
+    ).toEqual(new Set([firstWakeEvents[0]?.meta.id]));
     expect(renderer.readToolApproval).toHaveBeenCalledWith(
       expect.objectContaining({ approvalId: requestId, toolName: "selfmod__registry_add" }),
       { title: "Task Agent" },
@@ -1695,7 +1710,9 @@ describe("EveTUIRunner development session continuity", () => {
       name: "Weather Agent",
       renderer: fakeRenderer({
         readPrompt: vi.fn(async () => prompts.shift()),
-        renderCommandResult: (message) => results.push(message),
+        finishCommand: (outcome) => {
+          if (outcome.kind === "result") results.push(outcome.message ?? outcome.summary ?? "");
+        },
         renderStream: vi.fn(async (result) => {
           for await (const event of result.events) {
             void event;
@@ -1710,7 +1727,7 @@ describe("EveTUIRunner development session continuity", () => {
     expect(compact).toHaveBeenCalledOnce();
     expect(stream).toHaveBeenCalledOnce();
     expect(session.send).not.toHaveBeenCalled();
-    expect(results).toEqual(["Compaction requested."]);
+    expect(results).toEqual(["Compaction requested"]);
   });
 
   it.each(["/clear", "/new"])(
@@ -1737,7 +1754,9 @@ describe("EveTUIRunner development session continuity", () => {
         name: "Weather Agent",
         renderer: fakeRenderer({
           readPrompt: vi.fn(async () => prompts.shift()),
-          renderCommandResult: (message) => results.push(message),
+          finishCommand: (outcome) => {
+            if (outcome.kind === "result") results.push(outcome.message ?? outcome.summary ?? "");
+          },
           renderStream: vi.fn(async (result) => {
             for await (const event of result.events) {
               void event;
@@ -1752,7 +1771,7 @@ describe("EveTUIRunner development session continuity", () => {
       expect(clear).toHaveBeenCalledOnce();
       expect(stream).toHaveBeenCalledOnce();
       expect(session.send).not.toHaveBeenCalled();
-      expect(results).toEqual(["Context clear requested."]);
+      expect(results).toEqual([]);
     },
   );
 
@@ -1779,7 +1798,9 @@ describe("EveTUIRunner development session continuity", () => {
       name: "Weather Agent",
       renderer: fakeRenderer({
         readPrompt: vi.fn(async () => prompts.shift()),
-        renderCommandResult: (message) => results.push(message),
+        finishCommand: (outcome) => {
+          if (outcome.kind === "result") results.push(outcome.message ?? outcome.summary ?? "");
+        },
         renderStream: vi.fn(async (result) => {
           for await (const event of result.events) {
             void event;
@@ -1794,7 +1815,7 @@ describe("EveTUIRunner development session continuity", () => {
     expect(cancel).toHaveBeenCalledOnce();
     expect(stream).toHaveBeenCalledOnce();
     expect(send).not.toHaveBeenCalled();
-    expect(results).toEqual(["Turn cancellation requested."]);
+    expect(results).toEqual(["Cancellation requested"]);
   });
 
   it("does not call the cancel API before a session has started", async () => {
@@ -1804,13 +1825,15 @@ describe("EveTUIRunner development session continuity", () => {
       name: "Weather Agent",
       renderer: fakeRenderer({
         readPrompt: vi.fn(async () => prompts.shift()),
-        renderCommandResult: (message) => results.push(message),
+        finishCommand: (outcome) => {
+          if (outcome.kind === "result") results.push(outcome.message ?? outcome.summary ?? "");
+        },
       }),
     });
 
     await runner.run();
 
-    expect(results).toEqual(["No active turn to cancel."]);
+    expect(results).toEqual(["No active turn to cancel"]);
   });
 
   it("keeps the current transcript and session when /reset cannot reset the owner", async () => {
@@ -2122,14 +2145,14 @@ describe("EveTUIRunner initial input", () => {
         await login.promise;
         return result === "cancelled"
           ? { cancelled: true as const, message: "Connect a model with /login when you’re ready." }
-          : { tone: "error" as const, message: "Could not connect. Retry with /login." };
+          : { failed: true as const, message: "Could not connect. Retry with /login." };
       });
       const session = stubSession();
       vi.spyOn(session, "send");
       const renderer = fakeRenderer({
         setupFlow: createFakeSetupFlowRenderer(),
         renderCommandInvocation: vi.fn(),
-        renderCommandResult: vi.fn(),
+        finishCommand: vi.fn(),
       });
       const runner = new EveTUIRunner({
         session,
@@ -2151,12 +2174,13 @@ describe("EveTUIRunner initial input", () => {
         expect.objectContaining({ initialDraft: "Hello Alice\n\nstill editing" }),
       );
       expect(renderer.renderCommandInvocation).not.toHaveBeenCalled();
-      expect(renderer.renderCommandResult).toHaveBeenCalledWith(
-        result === "cancelled"
-          ? "Connect a model with /login when you’re ready."
-          : "Could not connect. Retry with /login.",
-        result === "error" ? "error" : undefined,
-      );
+      expect(renderer.finishCommand).toHaveBeenCalledWith({
+        kind: "result",
+        message:
+          result === "cancelled"
+            ? "Connect a model with /login when you’re ready."
+            : "Could not connect. Retry with /login.",
+      });
     },
   );
 
@@ -2497,10 +2521,13 @@ describe("EveTUIRunner native continuation state", () => {
       }),
     });
     await new EveTUIRunner({ session, renderer, name: "Agent" }).run();
-    expect(emitted.filter((event) => event.type === "assistant-delta")).toEqual([
-      { type: "assistant-delta", id: "text:t0:0", delta: "Hello" },
-      { type: "assistant-delta", id: "text:t0:0", delta: " world" },
-    ]);
+    expect(
+      new Set(
+        contentParts(emitted)
+          .filter((part) => part.type === "text")
+          .map((part) => `${part.id}:${part.text}`),
+      ),
+    ).toEqual(new Set([`${text.meta.id}:Hello`, `${text.meta.id}:Hello world`]));
     expect(emitted.filter((event) => event.type === "tool-call")).toHaveLength(1);
   });
 
@@ -2969,17 +2996,19 @@ describe("EveTUIRunner failure rendering", () => {
         renderer,
         name: "Weather Agent",
       }).run();
-      expect(
-        emitted.filter(
-          (event) => event.type === "assistant-complete" || event.type === "reasoning-complete",
-        ),
-      ).toEqual([
-        { type: "assistant-complete", id: "text:t0:0" },
-        { type: "reasoning-complete", id: "reasoning:t0:0" },
+      expect(contentParts(emitted).slice(-2)).toEqual([
+        expect.objectContaining({ id: stamped[1]?.meta.id, state: "done", text: "Partial answer" }),
+        expect.objectContaining({
+          id: stamped[2]?.meta.id,
+          state: "done",
+          text: "Partial thought",
+        }),
       ]);
       expect(web.messages[0]?.metadata?.status).toBe("complete");
       expect(
-        web.messages[0]?.parts.filter((part) => part.type === "text" || part.type === "reasoning"),
+        web.messages[0]?.parts
+          .filter((part) => part.type === "text" || part.type === "reasoning")
+          .map(({ id: _id, ...part }) => part),
       ).toEqual([
         { type: "text", stepIndex: 0, text: "Partial answer", state: "done" },
         { type: "reasoning", stepIndex: 0, text: "Partial thought", state: "done" },
@@ -3070,6 +3099,18 @@ describe("EveTUIRunner failure rendering", () => {
   });
 });
 
+function contentParts(events: readonly AgentTUIStreamEvent[]) {
+  return events.flatMap((event) =>
+    event.type === "content-state"
+      ? event.data.messages.flatMap((message) =>
+          message.role === "assistant"
+            ? message.parts.filter((part) => part.type === "text" || part.type === "reasoning")
+            : [],
+        )
+      : [],
+  );
+}
+
 async function projectWebAndTerminal(trace: UnstampedMessageStreamEvent[]) {
   const stamped = trace.map((event, index) => stampTestEvent(event, index));
   const reducer = defaultMessageReducer();
@@ -3135,9 +3176,12 @@ describe("EveTUIRunner reused step indexes", () => {
     await new EveTUIRunner({ session, renderer, name: "Weather Agent" }).run();
 
     expect(
-      emitted.flatMap((event) =>
-        event.type === "assistant-complete" && event.text !== undefined ? [event.text] : [],
-      ),
+      emitted
+        .filter((event) => event.type === "content-state")
+        .at(-1)
+        ?.data.messages.flatMap((message) => message.parts)
+        .filter((part) => part.type === "text")
+        .map((part) => part.text),
     ).toEqual(["First answer.", "Follow-up answer."]);
     expect(emitted.filter((event) => event.type === "turn-start")).toEqual([
       { type: "turn-start", turnId: "turn_0" },
@@ -3195,22 +3239,38 @@ describe("EveTUIRunner reused step indexes", () => {
       },
     ] as UnstampedMessageStreamEvent[];
     const { web, terminal: emitted } = await projectWebAndTerminal(trace);
-    const blocks = new Map<string, string>();
-    for (const event of emitted) {
-      if (event.type === "assistant-delta")
-        blocks.set(event.id, (blocks.get(event.id) ?? "") + event.delta);
-      if (event.type === "assistant-complete" && typeof event.text === "string")
-        blocks.set(event.id, event.text);
-      if (event.type === "assistant-remove") blocks.delete(event.id);
-    }
-    expect(emitted).toContainEqual({ type: "assistant-remove", id: "text:t0:0#1" });
-    expect([...blocks.values()]).toEqual(["First.", "Last."]);
+    const snapshots = emitted.filter((event) => event.type === "content-state");
+    const marker = snapshots.find((event) =>
+      event.data.messages.some((message) =>
+        message.parts.some((part) => part.type === "text" && part.text === "<eve-empty-delivery/>"),
+      ),
+    );
+    const markerPart = marker?.data.messages
+      .flatMap((message) => message.parts)
+      .find((part) => part.type === "text" && part.text === "<eve-empty-delivery/>");
+    const markerId = markerPart?.type === "text" ? markerPart.id : undefined;
+    expect(markerId).toBe("evt_test_0005");
     expect(
-      web.messages
-        .flatMap((message) => message.parts)
+      snapshots
+        .at(-1)
+        ?.data.messages.flatMap((message) => message.parts)
+        .some((part) => part.type === "text" && part.id === markerId),
+    ).toBe(false);
+    expect(
+      snapshots
+        .at(-1)
+        ?.data.messages.flatMap((message) => message.parts)
+        .filter((part) => part.type === "text"),
+    ).toEqual(
+      web.messages.flatMap((message) => message.parts).filter((part) => part.type === "text"),
+    );
+    expect(
+      snapshots
+        .at(-1)
+        ?.data.messages.flatMap((message) => message.parts)
         .filter((part) => part.type === "text")
-        .map((part) => part.text),
-    ).toEqual([...blocks.values()]);
+        .map((part) => part.id),
+    ).toEqual(["evt_test_0001", "evt_test_0009"]);
   });
 
   it("keeps another step open when a delayed step completion arrives", async () => {
@@ -3248,17 +3308,27 @@ describe("EveTUIRunner reused step indexes", () => {
       },
     ] as UnstampedMessageStreamEvent[];
     const { web, terminal: emitted } = await projectWebAndTerminal(trace);
-    expect(emitted.filter((event) => event.type.startsWith("assistant-"))).toEqual([
-      { type: "assistant-delta", id: "text:t0:0", delta: "First" },
-      { type: "assistant-delta", id: "text:t0:1", delta: "Second" },
-      { type: "assistant-complete", id: "text:t0:0" },
-      { type: "assistant-delta", id: "text:t0:1", delta: "!" },
-      { type: "assistant-complete", id: "text:t0:1" },
-    ]);
-    expect(emitted.filter((event) => event.type.startsWith("reasoning-"))).toEqual([
-      { type: "reasoning-delta", id: "reasoning:t0:1", delta: "Draft" },
-      { type: "reasoning-complete", id: "reasoning:t0:1", text: "Revised" },
-    ]);
+    const snapshots = emitted.filter((event) => event.type === "content-state");
+    const before = snapshots.find((event) =>
+      event.data.messages.some((message) =>
+        message.parts.some((part) => part.type === "text" && part.text === "Second"),
+      ),
+    );
+    const after = snapshots.at(-1);
+    expect(
+      before?.data.messages
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "text" && part.text === "Second"),
+    ).toEqual([expect.objectContaining({ id: "evt_test_0003", state: "streaming" })]);
+    expect(
+      after?.data.messages
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "text" || part.type === "reasoning"),
+    ).toEqual(
+      web.messages
+        .flatMap((message) => message.parts)
+        .filter((part) => part.type === "text" || part.type === "reasoning"),
+    );
     expect(
       web.messages
         .flatMap((message) => message.parts)
@@ -3317,12 +3387,12 @@ describe("EveTUIRunner reused step indexes", () => {
     ] as UnstampedMessageStreamEvent[];
     const { web, terminal: emitted } = await projectWebAndTerminal(trace);
     expect(
-      emitted
-        .filter((event) => event.type === "assistant-delta")
-        .map((event) => (event.type === "assistant-delta" ? [event.id, event.delta] : [])),
+      contentParts(emitted)
+        .filter((part) => part.type === "text" && part.state === "streaming")
+        .map((part) => [part.id, part.text]),
     ).toEqual([
-      ["text:t0:0", "Before tool."],
-      ["text:t0:0#1", "After tool."],
+      ["evt_test_0001", "Before tool."],
+      ["evt_test_0004", "After tool."],
     ]);
     expect(
       web.messages
@@ -3383,8 +3453,13 @@ describe("EveTUIRunner replay guards", () => {
     const runner = new EveTUIRunner({ session, renderer, name: "Weather Agent" });
     await runner.run();
 
-    const deltas = emitted.filter((event) => event.type === "assistant-delta");
-    expect(deltas).toEqual([{ type: "assistant-delta", id: "text:turn_0:0", delta: "Sunny." }]);
+    expect(
+      new Set(
+        contentParts(emitted)
+          .filter((part) => part.type === "text")
+          .map((part) => `${part.id}:${part.text}`),
+      ),
+    ).toEqual(new Set([`${appended.meta.id}:Sunny.`]));
   });
 
   it("deduplicates repeated call IDs and replaces retried text with the completed text", async () => {
@@ -3561,22 +3636,24 @@ describe("EveTUIRunner replay guards", () => {
 
     const toolCalls = emitted.filter((event) => event.type === "tool-call");
     const toolResults = emitted.filter((event) => event.type === "tool-result");
-    const streamedText = emitted
-      .filter((event) => event.type === "assistant-delta")
-      .map((event) => event.delta)
-      .join("");
-    const assistantCompletes = emitted.filter((event) => event.type === "assistant-complete");
+    const streamedText = contentParts(emitted)
+      .filter((part) => part.type === "text")
+      .map((part) => part.text);
 
     expect(toolCalls.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
     expect(toolResults.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
-    expect(streamedText).toContain("the retry collision");
-    expect(assistantCompletes).toEqual([
-      {
-        type: "assistant-complete",
-        id: "text:turn_0:1",
+    expect(streamedText).toContain("Using the first the retry collision");
+    expect(
+      contentParts(emitted)
+        .filter((part) => part.type === "text")
+        .at(-1),
+    ).toEqual(
+      expect.objectContaining({
+        id: "evt_test_0005",
         text: "Using the first answer.",
-      },
-    ]);
+        state: "done",
+      }),
+    );
     expect(emitted.filter((event) => event.type === "finish")).toHaveLength(1);
   });
 
@@ -3920,7 +3997,7 @@ describe("EveTUIRunner remote authentication", () => {
       flow,
       resolveDeployment: async () => ({ kind: "not-found" }),
       renderer: {
-        renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+        renderCommandInvocation: (text) => commandInvocations.push({ text, status: undefined }),
       },
     });
 
@@ -3945,7 +4022,7 @@ describe("EveTUIRunner remote authentication", () => {
         client,
         flow,
         renderer: {
-          renderCommandInvocation: (text, status) => commandInvocations.push({ text, status }),
+          renderCommandInvocation: (text) => commandInvocations.push({ text, status: undefined }),
           setRemoteConnectionStatus: (snapshot) => statuses.push(snapshot.connection.state),
           renderAgentHeader,
         },
@@ -4029,12 +4106,12 @@ describe("EveTUIRunner remote authentication", () => {
       );
       const setupFlow = idleSetupFlow();
       const readPrompt = vi.fn(async () => undefined);
-      const renderCommandResult = vi.fn();
+      const finishCommand = vi.fn();
       await runRemoteAuth({
         client,
         flow,
         initialInput: "Hello Alice",
-        renderer: { setupFlow, readPrompt, renderCommandResult },
+        renderer: { setupFlow, readPrompt, finishCommand },
       });
       expect(flow).toHaveBeenCalledOnce();
       expect(client.info).toHaveBeenCalledOnce();
@@ -4042,12 +4119,12 @@ describe("EveTUIRunner remote authentication", () => {
       expect(readPrompt).toHaveBeenCalledWith(
         expect.objectContaining({ initialDraft: "Hello Alice" }),
       );
-      if (kind === "cancelled") expect(renderCommandResult).not.toHaveBeenCalled();
+      if (kind === "cancelled") expect(finishCommand).not.toHaveBeenCalled();
       else
-        expect(renderCommandResult).toHaveBeenCalledWith(
-          expect.stringContaining("Check project permissions"),
-          "error",
-        );
+        expect(finishCommand).toHaveBeenCalledWith({
+          kind: "result",
+          message: expect.stringContaining("Check project permissions"),
+        });
     },
   );
 
@@ -4059,23 +4136,23 @@ describe("EveTUIRunner remote authentication", () => {
     const flow = successfulAuth([
       { kind: "trusted-sources-updated", targetProjectName: "inbound" },
     ]);
-    const renderCommandResult = vi.fn();
+    const finishCommand = vi.fn();
     const statuses: string[] = [];
     await runRemoteAuth({
       client,
       flow,
       renderer: {
-        renderCommandResult,
+        finishCommand,
         setRemoteConnectionStatus: (snapshot) => statuses.push(snapshot.connection.state),
       },
     });
     expect(flow).toHaveBeenCalledOnce();
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(statuses.at(-1)).toBe("auth-failed");
-    expect(renderCommandResult).toHaveBeenCalledWith(
-      expect.stringContaining("updated Trusted Sources for inbound"),
-      "error",
-    );
+    expect(finishCommand).toHaveBeenCalledWith({
+      kind: "result",
+      message: expect.stringContaining("updated Trusted Sources for inbound"),
+    });
   });
 
   it("aborts remote setup during an idle wait and waits for cleanup before releasing input", async () => {
@@ -4964,7 +5041,7 @@ describe("EveTUIRunner boot setup detection", () => {
   it("releases the composer while /info is still pending and ignores its result after exit", async () => {
     const refreshed = createDeferred<AgentInfoResult>();
     const renderAgentHeader = vi.fn();
-    const renderCommandResult = vi.fn();
+    const finishCommand = vi.fn();
     const renderSetupWarning = vi.fn();
     const readPrompt = vi.fn(async () => undefined);
     const setStartupPhase = vi.fn();
@@ -4973,7 +5050,7 @@ describe("EveTUIRunner boot setup detection", () => {
       bootDetections: [],
       renderer: {
         renderAgentHeader,
-        renderCommandResult,
+        finishCommand,
         renderSetupWarning,
         readPrompt,
         setStartupPhase,
@@ -4982,7 +5059,7 @@ describe("EveTUIRunner boot setup detection", () => {
     const run = runner.run();
     await vi.waitFor(() => expect(readPrompt).toHaveBeenCalledOnce());
     expect(client.info).toHaveBeenCalledTimes(2);
-    expect(renderCommandResult).not.toHaveBeenCalled();
+    expect(finishCommand).not.toHaveBeenCalled();
     expect(renderSetupWarning).not.toHaveBeenCalled();
     expect(setStartupPhase).toHaveBeenLastCalledWith(undefined);
     await run;
@@ -5102,7 +5179,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
   it("drops stale disconnected evidence when the post-setup info refresh fails", async () => {
     const clearSetupWarning = vi.fn();
-    const renderCommandResult = vi.fn();
+    const finishCommand = vi.fn();
     const headers: AgentTUIAgentHeader[] = [];
     const detect = vi.fn(({ info }: { info?: AgentInfoResult }) =>
       info?.agent.model.endpoint?.kind === "gateway" && !info.agent.model.endpoint.connected
@@ -5122,7 +5199,7 @@ describe("EveTUIRunner boot setup detection", () => {
       bootDetections: [{ id: "test", detect }],
       renderer: {
         clearSetupWarning,
-        renderCommandResult,
+        finishCommand,
         renderAgentHeader: (header) => headers.push(header),
       },
     });
@@ -5130,7 +5207,7 @@ describe("EveTUIRunner boot setup detection", () => {
     await runner.run();
     await vi.waitFor(() => expect(clearSetupWarning).toHaveBeenCalled());
 
-    expect(renderCommandResult).not.toHaveBeenCalled();
+    expect(finishCommand).not.toHaveBeenCalled();
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(detect).not.toHaveBeenCalled();
     expect(headers.at(-1)?.info?.agent.model.endpoint).toMatchObject({
@@ -5168,7 +5245,9 @@ describe("EveTUIRunner command outcome rendering", () => {
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
       renderNotice: vi.fn(),
-      renderCommandResult: (text) => results.push(text),
+      finishCommand: (outcome) => {
+        if (outcome.kind === "result") results.push(outcome.message ?? outcome.summary ?? "");
+      },
       renderStream: vi.fn(async () => {}),
     };
 
@@ -5205,7 +5284,9 @@ describe("EveTUIRunner command outcome rendering", () => {
       name: "Weather Agent",
       renderer: {
         readPrompt: vi.fn(async () => prompts.shift()),
-        renderCommandResult: (text) => results.push(text),
+        finishCommand: (outcome) => {
+          if (outcome.kind === "result") results.push(outcome.message ?? outcome.summary ?? "");
+        },
         renderStream: vi.fn(async () => {}),
       },
       session,
@@ -5231,7 +5312,9 @@ describe("EveTUIRunner command outcome rendering", () => {
 
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
-      renderCommandResult: (text) => results.push(text),
+      finishCommand: (outcome) => {
+        if (outcome.kind === "result") results.push(outcome.message ?? outcome.summary ?? "");
+      },
       renderStream: vi.fn(async () => {}),
       logDisplayMode: () => "all",
       setLogDisplayMode: (mode) => modes.push(mode),
@@ -5255,7 +5338,9 @@ describe("EveTUIRunner command outcome rendering", () => {
 
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
-      renderCommandResult: (text) => results.push(text),
+      finishCommand: (outcome) => {
+        if (outcome.kind === "result") results.push(outcome.message ?? outcome.summary ?? "");
+      },
       renderStream: vi.fn(async () => {}),
     };
 
@@ -5275,7 +5360,9 @@ describe("EveTUIRunner command outcome rendering", () => {
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
       renderNotice: (text) => notices.push(text),
-      renderCommandResult: (text) => results.push(text),
+      finishCommand: (outcome) => {
+        if (outcome.kind === "result") results.push(outcome.message ?? outcome.summary ?? "");
+      },
       renderStream: vi.fn(async () => {}),
     };
 
@@ -5294,7 +5381,7 @@ describe("EveTUIRunner command outcome rendering", () => {
     await runner.run();
 
     expect(results).toHaveLength(1);
-    expect(results[0]).toContain("--url");
+    expect(results[0]).toContain("remote agent");
     expect(notices).toEqual([]);
   });
 });
@@ -5643,7 +5730,7 @@ it("starts onboarding without login history and preserves the input draft", asyn
   const renderer = fakeRenderer({
     setupFlow: createFakeSetupFlowRenderer(),
     renderCommandInvocation: vi.fn(),
-    renderCommandResult: vi.fn(),
+    finishCommand: vi.fn(),
     readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
       order.push("prompt");
       expect(options?.initialDraft).toBe("Hello Alice");
@@ -5663,7 +5750,7 @@ it("starts onboarding without login history and preserves the input draft", asyn
   await runner.run();
   expect(order).toEqual(["login", "prompt"]);
   expect(renderer.renderCommandInvocation).not.toHaveBeenCalled();
-  expect(renderer.renderCommandResult).not.toHaveBeenCalled();
+  expect(renderer.finishCommand).not.toHaveBeenCalled();
 });
 
 it("keeps the result of an explicit login command after onboarding", async () => {
@@ -5671,7 +5758,7 @@ it("keeps the result of an explicit login command after onboarding", async () =>
   const handle = vi.fn(async () => ({ message: "Connected." }));
   const renderer = fakeRenderer({
     setupFlow: createFakeSetupFlowRenderer(),
-    renderCommandResult: vi.fn(),
+    finishCommand: vi.fn(),
     readPrompt: vi.fn(async () => prompts.shift()),
   });
   const runner = new EveTUIRunner({
@@ -5686,5 +5773,9 @@ it("keeps the result of an explicit login command after onboarding", async () =>
   await runner.run();
 
   expect(handle).toHaveBeenCalledTimes(2);
-  expect(renderer.renderCommandResult).toHaveBeenCalledExactlyOnceWith("Connected.", undefined);
+  expect(renderer.finishCommand).toHaveBeenCalledExactlyOnceWith({
+    kind: "result",
+    message: "Connected.",
+    summary: undefined,
+  });
 });

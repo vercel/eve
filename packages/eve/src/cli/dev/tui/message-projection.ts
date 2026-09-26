@@ -1,18 +1,9 @@
-import type {
-  EveDynamicToolPart,
-  EveMessageData,
-  EveMessagePart,
-} from "#client/message-reducer.js";
+import type { EveDynamicToolPart, EveMessageData } from "#client/message-reducer.js";
 import type { AgentTUIStreamEvent } from "./runner.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 
-type ContentPart = Extract<EveMessagePart, { type: "text" | "reasoning" }>;
-type Block = { part: ContentPart; turnId: string; id: string };
-
-/** Adapts the default reducer's ordered runs to terminal block updates. */
-export class TerminalMessageProjection {
-  #blocks: Block[] = [];
-  #generations = new Map<string, number>();
+/** Reconciles announced tool calls with the conversation's tool parts. */
+export class TerminalToolProjection {
   #tools = new Map<string, EveDynamicToolPart>();
   #announcedTools = new Set<string>();
 
@@ -24,106 +15,25 @@ export class TerminalMessageProjection {
     return this.#tools.has(callId);
   }
 
-  /** Restores terminal identity after the stream translator is recreated. */
   restore(data: EveMessageData): void {
     for (const message of data.messages) {
       if (message.role !== "assistant") continue;
       for (const part of message.parts) {
-        if (isTerminalToolCallPart(part)) {
-          this.announceTool(part.toolCallId);
-        }
+        if (isTerminalToolCallPart(part)) this.announceTool(part.toolCallId);
       }
     }
-    // The adapter's own identity state is restored without replaying prior rows.
-    for (const _ of this.transition(data)) {
-      /* consume */
-    }
-    for (const _ of this.toolTransitions(data)) {
-      /* consume */
+    for (const _ of this.transitions(data)) {
+      // Previously rendered tool rows belong to an earlier stream pass.
     }
   }
 
-  *transition(data: EveMessageData): Generator<AgentTUIStreamEvent> {
-    const parts = data.messages.flatMap((message) =>
-      message.role === "assistant"
-        ? message.parts.flatMap((part) =>
-            part.type === "text" || part.type === "reasoning"
-              ? [{ part, turnId: message.metadata?.turnId ?? "" }]
-              : [],
-          )
-        : [],
-    );
-    const next: Block[] = [];
-    const removed = new Set(this.#blocks);
-    for (const [index, { part, turnId }] of parts.entries()) {
-      // Reference equality preserves identity when a null completion removes an
-      // earlier run and shifts later runs to a different array position.
-      const unchanged = this.#blocks.find(
-        (block) => removed.has(block) && block.part === part && block.turnId === turnId,
-      );
-      const key = `${part.type}:${turnId}:${part.stepIndex}`;
-      const atIndex = this.#blocks[index];
-      const sameKey = (block: Block) =>
-        block.part.type === part.type &&
-        block.turnId === turnId &&
-        block.part.stepIndex === part.stepIndex;
-      const old =
-        unchanged ??
-        (atIndex && removed.has(atIndex) && sameKey(atIndex) ? atIndex : undefined) ??
-        this.#blocks.findLast((block) => removed.has(block) && sameKey(block));
-      const id = old?.id ?? this.#nextId(key);
-      next.push({ part, turnId, id });
-      if (old) removed.delete(old);
-      if (unchanged) continue;
-      const deltaType = part.type === "text" ? "assistant-delta" : "reasoning-delta";
-      const completeType = part.type === "text" ? "assistant-complete" : "reasoning-complete";
-      if (!old) {
-        if (part.state === "done") yield { type: completeType, id, text: part.text };
-        else if (part.text) yield { type: deltaType, id, delta: part.text };
-        continue;
-      }
-      const replaced = part.text !== old.part.text && !part.text.startsWith(old.part.text);
-      if (part.text !== old.part.text) {
-        if (part.text.startsWith(old.part.text) && old.part.state !== "done") {
-          const delta = part.text.slice(old.part.text.length);
-          if (delta) yield { type: deltaType, id, delta };
-        } else {
-          yield { type: completeType, id, text: part.text };
-        }
-      }
-      if (part.state === "done" && old.part.state !== "done" && !replaced) {
-        yield { type: completeType, id };
-      }
-    }
-    for (const old of removed) {
-      if (old.part.type === "text") yield { type: "assistant-remove", id: old.id };
-    }
-    this.#blocks = next;
-  }
-
-  #nextId(key: string): string {
-    const generation = this.#generations.get(key) ?? 0;
-    this.#generations.set(key, generation + 1);
-    return generation === 0 ? key : `${key}#${generation}`;
-  }
-
-  *finish(): Generator<AgentTUIStreamEvent> {
-    for (const block of this.#blocks) {
-      if (block.part.state === "done" || block.part.text.length === 0) continue;
-      yield block.part.type === "text"
-        ? { type: "assistant-complete", id: block.id }
-        : { type: "reasoning-complete", id: block.id };
-    }
-  }
-
-  *toolTransitions(data: EveMessageData): Generator<AgentTUIStreamEvent> {
+  *transitions(data: EveMessageData): Generator<AgentTUIStreamEvent> {
     for (const message of data.messages) {
       if (message.role !== "assistant") continue;
       for (const part of message.parts) {
         if (!isTerminalToolCallPart(part)) continue;
         if (part.toolMetadata?.eve?.inputRequest?.kind === "session-limit") continue;
         const old = this.#tools.get(part.toolCallId);
-        // Tool results without an announced call do not have a terminal block.
         if (!this.#announcedTools.has(part.toolCallId)) continue;
         if (old === part) continue;
         this.#tools.set(part.toolCallId, part);

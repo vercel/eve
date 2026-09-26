@@ -1,8 +1,9 @@
 import { authorizationKey } from "#client/session-utils.js";
 import { conversationReducer } from "#client/conversation-reducer.js";
+import type { EveMessageData } from "#client/message-reducer-types.js";
 import type { EveAgentReducerEvent } from "#client/reducer.js";
 import { openConversationInputs, type ConversationState } from "#client/conversation-state.js";
-import { TerminalMessageProjection } from "./message-projection.js";
+import { TerminalToolProjection } from "./message-projection.js";
 import { TerminalSubagentProjection } from "./subagent-projection.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
 import { SteeringStream } from "#cli/dev/tui/steering-stream.js";
@@ -174,6 +175,7 @@ export type AgentTUIStreamEvent =
   | { type: "turn-start"; turnId: string }
   | { type: "step-start"; modelId?: string }
   | { type: "step-finish"; usage?: AgentTUIStreamUsage }
+  | { type: "content-state"; data: EveMessageData }
   | { type: "assistant-delta"; id: string; delta: string }
   | { type: "assistant-complete"; id: string; text?: string | null }
   | { type: "assistant-remove"; id: string }
@@ -2190,8 +2192,8 @@ async function* eveEventsToTUIStream(
     failureHintOverride,
   } = input;
   const reducer = conversationReducer;
-  const messageProjection = new TerminalMessageProjection();
-  messageProjection.restore(getConversation());
+  const toolProjection = new TerminalToolProjection();
+  toolProjection.restore(getConversation());
 
   // The harness reports one underlying failure as a cascade (`step.failed` →
   // `turn.failed` → `session.failed`) with an identical payload on each
@@ -2212,12 +2214,12 @@ async function* eveEventsToTUIStream(
 
     if (event.type === "actions.requested") {
       for (const action of event.data.actions) {
-        if (action.kind === "tool-call") messageProjection.announceTool(action.callId);
+        if (action.kind === "tool-call") toolProjection.announceTool(action.callId);
       }
     } else if (event.type === "input.requested") {
       for (const request of event.data.requests) {
         if (request.action.kind === "tool-call" && request.kind !== "session-limit") {
-          messageProjection.announceTool(request.action.callId);
+          toolProjection.announceTool(request.action.callId);
         }
       }
     }
@@ -2240,11 +2242,10 @@ async function* eveEventsToTUIStream(
       ) {
         onSubagentEvent?.(event);
       }
-      for (const update of messageProjection.transition(messageData)) {
-        if (update.type === "assistant-delta") input.onAssistantResponse?.();
-        yield update;
-      }
-      yield* messageProjection.toolTransitions(messageData);
+      if (event.type === "message.appended" && event.data.messageDelta)
+        input.onAssistantResponse?.();
+      yield { type: "content-state", data: messageData };
+      yield* toolProjection.transitions(messageData);
     }
     const openInputs = openConversationInputs(messageData);
     turnState.pendingApprovals = openInputs
@@ -2286,29 +2287,8 @@ async function* eveEventsToTUIStream(
         // The conversation ledger owns request identity and closure.
         break;
 
-      case "approval.candidate": {
-        if (event.data.outcome === "pending") break;
-        const request = pendingInputRequests.get(event.data.requestId);
-        if (request !== undefined) upsertPendingApproval(turnState, request);
+      case "approval.candidate":
         break;
-      }
-
-      case "approval.settled":
-      case "input.resolved": {
-        const requestIds = new Set(
-          event.type === "input.resolved"
-            ? event.data.resolutions.map((resolution) => resolution.requestId)
-            : [event.data.requestId],
-        );
-        for (const requestId of requestIds) pendingInputRequests.delete(requestId);
-        turnState.pendingApprovals = turnState.pendingApprovals.filter(
-          (request) => !requestIds.has(request.approvalId),
-        );
-        turnState.pendingQuestions = turnState.pendingQuestions.filter(
-          (request) => !requestIds.has(request.requestId),
-        );
-        break;
-      }
 
       case "action.result": {
         const resultEvent = event as ActionResultStreamEvent;
@@ -2322,7 +2302,7 @@ async function* eveEventsToTUIStream(
               (part) =>
                 part.type === "dynamic-tool" && part.toolCallId === resultEvent.data.result.callId,
             );
-          if (messageProjection.hasTool(resultEvent.data.result.callId)) {
+          if (toolProjection.hasTool(resultEvent.data.result.callId)) {
             const address = registryHandoffAddress(
               undefined,
               tool?.type === "dynamic-tool" ? tool.toolName : undefined,
@@ -2406,7 +2386,6 @@ async function* eveEventsToTUIStream(
   }
 
   if (!sentFinish) {
-    yield* messageProjection.finish();
     yield { type: "finish", usage: latestStepUsage };
   }
 }

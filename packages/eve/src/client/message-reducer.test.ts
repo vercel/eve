@@ -154,8 +154,8 @@ describe("defaultMessageReducer", () => {
 
     expect(data.messages[0]?.parts).toEqual([
       { type: "step-start" },
-      { state: "streaming", stepIndex: 0, text: "I can", type: "reasoning" },
-      { state: "streaming", stepIndex: 0, text: "Hello", type: "text" },
+      { id: "evt_test_0000", state: "streaming", stepIndex: 0, text: "I can", type: "reasoning" },
+      { id: "evt_test_0002", state: "streaming", stepIndex: 0, text: "Hello", type: "text" },
     ]);
   });
 
@@ -187,6 +187,7 @@ describe("defaultMessageReducer", () => {
       stepIndex: 0,
       text: "abandonedreplacement complete",
       type: "text",
+      id: "evt_test_0000",
     });
 
     data = reduceServerEvents(reducer, data, [
@@ -203,6 +204,7 @@ describe("defaultMessageReducer", () => {
       stepIndex: 0,
       text: "replacement complete",
       type: "text",
+      id: "evt_test_0000",
     });
   });
 
@@ -374,8 +376,14 @@ describe("defaultMessageReducer", () => {
     expect(data.messages[0]?.metadata?.status).toBe("complete");
     expect(data.messages[0]?.parts).toEqual([
       { type: "step-start" },
-      { type: "text", stepIndex: 0, text: "Partial answer", state: "done" },
-      { type: "reasoning", stepIndex: 0, text: "Partial thought", state: "done" },
+      { id: "evt_test_0000", type: "text", stepIndex: 0, text: "Partial answer", state: "done" },
+      {
+        id: "evt_test_0001",
+        type: "reasoning",
+        stepIndex: 0,
+        text: "Partial thought",
+        state: "done",
+      },
     ]);
   });
 
@@ -609,6 +617,7 @@ describe("defaultMessageReducer", () => {
             stepIndex: 0,
             text: "Need the weather tool.",
             type: "reasoning",
+            id: "evt_test_0000",
           },
           {
             input: { city: "Vienna" },
@@ -620,8 +629,11 @@ describe("defaultMessageReducer", () => {
               eve: {
                 kind: "tool-call",
                 name: "get_weather",
+                inputRequest: undefined,
+                inputResponse: undefined,
               },
             },
+            approval: undefined,
             toolName: "get_weather",
             type: "dynamic-tool",
           },
@@ -1427,6 +1439,7 @@ describe("defaultMessageReducer", () => {
             stepIndex: 0,
             text: "First step.",
             type: "text",
+            id: "evt_test_0000",
           },
           { type: "step-start" },
           {
@@ -1434,6 +1447,7 @@ describe("defaultMessageReducer", () => {
             stepIndex: 1,
             text: "Second step.",
             type: "text",
+            id: "evt_test_0001",
           },
         ],
         role: "assistant",
@@ -1528,12 +1542,14 @@ describe("defaultMessageReducer", () => {
             stepIndex: 0,
             text: "Thinking",
             type: "reasoning",
+            id: "evt_test_0000",
           },
           {
             state: "done",
             stepIndex: 0,
             text: "Partial",
             type: "text",
+            id: "evt_test_0001",
           },
         ],
         role: "assistant",
@@ -1559,7 +1575,7 @@ describe("defaultMessageReducer", () => {
       createMessageCompletedEvent({ message: null, sequence: 1, stepIndex: 0, turnId: "turn_1" }),
     ]);
     expect(data.messages[0]?.parts.filter((part) => part.type === "text")).toEqual([
-      { state: "done", stepIndex: 0, text: "Earlier response.", type: "text" },
+      { id: "evt_test_0000", state: "done", stepIndex: 0, text: "Earlier response.", type: "text" },
     ]);
   });
 

@@ -53,7 +53,7 @@ export function Chat() {
         <article key={message.id}>
           <header>{message.role}</header>
           {message.parts.map((part, index) =>
-            part.type === "text" ? <p key={index}>{part.text}</p> : null,
+            part.type === "text" ? <p key={part.id ?? index}>{part.text}</p> : null,
           )}
         </article>
       ))}
@@ -170,7 +170,9 @@ the reset, it prepares the next owned session; otherwise, the next send creates 
 supplied `session` remains externally owned and is never replaced by prewarming or reset. Use
 `initialSession` with `resume: true` to restore a saved chat.
 
-`data.messages` are eve-owned `EveMessage[]`. Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
+`data.messages` are eve-owned `EveMessage[]`. Assistant text and reasoning parts have a stable `id` from the event that created the part. Appends and completion retain that ID; a null completion removes the provisional part. Use `part.id` to key streamed assistant content, including successive text parts within one step. Older events without an ID get a best-effort fallback. User text parts may not have an ID.
+
+Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
 
 When the root agent delegates, its stream emits `subagent.called` with the child's `childSessionId`, then `subagent.completed` when the parent records a successful result, for both blocking and background invocations. A background working receipt appears in `action.result` before the task settles; it is not itself a completion event. The child session can remain available for reuse. Task notifications wake the parent with completion, failure, or cancellation.
 

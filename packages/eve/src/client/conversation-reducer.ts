@@ -143,6 +143,18 @@ function reduceConversationLifecycle(
       }
       return { ...state, inputs };
     }
+    case "approval.candidate": {
+      const current = state.inputs[event.data.requestId];
+      if (current === undefined || current.status === "settled") return state;
+      if (event.data.outcome === "pending") return state;
+      return {
+        ...state,
+        inputs: {
+          ...state.inputs,
+          [event.data.requestId]: { ...current, status: "open", response: undefined },
+        },
+      };
+    }
     case "approval.settled": {
       const current = state.inputs[event.data.requestId];
       if (current === undefined || current.status === "settled") return state;

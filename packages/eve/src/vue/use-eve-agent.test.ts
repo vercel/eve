@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { effectScope } from "vue";
 
+import {
+  detachEveAgentStore,
+  EveAgentStore,
+  type EveAgentStoreSnapshot,
+} from "#client/eve-agent-store.js";
+import { defaultMessageReducer } from "#client/message-reducer.js";
+import type { ClientSessionState } from "#client/types.js";
 import { useEveAgent } from "#vue/use-eve-agent.js";
 import type { EveMessageData } from "#client/message-reducer.js";
 import type { ConversationState } from "#client/conversation-state.js";
@@ -13,6 +20,7 @@ import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionWaitingEvent,
+  createSessionFailedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
@@ -94,6 +102,7 @@ function completedTurnData(input: {
               parts: [
                 { type: "step-start" as const },
                 {
+                  id: expect.stringMatching(/^evt_/),
                   state: "done" as const,
                   stepIndex: 0,
                   text: input.assistantMessage,
@@ -107,11 +116,20 @@ function completedTurnData(input: {
   };
 }
 
+const cleanupStores: Array<() => void> = [];
+function createStore<TData>(
+  init: ConstructorParameters<typeof EveAgentStore<TData>>[0],
+): EveAgentStore<TData> {
+  const store = new EveAgentStore<TData>(init);
+  cleanupStores.push(() => detachEveAgentStore(store));
+  return store;
+}
+
 afterEach(() => {
+  for (const cleanup of cleanupStores.splice(0)) cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
-
 
 describe("EveAgentStore (Vue composable backing store)", () => {
   it("starts in ready status with empty data", () => {
@@ -342,7 +360,6 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     expect(store.snapshot.data).toEqual(["client.input.responded", "session.waiting"]);
   });
 });
-
 
 describe("useEveAgent (Vue composable wiring)", () => {
   it("automatically replays an initial session when resume is enabled", async () => {

@@ -223,9 +223,7 @@ export class EveAgentStore<TData> {
           ));
       assertExclusiveTurnInput(preparedInput);
 
-      if (!this.#isActiveTurn(turn)) {
-        return;
-      }
+      if (!this.#isActiveTurn(turn)) return;
 
       const submissionId = this.#messageSubmissions.submit(preparedInput, this.#events.length);
       this.#projectInputResponses(preparedInput);
@@ -259,17 +257,13 @@ export class EveAgentStore<TData> {
         turn.receivedFollowUpEvents.delete(event);
       }
 
-      if (!this.#isActiveTurn(turn)) {
-        return;
-      }
+      if (!this.#isActiveTurn(turn)) return;
 
       await followSteeredTurns(turn, reader, () => this.#isActiveTurn(turn));
       if (!this.#isActiveTurn(turn)) return;
       this.#status = this.#error === undefined ? "ready" : "error";
     } catch (error) {
-      if (!this.#isActiveTurn(turn)) {
-        return;
-      }
+      if (!this.#isActiveTurn(turn)) return;
 
       if (isAbortError(error)) {
         this.#status = "ready";

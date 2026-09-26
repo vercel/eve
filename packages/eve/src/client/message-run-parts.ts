@@ -8,6 +8,7 @@ function transition(
   input: {
     readonly stepIndex: number;
     readonly type: EveRunPart["type"];
+    readonly id?: string;
   } & (
     | { readonly kind: "append"; readonly delta: string }
     | { readonly kind: "complete"; readonly text: string | null }
@@ -29,6 +30,7 @@ function transition(
     };
   }
   const part: EveRunPart = {
+    id: current?.id ?? input.id ?? `${message.id}:${input.type}:${message.parts.length}`,
     state: input.kind === "append" ? "streaming" : "done",
     stepIndex: input.stepIndex,
     text: input.kind === "append" ? (current?.text ?? "") + input.delta : (input.text ?? ""),
