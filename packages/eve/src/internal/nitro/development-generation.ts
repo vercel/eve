@@ -1,6 +1,5 @@
 import { rm } from "node:fs/promises";
 import { finalizeDevelopmentGenerationMetadata } from "#internal/nitro/dev-runtime-generation-metadata.js";
-import { getDevelopmentFrameworkFingerprint } from "#internal/workflow/development-runtime-compatibility.js";
 
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
@@ -63,8 +62,7 @@ export async function stageDevelopmentGeneration(
 
     await finalizeDevelopmentGenerationMetadata(snapshot.snapshotRoot, {
       runtimeAppRoot: snapshot.runtimeAppRoot,
-      frameworkFingerprint: await getDevelopmentFrameworkFingerprint(),
-      workflowSourceFingerprint: prepared.workflowSourceFingerprint,
+      recoveryVersion: 1,
     });
 
     return prepared.workflowSourceFingerprint === undefined

@@ -3,8 +3,7 @@ import { basename, join } from "node:path";
 
 export interface DevelopmentGenerationMetadata {
   readonly runtimeAppRoot: string;
-  readonly frameworkFingerprint?: string;
-  readonly workflowSourceFingerprint?: string;
+  readonly recoveryVersion: 1;
 }
 
 const GENERATION_METADATA = "generation.json";
@@ -41,6 +40,7 @@ export async function readDevelopmentGenerationMetadata(
 ): Promise<
   | { readonly kind: "ready"; readonly metadata: DevelopmentGenerationMetadata }
   | { readonly kind: "missing" }
+  | { readonly kind: "legacy" }
   | { readonly kind: "invalid" }
 > {
   if (
@@ -79,12 +79,14 @@ export async function readDevelopmentGenerationMetadata(
     Array.isArray(metadata) ||
     !("runtimeAppRoot" in metadata) ||
     typeof metadata.runtimeAppRoot !== "string" ||
-    metadata.runtimeAppRoot.length === 0 ||
-    ("frameworkFingerprint" in metadata && typeof metadata.frameworkFingerprint !== "string") ||
-    ("workflowSourceFingerprint" in metadata &&
-      typeof metadata.workflowSourceFingerprint !== "string")
+    metadata.runtimeAppRoot.length === 0
   ) {
     return { kind: "invalid" };
   }
-  return { kind: "ready", metadata: metadata as DevelopmentGenerationMetadata };
+  if (!("recoveryVersion" in metadata)) return { kind: "legacy" };
+  if (metadata.recoveryVersion !== 1) return { kind: "invalid" };
+  return {
+    kind: "ready",
+    metadata: { runtimeAppRoot: metadata.runtimeAppRoot, recoveryVersion: 1 },
+  };
 }

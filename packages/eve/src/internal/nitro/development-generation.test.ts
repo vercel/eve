@@ -16,9 +16,6 @@ vi.mock("node:fs/promises", () => ({ rm: mocks.rm }));
 vi.mock("#internal/nitro/dev-runtime-generation-metadata.js", () => ({
   finalizeDevelopmentGenerationMetadata: vi.fn(async () => undefined),
 }));
-vi.mock("#internal/workflow/development-runtime-compatibility.js", () => ({
-  getDevelopmentFrameworkFingerprint: async () => "framework",
-}));
 vi.mock("#internal/authored-runtime-modules.js", () => ({
   prepareAuthoredRuntimeModules: mocks.prepare,
 }));

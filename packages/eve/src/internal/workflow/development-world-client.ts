@@ -207,7 +207,7 @@ function createQueueHandler(
       const availability = await getGenerationAvailability(generationId);
       if (availability.kind === "missing")
         throw new MissingDevelopmentGenerationError(generationId);
-      if (availability.kind === "incompatible" || availability.kind === "dormant")
+      if (availability.kind === "ineligible" || availability.kind === "dormant")
         return Response.json({ ok: true });
       const runtimeAppRoot = availability.runtimeAppRoot;
       const result = await withDevelopmentWorkflowGeneration(
