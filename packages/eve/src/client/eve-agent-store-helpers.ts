@@ -5,6 +5,20 @@ import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 
+export function activeTurnForOptimisticFollowUp(
+  events: readonly MessageStreamEvent[],
+): string | undefined {
+  const lastTurn = events.findLast(
+    (event) =>
+      event.type === "turn.started" ||
+      event.type === "turn.completed" ||
+      event.type === "turn.failed" ||
+      event.type === "turn.cancelled" ||
+      isCurrentTurnBoundaryEvent(event),
+  );
+  return lastTurn?.type === "turn.started" ? lastTurn.data.turnId : undefined;
+}
+
 export function isSettledSessionTail(events: readonly MessageStreamEvent[]): boolean {
   const tail = events.at(-1);
   return (

@@ -19,13 +19,13 @@ import {
 } from "#client/session-event-stream.js";
 import { EveAgentProjection } from "#client/eve-agent-projection.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
-import { SubagentPump } from "#client/subagent-pump.js";
-import type { ConversationState } from "#client/conversation-state.js";
-import type { EveAgentReducerEvent } from "#client/reducer.js";
+import { followSubagents } from "#client/follow-subagents.js";
+import type { SubagentPump } from "#client/subagent-pump.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import {
+  activeTurnForOptimisticFollowUp,
   assertExclusiveTurnInput,
   createAbortSignal,
   createActiveTurn,
@@ -67,8 +67,6 @@ export class EveAgentStore<TData> {
   readonly #optimistic: boolean;
   readonly #projection: EveAgentProjection<TData>;
   readonly #subscribers = new Set<() => void>();
-
-  /** Ids already folded into the projection: `initialEvents` and a reconnect can overlap. */
   #seenEvents = createEventDeduper();
 
   #activeTurn: ActiveTurn | undefined;
@@ -95,8 +93,6 @@ export class EveAgentStore<TData> {
           headers: init.headers,
           host: init.host ?? "",
         });
-    // Seed the deduper from the saved log so a live stream that replays the
-    // same prefix does not double-apply it.
     const initialEvents: MessageStreamEvent[] = [];
     for (const event of init.initialEvents ?? []) {
       if (this.#seenEvents.admit(event)) initialEvents.push(event);
@@ -442,18 +438,10 @@ export class EveAgentStore<TData> {
     }
     if (!this.#isActiveTurn(turn)) return await this.#submit(preparedInput);
 
-    const lastTurn = this.#events.findLast(
-      (event) =>
-        event.type === "turn.started" ||
-        event.type === "turn.completed" ||
-        event.type === "turn.failed" ||
-        event.type === "turn.cancelled" ||
-        isCurrentTurnBoundaryEvent(event),
-    );
     const submissionId = this.#messageSubmissions.submit(
       preparedInput,
       this.#events.length,
-      lastTurn?.type === "turn.started" ? lastTurn.data.turnId : undefined,
+      activeTurnForOptimisticFollowUp(this.#events),
     );
     if (submissionId !== undefined) turn.followUpSubmissionIds.add(submissionId);
     this.#publish();
@@ -579,29 +567,14 @@ export class EveAgentStore<TData> {
   }
 
   #followSubagents(): void {
-    if (this.#session === undefined) return;
+    if (!this.#session) return;
     this.#subagentPump?.abortAll();
-    const project = (event: EveAgentReducerEvent) => {
-      if (this.#subagentPump !== pump) return;
-      this.#projection.append(event);
-      this.#publish();
-    };
-    const pump = new SubagentPump({
-      session: () => this.#session,
-      getCall: (callId) => {
-        const data = this.#projection.data;
-        return (data as ConversationState).children?.[callId];
-      },
-      onFollowing: (callId) => project({ type: "client.child.following", data: { callId } }),
-      onEnded: (callId, outcome) =>
-        project({ type: "client.child.ended", data: { callId, outcome } }),
-      onUnavailable: (callId, reason) =>
-        project({ type: "client.child.unavailable", data: { callId, reason } }),
-      onChildEvent: (callId, event) =>
-        project({ type: "client.child.observed", data: { callId, event } }),
+    this.#subagentPump = followSubagents({
+      session: this.#session,
+      projection: this.#projection,
+      events: this.#events,
+      publish: () => this.#publish(),
     });
-    this.#subagentPump = pump;
-    for (const event of this.#events) pump.acceptParentEvent(event);
   }
 
   #resetPrewarm(): void {
@@ -649,7 +622,7 @@ export class EveAgentStore<TData> {
     this.#events = [...this.#events, event];
     this.#handleReconciliation(this.#messageSubmissions.apply(event));
     this.#subagentPump?.acceptParentEvent(event);
-    this.#subagentPump?.reconcile();
+    if (event.type === "turn.cancelled") this.#subagentPump?.reconcile();
     this.#callbacks.onEvent?.(event);
     this.#applyTerminalStreamFailure(event);
     const settled = isCurrentTurnBoundaryEvent(event) && this.#pendingAuthorizations.size === 0;
