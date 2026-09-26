@@ -160,8 +160,9 @@ export class SelfModificationHarness {
     this.#turns.add(liveParent);
     const parent = await liveParent.result();
     parent.expectOk();
-    // The delegation blocks the turn, so it stays pending while the child waits on an approval.
-    const callStatus = parent.status === "waiting" ? "pending" : "completed";
+    // The delegation blocks the turn, so it stays pending while the child waits on an approval
+    // proxied into this turn. Turn status cannot tell: every idle turn ends on session.waiting.
+    const callStatus = parent.inputRequests.length > 0 ? "pending" : "completed";
     const call = parent.requireToolCall(SELF_MODIFICATION_AGENT, { status: callStatus });
     const agentId = typeof call.input.agentId === "string" ? call.input.agentId : undefined;
     const message = agentId === undefined ? undefined : call.input.message;
