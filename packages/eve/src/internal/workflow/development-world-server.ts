@@ -25,6 +25,7 @@ import {
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
   DEVELOPMENT_WORLD_OPERATIONS,
+  type DevelopmentGenerationAdmission,
   type DevelopmentWorldRequest,
 } from "#internal/workflow/development-world-protocol.js";
 
@@ -314,7 +315,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     return header !== null && timingSafeEqualStrings(header, this.#transportSecret);
   }
 
-  async #generationAvailability(generationId: string) {
+  async #generationAvailability(generationId: string): Promise<DevelopmentGenerationAdmission> {
     const availability = await readDevelopmentGenerationAvailability(this.#appRoot, generationId);
     // Pruning still expires a run, even when startup refused its recovery.
     if (availability.kind !== "ready") return availability;

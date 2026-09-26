@@ -6,7 +6,6 @@ import type {
   World,
 } from "#compiled/@workflow/world/index.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
-import type { DevelopmentGenerationAvailability } from "#internal/workflow/development-runtime-compatibility.js";
 
 import {
   decodeDevelopmentWorldJson,
@@ -28,6 +27,7 @@ import {
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
   DEVELOPMENT_WORLD_OPERATIONS,
+  type DevelopmentGenerationAdmission,
   type DevelopmentGenerationAvailabilityCall,
   type DevelopmentWorldCall,
   type DevelopmentWorldOperation,
@@ -69,7 +69,7 @@ async function call<T>(
 
 async function getGenerationAvailability(
   generationId: string,
-): Promise<DevelopmentGenerationAvailability | { readonly kind: "dormant" }> {
+): Promise<DevelopmentGenerationAdmission> {
   const response = await fetchDevelopmentWorld(DEVELOPMENT_WORKFLOW_WORLD_ROUTE, {
     body: encodeDevelopmentWorldValue({
       operation: "eve.getGenerationAvailability",
@@ -77,9 +77,7 @@ async function getGenerationAvailability(
     } satisfies DevelopmentGenerationAvailabilityCall),
     method: "POST",
   });
-  return decodeDevelopmentWorldValue(await response.text()) as
-    | DevelopmentGenerationAvailability
-    | { readonly kind: "dormant" };
+  return decodeDevelopmentWorldValue(await response.text()) as DevelopmentGenerationAdmission;
 }
 
 /**
