@@ -245,14 +245,17 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     const previousCache = globals[cacheKey];
 
     try {
-      const supportChannelPath = await realpath(
-        join(app.appRoot, "agent", "channels", "support.ts"),
-      );
-      cache.set(supportChannelPath, { marker: "cached-channel-instance" });
+      // Native realpath resolves symlinks (macOS /var) and Windows 8.3 short
+      // names (RUNNER~1); loading from the same canonical root keeps the
+      // bundler's resolved channel path equal to the cache key.
+      const appRoot = await realpath(app.appRoot);
+      cache.set(join(appRoot, "agent", "channels", "support.ts"), {
+        marker: "cached-channel-instance",
+      });
       globals[cacheKey] = cache;
 
       const moduleNamespace = await loadAuthoredModuleNamespace(
-        join(app.appRoot, "agent", "tools", "use_support_channel.ts"),
+        join(appRoot, "agent", "tools", "use_support_channel.ts"),
       );
 
       expect(moduleNamespace.result).toBe("cached-channel-instance");
