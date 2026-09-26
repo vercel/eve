@@ -1295,6 +1295,54 @@ Replace \`<maintenance-job-path>\` with the Gmail maintenance route listed by th
 
 **Existing labelled mail is not imported on first setup.** The first successful \`watch()\` initializes the cursor at registration time. Send a new message from another account and apply the handoff label after initialization. Later watch renewals preserve the existing cursor. See the [Gmail adapter setup guide](https://chat-sdk.dev/adapters/official/gmail#setup) for Google Cloud, Pub/Sub, OAuth scopes, and watch-renewal requirements.`,
   },
+  pushary: {
+    logo: "pushary",
+    docsHref: "https://pushary.com/human-in-the-loop-eve",
+    keywords: [
+      "push",
+      "push notification",
+      "phone",
+      "mobile",
+      "approval",
+      "approvals",
+      "human-in-the-loop",
+      "hitl",
+      "lock screen",
+      "on-call",
+    ],
+    install: `Install the channel package (Node.js 24 or newer; eve 0.31 or newer):
+
+\`\`\`bash
+npm install @pushary/eve
+\`\`\`
+
+Use a Pushary Partner account and enroll the customer who will receive decisions. The customer needs the Pushary app and notification permission, but no Pushary account or API key.
+
+Set your Pushary credentials. The webhook secret comes from \`decisions.getWebhookSecret()\`, and the callback origin is the public URL this agent is deployed at, so answers can be routed back:
+
+\`\`\`bash title=".env.local"
+PUSHARY_API_KEY=pk_...sk_...
+PUSHARY_WEBHOOK_SECRET=whsec_...
+PUSHARY_CALLBACK_ORIGIN=https://your-agent.vercel.app
+\`\`\``,
+    quickStart: `Create \`agent/channels/pushary.ts\`:
+
+\`\`\`ts
+// agent/channels/pushary.ts
+import { pusharyChannel } from "@pushary/eve";
+
+export default pusharyChannel();
+\`\`\`
+
+With credentials, callback routing, and customer enrollment configured, the channel forwards approvals and \`ask_question\` requests to Pushary. Confirm notifications offer lock-screen actions; choices and text answers open the app. A verified answer resumes the parked turn. The session can wait durably until the decision expires, without holding a request open.
+
+By default the channel asks the session principal. Bind that identity through trusted user-scoped authentication and enroll the same customer ID. Pass \`externalId\` from trusted configuration to bind a fixed test user or single-user agent; never let model input choose the recipient.`,
+    configure: `The channel mounts four routes. \`POST /pushary/answer\` receives the answer and is the URL Pushary calls back; it verifies the Pushary webhook signature and a per-request routing signature before resuming the session. \`POST /pushary/message\`, \`/pushary/stop\`, and \`/pushary/reset\` let the same person send a follow-up, cancel the in-flight turn, or start a fresh session from their phone, mapping onto \`send\`, \`cancel\`, and \`reset\`.
+
+Options are matched back by label and then by id, so an approval resolves to eve's \`approve\` or \`deny\` and a select resolves to the option the human tapped. Each decision carries an idempotency key derived from the session and request id, so a replayed step never asks the same person twice. Set \`requireReachable: true\` to fail loudly when the end-user has no connected device instead of opening a decision that will expire unanswered.
+
+See the [Pushary eve guide](https://pushary.com/human-in-the-loop-eve) for enrollment, multi-tenant keys, and the fail-closed semantics.`,
+  },
 };
 const baseExtensionPresentations: Record<string, ExtensionPresentation> = {
   blitzreels: {
