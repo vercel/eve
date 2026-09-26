@@ -308,6 +308,8 @@ export class WorkflowBundleBuilder {
     ].join("\n");
     const interimBundle = await buildSingleRolldownChunk(`${options.label} workflow driver chunk`, {
       cwd: this.config.workingDir,
+      // Checked before the dependency-warning filter, which would otherwise
+      // drop an unresolved import raised inside node_modules.
       onLog(
         level: string,
         log: { code?: string; message: string },

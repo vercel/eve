@@ -1,5 +1,4 @@
 interface BundlerLog {
-  readonly code?: string;
   readonly id?: string;
   readonly ids?: readonly unknown[];
   readonly loc?: {
@@ -45,12 +44,6 @@ function getLogFilePaths(log: unknown): string[] {
 }
 
 function isVendoredDependencyWarning(log: unknown): boolean {
-  // An unresolved import is externalized and fails when the bundle loads, so
-  // it stays visible even when a dependency raised it.
-  if ((log as BundlerLog | null)?.code === "UNRESOLVED_IMPORT") {
-    return false;
-  }
-
   const filePaths = getLogFilePaths(log);
   return (
     filePaths.length > 0 &&
@@ -61,8 +54,7 @@ function isVendoredDependencyWarning(log: unknown): boolean {
 /**
  * Rollup/Rolldown `onLog` handler that drops warnings raised only by
  * dependency code (`node_modules` or eve's compiled vendor modules), which the
- * user cannot act on, and forwards everything else, including unresolved
- * imports.
+ * user cannot act on, and forwards everything else.
  */
 export function onVendoredDependencyLog(
   level: string,
