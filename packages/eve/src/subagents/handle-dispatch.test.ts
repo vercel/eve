@@ -61,6 +61,25 @@ describe("claimed child delivery", () => {
     });
   });
 
+  it("carries the current owner sandbox state when resuming an idle child", async () => {
+    const latestParentSandboxState = {
+      session: { providerName: "test", state: { name: "new" }, stateProtocolVersion: 1 },
+    };
+    await dispatchToClaimedAgentAddress({
+      ...input,
+      currentSession: { ...input.currentSession, sandboxState: latestParentSandboxState },
+      reply: { kind: "reply", parentToken: "reply-token" },
+    });
+
+    expect(dispatchSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({
+          caller: expect.objectContaining({ parentSandboxState: latestParentSandboxState }),
+        }),
+      }),
+    );
+  });
+
   it("supplies a new caller when continuing an idle child", async () => {
     await dispatchToClaimedAgentAddress({
       ...input,
