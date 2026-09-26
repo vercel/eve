@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import type { SubagentHookObservation } from "../subagent-hook-audit";
 
-// Only the model's agent tools publish subagent.* events; ctx.agent sessions publish agent.started.
+// An agent tool call is a task: task.started and task.settled carry its callId.
 export default defineEval({
   description: "Subagent hooks preserve parent context, skills, and sandbox writes.",
   async test(t) {
@@ -32,10 +32,11 @@ export default defineEval({
       "both hook subscriptions receive the parent's exact child result once",
       (events) => {
         if (!Array.isArray(observations) || observations.length !== 4) return false;
-        const completion = events.find((event) => event.type === "subagent.completed");
-        if (completion?.type !== "subagent.completed") return false;
-        if (!completion.data.output.startsWith("WORKFLOW-CHILD:")) return false;
-        if (!initial.message?.includes(completion.data.output)) return false;
+        const completion = events.find((event) => event.type === "task.settled");
+        if (completion?.type !== "task.settled") return false;
+        const output = completion.data.output;
+        if (typeof output !== "string" || !output.startsWith("WORKFLOW-CHILD:")) return false;
+        if (!initial.message?.includes(output)) return false;
         const records = observations as SubagentHookObservation[];
         return (
           records.every(
@@ -45,13 +46,13 @@ export default defineEval({
           (["typed", "wildcard"] as const).every(
             (subscriber) =>
               records.filter(
-                (record) => record.subscriber === subscriber && record.type === "subagent.called",
+                (record) => record.subscriber === subscriber && record.type === "task.started",
               ).length === 1 &&
               records.filter(
                 (record) =>
                   record.subscriber === subscriber &&
-                  record.type === "subagent.completed" &&
-                  record.output === completion.data.output,
+                  record.type === "task.settled" &&
+                  record.output === output,
               ).length === 1,
           )
         );
@@ -74,8 +75,8 @@ export default defineEval({
             record.sandboxCallId === record.callId,
         ),
     );
-    t.event("subagent.called", { data: { name: "workflow-marker" }, count: 1 });
-    t.event("subagent.completed", { data: { subagentName: "workflow-marker" }, count: 1 });
+    t.event("task.started", { data: { name: "workflow-marker" }, count: 1 });
+    t.event("task.settled", { data: { status: "completed" }, count: 1 });
     t.notEvent("session.failed");
     t.noFailedActions();
     t.succeeded();

@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 
-import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
-
 export function deriveRootTurnActivityWorkId(input: {
   readonly sessionId: string;
   readonly turnId: string;
@@ -14,7 +12,10 @@ export function deriveChildActivityWorkId(input: {
   readonly parentSessionId: string;
   readonly parentTurnId: string;
 }): string {
-  return `work:${deriveAgentOperationId(input)}`;
+  const digest = createHash("sha256")
+    .update(`${input.parentSessionId}\0${input.parentTurnId}\0${input.callId}`)
+    .digest("hex");
+  return `work:${digest}`;
 }
 
 function hashTuple(values: readonly string[]): string {

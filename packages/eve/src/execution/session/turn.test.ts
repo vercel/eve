@@ -331,7 +331,7 @@ describe("SessionExecution checkpoints", () => {
     ).resolves.toMatchObject({ cancelled: true, kind: "park" });
     expect(dispatchCoordinationStep).toHaveBeenCalledTimes(1);
     expect(inbox.next).not.toHaveBeenCalled();
-    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ serializedContext: {}, sessionState });
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({ sessionState });
   });
 
   it("consumes the cancelling command while retaining accepted follow-ups", async () => {

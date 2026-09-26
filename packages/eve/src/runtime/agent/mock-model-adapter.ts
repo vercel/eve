@@ -32,6 +32,7 @@ import {
 } from "#runtime/agent/mock-model-skill-selection.js";
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
 import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
+import { readTaskResults } from "#execution/tasks/render.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
@@ -485,14 +486,16 @@ function getAvailableTools(options: BootstrapGenerateOptions): AvailableBootstra
 function getLastAuthoredToolResult(prompt: BootstrapPrompt): BootstrapToolResult | null {
   for (const message of [...prompt].reverse()) {
     if (message.role === "user") {
-      // A framework-injected [Agents] announcement is scaffolding, not a
-      // turn boundary. Treating it as one masks the tool result behind it,
-      // and the adapter then re-issues the same deterministic tool call —
-      // for subagent starts that collides on the derived operation id and
-      // fatally fails the parent session.
-      if (isFrameworkAnnouncementText(getPromptContentText(message.content).trim())) {
-        continue;
+      const text = getPromptContentText(message.content).trim();
+      // A task's result arrives after its receipt, in a message of its own.
+      const task = readTaskResults(text).at(-1);
+      if (task !== undefined) {
+        const { body: output, taskId: toolCallId, tool: toolName } = task;
+        return { isError: task.status === "failed", output, toolCallId, toolName };
       }
+      // The [Tasks] note is scaffolding, not a turn boundary: skipping it keeps
+      // the tool result behind it, so the same call is not issued again.
+      if (isFrameworkAnnouncementText(text)) continue;
       return null;
     }
 

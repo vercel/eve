@@ -160,31 +160,33 @@ export class SelfModificationHarness {
     this.#turns.add(liveParent);
     const parent = await liveParent.result();
     parent.expectOk();
-    // The delegation blocks the turn, so it stays pending while the child waits on an approval
-    // proxied into this turn. Turn status cannot tell: every idle turn ends on session.waiting.
-    const callStatus = parent.inputRequests.length > 0 ? "pending" : "completed";
-    const call = parent.requireToolCall(SELF_MODIFICATION_AGENT, { status: callStatus });
-    const agentId = typeof call.input.agentId === "string" ? call.input.agentId : undefined;
-    const message = agentId === undefined ? undefined : call.input.message;
-    if (agentId !== undefined && (typeof message !== "string" || message.length === 0))
+    const call = parent.requireToolCall(SELF_MODIFICATION_AGENT);
+    const taskId = typeof call.input.taskId === "string" ? call.input.taskId : undefined;
+    const message = taskId === undefined ? undefined : call.input.message;
+    if (taskId !== undefined && (typeof message !== "string" || message.length === 0))
       throw new Error("Self-modification continuation omitted its message.");
 
-    const called = [...this.#turns]
+    const sessionEvents = [...this.#turns]
       .filter((turn) => turn.sessionId === parent.sessionId)
-      .flatMap((turn) => turn.events)
-      .find(
-        (event) =>
-          event.type === "subagent.called" &&
-          event.data.name === SELF_MODIFICATION_AGENT &&
-          (agentId === undefined
-            ? liveParent.events.includes(event)
-            : event.data.agentId === agentId),
-      );
-    if (called?.type !== "subagent.called") {
+      .flatMap((turn) => turn.events);
+    // The task's first call opened the child session; agent.started carries that call's id.
+    const firstCall = sessionEvents.find(
+      (event) =>
+        event.type === "task.started" &&
+        event.data.name === SELF_MODIFICATION_AGENT &&
+        (taskId === undefined ? liveParent.events.includes(event) : event.data.taskId === taskId),
+    );
+    const started = sessionEvents.find(
+      (event) =>
+        event.type === "agent.started" &&
+        firstCall?.type === "task.started" &&
+        event.data.callId === firstCall.data.callId,
+    );
+    if (started?.type !== "agent.started") {
       throw new Error("Self-modification parent turn did not start its child agent.");
     }
     const child = await this.#readChild(
-      called.data.childSessionId,
+      started.data.sessionId,
       typeof message === "string" ? message : undefined,
     );
     this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
@@ -302,7 +304,7 @@ export class SelfModificationHarness {
     for (const turn of this.#turns) {
       sessionIds.add(turn.sessionId);
       for (const event of turn.events) {
-        if (event.type === "subagent.called") sessionIds.add(event.data.childSessionId);
+        if (event.type === "agent.started") sessionIds.add(event.data.sessionId);
       }
     }
     const signal = AbortSignal.timeout(CLEANUP_TIMEOUT_MS);

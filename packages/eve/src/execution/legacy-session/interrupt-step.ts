@@ -24,10 +24,7 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
     },
   };
   try {
-    await terminateChildSessionsStep({
-      sessionState: originalState,
-      serializedContext: prepared.serializedContext,
-    });
+    await terminateChildSessionsStep({ sessionState: originalState });
   } catch (error) {
     logError(
       createLogger("execution.legacy-session"),

@@ -9,11 +9,12 @@ Use a subagent to run independent work in parallel, narrow the available tools, 
 - Use a [declared local subagent](#declared-subagents) for a specialist with its own directory and authored capabilities, rather than inheriting the root's.
 - Use a [remote agent](./guides/remote-agents) to delegate to a separately deployed eve agent, with its own configuration and authentication.
 
-Each subagent call blocks the calling turn until the child replies, and the child's final result is
-the tool result. If the child session expires, resets, or closes before replying, the call fails
-and reports the usage accumulated since its previous settlement. This applies to root-agent copies,
-declared local subagents, and remote subagents. The subagent session remains available for later
-calls.
+Every subagent call runs as a [task](./tools/workflows#run-calls-as-tasks-task). The call returns a
+receipt naming the task's `taskId` right away, the child works while the parent continues, and the
+child's final reply for that turn arrives as the task's result. The parent's turn does not end while
+the task is working. If the child's turn fails, the call fails and the task ends. This applies to
+root-agent copies, declared local subagents, and remote subagents. The subagent session remains
+available for later calls with the same `taskId`.
 
 ## The built-in `agent` tool
 
@@ -21,12 +22,12 @@ The root session receives `agent` by default. The model calls it to delegate a t
 
 ```ts
 {
-  message: string;  // everything the child needs; it does not see the parent's history
-  agentId?: string; // continue an existing child
+  message: string; // everything the child needs; it does not see the parent's history
+  taskId?: string; // continue an existing child
 }
 ```
 
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` needs no configuration. Each call waits for the child's reply and returns it as the tool result, and several `agent` calls in one response run in parallel. Give parallel children non-overlapping write scopes.
+The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` needs no configuration. Each call starts or continues a task whose result is the child's reply, and several `agent` calls in one response run in parallel. Give parallel children non-overlapping write scopes.
 
 `agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
 
@@ -72,7 +73,7 @@ export default defineAgent({
 
 The parent can alternatively export `disableTool()` from a same-named tool path, such as `agent/tools/researcher.ts`. This suppresses the derived model tool without removing `researcher` from the workflow invocation registry. A same-named authored tool replaces the model-facing surface while the workflow can still call the underlying subagent with `ctx.agent("researcher", ...)`.
 
-A declared local or remote subagent call waits for the child's reply and returns it as the tool result. Human input requests from the child surface on the parent session while the call waits. Cancelling the calling turn also cancels the child's current turn.
+A declared local or remote subagent call returns a receipt, and the child's reply arrives as the task's result. Human input requests from the child surface on the parent session while the task works. `task_cancel` with the task's `taskId` cancels the child's current turn, and so does cancelling the calling turn.
 
 A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
 
@@ -206,7 +207,7 @@ The root built-in `agent` tool is the exception. Its children reuse the root's s
 
 ## What the parent sees
 
-eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. To require structured output from a child, open a session with it from an authored workflow tool with [`ctx.agent(name)`](./tools/workflows#delegate-work-ctxagent) and pass `outputSchema` to `send()`; the schema applies to that turn, and the session accepts follow-up messages until the workflow run finishes.
+eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, taskId? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. To require structured output from a child, open a session with it from an authored workflow tool with [`ctx.agent(name)`](./tools/workflows#delegate-work-ctxagent) and pass `outputSchema` to `send()`; the schema applies to that turn, and the session accepts follow-up messages until the workflow run finishes.
 
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
@@ -216,20 +217,20 @@ A directly declared subagent's tool name is the bare path-derived name, with no 
 
 ```ts
 {
-  message: string;  // all context the child needs; it never sees the parent's history
-  agentId?: string; // continue an existing child
+  message: string; // all context the child needs; it never sees the parent's history
+  taskId?: string; // continue an existing child
 }
 ```
+
+The tool's description is the subagent's `description` followed by a sentence telling the model that the agent does not see the conversation and that `taskId` continues an agent task.
 
 By default, a subagent named `researcher` collides with an authored tool named `researcher`. Set the subagent's `tool` to `false` when the authored tool intentionally wraps that subagent; the authored tool becomes the model-facing capability while `ctx.agent("researcher", ...)` continues to address the child. A same-named `disableTool()` removes the model-facing capability entirely. Other static and active dynamic collisions remain errors.
 
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
-Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, pass the `subagent.called` event to [`session.streamSubagent()`](./guides/client/streaming#follow-a-subagent) on a client session attached to the parent. It reads `subagent.called.data.childStreamPath`: the child's own session stream for a local child, or a parent-origin proxy for a remote child, which the parent authenticates to the remote deployment.
+Each delegated subagent spins up its own child session and stream. The parent stream carries the call's `task.started` and `task.settled` events, `agent.started` when the child session opens, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. `task.settled` carries the child's reply as `output` when the call completes, or `error.message` when it fails. To follow the child's other progress, pass the `agent.started` event to [`session.streamSubagent()`](./guides/client/streaming#follow-a-subagent) on a client session attached to the parent. It reads `agent.started.data.streamPath`: the child's own session stream for a local child, or a parent-origin proxy for a remote child, which the parent authenticates to the remote deployment.
 
-Every invocation emits `subagent.called` after dispatch and `subagent.completed` after the parent records successful completion. Completion carries the actual output and identifies the same invocation by `callId`; the child session can remain available for reuse. Failure and cancellation do not emit `subagent.completed`; the failed tool result carries the error.
-
-A session an authored workflow tool opens with `ctx.agent` is announced with `agent.started` instead, which carries the workflow tool's `callId`, the agent `name`, the child's `sessionId`, and a `streamPath` that `session.streamSubagent()` also accepts. Its questions and sign-ins reach the root session the same way.
+`agent.started` carries the `callId` of the call that opened the session, the agent `name`, and the child's `sessionId`. Later calls with the same `taskId` reach the same session and do not announce it again. A session an authored workflow tool opens with `ctx.agent` is announced the same way, with the workflow tool's `callId`.
 
 Channels with activity reporting show a subagent's tool activity beneath that subagent's progress item. Activity reporting is best-effort and does not change execution or result delivery.
 
@@ -237,13 +238,13 @@ Subagent model calls automatically retry classified transient provider failures,
 
 ## Agent messaging
 
-A child parks after answering instead of terminating, keeping its session and conversation history alive. A failed child turn can also leave the child parked — its latest status shows the error and the parent may message it again. Pass a parked child's `agentId` to the same subagent tool with a new `message` to continue that session. Omitting `agentId` (or passing an empty string or `null`) always starts a new child, and an `agentId` that matches no known agent falls back to starting a new child rather than failing. Passing a known `agentId` through a different subagent tool fails with `AGENT_MISMATCH`.
+A child parks after answering instead of terminating, keeping its session and conversation history alive. Pass the task's `taskId` to the same subagent tool with a new `message` to continue that session. Omitting `taskId` always starts a new child. When a child's turn fails, the call fails and the task ends. A `taskId` that names no task available to the caller, including one that ended, fails with `UNKNOWN_TASK`. Only the principal that started a task can continue it.
 
-A call that names a child that is still starting or running returns `AGENT_BUSY`. Delivery failures are reported to the caller; eve does not start a replacement child session to hide them.
+A call with the `taskId` of a child that is still working joins the child's current turn, and that turn's final reply settles both calls. If the turn ends before the child reads the message, the message starts the child's next turn, and that turn's reply settles both calls. Use it to correct or add to work in progress. `task_cancel` with the task's `taskId` cancels the child's current turn and keeps its conversation, so a later call with the same `taskId` continues where it left off.
 
-Whenever the set of parked (resumable) children changes, eve appends a framework-injected note to the conversation — labeled `[Agents]` and carrying an `<agents>` block — listing each child's `agentId`, name, and latest status. The static system prompt tells the model the note is injected by eve, not written by the user. The note is appended only when the listing changes (an append-only design that preserves the provider prompt cache), the most recent note is authoritative, and children that are starting or running do not appear until they park again.
+eve adds a framework-injected `[Tasks]` note to the conversation that lists the caller's working and idle tasks by `taskId` and tool, so the model can find a child to continue.
 
-The parent holds agent handles only for its session lifetime. When the parent session ends, eve terminates local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
+The parent holds each child for the life of the task's run, which lasts until the parent session ends. Then eve resets local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
 
 ## When to split
 

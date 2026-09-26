@@ -1,4 +1,9 @@
-import { SERVE_TOOL_DESCRIPTION, TASK_ID_INPUT_DESCRIPTION } from "#execution/tasks/render.js";
+import {
+  AGENT_SERVE_TOOL_DESCRIPTION,
+  SERVE_TOOL_DESCRIPTION,
+  TASK_ID_INPUT_DESCRIPTION,
+} from "#execution/tasks/render.js";
+import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { JsonObject } from "#shared/json.js";
 import { isToolSchema, withOptionalStringProperty } from "#tools/schema.js";
@@ -15,9 +20,10 @@ export function withTaskIdInput(definition: HarnessToolDefinition): HarnessToolD
   if (!isToolSchema(schema)) {
     throw new Error(`Tool "${definition.name}" has no input schema eve can add taskId to.`);
   }
+  const sentence = isAgentTool(definition) ? AGENT_SERVE_TOOL_DESCRIPTION : SERVE_TOOL_DESCRIPTION;
   return {
     ...definition,
-    description: appendSentence(definition.description, SERVE_TOOL_DESCRIPTION),
+    description: appendSentence(definition.description, sentence),
     inputSchema: withOptionalStringProperty(schema, {
       description: TASK_ID_INPUT_DESCRIPTION,
       name: TASK_ID_INPUT,

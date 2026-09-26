@@ -46,12 +46,9 @@ function context(target, signal = new AbortController().signal) {
   };
 }
 
-/**
- * Mirrors a recorded eval turn: idle turns end on session.waiting, and a blocking delegation is
- * still pending only when its child's input request was proxied into the turn.
- */
+/** Mirrors a recorded eval turn: idle turns end on session.waiting. */
 function completedTurn(sessionId, events = [], { input = {}, inputRequests = [] } = {}) {
-  const call = { input, status: inputRequests.length > 0 ? "pending" : "completed" };
+  const call = { input, status: "completed" };
   return {
     sessionId,
     events,
@@ -64,6 +61,15 @@ function completedTurn(sessionId, events = [], { input = {}, inputRequests = [] 
       return call;
     },
   };
+}
+
+/** The parent events of an agent call that starts task `taskId` and opens `childSessionId`. */
+function agentCallEvents(childSessionId, taskId = "agent-1") {
+  const name = "self-modification__agent";
+  return [
+    { type: "task.started", data: { callId: `call-${taskId}`, name, taskId } },
+    { type: "agent.started", data: { callId: `call-${taskId}`, name, sessionId: childSessionId } },
+  ];
 }
 
 function liveTurn(sessionId, events = []) {
@@ -138,11 +144,8 @@ test("close restores registry installer project files", async () => {
 test("close retires every session before restoring the complete source tree", async () => {
   const child = liveTurn("child");
   const verification = liveTurn("verification");
-  const parentEvent = {
-    type: "subagent.called",
-    data: { name: "self-modification__agent", childSessionId: child.sessionId },
-  };
-  const parent = liveTurn("parent", [parentEvent]);
+  const parentEvents = agentCallEvents(child.sessionId);
+  const parent = liveTurn("parent", parentEvents);
 
   await withHarness(
     async ({ harness, root, calls, target, close }) => {
@@ -150,9 +153,8 @@ test("close retires every session before restoring the complete source tree", as
       parent.result = async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         parentFinished = true;
-        return completedTurn(parent.sessionId, [parentEvent]);
+        return completedTurn(parent.sessionId, parentEvents);
       };
-      parent.waitForEvent = async () => ({ data: parentEvent.data });
       target.watchTurn = () => {
         assert.equal(parentFinished, true);
         return child;
@@ -219,19 +221,13 @@ test("one reset failure still retires other sessions and leaves unsafe source un
     if (path.includes("bad/reset")) return new Response("no", { status: 500 });
     return response({ revision: "revision" });
   };
-  const parentEvent = {
-    type: "subagent.called",
-    data: { name: "self-modification__agent", childSessionId: "bad" },
-  };
+  const parentEvents = agentCallEvents("bad");
   // The public request path is used to populate both tracked sessions.
   const liveParent = {
     sessionId: "parent",
-    events: [parentEvent],
-    async waitForEvent() {
-      return { data: parentEvent.data };
-    },
+    events: parentEvents,
     async result() {
-      return completedTurn("parent", [parentEvent]);
+      return completedTurn("parent", parentEvents);
     },
   };
   target.watchTurn = () => ({
@@ -397,71 +393,50 @@ test("apply rejects a rebuild response without a runtime revision", async () => 
   });
 });
 
-test("request accepts a pending delegation while the parent turn waits on a proxied approval", async () => {
-  const called = {
-    type: "subagent.called",
-    data: { name: "self-modification__agent", childSessionId: "child" },
+test("request follows a continued agent task past stale child turns", async () => {
+  const initialParent = liveTurn("parent", agentCallEvents("child"));
+  const initialChild = liveTurn("child");
+  initialChild.session = { state: { streamIndex: 10 } };
+  const message = "Repair the existing inventory tool.";
+  const continuation = {
+    type: "task.started",
+    data: { callId: "call-2", name: "self-modification__agent", taskId: "agent-1" },
   };
-  const parent = liveTurn("parent", [called]);
-  parent.result = async () =>
-    completedTurn("parent", [called], { inputRequests: [{ requestId: "registry-approval" }] });
+  const repairParent = liveTurn("parent", [continuation]);
+  repairParent.result = async () =>
+    completedTurn("parent", [continuation], { input: { taskId: "agent-1", message } });
+  const diagnostic = liveTurn("child", [
+    { type: "message.received", data: { message: "Diagnose only." } },
+  ]);
+  diagnostic.session = { state: { streamIndex: 20 } };
+  diagnostic.result = async () => ({
+    ...completedTurn("child", diagnostic.events),
+    status: "waiting",
+  });
+  const repaired = liveTurn("child", [
+    ...diagnostic.events,
+    { type: "message.received", data: { message } },
+  ]);
+  repaired.session = { state: { streamIndex: 30 } };
+  const observed = [];
   await withHarness(async ({ harness, target }) => {
-    target.watchTurn = () => liveTurn("child");
-    const run = await harness.request("Add browser automation.", { start: async () => parent });
-    assert.equal(run.child.sessionId, "child");
+    const children = [initialChild, diagnostic, repaired];
+    target.watchTurn = (sessionId, options) => {
+      observed.push({ sessionId, ...options });
+      return children.shift();
+    };
+    await harness.request("Create the tool.", { start: async () => initialParent });
+    const result = await harness.request("Please repair it.", {
+      start: async () => repairParent,
+    });
+    assert.deepEqual(result.child.events, repaired.events);
+    assert.deepEqual(observed, [
+      { sessionId: "child", startIndex: 0 },
+      { sessionId: "child", startIndex: 10 },
+      { sessionId: "child", startIndex: 20 },
+    ]);
   });
 });
-
-for (const emitsCalled of [false, true]) {
-  test(`request follows a reused agent past stale turns (new called event: ${emitsCalled})`, async () => {
-    const called = {
-      type: "subagent.called",
-      data: { name: "self-modification__agent", agentId: "agent-1", childSessionId: "child" },
-    };
-    const initialParent = liveTurn("parent", [called]);
-    initialParent.waitForEvent = async () => called;
-    const initialChild = liveTurn("child");
-    initialChild.session = { state: { streamIndex: 10 } };
-    const message = "Repair the existing inventory tool.";
-    const repairParent = liveTurn("parent", emitsCalled ? [called] : []);
-    repairParent.waitForEvent = async () => {
-      throw new Error("Session reached session.waiting before the expected event.");
-    };
-    repairParent.result = async () =>
-      completedTurn("parent", [], { input: { agentId: "agent-1", message } });
-    const diagnostic = liveTurn("child", [
-      { type: "message.received", data: { message: "Diagnose only." } },
-    ]);
-    diagnostic.session = { state: { streamIndex: 20 } };
-    diagnostic.result = async () => ({
-      ...completedTurn("child", diagnostic.events),
-      status: "waiting",
-    });
-    const repaired = liveTurn("child", [
-      ...diagnostic.events,
-      { type: "message.received", data: { message } },
-    ]);
-    repaired.session = { state: { streamIndex: 30 } };
-    const observed = [];
-    await withHarness(async ({ harness, target }) => {
-      const children = [initialChild, diagnostic, repaired];
-      target.watchTurn = (sessionId, options) => {
-        observed.push({ sessionId, ...options });
-        return children.shift();
-      };
-      await harness.request("Create the tool.", { start: async () => initialParent });
-      const result = await harness.request("Please repair it.", {
-        start: async () => repairParent,
-      });
-      assert.deepEqual(result.child.events, repaired.events);
-      assert.deepEqual(observed, [
-        { sessionId: "child", startIndex: 0 },
-        { sessionId: "child", startIndex: 10 },
-        { sessionId: "child", startIndex: 20 },
-      ]);
-    });
-  });
-}
 
 test("cleanup failure retains a lock that identifies the source backup", async (t) => {
   const root = await temporaryCheckout(t, "eve-selfmod-cleanup-failed-");

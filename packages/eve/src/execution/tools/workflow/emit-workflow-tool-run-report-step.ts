@@ -4,12 +4,12 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import {
-  createActionPartialEvent,
-  createAgentStartedEvent,
-  encodeMessageStreamEvent,
-  stampMessageStreamEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+  publishSessionEvents,
+  writeSessionEvent,
+  type PublishedSessionEvents,
+  type SessionEventTarget,
+} from "#execution/publish-session-events.js";
+import { createActionPartialEvent, createAgentStartedEvent } from "#protocol/message.js";
 import type { JsonValue } from "#shared/json.js";
 
 export async function emitWorkflowToolRunReportStep(input: {
@@ -33,33 +33,20 @@ export async function emitWorkflowToolRunReportStep(input: {
 }
 
 /** Publishes `agent.started` for a session a workflow tool run opened. */
-export async function emitAgentStartedStep(input: {
-  readonly message: WorkflowToolRunAgentStartedMessage;
-  readonly parentSessionId: string;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-}): Promise<void> {
+export async function emitAgentStartedStep(
+  input: SessionEventTarget & {
+    readonly message: WorkflowToolRunAgentStartedMessage;
+  },
+): Promise<PublishedSessionEvents> {
   "use step";
 
   const { from, session } = input.message;
   const event = createAgentStartedEvent({
     callId: from.callId,
     name: session.name,
-    parentSessionId: input.parentSessionId,
+    parentSessionId: input.sessionState.sessionId,
     remote: session.remote,
     sessionId: session.sessionId,
   });
-  await writeSessionEvent(input.sessionWritable, event);
-}
-
-/** Writes one event straight to the session stream; call from a step. */
-export async function writeSessionEvent(
-  sessionWritable: WritableStream<Uint8Array>,
-  event: UnstampedMessageStreamEvent,
-): Promise<void> {
-  const writer = sessionWritable.getWriter();
-  try {
-    await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(event)));
-  } finally {
-    writer.releaseLock();
-  }
+  return await publishSessionEvents(input, [event]);
 }

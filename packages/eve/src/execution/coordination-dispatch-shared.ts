@@ -12,19 +12,16 @@ import {
   LocalDevRequestKey,
   type LocalDevRequestProvenance,
   ParentSessionKey,
-  SandboxKey,
 } from "#context/keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { ContextContainer } from "#context/container.js";
-import { withContextScope } from "#context/run-step.js";
 import {
   BundleKey,
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
-import type { RuntimeSession } from "#subagents/handle-dispatch.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import type { HarnessSession } from "#harness/types.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import {
   assertUniqueCoordinationCallIds,
@@ -44,23 +41,23 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
-import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
+import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
 import { readDynamicSubagentSelections } from "#context/dynamic-subagent-lifecycle.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
 export interface CoordinationDispatchInput {
-  readonly callbackBaseUrl?: string;
   readonly workflowToolRunOwner: WorkflowToolRunOwner;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
 
-/** Owner-side results and the updated session. */
+/** Owner-side results and the updated session, and context when hooks ran. */
 export interface CoordinationDispatchResult {
   readonly results: readonly RuntimeActionResult[];
+  readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
 
@@ -77,8 +74,6 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   readonly inheritedConversation: Parameters<
     typeof buildSubagentRunInput
   >[0]["inheritedConversation"];
-  /** Number of local children sharing the parent's remaining token quota. */
-  readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   /** Inherited originating-client metadata for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
@@ -90,7 +85,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly PlanEntry[];
-  readonly session: RuntimeSession;
+  readonly session: HarnessSession;
   readonly sessionState: DurableSessionState;
   readonly workflowAgents: Readonly<Record<string, WorkflowAgentMetadata>>;
 }
@@ -118,7 +113,6 @@ export async function prepareCoordinationDispatch(input: {
   const prepared = await prepareActionDispatch({
     batch: {
       event,
-      localFanoutSize: pending.localFanoutSize,
       requests,
     },
     ctx,
@@ -148,7 +142,6 @@ interface DispatchBatch {
     readonly stepIndex: number;
     readonly turnId: string;
   };
-  readonly localFanoutSize?: number;
   readonly requests: readonly { readonly callId: string }[];
 }
 
@@ -156,17 +149,12 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   readonly batch: DispatchBatch;
   readonly ctx: ContextContainer;
   readonly durableSession: Awaited<ReturnType<typeof readDurableSession>>;
-  readonly fanoutSize?: number;
   readonly plan: (input: {
     readonly bundle: CompiledBundle;
     readonly ctx: ContextContainer;
     readonly requests: DispatchBatch["requests"];
-    readonly session: RuntimeSession;
+    readonly session: HarnessSession;
   }) => readonly PlanEntry[];
-  readonly planReusesOwnerSandbox?: (input: {
-    readonly bundle: CompiledBundle;
-    readonly plan: readonly PlanEntry[];
-  }) => boolean;
   readonly serializedContext: Record<string, unknown>;
 }): Promise<Omit<PreparedCoordinationDispatch<PlanEntry>, "sessionState">> {
   const { batch, durableSession } = input;
@@ -175,7 +163,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   const ctx = input.ctx;
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  let session = hydrateDurableSession({
+  const session = hydrateDurableSession({
     compactionOverrides: {
       thresholdPercent: effectiveAgent.thresholdPercent,
     },
@@ -184,9 +172,6 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   });
   const adapter = ctx.require(ChannelKey);
 
-  // A corrupt handle store and rejected actions must resolve before sandbox
-  // initialization, which can provision provider resources and run preparation.
-  getAgentHandleStore(durableSession.state);
   const plan = input.plan({
     bundle,
     ctx,
@@ -195,17 +180,6 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   });
 
   const sandboxSessionId = resolveActiveSandboxSessionId(adapter.state, session.sessionId);
-  if (input.planReusesOwnerSandbox?.({ bundle, plan }) === true) {
-    try {
-      const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
-        await ctx.require(SandboxKey).get();
-        return { result: undefined, session: enrichedSession };
-      });
-      session = scoped.session;
-    } finally {
-      ctx.clearVirtualContext();
-    }
-  }
 
   return {
     adapter,
@@ -217,7 +191,6 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     channelMetadata: ctx.get(ChannelInstrumentationKey),
     dynamicSubagentSelections: readDynamicSubagentSelections(ctx),
     inheritedConversation: ctx.get(ConversationContextKey),
-    fanoutSize: input.fanoutSize ?? batch.localFanoutSize ?? 0,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     localDevRequest: ctx.get(LocalDevRequestKey),
     parentSession: ctx.get(ParentSessionKey),
@@ -236,7 +209,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
 
 function resolvePreparedActivity(
   activityObserver: ActivityObserverConfig | undefined,
-  session: RuntimeSession,
+  session: HarnessSession,
   turnId: string,
 ): (ActivityObserverConfig & { readonly workIdentity: ActivityWorkIdentityV1 }) | undefined {
   if (activityObserver === undefined) return undefined;

@@ -247,7 +247,9 @@ async function runSessionLoop(
       });
     }
     progress.turnId = `turn_${String(turnIndex++)}`;
-    return await execution.runTurn(payload);
+    const outcome = await execution.runTurn(payload);
+    if (outcome.caller !== undefined) progress.caller = outcome.caller;
+    return outcome;
   };
   const runDeliveredTurn = async (
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
@@ -354,7 +356,6 @@ async function runSessionLoop(
           continue;
         case "cancel-turn":
           await cancelDescendantTurnsStep({
-            serializedContext: cursor.serializedContext,
             sessionState: cursor.sessionState,
           });
           await execution.tasks.cancelAll();

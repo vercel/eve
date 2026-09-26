@@ -71,7 +71,6 @@ import {
 } from "#harness/input-requests.js";
 import { getDeferredStepInput } from "#harness/pending-input-batches.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
-import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
@@ -1073,215 +1072,6 @@ describe("createToolLoopHarness", () => {
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
-  it("announces parked agents as user-role content before the user message, outside the system prompt", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const runStep = createToolLoopHarness(
-      createTestConfig(undefined, {
-        historyProjector: ({ messages }) => [...messages],
-        resolveModel: vi.fn().mockResolvedValue(
-          new MockLanguageModelV3({
-            modelId: "claude-sonnet-4-5",
-            provider: "anthropic.messages",
-          }),
-        ),
-      }),
-    );
-    const session = createTestSession({
-      state: {
-        [AGENT_HANDLES_STATE_KEY]: {
-          handles: [
-            {
-              address: {
-                continuationToken: "private-token",
-                kind: "agent/local",
-                sessionId: "child-session-123456789012",
-              },
-              identity: {
-                id: "ag_research:123456789012",
-                name: "research",
-                nodeId: "subagents/research",
-              },
-              lastStatus: "waiting",
-              phase: "parked",
-            },
-          ],
-        },
-      },
-    });
-
-    const result = await runStep(session, { message: "Hi" });
-
-    const { instructions } = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
-    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-      generate: ReturnType<typeof vi.fn>;
-    };
-    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
-    // The volatile listing stays out of the system prompt (prompt cache) and
-    // rides history as a labeled, framework-injected user message.
-    expect(instructions).toBe("You are a test assistant.");
-    expect(messages).toContainEqual({
-      content: expect.stringContaining(
-        '<agent id="ag_research:123456789012" name="research">waiting</agent>',
-      ),
-      kind: "context.state",
-      role: "user",
-    });
-    // The announcement precedes the turn's actual user message.
-    expect(messages.at(-1)).toEqual({ content: "Hi", kind: "user" as const, role: "user" });
-    expect(messages.at(-2)).toEqual({
-      content: expect.stringContaining("[Agents]"),
-      kind: "context.state",
-      role: "user",
-    });
-    expect(JSON.stringify({ instructions, messages })).not.toContain("private-token");
-    expect(result.session.history).toContainEqual({
-      content: expect.stringContaining('<agent id="ag_research:123456789012"'),
-      kind: "context.state",
-      role: "user",
-    });
-  });
-
-  it("skips the agents snippet when no handle is parked", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const runStep = createToolLoopHarness(createTestConfig());
-    const session = createTestSession({
-      state: {
-        [AGENT_HANDLES_STATE_KEY]: {
-          handles: [
-            {
-              identity: {
-                id: "ag_research:123456789012",
-                name: "research",
-                nodeId: "subagents/research",
-              },
-              operation: {
-                callId: "call-1",
-                id: "op-1",
-                kind: "start",
-                parentTurnId: "turn-1",
-              },
-              phase: "starting",
-              target: { continuationToken: "private-token", kind: "agent/local" },
-            },
-          ],
-        },
-      },
-    });
-
-    await runStep(session, { message: "Hi" });
-
-    const call = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-      generate: ReturnType<typeof vi.fn>;
-    };
-    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
-    expect(JSON.stringify(call?.instructions ?? "")).not.toContain("<agents>");
-    expect(JSON.stringify(messages)).not.toContain("<agents>");
-  });
-
-  // Regression: a child settling used to append the updated <agents> listing
-  // to history as an assistant message. On a resume with no new user input the
-  // request then ended with `assistant`, which Anthropic rejects ("this model
-  // does not support assistant message prefill"). The announcement is
-  // user-role content, so on a no-input resume it trails the tool results
-  // and the request stays user-final.
-  it("keeps a no-input resume provider-valid when a parked handle is announced", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Done.", role: "assistant" }] },
-      text: "Done.",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const runStep = createToolLoopHarness(createTestConfig());
-    const session = createTestSession({
-      history: [
-        { content: "Delegate this.", kind: "user" as const, role: "user" },
-        {
-          content: [
-            {
-              input: { message: "do it" },
-              toolCallId: "call-1",
-              toolName: "research",
-              type: "tool-call",
-            },
-          ],
-          role: "assistant",
-        },
-        {
-          content: [
-            {
-              output: { type: "text", value: "child answered" },
-              toolCallId: "call-1",
-              toolName: "research",
-              type: "tool-result",
-            },
-          ],
-          role: "tool",
-        },
-      ],
-      state: {
-        [AGENT_HANDLES_STATE_KEY]: {
-          handles: [
-            {
-              address: {
-                continuationToken: "private-token",
-                kind: "agent/local",
-                sessionId: "child-session-123456789012",
-              },
-              identity: {
-                id: "ag_research:123456789012",
-                name: "research",
-                nodeId: "subagents/research",
-              },
-              lastStatus: "child answered",
-              phase: "parked",
-            },
-          ],
-        },
-      },
-    });
-
-    const result = await runStep(session);
-
-    const { instructions } = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
-    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-      generate: ReturnType<typeof vi.fn>;
-    };
-    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
-    // The request ends user-final: the announcement trails the tool results.
-    expect(messages.at(-1)).toEqual({
-      content: expect.stringContaining('<agent id="ag_research:123456789012"'),
-      kind: "context.state",
-      role: "user",
-    });
-    expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
-    // The volatile listing never rides the system prompt (prompt cache).
-    expect(JSON.stringify(instructions ?? "")).not.toContain("<agents>");
-    // The announcement persists append-only so the next step's diff gate
-    // sees it and does not re-announce an unchanged listing.
-    expect(result.session.history.at(-2)).toEqual({
-      content: expect.stringContaining("[Agents]"),
-      kind: "context.state",
-      role: "user",
-    });
-  });
-
   it.each([undefined, "low", "provider-default"] as const)(
     "uses dynamic model selection and reasoning (%s) for the model call",
     async (reasoning) => {
@@ -1713,53 +1503,13 @@ describe("createToolLoopHarness", () => {
       ),
     ).toHaveLength(1);
 
-    const parkedWithRunningDelegate = {
-      ...parked.session,
-      state: {
-        ...parked.session.state,
-        [AGENT_HANDLES_STATE_KEY]: {
-          handles: [
-            {
-              address: {
-                continuationToken: "delegate-token",
-                kind: "agent/local",
-                sessionId: "delegate-session",
-              },
-              identity: {
-                id: "ag_delegate:delegate",
-                name: "delegate",
-                nodeId: "workers",
-              },
-              operation: {
-                callId: "delegate-1",
-                id: "delegate-operation",
-                kind: "start",
-                parentTurnId: "turn_0",
-              },
-              phase: "running",
-            },
-          ],
-        },
-      },
-    } satisfies HarnessSession;
-    const reparked = await runStep(parkedWithRunningDelegate, {
+    const reparked = await runStep(parked.session, {
       runtimeActionResults: [
         {
           callId: "delegate-1",
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "delegated-done" },
-            usageDelta: {
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              inputTokens: 0,
-              outputTokens: 0,
-            },
-          },
+          kind: "tool-result",
           output: "delegated-done",
-          subagentName: "delegate",
+          toolName: "delegate",
         },
       ],
     });
@@ -1769,7 +1519,6 @@ describe("createToolLoopHarness", () => {
     expect(hasPendingInputBatch(reparked.session.state)).toBe(true);
     const toolMessages = reparked.session.history.filter((message) => message.role === "tool");
     expect(JSON.stringify(toolMessages)).toContain("delegated-done");
-    expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(1);
     expect(events.at(-1)?.type).toBe("session.waiting");
   });
 
@@ -6271,65 +6020,6 @@ describe("createToolLoopHarness", () => {
       result.session.history.at(-1)?.role,
     ]).toEqual(["assistant", "tool-call", "tool-result", "assistant"]);
     expect(toolResult).toEqual(resumedToolResultMessage.content[0]);
-  });
-
-  it("defers an agents announcement until an approved sibling tool has produced its result", async () => {
-    const toolResultMessage = {
-      content: [
-        {
-          output: { type: "text", value: "ok" },
-          toolCallId: "call-1",
-          toolName: "bash",
-          type: "tool-result",
-        },
-      ],
-      role: "tool",
-    };
-    setupMockAgent({
-      content: [],
-      finishReason: "stop",
-      response: { messages: [{ content: "Done.", role: "assistant" }] },
-      responseMessages: [toolResultMessage, { content: "Done.", role: "assistant" }],
-      text: "Done.",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const pending = createPendingBashApprovalSession();
-    const session = {
-      ...pending,
-      state: {
-        ...pending.state,
-        [AGENT_HANDLES_STATE_KEY]: {
-          handles: [
-            {
-              address: {
-                continuationToken: "private-token",
-                kind: "agent/local" as const,
-                sessionId: "child-session-123456789012",
-              },
-              identity: {
-                id: "ag_research:123456789012",
-                name: "research",
-                nodeId: "subagents/research",
-              },
-              lastStatus: "waiting",
-              phase: "parked" as const,
-            },
-          ],
-        },
-      },
-    };
-    const harness = createToolLoopHarness(createTestConfig(undefined, { tools: new Map() }));
-
-    await harness(session, {
-      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
-    });
-
-    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
-    if (agent === undefined) throw new Error("ToolLoopAgent mock did not return an instance.");
-    const messages = vi.mocked(agent.generate).mock.calls[0]?.[0].messages as ModelMessage[];
-    expect(JSON.stringify(messages)).not.toContain("[Agents]");
   });
 
   it("does not persist provider-executed deferred tool-results as generic tool messages", async () => {

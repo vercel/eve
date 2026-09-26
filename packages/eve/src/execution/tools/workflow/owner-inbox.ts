@@ -98,9 +98,6 @@ function normalizeInputRequest(
   requestId: string,
 ): InputRequest {
   switch (request.kind) {
-    case "agent-invoke":
-    case "agent-settled":
-      throw new TypeError("A workflow agent request cannot be normalized as human input.");
     case "authorization-request":
       throw new TypeError("A workflow authorization event cannot be normalized as human input.");
     case "ask":

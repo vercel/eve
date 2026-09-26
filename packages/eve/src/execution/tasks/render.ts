@@ -19,6 +19,10 @@ export const TASK_SYSTEM_BLOCK =
 export const SERVE_TOOL_DESCRIPTION =
   "To send this task more input, call this tool again with its taskId; without taskId, each call starts a new task.";
 
+/** Appended to an agent tool's description, in place of the `serve` tool sentence. */
+export const AGENT_SERVE_TOOL_DESCRIPTION =
+  "It does not see this conversation, so put everything it needs in message. To correct or continue an agent task, call this tool again with its taskId; without taskId, each call starts a new agent.";
+
 /** Describes the `taskId` eve adds to a `serve` tool's model input. */
 export const TASK_ID_INPUT_DESCRIPTION =
   "The id of a task this tool started, to send it this input. Omit it to start a new task.";
@@ -137,6 +141,29 @@ export function renderTaskResults(results: readonly RenderedTaskResult[]): strin
       return `${TASK_RESULT_TAG} ${attributes}>${body}</task_result>`;
     })
     .join("\n");
+}
+
+/** One block of a `task.result` message, as a deterministic mock model reads it back. */
+export interface ReadTaskResult {
+  readonly body: string;
+  readonly status: "completed" | "failed";
+  readonly taskId: string;
+  readonly tool: string;
+}
+
+const TASK_RESULT_BLOCK = new RegExp(
+  `${TASK_RESULT_TAG} id="([^"]*)" tool="([^"]*)" status="(completed|failed)">([\\s\\S]*?)</task_result>`,
+  "g",
+);
+
+/** The blocks of a `task.result` message, in order; empty for any other text. */
+export function readTaskResults(message: string): ReadTaskResult[] {
+  return [...message.matchAll(TASK_RESULT_BLOCK)].map(([, taskId, tool, status, body]) => ({
+    body: body!.replaceAll("<\\/task_result", "</task_result"),
+    status: status as ReadTaskResult["status"],
+    taskId: taskId!,
+    tool: tool!,
+  }));
 }
 
 function fitToBudget(body: string, budget: { bytes: number; lines: number }): string {

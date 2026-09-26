@@ -78,6 +78,7 @@ export class SessionTasks {
     await this.cursor.apply(
       await applyTaskRunMessageStep({
         message,
+        serializedContext: this.cursor.serializedContext,
         sessionState: this.cursor.sessionState,
         sessionWritable: this.cursor.sessionWritable,
       }),
@@ -165,6 +166,7 @@ export class SessionTasks {
     await this.cursor.apply(
       await cancelTasksStep({
         inbox: this.inbox,
+        serializedContext: this.cursor.serializedContext,
         sessionState: this.cursor.sessionState,
         sessionWritable: this.cursor.sessionWritable,
         taskIds,

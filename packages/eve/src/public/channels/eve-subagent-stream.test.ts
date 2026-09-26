@@ -8,7 +8,7 @@ import {
 } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { stampTestEvent } from "#internal/testing/events.js";
-import { createSubagentCalledEvent, type MessageStreamEvent } from "#protocol/message.js";
+import { createAgentStartedEvent, type MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SUBAGENT_STREAM_ROUTE_PATTERN } from "#protocol/routes.js";
 import { none, type AuthFn } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
@@ -27,7 +27,7 @@ describe("eveChannel remote subagent stream", () => {
   it("authenticates before reading the parent or fetching upstream", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const harness = createHarness({ auth: () => null, events: [remoteCalledEvent()] });
+    const harness = createHarness({ auth: () => null, events: [remoteStartedEvent()] });
 
     const response = await harness.fetch(proxyRequest());
 
@@ -40,9 +40,9 @@ describe("eveChannel remote subagent stream", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const forged = createHarness({
-      events: [remoteCalledEvent({ callId: "different-call" })],
+      events: [remoteStartedEvent({ callId: "different-call" })],
     });
-    const local = createHarness({ events: [localCalledEvent()] });
+    const local = createHarness({ events: [localStartedEvent()] });
 
     expect((await forged.fetch(proxyRequest())).status).toBe(404);
     expect((await local.fetch(proxyRequest())).status).toBe(404);
@@ -53,7 +53,7 @@ describe("eveChannel remote subagent stream", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const harness = createHarness({
-      events: [remoteCalledEvent()],
+      events: [remoteStartedEvent()],
       resolveHeaders: vi.fn().mockRejectedValue(new Error("remote URL mismatch")),
     });
 
@@ -90,7 +90,7 @@ describe("eveChannel remote subagent stream", () => {
     const bindingCancelled = vi.fn();
     const harness = createHarness({
       bindingCancelled,
-      events: [remoteCalledEvent()],
+      events: [remoteStartedEvent()],
       resolveHeaders,
     });
     const abort = new AbortController();
@@ -148,7 +148,7 @@ describe("eveChannel remote subagent stream", () => {
         }),
       ),
     );
-    const harness = createHarness({ events: [remoteCalledEvent()] });
+    const harness = createHarness({ events: [remoteStartedEvent()] });
 
     const response = await harness.fetch(proxyRequest());
 
@@ -158,38 +158,30 @@ describe("eveChannel remote subagent stream", () => {
   });
 });
 
-function remoteCalledEvent(overrides: Partial<typeof coordinates> = {}): MessageStreamEvent {
+function remoteStartedEvent(overrides: Partial<typeof coordinates> = {}): MessageStreamEvent {
   const values = { ...coordinates, ...overrides };
   return stampTestEvent(
-    createSubagentCalledEvent({
+    createAgentStartedEvent({
       callId: values.callId,
-      childSessionId: values.childSessionId,
       name: "research",
+      parentSessionId: values.parentSessionId,
       remote: {
         resolverId: "subagents/research",
         url: "https://remote.example/base",
       },
-      sequence: 1,
-      sessionId: values.parentSessionId,
-      toolName: "research",
-      turnId: "turn-1",
-      workflowId: "workflow-1",
+      sessionId: values.childSessionId,
     }),
     0,
   );
 }
 
-function localCalledEvent(): MessageStreamEvent {
+function localStartedEvent(): MessageStreamEvent {
   return stampTestEvent(
-    createSubagentCalledEvent({
+    createAgentStartedEvent({
       callId: coordinates.callId,
-      childSessionId: coordinates.childSessionId,
       name: "research",
-      sequence: 1,
-      sessionId: coordinates.parentSessionId,
-      toolName: "research",
-      turnId: "turn-1",
-      workflowId: "workflow-1",
+      parentSessionId: coordinates.parentSessionId,
+      sessionId: coordinates.childSessionId,
     }),
     0,
   );

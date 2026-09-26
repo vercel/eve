@@ -1,11 +1,11 @@
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import type { PreparedToolHandling } from "#tools/behavior.js";
 
-export const SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME = "subagentToolExecuteWorkflow";
+export const AGENT_TOOL_SERVE_WORKFLOW_NAME = "agentToolServeWorkflow";
 
-/** Shared framework-owned execute body for local and remote subagent tools. */
-export const subagentToolExecuteWorkflowReference = {
-  workflowId: `workflow//${EVE_PACKAGE_NAME}//${SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME}`,
+/** The framework-owned `serve` body of every agent tool. */
+export const agentToolServeWorkflowReference = {
+  workflowId: `workflow//${EVE_PACKAGE_NAME}//${AGENT_TOOL_SERVE_WORKFLOW_NAME}`,
 };
 
 /** Registered workflow that runs a tool with this handling; absent for tools without one. */
@@ -19,6 +19,6 @@ export function workflowIdForHandling(
     case "remote-agent-call":
     case "self-agent-call":
     case "subagent-call":
-      return subagentToolExecuteWorkflowReference.workflowId;
+      return agentToolServeWorkflowReference.workflowId;
   }
 }

@@ -17,7 +17,7 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   for (let index = 0; index < request.messages.length; index += 1) {
     const entry = request.messages[index]!;
     if (entry.role === "tool") lastToolResultIndex = index;
-    if (entry.role === "user" && !entry.text.trim().startsWith("[Agents]")) {
+    if (entry.role === "user" && !isFrameworkMessage(entry.text)) {
       lastAuthoredUserIndex = index;
     }
   }
@@ -28,7 +28,8 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
     if (!turnHasToolResult) {
       return { toolCalls: [{ input: { message: subagent[2] }, name: subagent[1] }] };
     }
-    return toolOutput(request, subagent[1]);
+    // The agent call returned a receipt; its result arrives in a <task_result> message.
+    return taskResultOf(request, subagent[1]) ?? { toolCalls: [{ input: {}, name: "task_wait" }] };
   }
 
   const bash = BASH_DIRECTIVE.exec(message);
@@ -53,6 +54,22 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   return `Mock reply: ${message}`;
+}
+
+/** The `[Tasks]` note and `<task_result>` messages are eve's, not the user's. */
+function isFrameworkMessage(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.startsWith("[Tasks]") || trimmed.startsWith("<task_result");
+}
+
+function taskResultOf(request: MockModelRequest, tool: string): string | undefined {
+  const pattern = new RegExp(`<task_result [^>]*tool="${tool}"[^>]*>([\\s\\S]*?)</task_result>`);
+  for (const entry of [...request.messages].reverse()) {
+    if (entry.role !== "user") continue;
+    const body = entry.text.match(pattern)?.[1];
+    if (body !== undefined) return body;
+  }
+  return undefined;
 }
 
 function bashStdout(request: MockModelRequest): string {

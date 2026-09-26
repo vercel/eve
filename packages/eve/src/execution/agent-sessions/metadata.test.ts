@@ -6,7 +6,7 @@ import {
   SessionDynamicSubagentSelectionsKey,
   TurnDynamicSubagentSelectionsKey,
 } from "#context/keys.js";
-import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
+import { resolveWorkflowAgentMetadata } from "#execution/agent-sessions/metadata.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 describe("resolveWorkflowAgentMetadata", () => {

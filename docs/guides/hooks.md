@@ -86,10 +86,11 @@ handle can also automatically resume on later I/O. A hook failure, including a
 failed stop, follows the normal
 [hook failure behavior](#what-happens-when-a-hook-throws).
 
-For `subagent.called` and `subagent.completed`, `ctx.session.id` identifies the
-parent session. Typed handlers and `*` handlers receive this context even when
-the subagent event arrives between parent turns. These hooks can use
-`ctx.getSandbox()` against the parent session.
+For `task.started`, `task.settled`, and `agent.started`, `ctx.session.id`
+identifies the session that started the task or opened the subagent session.
+Typed handlers and `*` handlers receive this context even when the event
+arrives between turns. These hooks can use `ctx.getSandbox()` against that
+session, and sandbox changes they make are kept for its next turn.
 
 ### Narrowing tool results
 
@@ -183,7 +184,7 @@ Hooks always run after the event is durably recorded, so if a hook throws, the s
 
 A thrown handler during a model turn propagates through turn execution and surfaces as `turn.failed`. This includes handlers for `turn.started` and the first `step.started` of a model call: the failed turn ends with `session.waiting`, and the next message can start another turn. If a hook subscribed to a failure-cascade event also throws, it escalates to `session.failed`. For belt-and-suspenders semantics inside a hook, wrap the body in `try`/`catch`. eve treats a thrown hook as a real failure.
 
-For `subagent.called`, `subagent.completed`, and events proxied from a child, a thrown handler fails the publishing step and follows the workflow runtime's step retry policy. A retry can publish the event again before rerunning its hooks. Parent execution waits for the publishing step to finish or exhaust its retries. Exhausting retries fails the session.
+For `task.started`, `task.settled`, `agent.started`, and events proxied from a child, a thrown handler fails the publishing step and follows the workflow runtime's step retry policy. A retry can publish the event again before rerunning its hooks. Parent execution waits for the publishing step to finish or exhaust its retries. Exhausting retries fails the session.
 
 ## Subagent isolation
 

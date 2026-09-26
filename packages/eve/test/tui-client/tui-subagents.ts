@@ -5,20 +5,16 @@ import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
 
 // Note: the apps/fixtures/agent-tui-client's echo-marker subagent is the source of every child
 // stream event the TUI observes here. The smoke validates the full pipeline:
-// parent subagent.called → child session subscription → nested `│` region
-// populated from the child's message.completed → parent subagent.completed.
+// parent task.started + agent.started → child session subscription → nested `│` region
+// populated from the child's message.completed → parent task.settled.
 
 import { run } from "./lib/run.ts";
 import { theme } from "./lib/theme.ts";
 
 /**
- * End-to-end proof that the TUI surfaces subagent stream events as a
- * persistent body section.
- *
- * Previously, `subagent.called`/`.started`/`.event`/`.completed` events
- * fell into the translator's `default:` arm and were dropped, the user
- * just saw a long pause. This smoke test drives the new subagent
- * section path against the `echo-marker` fixture:
+ * End-to-end proof that the TUI surfaces an agent task's child stream as a
+ * persistent body section. This smoke test drives the subagent section path
+ * against the `echo-marker` fixture:
  *
  *   1. Start the apps/fixtures/agent-tui-client server.
  *   2. Boot an `EveTUIRunner` with a mock terminal.

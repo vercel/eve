@@ -5,7 +5,7 @@ const MEMORABLE_FACT = "Alice named the tide station notebook Harbor Lumen 4482.
 /**
  * Cross-turn continuation of a remote child over a real HTTP hop: turn one
  * delegates a fact to `remote-loopback`, which parks once it replies; turn two
- * re-messages the same remote child via its agentId. The fact can only come
+ * re-messages the same remote child via its taskId. The fact can only come
  * back if the continuation reached the same remote session.
  */
 export default defineEval({
@@ -24,7 +24,7 @@ export default defineEval({
 
     const second = await first.session.send(
       [
-        "Message that same remote-loopback agent again: call it with the agentId shown in the latest <agents> block",
+        "Message that same remote-loopback agent again: call it again with the taskId of the task you started earlier",
         'and the message: "What exact fact did I ask you to remember? Reply with only the fact."',
         "Do not state the fact yourself.",
         "When it returns, reply with the agent's exact output and no other text.",
@@ -36,16 +36,15 @@ export default defineEval({
     t.succeeded();
     t.eventsSatisfy("both turns continue one remote child session", (events) => {
       const calls = events.flatMap((event) =>
-        event.type === "subagent.called" && event.data.name === "remote-loopback"
-          ? [event.data]
-          : [],
+        event.type === "task.started" && event.data.name === "remote-loopback" ? [event.data] : [],
       );
       return (
         calls.length >= 2 &&
-        new Set(calls.map((call) => call.childSessionId)).size === 1 &&
+        new Set(calls.map((call) => call.taskId)).size === 1 &&
         new Set(calls.map((call) => call.turnId)).size >= 2
       );
     });
+    t.event("agent.started", { data: { name: "remote-loopback" }, count: 1 });
     t.noFailedActions();
   },
 });

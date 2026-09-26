@@ -1,7 +1,6 @@
 import type { MockLanguageModelV3 } from "ai/test";
 
-import { AGENTS_SNIPPET_LABEL } from "#subagents/handles/prompt.js";
-import { TASKS_NOTE_LABEL } from "#execution/tasks/render.js";
+import { TASK_RESULT_TAG, TASKS_NOTE_LABEL } from "#execution/tasks/render.js";
 
 export type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 export type BootstrapPrompt = BootstrapGenerateOptions["prompt"];
@@ -159,8 +158,8 @@ export function getPromptContentText(content: BootstrapPrompt[number]["content"]
 /**
  * Returns the text from the last user message in the prompt, or `null`.
  *
- * Skips framework-injected `[Agents]` announcements: they ride the user
- * role in conversation history, but they are not authored input and must
+ * Skips framework-injected `[Tasks]` notes and task results: they ride the
+ * user role in conversation history, but they are not authored input and must
  * not drive mock directive parsing.
  */
 export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
@@ -184,14 +183,12 @@ export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
 }
 
 /**
- * True when the text is a framework-injected `[Agents]` announcement.
- * Announcements are user-role scaffolding, not authored input: mock model
- * heuristics must scan past them instead of treating them as the turn's
- * message or as a turn boundary.
+ * True when the text is a framework-injected `[Tasks]` note or task result:
+ * user-role scaffolding, not authored input. Mock model heuristics must scan
+ * past it instead of treating it as the turn's message or as a turn boundary.
  */
-/** Framework-injected `[Agents]` and `[Tasks]` listings: scaffolding, not authored input. */
 export function isFrameworkAnnouncementText(text: string): boolean {
-  return text.startsWith(AGENTS_SNIPPET_LABEL) || text.startsWith(TASKS_NOTE_LABEL);
+  return text.startsWith(TASKS_NOTE_LABEL) || text.startsWith(TASK_RESULT_TAG);
 }
 
 /**

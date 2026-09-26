@@ -1,9 +1,5 @@
 import { updatePendingAuthorizations } from "#client/session-utils.js";
-import type {
-  AgentStartedStreamEvent,
-  MessageStreamEvent,
-  SubagentCalledStreamEvent,
-} from "#protocol/message.js";
+import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import {
   EVE_SESSION_ROUTE_PATH,
@@ -216,23 +212,20 @@ export class ClientSession {
   /**
    * Follows one delegated child's durable event stream through this parent session.
    *
-   * Pass an `agent.started` or `subagent.called` event from this session. The
-   * client reads the child's stream path with this session's host and
+   * Pass an `agent.started` event from this session. The client reads the
+   * child's stream path with this session's host and
    * credentials: a local child's own stream route, or the parent-origin proxy
    * for a remote child, which the parent deployment authenticates to the remote
    * agent after checking that the parent recorded the child. Reading the child
    * never advances this session's cursor. The child cursor starts at `0`; pass
    * `startIndex` to resume. Stop at a child turn boundary with
    * `isCurrentTurnBoundaryEvent`.
-   *
-   * @throws {Error} When a `subagent.called` event has no `childStreamPath`
-   * because an older eve version recorded it.
    */
   streamSubagent(
-    started: AgentStartedStreamEvent | SubagentCalledStreamEvent,
+    started: AgentStartedStreamEvent,
     options?: StreamOptions,
   ): AsyncIterable<MessageStreamEvent> {
-    const path = readChildStreamPath(started);
+    const path = started.data.streamPath;
     const startIndex = options?.startIndex ?? 0;
     if (options?.follow === false && startIndex < 0) {
       throw new Error(
@@ -376,17 +369,6 @@ export class ClientSession {
       resolveReconnectPolicy: input.resolveReconnectPolicy,
     });
   }
-}
-
-function readChildStreamPath(started: AgentStartedStreamEvent | SubagentCalledStreamEvent): string {
-  if (started.type === "agent.started") return started.data.streamPath;
-  // Events persisted before childStreamPath existed replay without it.
-  if (typeof started.data.childStreamPath !== "string") {
-    throw new Error(
-      `streamSubagent() requires a subagent.called event with childStreamPath, but call ${started.data.callId} has none. The event was recorded by an older eve version.`,
-    );
-  }
-  return started.data.childStreamPath;
 }
 
 /** @internal Follow continuously while the frontend owns the session. */

@@ -315,28 +315,19 @@ describe("run assertions", () => {
 
   it("matches typed event counts and ordered event groups", async () => {
     const called = {
-      type: "subagent.called",
-      data: {
-        name: "child",
-        callId: "c",
-        childSessionId: "s",
-        sessionId: "p",
-        sequence: 1,
-        toolName: "subagent",
-        turnId: "t",
-        workflowId: "w",
-      },
+      type: "task.started",
+      data: { callId: "c", name: "child", taskId: "child-1", turnId: "t" },
     } as UnstampedMessageStreamEvent;
     const completed = {
-      type: "subagent.completed",
-      data: { callId: "c", output: "ok", sequence: 2, subagentName: "child", turnId: "t" },
+      type: "task.settled",
+      data: { callId: "c", output: "ok", status: "completed", taskId: "child-1" },
     } as UnstampedMessageStreamEvent;
     const result = makeResult({ events: [called, called, completed] });
 
     expect(
       (
         await Run.typedEvent({
-          type: "subagent.called",
+          type: "task.started",
           data: { name: "child" },
           count: 2,
         }).evaluate(result)
@@ -345,7 +336,7 @@ describe("run assertions", () => {
     expect(
       (
         await Run.typedEvent({
-          type: "subagent.called",
+          type: "task.started",
           data: { name: "child" },
           count: (count) => count >= 2,
         }).evaluate(result)
@@ -355,8 +346,8 @@ describe("run assertions", () => {
     expect(
       (
         await Run.eventOrder([
-          { type: "subagent.called", data: { name: "child" }, count: 2 },
-          { type: "subagent.completed", data: { subagentName: "child" } },
+          { type: "task.started", data: { name: "child" }, count: 2 },
+          { type: "task.settled", data: { taskId: "child-1" } },
         ]).evaluate(result)
       ).score,
     ).toBe(1);
@@ -364,13 +355,13 @@ describe("run assertions", () => {
       (
         await Run.eventOrder([
           {
-            type: "subagent.called",
+            type: "task.started",
             data: { name: "child" },
             count: (count) => count >= 2,
           },
           {
-            type: "subagent.completed",
-            data: { subagentName: "child" },
+            type: "task.settled",
+            data: { taskId: "child-1" },
             count: (count) => count >= 1,
           },
         ]).evaluate(result)
@@ -380,7 +371,7 @@ describe("run assertions", () => {
       (
         await Run.eventsSatisfy(
           "completion follows delegation",
-          (events) => events.at(-1)?.type === "subagent.completed",
+          (events) => events.at(-1)?.type === "task.settled",
         ).evaluate(result)
       ).score,
     ).toBe(1);
@@ -388,29 +379,20 @@ describe("run assertions", () => {
 
   it("eventOrder rejects interleaved event groups", async () => {
     const called = {
-      type: "subagent.called",
-      data: {
-        name: "child",
-        callId: "c",
-        childSessionId: "s",
-        sessionId: "p",
-        sequence: 1,
-        toolName: "subagent",
-        turnId: "t",
-        workflowId: "w",
-      },
+      type: "task.started",
+      data: { callId: "c", name: "child", taskId: "child-1", turnId: "t" },
     } as UnstampedMessageStreamEvent;
     const completed = {
-      type: "subagent.completed",
-      data: { callId: "c", output: "ok", sequence: 2, subagentName: "child", turnId: "t" },
+      type: "task.settled",
+      data: { callId: "c", output: "ok", status: "completed", taskId: "child-1" },
     } as UnstampedMessageStreamEvent;
     const result = makeResult({ events: [called, completed, called] });
 
     expect(
       (
         await Run.eventOrder([
-          { type: "subagent.called", data: { name: "child" }, count: 2 },
-          { type: "subagent.completed", data: { subagentName: "child" } },
+          { type: "task.started", data: { name: "child" }, count: 2 },
+          { type: "task.settled", data: { taskId: "child-1" } },
         ]).evaluate(result)
       ).score,
     ).toBe(0);

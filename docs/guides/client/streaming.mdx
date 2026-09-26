@@ -251,24 +251,24 @@ stream index after the captured prefix.
 
 ## Follow a subagent
 
-A delegated subagent reports its progress on its own child session. The parent stream announces each child: `subagent.called` when the model calls a subagent tool, and `agent.started` when a [workflow tool](/docs/tools/workflows#delegate-work-ctxagent) opens a session with `ctx.agent`. Pass either event to `streamSubagent()` on the parent's session handle to follow the child:
+A delegated subagent reports its progress on its own child session. The parent stream announces each child session with `agent.started`, whether the model called a subagent tool or a [workflow tool](/docs/tools/workflows#delegate-work-ctxagent) opened the session with `ctx.agent`. Pass the event to `streamSubagent()` on the parent's session handle to follow the child:
 
 ```ts
 import { isCurrentTurnBoundaryEvent } from "eve/client";
 
 const session = client.sessions.attach(parentSessionId);
 const { events } = await session.snapshot();
-const called = events.find((event) => event.type === "subagent.called");
+const started = events.find((event) => event.type === "agent.started");
 
-if (called?.type === "subagent.called") {
-  for await (const event of session.streamSubagent(called)) {
-    console.log(called.data.name, event.type);
+if (started?.type === "agent.started") {
+  for await (const event of session.streamSubagent(started)) {
+    console.log(started.data.name, event.type);
     if (isCurrentTurnBoundaryEvent(event)) break;
   }
 }
 ```
 
-`streamSubagent()` reads the event's stream path, `childStreamPath` on `subagent.called` or `streamPath` on `agent.started`, with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents) children:
+`streamSubagent()` reads the event's `streamPath` with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents) children:
 
 - A local child's path is its own session stream route on the same deployment. The channel's usual session authorization applies.
 - A remote child's path is a proxy route on the parent deployment. The parent checks that its session recorded the child for that tool call, then relays the remote child's stream with the remote agent's authored `auth` and `headers`. The client never needs the remote URL or its credentials.

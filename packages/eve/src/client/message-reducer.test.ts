@@ -18,9 +18,12 @@ import {
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
+  createTaskSettledEvent,
   createTurnCancelledEvent,
+  createTurnCompletedEvent,
   createTurnFailedEvent,
   type MessageStreamEvent,
+  type TaskSettledStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
@@ -1277,6 +1280,71 @@ describe("defaultMessageReducer", () => {
         role: "assistant",
       },
     ]);
+  });
+
+  describe("task tool parts", () => {
+    function settleResearchTask(settled: TaskSettledStreamEvent["data"]) {
+      const reducer = defaultMessageReducer();
+      const data = reduceServerEvents(reducer, reducer.initial(), [
+        createActionResultEvent({
+          result: {
+            callId: "call_1",
+            kind: "tool-result",
+            output: "Started task task_1.",
+            toolName: "research",
+          },
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createTurnCompletedEvent({ sequence: 0, turnId: "turn_1" }),
+        createTaskSettledEvent(settled),
+      ]);
+      const [message] = data.messages;
+      return { status: message?.metadata?.status, toolPart: message?.parts[1] };
+    }
+
+    it("replaces the receipt with the output of a completed task", () => {
+      expect(
+        settleResearchTask({
+          callId: "call_1",
+          output: { summary: "done" },
+          status: "completed",
+          taskId: "task_1",
+        }),
+      ).toMatchObject({
+        status: "complete",
+        toolPart: { output: { summary: "done" }, state: "output-available" },
+      });
+    });
+
+    it("shows a failed or cancelled task as a tool error", () => {
+      expect(
+        settleResearchTask({
+          callId: "call_1",
+          error: { message: "Remote agent unavailable." },
+          status: "failed",
+          taskId: "task_1",
+        }).toolPart,
+      ).toMatchObject({ errorText: "Remote agent unavailable.", state: "output-error" });
+      expect(
+        settleResearchTask({ callId: "call_1", status: "cancelled", taskId: "task_1" }).toolPart,
+      ).toMatchObject({ errorText: "Task was cancelled.", state: "output-error" });
+    });
+
+    it("does not render the task result message as a user message", () => {
+      const reducer = defaultMessageReducer();
+      const data = reduceServerEvents(reducer, reducer.initial(), [
+        createMessageReceivedEvent({
+          kind: "task.result",
+          message: "<task_result>done</task_result>",
+          sequence: 1,
+          turnId: "turn_2",
+        }),
+      ]);
+
+      expect(data.messages).toEqual([]);
+    });
   });
 
   it("preserves separate participant messages received within one turn", () => {

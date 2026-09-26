@@ -11,12 +11,7 @@ import type {
   WorkflowToolRunWithdrawMessage,
 } from "#execution/tools/workflow/messages.js";
 import { withdrawWorkflowToolRunQuestionStep } from "#execution/tools/workflow/withdraw-step.js";
-import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
-import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/task-cancel.js";
-import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import {
   workflowToolRunOutcomeToToolResult,
   workflowToolRunRequestToInputRequestPayload,
@@ -32,7 +27,6 @@ import type { SessionStateMap } from "#harness/types.js";
 import { findTask, readTaskTable } from "#execution/tasks/table.js";
 
 interface HandlerInput<T> {
-  readonly callbackMetadataUrl: string;
   readonly cursor: SessionStateCursor;
   readonly message: T;
 }
@@ -62,11 +56,14 @@ export async function handleWorkflowToolRunMessage(
       });
       return undefined;
     case "agent-started":
-      await emitAgentStartedStep({
-        message,
-        parentSessionId: input.cursor.sessionState.sessionId,
-        sessionWritable: input.cursor.sessionWritable,
-      });
+      await input.cursor.apply(
+        await emitAgentStartedStep({
+          message,
+          serializedContext: input.cursor.serializedContext,
+          sessionState: input.cursor.sessionState,
+          sessionWritable: input.cursor.sessionWritable,
+        }),
+      );
       return undefined;
   }
 }
@@ -89,22 +86,6 @@ async function handleWorkflowToolRunOutcome(
 
   const result = workflowToolRunOutcomeToToolResult(message);
 
-  // A failed or cancelled workflow may leave an agent invocation unfinished.
-  await cancelAgentInvocationOwnerStep({
-    ownerId: message.from.runId,
-    serializedContext: cursor.serializedContext,
-    sessionState: cursor.sessionState,
-  });
-  const released = await releaseAgentInvocationOwnerStep({
-    cancelled: message.result.status === "cancelled",
-    ownerId: message.from.runId,
-    sessionState: cursor.sessionState,
-  });
-  await cursor.apply({
-    serializedContext: cursor.serializedContext,
-    sessionState: released.sessionState,
-  });
-
   return isInboxToolResultFromRecordedWorkflowToolRun(
     cursor.sessionState.snapshot.session.state,
     result,
@@ -117,45 +98,6 @@ async function handleWorkflowToolRunRequest(
   input: HandlerInput<WorkflowToolRunRequestMessage>,
 ): Promise<void> {
   const { cursor, message } = input;
-  if (message.request.kind === "agent-invoke" || message.request.kind === "agent-settled") {
-    const recorded = findBlockingWorkflowToolRun(
-      cursor.sessionState.snapshot.session.state,
-      message.from.callId,
-      message.from.turnId,
-    );
-    if (recorded?.address.runId !== message.from.runId) {
-      if (message.request.kind === "agent-invoke") {
-        await resumeHookStep(message.replyTo, {
-          kind: "runtime-action-result",
-          results: [
-            {
-              callId: message.request.invocationId,
-              isError: true,
-              kind: "subagent-result",
-              origin: "dispatch",
-              output: {
-                code: "AGENT_INVOCATION_NOT_ADMITTED",
-                message: "The workflow tool run no longer owns this agent invocation.",
-              },
-              subagentName: message.request.input.target,
-            },
-          ],
-        });
-      }
-      return;
-    }
-    await cursor.apply(
-      await applyTaskAgentRequest(
-        {
-          ownerId: message.from.runId,
-          replyTo: message.replyTo,
-          request: message.request,
-        },
-        requestContext(input),
-      ),
-    );
-    return;
-  }
   if (message.request.kind === "authorization-request") {
     const request = message.request;
     await deliverWorkflowAuthorization({ ...message, request }, async () => {
@@ -216,14 +158,5 @@ function createAnswerHookRoute(message: WorkflowToolRunRequestMessage): AnswerHo
       ...(options !== undefined && { options: [...options] }),
     },
     runId: message.from.runId,
-  };
-}
-
-function requestContext(input: HandlerInput<unknown>) {
-  return {
-    callbackBaseUrl: resolveWorkflowCallbackBaseUrl(input.callbackMetadataUrl),
-    sessionWritable: input.cursor.sessionWritable,
-    serializedContext: input.cursor.serializedContext,
-    sessionState: input.cursor.sessionState,
   };
 }

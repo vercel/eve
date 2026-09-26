@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  clearProxyInputRequestsForChild,
   getProxyInputRequests,
   hasProxyInputRequests,
   toProxyInputRequestEntries,
@@ -188,37 +187,6 @@ describe("toProxyInputRequestEntries", () => {
         },
       ],
     ]);
-  });
-});
-
-describe("clearProxyInputRequestsForChild", () => {
-  it("removes only the target child's entries", () => {
-    let session = upsertProxyInputRequests({
-      entries: [["req-a", { childContinuationToken: "child-a", kind: "question" }]],
-      forChildContinuationToken: "child-a",
-      session: createSession(),
-    });
-
-    session = upsertProxyInputRequests({
-      entries: [["req-b", { childContinuationToken: "child-b", kind: "tool-approval" }]],
-      forChildContinuationToken: "child-b",
-      session,
-    });
-
-    session = clearProxyInputRequestsForChild(session, "child-a");
-    const entries = getProxyInputRequests(session.state);
-
-    expect(entries.size).toBe(1);
-    expect(entries.get("req-b")).toEqual({
-      childContinuationToken: "child-b",
-      kind: "tool-approval",
-    });
-  });
-
-  it("returns the same session when there is nothing to clear", () => {
-    const session = createSession();
-    const next = clearProxyInputRequestsForChild(session, "missing");
-    expect(next).toBe(session);
   });
 });
 

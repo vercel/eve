@@ -96,11 +96,6 @@
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
  *             directory and let consumers observe a partial package.
- *   rule 42 — The shared subagent workflow body is framework-authored
- *             userspace. It must not import task, harness, or context
- *             internals or recover private state through `Symbol.for`.
- *             Privileged dispatch belongs in ordinary step-backed APIs that
- *             the workflow body consumes through a public contract.
  *   rule 43 — Reusable session plumbing stays independent of the subagent
  *             executor. The generic inbox and state cursor must not
  *             import subagent modules; session/turn composition roots may
@@ -109,13 +104,14 @@
  *             `defineSandboxProvider()` and does not import sandbox runtime
  *             orchestration, registries, key derivation, or session state.
  *             Built-ins and authored providers must share one contract.
- *   rule 45 — Provided tools under `packages/eve/src/tools/provided/**` import
- *             only public eve entry points (the `#` specifiers of the
- *             package's `exports`), the vendored Workflow SDK that authored
- *             bodies import as `workflow`, and each other. eve is built on
- *             eve: a provided tool that needs a private hook means authors
- *             cannot build the same tool. Files that predate the rule are
- *             baselined and may only leave the baseline.
+ *   rule 45 — Provided tools under `packages/eve/src/tools/provided/**` and
+ *             the body of every agent tool import only public eve entry
+ *             points (the `#` specifiers of the package's `exports`), the
+ *             vendored Workflow SDK that authored bodies import as
+ *             `workflow`, and each other. eve is built on eve: a provided
+ *             tool that needs a private hook means authors cannot build the
+ *             same tool. Files that predate the rule are baselined and may
+ *             only leave the baseline.
  *   rule 46 — The task kernel owns its records and its words. Only
  *             `execution/tasks/table*.ts` names the session's task table, so
  *             every record write goes through it, and the model-facing task
@@ -220,7 +216,6 @@ function isTsLike(relPath) {
  *   rule33: Violation[];
  *   rule35: Violation[];
  *   rule37: Violation[];
- *   rule42: Violation[];
  *   rule43: Violation[];
  *   rule44: Violation[];
  *   rule45: { allowlist: Set<string>; violations: Violation[] };
@@ -254,7 +249,6 @@ async function scanRepo(state) {
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
-    checkRule42(posix, lines, state.rule42);
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
     checkRule45(posix, lines, state.rule45);
@@ -263,41 +257,10 @@ async function scanRepo(state) {
   }
 }
 
-// ---------- Rule 42: userspace subagent workflow ----------
-
-const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
-const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
-  /["']#(?:tasks|execution|harness|context|shared)(?:\/|\.js)/;
-// The shared body owns its invocation id, so it consumes the framework-internal
-// entry rather than the public `agent()`; that import is the one exception.
-const SUBAGENT_WORKFLOW_ALLOWED_IMPORT = '"#execution/tools/subagent/invoke-agent.js"';
-
-/**
- * @param {string} posix
- * @param {string[]} lines
- * @param {Violation[]} violations
- */
-function checkRule42(posix, lines, violations) {
-  if (posix !== SUBAGENT_WORKFLOW_PATH) return;
-
-  lines.forEach((line, idx) => {
-    if (line.includes(SUBAGENT_WORKFLOW_ALLOWED_IMPORT)) return;
-    if (!SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE.test(line) && !line.includes("Symbol.for(")) return;
-    violations.push({
-      rule: 42,
-      file: posix,
-      line: idx + 1,
-      message:
-        "the shared subagent workflow reaches into task, harness, or context internals. Keep the body userspace-shaped and call a public workflow-safe agent API instead.",
-    });
-  });
-}
-
 // ---------- Rule 43: executor-neutral session plumbing ----------
 
 // Matches both `#` alias specifiers and relative paths into the executor trees.
-const SUBAGENT_IMPORT_RE =
-  /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)(?:subagents|execution\/tools\/subagent|tools\/subagent)(?:\/|\.js|["'])/;
+const SUBAGENT_IMPORT_RE = /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)subagents(?:\/|\.js|["'])/;
 
 const RULE43_GENERIC_SESSION_FILES = new Set([
   "packages/eve/src/execution/session-hook-claims.ts",
@@ -359,6 +322,8 @@ function checkRule44(posix, lines, violations) {
 // ---------- Rule 45: provided tools use only public entry points ----------
 
 const PROVIDED_TOOLS_DIR = "packages/eve/src/tools/provided/";
+// Every agent tool is a `serve` workflow tool eve generates around this body.
+const AGENT_TOOL_BODY_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
 
 const EVE_PACKAGE_EXPORTS = require(join(REPO_ROOT, "packages/eve/package.json")).exports;
 const EXPORTED_TYPES_PATH_RE = /^\.\/dist\/src\/(.+)\.d\.ts$/;
@@ -412,7 +377,8 @@ function isProvidedToolImportAllowed(specifier) {
  * @param {{ allowlist: Set<string>; violations: Violation[] }} state
  */
 function checkRule45(posix, lines, state) {
-  if (!posix.startsWith(PROVIDED_TOOLS_DIR) || posix.endsWith(".test.ts")) return;
+  const provided = posix.startsWith(PROVIDED_TOOLS_DIR) && !posix.endsWith(".test.ts");
+  if (!provided && posix !== AGENT_TOOL_BODY_PATH) return;
   if (state.allowlist.has(posix) || PROVIDED_KERNEL_TOOL_FILES.has(posix)) return;
   lines.forEach((line, idx) => {
     // Doc comments show authors how to import the tool from its public entry.
@@ -1542,7 +1508,6 @@ async function main() {
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
-    rule42: /** @type {Violation[]} */ ([]),
     rule43: /** @type {Violation[]} */ ([]),
     rule44: /** @type {Violation[]} */ ([]),
     rule45: {
@@ -1649,9 +1614,6 @@ async function main() {
 
   // Rule 38
   violations.push(...(await checkRule38NoNestedEveBuild()));
-
-  // Rule 42
-  violations.push(...state.rule42);
 
   // Rule 43
   violations.push(...state.rule43);

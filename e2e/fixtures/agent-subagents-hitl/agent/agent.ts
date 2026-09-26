@@ -13,33 +13,33 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       : JSON.stringify(audit.output);
   }
   if (message.includes("Call the approval-child subagent exactly once")) {
-    const approval = request.toolResults.find((result) => result.name === "approval-child");
-    return approval === undefined
-      ? {
-          toolCalls: [
-            {
-              input: { message: "Ask whether to deploy, then wait for the answer." },
-              name: "approval-child",
-            },
-          ],
-        }
-      : String(approval.output);
+    const approval = taskResultOf(request, "approval-child");
+    if (approval !== undefined) return approval;
+    if (hasReceipt(request, "approval-child")) return waitForTasks();
+    return {
+      toolCalls: [
+        {
+          input: { message: "Ask whether to deploy, then wait for the answer." },
+          name: "approval-child",
+        },
+      ],
+    };
   }
   if (message.includes("Call the stock-price subagent exactly once")) {
-    const quote = request.toolResults.find((result) => result.name === "stock-price");
-    return quote !== undefined
-      ? `The stock-price subagent returned: ${String(quote.output)}`
-      : {
-          toolCalls: [
-            {
-              input: {
-                message:
-                  'Call the get_stock_price tool exactly once with ticker "GOOG". After it returns, do not call any tool again; return the result.',
-              },
-              name: "stock-price",
-            },
-          ],
-        };
+    const quote = taskResultOf(request, "stock-price");
+    if (quote !== undefined) return `The stock-price subagent returned: ${quote}`;
+    if (hasReceipt(request, "stock-price")) return waitForTasks();
+    return {
+      toolCalls: [
+        {
+          input: {
+            message:
+              'Call the get_stock_price tool exactly once with ticker "GOOG". After it returns, do not call any tool again; return the result.',
+          },
+          name: "stock-price",
+        },
+      ],
+    };
   }
   if (request.lastUserMessage?.includes(COLLISION_MARKER) !== true) {
     return `Mock reply: ${message}`;
@@ -70,6 +70,25 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   throw new Error("Mixed runtime-action step resumed before both tool results were available.");
+}
+
+/** An agent call returns a receipt; its result arrives later in a `<task_result>` message. */
+function taskResultOf(request: MockModelRequest, tool: string): string | undefined {
+  const pattern = new RegExp(`<task_result [^>]*tool="${tool}"[^>]*>([\\s\\S]*?)</task_result>`);
+  for (const message of [...request.messages].reverse()) {
+    if (message.role !== "user") continue;
+    const body = message.text.match(pattern)?.[1];
+    if (body !== undefined) return body;
+  }
+  return undefined;
+}
+
+function hasReceipt(request: MockModelRequest, tool: string): boolean {
+  return request.toolResults.some((result) => result.name === tool);
+}
+
+function waitForTasks(): MockModelResponse {
+  return { toolCalls: [{ input: {}, name: "task_wait" }] };
 }
 
 export default defineAgent({

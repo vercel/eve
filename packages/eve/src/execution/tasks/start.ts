@@ -19,7 +19,6 @@ import {
   writeTaskTable,
   type TaskTable,
 } from "#execution/tasks/table.js";
-import { writeSessionEvent } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import {
   startFailureResult,
   startWorkflowToolCallRun,
@@ -27,20 +26,19 @@ import {
 } from "#execution/tools/workflow/start.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { createTaskStartedEvent } from "#protocol/message.js";
+import type { HarnessSession } from "#harness/types.js";
+import { createTaskStartedEvent, type TaskStartedStreamEvent } from "#protocol/message.js";
 import type { RuntimeToolResultActionResult, WorkflowToolRunEntry } from "#shared/action-types.js";
-import type { RuntimeSession } from "#subagents/handle-dispatch.js";
 
 const log = createLogger("execution.tasks");
 
-type TaskDispatchInput = StartWorkflowTaskInput & {
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly taskId: string;
-};
+type TaskDispatchInput = StartWorkflowTaskInput & { readonly taskId: string };
 
 interface TaskDispatchResult {
   readonly result: RuntimeToolResultActionResult;
-  readonly session: RuntimeSession;
+  readonly session: HarnessSession;
+  /** `task.started`, for the dispatch step to publish, when the call reached a run. */
+  readonly started?: TaskStartedStreamEvent;
 }
 
 /** The entry of a run that does a task's work. */
@@ -52,10 +50,7 @@ type TaskRunEntry = Extract<WorkflowToolRunEntry, { readonly taskId: string }>;
  * task's cap is enforced: past it, the record is dropped and the call fails.
  */
 export async function startTaskRun(
-  input: StartWorkflowTaskInput & {
-    readonly entry: TaskRunEntry;
-    readonly sessionWritable: WritableStream<Uint8Array>;
-  },
+  input: StartWorkflowTaskInput & { readonly entry: TaskRunEntry },
 ): Promise<TaskDispatchResult> {
   const { entry, session, task } = input;
   const { taskId } = entry;
@@ -84,10 +79,10 @@ export async function startTaskRun(
     };
   }
 
-  await emitTaskStarted(dispatch);
   return {
     result: receipt,
     session: writeTaskTable(session, recordTaskRun(table, taskId, address)),
+    started: taskStartedEvent(dispatch),
   };
 }
 
@@ -117,10 +112,10 @@ export async function sendToTask(input: TaskDispatchInput): Promise<TaskDispatch
     input: task.input,
   });
   if (recorded.send !== undefined) await sendTaskRunCommands(recorded.send);
-  await emitTaskStarted(input);
   return {
     result: toolResult(input, renderTaskSentReceipt(taskId)),
     session: writeTaskTable(session, recorded.table),
+    started: taskStartedEvent(input),
   };
 }
 
@@ -155,16 +150,13 @@ function unknownTaskResult(input: TaskDispatchInput): RuntimeToolResultActionRes
   });
 }
 
-async function emitTaskStarted(input: TaskDispatchInput): Promise<void> {
-  await writeSessionEvent(
-    input.sessionWritable,
-    createTaskStartedEvent({
-      callId: input.task.callId,
-      name: input.task.toolName,
-      taskId: input.taskId,
-      turnId: input.batchEvent.turnId,
-    }),
-  );
+function taskStartedEvent(input: TaskDispatchInput): TaskStartedStreamEvent {
+  return createTaskStartedEvent({
+    callId: input.task.callId,
+    name: input.task.toolName,
+    taskId: input.taskId,
+    turnId: input.batchEvent.turnId,
+  });
 }
 
 function startReceipt(input: TaskDispatchInput, resumable: boolean): RuntimeToolResultActionResult {

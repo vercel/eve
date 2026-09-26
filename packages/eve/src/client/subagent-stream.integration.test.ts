@@ -12,9 +12,9 @@ import {
   EVE_STREAM_CONTROL_VERSION_QUERY,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
-  createSubagentCalledEvent,
+  createAgentStartedEvent,
+  type AgentStartedStreamEvent,
   type MessageStreamEvent,
-  type SubagentCalledStreamEvent,
 } from "#protocol/message.js";
 import { EVE_SUBAGENT_STREAM_ROUTE_PATTERN } from "#protocol/routes.js";
 import { none } from "#public/channels/auth.js";
@@ -29,7 +29,7 @@ afterEach(() => {
 
 describe("ClientSession.streamSubagent through the parent proxy", () => {
   it("reads a remote child's events through the parent channel with authored remote credentials", async () => {
-    const called = createCalled();
+    const started = createStarted();
     const childEvents = [
       { type: "turn.started", data: { turnId: "child-turn" } },
       {
@@ -39,7 +39,7 @@ describe("ClientSession.streamSubagent through the parent proxy", () => {
       { type: "turn.completed", data: { turnId: "child-turn" } },
     ];
     const remoteRequests: { readonly url: string; readonly headers: Headers }[] = [];
-    const parentRoute = createParentRoute(stampTestEvent(called, 0));
+    const parentRoute = createParentRoute(stampTestEvent(started, 0));
 
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(input instanceof Request ? input.url : String(input));
@@ -52,7 +52,7 @@ describe("ClientSession.streamSubagent through the parent proxy", () => {
 
     const session = new Client({ host: PARENT_ORIGIN }).sessions.attach("parent-1");
     const received: MessageStreamEvent[] = [];
-    for await (const event of session.streamSubagent(called, { follow: false })) {
+    for await (const event of session.streamSubagent(started, { follow: false })) {
       received.push(event);
     }
 
@@ -76,8 +76,8 @@ describe("ClientSession.streamSubagent through the parent proxy", () => {
   });
 
   it("surfaces the parent's refusal when the child is not bound to that parent", async () => {
-    const called = createCalled();
-    const parentRoute = createParentRoute(stampTestEvent(createCalled({ callId: "other" }), 0));
+    const started = createStarted();
+    const parentRoute = createParentRoute(stampTestEvent(createStarted({ callId: "other" }), 0));
     const remoteFetch = vi.fn();
 
     vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
@@ -90,7 +90,7 @@ describe("ClientSession.streamSubagent through the parent proxy", () => {
 
     const session = new Client({ host: PARENT_ORIGIN }).sessions.attach("parent-1");
     const read = async () => {
-      for await (const _event of session.streamSubagent(called, {
+      for await (const _event of session.streamSubagent(started, {
         streamReconnectPolicy: { reconnect: false },
       })) {
         // The proxy refuses before any child event exists.
@@ -102,17 +102,13 @@ describe("ClientSession.streamSubagent through the parent proxy", () => {
   });
 });
 
-function createCalled(overrides: { readonly callId?: string } = {}): SubagentCalledStreamEvent {
-  return createSubagentCalledEvent({
+function createStarted(overrides: { readonly callId?: string } = {}): AgentStartedStreamEvent {
+  return createAgentStartedEvent({
     callId: overrides.callId ?? "call-1",
-    childSessionId: "child-1",
     name: "research",
+    parentSessionId: "parent-1",
     remote: { resolverId: "subagents/research", url: REMOTE_URL },
-    sequence: 1,
-    sessionId: "parent-1",
-    toolName: "research",
-    turnId: "turn-1",
-    workflowId: "workflow-1",
+    sessionId: "child-1",
   });
 }
 
