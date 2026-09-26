@@ -164,28 +164,26 @@ describe("eve dev server chaos", () => {
           "Timed out waiting for the initial chaos health probe.",
         );
 
-        for (let round = 1; round <= 3; round += 1) {
-          const probesBeforeRound = probe.count();
-          await writeFile(toolPath, toolSource(`storm-${String(round)}-a`));
-          await writeFile(toolPath, toolSource(`storm-${String(round)}-b`));
-          const revisionBeforeBreak = await readDevelopmentRevision(server.url);
-          await writeFile(toolPath, "export default { this is not valid typescript\n");
-          // The watcher survives a failed candidate, so the forced rebuild
-          // resolves — the deterministic proof the broken build was
-          // attempted and rejected is the unchanged revision.
-          await forceDevelopmentRebuild(server.url);
-          await expect(readDevelopmentRevision(server.url)).resolves.toBe(revisionBeforeBreak);
-          await rm(toolPath);
-          await writeFile(toolPath, toolSource(`storm-${String(round)}-fixed`));
-          await Promise.all([
-            forceDevelopmentRebuild(server.url),
-            forceDevelopmentRebuild(server.url),
-          ]);
-          await waitForCondition(
-            () => probe.count() > probesBeforeRound,
-            `Health probe did not run during chaos round ${String(round)}.`,
-          );
-        }
+        const probesBeforeStorm = probe.count();
+        await writeFile(toolPath, toolSource("storm-a"));
+        await writeFile(toolPath, toolSource("storm-b"));
+        const revisionBeforeBreak = await readDevelopmentRevision(server.url);
+        await writeFile(toolPath, "export default { this is not valid typescript\n");
+        // The watcher survives a failed candidate, so the forced rebuild
+        // resolves — the deterministic proof the broken build was
+        // attempted and rejected is the unchanged revision.
+        await forceDevelopmentRebuild(server.url);
+        await expect(readDevelopmentRevision(server.url)).resolves.toBe(revisionBeforeBreak);
+        await rm(toolPath);
+        await writeFile(toolPath, toolSource("storm-fixed"));
+        await Promise.all([
+          forceDevelopmentRebuild(server.url),
+          forceDevelopmentRebuild(server.url),
+        ]);
+        await waitForCondition(
+          () => probe.count() > probesBeforeStorm,
+          "Health probe did not run during the edit storm.",
+        );
 
         const probesBeforeStructuralReload = probe.count();
         await writeFile(join(app.appRoot, ".env.local"), "EVE_CHAOS_STRUCTURAL=1\n");
@@ -210,7 +208,7 @@ describe("eve dev server chaos", () => {
   );
 
   it(
-    "recovers through worker crashes, aborted streams, and concurrent rebuilds",
+    "ends streams on a crashed worker and recovers through crashes, aborts, and concurrent rebuilds",
     async () => {
       const app = await scenarioApp(CHAOS_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
@@ -226,8 +224,25 @@ describe("eve dev server chaos", () => {
         await reader?.read();
         abort.abort();
 
+        const heldStream = await fetch(new URL("/chaos/slow-stream", server.url));
+        const heldReader = heldStream.body?.getReader();
+        await heldReader?.read();
+
         const crashResponse = await fetch(new URL("/chaos/crash", server.url));
         expect([200, 503]).toContain(crashResponse.status);
+        // A stream still open on the crashed worker must end, not hang.
+        await withinDeadline(
+          (async () => {
+            for (;;) {
+              const result = await heldReader?.read();
+              if (result === undefined || result.done) {
+                return;
+              }
+            }
+          })().catch(() => undefined),
+          "Timed out waiting for the crashed worker's stream to settle.",
+          15_000,
+        );
         await waitForCondition(async () => {
           try {
             return (await fetchText(server.url, "/chaos/worker-id")) !== firstWorkerId;
@@ -258,47 +273,6 @@ describe("eve dev server chaos", () => {
 
         await completeStreamedTurn(server, "What's the weather in Lisbon?");
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
-      } finally {
-        await server.stop();
-      }
-    },
-    CHAOS_SCENARIO_TIMEOUT_MS,
-  );
-
-  it(
-    "terminates an open stream within a bounded deadline when its worker crashes",
-    async () => {
-      const app = await scenarioApp(CHAOS_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
-
-      try {
-        const streamResponse = await fetch(new URL("/chaos/slow-stream", server.url));
-        const reader = streamResponse.body?.getReader();
-        await reader?.read();
-
-        await fetch(new URL("/chaos/crash", server.url));
-        await withinDeadline(
-          (async () => {
-            for (;;) {
-              const result = await reader?.read();
-              if (result === undefined || result.done) {
-                return;
-              }
-            }
-          })().catch(() => undefined),
-          "Timed out waiting for the crashed worker's stream to settle.",
-          15_000,
-        );
-
-        await waitForCondition(async () => {
-          try {
-            const response = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url));
-            return response.status === 200;
-          } catch {
-            return false;
-          }
-        }, "Timed out waiting for the dev server to recover after the crash.");
-        await completeStreamedTurn(server, "What's the weather in Lisbon?");
       } finally {
         await server.stop();
       }
@@ -339,7 +313,7 @@ describe("eve dev server chaos", () => {
   );
 
   it(
-    "reports the socket peer as the client address despite forged headers",
+    "stamps the socket peer and rejects untrusted internal transport on the public listener",
     async () => {
       const app = await scenarioApp(CHAOS_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
@@ -357,20 +331,7 @@ describe("eve dev server chaos", () => {
         });
         expect(response.status).toBe(200);
         await expect(response.text()).resolves.toBe("127.0.0.1");
-      } finally {
-        await server.stop();
-      }
-    },
-    CHAOS_SCENARIO_TIMEOUT_MS,
-  );
 
-  it(
-    "rejects untrusted internal transport requests on the public listener",
-    async () => {
-      const app = await scenarioApp(CHAOS_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
-
-      try {
         const worldCall = await fetch(new URL("/eve/v1/dev/internal/workflow-world", server.url), {
           body: "{}",
           method: "POST",

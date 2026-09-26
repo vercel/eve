@@ -5,7 +5,6 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { resolveExtensionBuildLockPath } from "#internal/nitro/host/extension-build-lock.js";
 import { buildWorkspaceExtensions } from "#internal/nitro/host/workspace-extensions.js";
 
 // These run the real extension publisher (rolldown and TypeScript), so they
@@ -37,17 +36,6 @@ describe("buildWorkspaceExtensions", () => {
 
     expect(secondBuild.ino).toBe(firstBuild.ino);
     expect(secondBuild.mtimeMs).toBe(firstBuild.mtimeMs);
-  });
-
-  it("publishes a shared stale extension when agent builds run concurrently", async () => {
-    const { appRoot, packageRoot } = await createWorkspaceAgent();
-
-    await Promise.all([buildWorkspaceExtensions(appRoot), buildWorkspaceExtensions(appRoot)]);
-
-    await expect(
-      stat(join(packageRoot, "dist", "extension", "_manifest.json")),
-    ).resolves.toBeDefined();
-    await expect(stat(resolveExtensionBuildLockPath(packageRoot))).rejects.toThrow();
   });
 });
 

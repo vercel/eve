@@ -1,9 +1,9 @@
-import { mkdir, utimes } from "node:fs/promises";
+import { mkdir, stat, utimes } from "node:fs/promises";
 import { once } from "node:events";
 import { Worker } from "node:worker_threads";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import { pathToFileURL } from "node:url";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -35,6 +35,16 @@ async function fixture() {
   };
 }
 
+function leasePathFor(app: Awaited<ReturnType<typeof fixture>>): string {
+  return join(
+    app.input.compiledArtifactsSource.appRoot,
+    ".eve",
+    "compile",
+    "sandbox-preparation.lock",
+    "lease",
+  );
+}
+
 describe("lazy development preparation", () => {
   it("deduplicates concurrent first access and reuses published artifacts", async () => {
     const app = await fixture();
@@ -52,29 +62,46 @@ describe("lazy development preparation", () => {
     expect(prewarmAppSandboxes).toHaveBeenCalledTimes(1);
   });
 
+  // The stale-owner interval is 15s; these tests backdate the lease journal
+  // instead of waiting it out, and their 10s timeout ensures the backdate, not
+  // wall-clock expiry, is what the contender observes.
   it("keeps a live preparation lease beyond the stale-owner interval", async () => {
     const app = await fixture();
+    const journalPath = join(leasePathFor(app), "owner.json");
+    const ownerStarted = Promise.withResolvers<void>();
+    const releaseOwner = Promise.withResolvers<void>();
     vi.mocked(prewarmAppSandboxes)
       .mockReset()
       .mockImplementation(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 16_000));
+        ownerStarted.resolve();
+        await releaseOwner.promise;
         await app.publish();
       });
-    await Promise.all([
-      ensureDevelopmentSandboxesPrepared(app.input),
-      ensureDevelopmentSandboxesPrepared(app.input),
-    ]);
+    const owner = ensureDevelopmentSandboxesPrepared(app.input);
+    await ownerStarted.promise;
+    const stale = new Date(Date.now() - 60_000);
+    await utimes(journalPath, stale, stale);
+    await vi.waitFor(
+      async () => {
+        expect(
+          (await stat(journalPath)).mtimeMs,
+          "the owner's heartbeat should refresh its backdated lease journal",
+        ).toBeGreaterThan(stale.getTime() + 30_000);
+      },
+      { interval: 50, timeout: 5_000 },
+    );
+
+    const contender = ensureDevelopmentSandboxesPrepared(app.input);
+    // Let the contender poll the held lease (every 250ms) before the owner finishes.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    releaseOwner.resolve();
+    await Promise.all([owner, contender]);
     expect(prewarmAppSandboxes).toHaveBeenCalledTimes(1);
-  });
+  }, 10_000);
 
   it("recovers after a worker terminates while its parent pid stays alive", async () => {
     const app = await fixture();
-    const lockPath = join(
-      app.input.compiledArtifactsSource.appRoot,
-      ".eve",
-      "compile",
-      "sandbox-preparation.lock",
-    );
+    const lockPath = dirname(leasePathFor(app));
     const moduleUrl = pathToFileURL(
       resolvePackageSourceFilePath("src/internal/application/output-publication-lock.ts"),
     ).href;
@@ -98,23 +125,19 @@ describe("lazy development preparation", () => {
     } finally {
       await worker.terminate();
     }
+    const stale = new Date(Date.now() - 60_000);
+    await utimes(join(leasePathFor(app), "owner.json"), stale, stale);
     vi.mocked(prewarmAppSandboxes).mockReset().mockImplementation(app.publish);
     await Promise.all([
       ensureDevelopmentSandboxesPrepared(app.input),
       ensureDevelopmentSandboxesPrepared(app.input),
     ]);
     expect(prewarmAppSandboxes).toHaveBeenCalledTimes(1);
-  });
+  }, 10_000);
 
   it("recovers an abandoned lock with no owner journal", async () => {
     const app = await fixture();
-    const leasePath = join(
-      app.input.compiledArtifactsSource.appRoot,
-      ".eve",
-      "compile",
-      "sandbox-preparation.lock",
-      "lease",
-    );
+    const leasePath = leasePathFor(app);
     await mkdir(leasePath, { recursive: true });
     const old = new Date(Date.now() - 60_000);
     await utimes(leasePath, old, old);

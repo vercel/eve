@@ -180,37 +180,6 @@ describe("eve dev server rebuild transactions", () => {
   );
 
   it(
-    "replaces the worker for instrumentation changes and preserves compiled routes",
-    async () => {
-      const app = await scenarioApp(TRANSACTIONAL_REBUILD_DESCRIPTOR);
-      const server = await startEveDev(app.appRoot);
-
-      try {
-        await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("one");
-        await expect(fetchText(server.url, "/overlap/static")).resolves.toBe("static");
-        const initialWorkerId = await fetchText(server.url, "/worker-id");
-
-        await forceDevelopmentRebuild(server.url);
-        await expect(fetchText(server.url, "/worker-id")).resolves.toBe(initialWorkerId);
-
-        await writeFile(
-          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
-          createInstrumentationSource("two"),
-        );
-        await forceDevelopmentRebuild(server.url);
-
-        await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("two");
-        await expect(fetchText(server.url, "/worker-id")).resolves.not.toBe(initialWorkerId);
-        await expect(fetchText(server.url, "/overlap/static")).resolves.toBe("static");
-        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
-      } finally {
-        await server.stop();
-      }
-    },
-    DEV_SERVER_SCENARIO_TIMEOUT_MS,
-  );
-
-  it(
     "keeps the complete prior generation active when a structural candidate fails",
     async () => {
       const app = await scenarioApp(TRANSACTIONAL_REBUILD_DESCRIPTOR);
@@ -218,6 +187,10 @@ describe("eve dev server rebuild transactions", () => {
 
       try {
         const initialRevision = await readDevelopmentRevision(server.url);
+        const initialWorkerId = await fetchText(server.url, "/worker-id");
+        await forceDevelopmentRebuild(server.url);
+        await expect(fetchText(server.url, "/worker-id")).resolves.toBe(initialWorkerId);
+
         await writeFile(
           join(app.appRoot, "agent", "channels", "dev-generation.ts"),
           ['import "./missing-candidate-module.ts";', createCandidateChannelSource()].join("\n"),
@@ -247,6 +220,7 @@ describe("eve dev server rebuild transactions", () => {
         await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("one");
         const candidateRoute = await fetch(new URL("/candidate-only", server.url));
         expect(candidateRoute.status).toBe(404);
+        await expect(fetchText(server.url, "/worker-id")).resolves.toBe(initialWorkerId);
 
         await writeFile(
           join(app.appRoot, "agent", "instrumentation", "reload.ts"),
@@ -256,6 +230,7 @@ describe("eve dev server rebuild transactions", () => {
         await expect(readDevelopmentRevision(server.url)).resolves.not.toBe(initialRevision);
         await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("two");
         await expect(fetchText(server.url, "/candidate-only")).resolves.toBe("candidate");
+        await expect(fetchText(server.url, "/worker-id")).resolves.not.toBe(initialWorkerId);
 
         await writeFile(
           join(app.appRoot, "agent", "channels", "dev-generation.ts"),
