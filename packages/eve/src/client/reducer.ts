@@ -10,6 +10,8 @@ export interface ClientMessageSubmittedEvent {
     readonly createdAt: number;
     readonly message: string;
     readonly submissionId: string;
+    /** Active turn receiving a steered follow-up, when known. */
+    readonly turnId?: string;
   };
   readonly type: "client.message.submitted";
 }
@@ -52,6 +54,25 @@ export interface ClientInputRespondedEvent {
  * UI state such as optimistic user messages and submitted HITL responses.
  */
 export type EveAgentReducerEvent =
+  | { readonly type: "client.child.following"; readonly data: { readonly callId: string } }
+  | {
+      readonly type: "client.child.unavailable";
+      readonly data: {
+        readonly callId: string;
+        readonly reason: "unsupported-stream" | "stream-error";
+      };
+    }
+  | {
+      readonly type: "client.child.ended";
+      readonly data: {
+        readonly callId: string;
+        readonly outcome: "completed" | "failed" | "cancelled";
+      };
+    }
+  | {
+      readonly type: "client.child.observed";
+      readonly data: { readonly callId: string; readonly event: MessageStreamEvent };
+    }
   | ClientInputRespondedEvent
   | ClientMessageFailedEvent
   | ClientMessageSubmittedEvent

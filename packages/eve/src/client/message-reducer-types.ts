@@ -101,6 +101,7 @@ export type EveAuthorizationPart = {
   readonly description: string;
   readonly displayName: string;
   readonly name: string;
+  readonly attemptId?: string;
   readonly stepIndex: number;
   readonly turnId: string;
   readonly type: "authorization";

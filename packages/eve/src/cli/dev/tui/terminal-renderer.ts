@@ -1,4 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
+import { authorizationKey } from "#client/session-utils.js";
 import type { DevDiagnostics } from "../diagnostics.js";
 
 import type {
@@ -1874,7 +1875,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#connectionAuth === "hidden") return;
     const terminalMessage = connectionAuthTerminalMessage(update.state);
     this.#upsertBlock({
-      id: connectionAuthSectionId(update.name),
+      id: connectionAuthSectionId(authorizationKey(update)),
       kind: "connection-auth",
       title: `${stripTerminalControls(update.name)} · authorization · ${update.state}`,
       body: formatConnectionAuthContent(update, terminalMessage),
@@ -3926,6 +3927,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
       }
 
+      case "assistant-remove":
+        turnState.text.delete(event.id);
+        this.#removeBlock(event.id);
+        this.#paint();
+        break;
+
       case "assistant-complete": {
         const existing = turnState.text.get(event.id) ?? "";
         const text = typeof event.text === "string" ? stripTerminalControls(event.text) : existing;
@@ -3949,7 +3956,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
       case "reasoning-complete": {
         if (displayModes.reasoning === "hidden") break;
-        const text = turnState.reasoning.get(event.id) ?? "";
+        const text =
+          typeof event.text === "string"
+            ? stripTerminalControls(event.text)
+            : (turnState.reasoning.get(event.id) ?? "");
+        turnState.reasoning.set(event.id, text);
         if (displayModes.reasoning === "full") {
           this.#upsertReasoningBlock(event.id, text, false, displayModes);
           break;
@@ -5531,8 +5542,8 @@ function subagentToolSectionId(callId: string, childCallId: string): string {
   return `subagent:${callId}:tool:${childCallId}`;
 }
 
-function connectionAuthSectionId(connectionName: string): string {
-  return `connection-auth:${connectionName}`;
+function connectionAuthSectionId(key: string): string {
+  return `connection-auth:${key}`;
 }
 
 function connectionAuthTerminalMessage(state: ConnectionAuthUpdate["state"]): string | undefined {

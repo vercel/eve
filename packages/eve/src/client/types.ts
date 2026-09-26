@@ -299,7 +299,8 @@ export interface MessageResult<TOutput = unknown> {
   readonly events: MessageStreamEvent[];
 
   /**
-   * HITL input requests emitted during this turn.
+   * HITL input requests emitted in this response and still open at its boundary.
+   * Earlier requests may remain open in the same session.
    */
   readonly inputRequests: readonly InputRequest[];
 

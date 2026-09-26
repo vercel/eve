@@ -286,6 +286,33 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot.match(/Recovered answer\./gu)).toHaveLength(1);
   });
 
+  it("removes a streamed channel-delivery marker on null completion", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "text:t0:0", delta: "<eve-empty-delivery/>" },
+        { type: "assistant-remove", id: "text:t0:0" },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "continue", continueSession: false },
+    );
+    expect(screen.snapshot()).not.toContain("<eve-empty-delivery/>");
+  });
+
+  it("replaces streamed reasoning with the completed text in place", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        { type: "reasoning-delta", id: "r1", delta: "Draft" },
+        { type: "reasoning-complete", id: "r1", text: "Revised" },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "continue", continueSession: false, reasoning: "full" },
+    );
+    expect(screen.snapshot()).toContain("Revised");
+    expect(screen.snapshot()).not.toContain("Draft");
+  });
+
   it("renders rejected tools as denied", async () => {
     const { screen, renderer } = makeRenderer();
     await renderer.renderStream(
@@ -1030,6 +1057,35 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("linear · authorization · pending");
     expect(snapshot).not.toContain("Authorization required for linear");
     expect(snapshot).not.toContain("https://connect.vercel.com/authorize/linear");
+  });
+
+  it("keeps same-name authorization blocks separate by attempt", async () => {
+    const { screen, renderer } = makeRenderer(100, 50);
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.upsertConnectionAuth({
+      name: "linear",
+      attemptId: "alice",
+      description: "Alice's connection",
+      state: "pending",
+    });
+    renderer.upsertConnectionAuth({
+      name: "linear",
+      attemptId: "bob",
+      description: "Bob's connection",
+      state: "pending",
+    });
+    renderer.upsertConnectionAuth({
+      name: "linear",
+      attemptId: "alice",
+      description: "Alice's connection",
+      state: "authorized",
+    });
+    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
+    const snapshot = screen.snapshot();
+    expect(countOccurrences(snapshot, "linear · authorization")).toBe(2);
+    renderer.shutdown();
+    expect(snapshot).toContain("linear · authorization · authorized");
+    expect(snapshot).toContain("linear · authorization · pending");
   });
 
   it("does not commit partial live assistant rows while streaming over the viewport", async () => {

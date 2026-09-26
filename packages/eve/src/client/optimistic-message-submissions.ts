@@ -25,7 +25,7 @@ export class OptimisticMessageSubmissions<TData> {
     this.#pending = [];
   }
 
-  submit(input: SendTurnPayload, eventStartIndex: number): string | undefined {
+  submit(input: SendTurnPayload, eventStartIndex: number, turnId?: string): string | undefined {
     if (input.message === undefined) return undefined;
     const pending = {
       createdAt: Date.now(),
@@ -37,7 +37,12 @@ export class OptimisticMessageSubmissions<TData> {
     this.#pending = [...this.#pending, pending];
     if (this.#optimistic) {
       this.#projection.append({
-        data: { createdAt: pending.createdAt, message: pending.message, submissionId: pending.id },
+        data: {
+          createdAt: pending.createdAt,
+          message: pending.message,
+          submissionId: pending.id,
+          turnId,
+        },
         type: "client.message.submitted",
       });
     }
@@ -128,22 +133,11 @@ export class OptimisticMessageSubmissions<TData> {
     const ids = submissions.map((pending) => pending.id);
     const idSet = new Set(ids);
     this.#pending = this.#pending.filter((pending) => !idSet.has(pending.id));
-    if (alreadyProjected) {
-      this.#projection.remove(
-        (candidate) =>
-          candidate.type === "client.message.submitted" && idSet.has(candidate.data.submissionId),
-      );
-    } else {
-      this.#projection.replace(
-        (candidate) =>
-          candidate.type === "client.message.submitted" && candidate.data.submissionId === ids[0],
-        event,
-      );
-      this.#projection.remove(
-        (candidate) =>
-          candidate.type === "client.message.submitted" && idSet.has(candidate.data.submissionId),
-      );
-    }
+    this.#projection.remove(
+      (candidate) =>
+        candidate.type === "client.message.submitted" && idSet.has(candidate.data.submissionId),
+    );
+    if (!alreadyProjected) this.#projection.append(event);
     return { alreadyProjected, event, ids };
   }
 }

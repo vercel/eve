@@ -8,6 +8,15 @@ export { AgentInfoResponseError } from "#client/agent-info-error.js";
 export { HealthResponseError } from "#client/health-response-error.js";
 export { ClientError } from "#client/client-error.js";
 export { defaultMessageReducer } from "#client/message-reducer.js";
+export { conversationReducer, reduceConversation } from "#client/conversation-reducer.js";
+export { openConversationInputs } from "#client/conversation-state.js";
+export type {
+  ConversationState,
+  ChildCall,
+  ChildObservation,
+  ConversationInput,
+  ConversationTurn,
+} from "#client/conversation-state.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientSession } from "#client/session.js";

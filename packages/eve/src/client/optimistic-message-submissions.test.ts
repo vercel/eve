@@ -3,7 +3,11 @@ import { EveAgentProjection } from "#client/eve-agent-projection.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
 import { stampTestEvents } from "#internal/testing/events.js";
-import { createMessageReceivedEvent, type MessageStreamEvent } from "#protocol/message.js";
+import {
+  createMessageCompletedEvent,
+  createMessageReceivedEvent,
+  type MessageStreamEvent,
+} from "#protocol/message.js";
 
 function received(
   message: string,
@@ -84,6 +88,128 @@ describe("OptimisticMessageSubmissions", () => {
       text: "First\n\nSecond",
       type: "text",
     });
+  });
+
+  it("places a coalesced follow-up before an already streamed reply", () => {
+    const { projection, submissions } = setup();
+    const first = submissions.submit({ message: "First" }, 0)!;
+    submissions.correlate(first, "first", []);
+    submissions.apply(received("First", ["first"]));
+    const turnId = "turn_first";
+    const reply = stampTestEvents([
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Reply",
+        sequence: 1,
+        stepIndex: 0,
+        turnId,
+      }),
+    ])[0]!;
+    submissions.apply(reply);
+
+    const followUp = submissions.submit({ message: "Second" }, 2)!;
+    submissions.correlate(followUp, "second", []);
+    const secondReceived = received("Second", ["second"]);
+    submissions.apply({
+      ...secondReceived,
+      data: { ...secondReceived.data, turnId },
+    });
+
+    expect(projection.data.messages.map((message) => message.role)).toEqual([
+      "user",
+      "user",
+      "assistant",
+    ]);
+    expect(projection.data.messages[1]?.parts).toContainEqual({
+      state: "done",
+      text: "Second",
+      type: "text",
+    });
+  });
+
+  it("keeps the active-turn optimistic correction above the reply through reconciliation", () => {
+    const { projection, submissions } = setup();
+    submissions.apply(received("First", ["first"]));
+    const reply = stampTestEvents([
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Reply",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_first",
+      }),
+    ])[0]!;
+    submissions.apply(reply);
+    const followUp = submissions.submit({ message: "Second" }, 2, "turn_first")!;
+    expect(projection.data.messages.map((message) => message.role)).toEqual([
+      "user",
+      "user",
+      "assistant",
+    ]);
+    submissions.correlate(followUp, "second", []);
+    const secondReceived = received("Second", ["second"]);
+    submissions.apply({
+      ...secondReceived,
+      data: { ...secondReceived.data, turnId: "turn_first" },
+    });
+    expect(projection.data.messages.map((message) => message.role)).toEqual([
+      "user",
+      "user",
+      "assistant",
+    ]);
+    expect(projection.data.messages[1]?.metadata?.optimistic).toBeUndefined();
+  });
+
+  it("replaces a coalesced pair with one server bubble before the reply", () => {
+    const { projection, submissions } = setup();
+    submissions.apply(received("First", ["first"]));
+    submissions.apply(
+      stampTestEvents([
+        createMessageCompletedEvent({
+          finishReason: "stop",
+          message: "Reply",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_first",
+        }),
+      ])[0]!,
+    );
+    const a = submissions.submit({ message: "Second" }, 2, "turn_first")!;
+    const b = submissions.submit({ message: "Third" }, 2, "turn_first")!;
+    submissions.correlate(a, "second", []);
+    submissions.correlate(b, "third", []);
+    const coalesced = received("Second\n\nThird", ["second", "third"]);
+    submissions.apply({ ...coalesced, data: { ...coalesced.data, turnId: "turn_first" } });
+    expect(projection.data.messages.map((message) => message.role)).toEqual([
+      "user",
+      "user",
+      "assistant",
+    ]);
+    expect(projection.data.messages[1]?.parts).toContainEqual({
+      state: "done",
+      text: "Second\n\nThird",
+      type: "text",
+    });
+  });
+
+  it("keeps the confirmed user message at its server position after an unrelated assistant", () => {
+    const { projection, submissions } = setup();
+    const followUp = submissions.submit({ message: "Second" }, 0)!;
+    submissions.correlate(followUp, "second", []);
+    submissions.apply(
+      stampTestEvents([
+        createMessageCompletedEvent({
+          finishReason: "stop",
+          message: "Other reply",
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "other",
+        }),
+      ])[0]!,
+    );
+    submissions.apply(received("Second", ["second"]));
+    expect(projection.data.messages.map((message) => message.role)).toEqual(["assistant", "user"]);
+    expect(projection.data.messages[1]?.metadata?.optimistic).toBeUndefined();
   });
 
   it("reconciles structured file input without comparing summaries", () => {

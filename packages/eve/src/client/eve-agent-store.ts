@@ -19,6 +19,9 @@ import {
 } from "#client/session-event-stream.js";
 import { EveAgentProjection } from "#client/eve-agent-projection.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
+import { SubagentPump } from "#client/subagent-pump.js";
+import type { ConversationState } from "#client/conversation-state.js";
+import type { EveAgentReducerEvent } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
@@ -57,6 +60,8 @@ export class EveAgentStore<TData> {
   readonly #autoPrewarm: boolean;
   #attached = false;
   #stream: SessionEventStream | undefined;
+  #subagentPump: SubagentPump | undefined;
+  readonly #followChildStreams: boolean;
   readonly #pendingAuthorizations = new Set<string>();
   readonly #externalSession: boolean;
   readonly #optimistic: boolean;
@@ -81,6 +86,7 @@ export class EveAgentStore<TData> {
 
   constructor(init: EveAgentStoreInit<TData>) {
     this.#autoPrewarm = init.prewarm ?? false;
+    this.#followChildStreams = init.followSubagents ?? false;
     this.#externalSession = init.session !== undefined;
     this.#client = this.#externalSession
       ? undefined
@@ -150,6 +156,7 @@ export class EveAgentStore<TData> {
         const created = await client.sessions.create({ signal: controller.signal });
         if (generation !== this.#prewarmGeneration) return;
         this.#session = created.session;
+        if (this.#followChildStreams && this.#attached) this.#followSubagents();
         this.#error = undefined;
         if (this.#status === "error") this.#status = "ready";
         this.#callbacks.onSessionChange?.(created.session.state);
@@ -372,6 +379,7 @@ export class EveAgentStore<TData> {
 
   [attachStore](): void {
     this.#attached = true;
+    if (this.#followChildStreams && this.#subagentPump === undefined) this.#followSubagents();
     if (this.#autoPrewarm && this.#session === undefined) void this.prewarm().catch(() => {});
   }
 
@@ -379,12 +387,16 @@ export class EveAgentStore<TData> {
     this.#attached = false;
     this.#stream?.close();
     this.#stream = undefined;
+    this.#subagentPump?.abortAll();
+    this.#subagentPump = undefined;
     this.#activeTurn?.abortController.abort();
     this.#resetPrewarm();
     this.#resumePromise = undefined;
   }
 
   reset(): void {
+    this.#subagentPump?.abortAll();
+    this.#subagentPump = undefined;
     this.#stream?.close();
     this.#stream = undefined;
     this.#pendingAuthorizations.clear();
@@ -400,6 +412,7 @@ export class EveAgentStore<TData> {
     this.#seenEvents = createEventDeduper();
     this.#messageSubmissions.reset();
     this.#projection.reset();
+    if (this.#followChildStreams && this.#attached) this.#followSubagents();
     this.#error = undefined;
     this.#status = "ready";
     this.#callbacks.onSessionChange?.(this.#session?.state);
@@ -429,7 +442,19 @@ export class EveAgentStore<TData> {
     }
     if (!this.#isActiveTurn(turn)) return await this.#submit(preparedInput);
 
-    const submissionId = this.#messageSubmissions.submit(preparedInput, this.#events.length);
+    const lastTurn = this.#events.findLast(
+      (event) =>
+        event.type === "turn.started" ||
+        event.type === "turn.completed" ||
+        event.type === "turn.failed" ||
+        event.type === "turn.cancelled" ||
+        isCurrentTurnBoundaryEvent(event),
+    );
+    const submissionId = this.#messageSubmissions.submit(
+      preparedInput,
+      this.#events.length,
+      lastTurn?.type === "turn.started" ? lastTurn.data.turnId : undefined,
+    );
     if (submissionId !== undefined) turn.followUpSubmissionIds.add(submissionId);
     this.#publish();
     this.#ensureStream({
@@ -502,6 +527,7 @@ export class EveAgentStore<TData> {
       const created = await this.#client.sessions.create({ ...input, message: input.message });
       input.signal?.throwIfAborted();
       this.#session = created.session;
+      if (this.#followChildStreams && this.#attached) this.#followSubagents();
       this.#callbacks.onSessionChange?.(created.session.state);
       this.#publish();
       return {
@@ -552,6 +578,32 @@ export class EveAgentStore<TData> {
     return this.#stream;
   }
 
+  #followSubagents(): void {
+    if (this.#session === undefined) return;
+    this.#subagentPump?.abortAll();
+    const project = (event: EveAgentReducerEvent) => {
+      if (this.#subagentPump !== pump) return;
+      this.#projection.append(event);
+      this.#publish();
+    };
+    const pump = new SubagentPump({
+      session: () => this.#session,
+      getCall: (callId) => {
+        const data = this.#projection.data;
+        return (data as ConversationState).children?.[callId];
+      },
+      onFollowing: (callId) => project({ type: "client.child.following", data: { callId } }),
+      onEnded: (callId, outcome) =>
+        project({ type: "client.child.ended", data: { callId, outcome } }),
+      onUnavailable: (callId, reason) =>
+        project({ type: "client.child.unavailable", data: { callId, reason } }),
+      onChildEvent: (callId, event) =>
+        project({ type: "client.child.observed", data: { callId, event } }),
+    });
+    this.#subagentPump = pump;
+    for (const event of this.#events) pump.acceptParentEvent(event);
+  }
+
   #resetPrewarm(): void {
     this.#prewarmGeneration += 1;
     this.#prewarmController?.abort();
@@ -596,6 +648,8 @@ export class EveAgentStore<TData> {
     updatePendingAuthorizations(this.#pendingAuthorizations, event);
     this.#events = [...this.#events, event];
     this.#handleReconciliation(this.#messageSubmissions.apply(event));
+    this.#subagentPump?.acceptParentEvent(event);
+    this.#subagentPump?.reconcile();
     this.#callbacks.onEvent?.(event);
     this.#applyTerminalStreamFailure(event);
     const settled = isCurrentTurnBoundaryEvent(event) && this.#pendingAuthorizations.size === 0;

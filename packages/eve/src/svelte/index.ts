@@ -14,6 +14,15 @@ export {
   type ClientMessageFailedEvent,
   type ClientMessageSubmittedEvent,
 } from "#client/reducer.js";
+export { conversationReducer, reduceConversation } from "#client/conversation-reducer.js";
+export { openConversationInputs } from "#client/conversation-state.js";
+export type {
+  ConversationState,
+  ChildCall,
+  ChildObservation,
+  ConversationInput,
+  ConversationTurn,
+} from "#client/conversation-state.js";
 export {
   defaultMessageReducer,
   type EveAuthorizationChallenge,

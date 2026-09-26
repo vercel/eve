@@ -60,6 +60,8 @@ export interface EveAgentStoreInit<TData> {
   readonly initialEvents?: readonly MessageStreamEvent[];
   readonly initialSession?: ClientSessionState;
   readonly optimistic?: boolean;
+  /** Follow child streams into the default projection. Disabled for custom reducers. */
+  readonly followSubagents?: boolean;
   readonly reducer: EveAgentReducer<TData>;
   readonly session?: ClientSession;
 }

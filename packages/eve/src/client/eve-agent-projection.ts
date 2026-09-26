@@ -4,6 +4,7 @@ import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 export class EveAgentProjection<TData> {
   readonly #reducer: EveAgentReducer<TData>;
   #events: readonly EveAgentReducerEvent[];
+  #childEvents: EveAgentReducerEvent[] = [];
   #data: TData;
 
   constructor(reducer: EveAgentReducer<TData>, events: readonly EveAgentReducerEvent[]) {
@@ -18,11 +19,21 @@ export class EveAgentProjection<TData> {
 
   reset(): void {
     this.#events = [];
+    this.#childEvents = [];
     this.#data = this.#reducer.initial();
   }
 
   append(event: EveAgentReducerEvent): void {
-    this.#events = [...this.#events, event];
+    if (
+      event.type === "client.child.observed" ||
+      event.type === "client.child.following" ||
+      event.type === "client.child.unavailable" ||
+      event.type === "client.child.ended"
+    ) {
+      this.#childEvents.push(event);
+    } else {
+      this.#events = [...this.#events, event];
+    }
     this.#data = this.#reducer.reduce(this.#data, event);
   }
 
@@ -46,6 +57,7 @@ export class EveAgentProjection<TData> {
   #reduce(): TData {
     let data = this.#reducer.initial();
     for (const event of this.#events) data = this.#reducer.reduce(data, event);
+    for (const event of this.#childEvents) data = this.#reducer.reduce(data, event);
     return data;
   }
 }
