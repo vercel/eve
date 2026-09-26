@@ -110,7 +110,6 @@ describe("parent development Workflow World", () => {
   it("keeps current-invocation deliveries eligible after authored workflow changes", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-world-");
     await seedGeneration(appRoot, "generation-a");
-    await seedGeneration(appRoot, "generation-b");
     let activeGenerationId = "generation-a";
     const world = createWorld({ activeGenerationId: () => activeGenerationId, appRoot });
     connectWorkerToWorld(world, appRoot);
@@ -338,7 +337,7 @@ describe("parent development Workflow World", () => {
 
   it("keeps previous invocations dormant across deliveries while new generations stay live", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-dormant-");
-    for (const id of ["old", "new", "reloaded"]) await seedGeneration(appRoot, id);
+    for (const id of ["old", "new"]) await seedGeneration(appRoot, id);
     const first = createWorld({ activeGenerationId: () => "old", appRoot });
     await first.start();
     const created = await callWorld(first, "events.create", [
@@ -375,6 +374,7 @@ describe("parent development Workflow World", () => {
       await expect(callWorld(second, "runs.get", [runId])).resolves.toMatchObject({
         status: "pending",
       });
+      await seedGeneration(appRoot, "reloaded");
       active = "reloaded";
       await expect(deliverToWorker({ runInput: { deploymentId: "reloaded" } })).resolves.toBe(
         "reloaded",
