@@ -13,7 +13,8 @@ the workflow's output as the tool result. While the body waits durably, the turn
 holding compute.
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
-`createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
+`createWebhook`, `sleep`, retries, and replay. eve provides `ctx.receive()` for the tool call and its
+input, `ctx.reply()` for settling the call early, `ctx.ask` for questions answered through
 the session's channel, `ctx.agents` for effective callable-agent descriptions, and `ctx.agent` for durable agent delegation. Use `yield` to report
 progress and `await` on a workflow operation to wait durably. Values needed after a durable wait
 stay in local variables in the workflow body.
@@ -31,11 +32,12 @@ import { computePlan, runDeploy, type DeployPlan } from "../lib/deploy";
 export default defineWorkflowTool({
   description: "Deploy a service to production. Pauses for a human to approve the plan.",
   inputSchema: z.object({ service: z.string() }),
-  async execute({ service }, ctx) {
+  async execute(ctx) {
     "use workflow";
-    const plan = await planDeploy(service);
+    const { input } = await ctx.receive();
+    const plan = await planDeploy(input.service);
     const answer = await ctx.ask({
-      prompt: `Deploy ${service}?\n\n${plan.summary}`,
+      prompt: `Deploy ${input.service}?\n\n${plan.summary}`,
       display: "confirmation",
       options: [
         { id: "approve", label: "Deploy", style: "primary" },
@@ -61,8 +63,9 @@ async function applyDeploy(plan: DeployPlan) {
 }
 ```
 
-The model calls `deploy`. The turn parks while the human reads the plan. When they answer, minutes
-or days later, the run resumes, deploys, and returns. The model sees one tool result.
+The model calls `deploy`. The body reads the call's input from `ctx.receive()`, and the turn parks
+while the human reads the plan. When they answer, minutes or days later, the run resumes, deploys,
+and returns. The model sees one tool result.
 
 ### Rules
 
@@ -77,11 +80,12 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 - Import `createHook`, `createWebhook`, `sleep`, and `FatalError` from `workflow` in the body.
   `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
-- In the body, `ctx` has `session`, `callId`, `toolName`, `abortSignal`, `agent`, `agents`, and `ask`.
+- In the body, `ctx` has `session`, `toolName`, `receive`, `reply`, `agent`, `agents`, and `ask`.
+  The call's `input`, `callId`, and `abortSignal` come from `await ctx.receive()`, not from `ctx`.
   A `"use step"` helper that receives `ctx` directly gets a restricted `WorkflowStepToolContext` with
-  `session`, `callId`, `toolName`, `abortSignal`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
-  `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
-  `getSandbox` remains unavailable.
+  `session`, `toolName`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
+  `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step
+  needs, such as the call's `abortSignal`. `getSandbox` remains unavailable.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
@@ -160,18 +164,72 @@ an agent catalog. Calls use the same target resolution, availability, and author
 Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workflow"` directive,
 and replace `agent(ctx, input)` and `ask(ctx, request)` with `ctx.agent(target, input)` and
 `ctx.ask(request)`. The `eve/workflow` entry point has been removed. Import `WorkflowToolContext`,
-`AgentInput`, `ToolInputRequest`, and `ToolInputResponse` from `eve/tools` when you need explicit types.
+`WorkflowToolCall`, `AgentInput`, `ToolInputRequest`, and `ToolInputResponse` from `eve/tools` when
+you need explicit types.
+
+The executor takes only `ctx`. Replace `execute(input, ctx)` with `execute(ctx)` and read the input
+from `await ctx.receive()`. `ctx.callId` and `ctx.abortSignal` moved onto the received call:
+
+```diff
+-async execute({ service }, ctx) {
++async execute(ctx) {
+   "use workflow";
+-  return await deploy(service, ctx.abortSignal);
++  const { input, abortSignal } = await ctx.receive();
++  return await deploy(input.service, abortSignal);
+ }
+```
 
 ## Wait for the result
 
 A workflow tool call works like any other tool call from the model's point of view:
 
-- **Tool result:** the workflow's output after the body finishes.
+- **Tool result:** the workflow's output after the body finishes, or the output of an earlier
+  `ctx.reply()`.
 - **Parent turn:** waits for the call to settle, then continues with the result.
 - **Durable wait inside the body:** suspends the workflow while the tool call stays pending.
 - **Cancel:** cancelling the turn cancels the run.
 
 `defineWorkflowTool` does not accept an `execution` option. Passing one throws at definition time.
+
+### Receive the call: `ctx.receive()`
+
+`await ctx.receive()` resolves with the tool call as a `WorkflowToolCall`:
+
+- `input`: the call's input, validated by `inputSchema` and typed from it.
+- `callId`: the id of the tool call, carried by the call's stream events.
+- `abortSignal`: aborts when the call's work is cancelled. See
+  [Cancel and clean up](#cancel-and-clean-up-abortsignal).
+
+The call arrives with the run, so the first `receive()` resolves at once, without a step or a
+durable wait, and replays deterministically. A workflow tool takes one call: a second `receive()`
+throws `This tool takes one call.`
+
+### Reply before the run finishes: `ctx.reply()`
+
+Returning settles the call and finishes the run. Call `ctx.reply(output)` to settle the call without
+finishing the run, so the body can clean up after the model has its result:
+
+```ts
+async execute(ctx) {
+  "use workflow";
+  const { input } = await ctx.receive();
+  const report = await buildReport(input.projectId);
+  ctx.reply({ url: report.url });
+  await deleteScratchFiles(input.projectId);
+}
+```
+
+The turn continues with the reply as the tool result while the run keeps running. `toModelOutput`
+applies to a reply exactly as it applies to a return value, and `outputSchema`, when set, types the
+`ctx.reply()` argument. The session tracks the run until it finishes, so `session.cancel()` and the
+end of the session still stop it through the call's `abortSignal`.
+
+After a reply, the call is settled:
+
+- A later `ctx.reply()` or the body's return value is dropped.
+- `yield` no longer publishes progress.
+- `ctx.ask()` throws, because no call is waiting for a result.
 
 ### How suspension works
 
@@ -184,7 +242,7 @@ functions so replay does not repeat completed effects.
 Consider a body that reports progress and then asks for approval:
 
 ```ts
-async *execute(input, ctx) {
+async *execute(ctx) {
   "use workflow";
   yield { status: "awaiting approval" };
   const answer = await ctx.ask({ prompt: "Continue?", display: "confirmation" });
@@ -394,19 +452,20 @@ async function chooseTarget(
 export default defineWorkflowTool({
   description: "Route a task to the appropriate specialist.",
   inputSchema: z.object({ task: z.string().min(1).max(8000) }),
-  async execute({ task }, ctx) {
+  async execute(ctx) {
     "use workflow";
 
+    const { input, abortSignal } = await ctx.receive();
     const target = await chooseTarget(
-      task,
+      input.task,
       {
         researcher: ctx.agents.researcher.description,
         operator: ctx.agents.operator.description,
       },
-      ctx.abortSignal,
+      abortSignal,
     );
 
-    return ctx.agent(target, { message: task });
+    return ctx.agent(target, { message: input.task });
   },
 });
 ```
@@ -436,11 +495,12 @@ This pattern controls specialist selection, not whether the parent model delegat
 A workflow body may be an async generator whose yields report progress. After processing a yield,
 eve advances the generator; use an awaited workflow operation when the body needs to suspend.
 
-| Operation       | Behavior                                                          |
-| --------------- | ----------------------------------------------------------------- |
-| `yield value`   | Emits an `action.partial` snapshot for the pending tool call.     |
-| `return value`  | Settles the tool call with its output.                            |
-| No return value | Uses the last yield as output, or `null` if there were no yields. |
+| Operation       | Behavior                                                           |
+| --------------- | ------------------------------------------------------------------ |
+| `yield value`   | Emits an `action.partial` snapshot for the pending tool call.      |
+| `return value`  | Settles the tool call with its output.                             |
+| `ctx.reply()`   | Settles the tool call early; later yields and returns are dropped. |
+| No return value | Uses the last yield as output, or `null` if there were no yields.  |
 
 An explicit `return null` also falls back to the last yield. Prefer an
 explicit object return when progress snapshots and the final result have different shapes.
@@ -457,11 +517,12 @@ import { z } from "zod";
 export default defineWorkflowTool({
   description: "Schedule a reminder.",
   inputSchema: z.object({ note: z.string(), delay: z.string() }),
-  async *execute({ note, delay }) {
+  async *execute(ctx) {
     "use workflow";
+    const { input } = await ctx.receive();
     yield { status: "preparing reminder" }; // Published as progress for the pending call.
-    await sleep(delay); // Durable suspension while the timer is pending.
-    return { reminder: note }; // The tool result.
+    await sleep(input.delay); // Durable suspension while the timer is pending.
+    return { reminder: input.note }; // The tool result.
   },
 });
 ```
@@ -469,21 +530,22 @@ export default defineWorkflowTool({
 Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer. See
 [yield and return](/docs/tools#yield-and-return) for the final-output rules.
 
-## Cancel and clean up: `ctx.abortSignal`
+## Cancel and clean up: `abortSignal`
 
-`ctx.abortSignal` aborts when the run is cancelled by explicit turn cancellation. It is durable — it
-survives replay, and a step that
+The call's `abortSignal`, from `ctx.receive()`, aborts when the run is cancelled by explicit turn
+cancellation. It is durable — it survives replay, and a step that
 receives it observes the abort. Pass it into the steps that should stop, and clean up in
 `try/finally`:
 
 ```ts
-async execute({ projectId }, ctx) {
+async execute(ctx) {
   "use workflow";
-  const jobId = await submitRender(projectId);
+  const { input, abortSignal } = await ctx.receive();
+  const jobId = await submitRender(input.projectId);
   try {
-    return await waitForRender(jobId, ctx.abortSignal);
+    return await waitForRender(jobId, abortSignal);
   } finally {
-    if (ctx.abortSignal.aborted) await abortRender(jobId);
+    if (abortSignal.aborted) await abortRender(jobId);
   }
 }
 ```
@@ -501,8 +563,9 @@ to stop. This includes time for the run to publish its outcome after body cleanu
 ### Approve with a deadline and an escalation
 
 ```ts
-async execute({ service }, ctx) {
+async execute(ctx) {
   "use workflow";
+  const { service } = (await ctx.receive()).input;
   const plan = await planDeploy(service);
   const pending = ctx.ask({ prompt: `Deploy ${service}?`, display: "confirmation", options: APPROVE_OR_CANCEL });
 
@@ -534,10 +597,11 @@ import { submitRender } from "../lib/render";
 export default defineWorkflowTool({
   description: "Render a video. Returns the URL once the render farm finishes.",
   inputSchema: z.object({ projectId: z.string() }),
-  async execute({ projectId }) {
+  async execute(ctx) {
     "use workflow";
+    const { input } = await ctx.receive();
     const done = createWebhook();
-    const jobId = await submitRender(projectId, done.url);
+    const jobId = await submitRender(input.projectId, done.url);
     const callback = await done;
     const { status, url } = await callback.json();
 
@@ -562,8 +626,9 @@ import { issueRefund } from "../lib/refunds";
 export default defineWorkflowTool({
   description: "Request approval to refund an order, then issue the refund once approved.",
   inputSchema: z.object({ orderId: z.string(), amount: z.number() }),
-  async execute({ orderId, amount }, ctx) {
+  async execute(ctx) {
     "use workflow";
+    const { orderId, amount } = (await ctx.receive()).input;
     const decision = await ctx.ask({
       prompt: `Refund $${amount} on order ${orderId}?`,
       display: "confirmation",
@@ -586,8 +651,9 @@ and the agent receives the outcome as the tool result.
 
 ## Semantics
 
-One call, one result. A workflow tool call resolves once, with the return value, the error, or a
-cancellation.
+One call, one result. A workflow tool call resolves once, with a `ctx.reply()` output, the return
+value, the error, or a cancellation. Whichever settles the call first wins; later outcomes are
+dropped.
 
 While a workflow tool runs, the turn is parked. A `queue` message waits for it. A `steer` message
 cancels the turn, which cancels the run, which withdraws its requests. Input responses never steer.

@@ -133,10 +133,10 @@ receive only the projected text.
 Every tool call finishes before its turn continues. The definition decides whether the executor
 can wait durably while the call is pending:
 
-| Definition           | Durable waits inside `execute`                           | Result delivered to the model      |
-| -------------------- | -------------------------------------------------------- | ---------------------------------- |
-| `defineTool`         | No; the executor runs inside the initiating step.        | Executor output after it finishes. |
-| `defineWorkflowTool` | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes. |
+| Definition           | Durable waits inside `execute`                           | Result delivered to the model                                   |
+| -------------------- | -------------------------------------------------------- | --------------------------------------------------------------- |
+| `defineTool`         | No; the executor runs inside the initiating step.        | Executor output after it finishes.                              |
+| `defineWorkflowTool` | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes, or an earlier `ctx.reply()`. |
 
 The `TaskExec` argument and `task.postMessage` have been removed. Return the result. In a workflow
 body, keep values needed after a wait in local variables; workflow replay reconstructs them across
@@ -161,7 +161,8 @@ selected by the rules above becomes the tool result.
 ### Workflows as tools
 
 Use `defineWorkflowTool` from `eve/tools` to run each call as a durable Workflow run. Its
-executor must start with `"use workflow"` and receives `ctx.agent` and `ctx.ask`. The tool can
+`execute(ctx)` must start with `"use workflow"`, reads the call's input from `await ctx.receive()`,
+and can use `ctx.agent` and `ctx.ask`. The tool can
 wait for a person, webhook, or timer without holding compute, then return its result to the model. See [Workflows as tools](/docs/tools/workflows) for the authoring rules and
 examples.
 
