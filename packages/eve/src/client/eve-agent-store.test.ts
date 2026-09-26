@@ -985,6 +985,41 @@ describe("EveAgentStore session resume", () => {
     },
   );
 
+  it("publishes a replayed session once after catch-up instead of once per event", async () => {
+    // Regression for #3862: a notification per replayed event forces one React commit per
+    // event inside a single task, which trips React's nested update limit past ~50 events.
+    const events = stampTestEvents(
+      Array.from({ length: 25 }, (_, index) => [
+        createMessageReceivedEvent({
+          message: `Question ${index}`,
+          sequence: 0,
+          turnId: `turn_${index}`,
+        }),
+        createMessageCompletedEvent({
+          finishReason: "stop",
+          message: `Answer ${index}`,
+          sequence: 1,
+          stepIndex: 0,
+          turnId: `turn_${index}`,
+        }),
+        createSessionWaitingEvent(),
+      ]).flat() as UnstampedMessageStreamEvent[],
+    );
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(boundedStreamResponse(events));
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: events.length },
+      reducer: defaultMessageReducer(),
+    });
+    const published: string[] = [];
+    store.subscribe(() => {
+      published.push(`${store.snapshot.status}:${store.snapshot.events.length}`);
+    });
+
+    await store.resume();
+
+    expect(published).toEqual(["resuming:0", `ready:${events.length}`]);
+  });
+
   it("finishes a settled replay without waiting for the probe stream to idle", async () => {
     const events = turnEvents();
     const probe = controlledStreamResponse();
