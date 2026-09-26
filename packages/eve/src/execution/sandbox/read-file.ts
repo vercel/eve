@@ -1,6 +1,7 @@
 import { loadContext } from "#context/container.js";
 import {
   buildReadFileTargetKey,
+  countTextLines,
   createReadFileStamp,
   normalizeModelPath,
   setReadFileStamp,
@@ -91,12 +92,7 @@ export async function executeReadFileOnSandbox(
   // session.ts) because the model-facing output re-joins with plain `\n`
   // and prepends line numbers — original endings are not preserved.
   const allLines = rawContent.split("\n");
-  // Trailing newline produces an empty last element — preserve the line
-  // count the way the user expects (a file ending with \n has N lines).
-  const totalLines =
-    allLines.length > 0 && allLines[allLines.length - 1] === ""
-      ? allLines.length - 1
-      : allLines.length;
+  const totalLines = countTextLines(allLines);
 
   // ── Validate offset against file length ─────────────────────────────
   if (totalLines === 0) {

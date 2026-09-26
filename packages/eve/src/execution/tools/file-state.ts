@@ -76,6 +76,14 @@ export function createReadFileStamp(input: { content: string; filePath: string }
 }
 
 /**
+ * Counts lines the way `read_file` numbers them: a trailing newline ends the
+ * last line instead of starting an empty one.
+ */
+export function countTextLines(lines: readonly string[]): number {
+  return lines.length > 0 && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
+}
+
+/**
  * Persists one read-file stamp into the durable context state.
  *
  * Centralizes the context read-update-write so the read and write file tools

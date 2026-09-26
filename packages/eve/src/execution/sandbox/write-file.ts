@@ -1,6 +1,7 @@
 import { loadContext } from "#context/container.js";
 import {
   buildReadFileTargetKey,
+  countTextLines,
   createReadFileStamp,
   normalizeModelPath,
   type ReadFileState,
@@ -27,6 +28,8 @@ export interface WriteFileInput {
  */
 export interface WriteFileResult {
   readonly existed: boolean;
+  /** Line count of the written content, numbered the same way as `read_file`. */
+  readonly lineCount: number;
   readonly path: string;
 }
 
@@ -71,7 +74,7 @@ export async function executeWriteFileOnSandbox(
 
     setReadFileStamp(ctx, targetKey, freshStamp);
 
-    return { existed: false, path: normalizedPath };
+    return { existed: false, lineCount: countTextLines(content.split("\n")), path: normalizedPath };
   }
 
   // ── File exists — enforce read-before-write ─────────────────────────
@@ -110,5 +113,5 @@ export async function executeWriteFileOnSandbox(
 
   setReadFileStamp(ctx, targetKey, freshStamp);
 
-  return { existed: true, path: normalizedPath };
+  return { existed: true, lineCount: countTextLines(content.split("\n")), path: normalizedPath };
 }

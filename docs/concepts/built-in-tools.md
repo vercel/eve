@@ -96,7 +96,7 @@ export default disableTool();
 
 ### `write_file`
 
-`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts absolute paths and paths beginning with `$HOME/`.
+`write_file` writes complete files in the sandbox. It enforces read-before-write and stale-read detection, and accepts absolute paths and paths beginning with `$HOME/`. Its result includes the written path, whether the file already existed, and the file's line count, counted the same way `read_file` numbers lines.
 
 ```sh
 eve add tool/write_file
@@ -287,7 +287,7 @@ export default disableTool();
 
 ### `connection_search`
 
-`connection_search` discovers tools across declared [connections](../connections) and makes matches directly callable by qualified name, such as `linear__list_issues`. eve adds it automatically when connections exist, even when `defaultTools` is `false`, so there is no add command.
+`connection_search` discovers tools across declared [connections](../connections) and makes matches directly callable by qualified name, such as `linear__list_issues`. Each search returns up to 10 matches by default; the model can set `limit` from 1 to 20. eve adds it automatically when connections exist, even when `defaultTools` is `false`, so there is no add command.
 
 An authored `agent/tools/connection_search.ts` replaces the framework behavior. Import the framework definition from `eve/tools/connection_search` when you need to reference it directly. Exporting `disableTool()` from this slot is an error because agents with connections require connection discovery.
 

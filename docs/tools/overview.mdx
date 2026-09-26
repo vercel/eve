@@ -41,6 +41,42 @@ eve validates the model's input against `inputSchema` before `execute` runs:
 
 Optional input fields remain optional for authored tools and connection tools. eve explicitly disables provider strict mode for function tools so providers such as OpenAI Responses do not implicitly require every property. Local input validation still follows the tool's schema.
 
+### Write descriptions for the model
+
+The model receives every advertised tool's `description` and input schema on each step, and uses them to choose a tool and fill in its arguments. Write them as instructions for the model rather than as API reference:
+
+- Say when to use the tool. When two tools overlap, name the one to use instead.
+- For an input the model cannot invent, such as an ID, say where to get it: "Order ID from a `list_orders` result."
+- State defaults and limits in the field description, such as "Defaults to 20, max 100."
+- Keep examples accurate, because the model tends to copy them literally.
+- Throw errors that say what went wrong and what to do next. The model receives the message as the tool error and can correct its next call.
+- Add a tool only when the agent needs it. Each advertised tool is one more option on every step, so an optional input on an existing tool is often clearer to the model than a second, similar tool.
+
+```ts title="agent/tools/cancel_order.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description:
+    "Cancel an order that has not shipped. For a shipped order, use refund_order instead.",
+  inputSchema: z.object({
+    orderId: z.string().describe("Order ID from a list_orders or get_order result."),
+    reason: z
+      .string()
+      .max(200)
+      .optional()
+      .describe("Reason shown to the customer, up to 200 characters. Defaults to none."),
+  }),
+  async execute({ orderId, reason }) {
+    const order = await getOrder(orderId);
+    if (order.status === "shipped") {
+      throw new Error(`Order ${orderId} has shipped and cannot be cancelled. Use refund_order.`);
+    }
+    return cancelOrder(orderId, reason);
+  },
+});
+```
+
 ### Hide a tool from delegated agents
 
 Set `availableInSubagents: false` when a tool should be callable only in a top-level root session:
