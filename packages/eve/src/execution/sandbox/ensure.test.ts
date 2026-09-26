@@ -27,12 +27,13 @@ function fixture(setup?: () => void, returnCopy = false) {
       onSessionStop: stopSandbox,
     };
   });
+  const start = vi.fn(async () => ({ handle: await create(), state: null }));
   const provider = defineSandboxProvider({
     name: "test",
     environment: () => ({
       prepare: async () => null,
       resume: create,
-      start: async () => ({ handle: await create(), state: null }),
+      start,
     }),
   });
   const environment = provider.environment();
@@ -55,39 +56,52 @@ function fixture(setup?: () => void, returnCopy = false) {
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return { create, deleteSandbox, registry, shutdownSandbox, stopSandbox };
+  return { create, deleteSandbox, registry, shutdownSandbox, start, stopSandbox };
 }
 async function open(
   registry: RuntimeSandboxRegistry,
   id = "session-1",
   state: Parameters<typeof ensureSandboxAccess>[0]["state"] = null,
-  principalId?: string,
+  nodeId = "__root__",
 ) {
   const context = new ContextContainer();
-  const auth =
-    principalId === undefined
-      ? null
-      : {
-          attributes: {},
-          authenticator: "test",
-          principalId,
-          principalType: "user",
-        };
   context.set(SessionKey, {
-    auth: { current: auth, initiator: auth },
+    auth: { current: null, initiator: null },
     sessionId: id,
     turn: { id: "turn", sequence: 0 },
   });
   return await contextStorage.run(context, async () => {
     const access = await ensureSandboxAccess({
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      nodeId: "__root__",
+      nodeId,
       registry,
       sessionId: id,
       state,
     });
     return { access, sandbox: await access.get() };
   });
+}
+function inheritingChildRegistry(rootRegistry: RuntimeSandboxRegistry): RuntimeSandboxRegistry {
+  const parent = rootRegistry.sandbox;
+  if (parent === null) throw new Error("Root registry has no sandbox.");
+  return {
+    sandbox: {
+      definition: {
+        kind: "parent",
+        logicalPath: "sandbox.ts",
+        selector: defineParentSandbox(),
+        revisionHash: "child-hash",
+        sourceId: "child-sandbox",
+        sourceKind: "module",
+      },
+      inheritance: {
+        definition: parent.definition,
+        nodeId: "__root__",
+        workspaceResourceRoot: parent.workspaceResourceRoot,
+      },
+      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+    },
+  };
 }
 afterEach(() => shutdownActiveSandboxHandles());
 
@@ -128,27 +142,8 @@ describe("ensureSandboxAccess", () => {
 
   it("passes empty live options when a child inherits its parent sandbox", async () => {
     const value = fixture();
-    const parent = value.registry.sandbox;
-    const registry: RuntimeSandboxRegistry = {
-      sandbox: {
-        definition: {
-          kind: "parent",
-          logicalPath: "sandbox.ts",
-          selector: defineParentSandbox(),
-          revisionHash: "child-hash",
-          sourceId: "child-sandbox",
-          sourceKind: "module",
-        },
-        inheritance: {
-          definition: parent.definition,
-          nodeId: "__root__",
-          workspaceResourceRoot: parent.workspaceResourceRoot,
-        },
-        workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
-      },
-    };
 
-    await open(registry);
+    await open(inheritingChildRegistry(value.registry));
 
     expect(value.create).toHaveBeenCalledOnce();
   });
@@ -178,6 +173,40 @@ describe("ensureSandboxAccess", () => {
       expect(second).toBe(first);
     });
     expect(value.create).toHaveBeenCalledOnce();
+  });
+
+  it("starts one sandbox when separate accesses to a shared session open concurrently", async () => {
+    const value = fixture();
+    const [owner, subagent] = await Promise.all([open(value.registry), open(value.registry)]);
+    expect(value.start).toHaveBeenCalledOnce();
+    expect(value.create).toHaveBeenCalledTimes(2);
+    expect(await subagent.access.captureState()).toEqual(await owner.access.captureState());
+  });
+
+  it("shares the parent's start with a subagent that inherits its sandbox", async () => {
+    const value = fixture();
+    const [owner, subagent] = await Promise.all([
+      open(value.registry),
+      open(inheritingChildRegistry(value.registry), "session-1", null, "child"),
+    ]);
+    expect(value.start).toHaveBeenCalledOnce();
+    expect(value.create).toHaveBeenCalledTimes(2);
+    expect(await subagent.access.captureState()).toEqual(await owner.access.captureState());
+  });
+
+  it("lets only one waiter retry after a shared start fails", async () => {
+    const value = fixture();
+    value.start.mockImplementationOnce(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      throw new Error("start failed");
+    });
+    const results = await Promise.allSettled([
+      open(value.registry),
+      open(value.registry),
+      open(value.registry),
+    ]);
+    expect(results.map(({ status }) => status)).toEqual(["rejected", "fulfilled", "fulfilled"]);
+    expect(value.start).toHaveBeenCalledTimes(2);
   });
 
   it("retries session setup after a selector failure", async () => {
