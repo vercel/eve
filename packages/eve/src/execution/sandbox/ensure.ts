@@ -44,6 +44,12 @@ interface OpenedSandbox {
   readonly sandbox: RuntimeSandboxSession;
 }
 
+// Parent and subagent sessions that share a sandbox each build their own
+// access, so concurrent first use in one process would otherwise race to
+// start the same provider sandbox. Late arrivals resume from the winner's
+// state instead.
+const pendingSandboxStarts = new Map<string, Promise<SandboxSessionState | null>>();
+
 export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Promise<SandboxAccess> {
   let persisted: SandboxSessionState | null = input.state?.session ?? null;
   let opened: OpenedSandbox | undefined;
@@ -215,6 +221,33 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       return await resumePersisted(definition, session);
     }
 
+    const startKey = `${inherited?.nodeId ?? input.nodeId}\0${input.sessionId}`;
+    const concurrentStart = pendingSandboxStarts.get(startKey);
+    if (concurrentStart !== undefined) {
+      persisted = await concurrentStart;
+      if (persisted !== null) return await resumePersisted(definition, session);
+    }
+
+    const starting = startHandle(definition, session);
+    const sharedStart = starting.then(
+      () => persisted,
+      () => null,
+    );
+    pendingSandboxStarts.set(startKey, sharedStart);
+    try {
+      return await starting;
+    } finally {
+      if (pendingSandboxStarts.get(startKey) === sharedStart) {
+        pendingSandboxStarts.delete(startKey);
+      }
+    }
+  }
+
+  async function startHandle(
+    definition: Extract<typeof registered.definition, { readonly kind: "independent" }>,
+    session: SandboxProviderSessionContext["session"],
+  ): Promise<SandboxProviderHandle> {
+    const inherited = registered.inheritance;
     if (inherited !== undefined) {
       await open(
         getSandboxEnvironmentRuntime(definition.environment),

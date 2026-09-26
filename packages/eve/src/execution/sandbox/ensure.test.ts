@@ -27,12 +27,13 @@ function fixture(setup?: () => void, returnCopy = false) {
       onSessionStop: stopSandbox,
     };
   });
+  const start = vi.fn(async () => ({ handle: await create(), state: null }));
   const provider = defineSandboxProvider({
     name: "test",
     environment: () => ({
       prepare: async () => null,
       resume: create,
-      start: async () => ({ handle: await create(), state: null }),
+      start,
     }),
   });
   const environment = provider.environment();
@@ -55,7 +56,7 @@ function fixture(setup?: () => void, returnCopy = false) {
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return { create, deleteSandbox, registry, shutdownSandbox, stopSandbox };
+  return { create, deleteSandbox, registry, shutdownSandbox, start, stopSandbox };
 }
 async function open(
   registry: RuntimeSandboxRegistry,
@@ -178,6 +179,14 @@ describe("ensureSandboxAccess", () => {
       expect(second).toBe(first);
     });
     expect(value.create).toHaveBeenCalledOnce();
+  });
+
+  it("starts one sandbox when separate accesses to a shared session open concurrently", async () => {
+    const value = fixture();
+    const [owner, subagent] = await Promise.all([open(value.registry), open(value.registry)]);
+    expect(value.start).toHaveBeenCalledOnce();
+    expect(value.create).toHaveBeenCalledTimes(2);
+    expect(await subagent.access.captureState()).toEqual(await owner.access.captureState());
   });
 
   it("retries session setup after a selector failure", async () => {
