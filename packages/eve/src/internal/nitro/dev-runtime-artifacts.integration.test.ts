@@ -163,9 +163,7 @@ describe("development runtime artifact snapshots", () => {
     expect(readDevelopmentRuntimeArtifactsRevision(appRoot)).toEqual({
       revision: appRoot,
     });
-    expect(
-      JSON.parse(await readFile(join(snapshot.snapshotRoot, "generation.json"), "utf8")),
-    ).toEqual({ runtimeAppRoot: snapshot.runtimeAppRoot });
+    expect(existsSync(join(snapshot.snapshotRoot, "generation.json"))).toBe(false);
 
     await activateSnapshot({
       appRoot,

@@ -40,7 +40,6 @@ export const DEVELOPMENT_WORLD_OPERATIONS = [
   "hooks.getByToken",
   "hooks.list",
   "getDeploymentId",
-  "getGenerationAvailability",
   "queue",
   "resolveLatestDeploymentId",
   "runs.experimentalSetAttributes",
@@ -62,3 +61,10 @@ export interface DevelopmentWorldCall {
   readonly arguments: readonly unknown[];
   readonly operation: DevelopmentWorldOperation;
 }
+
+export interface DevelopmentGenerationAvailabilityCall {
+  readonly operation: "eve.getGenerationAvailability";
+  readonly generationId: string;
+}
+
+export type DevelopmentWorldRequest = DevelopmentWorldCall | DevelopmentGenerationAvailabilityCall;

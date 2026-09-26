@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EntityConflictError, RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
-import { pruneDevelopmentRuntimeArtifactsSnapshots } from "#internal/nitro/dev-runtime-artifacts.js";
+import { activateDevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
@@ -229,6 +229,20 @@ describe("parent development Workflow World", () => {
     await seedGeneration(appRoot, "changed-workflow", {
       workflowSourceFingerprint: "old-workflow",
     });
+    for (const [generationId, source] of [
+      ["invalid-json", '{"runtimeAppRoot":'],
+      ["invalid-schema", JSON.stringify({ runtimeAppRoot: 42 })],
+      [
+        "invalid-fingerprint",
+        JSON.stringify({ runtimeAppRoot: "/unused", frameworkFingerprint: 42 }),
+      ],
+    ] as const) {
+      await seedGeneration(appRoot, generationId);
+      await writeFile(
+        join(appRoot, ".eve", "dev-runtime", "snapshots", generationId, "generation.json"),
+        source,
+      );
+    }
     const first = createWorld({ activeGenerationId: () => "retained", appRoot });
     await first.start();
     const runIds: string[] = [];
@@ -239,6 +253,9 @@ describe("parent development Workflow World", () => {
         "incompatible",
         "legacy",
         "changed-workflow",
+        "invalid-json",
+        "invalid-schema",
+        "invalid-fingerprint",
       ]) {
         runIds.push(
           readCreatedRunId(
@@ -271,9 +288,13 @@ describe("parent development Workflow World", () => {
       return Response.json({ ok: true });
     }) as typeof fetch;
     const restarted = createWorld({ activeGenerationId: () => "retained", appRoot });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       await restarted.start();
       await expect.poll(() => deliveries).toEqual([runIds[0]]);
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining('"invalid-json": Development generation metadata is invalid.'),
+      );
       await expect(callWorld(restarted, "runs.get", [runIds[1]])).resolves.toMatchObject({
         status: "cancelled",
       });
@@ -289,11 +310,12 @@ describe("parent development Workflow World", () => {
         deliverToWorker({ runId: RUN_ID, runInput: { deploymentId: "incompatible" } }),
       ).resolves.toBeUndefined();
     } finally {
+      warning.mockRestore();
       await restarted.close();
     }
   });
 
-  it("reconciles explicitly after pruning, preserves retained runs, and skips cleanup after close", async () => {
+  it("reconciles after activation prunes snapshots, preserves retained runs, and skips cleanup after close", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-pruning-");
     await seedGeneration(appRoot, "old");
     await seedGeneration(appRoot, "retained");
@@ -333,15 +355,49 @@ describe("parent development Workflow World", () => {
         join(appRoot, ".eve", "dev-runtime", "snapshots", "old", "retired.json"),
         JSON.stringify({ retiredAt: 0 }),
       );
-      await pruneDevelopmentRuntimeArtifactsSnapshots({
+      for (let index = 0; index < 5; index++) {
+        const generationId = `recent-${index}`;
+        await seedGeneration(appRoot, generationId);
+        const root = join(appRoot, ".eve", "dev-runtime", "snapshots", generationId);
+        await writeFile(join(root, "activated"), "");
+        await writeFile(join(root, "retired.json"), JSON.stringify({ retiredAt: Date.now() }));
+      }
+      const snapshotRoot = join(appRoot, ".eve", "dev-runtime", "snapshots", "retained");
+      const runtimeAppRoot = join(snapshotRoot, "source", "app");
+      const compileRoot = join(runtimeAppRoot, ".eve", "compile");
+      await mkdir(compileRoot, { recursive: true });
+      await writeFile(
+        join(compileRoot, "module-map.mjs"),
+        "export const moduleMap = { nodes: {} };\n",
+      );
+      await writeFile(
+        join(compileRoot, "authored-modules.json"),
+        JSON.stringify({
+          fingerprint: "test",
+          moduleMap: "module-map.mjs",
+          version: 3,
+        }),
+      );
+      const reconciled = Promise.withResolvers<void>();
+      await activateDevelopmentGeneration({
         appRoot,
-        gracePeriodMs: 60_000,
-        retainCount: 0,
+        generation: {
+          fingerprint: "test",
+          runtimeAppRoot,
+          snapshotRoot,
+          snapshotSourceRoot: join(snapshotRoot, "source"),
+          sourceRoot: appRoot,
+        },
+        onRuntimePruned: async () => {
+          try {
+            await world.reconcileExpiredRuns();
+            reconciled.resolve();
+          } catch (error) {
+            reconciled.reject(error);
+          }
+        },
       });
-      await expect(callWorld(world, "runs.get", [old])).resolves.toMatchObject({
-        status: "pending",
-      });
-      await world.reconcileExpiredRuns();
+      await reconciled.promise;
       for (const runId of [old, running]) {
         await expect(callWorld(world, "runs.get", [runId])).resolves.toMatchObject({
           status: "cancelled",
@@ -355,7 +411,6 @@ describe("parent development Workflow World", () => {
       });
       await world.close();
       await rm(join(appRoot, ".eve", "dev-runtime", "snapshots", "retained"), { recursive: true });
-      await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot });
       await world.reconcileExpiredRuns();
       await expect(callWorld(world, "runs.get", [retained])).resolves.toMatchObject({
         status: "pending",

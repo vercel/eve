@@ -19,7 +19,7 @@ import {
   withDevelopmentWorkflowGeneration,
 } from "#internal/workflow/development-generation-context.js";
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
-import { isMissingDevelopmentRunError } from "#internal/workflow/is-inactive-development-run-error.js";
+import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
@@ -28,6 +28,7 @@ import {
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
   DEVELOPMENT_WORLD_OPERATIONS,
+  type DevelopmentGenerationAvailabilityCall,
   type DevelopmentWorldCall,
   type DevelopmentWorldOperation,
 } from "#internal/workflow/development-world-protocol.js";
@@ -64,6 +65,19 @@ async function call<T>(
     method: "POST",
   });
   return decodeDevelopmentWorldValue(await response.text()) as T;
+}
+
+async function getGenerationAvailability(
+  generationId: string,
+): Promise<DevelopmentGenerationAvailability> {
+  const response = await fetchDevelopmentWorld(DEVELOPMENT_WORKFLOW_WORLD_ROUTE, {
+    body: encodeDevelopmentWorldValue({
+      operation: "eve.getGenerationAvailability",
+      generationId,
+    } satisfies DevelopmentGenerationAvailabilityCall),
+    method: "POST",
+  });
+  return decodeDevelopmentWorldValue(await response.text()) as DevelopmentGenerationAvailability;
 }
 
 /**
@@ -190,10 +204,7 @@ function createQueueHandler(
       const appRoot = readRequiredEnvironment(DEVELOPMENT_WORKER_APP_ROOT_ENV);
       const generationId = await resolveDeliveryGenerationId(message);
       if (generationId === undefined) return Response.json({ ok: true });
-      const availability = await call<DevelopmentGenerationAvailability>(
-        "getGenerationAvailability",
-        [generationId],
-      );
+      const availability = await getGenerationAvailability(generationId);
       if (availability.kind === "missing")
         throw new MissingDevelopmentGenerationError(generationId);
       if (availability.kind === "incompatible") return Response.json({ ok: true });
@@ -267,7 +278,7 @@ async function resolveDeliveryGenerationId(message: unknown): Promise<string | u
     ]);
     return run.deploymentId;
   } catch (error) {
-    if (!isMissingDevelopmentRunError(error)) throw error;
+    if (!isMissingWorkflowRunError(error)) throw error;
     return undefined;
   }
 }

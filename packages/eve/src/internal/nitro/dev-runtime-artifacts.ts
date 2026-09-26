@@ -19,9 +19,9 @@ import {
 } from "#internal/nitro/dev-runtime-artifacts-retention.js";
 import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
+import { resolveDevelopmentRuntimeArtifactsSnapshotsDirectory } from "#internal/nitro/dev-runtime-generation-metadata.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
-const DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA = "generation.json";
 const DEV_RUNTIME_ARTIFACTS_POINTER_VERSION = 2;
 
 interface DevelopmentRuntimeArtifactsPointerV1 {
@@ -66,10 +66,6 @@ export interface DevelopmentRuntimeArtifactsActivation {
  */
 export function resolveDevelopmentRuntimeArtifactsPointerPath(appRoot: string): string {
   return join(appRoot, ".eve", DEV_RUNTIME_ARTIFACTS_DIRECTORY, "current.json");
-}
-
-function resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(appRoot: string): string {
-  return join(appRoot, ".eve", DEV_RUNTIME_ARTIFACTS_DIRECTORY, "snapshots");
 }
 
 function isDevelopmentRuntimeArtifactsSnapshotRoot(appRoot: string, snapshotRoot: string): boolean {
@@ -135,10 +131,6 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
       ),
       snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
     });
-    await writeFile(
-      join(snapshotRoot, DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA),
-      `${JSON.stringify({ runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot })}\n`,
-    );
   } catch (error) {
     await rm(snapshotRoot, { force: true, recursive: true }).catch(() => {});
     throw error;
@@ -340,11 +332,11 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshots(input: {
   readonly gracePeriodMs?: number;
   readonly now?: number;
   readonly retainCount?: number;
-}): Promise<void> {
+}): Promise<boolean> {
   const pointer = readDevelopmentRuntimeArtifactsPointer(
     resolveDevelopmentRuntimeArtifactsPointerPath(input.appRoot),
   );
-  await pruneDevelopmentRuntimeArtifactsSnapshotDirectory({
+  return await pruneDevelopmentRuntimeArtifactsSnapshotDirectory({
     activeSnapshotRoot:
       pointer?.version === DEV_RUNTIME_ARTIFACTS_POINTER_VERSION ? pointer.snapshotRoot : undefined,
     gracePeriodMs: input.gracePeriodMs,

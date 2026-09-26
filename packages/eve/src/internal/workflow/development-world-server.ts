@@ -21,7 +21,7 @@ import {
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
   DEVELOPMENT_WORLD_OPERATIONS,
-  type DevelopmentWorldCall,
+  type DevelopmentWorldRequest,
 } from "#internal/workflow/development-world-protocol.js";
 
 /**
@@ -191,7 +191,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       return Response.json({ error: "Workflow World request is not trusted." }, { status: 401 });
     }
     try {
-      const call = decodeDevelopmentWorldValue(await request.text()) as DevelopmentWorldCall;
+      const call = decodeDevelopmentWorldValue(await request.text());
       const result = await this.#call(call);
       return new Response(encodeDevelopmentWorldValue(result));
     } catch (error) {
@@ -236,9 +236,12 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     });
   }
 
-  async #call(call: DevelopmentWorldCall): Promise<unknown> {
-    if (!isDevelopmentWorldCall(call)) {
+  async #call(call: unknown): Promise<unknown> {
+    if (!isDevelopmentWorldRequest(call)) {
       throw new Error("Development Workflow World call is malformed.");
+    }
+    if (call.operation === "eve.getGenerationAvailability") {
+      return await this.#generationAvailability(call.generationId);
     }
     const args = [...call.arguments];
     // Deployment identity and enqueueing carry eve semantics (generation
@@ -246,9 +249,6 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     // vendored world by the dot-path the shared operation table names.
     if (call.operation === "getDeploymentId" || call.operation === "resolveLatestDeploymentId") {
       return this.#resolveActiveGenerationId();
-    }
-    if (call.operation === "getGenerationAvailability") {
-      return await this.#generationAvailability(args[0] as string);
     }
     if (call.operation === "queue") {
       return await this.#queue(...(args as Parameters<World["queue"]>));
@@ -289,12 +289,13 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
 
 const DEVELOPMENT_WORLD_OPERATION_SET: ReadonlySet<string> = new Set(DEVELOPMENT_WORLD_OPERATIONS);
 
-function isDevelopmentWorldCall(value: unknown): value is DevelopmentWorldCall {
+function isDevelopmentWorldRequest(value: unknown): value is DevelopmentWorldRequest {
   return (
     isObject(value) &&
     typeof value.operation === "string" &&
-    DEVELOPMENT_WORLD_OPERATION_SET.has(value.operation) &&
-    Array.isArray(value.arguments)
+    (value.operation === "eve.getGenerationAvailability"
+      ? typeof value.generationId === "string"
+      : DEVELOPMENT_WORLD_OPERATION_SET.has(value.operation) && Array.isArray(value.arguments))
   );
 }
 
