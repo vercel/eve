@@ -153,12 +153,52 @@ describe("conversation reducer child calls", () => {
       observation: { status: "following" },
     });
     state = conversationReducer.reduce(state, {
-      type: "client.child.ended",
+      type: "client.child.settled",
       data: { callId: "child-call", outcome: "completed" },
     });
     expect(state.children["child-call"]?.observation).toMatchObject({
       status: "ended",
       outcome: "completed",
+    });
+  });
+
+  it("retains partial child detail across a failed observation and a resumed follower", () => {
+    let state = conversationReducer.reduce(conversationReducer.initial(), called());
+    state = conversationReducer.reduce(state, {
+      type: "client.child.following",
+      data: { callId: "child-call" },
+    });
+    state = conversationReducer.reduce(state, {
+      type: "client.child.observed",
+      data: { callId: "child-call", event: request("lookup", "child-turn") },
+    });
+    state = conversationReducer.reduce(state, {
+      type: "client.child.settled",
+      data: { callId: "child-call", reason: "stream-error" },
+    });
+    expect(state.children["child-call"]?.observation).toMatchObject({
+      status: "unavailable",
+      conversation: { inputs: { lookup: { status: "open" } } },
+    });
+    state = conversationReducer.reduce(state, {
+      type: "client.child.following",
+      data: { callId: "child-call" },
+    });
+    const resolution = stampTestEvents([
+      {
+        type: "input.resolved",
+        data: {
+          resolutions: [{ kind: "tool-approval", requestId: "lookup", outcome: "approved" }],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "child-turn",
+        },
+      } as UnstampedMessageStreamEvent,
+    ])[0]!;
+    state = reduceConversation(state, { scope: "child", callId: "child-call", event: resolution });
+    expect(state.children["child-call"]?.observation).toMatchObject({
+      status: "following",
+      conversation: { inputs: { lookup: { status: "settled" } } },
     });
   });
 

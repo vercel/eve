@@ -45,7 +45,7 @@ export function reduceConversation(
     if (
       call === undefined ||
       call.parentStatus === "cancelled" ||
-      call.observation.status !== "not-followed"
+      (call.observation.status !== "not-followed" && call.observation.status !== "unavailable")
     )
       return state;
     return {
@@ -54,47 +54,41 @@ export function reduceConversation(
         ...state.children,
         [call.callId]: {
           ...call,
-          observation: { status: "following", conversation: initialConversationState() },
+          observation: {
+            status: "following",
+            conversation:
+              call.observation.status === "unavailable"
+                ? (call.observation.conversation ?? initialConversationState())
+                : initialConversationState(),
+          },
         },
       },
     };
   }
-  if (observation.event.type === "client.child.ended") {
+  if (observation.event.type === "client.child.settled") {
     const call = state.children[observation.event.data.callId];
     if (call === undefined || call.observation.status === "ended") return state;
     const conversation =
       call.observation.status === "following"
         ? call.observation.conversation
-        : initialConversationState();
-    return {
-      ...state,
-      children: {
-        ...state.children,
-        [call.callId]: {
-          ...call,
-          observation: { status: "ended", conversation, outcome: observation.event.data.outcome },
-        },
-      },
-    };
-  }
-  if (observation.event.type === "client.child.unavailable") {
-    const call = state.children[observation.event.data.callId];
-    if (call === undefined || call.observation.status === "ended") return state;
-    return {
-      ...state,
-      children: {
-        ...state.children,
-        [call.callId]: {
-          ...call,
-          observation: {
-            status: "unavailable",
+        : call.observation.status === "unavailable"
+          ? call.observation.conversation
+          : undefined;
+    const childObservation =
+      "outcome" in observation.event.data
+        ? {
+            status: "ended" as const,
+            conversation: conversation ?? initialConversationState(),
+            outcome: observation.event.data.outcome,
+          }
+        : {
+            status: "unavailable" as const,
             reason: observation.event.data.reason,
-            ...(call.observation.status === "following"
-              ? { conversation: call.observation.conversation }
-              : {}),
-          },
-        },
-      },
+            conversation,
+          };
+    return {
+      ...state,
+      children: { ...state.children, [call.callId]: { ...call, observation: childObservation } },
     };
   }
   if (observation.event.type === "client.child.observed") {

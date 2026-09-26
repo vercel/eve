@@ -83,16 +83,10 @@ function setup() {
         data: { callId, event },
       });
     },
-    onEnded: (callId, outcome) => {
+    onSettled: (data) => {
       state = conversationReducer.reduce(state, {
-        type: "client.child.ended",
-        data: { callId, outcome },
-      });
-    },
-    onUnavailable: (callId, reason) => {
-      state = conversationReducer.reduce(state, {
-        type: "client.child.unavailable",
-        data: { callId, reason },
+        type: "client.child.settled",
+        data,
       });
     },
   });

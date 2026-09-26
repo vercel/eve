@@ -11,19 +11,18 @@ export function followSubagents<TData>(input: {
   projection: EveAgentProjection<TData>;
   events: readonly MessageStreamEvent[];
   publish: () => void;
+  cursors: Map<string, number>;
 }): SubagentPump {
   const project = (event: EveAgentReducerEvent) => {
     input.projection.append(event);
     input.publish();
   };
   const pump = new SubagentPump({
+    cursors: input.cursors,
     session: () => input.session,
     getCall: (callId) => (input.projection.data as ConversationState).children?.[callId],
     onFollowing: (callId) => project({ type: "client.child.following", data: { callId } }),
-    onEnded: (callId, outcome) =>
-      project({ type: "client.child.ended", data: { callId, outcome } }),
-    onUnavailable: (callId, reason) =>
-      project({ type: "client.child.unavailable", data: { callId, reason } }),
+    onSettled: (data) => project({ type: "client.child.settled", data }),
     onChildEvent: (callId, event) =>
       project({ type: "client.child.observed", data: { callId, event } }),
   });

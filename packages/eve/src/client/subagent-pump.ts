@@ -13,9 +13,14 @@ export interface SubagentPumpOptions {
   getCall: (callId: string) => ChildCall | undefined;
   onChildEvent: (callId: string, event: MessageStreamEvent) => void;
   onFollowing: (callId: string) => void;
-  onEnded: (callId: string, outcome: "completed" | "failed" | "cancelled") => void;
-  onUnavailable: (callId: string, reason: "unsupported-stream" | "stream-error") => void;
+  onSettled: (
+    result:
+      | { callId: string; outcome: "completed" | "failed" | "cancelled" }
+      | { callId: string; reason: "unsupported-stream" | "stream-error" },
+  ) => void;
   onToolCompleted?: (name: string, toolName: string, output: unknown) => Promise<void>;
+  /** Retained by the transport owner across detach/reattach. */
+  cursors?: Map<string, number>;
 }
 
 /** Acquires call-scoped child events; conversation state owns their meaning. */
@@ -24,12 +29,13 @@ export class SubagentPump {
   readonly #calls = new Map<string, SubagentCalledStreamEvent>();
   readonly #active = new Map<string, string>();
   readonly #queued = new Map<string, string[]>();
-  readonly #cursors = new Map<string, number>();
+  readonly #cursors: Map<string, number>;
   readonly #controllers = new Map<string, AbortController>();
   #disposed = false;
 
   constructor(options: SubagentPumpOptions) {
     this.#options = options;
+    this.#cursors = options.cursors ?? new Map();
   }
 
   acceptParentEvent(event: MessageStreamEvent): void {
@@ -62,7 +68,6 @@ export class SubagentPump {
     this.#controllers.clear();
     this.#active.clear();
     this.#queued.clear();
-    this.#cursors.clear();
     this.#calls.clear();
   }
 
@@ -97,10 +102,10 @@ export class SubagentPump {
     const { callId, childSessionId, name } = called.data;
     const session = this.#options.session(called.data.sessionId);
     if (session === undefined || typeof called.data.childStreamPath !== "string") {
-      this.#options.onUnavailable(
+      this.#options.onSettled({
         callId,
-        session === undefined ? "stream-error" : "unsupported-stream",
-      );
+        reason: session === undefined ? "stream-error" : "unsupported-stream",
+      });
       this.#release(childSessionId, callId);
       return;
     }
@@ -149,15 +154,15 @@ export class SubagentPump {
               ? Object.values(call.observation.conversation.turns)
               : [];
           const failed = turns.at(-1)?.status === "failed";
-          this.#options.onEnded(
+          this.#options.onSettled({
             callId,
-            event.type === "session.failed" || failed ? "failed" : "completed",
-          );
+            outcome: event.type === "session.failed" || failed ? "failed" : "completed",
+          });
           return;
         }
-        if (!controller.signal.aborted) this.#options.onUnavailable(callId, "stream-error");
+        if (!controller.signal.aborted) this.#options.onSettled({ callId, reason: "stream-error" });
       } catch {
-        if (!controller.signal.aborted) this.#options.onUnavailable(callId, "stream-error");
+        if (!controller.signal.aborted) this.#options.onSettled({ callId, reason: "stream-error" });
       } finally {
         controller.abort();
         if (this.#controllers.get(callId) === controller) this.#controllers.delete(callId);

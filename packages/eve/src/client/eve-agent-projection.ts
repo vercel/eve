@@ -27,8 +27,7 @@ export class EveAgentProjection<TData> {
     if (
       event.type === "client.child.observed" ||
       event.type === "client.child.following" ||
-      event.type === "client.child.unavailable" ||
-      event.type === "client.child.ended"
+      event.type === "client.child.settled"
     ) {
       this.#childEvents.push(event);
     } else {

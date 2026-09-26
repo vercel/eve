@@ -61,6 +61,7 @@ export class EveAgentStore<TData> {
   #attached = false;
   #stream: SessionEventStream | undefined;
   #subagentPump: SubagentPump | undefined;
+  readonly #childCursors = new Map<string, number>();
   readonly #followChildStreams: boolean;
   readonly #pendingAuthorizations = new Set<string>();
   readonly #externalSession: boolean;
@@ -68,7 +69,6 @@ export class EveAgentStore<TData> {
   readonly #projection: EveAgentProjection<TData>;
   readonly #subscribers = new Set<() => void>();
   #seenEvents = createEventDeduper();
-
   #activeTurn: ActiveTurn | undefined;
   #callbacks: EveAgentStoreCallbacks<TData> = {};
   #error: Error | undefined;
@@ -393,6 +393,7 @@ export class EveAgentStore<TData> {
   reset(): void {
     this.#subagentPump?.abortAll();
     this.#subagentPump = undefined;
+    this.#childCursors.clear();
     this.#stream?.close();
     this.#stream = undefined;
     this.#pendingAuthorizations.clear();
@@ -574,6 +575,7 @@ export class EveAgentStore<TData> {
       projection: this.#projection,
       events: this.#events,
       publish: () => this.#publish(),
+      cursors: this.#childCursors,
     });
   }
 
@@ -602,9 +604,7 @@ export class EveAgentStore<TData> {
   }
 
   #projectInputResponses(input: SendTurnPayload): void {
-    if (input.inputResponses === undefined || input.inputResponses.length === 0) {
-      return;
-    }
+    if (!input.inputResponses?.length) return;
 
     this.#projection.append({
       data: {

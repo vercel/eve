@@ -425,6 +425,87 @@ describe("EveAgentStore child following", () => {
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("child_1"))).toHaveLength(1);
   });
 
+  it("resumes a partially observed child after detach without replaying its first event", async () => {
+    const called = createSubagentCalledEvent({
+      callId: "call_1",
+      childSessionId: "child_1",
+      sessionId: "session_1",
+      sequence: 0,
+      name: "research",
+      toolName: "eve:subagent:research",
+      turnId: "turn_1",
+      workflowId: "workflow_1",
+    });
+    const [parent] = stampTestEvents([called]);
+    const childEvents = stampTestEvents([
+      createMessageAppendedEvent({
+        messageDelta: "First ",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "child_turn",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "second",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "child_turn",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    const first = controlledStreamResponse();
+    const childCursors: number[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.includes("child_1")) {
+        const index = Number(url.searchParams.get("startIndex") ?? 0);
+        childCursors.push(index);
+        return index === 0 ? first.response : streamResponse(childEvents.slice(index));
+      }
+      return boundedStreamResponse([], 0);
+    });
+    const store = createStore({
+      host: "http://localhost",
+      initialSession: { sessionId: "session_1", streamIndex: 1 },
+      initialEvents: [parent!],
+      reducer: conversationReducer,
+      followSubagents: true,
+    });
+    attachEveAgentStore(store);
+    await vi.waitFor(() => expect(childCursors).toEqual([0]));
+    first.emit(childEvents[0]!);
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.children.call_1?.observation).toMatchObject({
+        status: "following",
+        conversation: {
+          messages: [
+            expect.objectContaining({
+              parts: expect.arrayContaining([expect.objectContaining({ text: "First " })]),
+            }),
+          ],
+        },
+      }),
+    );
+    detachEveAgentStore(store);
+    attachEveAgentStore(store);
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.children.call_1?.observation.status).toBe("ended"),
+    );
+    expect(childCursors).toEqual([0, 1]);
+    expect(store.snapshot.data.children.call_1?.observation).toMatchObject({
+      conversation: {
+        messages: [
+          expect.objectContaining({
+            parts: expect.arrayContaining([expect.objectContaining({ text: "First second" })]),
+          }),
+        ],
+      },
+    });
+    detachEveAgentStore(store);
+    attachEveAgentStore(store);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(childCursors).toEqual([0, 1]);
+  });
+
   it("keeps a followed child's conversation state through optimistic root reconciliation", async () => {
     const called = createSubagentCalledEvent({
       callId: "call_1",
