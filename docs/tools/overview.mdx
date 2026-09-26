@@ -141,7 +141,9 @@ can wait durably while the call is pending:
 A workflow tool that defines `task(input, ctx)` in place of `execute` runs each call as a
 [task](/docs/tools/workflows#run-calls-as-tasks-task):
 the call returns a receipt at once, and the workflow's output reaches the model later in a
-`task.result` message.
+`task.result` message. One that defines `serve(receive, ctx)` runs a
+[resumable task](/docs/tools/workflows#resumable-tasks-serve), which the model can send more calls
+by its `taskId`.
 
 The `TaskExec` argument and `task.postMessage` have been removed. Return the result. In a workflow
 body, keep values needed after a wait in local variables; workflow replay reconstructs them across

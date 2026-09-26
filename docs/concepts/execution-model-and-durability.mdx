@@ -116,7 +116,7 @@ Some work has to wait, including a human approving a [tool](../tools) or an inte
 
 A workflow tool can suspend too, with its original tool call still pending and the turn parked
 until the workflow settles. `defineTool` always executes inside its initiating step. A workflow
-tool that defines `task(input, ctx)` doesn't park the turn: its call returns a receipt, the run keeps working,
+tool that defines `task(input, ctx)` or `serve(receive, ctx)` doesn't park the turn: its call returns a receipt, the run keeps working,
 and the turn parks only when the model calls `task_wait` or tries to end the turn while the task
 works. See [tasks](../tools/workflows#run-calls-as-tasks-task).
 
