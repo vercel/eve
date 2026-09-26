@@ -187,8 +187,8 @@ describe("tool loop cancellation (real AI SDK)", () => {
     for (const failureType of FAILURE_EVENT_TYPES) {
       expect(eventTypes).not.toContain(failureType);
     }
-    expect(logs.records).toContainEqual(
-      expect.objectContaining({ level: "error", message: "tool execution failed" }),
+    expect(logs.records).not.toContainEqual(
+      expect.objectContaining({ message: "tool execution failed" }),
     );
   });
 

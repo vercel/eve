@@ -585,7 +585,7 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
-    expect(output.lines).toContain("[eve:harness.tool-loop] tool execution failed");
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   });
 
   it("cancels a turn through the eve channel cancel route", async () => {
@@ -667,7 +667,7 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
-    expect(output.lines).toContain("[eve:harness.tool-loop] tool execution failed");
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   }, 60_000);
 
   it("cancels a turn from a channel route helper addressed by continuation token", async () => {
@@ -760,7 +760,7 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
-    expect(output.lines).toContain("[eve:harness.tool-loop] tool execution failed");
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   }, 60_000);
 
   it("consumes a cancel with a stale turn guard as a no-op and keeps the turn running", async () => {
@@ -810,7 +810,7 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
-    expect(output.lines).toContain("[eve:harness.tool-loop] tool execution failed");
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   }, 60_000);
 
   it("treats a cancel after the turn settled as a benign no-op", async () => {
