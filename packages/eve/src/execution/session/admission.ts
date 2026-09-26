@@ -8,10 +8,7 @@ import {
   SessionInboxPayloadError,
 } from "#execution/session-inbox/protocol.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
-import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { findRunningAgentHandle } from "#subagents/handles/query.js";
-import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 
 /** One canonical admission result, after wire decoding but before turn policy. */
 type SessionAdmission =
@@ -30,7 +27,6 @@ type SessionAdmission =
 export async function admitSessionInboxPayload(
   value: SessionInboxPayload,
   input: {
-    readonly cursor: SessionStateCursor;
     readonly queue: SessionInputQueue;
   },
 ): Promise<SessionAdmission> {
@@ -42,23 +38,8 @@ export async function admitSessionInboxPayload(
     input.queue.enqueueAuthorization(value.payloads);
     return { kind: "consumed" };
   }
+  // A child's questions reach the session only through the run that opened it.
   if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
-    const handle = findRunningAgentHandle(input.cursor.sessionState.snapshot.session.state, {
-      callId: value.callId,
-    });
-    if (
-      handle?.identity.name === value.subagentName &&
-      handle.address.sessionId === value.childSessionId
-    ) {
-      await input.cursor.apply(
-        await runProxySubagentEventStep({
-          hookPayload: value,
-          sessionWritable: input.cursor.sessionWritable,
-          serializedContext: input.cursor.serializedContext,
-          sessionState: input.cursor.sessionState,
-        }),
-      );
-    }
     return { kind: "consumed" };
   }
 

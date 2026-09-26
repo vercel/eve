@@ -362,39 +362,6 @@ export interface ActionPartialStreamEvent {
 }
 
 /**
- * Stream event emitted when the parent workflow starts a child subagent session.
- */
-export interface SubagentCalledStreamEvent {
-  data: {
-    agentId?: string;
-    callId: string;
-    childSessionId: string;
-    childStreamPath: string;
-    sessionId: string;
-    sequence: number;
-    name: string;
-    remote?: {
-      /**
-       * Key to the authored credential functions (`auth`/`headers`) for this
-       * remote child, resolved at stream-proxy time by
-       * `resolveRemoteAgentStreamHeaders`. Static subagent → the node id in
-       * `subagentRegistry.subagentsByNodeId`; dynamic subagent → its
-       * `credentialsStepId` in the step registry. The event stores this key —
-       * never resolved header values — because tokens expire and this event
-       * is persisted and streamed to clients. Absent when the remote child
-       * has no authored credentials.
-       */
-      resolverId?: string;
-      url: string;
-    };
-    toolName: string;
-    turnId: string;
-    workflowId: string;
-  };
-  type: "subagent.called";
-}
-
-/**
  * Stream event emitted when a workflow run opens a session with `ctx.agent`.
  * `callId` is the tool call whose run opened it; follow the session with
  * `session.streamSubagent(event)`.
@@ -408,9 +375,11 @@ export interface AgentStartedStreamEvent {
     /** A local session's stream route, or the parent-origin proxy for a remote one. */
     streamPath: string;
     /**
-     * Where a remote session runs, read by the parent's stream proxy. As on
-     * `subagent.called`, `resolverId` keys the authored credential functions,
-     * never resolved header values.
+     * Where a remote session runs, read by the parent's stream proxy.
+     * `resolverId` keys the authored credential functions (`auth` and
+     * `headers`): a static agent's node id, or a dynamic agent's
+     * `credentialsStepId`. The event is persisted and streamed to clients, so
+     * it carries this key, never resolved header values.
      */
     remote?: {
       resolverId?: string;
@@ -450,43 +419,6 @@ export interface TaskSettledStreamEvent {
     taskId: string;
   };
   type: "task.settled";
-}
-
-/**
- * Stream event emitted when an inline subagent execution starts.
- */
-export interface SubagentStartedStreamEvent {
-  data: {
-    callId: string;
-    subagentName: string;
-  };
-  type: "subagent.started";
-}
-
-/**
- * Stream event (`type: "subagent.event"`) wrapping one child stream event
- * produced by an inline subagent, under `data.event`, tagged with the
- * originating `data.callId` and `data.subagentName`.
- */
-export interface SubagentChildEventStreamEvent {
-  data: {
-    callId: string;
-    event: UnstampedMessageStreamEvent;
-    subagentName: string;
-  };
-  type: "subagent.event";
-}
-
-/**
- * Stream event emitted after the parent accepts a successful subagent invocation result.
- */
-export interface SubagentCompletedStreamEvent {
-  data: {
-    callId: string;
-    output: string;
-    subagentName: string;
-  };
-  type: "subagent.completed";
 }
 
 /**
@@ -841,10 +773,6 @@ export type UnstampedMessageStreamEvent =
   | SessionStartedStreamEvent
   | SessionWaitingStreamEvent
   | ResultCompletedStreamEvent
-  | SubagentCalledStreamEvent
-  | SubagentChildEventStreamEvent
-  | SubagentCompletedStreamEvent
-  | SubagentStartedStreamEvent
   | TaskSettledStreamEvent
   | TaskStartedStreamEvent
   | ActionsRequestedStreamEvent
@@ -1417,49 +1345,6 @@ export function createActionPartialEvent(input: {
       turnId: input.turnId,
     },
     type: "action.partial",
-  };
-}
-
-/**
- * Creates the `subagent.called` event for one started child workflow session.
- */
-export function createSubagentCalledEvent(input: {
-  readonly agentId?: string;
-  readonly callId: string;
-  readonly childSessionId: string;
-  readonly sessionId: string;
-  readonly sequence: number;
-  readonly name: string;
-  readonly remote?: {
-    readonly resolverId?: string;
-    readonly url: string;
-  };
-  readonly toolName: string;
-  readonly turnId: string;
-  readonly workflowId: string;
-}): SubagentCalledStreamEvent {
-  return {
-    data: {
-      agentId: input.agentId,
-      callId: input.callId,
-      childSessionId: input.childSessionId,
-      childStreamPath:
-        input.remote === undefined
-          ? createEveSessionStreamRoutePath(input.childSessionId)
-          : createEveSubagentStreamRoutePath({
-              callId: input.callId,
-              childSessionId: input.childSessionId,
-              parentSessionId: input.sessionId,
-            }),
-      sessionId: input.sessionId,
-      sequence: input.sequence,
-      name: input.name,
-      remote: input.remote,
-      toolName: input.toolName,
-      turnId: input.turnId,
-      workflowId: input.workflowId,
-    },
-    type: "subagent.called",
   };
 }
 

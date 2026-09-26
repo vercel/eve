@@ -23,7 +23,11 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { writeSessionEvent } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import {
+  publishSessionEvents,
+  type PublishedSessionEvents,
+  type SessionEventTarget,
+} from "#execution/publish-session-events.js";
 import type {
   WorkflowToolRunControlMessage,
   WorkflowToolRunMessage,
@@ -36,7 +40,7 @@ import {
 } from "#execution/workflow-runtime.js";
 import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
 import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
-import { createTaskSettledEvent } from "#protocol/message.js";
+import { createTaskSettledEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /** The messages a task's run sends that change its record. */
 export type TaskRunMessage = Extract<
@@ -51,18 +55,19 @@ interface TaskStepResult {
 const TASK_CANCEL_REASON = "The task was cancelled.";
 
 /** Applies one message from a task's run: started, a reply, or the run's outcome. */
-export async function applyTaskRunMessageStep(input: {
-  readonly message: TaskRunMessage;
-  readonly sessionState: DurableSessionState;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-}): Promise<TaskStepResult> {
+export async function applyTaskRunMessageStep(
+  input: SessionEventTarget & { readonly message: TaskRunMessage },
+): Promise<PublishedSessionEvents> {
   "use step";
 
   const { message } = input;
   const taskId = message.from.taskId;
   let session = readDurableSession(input.sessionState);
-  if (taskId === undefined) return { sessionState: input.sessionState };
+  if (taskId === undefined) {
+    return { serializedContext: input.serializedContext, sessionState: input.sessionState };
+  }
   let table = readTaskTable(session.state);
+  const settlements: TaskSettlement[] = [];
   switch (message.kind) {
     case "started": {
       const started = markTaskRunStarted(table, taskId, message.from.runId);
@@ -70,51 +75,53 @@ export async function applyTaskRunMessageStep(input: {
       if (started.held !== undefined) await sendTaskRunCommands(started.held);
       break;
     }
-    case "reply":
-      table = await settleCall(input.sessionWritable, table, {
+    case "reply": {
+      const settled = settleTaskCall(table, {
         callId: message.from.callId,
         outcome: { output: message.output, status: "completed" },
         taskId,
       });
+      table = settled.table;
+      if (settled.settlement !== undefined) settlements.push(settled.settlement);
       break;
+    }
     case "outcome": {
       const settled = settleRemainingTaskCalls(table, taskId, toCallOutcome(message));
-      for (const settlement of settled.settlements) {
-        await emitTaskSettled(input.sessionWritable, settlement);
-      }
+      settlements.push(...settled.settlements);
       table = finishTaskRun(settled.table, taskId, message.from.runId);
       session = forgetRunQuestions(session, message.from.runId);
       break;
     }
   }
-  return { sessionState: saveTable(input.sessionState, session, table) };
+  const sessionState = saveTable(input.sessionState, session, table);
+  return await publishSessionEvents({ ...input, sessionState }, settlements.map(taskSettledEvent));
 }
 
 /**
  * Cancels tasks: their calls settle as cancelled, their runs are told to
  * stop, and the sleeper is armed to hard-stop any run that doesn't confirm.
  */
-export async function cancelTasksStep(input: {
-  readonly inbox: string;
-  readonly sessionState: DurableSessionState;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly taskIds: readonly string[];
-}): Promise<TaskStepResult> {
+export async function cancelTasksStep(
+  input: SessionEventTarget & {
+    readonly inbox: string;
+    readonly taskIds: readonly string[];
+  },
+): Promise<PublishedSessionEvents> {
   "use step";
 
   const session = readDurableSession(input.sessionState);
   const now = Date.now();
   let table = readTaskTable(session.state);
+  const settlements: TaskSettlement[] = [];
   for (const taskId of input.taskIds) {
     const cancelled = cancelTask(table, taskId, now);
     table = cancelled.table;
-    for (const settlement of cancelled.settlements) {
-      await emitTaskSettled(input.sessionWritable, settlement);
-    }
+    settlements.push(...cancelled.settlements);
     if (cancelled.send !== undefined) await sendTaskRunCommands(cancelled.send);
   }
   table = await armHardStop(table, input.inbox);
-  return { sessionState: saveTable(input.sessionState, session, table) };
+  const sessionState = saveTable(input.sessionState, session, table);
+  return await publishSessionEvents({ ...input, sessionState }, settlements.map(taskSettledEvent));
 }
 
 /** Hard-stops every cancelled run whose confirmation is overdue, then re-arms the sleeper. */
@@ -135,42 +142,21 @@ export async function hardStopOverdueTasksStep(input: {
   return { sessionState: saveTable(input.sessionState, session, table) };
 }
 
-/** Publishes `task.settled` for one settled call. */
-async function emitTaskSettled(
-  sessionWritable: WritableStream<Uint8Array>,
-  settlement: TaskSettlement,
-): Promise<void> {
+/** The `task.settled` event for one settled call. */
+function taskSettledEvent(settlement: TaskSettlement): UnstampedMessageStreamEvent {
   const base = { callId: settlement.callId, taskId: settlement.taskId };
   switch (settlement.status) {
     case "completed":
-      await writeSessionEvent(
-        sessionWritable,
-        createTaskSettledEvent({ ...base, output: settlement.output, status: "completed" }),
-      );
-      return;
+      return createTaskSettledEvent({ ...base, output: settlement.output, status: "completed" });
     case "failed":
-      await writeSessionEvent(
-        sessionWritable,
-        createTaskSettledEvent({ ...base, error: { message: settlement.error }, status: "failed" }),
-      );
-      return;
+      return createTaskSettledEvent({
+        ...base,
+        error: { message: settlement.error },
+        status: "failed",
+      });
     case "cancelled":
-      await writeSessionEvent(
-        sessionWritable,
-        createTaskSettledEvent({ ...base, status: "cancelled" }),
-      );
-      return;
+      return createTaskSettledEvent({ ...base, status: "cancelled" });
   }
-}
-
-async function settleCall(
-  sessionWritable: WritableStream<Uint8Array>,
-  table: TaskTable,
-  input: Parameters<typeof settleTaskCall>[1],
-): Promise<TaskTable> {
-  const settled = settleTaskCall(table, input);
-  if (settled.settlement !== undefined) await emitTaskSettled(sessionWritable, settled.settlement);
-  return settled.table;
 }
 
 /** Starts the session's one sleeper for the earliest pending confirmation, unless one is armed. */

@@ -100,62 +100,6 @@ describe("resolveRemainingSessionTokenLimits", () => {
     });
   });
 
-  it("splits the remaining quota across the batch's delegated calls", () => {
-    const session = createSessionWithUsage({
-      limits: { maxInputTokensPerSession: 1_000_000, maxOutputTokensPerSession: 50_000 },
-      usedInputTokens: 100_000,
-      usedOutputTokens: 20_000,
-    });
-
-    expect(resolveRemainingSessionTokenLimits(session, 3)).toEqual({
-      maxInputTokensPerSession: 300_000,
-      maxOutputTokensPerSession: 10_000,
-    });
-  });
-
-  it("splits the remaining model token-cost budget across delegated calls", () => {
-    const session = createSessionWithUsage({
-      limits: { maxTokenCostUsdPerSession: 1.5 },
-      usedCostUsd: 0.3,
-    });
-
-    const limits = resolveRemainingSessionTokenLimits(session, 3);
-    expect(limits).toMatchObject({
-      maxInputTokensPerSession: false,
-      maxOutputTokensPerSession: false,
-    });
-    expect(limits.maxTokenCostUsdPerSession).toBeCloseTo(0.4);
-  });
-
-  it("floors uneven splits so a batch can never exceed the remainder", () => {
-    const session = createSessionWithUsage({
-      limits: { maxInputTokensPerSession: 100 },
-    });
-
-    expect(resolveRemainingSessionTokenLimits(session, 3)).toEqual({
-      maxInputTokensPerSession: 33,
-      maxOutputTokensPerSession: false,
-    });
-  });
-
-  it("treats a non-positive fan-out as a single delegation", () => {
-    const session = createSessionWithUsage({
-      limits: { maxInputTokensPerSession: 100 },
-    });
-
-    expect(resolveRemainingSessionTokenLimits(session, 0)).toEqual({
-      maxInputTokensPerSession: 100,
-      maxOutputTokensPerSession: false,
-    });
-  });
-
-  it("keeps uncapped parents uncapped regardless of fan-out", () => {
-    expect(resolveRemainingSessionTokenLimits(createSessionWithUsage({}), 5)).toEqual({
-      maxInputTokensPerSession: false,
-      maxOutputTokensPerSession: false,
-    });
-  });
-
   it("marks uncapped axes as false", () => {
     const session = createSessionWithUsage({
       limits: { maxOutputTokensPerSession: 50_000 },

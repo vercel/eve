@@ -1,10 +1,13 @@
-import { FatalError, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
-import { resolveAgentAction, resolveAgentStartTarget } from "#execution/agent-sessions/target.js";
+import {
+  resolveAgentAction,
+  resolveAgentStartTarget,
+  type SubagentStartTarget,
+} from "#execution/agent-sessions/target.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import type { SubagentStartTarget } from "#execution/tools/subagent/start.js";
 import {
   createWorkflowCallbackUrl,
   resolveWorkflowCallbackBaseUrl,
@@ -21,7 +24,6 @@ import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
-import { toErrorMessage } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SubagentParentContext } from "#subagents/invocation.js";
 import {
@@ -30,7 +32,7 @@ import {
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
-} from "#subagents/remote-dispatch.js";
+} from "#execution/agent-sessions/remote.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 
@@ -82,20 +84,17 @@ export async function openAgentSessionStep(
     dynamicSelections: context.dynamicSelections,
     input: { message: input.message, outputSchema: input.outputSchema, target: input.name },
   });
-  const plan = resolveAgentStartTarget({
+  const target = resolveAgentStartTarget({
     action,
     bundle,
     dynamicSelections: context.dynamicSelections,
     isRootSession: context.parent.rootSessionId === context.parent.sessionId,
   });
-  if (plan.kind === "reject") {
-    throw new FatalError(toErrorMessage(plan.result.output));
-  }
   const start = { bundle, context, key: input.key, replyTo: input.replyTo };
-  if (plan.target.kind === "remote") {
-    return await startRemoteSession({ ...start, target: plan.target });
+  if (target.kind === "remote") {
+    return await startRemoteSession({ ...start, target });
   }
-  return await startLocalSession({ ...start, target: plan.target });
+  return await startLocalSession({ ...start, target });
 }
 
 /** Sends a later message; it joins the session's running turn or starts the next. */

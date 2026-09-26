@@ -11,9 +11,6 @@ import { formatConnectionsSection } from "#runtime/prompt/connections.js";
 const PARALLEL_ACTION_INSTRUCTION =
   "Tool execution\nA single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.";
 
-const AGENT_MESSAGING_INSTRUCTION =
-  "Agent messaging\nA subagent call runs until the subagent replies, and its reply is the tool result. Agents you have already delegated to remain visible in the framework-authored `<agents>` conversation note. To continue an agent's conversation, call the original subagent tool again with that agentId. Calling a subagent without agentId starts a new agent session.";
-
 /**
  * Input for composing the base authored instructions prompt for one
  * resolved agent.
@@ -22,7 +19,6 @@ interface ComposeRuntimeBasePromptInput {
   connections?: readonly ResolvedConnectionDefinition[];
   instructions?: readonly ResolvedInstructionsDefinition[];
   skills?: readonly ResolvedSkillDefinition[];
-  subagentsAvailable?: boolean;
   toolsAvailable?: boolean;
   workspaceSpec?: WorkspaceRuntimeSpec;
 }
@@ -36,7 +32,6 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
     ...createInstructionsPromptBlocks(input.instructions),
     ...createWorkspacePromptBlocks(input.workspaceSpec),
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
-    ...(input.subagentsAvailable ? [AGENT_MESSAGING_INSTRUCTION] : []),
     ...createConnectionsPromptBlocks(input.connections),
     ...createSkillsPromptBlocks(input.skills),
   ];

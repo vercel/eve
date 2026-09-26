@@ -185,7 +185,7 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
-      "workflow//eve//subagentToolExecuteWorkflow",
+      "workflow//eve//agentToolServeWorkflow",
     );
 
     await dispatchDynamicSubagentEvent({
@@ -195,7 +195,7 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
-      "workflow//eve//subagentToolExecuteWorkflow",
+      "workflow//eve//agentToolServeWorkflow",
     );
   });
 
@@ -222,7 +222,7 @@ describe("dynamic subagent lifecycle", () => {
     });
 
     expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
-      "workflow//eve//subagentToolExecuteWorkflow",
+      "workflow//eve//agentToolServeWorkflow",
     );
   });
 
@@ -292,7 +292,7 @@ describe("dynamic subagent lifecycle", () => {
     });
 
     expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
-      "workflow//eve//subagentToolExecuteWorkflow",
+      "workflow//eve//agentToolServeWorkflow",
     );
   });
 
@@ -339,7 +339,7 @@ describe("dynamic subagent lifecycle", () => {
       kind: "remote",
       prepared: {
         inputSchema: {
-          properties: { agentId: expect.any(Object) },
+          properties: { message: expect.any(Object) },
         },
       },
       remoteAgent: {
@@ -395,7 +395,7 @@ describe("dynamic subagent lifecycle", () => {
     });
 
     expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
-      "workflow//eve//subagentToolExecuteWorkflow",
+      "workflow//eve//agentToolServeWorkflow",
     );
   });
 

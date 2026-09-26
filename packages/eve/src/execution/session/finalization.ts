@@ -35,7 +35,7 @@ export async function finalizeSession(
 ): Promise<WorkflowEntryResult> {
   const { serializedContext, sessionState } = context.cursor;
   if (sessionState !== undefined) {
-    await terminateChildSessionsStep({ serializedContext, sessionState });
+    await terminateChildSessionsStep({ sessionState });
   }
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({

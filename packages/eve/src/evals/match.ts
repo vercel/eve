@@ -58,13 +58,13 @@ export type EveEvalSkillLoadMatchOptions = Omit<EveEvalToolCallMatchOptions, "in
  * Constraints applied to subagent calls by `t.calledSubagent`.
  */
 export interface EveEvalSubagentCallMatchOptions {
-  /** Matcher over the runtime-action call id. */
+  /** Matcher over the agent tool call id. */
   readonly callId?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the durable child session id, when delegation started. */
+  /** Matcher over the id of the agent's session. */
   readonly childSessionId?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the `subagent.called` remote URL. */
+  /** Matcher over the `agent.started` remote URL. */
   readonly remoteUrl?: EveEvalValueMatcher<string | undefined>;
-  /** Matcher over the `subagent.completed` output. */
+  /** Matcher over the output of the call's `task.settled`. */
   readonly output?: EveEvalValueMatcher;
   /** Required lifecycle outcome. Defaults to `"completed"`. */
   readonly status?: EveEvalSubagentCall["status"];

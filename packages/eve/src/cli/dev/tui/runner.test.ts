@@ -387,15 +387,21 @@ describe("registryHandoffAddress", () => {
       client,
       session: sessionYielding([
         {
-          type: "subagent.called",
+          type: "task.started",
           data: {
             callId: "selfmod-call",
-            childSessionId: "child-session",
-            childStreamPath: "/eve/v1/session/child-session/stream",
             name: "self-modification__agent",
-            sequence: 0,
-            sessionId: "parent-session",
+            taskId: "self-modification__agent-selfmod-call",
             turnId: "parent-turn",
+          },
+        },
+        {
+          type: "agent.started",
+          data: {
+            callId: "selfmod-call",
+            name: "self-modification__agent",
+            sessionId: "child-session",
+            streamPath: "/eve/v1/session/child-session/stream",
           },
         },
         { type: "turn.completed", data: { sequence: 1, turnId: "parent-turn" } },
@@ -3568,7 +3574,7 @@ describe("EveTUIRunner renderer teardown", () => {
     expect(requestStop).toHaveBeenCalledOnce();
   });
 
-  it("finishes the section on the child's own turn boundary, before subagent.completed", async () => {
+  it("finishes the section on the child's own turn boundary, before task.settled", async () => {
     const client = stubClient();
     vi.stubGlobal(
       "fetch",
@@ -3630,21 +3636,25 @@ describe("EveTUIRunner renderer teardown", () => {
       }),
       session: sessionYielding([
         {
-          type: "subagent.called",
+          type: "task.started",
           data: {
             callId: "call-child",
-            childSessionId: "child-session",
-            childStreamPath: "/eve/v1/session/child-session/stream",
             name: "weather-child",
-            sequence: 0,
-            sessionId: "parent-session",
-            toolName: "delegate_weather",
+            taskId: "weather-child-call-child",
             turnId: "turn-parent",
-            workflowId: "workflow-parent",
           },
         },
-        // The parent stream never reports subagent.completed — the child's
-        // own boundary must finish the section.
+        {
+          type: "agent.started",
+          data: {
+            callId: "call-child",
+            name: "weather-child",
+            sessionId: "child-session",
+            streamPath: "/eve/v1/session/child-session/stream",
+          },
+        },
+        // The parent stream never reports task.settled — the child's own
+        // boundary must finish the section.
         { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
         {
           type: "session.waiting",
@@ -3699,17 +3709,21 @@ describe("EveTUIRunner renderer teardown", () => {
       }),
       session: sessionYielding([
         {
-          type: "subagent.called",
+          type: "task.started",
           data: {
             callId: "call-child",
-            childSessionId: "child-session",
-            childStreamPath: "/eve/v1/session/child-session/stream",
             name: "weather-child",
-            sequence: 0,
-            sessionId: "parent-session",
-            toolName: "delegate_weather",
+            taskId: "weather-child-call-child",
             turnId: "turn-parent",
-            workflowId: "workflow-parent",
+          },
+        },
+        {
+          type: "agent.started",
+          data: {
+            callId: "call-child",
+            name: "weather-child",
+            sessionId: "child-session",
+            streamPath: "/eve/v1/session/child-session/stream",
           },
         },
         { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
@@ -4747,27 +4761,39 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
 
     const session = sessionYielding([
       {
-        type: "subagent.called",
+        type: "task.started",
         data: {
           callId: "call-a",
-          childSessionId: "child-a",
-          childStreamPath: "/eve/v1/session/child-a/stream",
           name: "researcher",
-          sequence: 0,
-          sessionId: "parent-session",
+          taskId: "researcher-call-a",
           turnId: "turn-a",
         },
       },
       {
-        type: "subagent.called",
+        type: "agent.started",
+        data: {
+          callId: "call-a",
+          name: "researcher",
+          sessionId: "child-a",
+          streamPath: "/eve/v1/session/child-a/stream",
+        },
+      },
+      {
+        type: "task.started",
         data: {
           callId: "call-1",
-          childSessionId: "child-1",
-          childStreamPath: "/eve/v1/session/child-1/stream",
           name: "researcher",
-          sequence: 1,
-          sessionId: "parent-session",
+          taskId: "researcher-call-1",
           turnId: "turn-1",
+        },
+      },
+      {
+        type: "agent.started",
+        data: {
+          callId: "call-1",
+          name: "researcher",
+          sessionId: "child-1",
+          streamPath: "/eve/v1/session/child-1/stream",
         },
       },
       { type: "turn.cancelled", data: { turnId: "turn-1", sequence: 2 } },
@@ -4797,8 +4823,8 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
 
     expect(view.begin).toHaveBeenCalledWith({ callId: "call-a", name: "researcher" });
     expect(view.begin).toHaveBeenCalledWith({ callId: "call-1", name: "researcher" });
-    // `subagent.completed` never arrives for a cancelled delegation — the
-    // cancellation itself must close the section.
+    // A cancelled call's section closes with the cancelled turn, not a
+    // later `task.settled`.
     expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" });
     expect(view.complete).not.toHaveBeenCalledWith({ authoritative: true, callId: "call-a" });
   });

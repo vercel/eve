@@ -154,7 +154,6 @@ export const runtimeWorkflowTaskRequestSchema = z
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,
     kind: z.literal("workflow-task"),
-    nodeId: z.string().optional(),
     toolName: z.string(),
     workflowId: z.string(),
   })
@@ -265,9 +264,8 @@ export interface RuntimeSubagentChildResult {
 
 /**
  * Subagent failure synthesized on the parent side when no child produced a
- * result: dispatch rejections, start failures, and agentId-continuation
- * delivery errors. Always an error. Enters the harness only through the
- * trusted step-result path, never through the shared callback inbox.
+ * result. Always an error. Enters the harness only through the trusted
+ * step-result path, never through the shared callback inbox.
  */
 export type RuntimeSubagentDispatchFailure = z.infer<typeof runtimeSubagentDispatchFailureSchema>;
 

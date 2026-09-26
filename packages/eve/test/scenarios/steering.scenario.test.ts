@@ -55,8 +55,15 @@ export default defineAgent({
       const steps = events
         .filter((event) => event.type === "step.started")
         .map((event) => `${event.data.turnId}:${event.data.stepIndex}`);
-      expect(steps).toHaveLength(2);
+      // The first step starts five worker tasks; later steps read their
+      // results as they arrive. No step may run twice.
+      expect(steps.length).toBeGreaterThan(2);
       expect(new Set(steps).size).toBe(steps.length);
+      expect(
+        events.filter(
+          (event) => event.type === "task.settled" && event.data.status === "completed",
+        ),
+      ).toHaveLength(5);
       expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
       expect(server.stderr()).toContain("Step execution already in flight in this process");
     } finally {

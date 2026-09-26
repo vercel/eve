@@ -266,11 +266,11 @@ describe("createNodeHarnessTools", () => {
     expect(agentTool?.description).toContain("split a large task into independent pieces");
     expect(agentTool?.description).toContain("multiple `agent` calls in one response");
     expect(agentTool?.description).toContain("run a small fixed set in parallel");
-    expect(agentTool?.description).toContain("include essential context");
+    expect(agentTool?.description).toContain("put everything it needs in message");
     expect(agentTool?.description).toContain("non-overlapping scopes");
-    expect(agentTool?.description).not.toContain("eve");
+    expect(agentTool?.description).not.toMatch(/\beve\b/);
     expect(agentTool?.execute).toBeUndefined();
-    expect(agentTool?.workflowId).toBe("workflow//eve//subagentToolExecuteWorkflow");
+    expect(agentTool?.workflowId).toBe("workflow//eve//agentToolServeWorkflow");
   });
 
   it("keeps an authored agent tool separate from self-delegation", async () => {
@@ -317,7 +317,7 @@ describe("createNodeHarnessTools", () => {
     });
     for (const name of ["research", "reviewer"]) {
       expect(tools.get(name)?.execute).toBeUndefined();
-      expect(tools.get(name)?.workflowId).toBe("workflow//eve//subagentToolExecuteWorkflow");
+      expect(tools.get(name)?.workflowId).toBe("workflow//eve//agentToolServeWorkflow");
     }
   });
 });

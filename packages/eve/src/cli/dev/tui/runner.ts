@@ -16,8 +16,8 @@ import {
   type SessionFailedStreamEvent,
   type StepCompletedStreamEvent,
   type MessageStreamEvent,
-  type SubagentCalledStreamEvent,
-  type SubagentCompletedStreamEvent,
+  type AgentStartedStreamEvent,
+  type TaskStartedStreamEvent,
   Client,
   ClientSession,
 } from "#client/index.js";
@@ -589,18 +589,13 @@ export class EveTUIRunner {
   /** True only while the idle prompt owns terminal input. */
   #readingPrompt = false;
   /**
-   * callId → live state for one subagent dispatch. Persists across turn
-   * boundaries because a subagent dispatched in one turn may not emit
-   * `subagent.completed` until a later turn (e.g. after a HITL approval).
-   * Each run holds per-step text accumulators (so reasoning + message land
-   * in the same section per child step) and per-tool state.
+   * callId → live state for one call to an agent task. Persists across turn
+   * boundaries because a call made in one turn may not settle until a later
+   * turn (e.g. after a HITL approval). Each run holds per-step text
+   * accumulators (so reasoning + message land in the same section per child
+   * step) and per-tool state.
    */
   readonly #subagentPump: SubagentPump;
-  /**
-   * callId → AbortController for the parallel child-session stream pump
-   * launched on `subagent.called`. Cancelled on `subagent.completed`, when
-   * the session resets, or when the runner shuts down.
-   */
   /**
    * name → latest known state for one MCP connection
    * authorization lifecycle. Persists across turns because a turn that
@@ -1625,8 +1620,11 @@ export class EveTUIRunner {
         events: steering ?? events,
         pendingInputRequests: this.#pendingInputRequests,
         turnState,
-        onSubagentCalled: (called) => this.#subagentPump.begin(called),
-        onSubagentCompleted: (callId) => this.#subagentPump.settle(callId),
+        onTaskStarted: (event) =>
+          this.#subagentPump.taskStarted(event, sourceSession?.state.sessionId),
+        onAgentStarted: (event) =>
+          this.#subagentPump.agentStarted(event, sourceSession?.state.sessionId),
+        onTaskSettled: (callId) => this.#subagentPump.settle(callId),
         onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
@@ -2104,8 +2102,9 @@ type EveStreamTranslatorInput = {
   onAssistantResponse?: () => void;
   pendingInputRequests: Map<string, InputRequest>;
   turnState: AgentTUITurnState;
-  onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
-  onSubagentCompleted?: (callId: string) => void;
+  onTaskStarted?: (event: TaskStartedStreamEvent) => void;
+  onAgentStarted?: (event: AgentStartedStreamEvent) => void;
+  onTaskSettled?: (callId: string) => void;
   onTurnCancelled?: (turnId: string) => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
@@ -2150,8 +2149,9 @@ async function* eveEventsToTUIStream(
     events,
     pendingInputRequests,
     turnState,
-    onSubagentCalled,
-    onSubagentCompleted,
+    onTaskStarted,
+    onAgentStarted,
+    onTaskSettled,
     onTurnCancelled,
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
@@ -2526,26 +2526,20 @@ async function* eveEventsToTUIStream(
         yield { type: "turn-cancelled" };
         break;
 
-      case "subagent.called": {
-        // Re-delivery within this translator was filtered above; run creation
-        // and re-entry from a later translator live in the pump's begin().
-        onSubagentCalled?.(event as SubagentCalledStreamEvent);
-        break;
-      }
-
-      case "subagent.started":
-      case "subagent.event":
-        // `subagent.started` and `subagent.event` are not emitted by the
-        // current harness — the parent stream only sees `called` and
-        // `completed`. All intermediate child content is observed via
-        // the runner's parallel child-session stream pump.
+      // Re-delivery within this translator was filtered above; run creation
+      // and re-entry from a later translator live in the pump. The agent's
+      // content is observed through its session's stream.
+      case "task.started":
+        onTaskStarted?.(event);
         break;
 
-      case "subagent.completed": {
-        const completed = event as SubagentCompletedStreamEvent;
-        onSubagentCompleted?.(completed.data.callId);
+      case "agent.started":
+        onAgentStarted?.(event);
         break;
-      }
+
+      case "task.settled":
+        onTaskSettled?.(event.data.callId);
+        break;
 
       case "authorization.required":
         onConnectionAuthRequired?.(event as AuthorizationRequiredStreamEvent);
@@ -2694,10 +2688,9 @@ function isPostTurnVisibleEvent(event: MessageStreamEvent): boolean {
     case "step.completed":
     case "step.failed":
     case "step.started":
-    case "subagent.called":
-    case "subagent.completed":
-    case "subagent.event":
-    case "subagent.started":
+    case "agent.started":
+    case "task.settled":
+    case "task.started":
     case "turn.completed":
     case "turn.failed":
       return true;

@@ -6,7 +6,6 @@ import type {
   RuntimeTraceContext,
   MessageStreamEvent,
   AgentStartedStreamEvent,
-  SubagentCalledStreamEvent,
 } from "#protocol/message.js";
 import type {
   CancelSessionResult,
@@ -51,21 +50,22 @@ export interface EveEvalToolCall {
 }
 
 /**
- * One subagent delegation extracted from the captured stream
- * (`subagent.called` / `subagent.started`, joined with `subagent.completed`).
+ * One call to an agent task extracted from the captured stream: its
+ * `task.started`, joined with its `task.settled` and the task's
+ * `agent.started`.
  */
 export interface EveEvalSubagentCall {
-  /** Runtime-action call id joining this delegation's lifecycle events, when observed. */
+  /** The agent tool call's id, as on its task events. */
   readonly callId?: string;
-  /** Durable child session id for local and remote workflow delegations. */
+  /** The id of the agent's session, which every call to one task reaches. */
   readonly childSessionId?: string;
   /** Subagent name. */
   readonly name: string;
-  /** Remote agent URL for remote delegations (`subagent.called` remote metadata). */
+  /** Remote agent URL for remote delegations (`agent.started` remote metadata). */
   readonly remoteUrl?: string;
-  /** Output from the matching `subagent.completed` event; `undefined` when the call never completed. */
+  /** Output from the call's `task.settled`; `undefined` until the call completes. */
   readonly output?: JsonValue;
-  /** Delegation status inferred from the captured delegation events. */
+  /** The call's task status: `working` until its `task.settled` arrives. */
   readonly status: "working" | "completed" | "failed" | "cancelled";
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
@@ -333,7 +333,7 @@ interface EveEvalSessionDriver {
    * children use the parent-origin proxy.
    */
   streamSubagent(
-    started: AgentStartedStreamEvent | SubagentCalledStreamEvent,
+    started: AgentStartedStreamEvent,
     options?: StreamOptions,
   ): AsyncIterable<MessageStreamEvent>;
 }
