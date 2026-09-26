@@ -267,8 +267,8 @@ Each call is a task with its own id, `<tool>-<6 characters>`:
   result, not the receipt.
 - **Waiting:** the model gets `task_wait`, which parks the turn until one of its tasks settles, a
   new message arrives, or an optional timeout passes, and `task_cancel`, which stops a task. Both
-  are offered, with a short system prompt block that explains tasks, only when the agent has a
-  `task` or `serve` tool. See [`task_wait` and `task_cancel`](/docs/concepts/built-in-tools#task_wait-and-task_cancel).
+  are offered, with a short system prompt block that explains tasks, only when the agent has an
+  agent tool or a `task` or `serve` tool. See [`task_wait` and `task_cancel`](/docs/concepts/built-in-tools#task_wait-and-task_cancel).
 - **Turn end:** a turn can't end while tasks it started are working. When the model ends such a
   turn, eve waits as `task_wait` would, appends the results, and calls the model again in the same
   turn. A `final_output` call made while tasks work returns an error naming them. `turn.completed`
@@ -360,6 +360,11 @@ release-plan-7k2m9q to send it another message.` A call with `taskId` goes to th
   is dropped.
 - **Finishing:** the task finishes when its body returns or throws, or when the session ends,
   which aborts the current stretch's signal and rejects a pending `receive()`.
+
+Every [agent tool](/docs/subagents), including the built-in `agent` tool and remote agents, is a
+`serve` tool that eve builds this way on public API: each task opens one session with
+[`ctx.agent`](#delegate-work-ctxagent), sends each call's `message` with that call's `abortSignal`,
+and replies with the final response of each agent turn.
 
 ## Authorize inside a step
 
