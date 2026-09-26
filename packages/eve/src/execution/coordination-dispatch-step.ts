@@ -6,10 +6,11 @@ import {
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import { startWorkflowTask } from "#execution/tools/workflow/start.js";
-import { startTaskRun } from "#execution/tasks/start.js";
+import { startWorkflowTask, type StartWorkflowTaskInput } from "#execution/tools/workflow/start.js";
+import { sendToTask, startTaskRun } from "#execution/tasks/start.js";
 import { captureAgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { RuntimeSession } from "#subagents/handle-dispatch.js";
 
 type CoordinationDispatchStepInput = CoordinationDispatchInput & {
   readonly action: "park";
@@ -47,14 +48,7 @@ export async function dispatchCoordinationStep(
       session: nextSession,
       task,
     };
-    const started =
-      task.entry.entryPoint === "task"
-        ? await startTaskRun({
-            ...start,
-            sessionWritable: input.sessionWritable,
-            taskId: task.entry.taskId,
-          })
-        : await startWorkflowTask(start);
+    const started = await dispatchWorkflowCall(start, input.sessionWritable);
     nextSession = started.session;
     if (started.result !== undefined) results.push(started.result);
   }
@@ -66,4 +60,24 @@ export async function dispatchCoordinationStep(
         ? prepared.sessionState
         : createDurableSessionState({ session: nextSession }),
   };
+}
+
+/**
+ * Starts the run the call's entry point names, or sends a call with `taskId`
+ * to the running `serve` task it names.
+ */
+async function dispatchWorkflowCall(
+  start: StartWorkflowTaskInput,
+  sessionWritable: WritableStream<Uint8Array>,
+): Promise<{ readonly result?: RuntimeActionResult; readonly session: RuntimeSession }> {
+  const { entry } = start.task;
+  switch (entry.entryPoint) {
+    case "execute":
+      return await startWorkflowTask(start);
+    case "task":
+    case "serve":
+      return await startTaskRun({ ...start, entry, sessionWritable });
+    case "receive":
+      return await sendToTask({ ...start, sessionWritable, taskId: entry.taskId });
+  }
 }

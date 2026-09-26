@@ -137,5 +137,7 @@ export async function terminateChildSessionsStep(input: {
 /** Session end ends every task, including cancelled runs that haven't confirmed yet. */
 async function stopTaskRuns(session: DurableSession): Promise<void> {
   const runs = liveTaskRuns(readTaskTable(session.state));
-  await Promise.all(runs.map((run) => cancelWorkflowToolRun(run, "The session ended.")));
+  await Promise.all(
+    runs.map((run) => cancelWorkflowToolRun(run, { kind: "end", reason: "The session ended." })),
+  );
 }

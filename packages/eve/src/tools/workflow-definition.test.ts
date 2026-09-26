@@ -7,6 +7,8 @@ import {
   isWorkflowToolDefinition,
   type AgentMessageResult,
   type WorkflowAgentMetadata,
+  type WorkflowServeCall,
+  type WorkflowServeContext,
   type WorkflowStepToolContext,
   type WorkflowTaskContext,
   type WorkflowToolContext,
@@ -62,6 +64,30 @@ describe("defineWorkflowTool", () => {
       },
     });
     expectTypeOf(definition.task).parameter(0).toEqualTypeOf<{ service: string }>();
+  });
+
+  it("types a serve body's calls by inputSchema and its replies by outputSchema", () => {
+    const definition = defineWorkflowTool({
+      description: "Draft a release plan and revise it on request.",
+      inputSchema: z.object({ request: z.string() }),
+      outputSchema: z.object({ steps: z.array(z.string()) }),
+      async serve(receive, ctx) {
+        const call = await receive();
+        expectTypeOf(call).toEqualTypeOf<WorkflowServeCall<{ request: string }>>();
+        expectTypeOf(ctx).toEqualTypeOf<WorkflowServeContext<{ steps: string[] }>>();
+        // @ts-expect-error Steering never interrupts a task.
+        void ctx.interruptSignal;
+        // @ts-expect-error Each call carries its own abortSignal.
+        void ctx.abortSignal;
+        ctx.reply({ steps: [call.input.request] });
+        // @ts-expect-error A reply matches outputSchema.
+        ctx.reply({ steps: "freeze" });
+        return { steps: [] };
+      },
+    });
+    expectTypeOf(definition.serve)
+      .parameter(0)
+      .returns.resolves.toEqualTypeOf<WorkflowServeCall<{ request: string }>>();
   });
 
   it.each([

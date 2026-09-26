@@ -132,6 +132,66 @@ export function defineJsonSchema<T = unknown>(
 /** Schemas built by {@link defineJsonSchema}, which reach the model exactly as written. */
 const plainJsonSchemas = new WeakSet<object>();
 
+/** An optional string property added to an input schema. */
+export interface OptionalStringProperty {
+  readonly description: string;
+  readonly name: string;
+}
+
+/**
+ * Extends an object input schema with an optional string property that the
+ * schema itself never sees: validation splits the property off, validates the
+ * rest with `schema`, and returns the property alongside the result. A plain
+ * JSON Schema stays advertised as written.
+ */
+export function withOptionalStringProperty(
+  schema: ToolSchema,
+  property: OptionalStringProperty,
+): ToolSchema {
+  const emit = (): Record<string, unknown> =>
+    addOptionalStringProperty(serializeInputSchema(schema), property);
+  const extended = {
+    "~standard": {
+      version: 1,
+      vendor: "eve",
+      validate: (value: unknown) => validateWithProperty(schema, property.name, value),
+      jsonSchema: { input: emit, output: emit },
+    },
+  } as ToolSchema;
+  if (plainJsonSchemas.has(schema)) plainJsonSchemas.add(extended);
+  return extended;
+}
+
+function addOptionalStringProperty(
+  schema: JsonObject,
+  property: OptionalStringProperty,
+): Record<string, unknown> {
+  const properties = isObject(schema.properties) ? schema.properties : {};
+  return {
+    ...schema,
+    type: schema.type ?? "object",
+    properties: {
+      ...properties,
+      [property.name]: { description: property.description, type: "string" },
+    },
+  };
+}
+
+async function validateWithProperty(
+  schema: ToolSchema,
+  name: string,
+  value: unknown,
+): Promise<StandardSchemaV1.Result<unknown>> {
+  if (!isObject(value) || !(name in value)) return await schema["~standard"].validate(value);
+  const { [name]: propertyValue, ...rest } = value;
+  if (typeof propertyValue !== "string") {
+    return { issues: [{ message: `Expected "${name}" to be a string.`, path: [name] }] };
+  }
+  const result = await schema["~standard"].validate(rest);
+  if (result.issues !== undefined || !isObject(result.value)) return result;
+  return { value: { ...result.value, [name]: propertyValue } };
+}
+
 /**
  * Permissive schema lowered onto model-visible tools whose definitions
  * declare no input schema. Accepts any input — an absent schema declares no

@@ -12,11 +12,13 @@ import {
   nextHardStopDue,
   readTaskTable,
   setHardStopAt,
+  settleRemainingTaskCalls,
   settleTaskCall,
   takeOverdueRuns,
   writeTaskTable,
   type TaskCallOutcome,
-  type TaskRunAddress,
+  type TaskRunCommand,
+  type TaskRunCommands,
   type TaskSettlement,
   type TaskTable,
 } from "#execution/tasks/table.js";
@@ -39,19 +41,16 @@ import { createTaskSettledEvent } from "#protocol/message.js";
 /** The messages a task's run sends that change its record. */
 export type TaskRunMessage = Extract<
   WorkflowToolRunMessage,
-  { readonly kind: "outcome" | "started" }
+  { readonly kind: "outcome" | "reply" | "started" }
 >;
 
 interface TaskStepResult {
   readonly sessionState: DurableSessionState;
 }
 
-const TASK_CANCEL_COMMAND: WorkflowToolRunControlMessage = {
-  kind: "cancel",
-  reason: "The task was cancelled.",
-};
+const TASK_CANCEL_REASON = "The task was cancelled.";
 
-/** Applies one message from a task's run: started, or the run's outcome. */
+/** Applies one message from a task's run: started, a reply, or the run's outcome. */
 export async function applyTaskRunMessageStep(input: {
   readonly message: TaskRunMessage;
   readonly sessionState: DurableSessionState;
@@ -68,18 +67,25 @@ export async function applyTaskRunMessageStep(input: {
     case "started": {
       const started = markTaskRunStarted(table, taskId, message.from.runId);
       table = started.table;
-      if (started.heldCancel !== undefined) await sendTaskCancel(started.heldCancel);
+      if (started.held !== undefined) await sendTaskRunCommands(started.held);
       break;
     }
-    case "outcome":
+    case "reply":
       table = await settleCall(input.sessionWritable, table, {
         callId: message.from.callId,
-        outcome: toCallOutcome(message),
+        outcome: { output: message.output, status: "completed" },
         taskId,
       });
-      table = finishTaskRun(table, taskId, message.from.runId);
+      break;
+    case "outcome": {
+      const settled = settleRemainingTaskCalls(table, taskId, toCallOutcome(message));
+      for (const settlement of settled.settlements) {
+        await emitTaskSettled(input.sessionWritable, settlement);
+      }
+      table = finishTaskRun(settled.table, taskId, message.from.runId);
       session = forgetRunQuestions(session, message.from.runId);
       break;
+    }
   }
   return { sessionState: saveTable(input.sessionState, session, table) };
 }
@@ -105,7 +111,7 @@ export async function cancelTasksStep(input: {
     for (const settlement of cancelled.settlements) {
       await emitTaskSettled(input.sessionWritable, settlement);
     }
-    if (cancelled.sendCancel !== undefined) await sendTaskCancel(cancelled.sendCancel);
+    if (cancelled.send !== undefined) await sendTaskRunCommands(cancelled.send);
   }
   table = await armHardStop(table, input.inbox);
   return { sessionState: saveTable(input.sessionState, session, table) };
@@ -122,9 +128,7 @@ export async function hardStopOverdueTasksStep(input: {
   const overdue = takeOverdueRuns(readTaskTable(session.state), Date.now());
   const world = await getWorld();
   for (const run of overdue.runs) {
-    await ignoreGoneTarget(
-      cancelRun(world, run.runId, { cancelReason: "The task was cancelled." }),
-    );
+    await ignoreGoneTarget(cancelRun(world, run.runId, { cancelReason: TASK_CANCEL_REASON }));
     session = forgetRunQuestions(session, run.runId);
   }
   const table = await armHardStop(setHardStopAt(overdue.table, undefined), input.inbox);
@@ -178,8 +182,23 @@ async function armHardStop(table: TaskTable, inbox: string): Promise<TaskTable> 
   return setHardStopAt(table, dueAt);
 }
 
-async function sendTaskCancel(run: TaskRunAddress): Promise<void> {
-  await ignoreGoneTarget(resumeHook(run.hookToken, TASK_CANCEL_COMMAND));
+/**
+ * Sends commands to a task's run, in order. A run that already finished takes
+ * none; its outcome settles any call still waiting.
+ */
+export async function sendTaskRunCommands(commands: TaskRunCommands): Promise<void> {
+  for (const command of commands.commands) {
+    await ignoreGoneTarget(resumeHook(commands.run.hookToken, toControlMessage(command)));
+  }
+}
+
+function toControlMessage(command: TaskRunCommand): WorkflowToolRunControlMessage {
+  switch (command.kind) {
+    case "cancel":
+      return { kind: "cancel", reason: TASK_CANCEL_REASON };
+    case "call":
+      return { call: command.call, kind: "call" };
+  }
 }
 
 async function ignoreGoneTarget(pending: Promise<unknown>): Promise<void> {

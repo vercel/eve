@@ -1,3 +1,4 @@
+import type { WorkflowToolRunCall } from "#execution/tools/workflow/messages.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
@@ -19,6 +20,9 @@ export const TASK_HARD_STOP_MS = 30_000;
 /** Finished records kept so `task_cancel` can still answer `already_finished`. */
 const MAX_FINISHED_RECORDS = 100;
 
+/** Idle resumable tasks the `[Tasks]` note lists: the most recently used ones. */
+const MAX_LISTED_IDLE_TASKS = 10;
+
 const TASK_ID_ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
 const TASK_ID_SUFFIX_LENGTH = 6;
 
@@ -32,6 +36,20 @@ export interface TaskRun extends TaskRunAddress {
   readonly started: boolean;
 }
 
+/**
+ * A command for a task's run. Commands go over the run's one control hook, so
+ * the run sees calls and cancels in the order the session issued them.
+ */
+export type TaskRunCommand =
+  | { readonly kind: "cancel" }
+  | { readonly call: WorkflowToolRunCall; readonly kind: "call" };
+
+/** Commands for one run, to send in order. */
+export interface TaskRunCommands {
+  readonly commands: readonly TaskRunCommand[];
+  readonly run: TaskRunAddress;
+}
+
 /** One settled call's result, kept until the model receives it. */
 export type TaskResult =
   | { readonly callId: string; readonly output: JsonValue; readonly status: "completed" }
@@ -41,6 +59,8 @@ export interface TaskRecord {
   readonly id: string;
   /** The tool whose call started the task. */
   readonly name: string;
+  /** A `serve` tool's task: it takes more calls by its id, and is idle between results. */
+  readonly resumable: boolean;
   /** Principal of the caller that started the task; only it may wait on or cancel it. */
   readonly creator: string;
   /** The turn whose model step started the task. */
@@ -53,6 +73,8 @@ export interface TaskRecord {
   readonly run?: TaskRun;
   /** When the owner cancelled the run; the run is hard-stopped if it hasn't finished in time. */
   readonly cancelledAt?: number;
+  /** Commands issued before the run could take them, sent in order once it reports started. */
+  readonly held?: readonly TaskRunCommand[];
 }
 
 export interface TaskTable {
@@ -135,6 +157,34 @@ export function workingTasks(table: TaskTable, principal?: string): readonly Tas
   );
 }
 
+/**
+ * The principal's most recently used idle resumable tasks, oldest first. The
+ * table keeps records in order of use, so the last ones are the most recent.
+ */
+export function idleTasks(table: TaskTable, principal: string): readonly TaskRecord[] {
+  const idle = table.tasks.filter(
+    (record) => record.creator === principal && isResumableTaskIdle(record),
+  );
+  return idle.slice(-MAX_LISTED_IDLE_TASKS);
+}
+
+/**
+ * Whether a call may reach the task by its id: the task is resumable and
+ * unfinished, and was started by this tool for this principal.
+ */
+export function isTaskAvailable(
+  record: TaskRecord | undefined,
+  caller: { readonly principal: string; readonly toolName: string },
+): record is TaskRecord & { readonly run: TaskRun } {
+  return (
+    record !== undefined &&
+    record.resumable &&
+    record.run !== undefined &&
+    record.name === caller.toolName &&
+    record.creator === caller.principal
+  );
+}
+
 /** Tasks whose results the principal's model has not received yet. */
 export function tasksWithResults(table: TaskTable, principal: string): readonly TaskRecord[] {
   return table.tasks.filter((record) => record.creator === principal && record.results.length > 0);
@@ -169,6 +219,7 @@ export function createTask(
     readonly callId: string;
     readonly creator: string;
     readonly name: string;
+    readonly resumable: boolean;
     readonly turnId: string;
   },
 ): { readonly table: TaskTable; readonly taskId: string } {
@@ -179,6 +230,7 @@ export function createTask(
     id: taskId,
     name: input.name,
     results: [],
+    resumable: input.resumable,
     turnId: input.turnId,
   };
   return { table: { ...table, tasks: [...table.tasks, record] }, taskId };
@@ -194,22 +246,47 @@ export function recordTaskRun(table: TaskTable, taskId: string, run: TaskRunAddr
 }
 
 /**
- * The run can take commands now. A cancel issued before this was held on the
- * record; it is returned so the caller sends it.
+ * The run can take commands now. Commands issued before this were held on the
+ * record; they are returned, in order, so the caller sends them.
  */
 export function markTaskRunStarted(
   table: TaskTable,
   taskId: string,
   runId: string,
-): { readonly heldCancel?: TaskRunAddress; readonly table: TaskTable } {
+): { readonly held?: TaskRunCommands; readonly table: TaskTable } {
   const record = findTask(table, taskId);
   if (record?.run === undefined || record.run.runId !== runId || record.run.started) {
     return { table };
   }
   const run = { ...record.run, started: true };
-  const next = updateTask(table, taskId, (current) => ({ ...current, run }));
-  if (record.cancelledAt === undefined) return { table: next };
-  return { heldCancel: toRunAddress(run), table: next };
+  const next = updateTask(table, taskId, (current) => {
+    const { held: _held, ...rest } = current;
+    return { ...rest, run };
+  });
+  if (record.held === undefined) return { table: next };
+  return { held: { commands: record.held, run: toRunAddress(run) }, table: next };
+}
+
+/**
+ * Records a call that reaches an available task by its id: the task is
+ * working until the call has a result. The call goes to a started run now, or
+ * is held until the run reports started. The record moves to the end of the
+ * table, which keeps records in order of use.
+ */
+export function recordTaskCall(
+  table: TaskTable,
+  taskId: string,
+  call: WorkflowToolRunCall,
+): { readonly send?: TaskRunCommands; readonly table: TaskTable } {
+  const record = findTask(table, taskId);
+  if (record?.run === undefined) return { table };
+  const command: TaskRunCommand = { call, kind: "call" };
+  const run = record.run;
+  let updated: TaskRecord = { ...record, calls: [...record.calls, call.callId] };
+  if (!run.started) updated = { ...updated, held: [...(record.held ?? []), command] };
+  const next = { ...table, tasks: [...removeTask(table, taskId).tasks, updated] };
+  if (!run.started) return { table: next };
+  return { send: { commands: [command], run: toRunAddress(run) }, table: next };
 }
 
 /**
@@ -236,40 +313,83 @@ export function settleTaskCall(
   return { settlement, table: next };
 }
 
+/**
+ * Settles every call still without a result with one outcome, as a run's
+ * return or failure does: a task's one call, or every call a resumable task
+ * received, or never received, since its last reply.
+ */
+export function settleRemainingTaskCalls(
+  table: TaskTable,
+  taskId: string,
+  outcome: TaskCallOutcome,
+): { readonly settlements: readonly TaskSettlement[]; readonly table: TaskTable } {
+  const settlements: TaskSettlement[] = [];
+  let next = table;
+  for (const callId of findTask(table, taskId)?.calls ?? []) {
+    const settled = settleTaskCall(next, { callId, outcome, taskId });
+    next = settled.table;
+    if (settled.settlement !== undefined) settlements.push(settled.settlement);
+  }
+  return { settlements, table: next };
+}
+
 /** The task's run finished; nothing is left to cancel or hard-stop. */
 export function finishTaskRun(table: TaskTable, taskId: string, runId: string): TaskTable {
   return updateTask(table, taskId, (record) => {
     if (record.run?.runId !== runId) return record;
-    const { cancelledAt: _cancelledAt, run: _run, ...rest } = record;
+    const { cancelledAt: _cancelledAt, held: _held, run: _run, ...rest } = record;
     return rest;
   });
 }
 
-/**
- * Cancels a task: its calls settle as cancelled and never report back, and a
- * live run is told to stop. A run that hasn't started holds the cancel.
- */
-export function cancelTask(
-  table: TaskTable,
-  taskId: string,
-  now: number,
-): {
-  readonly sendCancel?: TaskRunAddress;
+/** What cancelling a task changed, and the command to send its run, if any. */
+export interface TaskCancellation {
+  readonly send?: TaskRunCommands;
   readonly settlements: readonly TaskSettlement[];
   readonly table: TaskTable;
-} {
+}
+
+/**
+ * Cancels a task's current work: its calls settle as cancelled and never
+ * report back, and a live run is told to stop. A run that hasn't started
+ * holds the cancel. A resumable task stays available and becomes idle.
+ */
+export function cancelTask(table: TaskTable, taskId: string, now: number): TaskCancellation {
   const record = findTask(table, taskId);
   if (record === undefined) return { settlements: [], table };
+  if (record.resumable) return cancelResumableTask(table, record);
   const settlements = cancelledSettlements(record);
   const alreadyCancelled = record.cancelledAt !== undefined;
+  const run = record.run;
   const next = updateTask(table, taskId, (current) => {
     const cancelled: TaskRecord = { ...current, calls: [] };
-    if (current.run === undefined || alreadyCancelled) return cancelled;
+    if (run === undefined || alreadyCancelled) return cancelled;
+    if (!run.started) return { ...cancelled, cancelledAt: now, held: [{ kind: "cancel" }] };
     return { ...cancelled, cancelledAt: now };
   });
-  const run = record.run;
   if (run === undefined || !run.started || alreadyCancelled) return { settlements, table: next };
-  return { sendCancel: toRunAddress(run), settlements, table: next };
+  return { send: cancelCommand(run), settlements, table: next };
+}
+
+/**
+ * A resumable run aborts only its current stretch of work and stays parked for
+ * later calls, so it needs no hard stop. Calls held for a run that hasn't
+ * started settle here, so only the cancel is still held for it.
+ */
+function cancelResumableTask(table: TaskTable, record: TaskRecord): TaskCancellation {
+  const run = record.run;
+  if (run === undefined || !isTaskWorking(record)) return { settlements: [], table };
+  const settlements = cancelledSettlements(record);
+  const next = updateTask(table, record.id, (current) => {
+    const idle: TaskRecord = { ...current, calls: [] };
+    return run.started ? idle : { ...idle, held: [{ kind: "cancel" }] };
+  });
+  if (!run.started) return { settlements, table: next };
+  return { send: cancelCommand(run), settlements, table: next };
+}
+
+function cancelCommand(run: TaskRun): TaskRunCommands {
+  return { commands: [{ kind: "cancel" }], run: toRunAddress(run) };
 }
 
 /** Hands the principal's undelivered results to the model, which receives each once. */
@@ -298,7 +418,7 @@ export function takeOverdueRuns(
     if (record.cancelledAt === undefined || record.run === undefined) return record;
     if (record.cancelledAt + TASK_HARD_STOP_MS > now) return record;
     runs.push(toRunAddress(record.run));
-    const { cancelledAt: _cancelledAt, run: _run, ...rest } = record;
+    const { cancelledAt: _cancelledAt, held: _held, run: _run, ...rest } = record;
     return rest;
   });
   return { runs, table: { ...table, tasks } };
@@ -358,6 +478,10 @@ function createTaskId(table: TaskTable, name: string): string {
   }
 }
 
+function isResumableTaskIdle(record: TaskRecord): boolean {
+  return record.resumable && record.run !== undefined && !isTaskWorking(record);
+}
+
 function isFinishedRecord(record: TaskRecord): boolean {
   return record.calls.length === 0 && record.results.length === 0 && record.run === undefined;
 }
@@ -382,6 +506,7 @@ function decodeTaskRecord(value: unknown): TaskRecord | undefined {
     id: value.id,
     name: value.name,
     results: [{ callId: "", error: UNREADABLE_TASK_ERROR, status: "failed" }],
+    resumable: false,
     turnId: typeof value.turnId === "string" ? value.turnId : "",
   };
 }
@@ -391,14 +516,23 @@ function isTaskRecord(value: unknown): value is TaskRecord {
     isObject(value) &&
     isNonEmptyString(value.id) &&
     isNonEmptyString(value.name) &&
+    typeof value.resumable === "boolean" &&
     typeof value.creator === "string" &&
     typeof value.turnId === "string" &&
     isStringArray(value.calls) &&
     Array.isArray(value.results) &&
     Array.from(value.results as unknown[]).every(isTaskResult) &&
     (value.run === undefined || isTaskRun(value.run)) &&
-    (value.cancelledAt === undefined || typeof value.cancelledAt === "number")
+    (value.cancelledAt === undefined || typeof value.cancelledAt === "number") &&
+    (value.held === undefined ||
+      (Array.isArray(value.held) && Array.from(value.held as unknown[]).every(isTaskRunCommand)))
   );
+}
+
+function isTaskRunCommand(value: unknown): value is TaskRunCommand {
+  if (!isObject(value)) return false;
+  if (value.kind === "cancel") return true;
+  return value.kind === "call" && isObject(value.call) && isNonEmptyString(value.call.callId);
 }
 
 function isTaskResult(value: unknown): value is TaskResult {

@@ -3,12 +3,15 @@ import { sleep } from "#compiled/@workflow/core/index.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import {
   createWorkflowBodyRef,
-  executeWorkflowBody,
+  startCallBody,
+  type StartedWorkflowBody,
+  type WorkflowBodyInput,
   type WorkflowBodyResult,
 } from "#execution/tools/workflow/body.js";
-import type {
-  WorkflowToolRunMessage,
-  WorkflowToolRunOutcome,
+import {
+  isWorkflowToolRunControlMessage,
+  type WorkflowToolRunMessage,
+  type WorkflowToolRunOutcome,
 } from "#execution/tools/workflow/messages.js";
 import { AgentSessions } from "#execution/agent-sessions/session.js";
 import {
@@ -19,6 +22,7 @@ import {
 import { openWorkflowToolRunOwnerInbox } from "#execution/tools/workflow/owner.js";
 import { createBlockingWorkflow } from "#execution/tools/workflow/workflow-owner-blocking.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { startServeBody } from "#execution/tools/workflow/serve.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 
 /** Owns command intake, body execution, and settlement for one workflow tool call. */
@@ -26,22 +30,18 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
   "use workflow";
 
   const owner = createBlockingWorkflow(input);
-  const { signal } = owner;
   const inbox = openWorkflowToolRunOwnerInbox();
-  if (input.entry.entryPoint === "task") await reportTaskStarted(input);
+  if (input.entry.entryPoint !== "execute") await reportTaskStarted(input);
   const agentSessions = new AgentSessions({
     context: input.agentContext,
     from: createWorkflowBodyRef(input),
     inbox: inbox.owner.inbox,
   });
+  const started = startWorkflowBody({ ...input, owner: inbox.owner }, agentSessions);
+  const signal = started.control.runSignal;
   const body: ChannelReader<"body", WorkflowBodyResult> = createChannelReader(
     "body",
-    awaitBodyResult(
-      executeWorkflowBody(
-        { ...input, owner: inbox.owner },
-        { abortSignal: signal, agentSessions, interruptSignal: owner.interruptSignal },
-      ),
-    ),
+    awaitBodyResult(started.result),
   );
   let commandsOpen = true;
   let relayedMessages = 0;
@@ -59,8 +59,8 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
       if (
         // Wait for the body to produce its final outcome.
         bodyResult !== undefined &&
-        // Its reports and `agent.started` announcements must be relayed before settlement.
-        relayedMessages >= bodyResult.reportCount + agentSessions.announcements &&
+        // Its reports, replies, and `agent.started` announcements must be relayed before settlement.
+        relayedMessages >= bodyResult.messageCount + agentSessions.announcements &&
         // Handle buffered commands, especially cancellation, before publishing the outcome.
         owner.commands.landed.length === 0 &&
         // Propagate a command-read failure instead of hiding it behind completion.
@@ -97,7 +97,8 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
         return;
       }
       if (read.channel === "control") {
-        owner.handleCommand(read.next.value);
+        const command = read.next.value;
+        if (isWorkflowToolRunControlMessage(command)) started.control.apply(command);
         continue;
       }
       if (read.channel === "body") {
@@ -141,9 +142,23 @@ async function reportTaskStarted(input: WorkflowToolRunInput): Promise<void> {
   );
 }
 
-/** Messages the run must relay before its outcome, so none arrives after the call settles. */
+/** Starts the body the run's entry point names. */
+function startWorkflowBody(
+  input: WorkflowBodyInput,
+  agentSessions: AgentSessions,
+): StartedWorkflowBody {
+  switch (input.entry.entryPoint) {
+    case "execute":
+    case "task":
+      return startCallBody(input, agentSessions);
+    case "serve":
+      return startServeBody(input, agentSessions);
+  }
+}
+
+/** Messages the run must relay before its outcome, so none arrives after its calls settle. */
 function isRelayedBeforeOutcome(message: WorkflowToolRunMessage): boolean {
-  return message.kind === "report" || message.kind === "agent-started";
+  return message.kind === "report" || message.kind === "reply" || message.kind === "agent-started";
 }
 
 async function* awaitBodyResult(
