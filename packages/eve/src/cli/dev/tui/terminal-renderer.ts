@@ -4498,12 +4498,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return [...drawer.rows, ...drawer.controls];
     }
 
-    // The HITL question overlay owns the footer down to the status bar —
-    // no indicator or hint row beneath it (the panel carries its own).
+    // The HITL drawer opens one row below the transcript, then owns the
+    // footer down to its controls with no status line beneath it.
     if (this.#questionPanel !== undefined) {
       const drawer = this.#questionPanel(width);
-      rows.length = 0;
-      return [...drawer.rows, ...drawer.controls];
+      return [...rows, ...drawer.rows, ...drawer.controls];
     }
 
     const flow = this.#setupFlow;

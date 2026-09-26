@@ -4036,6 +4036,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
 
     const snapshot = screen.snapshot();
+    expect(snapshot).toContain("\n\n─");
     expect(snapshot).toContain("Approve random_color?");
     const yes = snapshot.split("\n").find((row) => row.includes("Yes"));
     expect(yes).toBe("     Yes");
