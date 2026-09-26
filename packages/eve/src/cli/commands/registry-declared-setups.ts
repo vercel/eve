@@ -8,7 +8,7 @@ import type { RegistryCommandLogger, RegistrySetupDependencies } from "./registr
 import type { RegistrySetupCommand } from "./registry-setup-command.js";
 import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-headless.js";
 
-export interface DeclaredSetupOptions {
+interface DeclaredSetupOptions {
   yes?: boolean;
   force?: boolean;
   nonInteractive?: boolean;

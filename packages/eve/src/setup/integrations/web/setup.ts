@@ -59,7 +59,7 @@ const defaultDeps: WebSetupDeps = {
   writeTextFile,
 };
 
-export interface WebSetupPlan {
+interface WebSetupPlan {
   hosting: "next" | "vercel";
   packageManager: PackageManagerKind;
 }

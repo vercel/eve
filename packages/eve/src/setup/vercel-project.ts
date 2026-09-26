@@ -39,7 +39,7 @@ const VercelProjectReferenceSchema = z.object({
   name: z.string().min(1),
 });
 
-export interface PickProjectOptions extends VercelProjectOperationOptions {
+interface PickProjectOptions extends VercelProjectOperationOptions {
   /** Whether an empty project list may fall back to entering a name to create. */
   allowCreateWhenEmpty?: boolean;
   /**
@@ -50,7 +50,7 @@ export interface PickProjectOptions extends VercelProjectOperationOptions {
   suggestedName?: string;
 }
 
-export interface PickTeamOptions extends VercelProjectOperationOptions {
+interface PickTeamOptions extends VercelProjectOperationOptions {
   /** Builds the team selector heading from the current team's display name. */
   selectMessage?: (currentTeam: string) => string;
 }
@@ -123,7 +123,7 @@ export async function assertNewProjectNameAvailable(
  * ever hears "log in", even when the real fault is a missing CLI or a transient
  * API error and the user is already authenticated.
  */
-export function requireVercelLogin(failure?: VercelCaptureFailure): never {
+function requireVercelLogin(failure?: VercelCaptureFailure): never {
   const base = "Provisioning a Vercel project requires you to be logged in to Vercel.";
   const stderr = failure?.stderr.trim();
   const reason = failure
@@ -179,7 +179,7 @@ function isLoggedOutFailure(failure: VercelCaptureFailure): boolean {
  * anything else is a transient fault surfaced as a plain error, so the caller
  * reports "try again" rather than mislabeling it "log in".
  */
-export function requireVercelAuth(failure: VercelCaptureFailure): never {
+function requireVercelAuth(failure: VercelCaptureFailure): never {
   if (failure.errno === "ENOENT") {
     throw new HumanActionRequiredError({
       kind: "vercel-cli-missing",

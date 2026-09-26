@@ -55,7 +55,7 @@ export const UNKNOWN_CONVERSATION_CONTEXT: ConversationContext = {
   principalType: "anonymous",
 };
 
-export interface ConversationContextFallback {
+interface ConversationContextFallback {
   readonly channelKind?: string;
   readonly environment: ConversationEnvironment;
   readonly forwardedTracePolicy?: ForwardedTraceAssertion;

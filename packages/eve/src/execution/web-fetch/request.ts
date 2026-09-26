@@ -16,7 +16,7 @@ type DispatcherRequestInit = Omit<RequestInit, "dispatcher"> & {
 };
 
 /** Options for an SSRF-safe HTTPS request. */
-export interface PublicUrlRequestOptions {
+interface PublicUrlRequestOptions {
   readonly headers: Readonly<Record<string, string>>;
   readonly maxResponseSize: number;
   readonly signal: AbortSignal;

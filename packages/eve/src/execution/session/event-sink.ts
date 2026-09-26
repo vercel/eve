@@ -13,7 +13,7 @@ import {
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
-export interface SessionEventSinkInput {
+interface SessionEventSinkInput {
   readonly adapter: ChannelAdapter;
   readonly ctx: ContextContainer;
   readonly isFirstTurn: boolean;

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import type { DevelopmentAuthoredRebuildCoordinator } from "#internal/nitro/host/dev-authored-rebuild-coordinator.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
 import { STRUCTURAL_RELOAD_LOG_LINE } from "#internal/nitro/host/dev-watcher-log.js";

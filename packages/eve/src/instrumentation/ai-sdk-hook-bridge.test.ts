@@ -14,6 +14,7 @@ import {
   type InstrumentationToolCallStartedEvent,
   type InstrumentationToolCallTerminalEvent,
 } from "#instrumentation/lifecycle.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const scope: InstrumentationAttemptScope = {
   attemptId: "turn-1:step-0:attempt-0",
@@ -313,6 +314,7 @@ describe("createAiSdkHookBridge", () => {
   });
 
   it("isolates a failing provider from the remaining providers", async () => {
+    const logs = captureLogRecords();
     const after = vi.fn();
     const hooks = createInstrumentationHooks([
       {
@@ -347,6 +349,9 @@ describe("createAiSdkHookBridge", () => {
     ]);
 
     expect(after).toHaveBeenCalledOnce();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "instrumentation provider failed" }),
+    );
   });
 
   it("terminalizes started operations when the attempt errors", async () => {

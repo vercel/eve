@@ -1,6 +1,5 @@
 import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -9,7 +8,6 @@ import { createNextEveProxyDescriptor } from "../../src/internal/testing/scenari
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 
-const REPO_ROOT = fileURLToPath(new URL("../../../..", import.meta.url));
 const VERCEL_GENERATED_SERVICES_VERSION = "56.4.0";
 const VERCEL_PNPM_10_PROJECT_CREATED_AT = Date.UTC(2026, 6, 13);
 const scenarioApp = useScenarioApp();
@@ -142,13 +140,6 @@ async function runVercelBuild(appRoot: string): Promise<void> {
 }
 
 describe("framework-next build", () => {
-  it("builds the Next.js framework fixture against the workspace eve dist", async () => {
-    await runPnpmCommand({
-      args: ["--filter", "framework-next", "build"],
-      cwd: REPO_ROOT,
-    });
-  }, 180_000);
-
   it("preserves Next middleware when Vercel assembles the generated eve service", async () => {
     const app = await scenarioApp(NEXT_EVE_MIDDLEWARE_DESCRIPTOR);
 

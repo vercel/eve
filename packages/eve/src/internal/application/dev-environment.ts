@@ -1,7 +1,7 @@
 /** Environment flag set for processes that belong to an `eve dev` session. */
 export const EVE_DEV_ENV_FLAG = "EVE_DEV";
 
-export type InstrumentationEnvironment = "development" | "preview" | "production";
+type InstrumentationEnvironment = "development" | "preview" | "production";
 
 /** Reports whether this process belongs to an `eve dev` session. */
 export function isEveDevEnvironment(): boolean {
@@ -26,7 +26,7 @@ export const EVE_EVALUATION_RUN_ID_ENV = "EVE_EVALUATION_RUN_ID";
  * False for a server that `eve eval --url` merely points at: that process was
  * started to serve ordinary traffic and cannot know an eval is among it.
  */
-export function isEveEvaluationEnvironment(): boolean {
+function isEveEvaluationEnvironment(): boolean {
   return process.env[EVE_EVALUATION_ENV_FLAG] === "1";
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { planAgentDispatch } from "#execution/tools/subagent/invoke-preparation.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const localAction = {
   callId: "call-1",
@@ -25,6 +26,7 @@ function session(rootSessionId?: string) {
 
 describe("planAgentDispatch", () => {
   it("rejects recursive self-agent starts outside the root session", () => {
+    const logs = captureLogRecords();
     expect(
       planAgentDispatch({
         action: { ...localAction, name: "agent", nodeId: "__root__", subagentName: "agent" },
@@ -39,9 +41,16 @@ describe("planAgentDispatch", () => {
       kind: "reject",
       result: { output: { code: "RECURSIVE_AGENT_ROOT_ONLY" } },
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "recursive agent call blocked outside the root session",
+      }),
+    );
   });
 
   it("rejects a dynamic target omitted from the current selection", () => {
+    const logs = captureLogRecords();
     expect(
       planAgentDispatch({
         action: localAction,
@@ -56,9 +65,16 @@ describe("planAgentDispatch", () => {
         session: session() as never,
       }),
     ).toMatchObject({ kind: "reject", result: { output: { code: "SUBAGENT_UNAVAILABLE" } } });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "dynamic subagent call blocked after availability changed",
+      }),
+    );
   });
 
   it("falls back to a fresh start for an unknown agentId", () => {
+    const logs = captureLogRecords();
     expect(
       planAgentDispatch({
         action: { ...localAction, input: { agentId: "unknown", message: "Find it" } },
@@ -75,5 +91,11 @@ describe("planAgentDispatch", () => {
         session: session() as never,
       }),
     ).toMatchObject({ kind: "start", target: { action: localAction, kind: "local" } });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "unknown agentId on subagent call; starting a new agent",
+      }),
+    );
   });
 });

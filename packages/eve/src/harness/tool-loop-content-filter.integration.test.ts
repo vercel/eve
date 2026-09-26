@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
@@ -29,6 +30,7 @@ describe("content-filter reporting (real AI SDK)", () => {
   it.each(["", "Alice's inventory list is"])(
     "reports a filtered stream without retry or successful delivery: %j",
     async (text) => {
+      const logs = captureLogRecords();
       let calls = 0;
       const model = new MockLanguageModelV4({
         doStream: async () => {
@@ -74,6 +76,12 @@ describe("content-filter reporting (real AI SDK)", () => {
         ),
       ).toBe(false);
       expect(events.some((event) => event.type === "session.waiting")).toBe(true);
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     },
   );
 

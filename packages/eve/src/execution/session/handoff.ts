@@ -40,7 +40,7 @@ export type SessionOwnerActivation =
       readonly payloads: readonly SessionInboxPayload[];
     };
 
-export type SessionTransferOutcome =
+type SessionTransferOutcome =
   | { readonly kind: "transferred" }
   | {
       readonly kind: "retained";
@@ -53,7 +53,7 @@ export type SessionTransferOutcome =
         | "activation-failed";
     };
 
-export interface SessionHandoffInput {
+interface SessionHandoffInput {
   readonly checkpoint: Omit<SessionCheckpoint, "serializedContext" | "sessionState" | "version">;
   readonly deploymentId: string;
   readonly inbox: SessionInboxHandle;

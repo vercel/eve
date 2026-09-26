@@ -49,7 +49,7 @@ type ParseError = {
   readonly start?: number;
 };
 
-export type ParsedAgentObject =
+type ParsedAgentObject =
   | { readonly kind: "ok"; readonly object: ObjectExpression; readonly program: Program }
   | { readonly kind: "bail"; readonly reason: string; readonly line: number };
 

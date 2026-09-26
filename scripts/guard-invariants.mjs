@@ -16,10 +16,6 @@
  *   rule 13 — No spread-ternary object composition
  *             (`...(c ? {} : { k: v })`). (Rationale: hard to read, easy
  *             to mistype; declare the object then assign optional keys.)
- *   rule 15 — No `@workflow/*` imports inside `src/channel/**`,
- *             `src/harness/**`, or `src/tracing/**`. Channels, harnesses,
- *             and tracing must stay workflow-agnostic — only
- *             runtime/execution code touches workflow primitives.
  *   rule 19 — No `new AsyncLocalStorage()` outside the two allowlisted
  *             files. All ambient runtime state flows through a single
  *             `EveContext`.
@@ -197,7 +193,6 @@ function isTsLike(relPath) {
  *
  * @param {{
  *   rule13: { baseline: Record<string, number>; current: Map<string, number> };
- *   rule15: Violation[];
  *   rule19: { allowlist: Set<string>; current: Set<string>; lines: Map<string, number> };
  *   rule21: { allowlist: Set<string>; violations: Violation[] };
  *   rule23: { baseline: Record<string, number>; current: Map<string, number> };
@@ -229,7 +224,6 @@ async function scanRepo(state) {
     const lines = content.split(/\r?\n/);
 
     checkRule13(posix, lines, state.rule13);
-    checkRule15(posix, lines, state.rule15);
     checkRule19(posix, lines, state.rule19);
     checkRule21(posix, lines, state.rule21.allowlist, state.rule21.violations);
     checkRule23(posix, lines, state.rule23);
@@ -355,40 +349,6 @@ function checkRule13(posix, lines, state) {
     if (SPREAD_TERNARY_RE.test(line)) count++;
   }
   if (count > 0) state.current.set(posix, count);
-}
-
-// ---------- Rule 15: workflow primitives outside runtime/execution ----------
-
-const WORKFLOW_IMPORT_RE = /from ["']@workflow\b/;
-
-/**
- * @param {string} posix
- */
-function isChannelOrHarness(posix) {
-  return (
-    posix.startsWith("packages/eve/src/channel/") ||
-    posix.startsWith("packages/eve/src/harness/") ||
-    posix.startsWith("packages/eve/src/tracing/")
-  );
-}
-
-/**
- * @param {string} posix
- * @param {string[]} lines
- * @param {Violation[]} violations
- */
-function checkRule15(posix, lines, violations) {
-  if (!isChannelOrHarness(posix)) return;
-  lines.forEach((line, idx) => {
-    if (WORKFLOW_IMPORT_RE.test(line)) {
-      violations.push({
-        rule: 15,
-        file: posix,
-        line: idx + 1,
-        message: `imports from "@workflow/*". Channel, harness, and tracing code must stay workflow-agnostic. Move the workflow primitive call into src/runtime/ or src/execution/ and have the caller use a thin runtime helper instead.`,
-      });
-    }
-  });
 }
 
 // ---------- Rule 33: namespaced Workflow runtime boundary ----------
@@ -1401,7 +1361,6 @@ async function main() {
 
   const state = {
     rule13: { baseline: baseline.rule13_spreadTernaryByFile, current: new Map() },
-    rule15: /** @type {Violation[]} */ ([]),
     rule19: {
       allowlist: new Set(baseline.rule19_asyncLocalStorageAllowlist),
       current: new Set(),
@@ -1449,9 +1408,6 @@ async function main() {
       message: `${now} spread-ternary object composition${now === 1 ? "" : "s"} detected (baseline: ${was}). Replace \`...(cond ? {} : { key: value })\` with explicit assignment: declare the object, then \`if (cond) obj.key = value;\` (or use the conditional form for the *value* not the spread).`,
     });
   }
-
-  // Rule 15
-  violations.push(...state.rule15);
 
   // Rule 19
   for (const file of state.rule19.current) {

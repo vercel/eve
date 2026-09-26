@@ -3,7 +3,6 @@ import { createPublicKey, createVerify, generateKeyPairSync } from "node:crypto"
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  clearGitHubInstallationTokenCache,
   createGitHubAppJwt,
   createGitHubInstallationToken,
   normalizeGitHubPrivateKey,
@@ -23,7 +22,6 @@ function keyPair(): { privateKey: string; publicKey: string } {
 
 describe("GitHub App auth helpers", () => {
   beforeEach(() => {
-    clearGitHubInstallationTokenCache();
     vi.unstubAllEnvs();
   });
 

@@ -46,7 +46,7 @@ function buildSyntheticSession(input: {
 }
 
 /** Writes one synthetic snapshot into the returned durable state. */
-export async function durableSessionWriteStep(input: {
+async function durableSessionWriteStep(input: {
   readonly marker: string;
   readonly historyDepth: number;
   readonly sessionId: string;
@@ -67,7 +67,7 @@ export async function durableSessionWriteStep(input: {
  * Verifies the retry's returned state, not the seed state, is what
  * the next read sees.
  */
-export async function durableSessionWriteWithRetryStep(input: {
+async function durableSessionWriteWithRetryStep(input: {
   readonly marker: string;
   readonly historyDepth: number;
   readonly sessionId: string;
@@ -92,7 +92,7 @@ export async function durableSessionWriteWithRetryStep(input: {
 }
 
 /** Reads the latest snapshot and projects the fields the test asserts on. */
-export async function durableSessionReadStep(input: {
+async function durableSessionReadStep(input: {
   readonly sessionState: DurableSessionState;
 }): Promise<{
   readonly marker: string;
@@ -115,11 +115,11 @@ export async function durableSessionReadStep(input: {
  * outcome. `sessionId` comes from `workflowRunId` to mirror production
  * session identity.
  */
-export interface DurableSessionStoreFixtureInput {
+interface DurableSessionStoreFixtureInput {
   readonly markers: readonly { readonly marker: string; readonly historyDepth: number }[];
 }
 
-export interface DurableSessionStoreFixtureResult {
+interface DurableSessionStoreFixtureResult {
   readonly sessionId: string;
   readonly readsAfterEachWrite: readonly {
     readonly marker: string;
@@ -171,7 +171,7 @@ export async function durableSessionStoreFixtureWorkflow(
 }
 
 /** Forces a write-step retry and reads back the retry's returned state. */
-export interface DurableSessionRetryFixtureResult {
+interface DurableSessionRetryFixtureResult {
   readonly sessionId: string;
   readonly writeAttempt: number;
   readonly readAfterRetry: {

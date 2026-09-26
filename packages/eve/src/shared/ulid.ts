@@ -17,7 +17,7 @@ const RANDOM_CHARS = 16;
 export const ULID_LENGTH = TIME_CHARS + RANDOM_CHARS;
 
 /** Mints one ULID. See {@link createUlidFactory}. */
-export type UlidFactory = () => string;
+type UlidFactory = () => string;
 
 /**
  * Creates an independent ULID generator with its own monotonic state.
@@ -67,21 +67,6 @@ export function createUlidFactory(): UlidFactory {
  * is unavailable rather than weakening the randomness.
  */
 export const createUlid: UlidFactory = createUlidFactory();
-
-/**
- * Returns true when `value` is shaped like a ULID: {@link ULID_LENGTH}
- * characters drawn from the Crockford base32 alphabet.
- *
- * Shape-only — this does not prove the value was minted here.
- */
-export function isUlid(value: string): boolean {
-  if (value.length !== ULID_LENGTH) return false;
-  if (ENCODING.indexOf(value[0] ?? "") > 7) return false;
-  for (const character of value) {
-    if (!ENCODING.includes(character)) return false;
-  }
-  return true;
-}
 
 function randomFill(target: Uint8Array<ArrayBuffer>): void {
   const webCrypto = globalThis.crypto;

@@ -69,7 +69,7 @@ const invokeResultSchema = z.discriminatedUnion("status", [
 
 /** Durable session coordinates emitted by `eve remote invoke`. Credentials are deliberately excluded. */
 export type InvokeResume = z.infer<typeof invokeResumeSchema>;
-export type InvocationInputRequest = z.infer<typeof invocationInputRequestSchema>;
+type InvocationInputRequest = z.infer<typeof invocationInputRequestSchema>;
 /** Result emitted by one non-interactive agent invocation. */
 export type InvokeResult = z.infer<typeof invokeResultSchema>;
 export type InvokeAuthenticationFailure = Extract<

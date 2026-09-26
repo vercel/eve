@@ -26,6 +26,7 @@ import { defineMemory } from "#public/memory/index.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
+import { captureConsoleOutput } from "#internal/testing/log-records.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
@@ -399,6 +400,7 @@ describe("turn cancellation integration", () => {
   }, 60_000);
 
   it("keeps an abort-shaped memory recall error terminal while the turn signal is active", async () => {
+    const output = captureConsoleOutput();
     const fixture = await createAbortRecallRuntime("turn-active-memory-abort", {
       waitForAbort: false,
     });
@@ -416,17 +418,24 @@ describe("turn cancellation integration", () => {
         },
       ]);
       const stream = captureTurnEvents(run);
+      let failed = false;
 
       try {
         await fixture.recallStarted;
         const failedTurn = await stream.nextTurn();
         expect(failedTurn.at(-1)?.type).toBe("session.failed");
         expect(filterEventsByType(failedTurn, "turn.cancelled")).toHaveLength(0);
+        await expect(run.returnValue).rejects.toThrow("Agent workflow failed.");
+        failed = true;
       } finally {
         stream.dispose();
-        await run.cancel();
+        // A failed run is terminal and rejects cancellation.
+        if (!failed) await run.cancel();
       }
     });
+    expect(output.lines).toContain(
+      "[eve:execution.workflow-entry] workflow loop threw — emitting terminal session.failed",
+    );
   });
 
   it.each([
@@ -500,6 +509,7 @@ describe("turn cancellation integration", () => {
   );
 
   it("cancels a turn mid-tool and accepts the next message normally", async () => {
+    const output = captureConsoleOutput();
     const fixture = await createWaitToolRuntime("turn-cancel-tool");
     const continuationToken = "http:turn-cancel-tool";
 
@@ -575,9 +585,11 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   });
 
   it("cancels a turn through the eve channel cancel route", async () => {
+    const output = captureConsoleOutput();
     const fixture = await createWaitToolRuntime("turn-cancel-route");
     const continuationToken = "http:turn-cancel-route";
     const cancelViaRoute = createCancelRouteCaller();
@@ -655,9 +667,11 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   }, 60_000);
 
   it("cancels a turn from a channel route helper addressed by continuation token", async () => {
+    const output = captureConsoleOutput();
     const fixture = await createWaitToolRuntime("turn-cancel-helper");
     const rawToken = "turn-cancel-helper";
     const continuationToken = `http:${rawToken}`;
@@ -746,9 +760,11 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   }, 60_000);
 
   it("consumes a cancel with a stale turn guard as a no-op and keeps the turn running", async () => {
+    const output = captureConsoleOutput();
     const fixture = await createWaitToolRuntime("turn-cancel-stale-guard");
     const continuationToken = "http:turn-cancel-stale-guard";
 
@@ -794,6 +810,7 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   }, 60_000);
 
   it("treats a cancel after the turn settled as a benign no-op", async () => {

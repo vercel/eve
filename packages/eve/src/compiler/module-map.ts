@@ -15,7 +15,6 @@ import { normalizeEsmImportSpecifier } from "#internal/application/import-specif
 
 export { resolveCompiledModuleExtensionScopeNamespace } from "#compiler/load-binding-namespace.js";
 
-export type CompiledModuleNodeScope = z.infer<typeof compiledModuleNodeScopeSchema>;
 export type CompiledModuleMap = z.infer<typeof compiledModuleMapSchema>;
 
 const compiledModuleNodeScopeSchema = z
@@ -26,7 +25,7 @@ export const compiledModuleMapSchema = z
   .object({ nodes: z.record(z.string(), compiledModuleNodeScopeSchema) })
   .strict();
 
-export interface CreateCompiledModuleMapSourceInput {
+interface CreateCompiledModuleMapSourceInput {
   importSpecifierStyle?: "absolute" | "relative";
   manifest: CompiledAgentManifest;
   moduleMapPath: string;

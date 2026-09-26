@@ -21,7 +21,7 @@ export interface LinkProjectDeps {
   unresolvedProject: typeof unresolvedProject;
 }
 
-export interface LinkProjectOptions {
+interface LinkProjectOptions {
   /** Streams link progress and, in interactive runs, may confirm ambiguous framework detection. */
   prompter: Prompter;
   /** Headless runs must not ask follow-up questions after the plan is fixed. */

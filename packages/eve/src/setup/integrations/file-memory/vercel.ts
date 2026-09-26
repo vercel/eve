@@ -89,7 +89,7 @@ export interface FileMemoryBlobPlan {
   readonly regionWarning?: string;
 }
 
-export interface FileMemoryBlobResult {
+interface FileMemoryBlobResult {
   readonly action: FileMemoryBlobAction;
   readonly store: BlobStore;
 }

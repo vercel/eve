@@ -15,6 +15,7 @@ import {
   renderInputRequestComponents,
 } from "#public/channels/discord/hitl.js";
 import { defaultDiscordAuth, discordChannel } from "#public/channels/discord/index.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 function asCompiled<T = unknown>(channel: unknown): CompiledChannel<T> {
   if (!isCompiledChannel(channel)) {
@@ -268,6 +269,7 @@ describe("discordChannel() inbound route", () => {
   });
 
   it("rejects requests with invalid signatures", async () => {
+    const logs = captureLogRecords();
     const { privateKey, publicKeyHex } = testKeys();
     const channel = discordChannel({ credentials: { publicKey: publicKeyHex } });
 
@@ -282,6 +284,9 @@ describe("discordChannel() inbound route", () => {
 
     expect(response.status).toBe(401);
     expect(send).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "discord inbound verification failed" }),
+    );
   });
 
   it("delivers HITL button clicks as inputResponses", async () => {
@@ -438,6 +443,7 @@ describe("discordChannel() default event handlers", () => {
   });
 
   it("swallows typing indicator failures", async () => {
+    const logs = captureLogRecords();
     const fetchMock = vi.fn().mockRejectedValue(new Error("typing failed"));
     vi.stubGlobal("fetch", fetchMock);
     const adapter = withState(
@@ -452,6 +458,12 @@ describe("discordChannel() default event handlers", () => {
     await expect(
       callAdapterEventHandler(adapter, makeEvent("turn.started", {}), ctx),
     ).resolves.toEqual(makeEvent("turn.started", {}));
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "adapter event handler threw — event swallowed",
+      }),
+    );
   });
 
   it("uses the environment bot token for proactive messages", async () => {

@@ -270,7 +270,9 @@ function logToolExecutionError(event: {
   readonly toolCall: { readonly toolName: string; readonly toolCallId: string };
   readonly toolOutput: { readonly type: string; readonly error?: unknown };
 }): void {
-  if (event.toolOutput.type !== "tool-error") {
+  // A tool unwinding because its turn was cancelled is the expected outcome
+  // of a user action, not a failure worth an error log.
+  if (event.toolOutput.type !== "tool-error" || isTurnCancellation(event.toolOutput.error)) {
     return;
   }
   logError(log, "tool execution failed", event.toolOutput.error, {

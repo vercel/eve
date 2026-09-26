@@ -4,7 +4,7 @@ import type { RegistrySetupCompletion, RegistrySetupFact } from "#setup/registry
 
 import { runDeployFlow } from "./deploy.js";
 
-export interface RegistrySessionDeps {
+interface RegistrySessionDeps {
   detectDeployment: typeof detectDeployment;
   runDeployFlow: typeof runDeployFlow;
 }
@@ -31,7 +31,7 @@ export interface RegistrySessionResult {
   deployed?: "production";
 }
 
-export interface RegistrySession {
+interface RegistrySession {
   add(title: string, output: readonly string[], setup?: RegistrySetupCompletion): void;
   addIncomplete(title: string, resumeCommand: string): void;
   addFailure(title: string, message: string): void;

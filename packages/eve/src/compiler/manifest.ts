@@ -60,11 +60,6 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 export const COMPILED_AGENT_MANIFEST_VERSION = 52;
 
 /**
- * Compiled channel entry preserved in the compiled manifest.
- */
-export type CompiledChannelEntry = CompiledChannelDefinition;
-
-/**
  * Active compiled channel entry — backed by an authored `Channel` module.
  */
 export interface CompiledChannelDefinition {

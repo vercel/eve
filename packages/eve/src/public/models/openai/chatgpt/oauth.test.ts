@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { CHATGPT_CLIENT_ID, requestChatGptTokens } from "./oauth.js";
-import { createUnsignedJwt } from "./unsigned-jwt.js";
+import { createUnsignedJwt } from "#internal/testing/unsigned-jwt.js";
 
 describe("ChatGPT OAuth token exchange", () => {
   it("exchanges a PKCE code and retains account identity from the ID token", async () => {

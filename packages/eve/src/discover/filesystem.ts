@@ -17,7 +17,7 @@ export const SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS = [
  * Files that mark a surrounding directory as an application root when paired
  * with a top-level `agent/` directory.
  */
-export const PROJECT_MARKER_FILE_NAMES = ["package.json", "vercel.json"] as const;
+const PROJECT_MARKER_FILE_NAMES = ["package.json", "vercel.json"] as const;
 
 const PROJECT_MARKER_FILE_NAME_SET = new Set<string>(PROJECT_MARKER_FILE_NAMES);
 const GENERATED_AGENT_DIRECTORY_NAMES = new Set<string>([
@@ -37,7 +37,7 @@ export type DirectoryEntryType = "directory" | "file" | "other";
 /**
  * Classified root-level agent entry.
  */
-export type AgentRootEntryKind =
+type AgentRootEntryKind =
   | "agent-config-module"
   | "channels-directory"
   | "connections-directory"
@@ -63,7 +63,7 @@ export type AgentRootEntryKind =
 /**
  * Classified local-subagent root entry.
  */
-export type LocalSubagentEntryKind =
+type LocalSubagentEntryKind =
   | "agent-config-module"
   | "connections-directory"
   | "extensions-directory"
@@ -87,7 +87,7 @@ export type LocalSubagentEntryKind =
 /**
  * Classified Agent Skills package entry.
  */
-export type SkillPackageEntryKind =
+type SkillPackageEntryKind =
   | "skill-assets-directory"
   | "skill-markdown"
   | "skill-references-directory"
@@ -97,7 +97,7 @@ export type SkillPackageEntryKind =
 /**
  * Classified top-level entry inside `skills/`.
  */
-export type SkillsDirectoryEntryKind =
+type SkillsDirectoryEntryKind =
   | "flat-skill-markdown"
   | "flat-skill-module"
   | "ignored-declaration"

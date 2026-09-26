@@ -39,7 +39,7 @@ import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepFn, StepResult } from "#harness/types.js";
-import { createEmptyHookRegistry, createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
+import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import {
   createActionsRequestedEvent,
   createInputRequestedEvent,
@@ -88,6 +88,11 @@ function turnStep(input: Omit<TurnStepInput, "input"> & { readonly input?: Legac
   return runTurnStep({ ...input, input: payload });
 }
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
 /** When set, `bindSessionInstrumentation` binds this runtime instead of the global one. */
@@ -226,7 +231,7 @@ function createTurnStepTestBundle(modelCallsPerStep?: number) {
       nodesByNodeId: new Map(),
       root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
     },
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry: createRuntimeHookRegistry([]),
     moduleMap: { nodes: {} },
     resolvedAgent: { config },
     subagentRegistry: {},
@@ -299,7 +304,7 @@ function createStubBundle(): Awaited<ReturnType<typeof getCompiledRuntimeAgentBu
         turnAgent: TestTurnAgent,
       },
     },
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry: createRuntimeHookRegistry([]),
     resolvedAgent: { config: {} },
     subagentRegistry: {},
     toolRegistry: {},
@@ -853,7 +858,7 @@ describe("dispatchCoordinationStep", () => {
         nodesByNodeId: new Map(),
         root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
       },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: { subagentsByNodeId: new Map() },
       toolRegistry: {},
@@ -901,7 +906,7 @@ describe("dispatchCoordinationStep", () => {
         nodesByNodeId: new Map(),
         root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
       },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {
         subagentsByNodeId: new Map([
@@ -965,7 +970,7 @@ describe("dispatchCoordinationStep", () => {
           turnAgent: TestTurnAgent,
         },
       },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {
         subagentsByNodeId: new Map(),
@@ -1032,7 +1037,7 @@ describe("dispatchCoordinationStep", () => {
           turnAgent: TestTurnAgent,
         },
       },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {
         dynamicNodeIds: new Set([nodeId]),
@@ -1563,7 +1568,7 @@ describe("turnStep", () => {
         root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},
@@ -1677,7 +1682,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {}, dynamicToolResolvers: [dynamicToolResolver] },
       subagentRegistry: { dynamicResolvers: [dynamicSubagentResolver] },
       toolRegistry: {},
@@ -1758,7 +1763,7 @@ describe("turnStep", () => {
         root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: {
         config: {},
         dynamicToolResolvers: [
@@ -1865,7 +1870,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},
@@ -1926,7 +1931,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: {
         config: {},
       },
@@ -2065,7 +2070,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},
@@ -2140,7 +2145,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},
@@ -2218,7 +2223,7 @@ describe("turnStep", () => {
           root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
         },
         moduleMap: { nodes: {} },
-        hookRegistry: createEmptyHookRegistry(),
+        hookRegistry: createRuntimeHookRegistry([]),
         resolvedAgent: { config: {} },
         subagentRegistry: {},
         toolRegistry: {},
@@ -2279,7 +2284,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},
@@ -2336,7 +2341,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: {
         config: {},
       },
@@ -2852,7 +2857,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: {
         config: {},
       },
@@ -2940,7 +2945,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},
@@ -3030,7 +3035,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},
@@ -3094,7 +3099,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},
@@ -3190,7 +3195,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: {
         config: {},
         dynamicToolResolvers: [dynamicToolResolver],
@@ -3349,7 +3354,7 @@ describe("turnStep", () => {
         },
       },
       moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: {
         config: {},
         dynamicToolResolvers: [
@@ -3476,7 +3481,7 @@ describe("emitTerminalSessionFailureStep", () => {
           turnAgent: TestTurnAgent,
         },
       },
-      hookRegistry: createEmptyHookRegistry(),
+      hookRegistry: createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},
@@ -3557,6 +3562,7 @@ describe("emitTerminalSessionFailureStep", () => {
   });
 
   it("replaces cataloged failures with their semantic summary while keeping the raw dump", async () => {
+    const logs = captureLogRecords();
     const sessionFailedCalls: Array<{ data: unknown }> = [];
     const capturingAdapter: ChannelAdapter = {
       kind: "thread-context",
@@ -3594,9 +3600,16 @@ describe("emitTerminalSessionFailureStep", () => {
     // The raw inspection stays attached so the private session trace keeps
     // the evidence the curated message summarizes away.
     expect(data.details?.detail).toContain("fetch failed");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "workflow loop threw — emitting terminal session.failed",
+      }),
+    );
   });
 
   it("does not throw when the adapter handler itself throws", async () => {
+    const logs = captureLogRecords();
     // A throwing handler must not prevent the event from reaching
     // the durable stream. This mirrors `callAdapterEventHandler`'s
     // safety net — the step's guarantee to the workflow body is
@@ -3623,6 +3636,18 @@ describe("emitTerminalSessionFailureStep", () => {
 
     const writes = workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? [];
     expect(writes.length).toBe(1);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "workflow loop threw — emitting terminal session.failed",
+      }),
+    );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "adapter event handler threw — event swallowed",
+      }),
+    );
   });
 });
 
@@ -3654,7 +3679,7 @@ describe("runProxySubagentEventStep", () => {
           turnAgent: TestTurnAgent,
         },
       },
-      hookRegistry: options.hookRegistry ?? createEmptyHookRegistry(),
+      hookRegistry: options.hookRegistry ?? createRuntimeHookRegistry([]),
       resolvedAgent: { config: {} },
       subagentRegistry: {},
       toolRegistry: {},

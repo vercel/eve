@@ -36,7 +36,7 @@ import type { ConversationEnvironment } from "#shared/conversation-context.js";
 
 type SpanState = { readonly context: Context; readonly span: Span };
 
-export interface AgentMemoryInstrumentation {
+interface AgentMemoryInstrumentation {
   readonly events: Pick<
     NonNullable<InstrumentationProviderDefinition["events"]>,
     "memory.operation.completed" | "memory.operation.failed" | "memory.operation.started"

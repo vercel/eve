@@ -3,7 +3,7 @@ import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/
 import type { TelegramChannelState } from "#public/channels/telegram/telegramChannel.js";
 import type { AudienceContext } from "#shared/conversation-context.js";
 
-export function telegramInstrumentationMetadata(
+function telegramInstrumentationMetadata(
   state: TelegramChannelState,
 ): TelegramInstrumentationMetadata {
   return {
@@ -13,7 +13,7 @@ export function telegramInstrumentationMetadata(
   };
 }
 
-export function telegramAudience(state: TelegramChannelState): ChannelAudience {
+function telegramAudience(state: TelegramChannelState): ChannelAudience {
   return telegramAudienceForChatType(state.chatType);
 }
 

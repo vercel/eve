@@ -10,16 +10,16 @@ import {
 } from "#setup/primitives/run-vercel.js";
 import { z } from "#compiled/zod/index.js";
 
-export const LINQ_TRIGGER_PATH = "/eve/v1/linq";
-export const LINQ_TRIGGER_EVENTS = ["message.received", "reaction.added", "reaction.removed"];
+const LINQ_TRIGGER_PATH = "/eve/v1/linq";
+const LINQ_TRIGGER_EVENTS = ["message.received", "reaction.added", "reaction.removed"];
 
-export interface LinqConnectorRef {
+interface LinqConnectorRef {
   id: string;
   uid: string;
   phoneNumber?: string;
 }
 
-export interface ProvisionLinqConnectorDeps {
+interface ProvisionLinqConnectorDeps {
   runVercel: typeof runVercel;
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }

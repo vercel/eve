@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ResolvedHookDefinition } from "../types.js";
-import { createEmptyHookRegistry, createRuntimeHookRegistry } from "./registry.js";
+import { createRuntimeHookRegistry } from "./registry.js";
 
 describe("createRuntimeHookRegistry", () => {
   it("splits typed and wildcard stream-event subscribers", () => {
@@ -19,14 +19,6 @@ describe("createRuntimeHookRegistry", () => {
       (registry.streamEventsByType.get("message.completed") ?? []).map((e) => e.eventType),
     ).toEqual(["message.completed"]);
     expect(registry.streamEventsWildcard.map((e) => e.eventType)).toEqual(["*"]);
-  });
-});
-
-describe("createEmptyHookRegistry", () => {
-  it("returns flat empty buckets", () => {
-    const registry = createEmptyHookRegistry();
-    expect(registry.streamEventsByType.size).toBe(0);
-    expect(registry.streamEventsWildcard).toEqual([]);
   });
 });
 

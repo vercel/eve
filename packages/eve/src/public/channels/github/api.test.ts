@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   GitHubApiError,
@@ -9,23 +9,10 @@ import {
   getGitHubPullRequest,
   listGitHubPullRequestFiles,
 } from "#public/channels/github/api.js";
-import {
-  clearGitHubInstallationTokenCache,
-  seedGitHubInstallationTokenForTests,
-} from "#public/channels/github/auth.js";
 
 const credentials = {
-  appId: "test-app",
+  installationToken: "ghs_test",
 };
-
-beforeEach(() => {
-  clearGitHubInstallationTokenCache();
-  seedGitHubInstallationTokenForTests({
-    apiBaseUrl: "https://github.test",
-    installationId: 123,
-    token: "ghs_test",
-  });
-});
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(body), {

@@ -6,7 +6,7 @@ import {
 } from "#shared/history-view.js";
 import { projectMemoryHistoryFromSessionState } from "#shared/memory-state.js";
 
-export interface ExecutionHistoryView {
+interface ExecutionHistoryView {
   readonly initial: PreparedHistoryView;
   readonly messages: (session: HarnessSession) => PreparedHistoryView["messages"];
   readonly prepare: (session: HarnessSession) => PreparedHistoryView;

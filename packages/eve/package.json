@@ -491,6 +491,7 @@
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
     "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
     "test": "pnpm run test:unit && pnpm run test:integration",
+    "test:framework-fixtures": "pnpm run build:compiled && vitest run --config vitest.framework-fixtures.config.ts",
     "test:integration": "pnpm run build:js && vitest run --config vitest.integration.config.ts",
     "test:scenario": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts",
     "test:unit": "pnpm run build:compiled && vitest run --config vitest.unit.config.ts",
@@ -498,8 +499,7 @@
     "typecheck": "pnpm run check:web-template && pnpm run build:compiled && tsc -p tsconfig.json --noEmit",
     "generate:web-template": "node src/setup/build.ts --write",
     "check:web-template": "node src/setup/build.ts --check",
-    "test:tui": "pnpm run build:js && tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs",
-    "test:vercel": "vitest run --config vitest.vercel.config.ts"
+    "test:tui": "pnpm run build:js && tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },
   "dependencies": {
     "nitro": "3.0.260903-beta",

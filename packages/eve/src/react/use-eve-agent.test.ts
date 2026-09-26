@@ -1,6 +1,6 @@
 import { createElement, StrictMode, useState } from "react";
 import { act, create as createRenderer } from "react-test-renderer";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { useEveAgent, type UseEveAgentHelpers } from "#react/use-eve-agent.js";
 import type { EveMessageData } from "#client/message-reducer.js";
@@ -133,11 +133,38 @@ function completedTurnData(input: {
 
 const renderers: ReturnType<typeof createRenderer>[] = [];
 
+const REACT_TEST_RENDERER_DEPRECATION =
+  "react-test-renderer is deprecated. See https://react.dev/warnings/react-test-renderer";
+
 function create(...args: Parameters<typeof createRenderer>) {
-  const renderer = createRenderer(...args);
-  renderers.push(renderer);
-  return renderer;
+  // react-test-renderer 19 reports its own deprecation on every create().
+  // Drop only that line; any other error still reaches the console.
+  const consoleError = console.error;
+  const spy = vi.spyOn(console, "error").mockImplementation((...data: unknown[]) => {
+    if (data[0] !== REACT_TEST_RENDERER_DEPRECATION) consoleError(...data);
+  });
+  try {
+    const renderer = createRenderer(...args);
+    renderers.push(renderer);
+    return renderer;
+  } finally {
+    spy.mockRestore();
+  }
 }
+
+type ReactActEnvironment = typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+const actEnvironment = globalThis as ReactActEnvironment;
+const previousActEnvironment = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
+
+// Every update in this file runs inside act(); declaring the act environment
+// is how React knows that, instead of warning on each update.
+beforeAll(() => {
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+afterAll(() => {
+  actEnvironment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+});
 
 afterEach(async () => {
   try {

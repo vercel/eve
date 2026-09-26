@@ -19,7 +19,7 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { defineHook } from "#public/definitions/hook.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import { isEventId } from "#protocol/event-id.js";
+import { isEventId } from "#internal/testing/event-id.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { SessionTitleKey } from "#context/keys.js";
@@ -31,6 +31,7 @@ import {
   listCallerStepNames,
   withTimeout,
 } from "#internal/testing/entry-test-helpers.js";
+import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -174,6 +175,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("parks in conversation mode and resumes via runtime delivery", async () => {
+    const output = captureConsoleOutput();
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
     const continuationToken = "http:workflow-entry-conversation";
@@ -269,6 +271,7 @@ describe("workflowEntry integration", () => {
         if (!completed) await run.cancel();
       }
     });
+    expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
   });
 
   it("publishes the session ID as the waiting address for an ID-only session", async () => {

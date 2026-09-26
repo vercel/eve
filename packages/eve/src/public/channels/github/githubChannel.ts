@@ -90,7 +90,7 @@ export interface GitHubInboundContext {
 }
 
 /** Channel-owned GitHub context rebuilt from persisted channel state. */
-export interface GitHubChannelContext {
+interface GitHubChannelContext {
   readonly conversation: GitHubConversationRef;
   readonly github: GitHubHandle;
   readonly repository: GitHubRepositoryRef;

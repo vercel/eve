@@ -5,7 +5,7 @@ import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { normalizePublicEveRoutePath } from "#shared/eve-route-path.js";
 import { isReservedIpAddress } from "#shared/network-address.js";
 
-export type SessionCallbackParseResult =
+type SessionCallbackParseResult =
   | {
       readonly callback: SessionCallback;
       readonly ok: true;

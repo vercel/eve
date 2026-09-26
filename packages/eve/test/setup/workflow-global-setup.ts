@@ -10,9 +10,9 @@ import {
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 import { resolveWorkflowTestOutputDirectory } from "#internal/testing/workflow-vitest-plugin.js";
+import { bundleWorkflowStepRegistrations } from "#internal/testing/workflow-step-registrations.js";
 import { WorkflowBundleBuilder } from "#internal/workflow-bundle/builder.js";
 import {
-  bundleWorkflowStepRegistrations,
   collectWorkflowInputFiles,
   type WorkflowBundleDiscoveredEntries,
 } from "#internal/workflow-bundle/builder-support.js";

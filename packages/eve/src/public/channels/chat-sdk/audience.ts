@@ -6,7 +6,7 @@ import type {
 } from "#public/channels/chat-sdk/chatSdkChannel.js";
 import type { AudienceContext } from "#shared/conversation-context.js";
 
-export function chatSdkInstrumentationMetadata(
+function chatSdkInstrumentationMetadata(
   state: ChatSdkChannelState,
 ): ChatSdkInstrumentationMetadata {
   return {
@@ -17,7 +17,7 @@ export function chatSdkInstrumentationMetadata(
   };
 }
 
-export function chatSdkAudience(thread: SerializedThread | null): ChannelAudience {
+function chatSdkAudience(thread: SerializedThread | null): ChannelAudience {
   if (thread?.isDM === true) return "private";
   if (thread?.channelVisibility === "workspace") return "public";
   if (thread?.channelVisibility === "private" || thread?.channelVisibility === "external") {

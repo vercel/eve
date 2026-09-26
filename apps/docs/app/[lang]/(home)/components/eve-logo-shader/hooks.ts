@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 // INVARIANT: resolution order matches the old index.tsx hooks exactly.
 // Imported only by index.tsx.
 
-export function getCurrentTheme(prefersDarkTheme: boolean): "light" | "dark" {
+function getCurrentTheme(prefersDarkTheme: boolean): "light" | "dark" {
   if (typeof document === "undefined") return "light";
   const root = document.documentElement;
   if (root.classList.contains("dark") || root.dataset.theme === "dark") return "dark";

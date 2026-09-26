@@ -7,7 +7,7 @@ import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/ty
 
 const CANDIDATE_BUILD_TIMEOUT_MS = 120_000;
 
-export interface DevelopmentWorkerPayload {
+interface DevelopmentWorkerPayload {
   readonly entry: string;
   readonly workerData: Readonly<Record<string, unknown>>;
 }

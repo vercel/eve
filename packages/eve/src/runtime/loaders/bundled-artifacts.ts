@@ -63,16 +63,6 @@ export async function withBundledCompiledArtifacts<T>(
  * Reads the bundled compiled-artifact snapshot for the active runtime
  * session, or `null` if none has been installed.
  */
-export function updateBundledSandboxPreparedArtifacts(
-  sandboxPreparedArtifacts: SandboxPreparedArtifactsManifest,
-): boolean {
-  const session = getActiveRuntimeSession();
-  const installed = session.compiledArtifacts;
-  if (installed === null) return false;
-  setRuntimeSessionCompiledArtifacts(session, { ...installed, sandboxPreparedArtifacts });
-  return true;
-}
-
 export function readBundledCompiledArtifacts(): BundledCompiledArtifacts | null {
   return getActiveRuntimeSession().compiledArtifacts;
 }

@@ -4,7 +4,7 @@ const SVELTEKIT_VERSION = "^2.63.0";
 const SVELTE_VERSION = "^5.0.0";
 const VITE_VERSION = "^8.1.5";
 
-export interface SvelteKitEveServiceDescriptorOptions {
+interface SvelteKitEveServiceDescriptorOptions {
   readonly installDependencies?: boolean;
 }
 

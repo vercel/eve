@@ -1,6 +1,6 @@
 import * as THREE from "three/webgpu";
 
-export type RasterizedSvg = {
+type RasterizedSvg = {
   texture: THREE.DataTexture;
   pixels: Uint8Array;
   size: number;

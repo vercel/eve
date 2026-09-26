@@ -81,7 +81,7 @@ export interface TeamsInboundMessageContext extends TeamsContext {
 }
 
 /** Channel-owned Teams context returned by `context()`. */
-export interface TeamsChannelContext extends TeamsContext {
+interface TeamsChannelContext extends TeamsContext {
   readonly adaptiveCardVersion: string;
   state: TeamsChannelState;
 }

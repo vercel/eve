@@ -42,7 +42,7 @@ import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 
 const log = createLogger("execution.agent-invocation");
 
-export type OwnerAgentDispatchPlanEntry =
+type OwnerAgentDispatchPlanEntry =
   | {
       readonly kind: "resume";
       readonly action: RuntimeAgentHandleAction;

@@ -82,17 +82,6 @@ export async function stageDevelopmentGeneration(
   }
 }
 
-export async function publishDevelopmentGeneration(
-  compileResult: CompileAgentResult,
-): Promise<DevelopmentGeneration> {
-  const generation = await stageDevelopmentGeneration(compileResult);
-  await activateDevelopmentGeneration({
-    appRoot: compileResult.project.appRoot,
-    generation,
-  });
-  return generation;
-}
-
 export async function activateDevelopmentGeneration(input: {
   readonly appRoot: string;
   readonly generation: DevelopmentGeneration;

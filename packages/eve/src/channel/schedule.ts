@@ -33,7 +33,7 @@ export const SCHEDULE_ADAPTER: ChannelAdapter = {
  * Loaded shape of one schedule for the dispatcher. Either `run` is
  * defined (authored handler) or `markdown` is defined (fire-and-forget).
  */
-export interface ScheduleDispatchInput {
+interface ScheduleDispatchInput {
   readonly scheduleId: string;
   readonly run?: ScheduleRunHandler;
   readonly markdown?: string;
@@ -56,7 +56,7 @@ export interface ScheduleDispatchInput {
  * handler started (for telemetry / task-result observability) and the
  * `waitUntil` promises the handler registered.
  */
-export interface ScheduleDispatchResult {
+interface ScheduleDispatchResult {
   readonly sessions: readonly Session[];
   readonly waitUntilTasks: readonly Promise<unknown>[];
 }

@@ -22,8 +22,8 @@ interface BaggageMember {
   readonly properties: readonly BaggageProperty[];
 }
 
-export type ForwardedTraceBaggage = "absent" | "malformed" | ForwardedTraceAssertion;
-export type ForwardedParentSessionBaggage = "absent" | "malformed" | SessionParent;
+type ForwardedTraceBaggage = "absent" | "malformed" | ForwardedTraceAssertion;
+type ForwardedParentSessionBaggage = "absent" | "malformed" | SessionParent;
 
 /** Reads remote parent lineage without trusting the caller that supplied it. */
 export function readForwardedParentSessionBaggage(

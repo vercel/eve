@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Nitro } from "nitro/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
   COMPILE_METADATA_KIND,
   COMPILE_METADATA_VERSION,
@@ -19,7 +19,6 @@ import {
   resolveInstalledPackageInfo,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
-import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
 import type {
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
@@ -228,6 +227,10 @@ async function createPreparedHost(
       workflowBuildDir: `${appRoot}/.eve/dev-hosts/test/workflow`,
     },
   };
+}
+
+function resolveNitroBuildDirectory(appRoot: string): string {
+  return join(appRoot, ".eve", "nitro");
 }
 
 function createProductionOptions(preparedHost: PreparedApplicationHost) {

@@ -22,7 +22,7 @@ export const analyticsEvents = {
 
 export type AnalyticsEventName = (typeof analyticsEvents)[keyof typeof analyticsEvents];
 
-export type DocsSurface = "docs" | "home" | "integrations" | "other" | "templates";
+type DocsSurface = "docs" | "home" | "integrations" | "other" | "templates";
 
 export const isQueryFreeUrl = (url: string): boolean => {
   try {

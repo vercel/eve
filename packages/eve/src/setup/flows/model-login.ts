@@ -91,7 +91,7 @@ type LoginInput = {
   withConnectionUpdate?(task: () => Promise<void>): Promise<void>;
 };
 
-export type ModelLoginResult =
+type ModelLoginResult =
   | { kind: "ready"; reload: boolean; model?: ConnectedModel }
   | { kind: "cancelled" };
 

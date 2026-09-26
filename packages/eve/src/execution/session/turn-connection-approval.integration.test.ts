@@ -21,7 +21,7 @@ import {
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import type {
   ResolvedDynamicConnectionResolver,
@@ -30,6 +30,10 @@ import type {
 import connectionSearch from "#tools/framework/connection-search.js";
 import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
 import type { ApprovalResponseContext } from "#approval/definition.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
@@ -200,7 +204,7 @@ function setup(
         sandboxRegistry: sandboxRegistry as CompiledBundle["graph"]["root"]["sandboxRegistry"],
         turnAgent,
         channels: [],
-        hookRegistry: createEmptyHookRegistry(),
+        hookRegistry: createRuntimeHookRegistry([]),
         nodeId: "__root__",
         subagentRegistry: {
           dynamicNodeIds: new Set(),
@@ -212,7 +216,7 @@ function setup(
         toolRegistry: { preparedTools: [], toolsByName: new Map() },
       },
     },
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry: createRuntimeHookRegistry([]),
     moduleMap: { nodes: {} },
     resolvedAgent: resolvedAgent as CompiledBundle["resolvedAgent"],
     subagentRegistry: {

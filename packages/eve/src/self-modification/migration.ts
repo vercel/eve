@@ -1,7 +1,7 @@
 import { readdir, readFile, rm } from "node:fs/promises";
 import { join, relative } from "node:path";
 
-export const LEGACY_SELF_MODIFICATION_ROOT = "agent/subagents/self-modification";
+const LEGACY_SELF_MODIFICATION_ROOT = "agent/subagents/self-modification";
 const LEGACY_FILES = ["agent.ts", "config.ts", "sandbox.ts", "extensions/selfmod.ts"] as const;
 const LEGACY_DEFAULTS: Readonly<Record<string, readonly string[]>> = {
   "agent.ts": [

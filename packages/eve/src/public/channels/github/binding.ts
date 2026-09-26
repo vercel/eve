@@ -17,13 +17,13 @@ import type {
 } from "#public/channels/github/inbound.js";
 
 /** Minimal config needed to rebuild GitHub API handles. */
-export interface GitHubBindingConfig {
+interface GitHubBindingConfig {
   readonly api?: GitHubApiOptions;
   readonly credentials?: GitHubChannelCredentials;
 }
 
 /** Serializable state fields needed to rebuild GitHub API handles. */
-export interface GitHubBindingState {
+interface GitHubBindingState {
   readonly conversationKind: GitHubConversationKind;
   readonly installationId: number | null;
   readonly issueNumber: number | null;

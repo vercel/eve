@@ -7,6 +7,7 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, type TrustedForwarders } from "#public/channels/eve.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 function route(
   method: "GET" | "POST",
@@ -340,6 +341,7 @@ describe("eve ID-addressed session routes", () => {
   it.each([true, false])(
     "promotes remote parent lineage only from a trusted forwarder (%s)",
     async (trusted) => {
+      const logs = captureLogRecords();
       const createSession = vi.fn().mockResolvedValue({
         events: new ReadableStream(),
         sessionId: "wrun_A",
@@ -385,6 +387,10 @@ describe("eve ID-addressed session routes", () => {
           parent: trusted ? parent : undefined,
         }),
       );
+      const untrusted = logs.records.filter(
+        (record) => record.message === "ignoring remote parent lineage from an untrusted forwarder",
+      );
+      expect(untrusted).toHaveLength(trusted ? 0 : 1);
     },
   );
 

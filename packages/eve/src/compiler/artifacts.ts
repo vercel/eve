@@ -2,19 +2,13 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
-import { z } from "#compiled/zod/index.js";
-import {
-  discoverDiagnosticsSummarySchema,
-  type DiscoverDiagnostic,
-  type DiscoverDiagnosticsSummary,
-} from "#discover/diagnostics.js";
+import type { DiscoverDiagnostic, DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import {
-  compilerDiagnosticSchema,
   projectDiscoverDiagnostic,
   summarizeCompilerDiagnostics,
   type CompilerDiagnostic,
@@ -28,12 +22,12 @@ import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared
 /**
  * Stable diagnostics artifact kind emitted by the compiler.
  */
-export const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
+const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
 
 /**
  * Current diagnostics artifact schema version.
  */
-export const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
+const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
 
 /**
  * Stable compile metadata artifact kind emitted by the compiler.
@@ -63,21 +57,12 @@ export interface CompilerArtifactPaths {
 /**
  * Machine-readable compiler diagnostics artifact written by the compiler.
  */
-export interface CompilerDiagnosticsArtifact {
+interface CompilerDiagnosticsArtifact {
   diagnostics: CompilerDiagnostic[];
   kind: typeof COMPILER_DIAGNOSTICS_ARTIFACT_KIND;
   summary: DiscoverDiagnosticsSummary;
   version: typeof COMPILER_DIAGNOSTICS_ARTIFACT_VERSION;
 }
-
-export const compilerDiagnosticsArtifactSchema = z
-  .object({
-    diagnostics: z.array(compilerDiagnosticSchema),
-    kind: z.literal(COMPILER_DIAGNOSTICS_ARTIFACT_KIND),
-    summary: discoverDiagnosticsSummarySchema,
-    version: z.literal(COMPILER_DIAGNOSTICS_ARTIFACT_VERSION),
-  })
-  .strict();
 
 /**
  * One artifact digest recorded in compile metadata.

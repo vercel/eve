@@ -95,9 +95,6 @@ interface WalkContext {
   readonly workflowFunctions: ReadonlySet<string>;
 }
 
-// Keep the old export name for backward compatibility with the plugin.
-export { transformDynamicToolExecute as transformDynamicToolAwait };
-
 function findDefineToolAliases(
   ast: AstNode,
   names: readonly string[] = ["defineTool", "defineWorkflowTool"],

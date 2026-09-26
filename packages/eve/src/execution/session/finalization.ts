@@ -16,7 +16,7 @@ export type SessionTerminalOutcome =
   | { readonly kind: "expired" }
   | { readonly kind: "failed"; readonly error: unknown; readonly turnId?: string };
 
-export interface SessionFinalizationContext {
+interface SessionFinalizationContext {
   readonly caller: TurnCaller | undefined;
   readonly cursor: {
     readonly serializedContext: Record<string, unknown>;

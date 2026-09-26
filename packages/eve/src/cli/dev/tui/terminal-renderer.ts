@@ -274,7 +274,7 @@ const STATUS_LINE_LEFT_PADDING = "  ";
 
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 
-export type TerminalRendererOptions = {
+type TerminalRendererOptions = {
   input?: TerminalInput;
   output?: TerminalOutput;
   tools?: TerminalPartDisplayMode;
@@ -299,7 +299,7 @@ export type TerminalRendererOptions = {
   onExitRequest?: () => void;
 };
 
-export type AgentHeaderOptions = {
+type AgentHeaderOptions = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;

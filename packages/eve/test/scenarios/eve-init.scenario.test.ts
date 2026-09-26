@@ -6,12 +6,12 @@ import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
-import { CODING_AGENT_ENV_MARKERS } from "../../src/cli/agent-detection.js";
+import { CODING_AGENT_ENV_MARKERS } from "../../src/setup/primitives/coding-agent-env.js";
 import { stripAnsi } from "../../src/cli/ui/terminal-text.js";
 import { loadYaml } from "../../src/evals/loaders/yaml.js";
 import { DEFAULT_AGENT_MODEL_ID } from "../../src/shared/default-agent-model.js";
 import { pathExists } from "../../src/setup/path-exists.js";
-import { eveDevArguments } from "../../src/setup/primitives/run-pnpm.js";
+import { eveDevArguments } from "../../src/setup/primitives/index.js";
 import { ensureScenarioEveTarballPath } from "../../src/internal/testing/scenario-app.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 

@@ -3,7 +3,7 @@ import type { AgentWorkspace } from "#internal/project-context.js";
 
 import type { CliApplicationContext } from "./application-command.js";
 
-export type AgentCommandRequirement = (command: Command) => boolean;
+type AgentCommandRequirement = (command: Command) => boolean;
 
 async function selectWorkspaceAgent(
   workspace: AgentWorkspace,

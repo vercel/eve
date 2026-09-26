@@ -21,7 +21,7 @@ function formatDevBuildStatus(status: DevBuildStatus, theme: Theme): string {
   return `${glyph} ${summary}`;
 }
 
-export interface StatusLineInput {
+interface StatusLineInput {
   /** Transient authored-source build state, independent of the server log filter. */
   devBuild?: DevBuildStatus;
   /** Resolved model slug, e.g. "anthropic/claude-sonnet-5"; absent when `/eve/v1/info` failed. */

@@ -314,7 +314,7 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
  * callback URL can be minted (for example outside a deployment), so
  * callers can fall through to rethrowing the original `Required` error.
  */
-export async function startScopedAuthorization(
+async function startScopedAuthorization(
   input: ScopedAuthorization,
 ): Promise<AuthorizationSignal | undefined> {
   const { scope, authorization, connection } = input;

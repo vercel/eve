@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -8,7 +7,6 @@ import { createNuxtEveServiceDescriptor } from "../../src/internal/testing/scena
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 
-const REPO_ROOT = fileURLToPath(new URL("../../../..", import.meta.url));
 const scenarioApp = useScenarioApp();
 
 const NUXT_EVE_SERVICE_DESCRIPTOR = createNuxtEveServiceDescriptor({
@@ -58,13 +56,6 @@ function isFilesystemHandle(route: unknown): boolean {
 }
 
 describe("framework-nuxt build", () => {
-  it("builds the Nuxt framework fixture against the workspace eve dist", async () => {
-    await runPnpmCommand({
-      args: ["--filter", "framework-nuxt", "build"],
-      cwd: REPO_ROOT,
-    });
-  }, 300_000);
-
   it("emits the eve service and route into the Vercel Build Output", async () => {
     const app = await scenarioApp(NUXT_EVE_SERVICE_DESCRIPTOR);
 

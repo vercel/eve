@@ -39,7 +39,7 @@ export interface EveVercelBuildTarget {
   readonly projectRoot: string;
 }
 
-export interface EveVercelServiceContribution {
+interface EveVercelServiceContribution {
   readonly homeRouteSrc: string | undefined;
   readonly rootDirectory: string;
   readonly routeSrc: string;
@@ -92,7 +92,7 @@ export function createEveHomeRouteSrc(publicRoutePrefix: string): string | undef
 }
 
 /** Route a member's public base path to its package-owned home channel. */
-export function createEveHomePathRoute(publicRoutePrefix: string): VercelRouteConfig | undefined {
+function createEveHomePathRoute(publicRoutePrefix: string): VercelRouteConfig | undefined {
   const src = createEveHomeRouteSrc(publicRoutePrefix);
   return src === undefined
     ? undefined

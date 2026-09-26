@@ -213,14 +213,6 @@ function findPackageRoot(entryPath: string, packageName: string): string {
 /**
  * Moves the dev runtime pointer so future sessions use a staged snapshot.
  */
-export async function activateDevelopmentRuntimeArtifactsSnapshot(input: {
-  readonly appRoot: string;
-  readonly snapshot: DevelopmentRuntimeArtifactsSnapshot;
-}): Promise<void> {
-  const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction(input);
-  activation.commit();
-}
-
 export async function activateDevelopmentRuntimeArtifactsSnapshotTransaction(input: {
   readonly appRoot: string;
   readonly snapshot: DevelopmentRuntimeArtifactsSnapshot;

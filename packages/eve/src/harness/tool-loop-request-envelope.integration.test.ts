@@ -1,6 +1,6 @@
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import type { LanguageModel } from "ai";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
@@ -8,6 +8,11 @@ import { SessionDynamicInstructionsKey } from "#context/keys.js";
 import { mockModel, type MockModelRequest } from "#evals/mock-model.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 function session(): HarnessSession {
   return {
@@ -107,6 +112,7 @@ describe("model request envelope accounting", () => {
   });
 
   it("rechecks instructions added before an empty-response retry", async () => {
+    const logs = captureLogRecords();
     const ctx = new ContextContainer();
     const requests: MockModelRequest[] = [];
     let summaries = 0;
@@ -155,5 +161,11 @@ describe("model request envelope accounting", () => {
       role: "assistant",
       content: expect.any(Array),
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "empty model response; reissuing the model call once",
+      }),
+    );
   });
 });

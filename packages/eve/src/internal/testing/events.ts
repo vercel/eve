@@ -132,7 +132,7 @@ export function filterEventsByType<T extends UnstampedMessageStreamEvent["type"]
  * Options accepted by {@link captureTurnEvents} and
  * {@link captureTurnSequence}.
  */
-export interface CaptureTurnEventsOptions {
+interface CaptureTurnEventsOptions {
   /**
    * Text decoder used to convert stream bytes into UTF-8 strings. Defaults
    * to a fresh `TextDecoder`. Tests rarely need to override this.

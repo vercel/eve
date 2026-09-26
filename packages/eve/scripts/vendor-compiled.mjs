@@ -31,7 +31,7 @@ const scriptFiles = [
   fileURLToPath(import.meta.url),
   join(packageRoot, "package.json"),
   join(here, "nitro-rolldown.mjs"),
-  join(here, "vendor-warning-log.mjs"),
+  join(packageRoot, "src", "internal", "bundler", "vendored-dependency-log.ts"),
   ...(await collectFilesRecursively(vendorCompiledDir, [".mjs", ".d.ts"])),
 ];
 

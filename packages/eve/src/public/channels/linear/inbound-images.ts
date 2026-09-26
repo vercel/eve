@@ -11,7 +11,7 @@ const MARKDOWN_IMAGE_PATTERN =
   /!\[([^\]\r\n]*)\]\(\s*(?:<([^>\r\n]+)>|([^\s)\r\n]+))(?:\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^)\r\n]*\)))?\s*\)/gu;
 
 /** One trusted Linear upload referenced by markdown image syntax. */
-export interface LinearUploadImageReference {
+interface LinearUploadImageReference {
   readonly altText: string;
   readonly end: number;
   readonly start: number;

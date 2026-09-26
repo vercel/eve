@@ -14,10 +14,10 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 import { findRunningAgentHandle } from "#subagents/handles/query.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 
-export type SessionCancellation = Extract<SessionCommand, { readonly kind: "cancel" }>;
+type SessionCancellation = Extract<SessionCommand, { readonly kind: "cancel" }>;
 
 /** One canonical admission result, after wire decoding but before turn policy. */
-export type SessionAdmission =
+type SessionAdmission =
   | { readonly admission: DeliveryAdmission; readonly kind: "delivery" }
   | { readonly command: SessionCancellation; readonly kind: "cancel" }
   | { readonly kind: "consumed" }

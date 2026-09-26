@@ -20,7 +20,7 @@ import {
   type DynamicToolEventName,
 } from "#dynamic/definition.js";
 
-export type CompiledConnectionEntry =
+type CompiledConnectionEntry =
   | { readonly kind: "connection"; readonly definition: CompiledConnectionDefinition }
   | {
       readonly kind: "dynamic-connection";

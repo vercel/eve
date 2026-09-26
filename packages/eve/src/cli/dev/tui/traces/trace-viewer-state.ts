@@ -98,7 +98,7 @@ export interface TraceViewerKeyEnvironment {
   readonly conversationLineCounts?: readonly number[];
 }
 
-export interface TraceViewerKeyResult {
+interface TraceViewerKeyResult {
   readonly state: TraceViewerState;
   readonly effect?: "close";
   /** A completed drag selection to copy — the controller extracts and copies the text. */
@@ -144,7 +144,7 @@ export function selectedTraceViewerSpan(state: TraceViewerState): LocalTraceSpan
 }
 
 /** The number of selectable cards. */
-export function traceViewerItemCount(state: TraceViewerState): number {
+function traceViewerItemCount(state: TraceViewerState): number {
   return state.conversationItems.length;
 }
 

@@ -30,7 +30,7 @@ type RolldownParseAst = (
   options?: Record<string, unknown> | null,
   filename?: string,
 ) => unknown;
-export type RolldownParserLanguage = "js" | "jsx" | "ts" | "tsx";
+type RolldownParserLanguage = "js" | "jsx" | "ts" | "tsx";
 
 type RolldownModule = {
   readonly build: RolldownBuild;
@@ -62,7 +62,7 @@ function loadNitroRolldown(): Promise<RolldownModule> {
  * Loads Rolldown's parser from Nitro's dependency tree so workflow directive
  * transforms can use the same bundler dependency without exposing it publicly.
  */
-export function loadNitroRolldownParseAst(): Promise<RolldownParseAstModule> {
+function loadNitroRolldownParseAst(): Promise<RolldownParseAstModule> {
   rolldownParseAstPromise ??= (async () => {
     const require = createRequire(import.meta.url);
     const nitroRequire = createRequire(require.resolve("nitro/package.json"));
@@ -73,7 +73,7 @@ export function loadNitroRolldownParseAst(): Promise<RolldownParseAstModule> {
   return rolldownParseAstPromise;
 }
 
-export function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
+function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
   if (filename.endsWith(".tsx")) return "tsx";
   if (filename.endsWith(".jsx")) return "jsx";
   if (/\.[cm]?ts$/.test(filename)) return "ts";

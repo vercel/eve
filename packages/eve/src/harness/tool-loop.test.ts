@@ -75,10 +75,10 @@ import {
 } from "#harness/authorization.js";
 import {
   getPendingInputRequestIds,
-  hasDeferredStepInput,
   hasPendingInputBatch,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
+import { getDeferredStepInput } from "#harness/pending-input-batches.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
@@ -113,6 +113,11 @@ import {
   TASK_DELIVERY_INITIATING_INSTRUCTION,
   TASK_DELIVERY_SETTLED_INSTRUCTION,
 } from "#tasks/delivery-context.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
@@ -1695,6 +1700,7 @@ describe("createToolLoopHarness", () => {
   });
 
   it("emits a terminal failure when no dynamic model selection is active", async () => {
+    const logs = captureLogRecords();
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig(emit));
     const session = createTestSession({
@@ -1721,9 +1727,13 @@ describe("createToolLoopHarness", () => {
     const turnFailed = events.find((event) => event.type === "turn.failed");
     expect(turnFailed?.data.message).toContain("Dynamic model selection is required");
     expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "model selection failed terminally" }),
+    );
   });
 
   it("emits a terminal failure when a turn-scoped dynamic model resolver throws", async () => {
+    const logs = captureLogRecords();
     const events: UnstampedMessageStreamEvent[] = [];
     const emit: HarnessEmitFn = async (event) => {
       events.push(event);
@@ -1748,6 +1758,9 @@ describe("createToolLoopHarness", () => {
     const turnFailed = events.find((event) => event.type === "turn.failed");
     expect(turnFailed?.data.message).toBe("flag service unavailable");
     expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "model selection failed terminally" }),
+    );
   });
 
   it("keeps declared subagent tools visible in delegated sessions", async () => {
@@ -3422,6 +3435,7 @@ describe("createToolLoopHarness", () => {
   it.each(["", "Alice's inventory list is"])(
     "reports content-filter without retrying (text: %j)",
     async (text) => {
+      const logs = captureLogRecords();
       setupMockAgent({
         finishReason: "content-filter",
         providerMetadata: {
@@ -3462,6 +3476,12 @@ describe("createToolLoopHarness", () => {
       );
       expect(result.next).toBeNull();
       expect(events.some((event) => event.type === "session.waiting")).toBe(true);
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     },
   );
 
@@ -4285,6 +4305,7 @@ describe("createToolLoopHarness", () => {
   });
 
   it("retries a model call after an undici body timeout", async () => {
+    const logs = captureLogRecords();
     vi.useFakeTimers();
     const timeout = new TypeError("terminated", {
       cause: Object.assign(new Error("Body Timeout Error"), {
@@ -4341,6 +4362,12 @@ describe("createToolLoopHarness", () => {
     } finally {
       vi.useRealTimers();
     }
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "model call failed transiently — retrying",
+      }),
+    );
   });
 
   it("feeds malformed provider web search input back to the model", async () => {
@@ -4487,6 +4514,7 @@ describe("createToolLoopHarness", () => {
   });
 
   it("emits a recoverable failure cascade and parks the session on a non-terminal model-call error", async () => {
+    const logs = captureLogRecords();
     setupMockAgentError(new Error("Model blew up"));
 
     const { emit, events } = createEventCollector();
@@ -4520,6 +4548,12 @@ describe("createToolLoopHarness", () => {
       message: "Model blew up",
     });
     expect((stepFailed!.data as { details?: { errorId?: string } }).details?.errorId).toBeDefined();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "model call failed — parking session for retry by the user",
+      }),
+    );
   });
 
   it.each([
@@ -4538,6 +4572,7 @@ describe("createToolLoopHarness", () => {
   ])(
     "parks the session for the recoverable AI Gateway error: $message",
     async ({ message, hint }) => {
+      const logs = captureLogRecords();
       setupMockAgentError(
         Object.assign(new Error(message), {
           name: "GatewayInvalidRequestError",
@@ -4558,10 +4593,17 @@ describe("createToolLoopHarness", () => {
       });
       expect(events.map((event) => event.type)).toContain("session.waiting");
       expect(events.map((event) => event.type)).not.toContain("session.failed");
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     },
   );
 
   it("parks the session on an ambiguous GatewayInternalServerError 400 model-call error", async () => {
+    const logs = captureLogRecords();
     setupMockAgentError(
       createGatewayModelCallError({
         gatewayName: "GatewayInternalServerError",
@@ -4602,9 +4644,16 @@ describe("createToolLoopHarness", () => {
     expect(JSON.stringify((stepFailed!.data as { details?: unknown }).details)).not.toContain(
       "large schema",
     );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "AI Gateway rejected the model request before the agent produced a response.",
+      }),
+    );
   });
 
   it("emits the full terminal failure cascade on a structural 4xx model-call error", async () => {
+    const logs = captureLogRecords();
     // 400/401/403/404 responses are classified as terminal — the
     // session is torn down because retrying would hit the same wall.
     const error = Object.assign(new Error("invalid api key"), {
@@ -4625,9 +4674,13 @@ describe("createToolLoopHarness", () => {
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.failed");
     expect(types).not.toContain("session.waiting");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "invalid api key" }),
+    );
   });
 
   it("surfaces a terminal model-call error to a delegated conversation caller", async () => {
+    const logs = captureLogRecords();
     const error = Object.assign(new Error("No endpoints found for anthropic/claude-3.5-haiku"), {
       name: "AI_APICallError",
       statusCode: 404,
@@ -4653,9 +4706,16 @@ describe("createToolLoopHarness", () => {
     expect(types).toContain("step.failed");
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.failed");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "No endpoints found for anthropic/claude-3.5-haiku",
+      }),
+    );
   });
 
   it("emits the full terminal failure cascade on an explicit Gateway invalid-request error", async () => {
+    const logs = captureLogRecords();
     setupMockAgentError(
       createGatewayModelCallError({
         gatewayName: "GatewayInvalidRequestError",
@@ -4689,6 +4749,12 @@ describe("createToolLoopHarness", () => {
     });
     expect(JSON.stringify((stepFailed!.data as { details?: unknown }).details)).not.toContain(
       "large schema",
+    );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "AI Gateway rejected the model request before the agent produced a response.",
+      }),
     );
   });
 
@@ -5066,6 +5132,7 @@ describe("createToolLoopHarness", () => {
     });
 
     it("retries with the offending tool dropped and a one-shot system note", async () => {
+      const logs = captureLogRecords();
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => ({
         "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
       }));
@@ -5167,9 +5234,16 @@ describe("createToolLoopHarness", () => {
       expect(resolveRuntimeContext.mock.calls[1]?.[0].modelInput.instructions).toEqual(
         retryInstructions,
       );
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "disabling unsupported provider tool(s); retrying step once",
+        }),
+      );
     });
 
     it("falls through to terminal cascade when recovery retry also fails", async () => {
+      const logs = captureLogRecords();
       // Both attempts fail with the same unsupported-tool error. The
       // existing terminal/recoverable handling runs on the second
       // failure so the session is torn down.
@@ -5213,9 +5287,22 @@ describe("createToolLoopHarness", () => {
       expect(types).toContain("step.failed");
       expect(types).toContain("turn.failed");
       expect(types).toContain("session.failed");
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "disabling unsupported provider tool(s); retrying step once",
+        }),
+      );
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "AI Gateway rejected the model request before the agent produced a response.",
+        }),
+      );
     });
 
     it("does not retry when the error is unrelated to unsupported provider tools", async () => {
+      const logs = captureLogRecords();
       setupMockAgentError(new Error("Model blew up"));
 
       const { emit, events } = createEventCollector();
@@ -5229,6 +5316,12 @@ describe("createToolLoopHarness", () => {
       // The unrelated error still flows through the recoverable cascade
       // (plain Error defaults to recoverable classification).
       expect(types).toContain("session.waiting");
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     });
   });
 
@@ -8156,7 +8249,7 @@ describe("createToolLoopHarness", () => {
       expect(pendingApprovalInstructions(callIndex)).toContain("bash");
       expect(pendingApprovalInstructions(callIndex)).not.toContain("rm -rf /tmp/demo");
       expect(followup.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
-      expect(hasDeferredStepInput(followup.session)).toBe(false);
+      expect(getDeferredStepInput(followup.session)).toBeUndefined();
       expect(hasPendingInputBatch(followup.session.state)).toBe(true);
       pendingSession = followup.session;
     }
@@ -8434,7 +8527,7 @@ describe("createToolLoopHarness", () => {
     const lastMessages = (generateCalls[0] ?? []).filter((message) => message.role === "user");
     expect(JSON.stringify(lastMessages)).toContain("Wedged hello.");
     expect(JSON.stringify(lastMessages)).toContain("Are you there?");
-    expect(hasDeferredStepInput(result.session)).toBe(false);
+    expect(getDeferredStepInput(result.session)).toBeUndefined();
     expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
@@ -9146,6 +9239,7 @@ describe("createToolLoopHarness", () => {
   });
 
   it("returns a failed manual compaction to its waiting boundary", async () => {
+    const logs = captureLogRecords();
     vi.mocked(compactMessages).mockRejectedValueOnce(new Error("summary failed"));
 
     const { emit, events } = createEventCollector();
@@ -9169,9 +9263,13 @@ describe("createToolLoopHarness", () => {
     expect(ctx.get(HistoryStateKey)).toEqual({ taskState: "old message" });
     expect(getCompatibilityEventTypes(events)).toEqual(["compaction.requested", "session.waiting"]);
     expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "manual session compaction failed" }),
+    );
   });
 
   it("returns a failed manual model resolution to its waiting boundary", async () => {
+    const logs = captureLogRecords();
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
       createTestConfig(emit, {
@@ -9190,6 +9288,9 @@ describe("createToolLoopHarness", () => {
     expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
     expect(compactMessages).not.toHaveBeenCalled();
     expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "manual session compaction failed" }),
+    );
   });
 
   it("uses the authored compaction model when one is configured", async () => {
@@ -11061,6 +11162,7 @@ describe("createToolLoopHarness", () => {
     });
 
     it("merges runtime context before emitting step.started", async () => {
+      const logs = captureLogRecords();
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -11152,9 +11254,16 @@ describe("createToolLoopHarness", () => {
       expect(order.indexOf("turn.started")).toBeLessThan(order.indexOf("runtimeContext"));
       expect(order.indexOf("step.started")).toBeLessThan(order.indexOf("runtimeContext"));
       expect(getCompatibilityEventTypes(events)).toContain("step.started");
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "ignoring reserved instrumentation runtime context key",
+        }),
+      );
     });
 
     it("continues the normal turn flow when runtime context throws", async () => {
+      const logs = captureLogRecords();
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -11191,6 +11300,12 @@ describe("createToolLoopHarness", () => {
       expect(agentCall?.runtimeContext).toMatchObject({
         "eve.session.id": "test-session",
       });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "ignoring instrumentation projection after projector failure",
+        }),
+      );
     });
 
     it("resolves runtime context for each step and turn coordinate", async () => {
@@ -11716,6 +11831,7 @@ describe("createToolLoopHarness", () => {
     );
 
     it("does not advance history state when the model call fails", async () => {
+      const logs = captureLogRecords();
       const ctx = new ContextContainer();
       ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
       const { emit } = createEventCollector();
@@ -11744,6 +11860,12 @@ describe("createToolLoopHarness", () => {
       expect(ctx.get(HistoryStateKey)).toEqual({
         availableSkills: "Available skills\n- policy: Tenant policy",
       });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     });
 
     it("does not advance history state when recording the step result fails", async () => {
@@ -11769,6 +11891,7 @@ describe("createToolLoopHarness", () => {
     });
 
     it("retains completed compaction when the next model call fails", async () => {
+      const logs = captureLogRecords();
       const announcement = "Available skills\n- policy: Tenant policy";
       const ctx = new ContextContainer();
       ctx.set(PendingSkillAnnouncementKey, announcement);
@@ -11817,6 +11940,12 @@ describe("createToolLoopHarness", () => {
         retried.session.history.filter((message) => message.content === announcement),
       ).toHaveLength(1);
       expect(restoredContext.get(HistoryStateKey)).toEqual({ availableSkills: announcement });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     });
 
     it.each(["clear", "manual compaction", "automatic compaction"])(
@@ -12539,6 +12668,7 @@ describe("boundary event failures", () => {
   it.each(["turn.started", "step.started"] as const)(
     "parks a failed %s and accepts the next turn",
     async (boundary) => {
+      const logs = captureLogRecords();
       const events: UnstampedMessageStreamEvent[] = [];
       let denied = true;
       const emit: HarnessEmitFn = async (event) => {
@@ -12585,10 +12715,17 @@ describe("boundary event failures", () => {
         { data: { turnId: "turn_1", sequence: 1 } },
       ]);
       expect(events.filter((event) => event.type === "session.started")).toHaveLength(1);
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "turn boundary handler failed — parking session",
+        }),
+      );
     },
   );
 
   it("fails the current later step without invoking another model", async () => {
+    const logs = captureLogRecords();
     const events: UnstampedMessageStreamEvent[] = [];
     const emit: HarnessEmitFn = async (event) => {
       events.push(event);
@@ -12608,9 +12745,16 @@ describe("boundary event failures", () => {
       data: { stepIndex: 3, turnId: "turn_2" },
     });
     expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "turn boundary handler failed — parking session",
+      }),
+    );
   });
 
   it("lets a failed failure handler escalate", async () => {
+    const logs = captureLogRecords();
     const emit: HarnessEmitFn = async (event) => {
       if (event.type === "turn.started") throw new BoundaryHookError(new Error("admission denied"));
       if (event.type === "turn.failed") throw new Error("failure handler failed");
@@ -12620,6 +12764,12 @@ describe("boundary event failures", () => {
         message: "Hi",
       }),
     ).rejects.toThrow("failure handler failed");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "turn boundary handler failed — parking session",
+      }),
+    );
   });
 
   it("keeps runtime preamble failures terminal", async () => {

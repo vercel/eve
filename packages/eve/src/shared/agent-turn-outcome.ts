@@ -1,11 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import type { JsonValue } from "#shared/json.js";
-import {
-  tokenUsageSchema,
-  tokenUsageWithCostSchema,
-  type TokenUsage,
-} from "#shared/token-usage.js";
+import { tokenUsageWithCostSchema, type TokenUsage } from "#shared/token-usage.js";
 
 /**
  * What one delegated child turn produced, independent of whether the child
@@ -69,25 +65,11 @@ const agentTurnResultSchema: z.ZodType<AgentTurnResult> = z.discriminatedUnion("
 ]);
 
 /**
- * Zod schema for {@link AgentTurnOutcome}.
+ * Zod schema for {@link AgentTurnOutcome}, including optional model token cost.
  *
  * Validates outcomes crossing the process boundary (remote session
  * callbacks). Local notification paths construct the type directly.
  */
-export const agentTurnOutcomeSchema: z.ZodType<AgentTurnOutcome> = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal("parked"),
-    result: agentTurnResultSchema,
-    usageDelta: tokenUsageSchema,
-  }),
-  z.strictObject({
-    kind: z.literal("terminal"),
-    result: agentTurnResultSchema,
-    usageDelta: tokenUsageSchema,
-  }),
-]);
-
-/** Current outcome schema, including optional model token cost. */
 export const agentTurnOutcomeWithCostSchema: z.ZodType<AgentTurnOutcome> = z.discriminatedUnion(
   "kind",
   [

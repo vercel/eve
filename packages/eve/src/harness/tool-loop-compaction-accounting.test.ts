@@ -13,6 +13,10 @@ import {
   validateMemoryRecallResult,
 } from "#shared/memory-state.js";
 
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
+
 vi.mock("ai", () => ({
   generateText: vi.fn(),
   ToolLoopAgent: vi.fn(),

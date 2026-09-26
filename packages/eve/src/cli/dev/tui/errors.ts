@@ -40,16 +40,6 @@ export function isInterruptedError(error: unknown): boolean {
 }
 
 /**
- * Recognizes errors raised by aborting an in-flight fetch/stream (e.g. the
- * subagent child-session pump being cancelled). These are expected shutdown
- * noise, not failures to surface.
- */
-export function isAbortLikeError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return error.name === "AbortError" || /\babort(?:ed)?\b/iu.test(error.message);
-}
-
-/**
  * Stable identity for one failure cascade entry. The harness emits the same
  * `{ code, message }` payload on `step.failed`, `turn.failed`, and (for
  * terminal failures) `session.failed`; keying on both lets the stream
@@ -80,7 +70,7 @@ export function formatFailureMessage(event: FailureStreamEvent): string {
  * inspection dump for unrecognized failures. One projection so every
  * consumer narrows the untyped `details` payload the same way.
  */
-export interface FailureDetails {
+interface FailureDetails {
   readonly semanticErrorId?: string;
   readonly hint?: string;
   readonly detail?: string;

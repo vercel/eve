@@ -133,7 +133,7 @@ interface SlackMessageEvent {
  * only about `team_id` (for ergonomic auth derivation) and the inner
  * `event` payload.
  */
-export interface SlackEventCallback {
+interface SlackEventCallback {
   readonly type: "event_callback";
   readonly team_id?: string;
   readonly authorizations?: readonly {

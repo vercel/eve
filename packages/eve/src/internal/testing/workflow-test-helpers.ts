@@ -9,7 +9,7 @@ interface WorkflowEventLike {
   readonly eventType?: string;
 }
 
-export interface WorkflowHookLike {
+interface WorkflowHookLike {
   readonly hookId: string;
   readonly token: string;
 }

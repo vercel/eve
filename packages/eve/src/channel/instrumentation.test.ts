@@ -4,6 +4,7 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { buildChannelInstrumentationProjection } from "#channel/instrumentation.js";
 import { resolveAudience } from "#channel/audience.js";
 import type { AudienceContext } from "#shared/conversation-context.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const audienceInput: AudienceContext<Record<string, unknown>> = {
   auth: null,
@@ -98,6 +99,7 @@ describe("channel instrumentation", () => {
   });
 
   it("ignores an asynchronous audience classifier", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const adapter: ChannelAdapter = {
       instrumentation: { audience: () => Promise.resolve("public") as never },
       kind: "failing-classifier",
@@ -105,9 +107,13 @@ describe("channel instrumentation", () => {
     };
 
     expect(resolveAudience(adapter, audienceInput)).toBe("unknown");
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "ignoring channel audience classifier because it returned a Promise",
+    );
   });
 
   it("consumes a rejected classifier promise before failing closed", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const unhandledRejection = vi.fn();
     process.once("unhandledRejection", unhandledRejection);
     const adapter: ChannelAdapter = {
@@ -123,6 +129,9 @@ describe("channel instrumentation", () => {
 
     expect(unhandledRejection).not.toHaveBeenCalled();
     process.removeListener("unhandledRejection", unhandledRejection);
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      "ignoring channel audience classifier because it returned a Promise",
+    );
   });
 
   it("does not log authored classifier failures verbatim", () => {
@@ -144,6 +153,7 @@ describe("channel instrumentation", () => {
   });
 
   it("observes rejected thenables before ignoring channel metadata", async () => {
+    const logs = captureLogRecords();
     let observed = false;
     const promise = Promise.reject(new Error("metadata failed"));
     const originalCatch = promise.catch.bind(promise);
@@ -169,5 +179,17 @@ describe("channel instrumentation", () => {
     await Promise.resolve();
 
     expect(observed).toBe(true);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "ignoring instrumentation projection because it returned a Promise",
+      }),
+    );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "ignored instrumentation projection Promise rejected",
+      }),
+    );
   });
 });

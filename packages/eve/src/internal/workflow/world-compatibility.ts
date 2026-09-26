@@ -14,7 +14,7 @@ export interface WorkflowWorldManifest {
   readonly peerDependencies?: Readonly<Record<string, string>>;
 }
 
-export interface AssertWorkflowWorldCompatibilityInput {
+interface AssertWorkflowWorldCompatibilityInput {
   /** Package name of the configured world, used only for the error message. */
   readonly worldPackageName: string;
   /** Parsed `package.json` of the installed configured world. */

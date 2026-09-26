@@ -65,7 +65,7 @@ export class AgentSpanIdGenerator {
   }
 }
 
-export function deriveAgentSpanId(key: string): string {
+function deriveAgentSpanId(key: string): string {
   const spanId = createHash("sha256").update(key).digest("hex").slice(0, 16);
   return /^0+$/u.test(spanId) ? "0000000000000001" : spanId;
 }

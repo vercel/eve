@@ -139,14 +139,6 @@ export interface SessionAuthContext {
   readonly subject?: string;
 }
 
-/**
- * Runtime-provided function that writes one event to the event stream.
- *
- * Backed by `getWritable()` in the workflow runtime. Not part of the adapter
- * interface: the runtime always writes events itself.
- */
-export type EventEmitFn = (event: UnstampedMessageStreamEvent) => Promise<void>;
-
 // ---------------------------------------------------------------------------
 // Deliver payload
 // ---------------------------------------------------------------------------

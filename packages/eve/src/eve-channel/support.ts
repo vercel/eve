@@ -108,7 +108,7 @@ export function normalizeEveCors(cors: EveChannelCors | undefined): ChannelCors 
   return result;
 }
 
-export function normalizeEveCorsOrigin(
+function normalizeEveCorsOrigin(
   origin: NonNullable<EveChannelCorsOptions["origin"]>,
 ): "*" | "null" | readonly string[] {
   if (origin === "*" || origin === "null") {
@@ -159,6 +159,6 @@ export async function resolveOnMessage(input: {
   return { auth: result.auth, context: result.context, title: result.title };
 }
 
-export function defaultOnMessage(ctx: EveMessageContext): EveMessageResult {
+function defaultOnMessage(ctx: EveMessageContext): EveMessageResult {
   return { auth: defaultEveAuth(ctx) };
 }

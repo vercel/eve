@@ -8,7 +8,7 @@ import { defineEval } from "../../src/evals/define-eval.js";
 
 import { runCli } from "../../src/cli/run.js";
 import {
-  clearActiveSandboxHandlesForTest,
+  shutdownActiveSandboxHandles,
   trackActiveSandboxHandle,
 } from "../../src/execution/sandbox/active-handles.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
@@ -96,11 +96,11 @@ function clearDevelopmentEnvironment(): void {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   clearDevelopmentEnvironment();
   process.exitCode = undefined;
   vi.restoreAllMocks();
-  clearActiveSandboxHandlesForTest();
+  await shutdownActiveSandboxHandles();
   mockedEvalDependencies.createDevelopmentServer.mockReset();
   mockedEvalDependencies.discoverAndImportEvals.mockReset();
   mockedEvalDependencies.discoverEvalConfig.mockReset();

@@ -29,7 +29,7 @@ import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.
  * `MockSandbox` after running a tool to assert on ordering, arguments,
  * or file contents without touching disk or spawning processes.
  */
-export interface MockSandboxInput {
+interface MockSandboxInput {
   /** Callback invoked when authored runtime code deletes this sandbox. */
   readonly delete?: () => Promise<void> | void;
   /**

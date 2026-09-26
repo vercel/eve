@@ -10,7 +10,6 @@ import {
   SessionTitleKey,
 } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
 import { createSessionEventSink } from "#execution/session/event-sink.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
@@ -273,7 +272,7 @@ it("does not prepare context when no hook subscribes to the published event", as
   ctx.set(AuthKey, null);
   ctx.set(ChannelKey, { kind: "test" });
   const bundle: Partial<CompiledBundle> = {
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry: createRuntimeHookRegistry([]),
     get turnAgent(): never {
       throw new Error("unsubscribed event prepared runtime context");
     },

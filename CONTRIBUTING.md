@@ -57,6 +57,7 @@ pnpm test               # unit + integration
 pnpm test:unit          # unit tests
 pnpm test:integration   # integration tests
 pnpm test:scenario      # scenario tests (requires pnpm build first)
+pnpm test:framework-fixtures # apps/frameworks smoke builds (requires pnpm build first)
 pnpm test:e2e           # fixture-owned eve eval suites
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```

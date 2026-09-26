@@ -6,7 +6,6 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
-import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolvePackageRoot, resolveWorkflowModulePath } from "#internal/application/package.js";
 import {
@@ -14,7 +13,6 @@ import {
   getImportPath,
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
-import { WORKFLOW_STEP_EXTERNAL_PACKAGES } from "#internal/workflow-bundle/vercel-workflow-output.js";
 
 export const WORKFLOW_VIRTUAL_ENTRY_ID = "\0eve-workflow-entry";
 
@@ -219,19 +217,6 @@ export function createWorkflowPseudoPackagePlugin(): WorkflowRolldownPlugin {
   };
 }
 
-export function createWorkflowRuntimeAliasPlugin(): WorkflowRolldownPlugin {
-  return {
-    name: "eve-workflow-runtime-aliases",
-    resolveId(source: string) {
-      if (source !== "workflow" && !source.startsWith("workflow/")) {
-        return undefined;
-      }
-
-      return resolveWorkflowModulePath(source);
-    },
-  };
-}
-
 /**
  * `workflow` resolves to the body-side shim. A `workflow/api` import still live
  * after step bodies were stubbed means a body calls the runtime API; fail the
@@ -352,69 +337,6 @@ export function createWorkflowTransformPlugin(input: {
       };
     },
   };
-}
-
-export async function bundleWorkflowStepRegistrations(input: {
-  builtinsPath: string;
-  discoveredEntries: WorkflowBundleDiscoveredEntries;
-  outfile: string;
-  projectRoot: string;
-  tsconfigPath?: string;
-  workingDir: string;
-}): Promise<void> {
-  const stepFiles = [...input.discoveredEntries.discoveredSteps].sort();
-  const stepFileSet = new Set(stepFiles);
-  const serdeOnlyFiles = [...input.discoveredEntries.discoveredSerdeFiles]
-    .sort()
-    .filter((filePath) => !stepFileSet.has(filePath));
-  const manifest: WorkflowManifest = {};
-  const virtualEntrySource = [
-    createWorkflowImport(input.builtinsPath, input.workingDir),
-    ...stepFiles.map((filePath) => createWorkflowImport(filePath, input.workingDir)),
-    ...serdeOnlyFiles.map((filePath) => createWorkflowImport(filePath, input.workingDir)),
-    "export const __steps_registered = true;",
-  ].join("\n");
-  const chunk = await buildSingleRolldownChunk(`step registrations bundle for "${input.outfile}"`, {
-    cwd: input.workingDir,
-    input: WORKFLOW_VIRTUAL_ENTRY_ID,
-    // Optional runtime packages (the just-bash sandbox engine and its
-    // native codecs) resolve lazily against the application install at
-    // run time; inlining them would drag platform-specific `.node`
-    // binaries into the step bundle.
-    external: isWorkflowStepExternalPackage,
-    platform: "node",
-    plugins: [
-      createWorkflowVirtualEntryPlugin(virtualEntrySource),
-      createWorkflowPseudoPackagePlugin(),
-      createWorkflowRuntimeAliasPlugin(),
-      createEvePackageImportsPlugin(input.workingDir),
-      createWorkflowTransformPlugin({
-        manifest,
-        mode: "step",
-        projectRoot: input.projectRoot,
-        sideEffectFiles: [...stepFiles, ...serdeOnlyFiles],
-        workingDir: input.workingDir,
-      }),
-    ],
-    resolve: {
-      conditionNames: ["eve-source"],
-      extensions: WORKFLOW_SOURCE_EXTENSIONS,
-      mainFields: ["module", "main"],
-    },
-    tsconfig: input.tsconfigPath ?? false,
-    output: {
-      comments: false,
-      format: "esm",
-      sourcemap: "inline",
-    },
-  });
-  await writeWorkflowBundleAtomically(input.outfile, chunk.code);
-}
-
-function isWorkflowStepExternalPackage(source: string): boolean {
-  return WORKFLOW_STEP_EXTERNAL_PACKAGES.some(
-    (packageName) => source === packageName || source.startsWith(`${packageName}/`),
-  );
 }
 
 export function createWorkflowNodeBuiltinGuardPlugin(): WorkflowRolldownPlugin {

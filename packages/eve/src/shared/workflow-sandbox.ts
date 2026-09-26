@@ -69,7 +69,7 @@ export async function unwrapWorkflowSandboxResult(
     | { readonly interrupt: WorkflowSandboxInterrupt; readonly status: "interrupted" };
 }
 
-export type WorkflowSandboxResolution =
+type WorkflowSandboxResolution =
   | { readonly status: "completed"; readonly output: unknown }
   | { readonly status: "failed"; readonly error: string };
 

@@ -29,6 +29,7 @@ import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/p
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { eveChannel, type EveChannelInput } from "#public/channels/eve.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const ROUTER_CALLER: SessionAuthContext = {
   attributes: {},
@@ -109,6 +110,7 @@ function createEveCreateHandler(input: EveChannelInput) {
 
 describe("eveChannel forwarded principal → runtime principal", () => {
   it("preserves origin audience and ceiling across adapter-state persistence", async () => {
+    const logs = captureLogRecords();
     const trustedForwarders = vi.fn(
       (caller: SessionAuthContext) => caller.principalId === ROUTER_CALLER.principalId,
     );
@@ -224,11 +226,15 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     // The audit attribute never enters Connect token-cache keying.
     expect(principalKey(principal)).toBe('["user","slack","slack:U123"]');
     expect(trustedForwarders).toHaveBeenCalledTimes(1);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "info", message: "accepted forwarded trace policy" }),
+    );
   });
 
   it.each(["eve.audience=public;ceiling=i1", "eve.audience=public"])(
     "keeps malformed or mixed-version baggage metadata-only: %s",
     async (baggage) => {
+      const logs = captureLogRecords();
       const handler = createEveCreateHandler({
         trustedForwarders: () => true,
         auth: () => ROUTER_CALLER,
@@ -272,10 +278,17 @@ describe("eveChannel forwarded principal → runtime principal", () => {
         ceiling: { recordInputs: false, recordOutputs: false },
         originAudience: "unknown",
       });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "using metadata-only policy for malformed forwarded audience baggage",
+        }),
+      );
     },
   );
 
   it("ignores a ceiling that disagrees with unsampled trace flags", async () => {
+    const logs = captureLogRecords();
     const handler = createEveCreateHandler({
       trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
@@ -305,9 +318,16 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     expect(handler.createSession.mock.calls[0]?.[0]?.parentTraceContext).not.toHaveProperty(
       "forwardedTracePolicy",
     );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "ignoring forwarded trace policy without an accepted sampled principal",
+      }),
+    );
   });
 
   it("ignores public audience baggage without an accepted forwarded principal", async () => {
+    const logs = captureLogRecords();
     const handler = createEveCreateHandler({
       trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
@@ -346,6 +366,12 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       },
     });
     expect(ctx.get(ConversationContextKey)?.audience).toBe("unknown");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "ignoring forwarded trace policy without an accepted sampled principal",
+      }),
+    );
   });
 
   it("resolves the transport service principal (and fails Connect) without forwarding", async () => {

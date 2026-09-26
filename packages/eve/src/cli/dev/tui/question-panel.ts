@@ -21,7 +21,7 @@ import { renderOptionRow } from "#setup/cli/option-row.js";
 
 const FREEFORM_ROW_LABEL = "Type your own answer…";
 
-export interface QuestionPanelState {
+interface QuestionPanelState {
   readonly prompt: string;
   readonly options: readonly AgentTUIInputOption[];
   /** Row index under the cursor; `options.length` is the freeform row. */

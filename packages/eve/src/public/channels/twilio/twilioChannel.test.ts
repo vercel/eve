@@ -11,6 +11,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { TwilioTextMessage } from "#public/channels/twilio/inbound.js";
 import { twilioChannel, type TwilioContext } from "#public/channels/twilio/twilioChannel.js";
 import { signTwilioRequest } from "#public/channels/twilio/verify.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const AUTH_TOKEN = "test-auth-token";
 
@@ -361,6 +362,7 @@ describe("twilioChannel() inbound text pipeline", () => {
   });
 
   it("rejects inbound text with a bad signature", async () => {
+    const logs = captureLogRecords();
     const channel = twilioChannel({ allowFrom: "*" });
     const compiled = asCompiled(channel);
     const post = compiled.routes.find((r) => r.path === "/eve/v1/twilio/messages");
@@ -389,6 +391,9 @@ describe("twilioChannel() inbound text pipeline", () => {
 
     expect(response.status).toBe(401);
     expect(send).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "twilio inbound verification failed" }),
+    );
   });
 
   it("keeps the same sender separate across different Twilio receiver numbers", async () => {

@@ -55,7 +55,7 @@ export type TrustedForwarders = (
   assertion: ForwardedAssertion,
 ) => boolean | Promise<boolean>;
 
-export type ForwardedPrincipalParseResult =
+type ForwardedPrincipalParseResult =
   | {
       readonly forwardedPrincipal: ForwardedPrincipal;
       readonly ok: true;
@@ -72,7 +72,7 @@ export type ForwardedPrincipalParseResult =
  * assertion, or the stamped forwarded contexts once a trusted forwarder's
  * assertion is accepted.
  */
-export type ResolvedForwardedPrincipal =
+type ResolvedForwardedPrincipal =
   | {
       readonly accepted: false;
       readonly auth: SessionAuthContext;

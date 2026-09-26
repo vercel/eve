@@ -15,10 +15,16 @@ import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
 } from "#internal/testing/workflow-tool-run-harness.js";
+import {
+  captureConsoleOutput,
+  taskParentEndedNotice,
+  workflowSdkNotice,
+} from "#internal/testing/log-records.js";
 
 describe("background workflow tools", () => {
   afterEach(() => vi.unstubAllEnvs());
   it("runs a session-owned background workflow invocation", async () => {
+    const output = captureConsoleOutput();
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-background",
@@ -70,6 +76,9 @@ describe("background workflow tools", () => {
         await run.cancel();
       }
     });
+    expect(output.unexpected(workflowSdkNotice.unpinnedDelivery, taskParentEndedNotice)).toEqual(
+      [],
+    );
   }, 90_000);
 
   it("wakes the agent with the failure when a background workflow tool throws", async () => {

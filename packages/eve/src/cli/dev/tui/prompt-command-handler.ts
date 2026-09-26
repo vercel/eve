@@ -17,7 +17,7 @@ import type { DevelopmentTuiTarget } from "./target.js";
 
 type ExtensionCommand = Extract<PromptCommand, { type: "extension" }>;
 
-export interface PromptCommandHandlerOptions {
+interface PromptCommandHandlerOptions {
   readonly target: DevelopmentTuiTarget;
   /** Test seam; defaults to the model flow's shared source-change apply. */
   readonly applyModel?: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;

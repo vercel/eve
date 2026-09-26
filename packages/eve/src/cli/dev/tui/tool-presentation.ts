@@ -3,7 +3,7 @@ import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
 /** Renderer-ready copy derived from a tool call without owning its lifecycle. */
-export interface ToolPresentation {
+interface ToolPresentation {
   readonly title: string;
   readonly subtitle: string;
   readonly summarizeResult: (output: unknown) => string | undefined;

@@ -294,7 +294,7 @@ export interface EveEvalLiveTurn {
 }
 
 /** Operations and state belonging to one accepted session. */
-export interface EveEvalSessionDriver {
+interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
   readonly events: readonly MessageStreamEvent[];
   /**

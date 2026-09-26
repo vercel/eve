@@ -1,10 +1,10 @@
 import type { AppsManifestCreateArguments } from "@slack/web-api";
 
-import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import type { JsonObject } from "#shared/json.js";
 
-export const SLACK_APP_MANIFEST_TYPE = "https://docs.slack.dev/reference/app-manifest/";
+const SLACK_APP_MANIFEST_TYPE = "https://docs.slack.dev/reference/app-manifest/";
 
-export interface SlackAppManifestBuildDefinition {
+interface SlackAppManifestBuildDefinition {
   readonly build: (channelName: string) => JsonObject;
 }
 
@@ -36,11 +36,4 @@ export function defineSlackAppManifest(input: {
       return manifest;
     },
   };
-}
-
-export function buildSlackAppManifest(value: unknown, channelName: string): JsonObject | undefined {
-  if (value === null || typeof value !== "object") return undefined;
-  const build = (value as { readonly build?: unknown }).build;
-  if (typeof build !== "function") return undefined;
-  return parseJsonObject(build(channelName));
 }

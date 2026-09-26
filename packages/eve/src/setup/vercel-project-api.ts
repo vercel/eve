@@ -26,7 +26,7 @@ const VercelProjectListEntrySchema = z.object({
 export type VercelProjectListEntry = z.infer<typeof VercelProjectListEntrySchema>;
 
 /** One ranked Vercel project search page and its optional continuation cursor. */
-export interface VercelProjectSearchPage {
+interface VercelProjectSearchPage {
   readonly projects: VercelProjectListEntry[];
   readonly next?: number;
 }

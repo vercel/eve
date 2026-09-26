@@ -2,7 +2,6 @@ import type { ModelMessage } from "ai";
 
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 
-import { replayDynamicTools } from "#context/build-dynamic-tools.js";
 import { contextStorage, type AlsContext } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
@@ -19,7 +18,6 @@ import {
   type PersistedDynamicToolMetadata,
 } from "#context/dynamic-tool-metadata.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
-import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import type {
   SessionStartedStreamEvent,
@@ -67,15 +65,6 @@ function qualifyDynamicToolNames(
     entryKey,
     name: `${prefix}${entryKey}`,
   }));
-}
-
-/** Kept as the session-specific entry point for existing runtime consumers. */
-export function replayDynamicSessionTools(
-  metadata: readonly CurrentDynamicToolMetadata[],
-  _resolvers: readonly ResolvedDynamicToolResolver[],
-  sessionId: string,
-): readonly HarnessToolDefinition[] {
-  return replayDynamicTools(metadata, { sessionId, scope: "session" });
 }
 
 function durableKeyForEvent(

@@ -17,10 +17,16 @@ import {
   createWorkflowToolRuntime,
   waitForWorkflowToolRunTerminal,
 } from "#internal/testing/workflow-tool-run-harness.js";
+import {
+  captureConsoleOutput,
+  taskParentEndedNotice,
+  workflowSdkNotice,
+} from "#internal/testing/log-records.js";
 
 describe("workflow tool cancellation", () => {
   afterEach(() => vi.unstubAllEnvs());
   it("fails the retained caller when a yielded child receives reset", async () => {
+    const output = captureConsoleOutput();
     const kind = "reset";
     const runtime = await createWorkflowToolRuntime({
       agentName: `yielded-child-${kind}`,
@@ -97,9 +103,19 @@ describe("workflow tool cancellation", () => {
         }
       }
     });
+    expect(output.lines).toContainEqual(expect.stringContaining(workflowSdkNotice.maxRetries));
+    expect(output.lines).toContainEqual(expect.stringContaining(taskParentEndedNotice));
+    expect(
+      output.unexpected(
+        workflowSdkNotice.maxRetries,
+        taskParentEndedNotice,
+        workflowSdkNotice.unpinnedDelivery,
+      ),
+    ).toEqual([]);
   }, 30_000);
 
   it("cancels nested work after its owning child has yielded", async () => {
+    const output = captureConsoleOutput();
     const runtime = await createWorkflowToolRuntime({
       agentName: "yielded-child-cancel",
       background: true,
@@ -186,9 +202,18 @@ describe("workflow tool cancellation", () => {
         await child.cancel();
       }
     });
+    expect(output.lines).toContainEqual(expect.stringContaining(workflowSdkNotice.maxRetries));
+    expect(
+      output.unexpected(
+        workflowSdkNotice.maxRetries,
+        workflowSdkNotice.unpinnedDelivery,
+        taskParentEndedNotice,
+      ),
+    ).toEqual([]);
   }, 30_000);
 
   it("cancels the run when the waiting turn is cancelled and lets the body clean up", async () => {
+    const output = captureConsoleOutput();
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-cancel",
@@ -235,6 +260,14 @@ describe("workflow tool cancellation", () => {
         await run.cancel();
       }
     });
+    expect(output.lines).toContainEqual(expect.stringContaining(workflowSdkNotice.maxRetries));
+    expect(
+      output.unexpected(
+        workflowSdkNotice.maxRetries,
+        workflowSdkNotice.unpinnedDelivery,
+        taskParentEndedNotice,
+      ),
+    ).toEqual([]);
   }, 60_000);
 });
 

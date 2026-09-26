@@ -1,13 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildSlackAppManifest,
-  defineSlackAppManifest,
-} from "#public/channels/slack/app-manifest.js";
+import { defineSlackAppManifest } from "#public/channels/slack/app-manifest.js";
 
 describe("Slack app manifests", () => {
   it("builds the native baseline manifest", () => {
-    expect(buildSlackAppManifest(defineSlackAppManifest({}), "support")).toEqual({
+    expect(defineSlackAppManifest({}).build("support")).toEqual({
       $type: "https://docs.slack.dev/reference/app-manifest/",
       display_information: { name: "support" },
       features: {
@@ -31,7 +28,7 @@ describe("Slack app manifests", () => {
   it("uses a configured bot name and enforces Slack's app name limit", () => {
     const definition = defineSlackAppManifest({ botName: "x".repeat(40) });
 
-    expect(buildSlackAppManifest(definition, "support")).toMatchObject({
+    expect(definition.build("support")).toMatchObject({
       display_information: { name: "x".repeat(35) },
       features: { bot_user: { display_name: "x".repeat(35) } },
     });

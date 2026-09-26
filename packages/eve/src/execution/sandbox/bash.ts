@@ -22,7 +22,7 @@ export interface BashInput {
 /**
  * Structured result returned from {@link executeBashOnSandbox}.
  */
-export interface BashResult {
+interface BashResult {
   readonly exitCode: number;
   readonly stderr: string;
   readonly stdout: string;

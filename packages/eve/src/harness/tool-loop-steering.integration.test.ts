@@ -9,6 +9,11 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { always } from "#tools/approval/policies.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type Part = StreamResult["stream"] extends ReadableStream<infer T> ? T : never;
@@ -42,6 +47,7 @@ describe("generation steering with the real AI SDK", () => {
     const warning = vi.spyOn(console, "warn").mockImplementation((message) => {
       if (String(message).includes("retrying")) retrying.resolve();
     });
+    const streamError = vi.spyOn(console, "error").mockImplementation(() => {});
     const steering = new AbortController();
     const cancellation = new AbortController();
     const doStream = vi.fn<MockLanguageModelV3["doStream"]>(async () => ({
@@ -69,8 +75,13 @@ describe("generation steering with the real AI SDK", () => {
       if (kind === "cancel") await expect(running).rejects.toBeInstanceOf(TurnCancelledError);
       else expect((await running).steered).toBe(true);
       expect(doStream).toHaveBeenCalledOnce();
+      expect(streamError).toHaveBeenCalledWith(
+        "[eve:harness.tool-loop] tool-loop stream error",
+        expect.anything(),
+      );
     } finally {
       warning.mockRestore();
+      streamError.mockRestore();
       vi.useRealTimers();
     }
   });
@@ -78,6 +89,7 @@ describe("generation steering with the real AI SDK", () => {
   it.each(["input.requested", "turn.completed", "step.failed"] as const)(
     "finishes committing %s when a correction arrives during publication",
     async (boundary) => {
+      const logs = captureLogRecords();
       const steering = new AbortController();
       const events: UnstampedMessageStreamEvent[] = [];
       const model = new MockLanguageModelV3({
@@ -138,6 +150,10 @@ describe("generation steering with the real AI SDK", () => {
       expect(events.filter((event) => event.type === boundary)).toHaveLength(1);
       expect(events.filter((event) => event.type === "session.waiting")).toHaveLength(1);
       expect(events.filter((event) => event.type === "message.appended")).toHaveLength(0);
+      const parked = logs.records.filter(
+        (record) => record.message === "model call failed — parking session for retry by the user",
+      );
+      expect(parked).toHaveLength(boundary === "step.failed" ? 1 : 0);
     },
   );
 

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { dispatchToClaimedAgentAddress } from "./handle-dispatch.js";
 import { continueRemoteAgentSession, resolveRemoteAgentForAction } from "./remote-dispatch.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 vi.mock("#execution/workflow-runtime.js", () => ({ createWorkflowRuntime: vi.fn() }));
 vi.mock("#subagents/remote-dispatch.js", async (importOriginal) => ({
@@ -81,12 +82,16 @@ describe("claimed child delivery", () => {
   });
 
   it("reports a missing child without starting a replacement", async () => {
+    const logs = captureLogRecords();
     dispatchSession.mockResolvedValueOnce({ status: "session_not_active" });
     await expect(dispatchToClaimedAgentAddress(input)).resolves.toMatchObject({
       kind: "error",
       deliveryPermanent: true,
     });
     expect(dispatchSession).toHaveBeenCalledTimes(1);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "task agent delivery failed" }),
+    );
   });
 
   it("steers a remote child without replacing its callback", async () => {

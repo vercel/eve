@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import { parseGatewayModelCatalog } from "#shared/gateway-model-catalog.js";
 
 import {
   fetchGatewayCatalog,
   modelOptionsFromCatalog,
-  parseGatewayCatalog,
   type GatewayCatalogModel,
 } from "./select-model.js";
 
@@ -136,9 +136,9 @@ describe("modelOptionsFromCatalog", () => {
   });
 });
 
-describe("parseGatewayCatalog", () => {
+describe("parseGatewayModelCatalog", () => {
   it("skips malformed catalog entries instead of rejecting the whole catalog", () => {
-    const models = parseGatewayCatalog({
+    const models = parseGatewayModelCatalog({
       data: [
         CATALOG[0],
         { id: "vendor/experimental", shape: "unrecognized" },
@@ -152,7 +152,7 @@ describe("parseGatewayCatalog", () => {
 
   it("keeps a model when only its optional catalog metadata is malformed", () => {
     expect(
-      parseGatewayCatalog({
+      parseGatewayModelCatalog({
         data: [
           {
             id: "vendor/experimental",
@@ -175,6 +175,6 @@ describe("parseGatewayCatalog", () => {
   });
 
   it("rejects a catalog payload without a data array", () => {
-    expect(() => parseGatewayCatalog({ models: [] })).toThrow("invalid model catalog");
+    expect(() => parseGatewayModelCatalog({ models: [] })).toThrow("invalid model catalog");
   });
 });

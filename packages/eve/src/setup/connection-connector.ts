@@ -22,7 +22,7 @@ export interface SetupConnectionConnectorOptions {
 }
 
 /** Connector identity returned by the Vercel CLI. */
-export interface ConnectConnectorRef {
+interface ConnectConnectorRef {
   uid: string;
   id: string;
   name?: string;

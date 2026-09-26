@@ -12,7 +12,7 @@ import { toInputSchema } from "#tools/schema.js";
  * source id, permissive input schema) so most tests can supply just a name
  * and an `execute` function. Everything else is overrideable.
  */
-export interface MockToolInput {
+interface MockToolInput {
   /** Presentation callbacks derived from tool lifecycle values. */
   readonly label?: ResolvedToolDefinition["label"];
   /** Tool name exposed to the model. */

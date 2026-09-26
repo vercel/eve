@@ -25,7 +25,7 @@ export interface ApplyAiGatewayCredentialDeps {
   detectAiGatewayResolution: typeof detectAiGatewayResolution;
 }
 
-export interface ApplyAiGatewayCredentialOptions {
+interface ApplyAiGatewayCredentialOptions {
   /** Reports credential progress and warnings. The box never prompts through it. */
   prompter: Prompter;
   deps?: ApplyAiGatewayCredentialDeps;

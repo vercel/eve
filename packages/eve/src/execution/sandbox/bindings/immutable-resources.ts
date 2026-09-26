@@ -10,9 +10,9 @@ import {
 } from "#shared/sandbox-provider.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 
-export const SANDBOX_RESOURCES_ROOT = "/eve/resources";
+const SANDBOX_RESOURCES_ROOT = "/eve/resources";
 
-export function resolveImmutableResourcesPath(input: {
+function resolveImmutableResourcesPath(input: {
   readonly storagePath: string;
   readonly provider: string;
   readonly resourcesKey: string;

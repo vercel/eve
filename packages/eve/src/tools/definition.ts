@@ -103,13 +103,6 @@ export interface InternalToolDefinitionWithExecuteFn<
   execute: ToolExecuteFn<TInput, TOutput>;
 }
 
-export interface PublicToolDefinitionWithExecuteFn<
-  TInput = unknown,
-  TOutput = unknown,
-> extends PublicToolDefinition<TInput, TOutput> {
-  execute: ToolExecuteFn<TInput, TOutput>;
-}
-
 /**
  * A question a workflow tool asks the human on the session's channel, sent
  * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the

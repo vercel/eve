@@ -31,10 +31,8 @@ import {
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
-import {
-  type AgentTraceStateStore,
-  InMemoryAgentTraceStateStore,
-} from "#tracing/agent-trace-state.js";
+import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-trace-state-store.js";
 import {
   createInstrumentationHooks,
   type InstrumentationActionKind,

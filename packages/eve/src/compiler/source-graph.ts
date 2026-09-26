@@ -61,7 +61,7 @@ export interface AgentSourceRegistration {
   readonly source: ProgrammaticAgentSource;
 }
 
-export interface AgentSourceRegistryOptions {
+interface AgentSourceRegistryOptions {
   /** Programmatic extension declarations loaded by compiled virtual mounts. */
   readonly extensionDeclarations?: readonly ProgrammaticAgentSource[];
   readonly templates?: readonly ProgrammaticAgentSource[];
@@ -587,11 +587,6 @@ export async function loadProgrammaticModuleNamespace(input: {
     );
   }
   return namespace;
-}
-
-export function canonicalModuleSlot(logicalPath: string): string {
-  validateProgrammaticLogicalPath(logicalPath);
-  return canonicalSourceSlot(logicalPath);
 }
 
 /**

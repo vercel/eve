@@ -15,7 +15,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
 import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { emitProxiedInputRequest, routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
@@ -53,7 +53,7 @@ function buildMockBundle(adapters: readonly ChannelAdapter[]): CompiledBundle {
     adapterRegistry: createRuntimeAdapterRegistry({ channels }),
     compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
     graph: {} as CompiledBundle["graph"],
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry: createRuntimeHookRegistry([]),
     moduleMap: {} as CompiledBundle["moduleMap"],
     resolvedAgent: {} as CompiledBundle["resolvedAgent"],
     subagentRegistry: {} as CompiledBundle["subagentRegistry"],

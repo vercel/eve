@@ -29,7 +29,7 @@ import {
 import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
 import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-error.js";
 
-export interface EnsureSandboxAccessInput {
+interface EnsureSandboxAccessInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId: string;
   readonly ownsSandbox?: boolean;

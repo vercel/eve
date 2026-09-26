@@ -28,13 +28,12 @@ vi.mock("#context/build-callback-context.js", () => ({
 
 // Import after mock so the module picks up the mock
 const {
-  replayDynamicSessionTools,
   dispatchDynamicToolEvent,
   refreshDynamicSessionToolsForRuntimeRevision,
   rebindMissingCompiledDynamicToolCallbacks,
   validateDurableDynamicToolCallbacks,
 } = await import("#context/dynamic-tool-lifecycle.js");
-const { buildDynamicTools, buildResponseAuthorizationTools } =
+const { buildDynamicTools, buildResponseAuthorizationTools, replayDynamicTools } =
   await import("#context/build-dynamic-tools.js");
 
 import { ContextContainer } from "#context/container.js";
@@ -59,6 +58,7 @@ import {
   createStepStartedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 // Re-implement the naming logic here to test it independently
 // (the production function is unexported — testing via the public behavior)
@@ -217,7 +217,7 @@ describe("durable callback capture validation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// replayDynamicSessionTools — name+phase lookup + closure replay
+// replayDynamicTools — name+phase lookup + closure replay
 // ---------------------------------------------------------------------------
 
 function callbackOwner(
@@ -264,7 +264,9 @@ function requireCurrentMetadata(
   return metadata;
 }
 
-describe("replayDynamicSessionTools", () => {
+const SESSION_SCOPE = { sessionId: "test-session", scope: "session" } as const;
+
+describe("replayDynamicTools", () => {
   function metadata(name: string, closure: JsonObject = {}): CurrentDynamicToolMetadata {
     return {
       callbacks: { execute: { closure } },
@@ -277,7 +279,7 @@ describe("replayDynamicSessionTools", () => {
   }
 
   it("fails execution closed when the registered callback is unavailable", async () => {
-    const [tool] = replayDynamicSessionTools([metadata("unregistered")], [], "test-session");
+    const [tool] = replayDynamicTools([metadata("unregistered")], SESSION_SCOPE);
     await expect(tool!.execute!({}, executeOptions)).rejects.toThrow(
       'Dynamic tool "unregistered" cannot replay its execute callback',
     );
@@ -296,7 +298,7 @@ describe("replayDynamicSessionTools", () => {
         tenantName: "Acme",
       });
 
-      const tools = replayDynamicSessionTools([durable], [], "test-session");
+      const tools = replayDynamicTools([durable], SESSION_SCOPE);
       expect(tools).toHaveLength(1);
       expect(tools[0]!.name).toBe("replay-tool");
       expect(tools[0]!.description).toBe("replay-tool description");
@@ -316,12 +318,12 @@ describe("replayDynamicSessionTools", () => {
 
   it("runs the latest registered implementation after a redeploy rebinds the name", async () => {
     registerTestCallback("latest-tool", "execute", () => ({ version: 1 }));
-    const tools = replayDynamicSessionTools([metadata("latest-tool")], [], "test-session");
+    const tools = replayDynamicTools([metadata("latest-tool")], SESSION_SCOPE);
     await expect(tools[0]!.execute!({}, executeOptions)).resolves.toEqual({ version: 1 });
 
     // A redeploy re-resolves and replaces the binding under the same identity.
     registerTestCallback("latest-tool", "execute", () => ({ version: 2 }));
-    const rebound = replayDynamicSessionTools([metadata("latest-tool")], [], "test-session");
+    const rebound = replayDynamicTools([metadata("latest-tool")], SESSION_SCOPE);
     await expect(rebound[0]!.execute!({}, executeOptions)).resolves.toEqual({ version: 2 });
     getDynamicCallbackRegistry().delete("latest-tool");
   });
@@ -335,11 +337,7 @@ describe("replayDynamicSessionTools", () => {
 
     try {
       const closureVars = { counter: 1, label: "v1" };
-      const tools = replayDynamicSessionTools(
-        [metadata("snapshot-tool", closureVars)],
-        [],
-        "test-session",
-      );
+      const tools = replayDynamicTools([metadata("snapshot-tool", closureVars)], SESSION_SCOPE);
 
       const tool = tools[0]!;
       tool.execute!({}, executeOptions);
@@ -367,7 +365,7 @@ describe("replayDynamicSessionTools", () => {
         metadata("tenant__export", { tenant: "acme" }),
       ];
 
-      const tools = replayDynamicSessionTools(durable, [], "test-session");
+      const tools = replayDynamicTools(durable, SESSION_SCOPE);
       expect(tools).toHaveLength(2);
       expect(tools[0]!.name).toBe("tenant__query");
       expect(tools[1]!.name).toBe("tenant__export");
@@ -1253,6 +1251,7 @@ describe("dispatchDynamicToolEvent", () => {
   });
 
   it("skips map entries that were not created with defineTool", async () => {
+    const logs = captureLogRecords();
     const ctx = createCtx();
     const rawResolver = createResolver("raw", ["step.started"], () => ({
       unwrapped: {
@@ -1270,11 +1269,18 @@ describe("dispatchDynamicToolEvent", () => {
     });
 
     expect(buildDynamicTools(ctx)).toHaveLength(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Dynamic tool resolver (step.started) failed — skipping its complete result.",
+      }),
+    );
   });
 
   it.each(["single", "map"])(
     "does not advertise a workflow tool returned as a %s",
     async (shape) => {
+      const logs = captureLogRecords();
       const ctx = createCtx();
       const tool = defineWorkflowTool({
         description: "Invalid dynamic workflow",
@@ -1293,10 +1299,17 @@ describe("dispatchDynamicToolEvent", () => {
         event: makeEvent("session.started"),
       });
       expect(buildDynamicTools(ctx)).toHaveLength(0);
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "Dynamic tool resolver (session.started) failed — skipping its complete result.",
+        }),
+      );
     },
   );
 
   it("resolver throwing is logged and skipped — other resolvers still work", async () => {
+    const logs = captureLogRecords();
     const ctx = createCtx();
     const badResolver = createResolver("bad", ["session.started"], () => {
       throw new Error("resolver exploded");
@@ -1315,6 +1328,12 @@ describe("dispatchDynamicToolEvent", () => {
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("working");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Dynamic tool resolver (session.started) failed — skipping its complete result.",
+      }),
+    );
   });
 
   it("uses file slug when handler returns a single entry", async () => {
@@ -1808,6 +1827,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
   });
 
   it("rejects an untransformed tool atomically without resolver hydration", async () => {
+    const logs = captureLogRecords();
     const ctx = createCtx();
     const execute = vi.fn(async () => ({ ok: true }));
     const request = vi.fn(async () => "user-approval" as const);
@@ -1834,6 +1854,12 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(execute).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
     expect(response).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Dynamic tool resolver (session.started) failed — skipping its complete result.",
+      }),
+    );
   });
 
   it("propagates outputSchema from dynamic entries into harness tools and metadata", async () => {
@@ -2119,6 +2145,7 @@ describe("dynamic callback cache recovery", () => {
   it.each(["null", "throw", "invalid"])(
     "clears withdrawn and partially registered callbacks when a resolver returns %s",
     async (outcome) => {
+      const logs = captureLogRecords();
       const ctx = createCtx();
       const original = createResolver("changing", ["session.started"], () => ({
         changed: createReplayableTool(),
@@ -2158,6 +2185,12 @@ describe("dynamic callback cache recovery", () => {
       await expect(
         tools.find((tool) => tool.name === "other")!.execute!({}, executeOptions),
       ).resolves.toEqual({ ok: true });
+      const failures = logs.records.filter(
+        (record) =>
+          record.message ===
+          "Dynamic tool resolver (session.started) failed — skipping its complete result.",
+      );
+      expect(failures).toHaveLength(outcome === "null" ? 0 : 1);
     },
   );
 

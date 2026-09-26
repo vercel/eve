@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { resolveSelfModificationConfig } from "./config.js";
-import { resolveGitHubCredential } from "./credentials.js";
+import { createGitHubCredentialProvider } from "./credentials.js";
 import { resolveSelfModificationMode } from "./mode.js";
 
 afterEach(() => {
@@ -168,11 +168,12 @@ describe("self-modification deployed configuration", () => {
 
   it("resolves the GitHub token for each capability", async () => {
     process.env.EVE_SELF_MODIFICATION_GITHUB_TOKEN = " secret-token ";
-    const repository = resolveSelfModificationConfig(deployed).deployed!.repository;
-    await expect(resolveGitHubCredential({ capability: "checkout", repository })).resolves.toBe(
+    const { credentials, repository } = resolveSelfModificationConfig(deployed).deployed!;
+    const provider = createGitHubCredentialProvider(credentials);
+    await expect(provider.resolve({ capability: "checkout", repository })).resolves.toBe(
       "secret-token",
     );
-    await expect(resolveGitHubCredential({ capability: "publish", repository })).resolves.toBe(
+    await expect(provider.resolve({ capability: "publish", repository })).resolves.toBe(
       "secret-token",
     );
   });

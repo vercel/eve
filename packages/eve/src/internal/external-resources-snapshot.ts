@@ -3,7 +3,7 @@ import type { JsonObject } from "#shared/json.js";
 export const EXTERNAL_RESOURCES_SNAPSHOT_KIND = "eve-external-resources";
 export const EXTERNAL_RESOURCES_SNAPSHOT_VERSION = 1;
 
-export interface ExternalCredentialRequirement {
+interface ExternalCredentialRequirement {
   readonly method?: string;
   readonly reference: string;
   readonly service: string;

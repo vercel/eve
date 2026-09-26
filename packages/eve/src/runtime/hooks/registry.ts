@@ -26,19 +26,6 @@ export interface RuntimeHookRegistry {
 }
 
 /**
- * Returns an empty registry. Used by tests that build a runtime bundle
- * stub without authored hooks — production registries are constructed
- * via {@link createRuntimeHookRegistry} from the resolved authored
- * graph.
- */
-export function createEmptyHookRegistry(): RuntimeHookRegistry {
-  return {
-    streamEventsByType: new Map(),
-    streamEventsWildcard: [],
-  };
-}
-
-/**
  * Builds the per-node runtime hook registry from an ordered list of
  * resolved hook definitions.
  *

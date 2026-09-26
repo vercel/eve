@@ -34,7 +34,7 @@ const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond
 const APPROVAL_AUTHORIZER_TIMEOUT_MS = 10_000;
 const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
 
-export interface ApprovalDeliveryResult {
+interface ApprovalDeliveryResult {
   readonly challenges: readonly AuthorizationChallenge[];
   readonly feedback: readonly string[];
   readonly kind:

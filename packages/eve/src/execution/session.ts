@@ -19,7 +19,7 @@ export const DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION = 40_000_000;
  * explicitly uncapped the axis (skipping the root default). Resolution maps
  * this shape onto the numeric {@link SessionLimits} the harness checks.
  */
-export interface AuthoredSessionLimits {
+interface AuthoredSessionLimits {
   readonly maxInputTokensPerSession?: number | false;
   readonly maxOutputTokensPerSession?: number | false;
   readonly maxTokenCostUsdPerSession?: number | false;
@@ -59,7 +59,7 @@ export function createCompactionConfig(
   return config;
 }
 
-export interface CreateSessionInput {
+interface CreateSessionInput {
   readonly continuationToken: string;
   readonly compactionOverrides?: {
     readonly thresholdPercent?: number;

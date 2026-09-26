@@ -70,8 +70,6 @@ export async function fetchGatewayCatalog(signal?: AbortSignal): Promise<Gateway
   }
 }
 
-export { parseGatewayModelCatalog as parseGatewayCatalog } from "#shared/gateway-model-catalog.js";
-
 /** Position in the curated shortlist, or its length for everything else. */
 function featuredPriority(id: string): number {
   const index = FEATURED_MODEL_IDS.indexOf(id);

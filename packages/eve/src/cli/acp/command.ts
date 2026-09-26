@@ -24,7 +24,7 @@ export type RunAcpServer = (input: {
 export type ResolveVerifiedRemoteDevelopmentClient =
   typeof import("#setup/verified-remote-client.js").resolveVerifiedRemoteDevelopmentClient;
 
-export interface RegisterAcpCommandOptions {
+interface RegisterAcpCommandOptions {
   readonly applicationContext: CliApplicationContext;
   readonly eveVersion: string;
   readonly program: Command;
