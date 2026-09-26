@@ -45,7 +45,7 @@ catalog:
   "@vercel/connect": "2.3.3"
   "@vercel/otel": "2.1.3"
   "@vercel/sandbox": "3.3.0"
-  "@workflow/world-postgres": "5.0.0-beta.46"
+  "@workflow/world-postgres": "5.0.0-beta.47"
   ai: "^7.0.105"
   better-auth: "1.6.26"
   marked: "17.0.6"
