@@ -421,9 +421,9 @@ the turn to end, then starts that principal's turn. Calls with `taskId` and `tas
 only the task's creator principal, and `task_wait` and `[Tasks]` cover only the turn principal's
 tasks. Anonymous callers share one principal.
 
-**No task time limits.** `defineAgent`'s `timeout` keeps its meaning, the session lifetime
-(default 30 days), and bounds all work in the session. A body that needs a limit races `sleep`
-against its work. A person who wants an update asks, and the model decides whether to keep
+**No task time limits.** `defineAgent`'s `limits.sessionTimeoutMs` keeps its meaning, the
+session lifetime (default 30 days), and bounds all work in the session; with `false`, tasks are
+unbounded. A body that needs a limit races `sleep` against its work. A person who wants an update asks, and the model decides whether to keep
 waiting or cancel.
 
 **Cap.** At most 32 working tasks per session (`TOO_MANY_TASKS`), a worst-case backstop normal use
