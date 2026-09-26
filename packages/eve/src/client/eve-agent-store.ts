@@ -604,7 +604,7 @@ export class EveAgentStore<TData> {
       if (this.#activeTurn === undefined && settled) this.#status = "ready";
     }
     this.#callbacks.onSessionChange?.(this.#session?.state);
-    this.#publish();
+    if (this.#status !== "resuming") this.#publish();
     if (this.#activeTurn === undefined && wasStreaming && settled) {
       this.#callbacks.onFinish?.(this.#snapshot);
     }
