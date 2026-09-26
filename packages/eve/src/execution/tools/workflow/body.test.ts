@@ -32,7 +32,7 @@ it("defaults agent metadata to an empty registry for older workflow payloads", a
       owner: { inbox: "inbox" },
       runId: "run",
     },
-    new AbortController().signal,
+    { abortSignal: new AbortController().signal, interruptSignal: new AbortController().signal },
   );
 });
 
@@ -70,7 +70,10 @@ it("binds workflow-only methods to the run context", async () => {
     expect(mocks.agent).toHaveBeenCalledWith(ctx, target, invocation);
     return { answer, result };
   });
-  await expect(executeWorkflowBody(input, signal)).resolves.toEqual({
+  const interruptSignal = new AbortController().signal;
+  await expect(
+    executeWorkflowBody(input, { abortSignal: signal, interruptSignal }),
+  ).resolves.toEqual({
     outcome: { status: "completed", output: { answer: { optionId: "yes" }, result: "reviewed" } },
     reportCount: 0,
   });

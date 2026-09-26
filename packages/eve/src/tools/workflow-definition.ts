@@ -94,6 +94,12 @@ export type WorkflowToolContext = Pick<
   agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   /** Ask the human on the session's channel; awaiting the answer suspends the run. */
   ask(request: ToolInputRequest): PromiseLike<ToolInputResponse>;
+  /**
+   * Aborts once, on the first steering message that arrives while the turn
+   * waits on this call. What it means is the tool's choice: a body that
+   * ignores it keeps going, and one that should stop early races or passes it.
+   */
+  readonly interruptSignal: AbortSignal;
 };
 
 const WORKFLOW_TOOL_BRAND = Symbol.for("eve:workflow-tool-brand");
