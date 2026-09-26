@@ -215,7 +215,8 @@ import {
   readGatewayGenerationId,
   type HarnessStepResult,
 } from "#harness/step-hooks.js";
-import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
+import { resolveCallProviderOptions } from "#harness/provider-safety.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
 import {
   buildToolApproval,
   buildToolSetFromDefinitions,
@@ -3128,11 +3129,13 @@ async function maybeCompact(input: {
   });
   const compactionModelReference =
     session.agent.compactionModelReference ?? requireSessionModelReference(session);
-  const providerOptions = mergeProviderSafetyIdentifier(
-    compactionModelReference,
-    compaction.providerOptions,
-    input.auth,
-  ) as Parameters<typeof compactMessages>[3];
+  const providerOptions = resolveCallProviderOptions({
+    auth: input.auth,
+    conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
+    model: compaction.model,
+    modelReference: compactionModelReference,
+    providerOptions: compaction.providerOptions,
+  }) as Parameters<typeof compactMessages>[3];
 
   if (emit) {
     const ctx = contextStorage.getStore();

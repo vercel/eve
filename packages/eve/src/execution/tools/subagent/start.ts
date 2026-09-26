@@ -14,7 +14,7 @@ import { startRemoteSubagent } from "#subagents/start-remote.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
 import type { SubagentParentContext } from "#subagents/invocation.js";
 import type { AgentChildTraceDispatch } from "#tracing/agent-invocation-coordinator.js";
-import { resolveConversationId } from "#tracing/conversation-context.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
 
 export type SubagentStartTarget =
   | {

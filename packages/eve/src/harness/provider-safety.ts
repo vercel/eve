@@ -1,4 +1,6 @@
+import type { LanguageModel } from "ai";
 import type { SessionAuthContext } from "#channel/types.js";
+import { mergeGatewaySessionId } from "#internal/gateway.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { mergeObjects } from "#shared/objects.js";
@@ -26,4 +28,19 @@ export function mergeProviderSafetyIdentifier(
         : undefined;
 
   return defaults === undefined ? providerOptions : mergeObjects(defaults, providerOptions);
+}
+
+/** Composes the per-call defaults shared by model steps and compaction. */
+export function resolveCallProviderOptions(input: {
+  readonly auth: SessionAuthContext | null;
+  readonly conversationId: string;
+  readonly model: LanguageModel;
+  readonly modelReference: RuntimeModelReference;
+  readonly providerOptions: Readonly<Record<string, unknown>> | undefined;
+}): Record<string, unknown> | undefined {
+  return mergeGatewaySessionId(
+    input.model,
+    mergeProviderSafetyIdentifier(input.modelReference, input.providerOptions, input.auth),
+    input.conversationId,
+  );
 }
