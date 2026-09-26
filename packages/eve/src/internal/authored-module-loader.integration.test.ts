@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
+  bundleAuthoredModuleCode,
   bundleAuthoredModuleForGeneration,
   bundleAuthoredModuleMapForGeneration,
   loadAuthoredModuleNamespace,
@@ -833,19 +834,20 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
         ].join("\n"),
       );
 
-      const externalPackageRoot = join(app.appRoot, "node_modules", "@aws-sdk", "client-kms");
-      await mkdir(externalPackageRoot, { recursive: true });
+      // Installed beside the workspace package, as pnpm lays it out.
+      const dependencyRoot = join(packageRoot, "node_modules", "@aws-sdk", "client-kms");
+      await mkdir(dependencyRoot, { recursive: true });
       await writeFile(
-        join(externalPackageRoot, "package.json"),
+        join(dependencyRoot, "package.json"),
         JSON.stringify({ main: "index.cjs", name: "@aws-sdk/client-kms" }, null, 2),
       );
       await writeFile(
-        join(externalPackageRoot, "index.cjs"),
+        join(dependencyRoot, "index.cjs"),
         'module.exports = require("./runtimeConfig.shared");\n',
       );
       await writeFile(
-        join(externalPackageRoot, "runtimeConfig.shared.js"),
-        "module.exports = { value: 'bundled-dependency' };\n",
+        join(dependencyRoot, "runtimeConfig.shared.js"),
+        "module.exports = { value: 'kms-client-inlined' };\n",
       );
 
       await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
@@ -855,11 +857,19 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
         "junction",
       );
 
-      const moduleNamespace = await loadAuthoredModuleNamespace(
-        join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
+      const modulePath = join(
+        app.appRoot,
+        "agent",
+        "channels",
+        "api",
+        "contact-sales",
+        "webhook.ts",
       );
+      const moduleNamespace = await loadAuthoredModuleNamespace(modulePath);
 
-      expect(moduleNamespace.result).toBe("bundled-dependency");
+      expect(moduleNamespace.result).toBe("kms-client-inlined");
+      // The dependency's source is inlined, not left as an external import.
+      expect(await bundleAuthoredModuleCode(modulePath)).toContain("kms-client-inlined");
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
