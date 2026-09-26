@@ -5,7 +5,7 @@ export default defineMcpClientConnection({
   description:
     "DataForSEO: run SEO, keyword, and SERP data lookups through DataForSEO's MCP server.",
   headers: () => {
-    const login = process.env.DATAFORSEO_LOGIN!;
+    const login = process.env.DATAFORSEO_USERNAME!;
     const password = process.env.DATAFORSEO_PASSWORD!;
     const token = Buffer.from(`${login}:${password}`).toString("base64");
     return {

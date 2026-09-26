@@ -474,7 +474,7 @@
       "title": "DataForSEO",
       "description": "Run SEO, keyword, and SERP data lookups through DataForSEO's MCP server.",
       "envVars": {
-        "DATAFORSEO_LOGIN": "",
+        "DATAFORSEO_USERNAME": "",
         "DATAFORSEO_PASSWORD": ""
       },
       "files": [

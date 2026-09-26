@@ -170,7 +170,7 @@ for (const item of items) {
       const envVars = item.envVars ?? {};
       if (
         item.dependencies !== undefined ||
-        !("DATAFORSEO_LOGIN" in envVars) ||
+        !("DATAFORSEO_USERNAME" in envVars) ||
         !("DATAFORSEO_PASSWORD" in envVars)
       ) {
         throw new Error(
