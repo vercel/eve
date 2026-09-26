@@ -1,5 +1,4 @@
 import { rm } from "node:fs/promises";
-import { finalizeDevelopmentGenerationMetadata } from "#internal/nitro/dev-runtime-generation-metadata.js";
 
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
@@ -58,11 +57,6 @@ export async function stageDevelopmentGeneration(
     const materialized = await writeMaterializedAuthoredModules({
       prepared,
       runtimeAppRoot: snapshot.runtimeAppRoot,
-    });
-
-    await finalizeDevelopmentGenerationMetadata(snapshot.snapshotRoot, {
-      runtimeAppRoot: snapshot.runtimeAppRoot,
-      recoveryVersion: 1,
     });
 
     return prepared.workflowSourceFingerprint === undefined

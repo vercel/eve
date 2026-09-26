@@ -253,7 +253,7 @@ describe("parent development Workflow World", () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-recovery-");
     await seedGeneration(appRoot, "retained");
     await seedGeneration(appRoot, "changed-framework", { frameworkFingerprint: "old-framework" });
-    await seedGeneration(appRoot, "legacy", { recoveryVersion: undefined });
+    await seedGeneration(appRoot, "legacy");
     await seedGeneration(appRoot, "queued-only", { workflowSourceFingerprint: "old-workflow" });
     await seedGeneration(appRoot, "changed-workflow", {
       workflowSourceFingerprint: "old-workflow",
@@ -261,7 +261,6 @@ describe("parent development Workflow World", () => {
     for (const [generationId, source] of [
       ["invalid-json", '{"runtimeAppRoot":'],
       ["invalid-schema", JSON.stringify({ runtimeAppRoot: 42 })],
-      ["invalid-version", JSON.stringify({ runtimeAppRoot: "/unused", recoveryVersion: 2 })],
     ] as const) {
       await seedGeneration(appRoot, generationId);
       await writeFile(
@@ -281,7 +280,6 @@ describe("parent development Workflow World", () => {
         "changed-workflow",
         "invalid-json",
         "invalid-schema",
-        "invalid-version",
       ]) {
         runIds.push(
           readCreatedRunId(
@@ -324,7 +322,7 @@ describe("parent development Workflow World", () => {
       await restarted.start();
       await expect
         .poll(() => [...deliveries].sort())
-        .toEqual([runIds[0], runIds[2], runIds[4]].sort());
+        .toEqual([runIds[0], runIds[2], runIds[3], runIds[4]].sort());
       expect(warning).toHaveBeenCalledWith(
         expect.stringContaining('"invalid-json": Development generation metadata is invalid.'),
       );
@@ -338,7 +336,13 @@ describe("parent development Workflow World", () => {
       for (const [index, runId] of runIds.entries()) {
         if (index < 2) continue;
         const expected =
-          index === 2 ? "changed-framework" : index === 4 ? "changed-workflow" : undefined;
+          index === 2
+            ? "changed-framework"
+            : index === 3
+              ? "legacy"
+              : index === 4
+                ? "changed-workflow"
+                : undefined;
         await expect(deliverToWorker({ runId })).resolves.toBe(expected);
         await expect(deliverToWorker({ workflowRunId: runId })).resolves.toBe(expected);
         await expect(callWorld(restarted, "runs.get", [runId])).resolves.toMatchObject({
@@ -853,7 +857,6 @@ async function seedGeneration(
   appRoot: string,
   generationId: string,
   overrides: {
-    recoveryVersion?: number | undefined;
     frameworkFingerprint?: string;
     workflowSourceFingerprint?: string;
   } = {},
@@ -863,7 +866,7 @@ async function seedGeneration(
   await mkdir(runtimeAppRoot, { recursive: true });
   await writeFile(
     join(snapshotRoot, "generation.json"),
-    `${JSON.stringify({ runtimeAppRoot, recoveryVersion: 1, ...overrides })}\n`,
+    `${JSON.stringify({ runtimeAppRoot, ...overrides })}\n`,
   );
 }
 

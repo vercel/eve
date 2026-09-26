@@ -14,13 +14,11 @@ export async function readDevelopmentGenerationAvailability(
   if (retained.kind === "missing") {
     return { kind: "missing", reason: "Development runtime snapshot is no longer available" };
   }
-  if (retained.kind === "invalid" || retained.kind === "legacy") {
+  if (retained.kind === "invalid") {
     return {
       kind: "ineligible",
       reason:
-        retained.kind === "legacy"
-          ? "Development generation lacks recovery metadata. Start a new session."
-          : "Development generation metadata is invalid. Restore the affected snapshot from a backup or start a new session.",
+        "Development generation metadata is invalid. Restore the affected snapshot from a backup or start a new session.",
     };
   }
   return { kind: "ready", runtimeAppRoot: retained.metadata.runtimeAppRoot };
