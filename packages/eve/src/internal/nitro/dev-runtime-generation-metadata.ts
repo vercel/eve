@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 export interface DevelopmentGenerationMetadata {
@@ -11,6 +11,18 @@ const GENERATION_METADATA = "generation.json";
 
 export function resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(appRoot: string): string {
   return join(appRoot, ".eve", "dev-runtime", "snapshots");
+}
+
+export async function listDevelopmentGenerationIds(appRoot: string): Promise<string[]> {
+  try {
+    const entries = await readdir(resolveDevelopmentRuntimeArtifactsSnapshotsDirectory(appRoot), {
+      withFileTypes: true,
+    });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+    throw error;
+  }
 }
 
 /** Finalizes metadata once, before the staged snapshot can be published. */

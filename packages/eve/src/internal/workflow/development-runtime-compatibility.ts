@@ -44,19 +44,20 @@ export type DevelopmentGenerationAvailability =
   | { readonly kind: "missing"; readonly reason: string }
   | { readonly kind: "incompatible"; readonly reason: string };
 
+/** Compares fingerprints only when selecting retained generations for startup recovery. */
 export async function readDevelopmentGenerationAvailability(
   appRoot: string,
   generationId: string,
-  activeGenerationId: string,
+  recoveryGenerationId?: string,
 ): Promise<DevelopmentGenerationAvailability> {
   const retained = await readDevelopmentGenerationMetadata(appRoot, generationId);
   if (retained.kind === "missing") {
     return { kind: "missing", reason: "Development runtime snapshot is no longer available" };
   }
   const active =
-    generationId === activeGenerationId
+    recoveryGenerationId === undefined || generationId === recoveryGenerationId
       ? retained
-      : await readDevelopmentGenerationMetadata(appRoot, activeGenerationId);
+      : await readDevelopmentGenerationMetadata(appRoot, recoveryGenerationId);
   if (retained.kind === "invalid" || active.kind === "invalid") {
     return {
       kind: "incompatible",
@@ -67,8 +68,9 @@ export async function readDevelopmentGenerationAvailability(
   const { metadata } = retained;
   if (
     active.kind !== "ready" ||
-    metadata.frameworkFingerprint !== (await getDevelopmentFrameworkFingerprint()) ||
-    metadata.workflowSourceFingerprint !== active.metadata.workflowSourceFingerprint
+    (recoveryGenerationId !== undefined &&
+      (metadata.frameworkFingerprint !== (await getDevelopmentFrameworkFingerprint()) ||
+        metadata.workflowSourceFingerprint !== active.metadata.workflowSourceFingerprint))
   ) {
     return {
       kind: "incompatible",

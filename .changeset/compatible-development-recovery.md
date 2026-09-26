@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Local development skips retained workflows whose framework build or authored workflow sources no longer match, rather than replaying them into corrupted-event-log errors. Incompatible runs and runs with malformed snapshot metadata remain stored without blocking recovery of compatible runs, and startup reports why recovery was skipped.
+At server startup, local development skips retained workflows whose framework build or authored workflow sources no longer match, or whose snapshot metadata is malformed, and reports why recovery was skipped. Those runs remain stored and dormant for that server invocation; hot reload preserves existing behavior for admitted runs, including follow-up turns, cancellation, and starting a new conversation.

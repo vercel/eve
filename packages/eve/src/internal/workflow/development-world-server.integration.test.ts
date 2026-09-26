@@ -107,7 +107,7 @@ describe("parent development Workflow World", () => {
     }
   });
 
-  it("pins every workflow delivery to its recorded generation", async () => {
+  it("keeps current-invocation deliveries eligible after authored workflow changes", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-world-");
     await seedGeneration(appRoot, "generation-a");
     await seedGeneration(appRoot, "generation-b");
@@ -132,8 +132,20 @@ describe("parent development Workflow World", () => {
       ]);
       const runId = readCreatedRunId(created);
 
+      await seedGeneration(appRoot, "generation-b", {
+        workflowSourceFingerprint: "added-workflow",
+      });
       activeGenerationId = "generation-b";
-      await expect(deliverToWorker({ runId })).resolves.toBe("generation-a");
+      for (const message of [
+        { runId },
+        { workflowRunId: runId },
+        { runInput: { deploymentId: "generation-a" } },
+        { runInput: { deploymentId: "generation-b" } },
+      ]) {
+        await expect(deliverToWorker(message)).resolves.toBe(
+          message.runInput?.deploymentId ?? "generation-a",
+        );
+      }
     } finally {
       await world.close();
     }
@@ -226,6 +238,7 @@ describe("parent development Workflow World", () => {
     await seedGeneration(appRoot, "retained");
     await seedGeneration(appRoot, "incompatible", { frameworkFingerprint: "old-framework" });
     await seedGeneration(appRoot, "legacy", { frameworkFingerprint: undefined });
+    await seedGeneration(appRoot, "queued-only", { workflowSourceFingerprint: "old-workflow" });
     await seedGeneration(appRoot, "changed-workflow", {
       workflowSourceFingerprint: "old-workflow",
     });
@@ -287,7 +300,8 @@ describe("parent development Workflow World", () => {
       deliveries.push(message.runId);
       return Response.json({ ok: true });
     }) as typeof fetch;
-    const restarted = createWorld({ activeGenerationId: () => "retained", appRoot });
+    let activeGenerationId = "retained";
+    const restarted = createWorld({ activeGenerationId: () => activeGenerationId, appRoot });
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       await restarted.start();
@@ -299,6 +313,9 @@ describe("parent development Workflow World", () => {
         status: "cancelled",
       });
       connectWorkerToWorld(restarted, appRoot);
+      await seedGeneration(appRoot, "rebuilt", { workflowSourceFingerprint: "old-workflow" });
+      activeGenerationId = "rebuilt";
+      await expect(deliverToWorker({ runId: runIds[0] })).resolves.toBe("retained");
       for (const runId of runIds.slice(2)) {
         await expect(deliverToWorker({ runId })).resolves.toBeUndefined();
         await expect(deliverToWorker({ workflowRunId: runId })).resolves.toBeUndefined();
@@ -307,7 +324,7 @@ describe("parent development Workflow World", () => {
         });
       }
       await expect(
-        deliverToWorker({ runId: RUN_ID, runInput: { deploymentId: "incompatible" } }),
+        deliverToWorker({ runId: RUN_ID, runInput: { deploymentId: "queued-only" } }),
       ).resolves.toBeUndefined();
     } finally {
       warning.mockRestore();

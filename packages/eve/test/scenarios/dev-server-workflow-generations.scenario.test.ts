@@ -142,9 +142,9 @@ describe("eve dev server workflow generations", () => {
     DEV_SERVER_SCENARIO_TIMEOUT_MS,
   );
 
-  it(
-    "makes a newly added tool available to the next turn in a continued session",
-    async () => {
+  it.each(["tool", "workflow"] as const)(
+    "makes a newly added %s available to the next turn and allows session reset",
+    async (kind) => {
       const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
 
@@ -159,7 +159,20 @@ describe("eve dev server workflow generations", () => {
 
         await writeFile(
           join(app.appRoot, "agent", "tools", "get_added_marker.ts"),
-          createGenerationMarkerToolSource("added-tool", false),
+          kind === "tool"
+            ? createGenerationMarkerToolSource("added-tool", false)
+            : [
+                'import { defineWorkflowTool } from "eve/tools";',
+                'import { z } from "zod";',
+                "export default defineWorkflowTool({",
+                '  description: "Return the added workflow marker.",',
+                "  inputSchema: z.object({ city: z.string().optional() }),",
+                "  async execute() {",
+                '    "use workflow";',
+                '    return { marker: "added-tool" };',
+                "  },",
+                "});",
+              ].join("\n"),
         );
         await forceDevelopmentRebuild(server.url);
 
@@ -171,6 +184,13 @@ describe("eve dev server workflow generations", () => {
 
         expect(secondResult.sessionId).toBe(firstSessionId);
         expect(readCompletedMessages(secondResult.events)).toContain("added-tool");
+        const reset = await fetch(new URL(`/eve/v1/session/${firstSessionId}/reset`, server.url), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reason: "Start a new conversation after rebuilding" }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        expect(reset.status, await reset.text()).toBe(200);
       } finally {
         await server.stop();
       }
