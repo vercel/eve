@@ -6,6 +6,11 @@ import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { readRetainedBackgroundToolResult } from "#execution/tasks/parent/tool-execution.js";
+import { isApprovalRequest } from "#harness/input-request-class.js";
+import {
+  getPendingInputBatches,
+  removePendingInputBatches,
+} from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
@@ -31,12 +36,16 @@ export async function createCancelledModelCallBatchResult(input: {
   const backgroundTasks = retained?.backgroundTasks ?? input.checkpoint?.result.backgroundTasks;
   const checkpointSession =
     backgroundTaskSession ?? input.checkpoint?.result.session ?? input.initialSession;
+  const resolvedCheckpointSession = removeResolvedApprovalBatches(
+    checkpointSession,
+    input.stepInput,
+  );
   const cancelledSession =
     input.checkpoint === undefined
       ? await contextStorage.run(input.ctx, () =>
-          preserveCancelledTurnMessage(checkpointSession, input.stepInput),
+          preserveCancelledTurnMessage(resolvedCheckpointSession, input.stepInput),
         )
-      : checkpointSession;
+      : resolvedCheckpointSession;
   const checkpointContext = {
     ...(input.checkpoint?.serializedContext ?? input.beforeBatchContext),
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
@@ -64,4 +73,23 @@ export async function createCancelledModelCallBatchResult(input: {
     ),
     sessionState: createDurableSessionState({ session: cancelledSession }),
   };
+}
+
+function removeResolvedApprovalBatches(
+  session: HarnessSession,
+  stepInput: StepInput | undefined,
+): HarnessSession {
+  const responseIds = new Set(stepInput?.inputResponses?.map((response) => response.requestId));
+  if (responseIds.size === 0) return session;
+
+  const resolvedBatches = getPendingInputBatches(session.state).filter(
+    (batch) =>
+      batch.requests.some((request) => isApprovalRequest(request)) &&
+      batch.requests.every(
+        (request) => !isApprovalRequest(request) || responseIds.has(request.requestId),
+      ),
+  );
+  return resolvedBatches.length === 0
+    ? session
+    : removePendingInputBatches(session, resolvedBatches);
 }
