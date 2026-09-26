@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/task-cancel.js";
+import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
@@ -13,6 +14,9 @@ vi.mock("#execution/tools/subagent/task-agent-requests.js", () => ({
 }));
 vi.mock("#execution/tools/subagent/task-cancel.js", () => ({
   cancelAgentInvocationOwnerStep: vi.fn(),
+}));
+vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
+  releaseAgentInvocationOwnerStep: vi.fn(),
 }));
 
 beforeEach(() => vi.resetAllMocks());
@@ -77,6 +81,15 @@ it.each(["completed", "cancelled"] as const)(
       serializedContext: {},
       sessionState: state,
     });
+    const handleStore = getAgentHandleStore(state.snapshot.session.state);
+    const releasedHandle =
+      status === "completed"
+        ? { address, identity, phase: "available" as const }
+        : { address, identity, lastStatus: "(cancelled)", phase: "parked" as const };
+    vi.mocked(releaseAgentInvocationOwnerStep).mockResolvedValue({
+      claimedHandles: [{ address, identity }],
+      handleStore: { handles: [releasedHandle] },
+    });
     await handleWorkflowToolRunMessage({
       callbackMetadataUrl: "https://parent.example",
       cursor,
@@ -105,6 +118,11 @@ it.each(["completed", "cancelled"] as const)(
             output: "The workflow tool run was cancelled.",
           },
     );
+    expect(releaseAgentInvocationOwnerStep).toHaveBeenCalledWith({
+      cancelled: status === "cancelled",
+      handleStore,
+      ownerId: "run",
+    });
     expect(cancelAgentInvocationOwnerStep).toHaveBeenCalledWith({
       handles: [{ address, identity }],
       ownerId: "run",
