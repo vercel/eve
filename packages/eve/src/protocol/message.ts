@@ -295,7 +295,13 @@ export interface InputRequestedStreamEvent {
 }
 
 /** Authoritative terminal outcome for one human-input request. */
-export type InputResolutionOutcome = "answered" | "approved" | "denied" | "ignored" | "invalid";
+export type InputResolutionOutcome =
+  | "answered"
+  | "approved"
+  | "cancelled"
+  | "denied"
+  | "ignored"
+  | "invalid";
 
 /** One server-accepted resolution from a pending human-input batch. */
 export interface InputResolution {

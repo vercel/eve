@@ -86,17 +86,32 @@ export interface WorkflowToolRunOutcomeMessage {
   readonly result: WorkflowToolRunOutcome;
 }
 
+/** A `ctx.ask()` request sent under `replyTo` was withdrawn before anyone answered it. */
+export interface WorkflowToolRunWithdrawMessage {
+  readonly from: WorkflowToolRunRef;
+  readonly replyTo: string;
+}
+
 export type WorkflowToolRunMessage =
   | ({ readonly kind: "report" } & WorkflowToolRunReport)
   | ({ readonly kind: "request" } & WorkflowToolRunRequestMessage)
+  | ({ readonly kind: "withdraw" } & WorkflowToolRunWithdrawMessage)
   | ({ readonly kind: "outcome" } & WorkflowToolRunOutcomeMessage);
 
-export type WorkflowToolRunControlMessage = { readonly kind: "cancel"; readonly reason: string };
+/**
+ * Commands the session sends a run on its control hook. `cancel` aborts the
+ * call's `abortSignal`; `interrupt` aborts its `interruptSignal`, because
+ * steering arrived while the turn waits on the call.
+ */
+export type WorkflowToolRunControlMessage =
+  | { readonly kind: "cancel"; readonly reason: string }
+  | { readonly kind: "interrupt" };
 
 export function isWorkflowToolRunControlMessage(
   value: unknown,
 ): value is WorkflowToolRunControlMessage {
   if (typeof value !== "object" || value === null) return false;
   const { kind, reason } = value as { kind?: unknown; reason?: unknown };
+  if (kind === "interrupt") return true;
   return kind === "cancel" && typeof reason === "string";
 }

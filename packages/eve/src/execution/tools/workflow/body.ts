@@ -43,6 +43,12 @@ export interface WorkflowBodyResult {
   readonly reportCount: number;
 }
 
+/** The call's signals, owned by the run: commands on its control hook abort them. */
+export interface WorkflowBodySignals {
+  readonly abortSignal: AbortSignal;
+  readonly interruptSignal: AbortSignal;
+}
+
 type WorkflowToolExecute = (
   input: unknown,
   ctx: WorkflowToolContext,
@@ -51,10 +57,11 @@ type WorkflowToolExecute = (
 /** Executes one registered workflow body and reports progress to its owner. */
 export async function executeWorkflowBody(
   input: WorkflowBodyInput & { readonly runId?: string },
-  signal: AbortSignal,
+  signals: WorkflowBodySignals,
 ): Promise<WorkflowBodyResult> {
+  const signal = signals.abortSignal;
   const from = createWorkflowBodyRef(input);
-  const ctx = createWorkflowBodyContext(input, signal);
+  const ctx = createWorkflowBodyContext(input, signals);
   attachWorkflowToolRunContext(ctx, {
     canRequestInput: input.canRequestInput,
     from,
@@ -123,7 +130,7 @@ function resolveWorkflowToolExecute(input: WorkflowBodyInput): WorkflowToolExecu
 
 function createWorkflowBodyContext(
   input: WorkflowBodyInput,
-  signal: AbortSignal,
+  signals: WorkflowBodySignals,
 ): ToolContext & WorkflowToolContext {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
@@ -141,9 +148,10 @@ function createWorkflowBodyContext(
         ]),
       ),
     ),
-    ask: (request) => ask(ctx, request),
-    abortSignal: signal,
+    ask: (request, options) => ask(ctx, request, options),
+    abortSignal: signals.abortSignal,
     callId: input.callId,
+    interruptSignal: signals.interruptSignal,
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),

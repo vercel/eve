@@ -59,8 +59,6 @@ export interface RoutedChildDelivery {
   readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  /** Answer-hook requests the user moved past; each hook resumes as `dismissed`. */
-  readonly dismissedRequestIds?: readonly string[];
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
   /** Parent-visible request IDs safe to retire once this bucket is forwarded. */
   readonly retireRequestIds: readonly string[];
@@ -82,7 +80,6 @@ interface ChildResponseBucket {
   readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  readonly dismissedRequestIds: string[];
   /** Parent-visible request IDs answered in this bucket. */
   readonly parentRequestIds: string[];
   readonly responses: InputResponse[];
@@ -95,7 +92,7 @@ interface ChildResponseBucket {
  * With `resolveMessage`, a plain-text message is also resolved against pending
  * `ctx.ask()` questions: when exactly one question is pending, a matching option or
  * permitted free text answers it and consumes the message. Otherwise the
- * message dismisses every `dismissible` question and stays with the parent.
+ * message stays with the parent.
  */
 export function routeDeliverPayload(input: {
   readonly allowRoute?: (requestId: string, route: ProxyInputRequest) => boolean;
@@ -126,7 +123,6 @@ export function routeDeliverPayload(input: {
     if (existing !== undefined) return existing;
     const bucket: ChildResponseBucket = {
       childContinuationToken: route.childContinuationToken,
-      dismissedRequestIds: [],
       parentRequestIds: [],
       responses: [],
       routes: [],
@@ -161,23 +157,17 @@ export function routeDeliverPayload(input: {
     bucket.routes.push(route);
   }
 
-  for (const requestId of message.dismissedRequestIds) {
-    const route = entries.get(requestId);
-    if (route !== undefined) bucketFor(route).dismissedRequestIds.push(requestId);
-  }
-
   const forChildren = [...responsesByChild.values()].map(
     ({
       answerHook,
       childContinuationToken,
       childSessionInbox,
-      dismissedRequestIds,
       parentRequestIds,
       responses,
       routes,
     }): RoutedChildDelivery => {
       const responseIds = new Set(parentRequestIds);
-      const retireRequestIds = new Set([...responseIds, ...dismissedRequestIds]);
+      const retireRequestIds = new Set(responseIds);
 
       // A fully-answered approval batch retires its sibling requests
       // too, so a late free-form answer cannot route through a stale
@@ -195,7 +185,6 @@ export function routeDeliverPayload(input: {
         childContinuationToken,
         payload: { inputResponses: responses },
         retireRequestIds: [...retireRequestIds],
-        ...(dismissedRequestIds.length > 0 && { dismissedRequestIds }),
         ...(childSessionInbox !== undefined && { childSessionInbox }),
         ...(answerHook !== undefined && { answerHook }),
       };
@@ -232,10 +221,9 @@ function resolveMessageAgainstQuestions(input: {
   readonly routable: (requestId: string, route: ProxyInputRequest) => boolean;
 }): {
   readonly consumed: boolean;
-  readonly dismissedRequestIds: readonly string[];
   readonly responses: readonly InputResponse[];
 } {
-  const none = { consumed: false, dismissedRequestIds: [], responses: [] };
+  const none = { consumed: false, responses: [] };
   // An explicit structured answer means the client already chose what to answer.
   if (!input.enabled || (input.payload.inputResponses?.length ?? 0) > 0) return none;
   if (input.payload.message === undefined) return none;
@@ -256,15 +244,8 @@ function resolveMessageAgainstQuestions(input: {
     pending.length === 1 && only !== undefined && typeof input.payload.message === "string"
       ? resolveTextToResponse(input.payload.message, only)
       : undefined;
-  if (answer !== undefined) return { consumed: true, dismissedRequestIds: [], responses: [answer] };
-
-  return {
-    consumed: false,
-    dismissedRequestIds: questions
-      .filter((question) => question.dismissible === true)
-      .map((question) => question.requestId),
-    responses: [],
-  };
+  if (answer !== undefined) return { consumed: true, responses: [answer] };
+  return none;
 }
 
 function batchResolves(input: {

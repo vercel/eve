@@ -7,7 +7,8 @@ import {
 } from "#internal/testing/events.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import { SLEEP_INPUT_SCHEMA, executeSleepTool } from "#execution/tools/sleep.js";
+import { SLEEP_INPUT_SCHEMA } from "#tools/provided/sleep.js";
+import { executeSleepTool } from "#tools/provided/sleep-workflow.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   askThenRaceWorkflow,

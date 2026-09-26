@@ -1,15 +1,18 @@
-import type { AskQuestionInput, AskQuestionOutput } from "#execution/tools/ask-question.js";
-import type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
-import type { WorkflowToolContext } from "#tools/workflow-definition.js";
+import type {
+  ToolInputRequest,
+  ToolInputResponse,
+  WorkflowToolContext,
+} from "#public/tools/index.js";
+import type { AskQuestionInput, AskQuestionOutput } from "#tools/provided/ask-question.js";
 
-/** Asks the session's user one question in a workflow dedicated to this tool call. */
+/** Asks the session's user one question, and withdraws it when a new message arrives. */
 export async function executeAskQuestionTool(
   input: AskQuestionInput,
   ctx: WorkflowToolContext,
 ): Promise<AskQuestionOutput> {
   "use workflow";
 
-  const answer = await ctx.ask(toAskQuestionRequest(input));
+  const answer = await ctx.ask(toAskQuestionRequest(input), { signal: ctx.interruptSignal });
   return toAskQuestionOutput(answer);
 }
 
@@ -25,7 +28,6 @@ export function toAskQuestionRequest(input: AskQuestionInput): ToolInputRequest 
   }));
   return {
     allowFreeform: true,
-    dismissible: true,
     display: options === undefined ? "text" : "select",
     prompt: input.question,
     ...(options !== undefined && { options }),
@@ -33,6 +35,12 @@ export function toAskQuestionRequest(input: AskQuestionInput): ToolInputRequest 
 }
 
 export function toAskQuestionOutput(answer: ToolInputResponse): AskQuestionOutput {
-  if (answer.status !== "answered") return { status: answer.status };
-  return { answer: answer.optionId ?? answer.text ?? "", status: "answered" };
+  switch (answer.status) {
+    case "answered":
+      return { answer: answer.optionId ?? answer.text ?? "", status: "answered" };
+    case "cancelled":
+      return { interrupted: true };
+    case "unavailable":
+      return { status: "unavailable" };
+  }
 }

@@ -142,6 +142,7 @@ describe("WorkflowBundleBuilder", () => {
       resolvePackageSourceDirectoryPath("src/execution"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
       resolvePackageSourceDirectoryPath("src/subagents"),
+      resolvePackageSourceDirectoryPath("src/tools/provided"),
     ]);
   });
 
@@ -660,7 +661,7 @@ describe("WorkflowBundleBuilder", () => {
   });
 
   it.each([
-    ["sleep tool", "src/execution/tools/sleep-workflow.ts", "executeSleepTool"],
+    ["sleep tool", "src/tools/provided/sleep-workflow.ts", "executeSleepTool"],
     ["session owner", "src/execution/session/entry.ts", "nextTurnDelivery"],
     ["workflow tool owner", "src/execution/tools/workflow/workflow.ts", "workflowToolRunWorkflow"],
   ])("keeps the %s schemas out of the workflow driver", async (_name, sourcePath, marker) => {

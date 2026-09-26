@@ -25,7 +25,12 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
   const inbox = openWorkflowToolRunOwnerInbox();
   const body: ChannelReader<"body", WorkflowBodyResult> = createChannelReader(
     "body",
-    awaitBodyResult(executeWorkflowBody({ ...input, owner: inbox.owner }, signal)),
+    awaitBodyResult(
+      executeWorkflowBody(
+        { ...input, owner: inbox.owner },
+        { abortSignal: signal, interruptSignal: owner.interruptSignal },
+      ),
+    ),
   );
   let commandsOpen = true;
   let consumedReports = 0;

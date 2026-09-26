@@ -5,7 +5,7 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
-import { isSteeringDelivery, type SessionInputQueue } from "#execution/session/input-queue.js";
+import { isSteeringMessage, type SessionInputQueue } from "#execution/session/input-queue.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -14,6 +14,7 @@ import type { SessionInboxPayload, SessionInboxReader } from "#execution/session
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
+import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type {
   DurableStepResult,
@@ -27,7 +28,10 @@ import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
-import { isInboxToolResultFromRecordedWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import {
+  findBlockingWorkflowToolRun,
+  isInboxToolResultFromRecordedWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { isInboxSubagentResultFromRunningHandle } from "#subagents/handles/query.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
@@ -191,6 +195,7 @@ export class SessionExecution {
     readonly turn: ActiveTurn;
   }): Promise<RuntimeActionResultStepInput | "cancelled"> {
     const results: RuntimeActionResult[] = [...input.initialResults];
+    let interrupted = false;
     const acceptedAtMsByCallId = new Map<string, number>();
     if (input.initialAcceptedAtMs !== undefined) {
       for (const result of results)
@@ -213,6 +218,12 @@ export class SessionExecution {
 
       const next = await input.turn.nextRuntimeEvent();
       if (next === "cancelled") return next;
+      if (next.kind === "steering") {
+        // Only the first steering message interrupts; later ones wait for the calls anyway.
+        if (!interrupted) await this.interruptWaitedWorkflowCalls(input.pendingCallIds, results);
+        interrupted = true;
+        continue;
+      }
       if (next.kind === "runtime-action-result") {
         const snapshot = this.input.cursor.sessionState.snapshot.session.state;
         const accepted = next.results.filter((result) => {
@@ -239,11 +250,28 @@ export class SessionExecution {
       }
     }
   }
+
+  /** Fires the `interruptSignal` of every workflow tool call the wait has no result for yet. */
+  private async interruptWaitedWorkflowCalls(
+    pendingCallIds: readonly string[],
+    settled: readonly RuntimeActionResult[],
+  ): Promise<void> {
+    const state = this.input.cursor.sessionState.snapshot.session.state;
+    const settledCallIds = new Set(settled.map((result) => result.callId));
+    const waited = pendingCallIds.filter((callId) => !settledCallIds.has(callId));
+    const runs = waited.flatMap((callId) => {
+      const run = findBlockingWorkflowToolRun(state, callId);
+      return run === undefined ? [] : [run.address];
+    });
+    await Promise.all(runs.map((run) => interruptWorkflowToolRun(run)));
+  }
 }
 
 type RuntimeEvent =
   | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
+  /** A steering message that answered no pending request arrived during the wait. */
+  | { readonly kind: "steering" }
   | "cancelled";
 
 /**
@@ -287,11 +315,8 @@ class ActiveTurn {
     }
     if (
       delivery.kind === "deliver" &&
-      isSteeringDelivery(delivery, this.callerCallId) &&
-      !this.input.cursor.sessionState.hasProxyInputRequests &&
-      delivery.payloads.some(
-        (value) => value.message !== undefined && value.inputResponses === undefined,
-      )
+      isSteeringMessage(delivery, this.callerCallId) &&
+      !this.input.cursor.sessionState.hasProxyInputRequests
     )
       this.steeringController.abort();
   };
@@ -342,17 +367,22 @@ class ActiveTurn {
     return steering.length === 1 ? steering[0] : coalesceDeliveries(steering);
   }
 
-  /** Next runtime result or workflow message, admitting inbox traffic while waiting. */
+  /**
+   * Next runtime result, workflow message, or steering, admitting inbox traffic
+   * while waiting. Deliveries admitted before the wait began are routed first,
+   * so a message that arrived as the calls started still steers.
+   */
   async nextRuntimeEvent(): Promise<RuntimeEvent> {
     while (true) {
+      const steered = await this.routeAdmittedToChildren();
       if (this.signal.aborted) return "cancelled";
+      if (steered) return { kind: "steering" };
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
       const payload = await this.input.inbox.next();
       if (payload === undefined)
         throw new Error("Session inbox closed before runtime actions completed.");
       await this.admit(payload);
-      await this.routeAdmittedToChildren();
     }
   }
 
@@ -385,8 +415,13 @@ class ActiveTurn {
     }
   }
 
-  /** During a runtime wait, descendant-bound answers cannot wait for the boundary. */
-  private async routeAdmittedToChildren(): Promise<void> {
+  /**
+   * During a runtime wait, descendant-bound answers cannot wait for the
+   * boundary. Returns whether a newly routed delivery still steers: it
+   * answered nothing, so its message is for the model.
+   */
+  private async routeAdmittedToChildren(): Promise<boolean> {
+    let steered = false;
     for (const sequence of this.admitted) {
       if (this.routedToChildren.has(sequence)) continue;
       const delivery = this.input.queue.delivery(sequence);
@@ -406,11 +441,16 @@ class ActiveTurn {
         this.input.queue.replaceDelivery(sequence, undefined);
         this.admitted.delete(sequence);
         this.abort();
-        return;
+        return false;
       }
       this.input.queue.replaceDelivery(sequence, routed.remainder);
-      if (routed.remainder === undefined) this.admitted.delete(sequence);
+      if (routed.remainder === undefined) {
+        this.admitted.delete(sequence);
+        continue;
+      }
+      if (isSteeringMessage(routed.remainder, this.callerCallId)) steered = true;
     }
+    return steered;
   }
 
   private abort(): void {

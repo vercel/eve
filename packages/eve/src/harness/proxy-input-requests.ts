@@ -20,14 +20,13 @@ const PROXY_INPUT_REQUEST_KINDS = {
  */
 export interface AnswerHookRoute {
   readonly runId: string;
-  /** Present for a `ctx.ask()` question: what a plain-text message may answer or dismiss. */
+  /** Present for a `ctx.ask()` question: what a plain-text message may answer. */
   readonly question?: AnswerHookQuestion;
 }
 
 /** The parts of a `ctx.ask()` request a plain-text message is resolved against. */
 export interface AnswerHookQuestion {
   readonly allowFreeform?: boolean;
-  readonly dismissible?: boolean;
   readonly options?: readonly InputOption[];
 }
 
@@ -305,14 +304,12 @@ function parseAnswerHookQuestion(value: unknown): AnswerHookQuestion | undefined
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const question: {
     allowFreeform?: boolean;
-    dismissible?: boolean;
     options?: readonly InputOption[];
   } = {};
-  for (const key of ["allowFreeform", "dismissible"] as const) {
-    const flag = Reflect.get(value, key);
-    if (flag === undefined) continue;
-    if (typeof flag !== "boolean") return undefined;
-    question[key] = flag;
+  const allowFreeform = Reflect.get(value, "allowFreeform");
+  if (allowFreeform !== undefined) {
+    if (typeof allowFreeform !== "boolean") return undefined;
+    question.allowFreeform = allowFreeform;
   }
   const options = Reflect.get(value, "options");
   if (options !== undefined) {

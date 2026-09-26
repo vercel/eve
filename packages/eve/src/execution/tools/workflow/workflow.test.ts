@@ -109,7 +109,7 @@ it("emits every persisted report before the terminal outcome", async () => {
   );
   expect(mocks.executeWorkflowBody).toHaveBeenCalledWith(
     expect.objectContaining({ owner: { inbox: "invocation-owner" } }),
-    expect.any(AbortSignal),
+    { abortSignal: expect.any(AbortSignal), interruptSignal: expect.any(AbortSignal) },
   );
 });
 
@@ -207,6 +207,7 @@ it("preserves the pending inbox read across cancellation and drains the report b
 function setControl(controller: AbortController) {
   const { signal } = controller;
   mocks.control.mockReturnValue({
+    interruptSignal: new AbortController().signal,
     signal,
     commands: createChannelReader(
       "control",
@@ -258,6 +259,7 @@ it("applies cancellation buffered during the last report delivery before publish
     }
   });
   mocks.control.mockReturnValue({
+    interruptSignal: new AbortController().signal,
     commands,
     signal: controller.signal,
     handleMessage: deliver,
@@ -289,6 +291,7 @@ it("applies cancellation buffered during the last report delivery before publish
 
 it("keeps waiting for the body after the control hook closes", async () => {
   mocks.control.mockReturnValue({
+    interruptSignal: new AbortController().signal,
     signal: new AbortController().signal,
     commands: createChannelReader("control", (async function* () {})()),
     handleCommand: vi.fn(),

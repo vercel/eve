@@ -42,4 +42,8 @@ export {
   type AgentInput,
   type WorkflowAgentMetadata,
 } from "#tools/workflow-definition.js";
-export type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+export type {
+  ToolInputRequest,
+  ToolInputRequestOptions,
+  ToolInputResponse,
+} from "#tools/definition.js";

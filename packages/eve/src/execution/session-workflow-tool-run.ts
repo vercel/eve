@@ -4,7 +4,9 @@ import type {
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunRequestMessage,
+  WorkflowToolRunWithdrawMessage,
 } from "#execution/tools/workflow/messages.js";
+import { withdrawWorkflowToolRunQuestionStep } from "#execution/tools/workflow/withdraw-step.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
@@ -38,6 +40,9 @@ export async function handleWorkflowToolRunMessage(
       return await handleWorkflowToolRunOutcome({ ...input, message });
     case "request":
       await handleWorkflowToolRunRequest({ ...input, message });
+      return undefined;
+    case "withdraw":
+      await handleWorkflowToolRunWithdraw({ ...input, message });
       return undefined;
     case "report":
       await emitWorkflowToolRunReportStep({
@@ -161,13 +166,33 @@ async function handleWorkflowToolRunRequest(
   );
 }
 
+/** A run withdrew a `ctx.ask()` question: the channel stops offering it. */
+async function handleWorkflowToolRunWithdraw(
+  input: HandlerInput<WorkflowToolRunWithdrawMessage>,
+): Promise<void> {
+  const { cursor, message } = input;
+  const recorded = findBlockingWorkflowToolRun(
+    cursor.sessionState.snapshot.session.state,
+    message.from.callId,
+    message.from.turnId,
+  );
+  if (recorded?.address.runId !== message.from.runId) return;
+  await cursor.apply(
+    await withdrawWorkflowToolRunQuestionStep({
+      requestId: message.replyTo,
+      runId: message.from.runId,
+      sessionState: cursor.sessionState,
+      sessionWritable: cursor.sessionWritable,
+    }),
+  );
+}
+
 function createAnswerHookRoute(message: WorkflowToolRunRequestMessage): AnswerHookRoute {
   if (message.request.kind !== "ask") return { runId: message.from.runId };
-  const { allowFreeform, dismissible, options } = message.request.request;
+  const { allowFreeform, options } = message.request.request;
   return {
     question: {
       ...(allowFreeform !== undefined && { allowFreeform }),
-      ...(dismissible !== undefined && { dismissible }),
       ...(options !== undefined && { options: [...options] }),
     },
     runId: message.from.runId,

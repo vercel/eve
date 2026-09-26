@@ -117,7 +117,7 @@ describe("applyWorkflowTransform", () => {
   });
 
   it("stamps versioned package workflow metadata without consuming the framework body", async () => {
-    const filename = "src/execution/tools/sleep.ts";
+    const filename = "src/tools/provided/sleep-workflow.ts";
     const transformed = await applyWorkflowTransform(
       filename,
       [

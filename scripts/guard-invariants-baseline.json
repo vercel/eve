@@ -38,5 +38,17 @@
     "packages/eve/src/internal/nitro/routes/runtime-artifacts.test.ts",
     "packages/eve/test/scenarios/load-agent-info-data.scenario.test.ts",
     "packages/eve/test/scenarios/runtime-loaders.scenario.test.ts"
+  ],
+  "rule45_providedToolPrivateImportAllowlist": [
+    "packages/eve/src/tools/provided/agent-router.ts",
+    "packages/eve/src/tools/provided/bash.ts",
+    "packages/eve/src/tools/provided/glob.ts",
+    "packages/eve/src/tools/provided/grep.ts",
+    "packages/eve/src/tools/provided/load-skill.ts",
+    "packages/eve/src/tools/provided/read-file.ts",
+    "packages/eve/src/tools/provided/web-fetch.ts",
+    "packages/eve/src/tools/provided/web-search.ts",
+    "packages/eve/src/tools/provided/workflow.ts",
+    "packages/eve/src/tools/provided/write-file.ts"
   ]
 }

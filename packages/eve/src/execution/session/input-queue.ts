@@ -221,6 +221,19 @@ export function isSteeringDelivery(
   );
 }
 
+/** A steering delivery with a message for the model, not only answers to requests. */
+export function isSteeringMessage(
+  delivery: DeliverHookPayload,
+  callerCallId: string | undefined,
+): boolean {
+  return (
+    isSteeringDelivery(delivery, callerCallId) &&
+    delivery.payloads.some(
+      (payload) => payload.message !== undefined && payload.inputResponses === undefined,
+    )
+  );
+}
+
 function combine(entries: readonly DeliveryAdmission[]): DeliverHookPayload {
   if (entries.length === 1) return entries[0]!.delivery;
   return coalesceDeliveries(entries.map(({ delivery }) => delivery));
