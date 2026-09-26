@@ -1,5 +1,14 @@
 # eve
 
+## 0.67.1
+
+### Patch Changes
+
+- aaea9b6: Send the Agent Runs conversation ID as the AI Gateway session ID for model and compaction calls, so Gateway generations from one conversation can be grouped together. Preserve an explicitly configured Gateway session ID.
+- 16e2913: eve no longer prints bundler warnings that come only from dependency code when it bundles authored modules, development generations, and workflow code, matching the production server build. Warnings from your own code and unresolved imports still print, and an unresolved import inside a workflow dependency still fails the build.
+- 16e2913: Remove unused internal helpers from the `eve` package. This is internal cleanup with no user-visible behavior change.
+- 8cac212: Fix `useEveAgent({ resume: true })` crashing with React error #185 ("Maximum update depth exceeded") when a saved session replays more than ~50 events. The store now publishes once after catch-up instead of once per replayed event.
+
 ## 0.67.0
 
 ### Minor Changes
