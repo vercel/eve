@@ -126,7 +126,7 @@ describe("resolveProvisioning box", () => {
     expect(next.aiGateway).toEqual({ kind: "inherit" });
     expect(next.modelWiring).toBe("gateway");
     expect(deps.requireAuth).toHaveBeenCalledWith("/tmp/parent", undefined, { signal: undefined });
-    expect(deps.validateTeam).toHaveBeenCalledWith(expect.anything(), "/tmp/parent", "team", {
+    expect(deps.validateTeam).toHaveBeenCalledWith("/tmp/parent", "team", {
       signal: undefined,
     });
     expect(deps.resolveTeam).toHaveBeenCalledWith("/tmp/parent", "team", { signal: undefined });
