@@ -18,7 +18,7 @@ import {
  * against a registered URL pattern, then calls the matched channel's
  * `fetch` with a `RouteContext` built from `runtime`.
  */
-export interface NitroChannelRuntimeBundle {
+interface NitroChannelRuntimeBundle {
   readonly agentName: string;
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly resolveRemoteAgentStreamHeaders?: RemoteAgentStreamHeadersResolver;

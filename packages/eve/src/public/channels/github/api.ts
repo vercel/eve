@@ -27,7 +27,7 @@ export type GitHubApiMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
 export interface GitHubApiOptions extends GitHubAuthApiOptions {}
 
 /** Options for {@link GitHubHandle.request}. */
-export interface GitHubRequestOptions {
+interface GitHubRequestOptions {
   readonly auth?: boolean;
   readonly headers?: Readonly<Record<string, string>>;
   readonly installationId?: number;
@@ -66,7 +66,7 @@ export class GitHubApiError extends Error {
 }
 
 /** Body accepted by GitHub comment-writing helpers. */
-export interface GitHubCommentBody {
+interface GitHubCommentBody {
   readonly body: string;
 }
 

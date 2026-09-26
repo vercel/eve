@@ -1,7 +1,7 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 
 /** Remembers which session-stream events have already been consumed. */
-export type EventDeduper = {
+type EventDeduper = {
   /**
    * Records `event` and returns true when it is new — false when its id was
    * already admitted, so the caller should drop it.

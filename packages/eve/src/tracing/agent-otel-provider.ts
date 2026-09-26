@@ -97,7 +97,7 @@ export interface AgentOtelInstrumentationInput {
 }
 
 /** OTel event definition and its trusted framework context runner. */
-export interface AgentOtelInstrumentation {
+interface AgentOtelInstrumentation {
   readonly hook: InstrumentationProviderDefinition;
   readonly prepareSessionTrace: (
     event: InstrumentationSessionStartedEvent,

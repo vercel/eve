@@ -13,7 +13,7 @@ export type { TemplateCategory, TemplateIntegration, TemplateSource } from "./ma
 
 const generatedTemplatesPath = join(process.cwd(), ".template-data/templates.json");
 
-export const getTemplateEntries = async (): Promise<TemplateEntry[]> => {
+const getTemplateEntries = async (): Promise<TemplateEntry[]> => {
   "use cache";
   cacheLife("max");
 

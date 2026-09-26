@@ -16,7 +16,7 @@ export interface AgentModelSettingsPatch {
 
 export type AgentModelSetting = "model" | "reasoning" | "fast-mode";
 
-export type AgentModelSettingsEdit =
+type AgentModelSettingsEdit =
   | {
       readonly kind: "applied";
       readonly changed: readonly AgentModelSetting[];

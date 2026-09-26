@@ -126,7 +126,7 @@ export async function removeSkillPackageFromSandbox(input: {
  * Validates a runtime-contributed skill name before it becomes one path
  * segment under the sandbox skill root.
  */
-export function assertSafeSkillPackageName(name: string): void {
+function assertSafeSkillPackageName(name: string): void {
   if (
     name.length === 0 ||
     name.startsWith(".") ||

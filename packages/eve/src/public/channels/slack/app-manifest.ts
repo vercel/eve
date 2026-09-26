@@ -2,9 +2,9 @@ import type { AppsManifestCreateArguments } from "@slack/web-api";
 
 import type { JsonObject } from "#shared/json.js";
 
-export const SLACK_APP_MANIFEST_TYPE = "https://docs.slack.dev/reference/app-manifest/";
+const SLACK_APP_MANIFEST_TYPE = "https://docs.slack.dev/reference/app-manifest/";
 
-export interface SlackAppManifestBuildDefinition {
+interface SlackAppManifestBuildDefinition {
   readonly build: (channelName: string) => JsonObject;
 }
 

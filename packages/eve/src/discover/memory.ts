@@ -7,7 +7,7 @@ import type { MemorySourceRef } from "#discover/manifest.js";
 import { discoverNamedSourceDirectory } from "#discover/named-source-directory.js";
 import type { ProjectSource, ProjectSourceEntry } from "#discover/project-source.js";
 
-export const DISCOVER_MEMORY_DIRECTORY_INVALID = "discover/memory-directory-invalid";
+const DISCOVER_MEMORY_DIRECTORY_INVALID = "discover/memory-directory-invalid";
 export const DISCOVER_MEMORY_SLOT_AMBIGUOUS = "discover/memory-slot-ambiguous";
 export const DISCOVER_MEMORY_NAME_INVALID = "discover/memory-name-invalid";
 

@@ -11,7 +11,7 @@ export interface ProcessOutputLine {
 export type ProcessOutputHandler = (line: ProcessOutputLine) => void;
 
 /** Accumulates partial chunks until they can be emitted as prompt-safe lines. */
-export interface ProcessOutputBuffer {
+interface ProcessOutputBuffer {
   write(stream: ProcessOutputStream, chunk: Buffer): void;
   flush(): void;
 }

@@ -10,7 +10,7 @@ export interface TwilioRoutes {
   readonly voice: string;
 }
 
-export type TwilioVerifyResult = {
+type TwilioVerifyResult = {
   readonly body: string;
   readonly params: URLSearchParams;
 } | null;

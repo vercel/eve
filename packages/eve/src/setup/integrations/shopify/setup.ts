@@ -18,7 +18,7 @@ export interface ShopifySetupDeps {
 
 const defaultDeps: ShopifySetupDeps = { appendEnv, writeTextFile };
 
-export interface ShopifySetupPlan {
+interface ShopifySetupPlan {
   storeDomain: string;
 }
 

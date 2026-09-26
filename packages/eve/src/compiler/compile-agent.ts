@@ -20,7 +20,7 @@ import type { DevelopmentExtensionSelection } from "#compiler/development-extens
  * Input for compiling the current authored agent into framework-owned
  * discovery artifacts.
  */
-export interface CompileAgentInput {
+interface CompileAgentInput {
   /** Development-only source extensions applied before source composition. */
   developmentExtensions?: DevelopmentExtensionSelection;
   /**

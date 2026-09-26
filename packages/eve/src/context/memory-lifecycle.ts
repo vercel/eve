@@ -477,7 +477,7 @@ async function settleMemoryOperations<T>(operations: readonly Promise<T>[]): Pro
   return values;
 }
 
-export function memoryOperationId(input: {
+function memoryOperationId(input: {
   readonly phase: string;
   readonly sequence: number;
   readonly sessionId: string;

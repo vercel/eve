@@ -2,7 +2,7 @@ import type { Theme } from "./theme.js";
 import { renderFlowPanel, type FlowPanelState } from "./setup-panel.js";
 
 /** Temporary setup content enclosed by a drawer and its navigation controls. */
-export interface FlowDrawer {
+interface FlowDrawer {
   readonly rows: string[];
   readonly controls: string[];
 }

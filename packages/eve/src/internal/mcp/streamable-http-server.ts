@@ -17,9 +17,7 @@ export const MCP_PROTOCOL_VERSION = "2026-07-28";
  */
 export const MCP_REQUEST_BODY_MAX_BYTES = 1024 * 1024;
 
-export interface McpToolDefinition<
-  TInputSchema extends StandardSchemaWithJSON = StandardSchemaWithJSON,
-> {
+interface McpToolDefinition<TInputSchema extends StandardSchemaWithJSON = StandardSchemaWithJSON> {
   readonly name: string;
   readonly description?: string;
   readonly annotations?: McpToolAnnotations;
@@ -49,9 +47,9 @@ export type McpContent =
  * change or re-read something; `not_found` means stop; `internal` means the
  * server failed and `errorId` correlates with its logs.
  */
-export type McpToolOperationErrorCode = "invalid_input" | "not_found" | "conflict" | "internal";
+type McpToolOperationErrorCode = "invalid_input" | "not_found" | "conflict" | "internal";
 
-export interface McpToolOperationErrorData {
+interface McpToolOperationErrorData {
   readonly code: McpToolOperationErrorCode;
   readonly errorId?: string;
   readonly message: string;
@@ -120,7 +118,7 @@ export function defineMcpTool<
   };
 }
 
-export interface McpStreamableHttpServerOptions {
+interface McpStreamableHttpServerOptions {
   readonly name: string;
   readonly version: string;
   /** Server-level usage guidance returned from `initialize` and `server/discover`. */

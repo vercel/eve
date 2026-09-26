@@ -43,7 +43,7 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
  * Dynamic handle for whichever durable session currently owns one channel-local address.
  * Only {@link send} may create a session when the address is unowned.
  */
-export interface ChannelAddress<TState = undefined> {
+interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
   deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
   send(
@@ -62,9 +62,7 @@ export interface ChannelAddress<TState = undefined> {
 }
 
 /** Factory for binding a route-local continuation token to a {@link ChannelAddress}. */
-export type ChannelAddressFn<TState = undefined> = (
-  continuationToken: string,
-) => ChannelAddress<TState>;
+type ChannelAddressFn<TState = undefined> = (continuationToken: string) => ChannelAddress<TState>;
 
 /** Creates one channel address backed by the runtime's continuation dispatch primitive. */
 export function createChannelAddress<TState = undefined>(input: {

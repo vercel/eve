@@ -22,12 +22,12 @@ import { createSandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared
 /**
  * Stable diagnostics artifact kind emitted by the compiler.
  */
-export const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
+const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
 
 /**
  * Current diagnostics artifact schema version.
  */
-export const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
+const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
 
 /**
  * Stable compile metadata artifact kind emitted by the compiler.
@@ -57,7 +57,7 @@ export interface CompilerArtifactPaths {
 /**
  * Machine-readable compiler diagnostics artifact written by the compiler.
  */
-export interface CompilerDiagnosticsArtifact {
+interface CompilerDiagnosticsArtifact {
   diagnostics: CompilerDiagnostic[];
   kind: typeof COMPILER_DIAGNOSTICS_ARTIFACT_KIND;
   summary: DiscoverDiagnosticsSummary;

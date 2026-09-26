@@ -27,7 +27,7 @@ import type {
 /**
  * Input for resolving one compiled authored agent into a runtime-owned model.
  */
-export interface ResolveAgentInput {
+interface ResolveAgentInput {
   manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   moduleMap: CompiledModuleMap;
   nodeId?: string;

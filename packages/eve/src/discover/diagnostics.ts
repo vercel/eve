@@ -3,7 +3,7 @@ import { z } from "#compiled/zod/index.js";
 /**
  * Zod schema for structured discovery diagnostic severities.
  */
-export const discoverDiagnosticSeveritySchema = z.union([z.literal("error"), z.literal("warning")]);
+const discoverDiagnosticSeveritySchema = z.union([z.literal("error"), z.literal("warning")]);
 
 /**
  * Structured discovery diagnostic emitted while classifying authored sources.

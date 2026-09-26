@@ -10,12 +10,12 @@ import { isObject } from "#shared/guards.js";
 import { probeAgentInfo } from "#services/dev-client/agent-info-probe.js";
 import type { RemoteConnectionState } from "./remote-connection-types.js";
 
-export type RemoteProbeResult = Extract<
+type RemoteProbeResult = Extract<
   RemoteConnectionState,
   { state: "ready" | "auth-required" | "unavailable" }
 >;
 
-export type RemoteProbePhase = "connection-check" | "authentication-verification";
+type RemoteProbePhase = "connection-check" | "authentication-verification";
 
 function isEveOidcChallenge(error: unknown): boolean {
   if (!(error instanceof ClientError) || error.status !== 401) return false;

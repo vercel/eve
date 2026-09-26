@@ -5,7 +5,7 @@ import { toErrorMessage } from "#shared/errors.js";
  * Structural so handles of any session-options generic register without
  * variance friction.
  */
-export interface ShutdownCapableSandboxHandle {
+interface ShutdownCapableSandboxHandle {
   onRuntimeShutdown(): Promise<void>;
 }
 

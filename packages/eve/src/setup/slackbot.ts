@@ -29,7 +29,7 @@ import {
 } from "./slack-connect-lifecycle.js";
 
 /** Injected for tests; defaults to the real Vercel CLI subprocess primitives. */
-export interface SlackbotProvisionDeps extends SlackConnectLifecycleDeps, SlackConnectorCreateDeps {
+interface SlackbotProvisionDeps extends SlackConnectLifecycleDeps, SlackConnectorCreateDeps {
   /** Test seam for the linked Vercel project and team lookup. */
   readProjectLink?: typeof readProjectLink;
   /** Test seam for the workspace poll's pacing; defaults to a real sleep. */
@@ -328,7 +328,7 @@ export async function inspectSlackbotConnectors(
   return lookup;
 }
 
-export interface ProvisionSlackbotOptions {
+interface ProvisionSlackbotOptions {
   /**
    * Cancels the caller's whole operation. The promise rejects after attempting
    * cleanup; only the explicit interactive Cancel action returns `cancelled`.

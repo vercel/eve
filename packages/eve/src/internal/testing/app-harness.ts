@@ -39,7 +39,7 @@ import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sand
  * no tools, skills, or subagents. The harness installs an in-memory sandbox
  * backend so runtime tests never depend on a host container or VM service.
  */
-export interface TestAppDescriptor {
+interface TestAppDescriptor {
   readonly agent?: {
     readonly limits?: {
       readonly maxInputTokensPerSession?: number | false;

@@ -82,7 +82,7 @@ export interface ResolveProvisioningOptions {
 }
 
 /** Both provisioning plans plus the model wiring they imply. Input and payload. */
-export interface ResolvedProvisioning {
+interface ResolvedProvisioning {
   vercelProject: ResolvedVercelProject;
   aiGateway: ResolvedAiGateway;
   modelWiring: WiringMode;

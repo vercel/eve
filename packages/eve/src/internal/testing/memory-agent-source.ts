@@ -10,7 +10,7 @@ import { createMemoryProjectSource, type ProjectSource } from "#discover/project
  * `agent/` (eg. `"instructions.md"`, `"tools/get_weather.ts"`) and the helper
  * materializes them under a synthetic absolute root (`/memory/app/agent/…`).
  */
-export interface MemoryAgentProjectInput {
+interface MemoryAgentProjectInput {
   /**
    * Files authored relative to the agent root
    * (eg. `"instructions.md"`, `"tools/weather.ts"`).
@@ -59,7 +59,7 @@ export interface MemoryAgentProjectInput {
 /**
  * Materialized in-memory project handed to tests.
  */
-export interface MemoryAgentProject {
+interface MemoryAgentProject {
   /**
    * Absolute path of the synthetic app root. Use this as `appRoot` on any
    * `discover*({ agentRoot, appRoot, source })` call or as the start path

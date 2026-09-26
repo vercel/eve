@@ -24,7 +24,7 @@ import {
  * Either a real skill definition or a dynamic skill resolver that
  * produces skills at runtime.
  */
-export type CompiledSkillEntry =
+type CompiledSkillEntry =
   | { readonly kind: "skill"; readonly definition: CompiledSkillDefinition }
   | { readonly kind: "dynamic-skill"; readonly definition: CompiledDynamicSkillDefinition };
 

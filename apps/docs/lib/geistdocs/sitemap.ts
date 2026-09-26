@@ -5,7 +5,7 @@ export interface SitemapSourceEntry {
   pathname: string;
 }
 
-export interface CanonicalSitemapEntry {
+interface CanonicalSitemapEntry {
   lastModified?: Date;
   url: string;
 }

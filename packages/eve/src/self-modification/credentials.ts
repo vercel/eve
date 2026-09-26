@@ -23,7 +23,7 @@ export function createGitHubCredentialProvider(
   };
 }
 
-export const defaultGitHubCredentialProvider: GitHubCredentialProvider = {
+const defaultGitHubCredentialProvider: GitHubCredentialProvider = {
   async resolve() {
     const token = process.env[SELF_MODIFICATION_GITHUB_TOKEN_ENV];
     if (token === undefined || token.trim().length === 0) {

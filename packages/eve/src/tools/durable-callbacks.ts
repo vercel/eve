@@ -49,7 +49,7 @@ export interface StampedDurableDynamicCallback {
   readonly closure: JsonObject;
 }
 
-export type LiveDurableDynamicToolCallbacks = Partial<{
+type LiveDurableDynamicToolCallbacks = Partial<{
   execute: StampedDurableDynamicCallback;
   inputSchema: StampedDurableDynamicCallback;
   outputSchema: StampedDurableDynamicCallback;
@@ -65,7 +65,7 @@ export type LiveDurableDynamicToolCallbacks = Partial<{
 }>;
 
 const STAMPED_CALLBACK = Symbol.for("eve:durable-dynamic-callback");
-export const DURABLE_DYNAMIC_TOOL_CALLBACKS = Symbol.for("eve:durable-dynamic-tool-callbacks");
+const DURABLE_DYNAMIC_TOOL_CALLBACKS = Symbol.for("eve:durable-dynamic-tool-callbacks");
 
 const REGISTRY = Symbol.for("eve:scoped-dynamic-tool-callbacks");
 const MAX_CACHED_SESSIONS = 1_024;

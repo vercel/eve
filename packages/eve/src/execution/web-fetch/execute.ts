@@ -26,7 +26,7 @@ export interface WebFetchInput {
 }
 
 /** Per-call options accepted by {@link executeWebFetchTool}. */
-export interface WebFetchExecuteOptions {
+interface WebFetchExecuteOptions {
   /** Signal combined with the request timeout. */
   readonly abortSignal?: AbortSignal;
 }
@@ -34,7 +34,7 @@ export interface WebFetchExecuteOptions {
 /**
  * Structured result returned from {@link executeWebFetchTool}.
  */
-export interface WebFetchResult {
+interface WebFetchResult {
   /** Response body, bounded to the shared tool-output limits. */
   readonly content: string;
   /** Response `Content-Type` header. */

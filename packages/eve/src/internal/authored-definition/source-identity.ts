@@ -1,4 +1,4 @@
-export type DefinitionSourceEntry =
+type DefinitionSourceEntry =
   | { readonly kind: "connection"; readonly logicalPath?: string; readonly name: string }
   | { readonly kind: "tool"; readonly logicalPath?: string; readonly name: string };
 

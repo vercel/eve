@@ -54,7 +54,7 @@ export default discordChannel({
 `;
 }
 
-export interface DiscordSetupPlan {
+interface DiscordSetupPlan {
   botToken: string;
   commandName: string;
   commandDescription: string;

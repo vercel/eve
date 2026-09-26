@@ -13,7 +13,7 @@ type CliMessageTone =
 /**
  * Shared color palette used by the eve CLI.
  */
-export interface CliTheme {
+interface CliTheme {
   readonly color: boolean;
   accent(text: string): string;
   danger(text: string): string;

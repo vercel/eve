@@ -5,7 +5,7 @@ import { parseDevelopmentServerUrl } from "./url.js";
 
 export type DevelopmentRequestHeaders = Readonly<Record<string, string>>;
 
-export interface DevelopmentUrlTargetOptions {
+interface DevelopmentUrlTargetOptions {
   header?: DevelopmentRequestHeaders;
   host?: string;
   port?: number;

@@ -202,7 +202,7 @@ export interface Theme {
   readonly spinner: readonly string[];
 }
 
-export interface CreateThemeOptions {
+interface CreateThemeOptions {
   /** Whether to emit ANSI color. Defaults to `true`. */
   color?: boolean;
   /** Whether the terminal renders Unicode glyphs. Defaults to `true`. */

@@ -116,7 +116,7 @@ interface SetupActionsPanelState {
 
 export type SetupSelectPanelState = SetupOptionSelectPanelState | SetupActionsPanelState;
 
-export interface SetupTextPanelState {
+interface SetupTextPanelState {
   message: string;
   editor: LineState;
   placeholder?: string;
@@ -126,7 +126,7 @@ export interface SetupTextPanelState {
   notices?: readonly SelectNotice[];
 }
 
-export interface SetupAcknowledgePanelState {
+interface SetupAcknowledgePanelState {
   message: string;
   lines: readonly string[];
 }

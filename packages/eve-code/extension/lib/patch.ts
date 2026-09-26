@@ -4,7 +4,7 @@ import type { SandboxSession } from "eve/sandbox";
 
 import { shellQuote } from "./shell.ts";
 
-export type PatchHunk =
+type PatchHunk =
   | { readonly type: "add"; readonly path: string; readonly contents: string }
   | { readonly type: "delete"; readonly path: string }
   | {
@@ -14,7 +14,7 @@ export type PatchHunk =
       readonly chunks: readonly UpdateChunk[];
     };
 
-export interface UpdateChunk {
+interface UpdateChunk {
   readonly oldLines: readonly string[];
   readonly newLines: readonly string[];
   readonly changeContext?: string;

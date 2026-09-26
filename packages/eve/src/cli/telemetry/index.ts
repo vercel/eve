@@ -13,7 +13,7 @@ import {
   readOrCreateEveTelemetryIdentity,
 } from "#cli/telemetry/preference.js";
 
-export type EveCliTelemetryEvent = {
+type EveCliTelemetryEvent = {
   readonly id: string;
   readonly event_time: number;
   readonly key: string;

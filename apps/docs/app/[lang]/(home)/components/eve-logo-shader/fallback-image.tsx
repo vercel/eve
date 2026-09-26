@@ -8,12 +8,12 @@ import { BLOOM_RADIUS } from "./render";
 // INVARIANT: CSS padding mirrors the animated canvas bloom padding.
 // Imported only by index.tsx.
 
-export const FALLBACK_IMAGE_WIDTH = 1095;
-export const FALLBACK_IMAGE_HEIGHT = 348;
-export const FALLBACK_IMAGE_ASPECT_RATIO = `${FALLBACK_IMAGE_WIDTH} / ${FALLBACK_IMAGE_HEIGHT}`;
+const FALLBACK_IMAGE_WIDTH = 1095;
+const FALLBACK_IMAGE_HEIGHT = 348;
+const FALLBACK_IMAGE_ASPECT_RATIO = `${FALLBACK_IMAGE_WIDTH} / ${FALLBACK_IMAGE_HEIGHT}`;
 export const FALLBACK_CONTAINER_ASPECT_RATIO = `${FALLBACK_IMAGE_WIDTH + BLOOM_RADIUS} / ${FALLBACK_IMAGE_HEIGHT + BLOOM_RADIUS}`;
-export const FALLBACK_IMAGE_SIZES = "(min-width: 768px) 1095px, calc(100vw - 16px)";
-export const FALLBACK_IMAGE_PADDING = BLOOM_RADIUS / 2;
+const FALLBACK_IMAGE_SIZES = "(min-width: 768px) 1095px, calc(100vw - 16px)";
+const FALLBACK_IMAGE_PADDING = BLOOM_RADIUS / 2;
 
 const fallbackImageOptions = {
   alt: "",

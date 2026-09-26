@@ -1,7 +1,7 @@
 import rawResults from "./benchmark-results.json";
 
-export type BenchmarkTreatment = "baseline" | "guided";
-export type BenchmarkCellStatus = "current" | "missing" | "stale";
+type BenchmarkTreatment = "baseline" | "guided";
+type BenchmarkCellStatus = "current" | "missing" | "stale";
 
 export interface BenchmarkExperiment {
   id: string;

@@ -11,7 +11,7 @@ import {
 } from "#internal/external-resources-snapshot.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
-export const CONNECT_MANIFEST_FILENAME = "vercel-connect-manifest.json";
+const CONNECT_MANIFEST_FILENAME = "vercel-connect-manifest.json";
 
 export function buildExternalResourcesSnapshot(input: {
   readonly generatorVersion: string;

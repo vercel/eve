@@ -42,7 +42,7 @@ export type RuntimeRemoteAgentCallActionRequest = z.infer<
   typeof runtimeRemoteAgentCallActionRequestSchema
 >;
 
-export const runtimeRemoteAgentCallActionRequestSchema = z
+const runtimeRemoteAgentCallActionRequestSchema = z
   .object({
     callId: z.string(),
     description: z.string(),

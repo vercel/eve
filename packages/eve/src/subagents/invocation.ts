@@ -15,7 +15,7 @@ export interface SubagentParentContext {
  * Narrowed form of {@link StepInput} whose `message` is always a plain string.
  * Delegated child runs receive a synthesized text-only prompt.
  */
-export interface FormattedSubagentInvocation extends StepInput {
+interface FormattedSubagentInvocation extends StepInput {
   readonly message: string;
 }
 

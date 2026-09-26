@@ -21,7 +21,7 @@ export interface SlackConnectorCreateDeps {
   now?: () => number;
 }
 
-export type SlackConnectorCreateResult =
+type SlackConnectorCreateResult =
   | { state: "created"; via: "cli"; ref: SlackConnectorRef }
   | {
       state: "created";

@@ -4,7 +4,7 @@ import type { SessionStateMap } from "#harness/types.js";
 
 const APPROVAL_STATE_KEY = "eve.runtime.hitl.approvalState";
 
-export type ApprovalCandidateStatus =
+type ApprovalCandidateStatus =
   | "pending"
   | "authorization-required"
   | "allowed"
@@ -13,7 +13,7 @@ export type ApprovalCandidateStatus =
   | "timed-out"
   | "stale";
 
-export interface ApprovalCandidateAuditRecord {
+interface ApprovalCandidateAuditRecord {
   readonly candidateId: string;
   readonly requestId: string;
   readonly responder: ApprovalResponderIdentity;
@@ -59,7 +59,7 @@ interface DurableApprovalState {
   readonly settlements: Readonly<Record<string, ApprovalSettlementAuditRecord>>;
 }
 
-export interface ApprovalStateTransition {
+interface ApprovalStateTransition {
   readonly changed: boolean;
   readonly state: SessionStateMap | undefined;
 }

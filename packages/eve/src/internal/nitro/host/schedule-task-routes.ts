@@ -24,7 +24,7 @@ interface ScheduleTaskNitro {
  * module — the synthetic task module imports it and forwards `event.name`
  * along with the baked-in artifacts config.
  */
-export interface RegisterScheduleTaskHandlersInput {
+interface RegisterScheduleTaskHandlersInput {
   readonly artifactsConfig: NitroArtifactsConfig;
   readonly dispatchModulePath: string;
   readonly registrations: readonly ScheduleRegistration[];

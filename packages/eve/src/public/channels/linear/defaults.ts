@@ -57,7 +57,7 @@ export function defaultOnAgentSession(
 }
 
 /** Options used by built-in Linear event handlers. */
-export interface LinearDefaultEventOptions {
+interface LinearDefaultEventOptions {
   readonly api?: LinearApiOptions;
   readonly credentials?: LinearChannelCredentials;
 }

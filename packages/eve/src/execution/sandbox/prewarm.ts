@@ -67,7 +67,7 @@ interface NodeSandbox extends RuntimeRegisteredSandbox {
  * templates the orchestrator emits and what preparation calls flow through
  * them.
  */
-export type SandboxProviderPrepareDispatch = (input: {
+type SandboxProviderPrepareDispatch = (input: {
   readonly context: SandboxProviderPrepareContext;
   readonly provider: SandboxProviderRuntime;
 }) => Promise<SandboxPreparedArtifact>;
@@ -89,7 +89,7 @@ interface PrewarmSandboxesInput {
  * Iterates every registered sandbox and invokes `provider.prepare(...)`
  * for each provider template.
  */
-export async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
+async function prewarmSandboxes(input: PrewarmSandboxesInput): Promise<void> {
   const targets = await collectPrewarmTargets(input);
 
   if (targets.length === 0) {

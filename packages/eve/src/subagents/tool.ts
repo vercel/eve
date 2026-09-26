@@ -34,7 +34,7 @@ export type SubagentInputSource =
  * {@link RunInput} so dispatch sites never re-derive the token from
  * `(callId, parentSessionId)` on their own.
  */
-export interface SubagentRunInputBuild {
+interface SubagentRunInputBuild {
   readonly childContinuationToken: string;
   readonly runInput: RunInput;
 }

@@ -1,7 +1,7 @@
 /**
  * Runtime-owned compiled artifact paths for one application root.
  */
-export interface RuntimeCompilerArtifactPaths {
+interface RuntimeCompilerArtifactPaths {
   readonly appRoot: string;
   readonly compiledManifestPath: string;
   readonly compileDirectoryPath: string;

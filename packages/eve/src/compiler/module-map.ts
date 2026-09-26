@@ -25,7 +25,7 @@ export const compiledModuleMapSchema = z
   .object({ nodes: z.record(z.string(), compiledModuleNodeScopeSchema) })
   .strict();
 
-export interface CreateCompiledModuleMapSourceInput {
+interface CreateCompiledModuleMapSourceInput {
   importSpecifierStyle?: "absolute" | "relative";
   manifest: CompiledAgentManifest;
   moduleMapPath: string;

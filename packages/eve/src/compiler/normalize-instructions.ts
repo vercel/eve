@@ -24,7 +24,7 @@ import {
  * Either a static instructions definition or a dynamic resolver that
  * produces model messages at runtime.
  */
-export type CompiledInstructionsEntry =
+type CompiledInstructionsEntry =
   | { readonly kind: "instructions"; readonly definition: CompiledInstructionsDefinition }
   | {
       readonly kind: "dynamic-instructions";

@@ -20,14 +20,14 @@ export const initialQuitGuardState: QuitGuardState = { armed: false };
  * Key intents the guard distinguishes. Escape arms or quits; every other key is
  * collapsed to `other-key`, which only matters while armed (it disarms).
  */
-export type QuitGuardEvent = { type: "escape" } | { type: "other-key" };
+type QuitGuardEvent = { type: "escape" } | { type: "other-key" };
 
 /**
  * Side effect the prompt wiring should perform after the transition. Only `quit`
  * requires the caller to act (cancel the prompt); `arm`/`disarm`/`none` are
  * reflected purely by re-rendering with the returned {@link QuitGuardState}.
  */
-export type QuitGuardAction = "none" | "arm" | "quit" | "disarm";
+type QuitGuardAction = "none" | "arm" | "quit" | "disarm";
 
 /**
  * Advances the guard for a single keypress.

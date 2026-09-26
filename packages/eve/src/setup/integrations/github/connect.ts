@@ -4,10 +4,10 @@ import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { runVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
 import { z } from "#compiled/zod/index.js";
 
-export const GITHUB_TRIGGER_PATH = "/eve/v1/github";
+const GITHUB_TRIGGER_PATH = "/eve/v1/github";
 
 /** Identity of the GitHub connector provisioned for an agent channel. */
-export interface GitHubConnectorRef {
+interface GitHubConnectorRef {
   /** GitHub's actual @mention handle, without the `[bot]` suffix. */
   appSlug: string;
   id: string;
@@ -15,7 +15,7 @@ export interface GitHubConnectorRef {
 }
 
 /** Effects used to provision a GitHub Connect connector. */
-export interface ProvisionGitHubConnectorDeps {
+interface ProvisionGitHubConnectorDeps {
   runVercel: typeof runVercel;
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }

@@ -1,6 +1,6 @@
 import { shellQuote } from "./shell.ts";
 
-export const DEFAULT_GREP_LIMIT = 50;
+const DEFAULT_GREP_LIMIT = 50;
 export const MAX_GREP_LIMIT = 200;
 export const MAX_GREP_COMMAND_BYTES = 256 * 1024;
 export const MAX_GREP_LINE_BYTES = 8 * 1024;
@@ -10,9 +10,9 @@ const REGEX_META = /[\\^$.*+?()[\]{}|]/u;
 
 export const GREP_OUTPUT_MODES = ["files_with_matches", "content", "count"] as const;
 
-export type GrepOutputMode = (typeof GREP_OUTPUT_MODES)[number];
+type GrepOutputMode = (typeof GREP_OUTPUT_MODES)[number];
 
-export interface GrepCommandInput {
+interface GrepCommandInput {
   readonly contextLines: number;
   readonly glob: string | undefined;
   readonly ignoreCase: boolean;
@@ -31,7 +31,7 @@ export interface GrepSearchResult {
   readonly truncated: boolean;
 }
 
-export interface GrepSandbox {
+interface GrepSandbox {
   resolvePath(path: string): string;
   run(input: {
     abortSignal?: AbortSignal;
@@ -39,7 +39,7 @@ export interface GrepSandbox {
   }): PromiseLike<{ exitCode: number; stderr: string; stdout: string }>;
 }
 
-export interface GrepToolInput {
+interface GrepToolInput {
   readonly context?: number;
   readonly glob?: string;
   readonly ignoreCase?: boolean;

@@ -1,7 +1,7 @@
 import type { InputOption, InputResponse } from "#shared/input.js";
 
 /** The request fields plain text is resolved against. */
-export interface TextResolvableRequest {
+interface TextResolvableRequest {
   readonly allowFreeform?: boolean;
   readonly options?: readonly InputOption[];
   readonly requestId: string;

@@ -83,7 +83,7 @@ export interface ScenarioAppDescriptor {
  * Handle to a materialized scenario app. Callers must call
  * {@link ScenarioApp.cleanup} in `afterEach` / `afterAll`.
  */
-export interface ScenarioApp {
+interface ScenarioApp {
   /** Absolute filesystem path to the materialized app root. */
   readonly appRoot: string;
   /** Removes the app root and all transient artifacts. */

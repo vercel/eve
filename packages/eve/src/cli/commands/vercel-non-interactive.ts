@@ -6,7 +6,7 @@ import { resolveProjectByNameOrId, resolveTeam } from "#setup/vercel-project.js"
 
 import { NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
 
-export interface VercelNonInteractiveLogger {
+interface VercelNonInteractiveLogger {
   error(message: string): void;
   log(message: string): void;
 }

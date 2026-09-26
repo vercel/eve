@@ -1,7 +1,7 @@
 import type { Block, DisplayBlock, ToolGroupItem } from "./blocks.js";
 import { toolBaseName } from "./tool-presentation.js";
 
-export interface ToolBlockDisplayGroup {
+interface ToolBlockDisplayGroup {
   readonly members: readonly Block[];
   readonly display: DisplayBlock;
 }
@@ -21,7 +21,7 @@ export interface ToolBlockDisplayGroup {
  * consume a group must remove its members by identity, never by prefix
  * length.
  */
-export interface GroupToolBlocksOptions {
+interface GroupToolBlocksOptions {
   /**
    * How captured log writes coalesce. `"window"` (the default, for the live
    * block window) merges every write of one source across the whole input

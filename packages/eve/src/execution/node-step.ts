@@ -42,7 +42,7 @@ const log = createLogger("execution.node-step");
  * `createWorkflowRuntime`, so callers pass the constructor directly —
  * no wrapper needed.
  */
-export type CreateRuntime = (config: {
+type CreateRuntime = (config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId?: string;
 }) => Runtime;
@@ -50,7 +50,7 @@ export type CreateRuntime = (config: {
 /**
  * Input for building a harness step for one resolved runtime node.
  */
-export interface CreateExecutionNodeStepInput {
+interface CreateExecutionNodeStepInput {
   readonly steeringSignal?: AbortSignal;
   /** Cancellation signal forwarded to the tool-loop harness. */
   readonly abortSignal?: AbortSignal;

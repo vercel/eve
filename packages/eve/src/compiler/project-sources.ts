@@ -176,7 +176,7 @@ export function projectSelectedSources(input: {
   return projected;
 }
 
-export function createFilesystemModuleCandidate(input: {
+function createFilesystemModuleCandidate(input: {
   readonly externalDependencies: readonly string[];
   readonly extensionScope?: { readonly namespace: string; readonly sourceRoot: string };
   readonly layer: AgentSourceLayer;

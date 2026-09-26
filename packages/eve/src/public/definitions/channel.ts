@@ -175,7 +175,7 @@ export interface ChannelContinuationOps {
  * Channel context passed to event handlers: `TCtx` intersected with
  * {@link ChannelContinuationOps}.
  */
-export type ChannelContext<TCtx> = TCtx & ChannelContinuationOps;
+type ChannelContext<TCtx> = TCtx & ChannelContinuationOps;
 
 type ChannelEventHandler<T extends UnstampedMessageStreamEvent["type"], TCtx> = (
   data: EventData<T>,

@@ -3,7 +3,7 @@
 import { type ReactNode, useState } from "react";
 import { cn } from "@/lib/utils";
 
-export interface FileTreeItem {
+interface FileTreeItem {
   /** Category name (unused by this layout). */
   label: string;
   /** File/folder name shown in the IDE file tree. */

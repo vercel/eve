@@ -12,7 +12,7 @@ export interface PromptArgumentSuggestion {
   readonly next?: readonly PromptArgumentSuggestion[];
 }
 
-export interface ArgumentTypeaheadQuery {
+interface ArgumentTypeaheadQuery {
   readonly command: ArgumentTypeaheadCommand;
   readonly argument: string;
   /** Complete arguments before the one currently being typed. */

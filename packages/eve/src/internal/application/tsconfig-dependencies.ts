@@ -24,7 +24,7 @@ export async function resolveTsConfigDependencyPaths(appRoot: string): Promise<s
   return [...resolvedConfigPaths].sort((left, right) => left.localeCompare(right));
 }
 
-export async function resolveRootTsConfigPaths(appRoot: string): Promise<string[]> {
+async function resolveRootTsConfigPaths(appRoot: string): Promise<string[]> {
   const paths = new Set<string>([join(appRoot, "tsconfig.json"), join(appRoot, "jsconfig.json")]);
 
   try {
@@ -50,7 +50,7 @@ export async function resolveRootTsConfigPaths(appRoot: string): Promise<string[
   return [...paths];
 }
 
-export async function collectTsConfigDependencyPaths(input: {
+async function collectTsConfigDependencyPaths(input: {
   readonly configPath: string;
   readonly resolvedConfigPaths: Set<string>;
   readonly visitingConfigPaths: Set<string>;
@@ -119,7 +119,7 @@ export function parseTsConfigObject(source: string): Record<string, unknown> | u
   return parsedConfig as Record<string, unknown>;
 }
 
-export function extractTsConfigExtendsSpecifiers(source: string): string[] {
+function extractTsConfigExtendsSpecifiers(source: string): string[] {
   const parsedConfig = parseTsConfigObject(source);
 
   if (parsedConfig === undefined) {
@@ -141,7 +141,7 @@ export function extractTsConfigExtendsSpecifiers(source: string): string[] {
   );
 }
 
-export function resolveTsConfigExtendsTargetPaths(input: {
+function resolveTsConfigExtendsTargetPaths(input: {
   readonly configPath: string;
   readonly extendsSpecifier: string;
 }): string[] {
@@ -209,7 +209,7 @@ function resolvePackageExtendsCandidates(input: {
   return [...resolvedPaths];
 }
 
-export function isTsConfigFilePath(specifier: string): boolean {
+function isTsConfigFilePath(specifier: string): boolean {
   if (specifier.startsWith(".")) {
     return true;
   }

@@ -70,7 +70,7 @@ export function formatFailureMessage(event: FailureStreamEvent): string {
  * inspection dump for unrecognized failures. One projection so every
  * consumer narrows the untyped `details` payload the same way.
  */
-export interface FailureDetails {
+interface FailureDetails {
   readonly semanticErrorId?: string;
   readonly hint?: string;
   readonly detail?: string;

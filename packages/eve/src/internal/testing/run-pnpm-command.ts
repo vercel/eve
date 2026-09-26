@@ -18,7 +18,7 @@ interface PnpmCommandInput {
  * that need to parse output (e.g. `pnpm dlx vercel deploy --json`) read
  * `stdout` directly.
  */
-export interface PnpmCommandResult {
+interface PnpmCommandResult {
   readonly stderr: string;
   readonly stdout: string;
 }

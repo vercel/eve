@@ -17,7 +17,7 @@ interface InvokeCliOptions {
   scope?: string;
 }
 
-export interface InvokeCommandDependencies {
+interface InvokeCommandDependencies {
   readonly loadEnvironment: (appRoot: string) => void | Promise<void>;
   readonly runInvoke: (input: RunInvokeInput) => Promise<InvokeResult>;
 }
@@ -50,7 +50,7 @@ export function registerRuntimeInvokeCommand(input: {
 }
 
 /** Registers the non-interactive remote invocation command. */
-export function registerInvokeCommand(input: {
+function registerInvokeCommand(input: {
   readonly applicationContext: CliApplicationContext;
   readonly deps: InvokeCommandDependencies;
   readonly logger: InvokeCommandLogger;

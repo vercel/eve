@@ -149,7 +149,7 @@ type LaunchAction =
 
 type DriverAction = { action: string } & Record<string, unknown>;
 
-export interface ComputerUseDriverRequest {
+interface ComputerUseDriverRequest {
   action: DriverAction;
   screenshotPath: string;
 }

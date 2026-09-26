@@ -18,7 +18,7 @@ export type ProviderPickerPhase =
   | { kind: "invalid"; editor: LineState; message: string };
 
 /** One provider picker interaction: ordinary select state plus its key field. */
-export interface ProviderPickerState {
+interface ProviderPickerState {
   select: SelectState;
   phase: ProviderPickerPhase;
 }
@@ -32,7 +32,7 @@ export type ProviderPickerEvent =
   | { type: "validated"; validation: GatewayKeyValidation };
 
 /** One state transition; abort controllers remain in the terminal renderer. */
-export type ProviderPickerTransition =
+type ProviderPickerTransition =
   | { kind: "ignore"; state: ProviderPickerState }
   | { kind: "render"; state: ProviderPickerState }
   | { kind: "clear"; state: ProviderPickerState }

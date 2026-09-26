@@ -27,12 +27,12 @@ const channelInstrumentationKindGlobal = globalThis as ChannelInstrumentationKin
 channelInstrumentationKindGlobal[CHANNEL_INSTRUMENTATION_KINDS] ??= new Map();
 const channelInstrumentationKinds = channelInstrumentationKindGlobal[CHANNEL_INSTRUMENTATION_KINDS];
 
-export interface ChannelBuildMetadata {
+interface ChannelBuildMetadata {
   readonly externalCredentials?: unknown;
   readonly manifest?: JsonObject;
 }
 
-export type ChannelBuildMetadataFactory = (channelName: string) => ChannelBuildMetadata;
+type ChannelBuildMetadataFactory = (channelName: string) => ChannelBuildMetadata;
 
 /** Structural identity shared by public authored channels and compiled channels. */
 export interface ChannelReference<

@@ -17,7 +17,7 @@ const RANDOM_CHARS = 16;
 export const ULID_LENGTH = TIME_CHARS + RANDOM_CHARS;
 
 /** Mints one ULID. See {@link createUlidFactory}. */
-export type UlidFactory = () => string;
+type UlidFactory = () => string;
 
 /**
  * Creates an independent ULID generator with its own monotonic state.

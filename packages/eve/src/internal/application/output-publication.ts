@@ -19,7 +19,7 @@ import {
 
 export { resolveOutputPublicationLockPath };
 
-export interface OutputPublicationInput {
+interface OutputPublicationInput {
   readonly appRoot: string;
   readonly finalOutputDir: string;
   readonly finalSummaryPath: string;

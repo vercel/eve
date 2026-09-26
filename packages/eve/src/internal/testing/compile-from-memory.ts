@@ -53,7 +53,7 @@ export interface CompileFromMemorySkillInput {
   readonly markdown?: string;
 }
 
-export interface CompileFromMemoryResult {
+interface CompileFromMemoryResult {
   readonly manifest: CompiledAgentManifest;
   readonly moduleMap: CompiledModuleMap;
 }

@@ -60,7 +60,7 @@ interface VercelJsonConfig {
  * The top-level Vercel Build Output route that sends eve transport requests to
  * the generated eve service.
  */
-export type EveVercelServiceRoute = {
+type EveVercelServiceRoute = {
   readonly destination: {
     readonly service: string;
     readonly type: "service";
@@ -72,7 +72,7 @@ export type EveVercelServiceRoute = {
  * A service-scoped route carrying the `request.path` transform that pins the
  * path the eve runtime observes to the eve transport namespace.
  */
-export type EveVercelServiceRequestPathRoute = {
+type EveVercelServiceRequestPathRoute = {
   readonly src: string;
   readonly transforms: readonly [VercelRequestPathTransform];
 };

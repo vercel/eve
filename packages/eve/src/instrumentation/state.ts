@@ -77,7 +77,7 @@ export interface InstrumentationStateSlot {
   set(value: JsonValue | undefined): void;
 }
 
-export interface InstrumentationStateLease extends InstrumentationStateSlot {
+interface InstrumentationStateLease extends InstrumentationStateSlot {
   /** Makes later reads empty and writes no-ops. */
   revoke(): void;
 }
@@ -231,7 +231,7 @@ export function takeInstrumentationInputScope(
   return scope;
 }
 
-export interface InstrumentationActionCorrelation {
+interface InstrumentationActionCorrelation {
   readonly idempotencyKey: string;
   readonly scope: InstrumentationAttemptScope;
 }

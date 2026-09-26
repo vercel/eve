@@ -13,7 +13,7 @@ import {
   discardDevelopmentGeneration,
 } from "#internal/nitro/development-generation.js";
 
-export type DevelopmentRebuildKind = "structural" | "unchanged" | "runtime";
+type DevelopmentRebuildKind = "structural" | "unchanged" | "runtime";
 
 /**
  * Raised when generation activation fails after the replacement worker has
