@@ -105,12 +105,6 @@ async function writeDescriptorAppFiles(input: {
   readonly appRoot: string;
   readonly descriptor: ScenarioAppDescriptor;
 }): Promise<void> {
-  for (const directory of input.descriptor.directories ?? []) {
-    await mkdir(join(input.appRoot, directory), {
-      recursive: true,
-    });
-  }
-
   for (const [relativePath, contents] of Object.entries(input.descriptor.files)) {
     const destinationPath = join(input.appRoot, relativePath);
     await mkdir(dirname(destinationPath), {
@@ -132,7 +126,7 @@ async function writeDescriptorPackageManifest(input: {
     },
     name: input.descriptor.name,
     private: true,
-    type: input.descriptor.packageType ?? "module",
+    type: "module",
   };
 
   await writeFile(

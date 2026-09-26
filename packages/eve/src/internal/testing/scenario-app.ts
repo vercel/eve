@@ -50,11 +50,6 @@ export interface ScenarioAppDescriptor {
    */
   readonly files: Readonly<Record<string, string>>;
   /**
-   * Directories to create without any files. Parents of paths in {@link files}
-   * are inferred automatically; list explicit empty directories here.
-   */
-  readonly directories?: readonly string[];
-  /**
    * Additional dependencies installed alongside `eve`. Keys are
    * package names, values are npm version specifiers or `file:` specifiers.
    *
@@ -63,10 +58,6 @@ export interface ScenarioAppDescriptor {
    * installed version by default unless a descriptor overrides `ai`.
    */
   readonly dependencies?: Readonly<Record<string, string>>;
-  /**
-   * Optional `package.json#type` value. Defaults to `"module"`.
-   */
-  readonly packageType?: "module" | "commonjs";
   /**
    * When `true`, the materialized app has a populated `node_modules/` tree
    * containing the `eve` tarball and the requested dependencies.
@@ -118,10 +109,6 @@ export async function materializeScenarioApp(
 
   try {
     await writePackageManifest({
-      appRoot,
-      descriptor,
-    });
-    await writeDescriptorDirectories({
       appRoot,
       descriptor,
     });
@@ -200,7 +187,7 @@ async function writePackageManifest(input: {
     },
     name: input.descriptor.name,
     private: true,
-    type: input.descriptor.packageType ?? "module",
+    type: "module",
   };
 
   await writeFile(
@@ -245,21 +232,6 @@ export async function resolveScenarioPackageVersion(packageName: string): Promis
     }
     currentPath = parentPath;
   }
-}
-
-async function writeDescriptorDirectories(input: {
-  readonly appRoot: string;
-  readonly descriptor: ScenarioAppDescriptor;
-}): Promise<void> {
-  const directories = input.descriptor.directories ?? [];
-
-  await Promise.all(
-    directories.map(async (relativePath) => {
-      await mkdir(join(input.appRoot, relativePath), {
-        recursive: true,
-      });
-    }),
-  );
 }
 
 async function writeDescriptorFiles(input: {

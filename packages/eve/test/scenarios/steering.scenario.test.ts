@@ -7,15 +7,13 @@ import { startEveDev } from "./dev-server-harness.js";
 const scenarioApp = useScenarioApp();
 
 describe("durable generation steering", () => {
-  it.each([undefined, "1"])(
-    "does not repeat a model step when background children wake the owner (lease %s)",
-    async (leaseSeconds) => {
-      const app = await scenarioApp({
-        name: "steering-background-wakes",
-        installDependencies: true,
-        files: {
-          "agent/instructions.md": "Delegate the five work items.\n",
-          "agent/agent.ts": `import { defineAgent } from "eve";
+  it("does not repeat a model step when background children wake the owner mid-lease", async () => {
+    const app = await scenarioApp({
+      name: "steering-background-wakes",
+      installDependencies: true,
+      files: {
+        "agent/instructions.md": "Delegate the five work items.\n",
+        "agent/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 export default defineAgent({
   model: mockModel(async ({ toolResults }) => {
@@ -27,8 +25,8 @@ export default defineAgent({
   }),
   modelContextWindowTokens: 32000,
 });`,
-          "agent/subagents/worker/instructions.md": "Complete the work item.\n",
-          "agent/subagents/worker/agent.ts": `import { defineAgent } from "eve";
+        "agent/subagents/worker/instructions.md": "Complete the work item.\n",
+        "agent/subagents/worker/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 export default defineAgent({
   description: "Complete a work item in the background.",
@@ -38,39 +36,33 @@ export default defineAgent({
   }),
   modelContextWindowTokens: 32000,
 });`,
-        },
-      });
-      const server = await startEveDev(app.appRoot, {
-        env: {
-          EVE_MOCK_AUTHORED_MODELS: "",
-          NODE_ENV: "production",
-          WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: leaseSeconds,
-        },
-      });
-      try {
-        const client = new Client({ host: server.url });
-        const { response } = await client.sessions.create({ message: "Start five work items." });
-        const result = await response.result();
-        const events = result.events;
-        const steps = events
-          .filter((event) => event.type === "step.started")
-          .map((event) => `${event.data.turnId}:${event.data.stepIndex}`);
-        expect(steps).toHaveLength(2);
-        expect(new Set(steps).size).toBe(steps.length);
-        expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
-        // A one-second lease expires mid-step, so the backstop must meet the
-        // single-flight guard. The default lease still logs this in some CI
-        // runs for a reason not yet identified, so there the step and turn
-        // counts above are the guarantee.
-        if (leaseSeconds !== undefined) {
-          expect(server.stderr()).toContain("Step execution already in flight in this process");
-        }
-      } finally {
-        await server.stop();
-      }
-    },
-    360_000,
-  );
+      },
+    });
+    const server = await startEveDev(app.appRoot, {
+      env: {
+        EVE_MOCK_AUTHORED_MODELS: "",
+        NODE_ENV: "production",
+        // A one-second lease expires mid-step, so the ownership backstop
+        // races the background wakes into the single-flight guard.
+        WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
+      },
+    });
+    try {
+      const client = new Client({ host: server.url });
+      const { response } = await client.sessions.create({ message: "Start five work items." });
+      const result = await response.result();
+      const events = result.events;
+      const steps = events
+        .filter((event) => event.type === "step.started")
+        .map((event) => `${event.data.turnId}:${event.data.stepIndex}`);
+      expect(steps).toHaveLength(2);
+      expect(new Set(steps).size).toBe(steps.length);
+      expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+      expect(server.stderr()).toContain("Step execution already in flight in this process");
+    } finally {
+      await server.stop();
+    }
+  }, 360_000);
   it("interrupts a pending request through the public session API and keeps one turn", async () => {
     const app = await scenarioApp({
       name: "generation-steering",

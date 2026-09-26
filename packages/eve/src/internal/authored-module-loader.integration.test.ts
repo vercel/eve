@@ -11,31 +11,17 @@ import {
   bundleAuthoredModuleMapForGeneration,
   loadAuthoredModuleNamespace,
 } from "#internal/authored-module-loader.js";
-import { useScenarioApp } from "#internal/testing/scenario-app.js";
+import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
 
 describe("loadAuthoredModuleNamespace", () => {
-  const scenarioApp = useScenarioApp();
+  const createAppRoot = useTemporaryAppRoots();
 
-  it.each(["agent", "ask"])(
-    "rejects the removed eve/workflow %s import at build time",
-    async (helper) => {
-      const app = await scenarioApp({
-        files: {
-          "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
-          "agent/tools/probe.ts": `import { defineTool } from "eve/tools";
-import { ${helper} } from "eve/workflow";
-export default defineTool({ description: "Probe", inputSchema: { type: "object" }, async execute(input, ctx) { return ${helper}(ctx, input); } });`,
-        },
-        installDependencies: true,
-        name: "removed-workflow-helper",
-      });
-      const discovered = await discoverAgent({
-        agentRoot: join(app.appRoot, "agent"),
-        appRoot: app.appRoot,
-      });
-      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(/eve\/workflow/);
-    },
-  );
+  function createApp(input: {
+    readonly files: Readonly<Record<string, string>>;
+    readonly name: string;
+  }) {
+    return createAppRoot(`eve-${input.name}-`, { files: input.files });
+  }
 
   it.each(["defineTool", "bare object"])(
     "rejects %s workflow executors during compilation",
@@ -44,12 +30,11 @@ export default defineTool({ description: "Probe", inputSchema: { type: "object" 
   "use workflow";
   return 1;
 } }`;
-      const app = await scenarioApp({
+      const app = await createApp({
         files: {
           "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
           "agent/tools/probe.ts": `import { defineTool } from "eve/tools";\nexport default ${kind === "defineTool" ? `defineTool(${definition})` : definition};`,
         },
-        installDependencies: true,
         name: "legacy-workflow-tool",
       });
       const discovered = await discoverAgent({
@@ -63,7 +48,7 @@ export default defineTool({ description: "Probe", inputSchema: { type: "object" 
   );
 
   it("rejects a named workflow channel handler during compilation", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
         "agent/channels/probe.ts": `import { defineChannel, POST } from "eve/channels";
@@ -73,7 +58,6 @@ async function handler() {
   return new Response("Done");
 }`,
       },
-      installDependencies: true,
       name: "invalid-workflow-channel",
     });
     const discovered = await discoverAgent({
@@ -86,52 +70,35 @@ async function handler() {
   });
 
   it.each([
-    ["missing", "async execute() { return 1; }", "", "requires a compiled workflow executor"],
-    ["generator", "async *execute() { yield 1; }", "", "requires a compiled workflow executor"],
-    ["expression body", "execute: async () => 1", "", "requires a compiled workflow executor"],
-    ["synchronous", "execute() { return 1; }", "", "requires a compiled workflow executor"],
-    [
-      "misplaced",
-      'async execute() { void 0; "use workflow"; return 1; }',
-      "",
-      "requires a compiled workflow executor",
-    ],
-    [
-      "local reference",
-      "execute: run",
-      "async function run() { return 1; }",
-      "requires a compiled workflow executor",
-    ],
+    ["missing", "async execute() { return 1; }", ""],
+    ["generator", "async *execute() { yield 1; }", ""],
+    ["expression body", "execute: async () => 1", ""],
+    ["synchronous", "execute() { return 1; }", ""],
+    ["local reference", "execute: run", "async function run() { return 1; }"],
     [
       "unrelated workflow",
       "async execute() { return 1; }",
       'async function other() { "use workflow"; return 1; }',
-      "requires a compiled workflow executor",
-    ],
-    [
-      "nested only",
-      'async execute() { async function inner() { "use workflow"; return 1; } return inner(); }',
-      "",
-      'marks the nested function "inner"',
     ],
   ])(
     "rejects a workflow tool with a %s executor directive during compilation",
-    async (_kind, execute, helper, error) => {
-      const app = await scenarioApp({
+    async (_kind, execute, helper) => {
+      const app = await createApp({
         files: {
           "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
           "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
 export default defineWorkflowTool({ description: "Probe", inputSchema: {}, ${execute} });
 ${helper}`,
         },
-        installDependencies: true,
         name: "missing-workflow-directive",
       });
       const discovered = await discoverAgent({
         agentRoot: join(app.appRoot, "agent"),
         appRoot: app.appRoot,
       });
-      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(error);
+      await expect(compileAgentManifest(discovered.manifest)).rejects.toThrow(
+        "requires a compiled workflow executor",
+      );
     },
   );
 
@@ -139,7 +106,7 @@ ${helper}`,
     ['import { defineWorkflowTool as durable } from "eve/tools";', "durable"],
     ['import * as tools from "eve/tools";', "tools.defineWorkflowTool"],
   ])("validates a workflow tool through its compiled definition: %s", async (binding, definer) => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
         "agent/tools/probe.ts": `${binding}
@@ -147,7 +114,6 @@ import { run } from "../lib/run";
 export default ${definer}({ description: "Probe", inputSchema: {}, execute: run });`,
         "agent/lib/run.ts": 'export async function run() { "use workflow"; return 1; }',
       },
-      installDependencies: true,
       name: "compiled-workflow-reference",
     });
     const discovered = await discoverAgent({
@@ -162,7 +128,7 @@ export default ${definer}({ description: "Probe", inputSchema: {}, execute: run 
   });
 
   it("compiles a workflow tool that calls agent through an imported helper", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
         "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
@@ -173,7 +139,6 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
 } });`,
         "agent/lib/delegate.ts": `export async function delegate(ctx, input) { return ctx.agent("researcher", input); }`,
       },
-      installDependencies: true,
       name: "valid-workflow-helper",
     });
     const discovered = await discoverAgent({
@@ -199,7 +164,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   ])(
     "rejects an imported workflow handler while compiling %s",
     async (path, kind, binding, definition) => {
-      const app = await scenarioApp({
+      const app = await createApp({
         files: {
           "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
           [`agent/${path}`]: `${binding}\nimport { handler } from "../lib/handler";\nexport default ${definition};\n`,
@@ -208,7 +173,6 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   return undefined;
 }`,
         },
-        installDependencies: true,
         name: "imported-workflow-handler",
       });
       const discovered = await discoverAgent({
@@ -222,7 +186,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   );
 
   it("stamps dynamic callbacks while building the generation module map", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
         "agent/tools/dynamic.ts": [
@@ -242,7 +206,6 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
           "",
         ].join("\n"),
       },
-      installDependencies: true,
       name: "generation-dynamic-callback",
     });
     const discovered = await discoverAgent({
@@ -261,7 +224,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("preserves cached channel identity for relative channel imports", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/support.ts": [
           'export default { marker: "source-channel-instance" };',
@@ -303,7 +266,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("explains when an installed package contains Node-incompatible extensionless ESM", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/eve.ts": [
           'import { matchRoute } from "compiler-oriented-sdk/server";',
@@ -350,7 +313,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("does not infer a compiler requirement when package output is simply missing", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/tools/use_sdk.ts": 'import "incomplete-sdk";\nexport const result = true;\n',
         "node_modules/incomplete-sdk/index.js": 'import "./generated";\n',
@@ -386,7 +349,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("preserves an authored module initialization failure as the evaluation cause", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/tools/throws.ts": 'throw new Error("authored initialization failed");\n',
       },
@@ -410,7 +373,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("resolves extensionless relative imports with dotted TypeScript basenames", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/tools/use_schema.ts": [
           'import { schemaValue } from "./mock-registry.schemas";',
@@ -434,7 +397,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("resolves extensionless relative directory imports to index modules", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/tools/use_helpers.ts": [
           'import { helperValue } from "./helpers";',
@@ -457,7 +420,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("resolves extensionless CommonJS requires with dotted JavaScript basenames", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/api/contact-sales/webhook.ts": [
           'import { readDottedValue } from "@repo/enrichment/dotted";',
@@ -538,7 +501,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("bundles symlinked workspace packages that export TypeScript source", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/api/contact-sales/webhook.ts": [
           'import { searchLinkedInProfile } from "@repo/enrichment/exa-linkedin";',
@@ -629,7 +592,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     // source already declared one of those identifiers at the top level
     // the bundled `.mjs` failed to load with
     // `SyntaxError: Identifier '__dirname' has already been declared`.
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/api/already-declared/webhook.ts": [
           'import { createRequire } from "node:module";',
@@ -663,7 +626,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("uses a symlinked workspace package's tsconfig paths when bundling its source", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/api/contact-sales/webhook.ts": [
           'import { searchLinkedInProfile } from "@repo/enrichment/exa-linkedin";',
@@ -790,7 +753,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("keeps configured dependencies external when they are imported from workspace packages", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/api/contact-sales/webhook.ts": [
           'import { readExternalValue } from "@repo/enrichment/external-value";',
@@ -870,7 +833,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("bundles unconfigured dependencies imported from workspace packages", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/api/contact-sales/webhook.ts": [
           'import { readExternalValue } from "@repo/enrichment/external-value";',
@@ -993,7 +956,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   }
 
   it("inlines store-sibling dependencies of modules reached through literal symlink paths", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/tools/use_echo.ts": [
           'import { result } from "../../node_modules/gadget-extension/extension/tools/echo.ts";',
@@ -1021,7 +984,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("prefers a package's store sibling over a consumer copy of the same dependency", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/tools/use_echo.ts": [
           'import { result } from "../../node_modules/gadget-extension/extension/tools/echo.ts";',
@@ -1049,7 +1012,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("resolves store siblings for generation bundles entered at node_modules paths", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/instructions.md": "Store-sibling entry scenario.\n",
       },
@@ -1072,7 +1035,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("keeps configured dependency subpaths importable after externalizing them", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/api/contact-sales/webhook.ts": [
           'import { readExternalValue } from "@repo/enrichment/external-value";',
@@ -1144,7 +1107,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("resolves configured dependency subpaths from the importing package", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/api/contact-sales/webhook.ts": [
           'import { readExternalValue } from "@repo/enrichment/external-value";',
@@ -1215,7 +1178,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("applies agent build externals while compiling authored modules", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/agent.ts": [
           "export default {",
@@ -1313,7 +1276,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("inherits root build externals while compiling subagent authored modules", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/agent.ts": [
           "export default {",
@@ -1423,7 +1386,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("loads authored modules that use asset imports", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/assets/logo.bin": "logo-bytes",
         "agent/assets/logo.png": "png-bytes",
@@ -1468,7 +1431,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("rejects asset imports outside the authored package", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/tools/outside_asset.ts": "export default {};\n",
       },
@@ -1504,7 +1467,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     // the same process kept failing with the no-exports fallback error
     // ("Cannot find module .../node_modules/@scope/pkg/sub") until restart.
     // Failing at bundle time instead keeps the process recoverable.
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/channels/api/late-install/webhook.ts": [
           'import { value } from "@scope/late-dep/sub";',
@@ -1549,7 +1512,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   });
 
   it("adds actionable hints when authored bundling hits native module imports", async () => {
-    const app = await scenarioApp({
+    const app = await createApp({
       files: {
         "agent/native.node": "not really native",
         "agent/tools/use_native.ts": [

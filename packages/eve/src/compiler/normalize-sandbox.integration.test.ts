@@ -2,11 +2,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
-import { useScenarioApp } from "#internal/testing/scenario-app.js";
+import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
 describe("sandbox compilation", () => {
-  const scenarioApp = useScenarioApp();
+  const createAppRoot = useTemporaryAppRoots();
   it("compiles an exported environment and selector", async () => {
-    const app = await scenarioApp({
+    const app = await createAppRoot("eve-sandbox-environment-", {
       files: {
         "agent/sandbox.ts": [
           'import { DefaultSandbox, defineSandbox } from "eve/sandbox";',
@@ -14,8 +14,6 @@ describe("sandbox compilation", () => {
           "export default defineSandbox(() => environment.open());",
         ].join("\n"),
       },
-      installDependencies: true,
-      name: "sandbox-environment",
     });
     const discovered = await discoverAgent({
       agentRoot: join(app.appRoot, "agent"),
@@ -28,7 +26,7 @@ describe("sandbox compilation", () => {
     });
   });
   it("compiles managed child resources for runtime rejection", async () => {
-    const app = await scenarioApp({
+    const app = await createAppRoot("eve-inherited-sandbox-child-resources-", {
       files: {
         "agent/subagents/foo/agent.ts":
           "export default { description: 'foo', model: 'openai/gpt-5.4' };",
@@ -37,8 +35,6 @@ describe("sandbox compilation", () => {
           'import { defineParentSandbox } from "eve/sandbox"; export default defineParentSandbox();',
         "agent/subagents/foo/sandbox/workspace/bar.txt": "child seed\n",
       },
-      installDependencies: true,
-      name: "inherited-sandbox-child-resources",
     });
     const discovered = await discoverAgent({
       agentRoot: join(app.appRoot, "agent"),
