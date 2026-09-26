@@ -20,10 +20,7 @@ import {
   workflowToolRunOutcomeToToolResult,
   workflowToolRunRequestToInputRequestPayload,
 } from "#execution/tools/workflow/owner-inbox.js";
-import {
-  findSendingWorkflowToolRun,
-  isInboxToolResultFromRecordedWorkflowToolRun,
-} from "#harness/workflow-tool-runs.js";
+import { findSendingWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
@@ -98,13 +95,9 @@ async function handleWorkflowToolRunOutcome(
     return undefined;
   }
 
-  const result = workflowToolRunOutcomeToToolResult(message);
-  return isInboxToolResultFromRecordedWorkflowToolRun(
-    cursor.sessionState.snapshot.session.state,
-    result,
-  )
-    ? result
-    : undefined;
+  // `recorded` already matched this turn, call, and run; another turn may share the callId.
+  if (recorded.toolName !== message.from.toolName) return undefined;
+  return workflowToolRunOutcomeToToolResult(message);
 }
 
 /** Settles the call with `ctx.reply()`'s output; the session tracks the run until it finishes. */

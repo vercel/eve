@@ -7,6 +7,7 @@ import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invok
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import type { BlockingWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
 vi.mock("#execution/tools/subagent/task-agent-requests.js", () => ({
   applyTaskAgentRequest: vi.fn(),
@@ -88,4 +89,58 @@ it("settles the agent request once and treats workflow completion as an ordinary
   });
   expect(cancelAgentInvocationOwnerStep).toHaveBeenCalledOnce();
   expect(releaseAgentInvocationOwnerStep).toHaveBeenCalledOnce();
+});
+
+it("settles a later turn's call when a replied run from an earlier turn shares its callId", async () => {
+  const sessionState = createTestSessionState();
+  const runs: BlockingWorkflowToolRun[] = [
+    {
+      callId: "call",
+      toolName: "lookup",
+      origin: { turnId: "turn-a", stepIndex: 0 },
+      address: { runId: "run-a", hookToken: "control-a" },
+      replied: true,
+    },
+    {
+      callId: "call",
+      toolName: "lookup",
+      origin: { turnId: "turn-b", stepIndex: 0 },
+      address: { runId: "run-b", hookToken: "control-b" },
+    },
+  ];
+  const session = runs.reduce(registerWorkflowToolRun, sessionState.snapshot.session);
+  const state = { ...sessionState, snapshot: { session } };
+  const cursor = new SessionStateCursor({
+    sessionState: state,
+    serializedContext: {},
+    sessionWritable: new WritableStream<Uint8Array>(),
+    inbox: { claimSessionHooks: vi.fn() },
+  });
+  vi.mocked(releaseAgentInvocationOwnerStep).mockResolvedValue({ sessionState: state });
+
+  const outcome = await handleWorkflowToolRunMessage({
+    callbackMetadataUrl: "https://parent.example",
+    cursor,
+    message: {
+      kind: "outcome",
+      from: {
+        callId: "call",
+        execution: "blocking",
+        input: {},
+        runId: "run-b",
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "lookup",
+        turnId: "turn-b",
+      },
+      result: { status: "completed", output: "found" },
+    },
+  });
+
+  expect(outcome).toEqual({
+    kind: "tool-result",
+    callId: "call",
+    toolName: "lookup",
+    output: "found",
+  });
 });
