@@ -1,5 +1,33 @@
 # eve
 
+## 0.67.0
+
+### Minor Changes
+
+- 04b6464: Simplify the CLI around explicit local and remote agent workflows. Use `eve remote` to connect to, invoke, or inspect an existing agent; `eve dev` now starts only local development.
+  
+  Replace `eve dev <url>` with `eve remote connect <url>`, and `eve invoke` with `eve remote invoke <url>`. Replace `eve set --model` and `eve set --reasoning` with `eve set model [model] [--reasoning <effort>]`.
+- f9addc3: Remove the `conversation` / `task` run mode. Every session now parks after each turn instead of ending, including markdown schedules and MCP `agent_start` invocations. Sessions that cannot request input, such as markdown schedules, still fail when a tool needs approval. `agent_get` reports `completed` once the turn settles, and a recoverable model failure fails only that turn. The `mode` option is gone from `ChannelAddress` and Chat SDK `send(...)` options, as well as from audience and trace-policy inputs. The eve HTTP channel now ignores a `mode` field on session creation. `outputSchema` is removed from `defineAgent`, `defineRemoteAgent`, `defineWorkspaceAgent`, dynamic subagent configs, agent info, the model-facing subagent and `agentRouter()` tool inputs, MCP `agent_start`, and channel `from(address).send()` / `respond()` options; request structured output per turn through the session API or `ctx.agent()`.
+
+### Patch Changes
+
+- bd71df9: Finish refused approval-response deliveries without leaving clients streaming, and let the dev TUI retry refused approvals. The default reducer now keeps approval, question, and session-limit prompts pending until server confirmation; frontends should disable response controls while the store is `submitted`, `streaming`, or `resuming` instead of relying on the prompt disappearing immediately.
+- 0b49e3f: Define the versioned internal snapshot used to hand compiled external resource requirements to build integrations.
+- e7d2057: Await instrumentation setup before loading server dependencies in development and production, so OpenTelemetry can instrument external packages such as `pg`.
+- e5147e7: Fix project discovery for directories named `agent` that contain their own project manifest. Nested and flat projects now resolve within that directory instead of being assigned to an ancestor or failing because the ancestor has no agent files.
+- a58fa96: Run parent stream-event hooks after publishing proxied input requests, authorization events, and their completion/waiting events. Hooks receive the parent context and the published event ID.
+- 3a1892d: Add a copy button to the deployment home page so you can copy the `eve dev <url>` command with one click instead of selecting it by hand.
+- 5b5f746: MCP connection calls now carry OpenTelemetry context in MCP metadata and add MCP semantic attributes to their tool traces. Tool payload capture continues to follow the configured trace content policy.
+- c685f5e: Give memory compaction callbacks a step-specific operation ID so multiple compactions in one turn can return refreshed recall results.
+- cd82f57: Compile Connect-backed channels and connections into a generic external-resource snapshot, then delegate final manifest creation to the installed @vercel/connect compiler.
+- 32cd5b9: Preserve optional function-tool inputs by explicitly disabling provider strict mode. This prevents OpenAI Responses from implicitly requiring optional fields in authored and connection tool schemas.
+- 0cd4239: Limit `/eve/v1/info` model provider options to the priority tier indicator. Other provider options no longer appear in the inspection response, so credentials stored under unexpected keys cannot be exposed there.
+- b21efb3: Prevent parent-agent steering text from resolving a delegated child's pending `ctx.ask()` question. Human-facing parent sessions continue to proxy plain-text and structured answers to children by request ID.
+- 8c8ef08: Keep inbound Slack link previews alongside the sender's message even when the link has surrounding text. Previously, shorter previews could be dropped when the message included a question or comment.
+- 3b6549c: Render terminal approvals and questions in drawers, and simplify the completed-turn stats line.
+- 83c5fe2: Restore turn-scoped dynamic connections before authorizing approval responses, including after a cold start. Connection response policies now run instead of failing because their callbacks are unavailable; missing tools or changed connection identities fail explicitly rather than replaying against a replacement connection.
+- 01cb6b4: Fix compiling agents on Windows when a mounted extension contributes a subagent. Each subagent's workspace resources now live in one URL-encoded directory under `.eve/compile/workspace-resources/`, so ids that contain `:` no longer produce invalid Windows paths.
+
 ## 0.66.3
 
 ### Patch Changes
