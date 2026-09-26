@@ -27,7 +27,7 @@ import {
   normalizePersistedMessageStreamEvent,
   type MessageStreamEventForVersion,
 } from "#protocol/message-version.js";
-import { isEventId } from "#protocol/event-id.js";
+import { isEventId } from "#internal/testing/event-id.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {

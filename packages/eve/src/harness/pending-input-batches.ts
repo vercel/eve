@@ -234,14 +234,6 @@ export function consumeDeferredStepInput(input: {
   };
 }
 
-/**
- * Returns true when the session carries queued follow-up input for the next
- * internal harness step.
- */
-export function hasDeferredStepInput(session: HarnessSession): boolean {
-  return getDeferredStepInput(session) !== undefined;
-}
-
 export function getDeferredStepInput(session: HarnessSession): StepInput | undefined {
   return session.state?.[DEFERRED_STEP_INPUT_KEY] as StepInput | undefined;
 }

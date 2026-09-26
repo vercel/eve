@@ -21,10 +21,12 @@ import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-arti
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createRuntimeSession, withRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
-import { publishDevelopmentGeneration } from "#internal/nitro/development-generation.js";
+import {
+  activateDevelopmentGeneration,
+  stageDevelopmentGeneration,
+} from "#internal/nitro/development-generation.js";
 import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import {
-  activateDevelopmentRuntimeArtifactsSnapshot,
   activateDevelopmentRuntimeArtifactsSnapshotTransaction,
   pruneDevelopmentRuntimeArtifactsSnapshots,
   readDevelopmentRuntimeArtifactsSnapshotRoot,
@@ -36,6 +38,13 @@ import {
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 
 const createScratchDirectory = useTemporaryDirectories();
+
+async function activateSnapshot(
+  input: Parameters<typeof activateDevelopmentRuntimeArtifactsSnapshotTransaction>[0],
+): Promise<void> {
+  const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction(input);
+  activation.commit();
+}
 
 async function markSnapshotMaterialized(
   snapshot: DevelopmentRuntimeArtifactsSnapshot,
@@ -117,11 +126,12 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
 
   const compileResult = await compileAgent({ startPath: appRoot });
 
-  await publishDevelopmentGeneration({
+  const generation = await stageDevelopmentGeneration({
     ...compileResult,
     paths: { ...compileResult.paths, compileDirectoryPath, moduleMapPath },
     project: { appRoot },
   } as CompileAgentResult);
+  await activateDevelopmentGeneration({ appRoot, generation });
 
   return { appRoot };
 }
@@ -157,7 +167,7 @@ describe("development runtime artifact snapshots", () => {
       JSON.parse(await readFile(join(snapshot.snapshotRoot, "generation.json"), "utf8")),
     ).toEqual({ runtimeAppRoot: snapshot.runtimeAppRoot });
 
-    await activateDevelopmentRuntimeArtifactsSnapshot({
+    await activateSnapshot({
       appRoot,
       snapshot: await markSnapshotMaterialized(snapshot),
     });
@@ -184,7 +194,7 @@ describe("development runtime artifact snapshots", () => {
     } as CompileAgentResult;
     const first = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
     const second = await stageDevelopmentRuntimeArtifactsSnapshot(compileResult);
-    await activateDevelopmentRuntimeArtifactsSnapshot({
+    await activateSnapshot({
       appRoot,
       snapshot: await markSnapshotMaterialized(first),
     });
@@ -444,7 +454,7 @@ describe("development runtime artifact snapshots", () => {
     await utimes(retainedSnapshotRoot, new Date(now - 20_000), new Date(now - 20_000));
     await utimes(staleSnapshotRoot, new Date(now - 30_000), new Date(now - 30_000));
 
-    await activateDevelopmentRuntimeArtifactsSnapshot({
+    await activateSnapshot({
       appRoot,
       snapshot: await markSnapshotMaterialized({
         runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
@@ -483,12 +493,12 @@ describe("development runtime artifact snapshots", () => {
       snapshotSourceRoot: join(snapshotRoot, "source"),
       sourceRoot: appRoot,
     });
-    await activateDevelopmentRuntimeArtifactsSnapshot({
+    await activateSnapshot({
       appRoot,
       snapshot: await markSnapshotMaterialized(createSnapshot(firstSnapshotRoot)),
     });
     const beforeRetirement = Date.now();
-    await activateDevelopmentRuntimeArtifactsSnapshot({
+    await activateSnapshot({
       appRoot,
       snapshot: await markSnapshotMaterialized(createSnapshot(nextSnapshotRoot)),
     });
@@ -531,7 +541,7 @@ describe("development runtime artifact snapshots", () => {
         `${JSON.stringify({ retiredAt: now - gracePeriodMs - index - 1 })}\n`,
       );
     }
-    await activateDevelopmentRuntimeArtifactsSnapshot({
+    await activateSnapshot({
       appRoot,
       snapshot: await markSnapshotMaterialized({
         runtimeAppRoot: join(activeSnapshotRoot, "source"),
@@ -567,7 +577,7 @@ describe("development runtime artifact snapshots", () => {
       await mkdir(snapshotRoot, { recursive: true });
       await writeFile(join(snapshotRoot, "activated"), "");
     }
-    await activateDevelopmentRuntimeArtifactsSnapshot({
+    await activateSnapshot({
       appRoot,
       snapshot: await markSnapshotMaterialized({
         runtimeAppRoot: join(activeSnapshotRoot, "source", "app"),
@@ -612,7 +622,7 @@ describe("development runtime artifact snapshots", () => {
       join(retiredSnapshotRoot, "retired.json"),
       `${JSON.stringify({ retiredAt: 1 })}\n`,
     );
-    await activateDevelopmentRuntimeArtifactsSnapshot({
+    await activateSnapshot({
       appRoot,
       snapshot: await markSnapshotMaterialized({
         runtimeAppRoot: join(activeSnapshotRoot, "source"),
@@ -698,10 +708,10 @@ describe("development runtime artifact snapshots", () => {
       paths: { compileDirectoryPath },
       project: { appRoot },
     } as CompileAgentResult);
-    await expect(
-      activateDevelopmentRuntimeArtifactsSnapshot({ appRoot, snapshot }),
-    ).rejects.toThrow("before its authored modules are materialized");
-    await activateDevelopmentRuntimeArtifactsSnapshot({
+    await expect(activateSnapshot({ appRoot, snapshot })).rejects.toThrow(
+      "before its authored modules are materialized",
+    );
+    await activateSnapshot({
       appRoot,
       snapshot: await markSnapshotMaterialized(snapshot),
     });

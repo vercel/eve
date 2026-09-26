@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
   collectRuntimeModuleBindingsForManifest,
   createCompiledModuleMapSource,

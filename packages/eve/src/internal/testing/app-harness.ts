@@ -1,5 +1,8 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { compileFromMemory, type CompileFromMemoryInput } from "#compiler/compile-from-memory.js";
+import {
+  compileFromMemory,
+  type CompileFromMemoryInput,
+} from "#internal/testing/compile-from-memory.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";

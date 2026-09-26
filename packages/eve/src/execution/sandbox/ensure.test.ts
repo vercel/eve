@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  clearActiveSandboxHandlesForTest,
-  countActiveSandboxHandles,
-} from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
@@ -20,12 +17,13 @@ vi.mock("#runtime/sandbox/prepared-artifacts.js", () => ({
 function fixture(setup?: () => void, returnCopy = false) {
   const deleteSandbox = vi.fn(async () => {});
   const stopSandbox = vi.fn(async () => {});
+  const shutdownSandbox = vi.fn(async () => {});
   const create = vi.fn(async () => {
     const sandbox = mockSandbox();
     return {
       sandbox: sandbox.session,
       onSessionDelete: deleteSandbox,
-      onRuntimeShutdown: async () => {},
+      onRuntimeShutdown: shutdownSandbox,
       onSessionStop: stopSandbox,
     };
   });
@@ -57,7 +55,7 @@ function fixture(setup?: () => void, returnCopy = false) {
       workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
     },
   };
-  return { create, deleteSandbox, registry, stopSandbox };
+  return { create, deleteSandbox, registry, shutdownSandbox, stopSandbox };
 }
 async function open(
   registry: RuntimeSandboxRegistry,
@@ -91,7 +89,7 @@ async function open(
     return { access, sandbox: await access.get() };
   });
 }
-afterEach(() => clearActiveSandboxHandlesForTest());
+afterEach(() => shutdownActiveSandboxHandles());
 
 describe("ensureSandboxAccess", () => {
   it("does not prepare or start anything until the sandbox is requested", async () => {
@@ -203,7 +201,8 @@ describe("ensureSandboxAccess", () => {
         state: null,
       });
       await expect(access.get()).rejects.toThrow("setup failed");
-      expect(countActiveSandboxHandles()).toBe(0);
+      await shutdownActiveSandboxHandles();
+      expect(value.shutdownSandbox).not.toHaveBeenCalled();
       await expect(access.get()).resolves.toBeTruthy();
     });
     expect(attempts).toBe(2);
@@ -212,7 +211,8 @@ describe("ensureSandboxAccess", () => {
   it("tracks dedicated handles for server shutdown", async () => {
     const value = fixture();
     await open(value.registry);
-    expect(countActiveSandboxHandles()).toBe(1);
+    await shutdownActiveSandboxHandles();
+    expect(value.shutdownSandbox).toHaveBeenCalledOnce();
   });
 
   it("deletes a dedicated sandbox and creates a fresh handle on next access", async () => {

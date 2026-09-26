@@ -61,12 +61,3 @@ export async function shutdownActiveSandboxHandles(input?: {
     }
   }
 }
-
-/** Returns the number of tracked handles. Exposed for tests and logging. */
-export function countActiveSandboxHandles(): number {
-  return activeSandboxHandles.size;
-}
-
-export function clearActiveSandboxHandlesForTest(): void {
-  activeSandboxHandles.clear();
-}

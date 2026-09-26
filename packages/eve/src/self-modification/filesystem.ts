@@ -64,5 +64,3 @@ export async function createSelfModificationFilesystem(input: {
     ],
   });
 }
-
-export const createLocalSelfModificationFilesystem = createSelfModificationFilesystem;

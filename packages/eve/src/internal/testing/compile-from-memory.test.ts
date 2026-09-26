@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
   COMPILED_AGENT_MANIFEST_KIND,
   COMPILED_AGENT_MANIFEST_VERSION,

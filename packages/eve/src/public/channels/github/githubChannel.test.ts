@@ -9,10 +9,6 @@ import { SandboxKey, SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import {
-  clearGitHubInstallationTokenCache,
-  seedGitHubInstallationTokenForTests,
-} from "#public/channels/github/auth.js";
 import { defaultGitHubAuth } from "#public/channels/github/defaults.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
 import { type GitHubChannelState } from "#public/channels/github/state.js";
@@ -194,10 +190,6 @@ async function firePost(
 describe("githubChannel", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    clearGitHubInstallationTokenCache();
-    for (const apiBaseUrl of ["https://api.github.com", "https://github.test"]) {
-      seedGitHubInstallationTokenForTests({ apiBaseUrl, installationId: 55, token: "ghs_test" });
-    }
   });
 
   it("acks ping deliveries without dispatching", async () => {
@@ -541,7 +533,7 @@ describe("githubChannel", () => {
       api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
       botName: "testbot",
       credentials: {
-        appId: "test-app",
+        installationToken: "ghs_test",
         webhookSecret: SECRET,
       },
     });
@@ -573,7 +565,7 @@ describe("githubChannel", () => {
     const channel = githubChannel({
       api: { apiBaseUrl: "https://github.test", fetch: prContextFetch() },
       botName: "testbot",
-      credentials: { appId: "test-app", webhookSecret: SECRET },
+      credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
     });
     const { send } = await firePost(
       channel,
@@ -672,7 +664,7 @@ describe("githubChannel", () => {
     const hook = vi.fn();
     const channel = githubChannel({
       api: { apiBaseUrl: "https://github.test", fetch: prContextFetch() },
-      credentials: { appId: "test-app", webhookSecret: SECRET },
+      credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
       onPullRequest(ctx, pullRequest) {
         hook(ctx.conversation, pullRequest);
         return { auth: defaultGitHubAuth(ctx) };
@@ -731,7 +723,7 @@ describe("githubChannel", () => {
     const hook = vi.fn();
     const commonConfig = {
       api: { apiBaseUrl: "https://github.test", fetch: prContextFetch() },
-      credentials: { appId: "test-app", webhookSecret: SECRET },
+      credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
     };
     const channel =
       testCase.event === "check_suite"
@@ -906,7 +898,7 @@ describe("githubChannel", () => {
         githubChannel({
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
           credentials: {
-            appId: "test-app",
+            installationToken: "ghs_test",
             webhookSecret: SECRET,
           },
         }),
@@ -948,7 +940,7 @@ describe("githubChannel", () => {
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
           botName: "testbot",
           credentials: {
-            appId: "test-app",
+            installationToken: "ghs_test",
             webhookSecret: SECRET,
           },
         }),
@@ -998,7 +990,7 @@ describe("githubChannel", () => {
         githubChannel({
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
           botName: () => Promise.resolve("testbot"),
-          credentials: { appId: "test-app", webhookSecret: SECRET },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
         }),
       ),
       {
@@ -1045,7 +1037,7 @@ describe("githubChannel", () => {
       getAdapter(
         githubChannel({
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
-          credentials: { appId: "test-app", webhookSecret: SECRET },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
         }),
       ),
       {
@@ -1090,7 +1082,7 @@ describe("githubChannel", () => {
       getAdapter(
         githubChannel({
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
-          credentials: { appId: "test-app", webhookSecret: SECRET },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
         }),
       ),
       {
@@ -1127,7 +1119,7 @@ describe("githubChannel", () => {
         githubChannel({
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
           credentials: {
-            appId: "test-app",
+            installationToken: "ghs_test",
             webhookSecret: SECRET,
           },
         }),
@@ -1178,7 +1170,7 @@ describe("githubChannel", () => {
       getAdapter(
         githubChannel({
           credentials: {
-            appId: "test-app",
+            installationToken: "ghs_test",
             webhookSecret: SECRET,
           },
         }),

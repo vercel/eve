@@ -36,7 +36,6 @@ export {
   appendPendingInputBatch,
   consumeDeferredStepInput,
   getPendingInputRequestIds,
-  hasDeferredStepInput,
   hasPendingInputBatch,
 } from "#harness/pending-input-batches.js";
 

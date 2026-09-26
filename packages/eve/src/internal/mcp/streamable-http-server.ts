@@ -11,7 +11,6 @@ import { createLogger, logError } from "#internal/logging.js";
 const log = createLogger("mcp.server");
 
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
-export const MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25";
 /**
  * Upper bound for any MCP POST body. Tool arguments are small JSON; the
  * largest legitimate payload is an `outputSchema`, itself capped at 64 KiB.

@@ -1,23 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import {
-  clearGitHubInstallationTokenCache,
-  seedGitHubInstallationTokenForTests,
-} from "#public/channels/github/auth.js";
 import { buildGitHubPullRequestContext } from "#public/channels/github/pr-context.js";
 
 const credentials = {
-  appId: "test-app",
+  installationToken: "ghs_test",
 };
-
-beforeEach(() => {
-  clearGitHubInstallationTokenCache();
-  seedGitHubInstallationTokenForTests({
-    apiBaseUrl: "https://github.test",
-    installationId: 55,
-    token: "ghs_test",
-  });
-});
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {

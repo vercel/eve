@@ -19,7 +19,7 @@ import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { defineHook } from "#public/definitions/hook.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import { isEventId } from "#protocol/event-id.js";
+import { isEventId } from "#internal/testing/event-id.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { SessionTitleKey } from "#context/keys.js";

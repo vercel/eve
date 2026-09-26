@@ -21,7 +21,7 @@ import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID, type ResolvedRuntimeAgentNode } from "#runtime/graph.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
@@ -160,7 +160,7 @@ function createTestNode(
   return {
     agent,
     channels: [],
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry: createRuntimeHookRegistry([]),
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
     sandboxRegistry: createStubSandboxRegistry(),
     subagentRegistry: {

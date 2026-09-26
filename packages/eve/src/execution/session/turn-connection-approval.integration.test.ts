@@ -21,7 +21,7 @@ import {
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import type {
   ResolvedDynamicConnectionResolver,
@@ -204,7 +204,7 @@ function setup(
         sandboxRegistry: sandboxRegistry as CompiledBundle["graph"]["root"]["sandboxRegistry"],
         turnAgent,
         channels: [],
-        hookRegistry: createEmptyHookRegistry(),
+        hookRegistry: createRuntimeHookRegistry([]),
         nodeId: "__root__",
         subagentRegistry: {
           dynamicNodeIds: new Set(),
@@ -216,7 +216,7 @@ function setup(
         toolRegistry: { preparedTools: [], toolsByName: new Map() },
       },
     },
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry: createRuntimeHookRegistry([]),
     moduleMap: { nodes: {} },
     resolvedAgent: resolvedAgent as CompiledBundle["resolvedAgent"],
     subagentRegistry: {

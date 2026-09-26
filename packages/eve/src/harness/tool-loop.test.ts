@@ -75,10 +75,10 @@ import {
 } from "#harness/authorization.js";
 import {
   getPendingInputRequestIds,
-  hasDeferredStepInput,
   hasPendingInputBatch,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
+import { getDeferredStepInput } from "#harness/pending-input-batches.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
@@ -8249,7 +8249,7 @@ describe("createToolLoopHarness", () => {
       expect(pendingApprovalInstructions(callIndex)).toContain("bash");
       expect(pendingApprovalInstructions(callIndex)).not.toContain("rm -rf /tmp/demo");
       expect(followup.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
-      expect(hasDeferredStepInput(followup.session)).toBe(false);
+      expect(getDeferredStepInput(followup.session)).toBeUndefined();
       expect(hasPendingInputBatch(followup.session.state)).toBe(true);
       pendingSession = followup.session;
     }
@@ -8527,7 +8527,7 @@ describe("createToolLoopHarness", () => {
     const lastMessages = (generateCalls[0] ?? []).filter((message) => message.role === "user");
     expect(JSON.stringify(lastMessages)).toContain("Wedged hello.");
     expect(JSON.stringify(lastMessages)).toContain("Are you there?");
-    expect(hasDeferredStepInput(result.session)).toBe(false);
+    expect(getDeferredStepInput(result.session)).toBeUndefined();
     expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
