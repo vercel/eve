@@ -87,13 +87,13 @@ describe("executeWriteFileOnSandbox", () => {
     const result = (await contextStorage.run(ctx, () =>
       executeWriteFileOnSandbox(session, {
         filePath: "/workspace/new.ts",
-        content: "hello",
+        content: "hello\nworld\n",
       }),
     )) as WriteFileResult;
 
-    expect(result.existed).toBe(false);
-    expect(result.path).toBe("/workspace/new.ts");
-    expect(files["/workspace/new.ts"]).toBe("hello");
+    // A trailing newline ends the last line, matching read_file's totalLines.
+    expect(result).toEqual({ existed: false, lineCount: 2, path: "/workspace/new.ts" });
+    expect(files["/workspace/new.ts"]).toBe("hello\nworld\n");
   });
 
   // ---------------------------------------------------------------------------
@@ -320,7 +320,7 @@ describe("executeWriteFileOnSandbox", () => {
       });
     })) as WriteFileResult;
 
-    expect(result).toEqual({ existed: true, path: filePath });
+    expect(result).toEqual({ existed: true, lineCount: 1, path: filePath });
     expect(files[filePath]).toBe("updated");
   });
 

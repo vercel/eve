@@ -38,19 +38,28 @@ import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 
 const logger = createLogger("framework.connection-search-dynamic");
 
+// Every match becomes a callable tool with its full schema, so one search must not flood the tool set.
+const CONNECTION_SEARCH_MAX_RESULTS = 20;
+
 const CONNECTION_SEARCH_INPUT_SCHEMA = defineJsonSchema<ConnectionSearchInput>({
   type: "object",
   properties: {
     connection: {
       type: "string",
-      description: "Optional: limit search to a specific connection name.",
+      description:
+        "Optional connection name from the Available connections list. Omit to search every connection.",
     },
     keywords: {
       type: "string",
       description:
-        "Search keywords and expanded aliases. Distill intent into keywords; avoid stop words like 'a', 'the', 'in'.",
+        "Space-separated keywords for the action and its likely synonyms, e.g. 'list issues tickets'. Avoid stop words like 'a', 'the', 'in'.",
     },
-    limit: { type: "number", description: "Max results to return. Default 10." },
+    limit: {
+      type: "integer",
+      minimum: 1,
+      maximum: CONNECTION_SEARCH_MAX_RESULTS,
+      description: `Maximum matching tools to return, from 1 to ${String(CONNECTION_SEARCH_MAX_RESULTS)}. Defaults to 10.`,
+    },
   },
   required: ["keywords"],
   additionalProperties: false,
@@ -433,11 +442,19 @@ export async function resolveConnectionSearchDynamicTools() {
   const tools: Record<string, object> = {};
 
   const connectionSearchTool = defineTool({
-    description:
-      "Search for tools across your connections. " +
-      "Discovered tools become directly callable by their qualified name " +
-      "(e.g. `linear__list_issues`) in your next response. " +
+    description: [
+      "Search the tools published by your connections, then call a match directly.",
+      "",
+      "Usage:",
+      "- Search for the action you need, such as 'create invoice' or 'list open issues', not for the service name alone.",
+      "- Pass connection when you already know which service owns the action; omit it to search every connection.",
+      "- Each match includes its qualified name (e.g. `linear__list_issues`) and input schema. Matches become directly callable by qualified name in your next response. Call a tool that is already available instead of searching for it again.",
+      "- A result with needsAuthorization: true means that connection must be authorized before its tools work. Tell the user instead of retrying the search.",
+      "- A result with error means that connection failed to load its tools; other connections in the same result still work.",
+      "- When nothing matches, the result lists each connection's description. Retry with different keywords or a specific connection.",
+      "",
       `Available connections: ${connectionNames.join(", ")}.`,
+    ].join("\n"),
     inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
     async execute(input: ConnectionSearchInput) {
       return executeConnectionSearch(input);

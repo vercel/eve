@@ -10,6 +10,7 @@ export interface WriteFileToolInput {
 
 export interface WriteFileToolOutput {
   existed: boolean;
+  lineCount: number;
   path: string;
 }
 
@@ -36,9 +37,10 @@ export const WRITE_FILE_OUTPUT_SCHEMA = defineJsonSchema<WriteFileToolOutput>({
   type: "object",
   properties: {
     existed: { type: "boolean" },
+    lineCount: { type: "integer", minimum: 0 },
     path: { type: "string" },
   },
-  required: ["existed", "path"],
+  required: ["existed", "lineCount", "path"],
   additionalProperties: false,
 });
 
@@ -48,14 +50,14 @@ export const WRITE_FILE_OUTPUT_SCHEMA = defineJsonSchema<WriteFileToolOutput>({
 export const writeFile: ToolDefinition<WriteFileToolInput, WriteFileToolOutput> = defineTool({
   label: { start: (input) => toolLabel("Write", input.filePath) },
   description: [
-    "Writes a file to the local filesystem.",
+    "Write complete contents to a text file, creating it or replacing an existing file.",
     "",
     "Usage:",
-    "- This tool will overwrite the existing file if there is one at the provided path.",
-    "- If this is an existing file, you MUST use the read_file tool first to read the file's contents. This tool will fail if you did not read the file first.",
-    "- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.",
-    "- NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.",
-    "- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.",
+    "- The filePath parameter should be an absolute path or begin with $HOME/.",
+    "- content replaces the whole file, so include every line you want to keep.",
+    "- New files need no prior read.",
+    "- Before overwriting an existing file, read it with the read_file tool. The write fails if you have not read the file or if it changed since your last read; read it again, then retry.",
+    "- Returns the written path, whether the file already existed, and its line count.",
   ].join("\n"),
   async execute(input, ctx) {
     return await executeWriteFileOnSandbox(await ctx.getSandbox(), input as WriteFileInput);
