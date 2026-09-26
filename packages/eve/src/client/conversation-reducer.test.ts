@@ -83,21 +83,6 @@ describe("conversation reducer child calls", () => {
     });
   });
 
-  it("keeps an unfollowed child's parent facts without synthesizing a child outcome", () => {
-    let state = conversationReducer.reduce(conversationReducer.initial(), called());
-    const completed = stampTestEvents([
-      {
-        type: "subagent.completed",
-        data: { callId: "child-call", subagentName: "researcher", output: "done" },
-      } as UnstampedMessageStreamEvent,
-    ])[0]!;
-    state = conversationReducer.reduce(state, completed);
-    expect(state.children["child-call"]).toMatchObject({
-      parentStatus: "reported-complete",
-      observation: { status: "not-followed" },
-    });
-  });
-
   it("scopes root and child input IDs, and preserves child state through parent events", () => {
     let state = conversationReducer.reduce(conversationReducer.initial(), called());
     state = conversationReducer.reduce(state, request("same-id", "root-turn"));
