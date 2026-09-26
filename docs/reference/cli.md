@@ -243,13 +243,13 @@ Local development records traces under `.eve/traces/` by default and bounds that
 
 ### Local workflow recovery
 
-With the built-in local Workflow World, a new `eve dev` server leaves previous invocations' runs dormant by default, including deliveries triggered by timers or hooks. Source-watcher rebuilds and worker restarts within the same server retain current runs' eligibility.
+With the built-in local Workflow World, a new `eve dev` server leaves previous invocations' runs dormant by default, including deliveries triggered by timers or hooks. A new message or control request addressed to a dormant conversation fails instead of being accepted without a response; the HTTP channel reports its usual request failure. Start a new conversation, or restart `eve dev` with `--resume` to attempt recovery. Already-open event streams are not changed by this request guard. Source-watcher rebuilds and worker restarts within the same server retain current runs' eligibility.
 
-Pass `eve dev --resume` to attempt recovery of unfinished runs from previous invocations. Recovery requires a retained snapshot with readable generation metadata. Changes to the eve framework or authored workflow sources do not prevent the attempt, but replay can fail.
+Pass `eve dev --resume` to attempt recovery of unfinished runs from previous invocations. Recovery requires a retained snapshot with readable generation metadata. Changes to the eve framework or authored workflow sources do not prevent the attempt, but replay can fail and leave the run terminally failed after executing some work. Use `--resume` only when you want to try continuing those previous runs.
 
 Runs with malformed generation metadata remain stored and dormant for that server invocation, including later timer and hook deliveries. Startup with `--resume` reports why recovery was skipped without blocking other eligible runs. Restore malformed snapshot metadata from a backup or start a new session.
 
-Recovery eligibility is decided before startup queue delivery begins. Hot reload does not recheck admitted runs against the latest workflow sources, so follow-up turns, cancellation, and `/new` retain their existing behavior. This does not guarantee safe replay of an authored workflow whose body changes while it is running.
+Recovery eligibility is decided before startup queue delivery begins. Hot reload does not recheck admitted runs against the latest workflow sources, so follow-up turns, cancellation, and `/new` retain their existing behavior. Changing an authored workflow body while it is running can likewise cause replay failure.
 
 At startup and after snapshot pruning, `eve dev` cancels unfinished runs whose runtime snapshots are missing. This includes waiting conversations and session timeout workflows. Cancellation records the reason in the run history without a terminal warning; normal run-data retention still applies. Stopping `eve dev` does not intentionally cancel runs whose snapshots remain available.
 

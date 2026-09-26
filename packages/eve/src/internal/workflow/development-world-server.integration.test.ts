@@ -1,4 +1,3 @@
-import { getDevelopmentFrameworkFingerprint } from "#internal/workflow/development-runtime-compatibility.js";
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -130,11 +129,29 @@ describe("parent development Workflow World", () => {
         },
       ]);
       const runId = readCreatedRunId(created);
+      const token = `review-live-${runId}`;
+      await callWorld(world, "events.create", [
+        runId,
+        {
+          eventType: "run_started",
+          specVersion: 6,
+        },
+      ]);
+      await callWorld(world, "events.create", [
+        runId,
+        {
+          eventType: "hook_created",
+          specVersion: 6,
+          correlationId: "hook_01J00000000000000000000001",
+          eventData: { token },
+        },
+      ]);
 
       await seedGeneration(appRoot, "generation-b", {
         workflowSourceFingerprint: "added-workflow",
       });
       activeGenerationId = "generation-b";
+      await expect(callWorld(world, "hooks.getByToken", [token])).resolves.toMatchObject({ runId });
       for (const message of [
         { runId },
         { workflowRunId: runId },
@@ -235,8 +252,8 @@ describe("parent development Workflow World", () => {
   it("recovers retained runs across restarts without recovering cancelled orphans", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-recovery-");
     await seedGeneration(appRoot, "retained");
-    await seedGeneration(appRoot, "incompatible", { frameworkFingerprint: "old-framework" });
-    await seedGeneration(appRoot, "legacy", { frameworkFingerprint: undefined });
+    await seedGeneration(appRoot, "changed-framework", { frameworkFingerprint: "old-framework" });
+    await seedGeneration(appRoot, "legacy", { recoveryVersion: undefined });
     await seedGeneration(appRoot, "queued-only", { workflowSourceFingerprint: "old-workflow" });
     await seedGeneration(appRoot, "changed-workflow", {
       workflowSourceFingerprint: "old-workflow",
@@ -244,10 +261,7 @@ describe("parent development Workflow World", () => {
     for (const [generationId, source] of [
       ["invalid-json", '{"runtimeAppRoot":'],
       ["invalid-schema", JSON.stringify({ runtimeAppRoot: 42 })],
-      [
-        "invalid-fingerprint",
-        JSON.stringify({ runtimeAppRoot: "/unused", frameworkFingerprint: 42 }),
-      ],
+      ["invalid-version", JSON.stringify({ runtimeAppRoot: "/unused", recoveryVersion: 2 })],
     ] as const) {
       await seedGeneration(appRoot, generationId);
       await writeFile(
@@ -262,12 +276,12 @@ describe("parent development Workflow World", () => {
       for (const deploymentId of [
         "retained",
         "missing",
-        "incompatible",
+        "changed-framework",
         "legacy",
         "changed-workflow",
         "invalid-json",
         "invalid-schema",
-        "invalid-fingerprint",
+        "invalid-version",
       ]) {
         runIds.push(
           readCreatedRunId(
@@ -308,7 +322,9 @@ describe("parent development Workflow World", () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
       await restarted.start();
-      await expect.poll(() => deliveries).toEqual([runIds[0]]);
+      await expect
+        .poll(() => [...deliveries].sort())
+        .toEqual([runIds[0], runIds[2], runIds[4]].sort());
       expect(warning).toHaveBeenCalledWith(
         expect.stringContaining('"invalid-json": Development generation metadata is invalid.'),
       );
@@ -319,16 +335,19 @@ describe("parent development Workflow World", () => {
       await seedGeneration(appRoot, "rebuilt", { workflowSourceFingerprint: "old-workflow" });
       activeGenerationId = "rebuilt";
       await expect(deliverToWorker({ runId: runIds[0] })).resolves.toBe("retained");
-      for (const runId of runIds.slice(2)) {
-        await expect(deliverToWorker({ runId })).resolves.toBeUndefined();
-        await expect(deliverToWorker({ workflowRunId: runId })).resolves.toBeUndefined();
+      for (const [index, runId] of runIds.entries()) {
+        if (index < 2) continue;
+        const expected =
+          index === 2 ? "changed-framework" : index === 4 ? "changed-workflow" : undefined;
+        await expect(deliverToWorker({ runId })).resolves.toBe(expected);
+        await expect(deliverToWorker({ workflowRunId: runId })).resolves.toBe(expected);
         await expect(callWorld(restarted, "runs.get", [runId])).resolves.toMatchObject({
           status: "pending",
         });
       }
       await expect(
         deliverToWorker({ runId: RUN_ID, runInput: { deploymentId: "queued-only" } }),
-      ).resolves.toBeUndefined();
+      ).resolves.toBe("queued-only");
     } finally {
       warning.mockRestore();
       await restarted.close();
@@ -354,6 +373,23 @@ describe("parent development Workflow World", () => {
       },
     ]);
     const runId = readCreatedRunId(created);
+    const token = `review-dormant-${runId}`;
+    await callWorld(first, "events.create", [
+      runId,
+      {
+        eventType: "run_started",
+        specVersion: 6,
+      },
+    ]);
+    await callWorld(first, "events.create", [
+      runId,
+      {
+        eventType: "hook_created",
+        specVersion: 6,
+        correlationId: "hook_01J00000000000000000000002",
+        eventData: { token },
+      },
+    ]);
     await first.close();
 
     let active = "new";
@@ -364,6 +400,9 @@ describe("parent development Workflow World", () => {
       await second.start();
       expect(startupFetch).not.toHaveBeenCalled();
       startupFetch.mockRestore();
+      await expect(createDevelopmentWorkflowWorld().hooks.getByToken(token)).rejects.toThrow(
+        "Local Workflow run was not resumed",
+      );
       for (const message of [
         { runId },
         { workflowRunId: runId },
@@ -372,7 +411,10 @@ describe("parent development Workflow World", () => {
         await expect(deliverToWorker(message)).resolves.toBeUndefined();
       }
       await expect(callWorld(second, "runs.get", [runId])).resolves.toMatchObject({
-        status: "pending",
+        status: "running",
+      });
+      await expect(callWorld(second, "events.list", [{ runId }])).resolves.toMatchObject({
+        data: expect.not.arrayContaining([expect.objectContaining({ eventType: "hook_received" })]),
       });
       await seedGeneration(appRoot, "reloaded");
       active = "reloaded";
@@ -395,6 +437,9 @@ describe("parent development Workflow World", () => {
       await resumed.start();
       await expect.poll(() => deliveries).toEqual([runId]);
       connectWorkerToWorld(resumed, appRoot);
+      await expect(callWorld(resumed, "hooks.getByToken", [token])).resolves.toMatchObject({
+        runId,
+      });
       await expect(deliverToWorker({ runId })).resolves.toBe("old");
     } finally {
       await resumed.close();
@@ -807,14 +852,18 @@ function deliveryHeaders(input: { readonly secret?: string }): Record<string, st
 async function seedGeneration(
   appRoot: string,
   generationId: string,
-  overrides: { frameworkFingerprint?: string | undefined; workflowSourceFingerprint?: string } = {},
+  overrides: {
+    recoveryVersion?: number | undefined;
+    frameworkFingerprint?: string;
+    workflowSourceFingerprint?: string;
+  } = {},
 ): Promise<void> {
   const snapshotRoot = join(appRoot, ".eve", "dev-runtime", "snapshots", generationId);
   const runtimeAppRoot = join(snapshotRoot, "source", "app");
   await mkdir(runtimeAppRoot, { recursive: true });
   await writeFile(
     join(snapshotRoot, "generation.json"),
-    `${JSON.stringify({ runtimeAppRoot, frameworkFingerprint: await getDevelopmentFrameworkFingerprint(), ...overrides })}\n`,
+    `${JSON.stringify({ runtimeAppRoot, recoveryVersion: 1, ...overrides })}\n`,
   );
 }
 

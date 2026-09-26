@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Local development now leaves previous invocations' workflows dormant by default; use `eve dev --resume` to attempt recovery, with warnings for retained runs that fail conservative startup checks. Recovery decisions last for the server invocation without changing hot-reload behavior for admitted runs, including follow-up turns, cancellation, and starting a new conversation.
+Local development leaves previous invocations' workflows dormant by default. `eve dev --resume` attempts to recover runs with valid retained snapshots even when framework or authored workflow sources changed; replay can fail after executing work. Missing snapshots are cancelled, while runs with legacy or malformed recovery metadata remain stored and dormant. Requests addressed to dormant conversations fail instead of appearing accepted without a response.

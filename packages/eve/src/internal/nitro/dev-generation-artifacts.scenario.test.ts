@@ -654,11 +654,7 @@ describe("development generation artifacts", () => {
     const generation = await stageDevelopmentGeneration(compileResult);
     expect(generation.workflowSourceFingerprint).toEqual(expect.any(String));
     await expect(
-      readDevelopmentGenerationAvailability(
-        app.appRoot,
-        basename(generation.snapshotRoot),
-        basename(generation.snapshotRoot),
-      ),
+      readDevelopmentGenerationAvailability(app.appRoot, basename(generation.snapshotRoot)),
     ).resolves.toEqual({ kind: "ready", runtimeAppRoot: generation.runtimeAppRoot });
 
     const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
@@ -688,12 +684,8 @@ describe("development generation artifacts", () => {
     );
     expect(helperChanged.workflowSourceFingerprint).not.toBe(generation.workflowSourceFingerprint);
     await expect(
-      readDevelopmentGenerationAvailability(
-        app.appRoot,
-        basename(generation.snapshotRoot),
-        basename(helperChanged.snapshotRoot),
-      ),
-    ).resolves.toMatchObject({ kind: "incompatible" });
+      readDevelopmentGenerationAvailability(app.appRoot, basename(generation.snapshotRoot)),
+    ).resolves.toEqual({ kind: "ready", runtimeAppRoot: generation.runtimeAppRoot });
 
     await writeFile(
       join(app.appRoot, "agent", "tools", "plain.mjs"),
@@ -704,11 +696,7 @@ describe("development generation artifacts", () => {
     );
     expect(plainChanged.workflowSourceFingerprint).toBe(helperChanged.workflowSourceFingerprint);
     await expect(
-      readDevelopmentGenerationAvailability(
-        app.appRoot,
-        basename(helperChanged.snapshotRoot),
-        basename(plainChanged.snapshotRoot),
-      ),
+      readDevelopmentGenerationAvailability(app.appRoot, basename(helperChanged.snapshotRoot)),
     ).resolves.toEqual({ kind: "ready", runtimeAppRoot: helperChanged.runtimeAppRoot });
     expect(plainChanged.fingerprint).not.toBe(helperChanged.fingerprint);
   });

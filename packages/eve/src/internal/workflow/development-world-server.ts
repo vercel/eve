@@ -72,7 +72,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   // Owned by the host, not a worker: rebuilds preserve the startup admission decision.
   readonly #unrecoveredGenerations = new Map<
     string,
-    | Extract<DevelopmentGenerationAvailability, { kind: "incompatible" }>
+    | Extract<DevelopmentGenerationAvailability, { kind: "ineligible" }>
     | { readonly kind: "dormant" }
   >();
   #closed = false;
@@ -114,12 +114,8 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
         this.#unrecoveredGenerations.set(generationId, { kind: "dormant" });
         continue;
       }
-      const availability = await readDevelopmentGenerationAvailability(
-        this.#appRoot,
-        generationId,
-        recoveryGenerationId,
-      );
-      if (availability.kind === "incompatible") {
+      const availability = await readDevelopmentGenerationAvailability(this.#appRoot, generationId);
+      if (availability.kind === "ineligible") {
         this.#unrecoveredGenerations.set(generationId, availability);
       }
     }
@@ -135,7 +131,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
         world: this.#world,
         canRecover: async (generationId) => {
           const availability = await this.#generationAvailability(generationId);
-          if (availability.kind === "incompatible" && !skippedGenerations.has(generationId)) {
+          if (availability.kind === "ineligible" && !skippedGenerations.has(generationId)) {
             skippedGenerations.add(generationId);
             console.warn(
               `[eve:dev] Skipping retained Workflow generation "${generationId}": ${availability.reason}`,
@@ -289,6 +285,23 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
     if (call.operation === "queue") {
       return await this.#queue(...(args as Parameters<World["queue"]>));
+    }
+    if (call.operation === "hooks.getByToken" || call.operation === "hooks.get") {
+      if (!this.#started) throw new Error("Local Workflow World is still starting.");
+      const hook =
+        call.operation === "hooks.getByToken"
+          ? await this.#world.hooks.getByToken(
+              ...(args as Parameters<World["hooks"]["getByToken"]>),
+            )
+          : await this.#world.hooks.get(...(args as Parameters<World["hooks"]["get"]>));
+      const run = await this.#world.runs.get(hook.runId, { resolveData: "none" });
+      const availability = await this.#generationAvailability(run.deploymentId);
+      if (availability.kind === "dormant" || availability.kind === "ineligible") {
+        throw new Error(
+          "Local Workflow run was not resumed. Start a new conversation, or restart eve dev with --resume to attempt recovery.",
+        );
+      }
+      return hook;
     }
     if (call.operation === "streams.writeMulti" && this.#world.streams.writeMulti === undefined) {
       for (const chunk of args[2] as readonly (string | Uint8Array)[]) {
