@@ -23,6 +23,7 @@ import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
 } from "#internal/testing/workflow-tool-run-harness.js";
+import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 
 describe("workflow tools", () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -99,6 +100,7 @@ describe("workflow tools", () => {
   });
 
   it("fails workflow-context misuse in a step with actionable guidance", async () => {
+    const consoleOutput = captureConsoleOutput();
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-step-context-misuse",
       execute: workflowContextMisuseWorkflow,
@@ -124,6 +126,10 @@ describe("workflow tools", () => {
       "Read ctx.agents in the workflow body and pass the required serializable metadata into the step.",
     );
     expect(output).toContain("Attempt 1.");
+    expect(consoleOutput.lines).toContainEqual(
+      expect.stringContaining(workflowSdkNotice.fatalStep),
+    );
+    expect(consoleOutput.unexpected(workflowSdkNotice.fatalStep)).toEqual([]);
   });
 
   it("settles the call with an error when the workflow body throws", async () => {
@@ -151,6 +157,7 @@ describe("workflow tools", () => {
   });
 
   it("routes workflow reports, human input, and outcome through the session owner", async () => {
+    const output = captureConsoleOutput();
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-hitl",
@@ -218,6 +225,7 @@ describe("workflow tools", () => {
         await run.cancel();
       }
     });
+    expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
   }, 60_000);
 
   it("lets a deadline win a race against an unanswered ask", async () => {

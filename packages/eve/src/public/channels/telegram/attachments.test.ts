@@ -5,9 +5,11 @@ import {
   createTelegramFetchFile,
   createTelegramFileUrl,
 } from "#public/channels/telegram/attachments.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 describe("collectTelegramFileParts", () => {
   it("emits URL-backed file parts and applies the upload policy", () => {
+    const logs = captureLogRecords();
     const parts = collectTelegramFileParts(
       [
         {
@@ -35,6 +37,13 @@ describe("collectTelegramFileParts", () => {
       type: "file",
     });
     expect(String(parts[0]!.data)).toContain("telegram-file:");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          'dropped attachment — report.pdf has media type "application/pdf" which is not allowed by this route. Allowed: image/*.',
+      }),
+    );
   });
 });
 

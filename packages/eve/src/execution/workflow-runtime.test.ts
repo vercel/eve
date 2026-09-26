@@ -33,6 +33,7 @@ import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import type { TraceCaptureContext } from "#shared/trace-policy.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const getHookByTokenMock = vi.fn();
 const world = {
@@ -275,6 +276,7 @@ describe("createWorkflowRuntime command dispatch", () => {
   });
 
   it("does not report an accepted command as missing when metadata hydration fails", async () => {
+    const logs = captureLogRecords();
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     resumeHookMock.mockResolvedValue({
       runId: "owner",
@@ -291,6 +293,9 @@ describe("createWorkflowRuntime command dispatch", () => {
     expect(resumeHookMock).toHaveBeenCalledOnce();
     expect(startMock).not.toHaveBeenCalled();
     expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to dispatch session command" }),
+    );
   });
 
   it("preserves the delivery payload through the stable session inbox", async () => {
@@ -349,6 +354,7 @@ describe("createWorkflowRuntime command dispatch", () => {
   });
 
   it("re-throws unexpected errors from `resumeHook`", async () => {
+    const logs = captureLogRecords();
     const failure = new Error("transient backing-store outage");
     resumeHookMock.mockRejectedValue(failure);
 
@@ -360,6 +366,9 @@ describe("createWorkflowRuntime command dispatch", () => {
         continuationToken: NOT_FOUND_TOKEN,
       }),
     ).rejects.toBe(failure);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to dispatch session command" }),
+    );
   });
 
   it("dispatches guarded cancellation through the stable inbox", async () => {
@@ -403,6 +412,7 @@ describe("createWorkflowRuntime command dispatch", () => {
   });
 
   it("rethrows unexpected runtime failures", async () => {
+    const logs = captureLogRecords();
     const failure = new Error("transient backing-store outage");
     resumeHookMock.mockRejectedValue(failure);
 
@@ -412,6 +422,9 @@ describe("createWorkflowRuntime command dispatch", () => {
         sessionId: "session-1",
       }),
     ).rejects.toBe(failure);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to dispatch session command" }),
+    );
   });
 
   it("waits for reset to release the stable command inbox", async () => {
@@ -472,10 +485,17 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
   });
 
   it("rethrows unexpected lookup failures", async () => {
+    const logs = captureLogRecords();
     const failure = new Error("transient backing-store outage");
     getHookByTokenMock.mockRejectedValue(failure);
 
     await expect(buildRuntime().resolveContinuation("test:token")).rejects.toBe(failure);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "failed to resolve session by continuation token",
+      }),
+    );
   });
 });
 
@@ -748,6 +768,7 @@ describe("createWorkflowRuntime#createSession", () => {
   });
 
   it("starts the root without activity when collector launch fails", async () => {
+    const logs = captureLogRecords();
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock
@@ -762,9 +783,13 @@ describe("createWorkflowRuntime#createSession", () => {
 
     const workflowInput = startMock.mock.calls[1]?.[1][0];
     expect(workflowInput.serializedContext[ActivityObserverKey.name]).toBeUndefined();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "failed to start activity collector" }),
+    );
   });
 
   it("cancels the collector when root workflow startup fails", async () => {
+    const logs = captureLogRecords();
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     const failure = new Error("root start failed");
@@ -781,6 +806,9 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(cancelRunMock).toHaveBeenCalledWith(world, "collector-run", {
       cancelReason: "Root session creation did not complete",
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to start workflow run" }),
+    );
   });
 
   it("does not inspect continuation ownership after accepting a root candidate", async () => {

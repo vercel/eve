@@ -27,6 +27,7 @@ import {
   type Session as RuntimeSession,
 } from "#context/keys.js";
 import { createMessageCompletedEvent } from "#protocol/message.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -758,6 +759,7 @@ describe("eveChannel — onMessage", () => {
   });
 
   it("rejects an invalid null onMessage result instead of returning an empty success", async () => {
+    const logs = captureLogRecords();
     const handler = createEveCreateHandler({
       auth: none(),
       onMessage: (() => null) as never,
@@ -771,6 +773,9 @@ describe("eveChannel — onMessage", () => {
       error: "onMessage handler failed.",
       ok: false,
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "onMessage handler failed" }),
+    );
   });
 
   it("allows onMessage to dispatch with an empty context array", async () => {
@@ -789,6 +794,7 @@ describe("eveChannel — onMessage", () => {
   });
 
   it("returns 500 without dispatching when onMessage throws", async () => {
+    const logs = captureLogRecords();
     const handler = createEveCreateHandler({
       auth: none(),
       onMessage: () => {
@@ -804,6 +810,9 @@ describe("eveChannel — onMessage", () => {
       error: "onMessage handler failed.",
       ok: false,
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "onMessage handler failed" }),
+    );
   });
 
   it("rejects combined messages and input responses on continue requests", async () => {
@@ -1037,6 +1046,7 @@ describe("eveChannel — create session idempotency", () => {
 
 describe("eveChannel — create session (text)", () => {
   it("returns a structured 500 when session creation fails", async () => {
+    const logs = captureLogRecords();
     const handler = createEveCreateHandler({ auth: none() });
     handler.send.mockRejectedValue(new Error("backing store outage"));
 
@@ -1047,6 +1057,9 @@ describe("eveChannel — create session (text)", () => {
       error: "Failed to create the session.",
       ok: false,
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "session-create request failed" }),
+    );
   });
 
   it("accepts a plain-string message and opens a new session", async () => {
@@ -1593,6 +1606,7 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
   });
 
   it("returns a structured 500 when fixed-session delivery fails", async () => {
+    const logs = captureLogRecords();
     const handler = createEveContinueHandler({ auth: none() });
     handler.send.mockRejectedValue(new Error("backing store outage"));
 
@@ -1603,6 +1617,9 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
       error: "Failed to send the session message.",
       ok: false,
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "session-message request failed" }),
+    );
   });
 
   it("converts clientContext on continue-session requests", async () => {
@@ -1856,6 +1873,7 @@ describe("eveChannel — cancel turn", () => {
   });
 
   it("returns 500 when the cancellation request fails unexpectedly", async () => {
+    const logs = captureLogRecords();
     const handler = createEveCancelHandler({ auth: none() });
     handler.cancelTurn.mockRejectedValue(new Error("backing store outage"));
 
@@ -1866,6 +1884,9 @@ describe("eveChannel — cancel turn", () => {
       error: "Failed to cancel the turn.",
       ok: false,
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "cancel-turn request failed" }),
+    );
   });
 });
 
@@ -1918,6 +1939,7 @@ describe("eveChannel — reset session", () => {
   });
 
   it("returns 500 when reset fails unexpectedly", async () => {
+    const logs = captureLogRecords();
     const handler = createEveResetHandler({ auth: none() });
     handler.reset.mockRejectedValue(new Error("backing store outage"));
 
@@ -1928,6 +1950,9 @@ describe("eveChannel — reset session", () => {
       error: "Failed to reset the session.",
       ok: false,
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "session-reset request failed" }),
+    );
   });
 });
 
@@ -2128,6 +2153,7 @@ describe("eveChannel — forwarded principal", () => {
   });
 
   it("returns 500 when the authored predicate throws", async () => {
+    const logs = captureLogRecords();
     const handler = createEveCreateHandler({
       trustedForwarders: () => {
         throw new Error("boom");
@@ -2139,6 +2165,9 @@ describe("eveChannel — forwarded principal", () => {
 
     expect(response.status).toBe(500);
     expect(handler.send).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "trustedForwarders handler failed" }),
+    );
   });
 
   it("replaces the session principal when the forwarder is accepted", async () => {

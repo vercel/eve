@@ -10,6 +10,7 @@ import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import type { ActivitySnapshotV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const at = "2026-01-01T00:00:00.000Z";
 
@@ -297,6 +298,7 @@ describe("observeSessionActivity", () => {
   });
 
   it("submits projected activity and swallows transport failure", async () => {
+    const logs = captureLogRecords();
     const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -308,5 +310,8 @@ describe("observeSessionActivity", () => {
       }),
     ).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "activity sink request failed" }),
+    );
   });
 });

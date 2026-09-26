@@ -58,6 +58,7 @@ import {
   createStepStartedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 // Re-implement the naming logic here to test it independently
 // (the production function is unexported — testing via the public behavior)
@@ -1250,6 +1251,7 @@ describe("dispatchDynamicToolEvent", () => {
   });
 
   it("skips map entries that were not created with defineTool", async () => {
+    const logs = captureLogRecords();
     const ctx = createCtx();
     const rawResolver = createResolver("raw", ["step.started"], () => ({
       unwrapped: {
@@ -1267,11 +1269,18 @@ describe("dispatchDynamicToolEvent", () => {
     });
 
     expect(buildDynamicTools(ctx)).toHaveLength(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Dynamic tool resolver (step.started) failed — skipping its complete result.",
+      }),
+    );
   });
 
   it.each(["single", "map"])(
     "does not advertise a workflow tool returned as a %s",
     async (shape) => {
+      const logs = captureLogRecords();
       const ctx = createCtx();
       const tool = defineWorkflowTool({
         description: "Invalid dynamic workflow",
@@ -1290,10 +1299,17 @@ describe("dispatchDynamicToolEvent", () => {
         event: makeEvent("session.started"),
       });
       expect(buildDynamicTools(ctx)).toHaveLength(0);
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "Dynamic tool resolver (session.started) failed — skipping its complete result.",
+        }),
+      );
     },
   );
 
   it("resolver throwing is logged and skipped — other resolvers still work", async () => {
+    const logs = captureLogRecords();
     const ctx = createCtx();
     const badResolver = createResolver("bad", ["session.started"], () => {
       throw new Error("resolver exploded");
@@ -1312,6 +1328,12 @@ describe("dispatchDynamicToolEvent", () => {
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);
     expect(tools[0]!.name).toBe("working");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Dynamic tool resolver (session.started) failed — skipping its complete result.",
+      }),
+    );
   });
 
   it("uses file slug when handler returns a single entry", async () => {
@@ -1805,6 +1827,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
   });
 
   it("rejects an untransformed tool atomically without resolver hydration", async () => {
+    const logs = captureLogRecords();
     const ctx = createCtx();
     const execute = vi.fn(async () => ({ ok: true }));
     const request = vi.fn(async () => "user-approval" as const);
@@ -1831,6 +1854,12 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(execute).not.toHaveBeenCalled();
     expect(request).not.toHaveBeenCalled();
     expect(response).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Dynamic tool resolver (session.started) failed — skipping its complete result.",
+      }),
+    );
   });
 
   it("propagates outputSchema from dynamic entries into harness tools and metadata", async () => {
@@ -2116,6 +2145,7 @@ describe("dynamic callback cache recovery", () => {
   it.each(["null", "throw", "invalid"])(
     "clears withdrawn and partially registered callbacks when a resolver returns %s",
     async (outcome) => {
+      const logs = captureLogRecords();
       const ctx = createCtx();
       const original = createResolver("changing", ["session.started"], () => ({
         changed: createReplayableTool(),
@@ -2155,6 +2185,12 @@ describe("dynamic callback cache recovery", () => {
       await expect(
         tools.find((tool) => tool.name === "other")!.execute!({}, executeOptions),
       ).resolves.toEqual({ ok: true });
+      const failures = logs.records.filter(
+        (record) =>
+          record.message ===
+          "Dynamic tool resolver (session.started) failed — skipping its complete result.",
+      );
+      expect(failures).toHaveLength(outcome === "null" ? 0 : 1);
     },
   );
 

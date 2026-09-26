@@ -30,6 +30,7 @@ import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const boundSession = {
   agentName: "test-agent",
@@ -110,7 +111,11 @@ function initializeRemoteSession(
     traceFlags: 1,
     traceId: "d".repeat(32),
   });
+  const logs = captureLogRecords();
   initializeSessionInstrumentation({ agentName: "remote-agent", ctx });
+  expect(logs.records).toContainEqual(
+    expect.objectContaining({ level: "info", message: "resolved forwarded trace policy" }),
+  );
   return ctx;
 }
 
@@ -223,6 +228,7 @@ describe("initializeSessionInstrumentation", () => {
   });
 
   it("redacts runtime-context model input when the forwarded ceiling denies inputs", async () => {
+    const logs = captureLogRecords();
     const ctx = createContext("public");
     const runtime: InstrumentationRuntime = {
       ...createRuntime({ capturesContent: true, publish: vi.fn() }, () => ({
@@ -276,6 +282,13 @@ describe("initializeSessionInstrumentation", () => {
       );
 
     expect(messageCount).toBe(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "info",
+        message: "resolved forwarded trace policy",
+        fields: expect.objectContaining({ ceilingEffective: "i0o1", ceilingIn: "i0o1" }),
+      }),
+    );
   });
 
   it("narrows monotonically across a three-hop chain", () => {

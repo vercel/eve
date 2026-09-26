@@ -7,6 +7,11 @@ import { handleConnectionCallbackRequest } from "#execution/connections/callback
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { authorizedDeployWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
 import {
+  captureConsoleOutput,
+  taskParentEndedNotice,
+  workflowSdkNotice,
+} from "#internal/testing/log-records.js";
+import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
   waitForWorkflowToolRunTerminal,
@@ -21,6 +26,7 @@ describe("workflow step authorization failures", () => {
   ])(
     "closes authorization on $disposition (background=$background)",
     async ({ background, disposition }) => {
+      const output = captureConsoleOutput();
       const runtime = await createWorkflowToolRuntime({
         agentName: "workflow-step-auth-failure",
         background,
@@ -104,6 +110,11 @@ describe("workflow step authorization failures", () => {
           await run.cancel();
         }
       });
+      // A denied or rejected authorization fails the step fatally.
+      expect(
+        output.lines.filter((line) => line.startsWith(workflowSdkNotice.fatalStep)),
+      ).toHaveLength(disposition === "cancel" ? 0 : 1);
+      expect(output.unexpected(workflowSdkNotice.fatalStep, taskParentEndedNotice)).toEqual([]);
     },
     60_000,
   );

@@ -7,6 +7,11 @@ import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
@@ -92,6 +97,7 @@ describe("tool loop cancellation (real AI SDK)", () => {
   });
 
   it("forwards a live signal to executing tools and discards the straggler result", async () => {
+    const logs = captureLogRecords();
     const abortController = new AbortController();
     const cancellation = new TurnCancelledError();
 
@@ -181,6 +187,9 @@ describe("tool loop cancellation (real AI SDK)", () => {
     for (const failureType of FAILURE_EVENT_TYPES) {
       expect(eventTypes).not.toContain(failureType);
     }
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "tool execution failed" }),
+    );
   });
 
   it("leaves behavior unchanged when the signal never aborts", async () => {

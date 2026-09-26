@@ -31,6 +31,10 @@ import connectionSearch from "#tools/framework/connection-search.js";
 import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
 import type { ApprovalResponseContext } from "#approval/definition.js";
 
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
+
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
 }));

@@ -4,6 +4,7 @@ import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/st
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import type { BackgroundWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const COMPILED_BUNDLE = {
   subagentRegistry: { subagentsByNodeId: new Map() },
@@ -246,6 +247,7 @@ describe("terminateChildSessionsStep", () => {
   });
 
   it("settles every indexed task cancellation before terminating local children", async () => {
+    const logs = captureLogRecords();
     const firstCancellation = createDeferred();
     const secondCancellation = createDeferred();
     const order: string[] = [];
@@ -287,47 +289,56 @@ describe("terminateChildSessionsStep", () => {
     expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-local", {
       cancelReason: "Parent session ended",
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "failed to settle background task instrumentation",
+      }),
+    );
   });
 
   it("continues finalization after an indexed task cancellation fails", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logs = captureLogRecords();
     cancelOwnedTaskMock
       .mockRejectedValueOnce(new Error("task cancellation unavailable"))
       .mockImplementationOnce(async ({ entry }: { entry: BackgroundWorkflowToolRun }) =>
         cancelledView(entry),
       );
 
-    try {
-      await expect(
-        terminateChildSessionsStep({
-          serializedContext: { context: "serialized" },
-          sessionState: makeSessionState(
-            [
-              parkedHandle({
-                id: "ag_local:1",
-                kind: "agent/local",
-                sessionId: "session-local",
-              }),
-            ],
-            [indexedTask("task-1"), indexedTask("task-2")],
-          ),
-        }),
-      ).resolves.toBeUndefined();
+    await expect(
+      terminateChildSessionsStep({
+        serializedContext: { context: "serialized" },
+        sessionState: makeSessionState(
+          [
+            parkedHandle({
+              id: "ag_local:1",
+              kind: "agent/local",
+              sessionId: "session-local",
+            }),
+          ],
+          [indexedTask("task-1"), indexedTask("task-2")],
+        ),
+      }),
+    ).resolves.toBeUndefined();
 
-      expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2);
-      expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-local", {
-        cancelReason: "Parent session ended",
-      });
-      expect(errorSpy).toHaveBeenCalledWith(
-        "[eve:execution.cancel-indexed-session-tasks] failed to cancel indexed task",
-        expect.objectContaining({
-          parentSessionId: "parent-session",
-          taskId: "task-1",
-        }),
-      );
-    } finally {
-      errorSpy.mockRestore();
-    }
+    expect(cancelOwnedTaskMock).toHaveBeenCalledTimes(2);
+    expect(cancelRunMock).toHaveBeenCalledExactlyOnceWith("world", "session-local", {
+      cancelReason: "Parent session ended",
+    });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        namespace: "execution.cancel-indexed-session-tasks",
+        message: "failed to cancel indexed task",
+        fields: expect.objectContaining({ parentSessionId: "parent-session", taskId: "task-1" }),
+      }),
+    );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "failed to settle background task instrumentation",
+      }),
+    );
   });
 
   it("continues terminating children after one termination fails", async () => {

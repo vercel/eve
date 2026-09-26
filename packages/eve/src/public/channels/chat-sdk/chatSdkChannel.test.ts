@@ -195,6 +195,8 @@ describe("chatSdkChannel", () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       state: memoryState(),
+      // Tests that initialize Chat SDK keep its warnings but not its info-level startup lines.
+      logger: "warn",
       userName: "bot",
     });
     const compiled = asCompiled<ChatSdkChannelState>(bridge.channel);
@@ -227,6 +229,7 @@ describe("chatSdkChannel", () => {
       adapters: { test: adapter },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
 
@@ -268,6 +271,7 @@ describe("chatSdkChannel", () => {
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
 
@@ -303,6 +307,7 @@ describe("chatSdkChannel", () => {
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
 
@@ -716,6 +721,7 @@ describe("chatSdkChannel", () => {
       adapters: { test: adapter },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
     const channelAdapter = withState(getAdapter(bridge.channel), {

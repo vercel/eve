@@ -1,3 +1,6 @@
+// The build scripts import this file directly through Node type stripping, so
+// it must stay free of `#` imports and non-erasable TypeScript syntax.
+
 interface BundlerLog {
   readonly id?: string;
   readonly ids?: readonly unknown[];

@@ -12,6 +12,7 @@ import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.j
 import type { TaskView } from "#tasks/types.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { submitActivity } from "#execution/submit-activity.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 vi.mock("#execution/submit-activity.js", () => ({ submitActivity: vi.fn() }));
 
@@ -332,8 +333,15 @@ describe("notifyTaskParent", () => {
     new HookNotFoundError("parent-token"),
     new Error("delivery failed", { cause: new RunExpiredError("parent ended") }),
   ])("tolerates an ended parent", async (error) => {
+    const logs = captureLogRecords();
     vi.mocked(resumeSessionInbox).mockRejectedValueOnce(error);
     await expect(notifyTaskParent(notification)).resolves.toBeUndefined();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "task notification target is gone; the parent session already ended",
+      }),
+    );
   });
 
   it("propagates transient delivery failures so the durable step can retry", async () => {

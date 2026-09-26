@@ -9,6 +9,7 @@ import {
   type SlackBotTokenContext,
 } from "#public/channels/slack/api.js";
 import { resolveSlackTransportOptions } from "#public/channels/slack/transport.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 interface FetchCall {
   url: string;
@@ -596,6 +597,7 @@ describe("SlackThread.refresh", () => {
   });
 
   it("preserves loaded messages when a later refresh fails", async () => {
+    const logs = captureLogRecords();
     const { thread } = buildSlackBinding({
       botToken: "xoxb-test",
       channelId: "C01",
@@ -609,6 +611,9 @@ describe("SlackThread.refresh", () => {
     await thread.refresh();
 
     expect(thread.recentMessages).toEqual(loadedMessages);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "refresh threw — swallowed" }),
+    );
   });
 
   it("marks only replies from the bound Slack app as mine", async () => {

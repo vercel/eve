@@ -18,10 +18,12 @@ import {
 } from "#execution/session-inbox/address.js";
 import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
+import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 
 describe("workflowEntry integration", () => {
   describe("deployment handoff", () => {
     it("recovers the original owner when target rejects nested state", async () => {
+      const output = captureConsoleOutput();
       const runtime = await createTestRuntime({ agent: { name: "handoff-validation" } });
       await runtime.run(async () => {
         const anchor = await start(workflowEntry, [
@@ -176,6 +178,13 @@ describe("workflowEntry integration", () => {
           stream.dispose();
         }
       });
+      expect(output.lines).toContainEqual(
+        expect.stringContaining(workflowSdkNotice.unpinnedDelivery),
+      );
+      expect(output.lines).toContainEqual(expect.stringContaining(workflowSdkNotice.maxRetries));
+      expect(
+        output.unexpected(workflowSdkNotice.unpinnedDelivery, workflowSdkNotice.maxRetries),
+      ).toEqual([]);
     });
 
     it("retains a message accepted just before durable hook disposal", async () => {
@@ -287,6 +296,7 @@ describe("workflowEntry integration", () => {
     });
 
     it("hands off an alias-addressed session and keeps the alias resolving through the gap", async () => {
+      const output = captureConsoleOutput();
       const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff-alias" } });
       const continuationToken = "http:workflow-entry-handoff-alias";
 
@@ -389,6 +399,10 @@ describe("workflowEntry integration", () => {
           await anchor.cancel();
         }
       });
+      expect(output.lines).toContainEqual(
+        expect.stringContaining(workflowSdkNotice.unpinnedDelivery),
+      );
+      expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
     });
 
     it("keeps the session on the current owner when it is not idle", async () => {

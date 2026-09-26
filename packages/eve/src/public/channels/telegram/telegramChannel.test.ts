@@ -14,6 +14,7 @@ import {
   type TelegramChannelState,
 } from "#public/channels/telegram/index.js";
 import { isTelegramBotMentioned } from "#public/channels/telegram/defaults.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const SECRET = "telegram-secret";
 
@@ -276,6 +277,7 @@ describe("telegramChannel() inbound route", () => {
   });
 
   it("sends authorization privately after the requester taps its group callback", async () => {
+    const logs = captureLogRecords();
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response(JSON.stringify({ ok: true, result: true })));
@@ -336,6 +338,12 @@ describe("telegramChannel() inbound route", () => {
       callback_query_id: "cb-auth",
       text: "Sign-in prompt sent privately.",
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Telegram authorization callback delivery failed",
+      }),
+    );
   });
 
   it("keeps direct approval replies as fallback text for option prompts", async () => {
@@ -366,6 +374,7 @@ describe("telegramChannel() inbound route", () => {
   });
 
   it("rejects requests with invalid webhook verification", async () => {
+    const logs = captureLogRecords();
     const channel = telegramChannel({ credentials: { webhookSecretToken: SECRET } });
     const compiled = asCompiled(channel);
     const post = compiled.routes.find((route) => route.method === "POST");
@@ -392,6 +401,9 @@ describe("telegramChannel() inbound route", () => {
 
     expect(response.status).toBe(401);
     expect(send).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "telegram inbound verification failed" }),
+    );
   });
 });
 

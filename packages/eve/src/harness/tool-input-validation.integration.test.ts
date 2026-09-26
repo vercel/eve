@@ -1,9 +1,13 @@
 import type { LanguageModel, ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 const usage = {
   inputTokens: {

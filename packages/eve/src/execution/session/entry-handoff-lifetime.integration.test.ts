@@ -4,6 +4,7 @@ import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
@@ -23,6 +24,7 @@ describe("workflowEntry integration", () => {
     it.each([undefined, 60_000, false] as const)(
       "renews the configured lifetime across handoffs and keeps the original stream (%s)",
       async (sessionTimeoutMs) => {
+        const output = captureConsoleOutput();
         const runtime = await createTestRuntime({ agent: { name: "workflow-entry-handoff" } });
 
         await runtime.run(async () => {
@@ -204,6 +206,11 @@ describe("workflowEntry integration", () => {
             if (!completed) await anchor.cancel();
           }
         });
+        // Each handoff delivers the session to a deployment it was not started on.
+        expect(output.lines).toContainEqual(
+          expect.stringContaining(workflowSdkNotice.unpinnedDelivery),
+        );
+        expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
       },
     );
   });

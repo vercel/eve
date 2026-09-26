@@ -21,6 +21,10 @@ const poolId = process.env.VITEST_POOL_ID ?? "0";
 installEveWorkflowQueueNamespace(WORKFLOW_TEST_AGENT_NAME);
 const world = createWorld({
   dataDir: join(resolveLocalWorkflowWorldDataDirectory(packageRoot), `vitest-${poolId}`),
+  // Every test file in this worker shares the data directory, and the file's
+  // state is cleared below. Recovering the previous file's unfinished runs on
+  // start would only re-enqueue deliveries that fail before a handler exists.
+  recoverActiveRuns: false,
   tag: `vitest-${poolId}`,
 });
 

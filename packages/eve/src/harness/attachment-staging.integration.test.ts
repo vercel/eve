@@ -12,6 +12,7 @@ import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 /**
  * Integration coverage for {@link stageAttachmentsToSandbox}.
@@ -249,6 +250,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
   });
 
   it("degrades plain resolver errors to a channel-neutral safe note", async () => {
+    const logs = captureLogRecords();
     const upstream = new Error("boom https://secret.example/file?token=private");
     const adapter: ChannelAdapter<any> = {
       async fetchFile() {
@@ -280,9 +282,16 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     ]);
     expect(staged[0]).not.toHaveProperty("text", expect.stringContaining("secret.example"));
     expect(sandbox.writes).toHaveLength(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "attachment resolver failed — degrading to text part",
+      }),
+    );
   });
 
   it("exposes a channel-authored safe resolver error to the model", async () => {
+    const logs = captureLogRecords();
     const resolverError = new EveAttachmentError({
       adapterKind: "custom-channel",
       kind: "resolver-threw",
@@ -317,9 +326,16 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       },
     ]);
     expect(sandbox.writes).toHaveLength(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "attachment resolver failed — degrading to text part",
+      }),
+    );
   });
 
   it("stages sibling attachments when one resolver call fails", async () => {
+    const logs = captureLogRecords();
     const adapter: ChannelAdapter<any> = {
       async fetchFile(url) {
         if (url.endsWith("missing.bin")) {
@@ -361,6 +377,12 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     });
     expect((staged[1] as FilePart).filename).toMatch(/\/available\.bin$/);
     expect(sandbox.writes).toHaveLength(1);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "attachment resolver failed — degrading to text part",
+      }),
+    );
   });
 
   it("works alongside non-file parts in the same user message", async () => {
@@ -620,6 +642,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
   });
 
   it("degrades to a text reference when an inlinable sandbox ref points at a missing file", async () => {
+    const logs = captureLogRecords();
     // Resuming a durable session whose staging sandbox was torn down
     // leaves historical attachment refs pointing at bytes that are gone.
     // Hydration must not fail the whole turn over it — it degrades to a
@@ -662,9 +685,16 @@ describe("hydrateSandboxAttachments (integration)", () => {
     });
     const fileParts = hydratedContent.filter((p) => (p as FilePart).type === "file");
     expect(fileParts).toHaveLength(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "sandbox-ref attachment bytes missing on hydration — degrading to text reference",
+      }),
+    );
   });
 
   it("survives a resume after the staging sandbox was torn down (#276)", async () => {
+    const logs = captureLogRecords();
     // Stage an image into one sandbox, then hydrate the resulting
     // ref-only message against a fresh sandbox — the same shape as
     // resuming a durable session whose ephemeral sandbox is gone. The
@@ -695,6 +725,12 @@ describe("hydrateSandboxAttachments (integration)", () => {
       type: "text",
     });
     expect(hydratedContent.filter((p) => (p as FilePart).type === "file")).toHaveLength(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "sandbox-ref attachment bytes missing on hydration — degrading to text reference",
+      }),
+    );
   });
 
   it("does not touch the sandbox when every ref is non-inlinable — text references carry all the info", async () => {

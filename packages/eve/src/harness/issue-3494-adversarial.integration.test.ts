@@ -24,6 +24,11 @@ import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import { createTurnStartedEvent } from "#protocol/message.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 // Diagnostic probes assert desired outcomes. Pending state is created by the
 // real harness and SDK; only provider output and runtime result delivery are scripted.
@@ -290,6 +295,7 @@ for (const variant of [
   "response-authorized",
 ] as const) {
   it(`finishes unrelated ${variant} tool turn while an approval stays open`, async () => {
+    const logs = captureLogRecords();
     const f = fixture(variant, variant === "response-authorized");
     await f.gate("gateA");
     f.script.push(
@@ -313,6 +319,9 @@ for (const variant of [
     }[variant];
     expect([...f.executions].sort()).toEqual(expectedExecutions.sort());
     expect(result.settledTurn?.output).toBe("FINAL");
+    expect(
+      logs.records.filter((record) => record.message === "tool execution failed"),
+    ).toHaveLength(variant === "fail" ? 1 : 0);
   });
 }
 
@@ -425,6 +434,7 @@ it("reaches the next budget prompt after a grant while an earlier approval remai
 
 for (const variant of ["fail", "invalid"]) {
   it(`recovers from ${variant} without pending input [control]`, async () => {
+    const logs = captureLogRecords();
     const f = fixture(`control-${variant}`);
     f.script.push(
       variant === "invalid" ? [{ toolName: "read", input: { n: "invalid" } }] : calls("fail"),
@@ -432,6 +442,9 @@ for (const variant of ["fail", "invalid"]) {
     );
     expect((await f.drive({ message: "Try the tool." })).settledTurn?.output).toBe("FINAL");
     if (variant === "invalid") expect(f.executions).toHaveLength(0);
+    expect(
+      logs.records.filter((record) => record.message === "tool execution failed"),
+    ).toHaveLength(variant === "fail" ? 1 : 0);
   });
 }
 

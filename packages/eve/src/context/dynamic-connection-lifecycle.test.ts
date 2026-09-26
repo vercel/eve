@@ -12,6 +12,7 @@ import type {
   ResolvedConnectionDefinition,
   ResolvedDynamicConnectionResolver,
 } from "#runtime/types.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 describe("dynamic connection lifecycle", () => {
   it("resolves a mixed connection map with bare map-key names", async () => {
@@ -126,6 +127,7 @@ describe("dynamic connection lifecycle", () => {
   });
 
   it("does not reveal a shadowed static connection when its resolver fails", async () => {
+    const logs = captureLogRecords();
     const { ctx, registry } = createContext([createStaticConnection("production")]);
     const resolver = createResolver({
       eventNames: ["session.started", "turn.started"],
@@ -160,9 +162,16 @@ describe("dynamic connection lifecycle", () => {
     expect(registry.getConnections()).toMatchObject([
       { connectionName: "production", description: "Caller production account." },
     ]);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Dynamic connection resolver (turn.started) failed.",
+      }),
+    );
   });
 
   it("requires an instance key for authenticated dynamic connections", async () => {
+    const logs = captureLogRecords();
     const { ctx } = createContext();
     const resolver = createResolver({
       handler: () =>
@@ -181,6 +190,12 @@ describe("dynamic connection lifecycle", () => {
       }),
     ).rejects.toThrow(
       'Dynamic connection resolver "connections/accounts.ts" failed during "session.started".',
+    );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Dynamic connection resolver (session.started) failed.",
+      }),
     );
   });
 
@@ -289,6 +304,7 @@ describe("dynamic connection lifecycle", () => {
   });
 
   it("fails closed when a handler returns an unbranded connection", async () => {
+    const logs = captureLogRecords();
     const { ctx, registry } = createContext();
     const resolver = createResolver({
       handler: () => ({
@@ -310,6 +326,12 @@ describe("dynamic connection lifecycle", () => {
     );
 
     expect(registry.getConnections()).toEqual([]);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Dynamic connection resolver (session.started) failed.",
+      }),
+    );
   });
 
   it("prefixes map keys produced by an extension resolver", async () => {
