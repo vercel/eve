@@ -15,9 +15,7 @@ export default defineEval({
       equals(["agent", "operator", "researcher"]),
     );
     turn.calledTool("inspect-agents", { count: 1 });
-    turn.calledSubagent("agent", { count: 0 });
-    turn.calledSubagent("operator", { count: 0 });
-    turn.calledSubagent("researcher", { count: 0 });
+    turn.notEvent("agent.started");
     t.succeeded();
     t.noFailedActions();
   },

@@ -7,6 +7,7 @@ import {
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
+import { captureAgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 type CoordinationDispatchStepInput = CoordinationDispatchInput & {
@@ -35,10 +36,10 @@ export async function dispatchCoordinationStep(
 
   for (const task of prepared.plan) {
     const started = await startWorkflowTask({
+      agentContext: captureAgentSessionContext(prepared, task.callId),
       agents: prepared.workflowAgents,
       auth: prepared.auth,
       batchEvent: batch.event,
-      canRequestInput: prepared.capabilities?.requestInput === true,
       initiatorAuth: prepared.initiatorAuth,
       owner: input.workflowToolRunOwner,
       parentSession: prepared.parentSession,

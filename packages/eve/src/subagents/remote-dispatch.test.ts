@@ -176,7 +176,7 @@ describe("startRemoteAgentSession", () => {
       .fn()
       .mockResolvedValue(
         Response.json(
-          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { ok: true, protocolVersion: 2, sessionId: "remote-session", status: "accepted" },
           { status: 202 },
         ),
       );
@@ -187,14 +187,7 @@ describe("startRemoteAgentSession", () => {
       callbackBaseUrl: "https://caller.example.com",
       operationId: "operation-1",
       remote: createRemoteAgent(),
-      session: {
-        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
-        compaction: { recentWindowSize: 10, threshold: 100000 },
-        continuationToken: "eve:parent-token",
-        history: [],
-        sessionId: "parent-session",
-        state: {},
-      },
+      session: { continuationToken: "eve:parent-token" },
     });
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
@@ -209,6 +202,7 @@ describe("startRemoteAgentSession", () => {
         Response.json(
           {
             ok: true,
+            protocolVersion: 2,
             sessionId: "accepted-child",
             status: "accepted",
           },
@@ -237,14 +231,7 @@ describe("startRemoteAgentSession", () => {
             baggage: "eve.conversation.id=operator-id,vendor=value",
           },
         },
-        session: {
-          agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
-          compaction: { recentWindowSize: 10, threshold: 100000 },
-          continuationToken: "eve:parent-token",
-          history: [],
-          sessionId: "parent-session",
-          state: {},
-        },
+        session: { continuationToken: "eve:parent-token" },
       };
 
       await expect(startRemoteAgentSession(input)).resolves.toEqual({
@@ -270,6 +257,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
+          protocolVersion: 2,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -285,21 +273,7 @@ describe("startRemoteAgentSession", () => {
         ...createRemoteAgent(),
         headers: { Traceparent: "00-authored", "x-static": "yes" },
       },
-      session: {
-        agent: {
-          modelReference: { id: "mock/test" },
-          system: "",
-          tools: [],
-        },
-        compaction: {
-          recentWindowSize: 10,
-          threshold: 100000,
-        },
-        continuationToken: "eve:parent-token",
-        history: [],
-        sessionId: "parent-session",
-        state: {},
-      },
+      session: { continuationToken: "eve:parent-token" },
       parent: {
         lineage: {
           callId: "call-remote",
@@ -345,6 +319,7 @@ describe("startRemoteAgentSession", () => {
         "find the marker",
       ].join("\n"),
       capabilities: {},
+      protocolVersion: 2,
     });
     expect(
       readForwardedParentSessionBaggage(
@@ -371,14 +346,7 @@ describe("startRemoteAgentSession", () => {
         action: createAction(),
         callbackBaseUrl: "https://caller.example.com",
         remote: createRemoteAgent(),
-        session: {
-          agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
-          compaction: { recentWindowSize: 10, threshold: 100000 },
-          continuationToken: "eve:parent-token",
-          history: [],
-          sessionId: "parent-session",
-          state: {},
-        },
+        session: { continuationToken: "eve:parent-token" },
       }),
     ).rejects.toThrow("create-session response was invalid");
   });
@@ -394,21 +362,7 @@ describe("startRemoteAgentSession", () => {
         action: createAction(),
         callbackBaseUrl: "https://caller.example.com",
         remote: createRemoteAgent(),
-        session: {
-          agent: {
-            modelReference: { id: "mock/test" },
-            system: "",
-            tools: [],
-          },
-          compaction: {
-            recentWindowSize: 10,
-            threshold: 100000,
-          },
-          continuationToken: "eve:parent-token",
-          history: [],
-          sessionId: "parent-session",
-          state: {},
-        },
+        session: { continuationToken: "eve:parent-token" },
       }),
     ).rejects.toThrow("create-session response was invalid");
   });
@@ -418,6 +372,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
+          protocolVersion: 2,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -433,13 +388,7 @@ describe("startRemoteAgentSession", () => {
         ...createRemoteAgent(),
         url: "https://remote.example.com/eve/researcher",
       },
-      session: {
-        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
-        compaction: { recentWindowSize: 10, threshold: 100000 },
-        continuationToken: "eve:parent-token",
-        history: [],
-        sessionId: "parent-session",
-      },
+      session: { continuationToken: "eve:parent-token" },
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -453,6 +402,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
+          protocolVersion: 2,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -472,14 +422,7 @@ describe("startRemoteAgentSession", () => {
       action: { ...action, input: { ...action.input, outputSchema } },
       callbackBaseUrl: "https://caller.example.com",
       remote: createRemoteAgent(),
-      session: {
-        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
-        compaction: { recentWindowSize: 10, threshold: 100000 },
-        continuationToken: "eve:parent-token",
-        history: [],
-        sessionId: "parent-session",
-        state: {},
-      },
+      session: { continuationToken: "eve:parent-token" },
     });
 
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
@@ -495,6 +438,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
+          protocolVersion: 2,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -510,14 +454,7 @@ describe("startRemoteAgentSession", () => {
       action: { ...action, input: { ...action.input, outputSchema: {} } },
       callbackBaseUrl: "https://caller.example.com",
       remote: createRemoteAgent(),
-      session: {
-        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
-        compaction: { recentWindowSize: 10, threshold: 100000 },
-        continuationToken: "eve:parent-token",
-        history: [],
-        sessionId: "parent-session",
-        state: {},
-      },
+      session: { continuationToken: "eve:parent-token" },
     });
 
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
@@ -529,6 +466,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
+          protocolVersion: 2,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -541,13 +479,7 @@ describe("startRemoteAgentSession", () => {
       action: createAction(),
       callbackBaseUrl: "https://caller.example.com",
       remote: createRemoteAgent(),
-      session: {
-        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
-        compaction: { recentWindowSize: 10, threshold: 100000 },
-        continuationToken: "eve:parent-token",
-        history: [],
-        sessionId: "parent-session",
-      },
+      session: { continuationToken: "eve:parent-token" },
       parent: { continuationToken: "turn-inbox" },
     });
 
@@ -565,6 +497,7 @@ describe("startRemoteAgentSession", () => {
       new Response(
         JSON.stringify({
           ok: true,
+          protocolVersion: 2,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -577,21 +510,7 @@ describe("startRemoteAgentSession", () => {
       action: createAction(),
       callbackBaseUrl: "https://caller.example.com",
       remote: createRemoteAgent(),
-      session: {
-        agent: {
-          modelReference: { id: "mock/test" },
-          system: "",
-          tools: [],
-        },
-        compaction: {
-          recentWindowSize: 10,
-          threshold: 100000,
-        },
-        continuationToken: "eve:parent-token",
-        history: [],
-        sessionId: "parent-session",
-        state: {},
-      },
+      session: { continuationToken: "eve:parent-token" },
     });
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual(
@@ -631,6 +550,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     return new Response(
       JSON.stringify({
         ok: true,
+        protocolVersion: 2,
         sessionId: "remote-session",
         status: "accepted",
       }),
@@ -810,6 +730,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       new Response(
         JSON.stringify({
           ok: true,
+          protocolVersion: 2,
           sessionId: "remote-session",
           status: "accepted",
         }),
@@ -848,6 +769,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       new Response(
         JSON.stringify({
           ok: true,
+          protocolVersion: 2,
           sessionId: "remote-session",
           status: "accepted",
         }),

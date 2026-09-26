@@ -1,4 +1,5 @@
 import type { SessionAuth, SessionParent } from "#context/session-context.js";
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -33,9 +34,9 @@ export async function startWorkflowToolRun(
 
 /** Starts one durable workflow task and records it on the owning session. */
 export async function startWorkflowTask(input: {
+  readonly agentContext: AgentSessionContext;
   readonly agents: WorkflowToolRunInput["agents"];
   readonly auth: SessionAuth["current"];
-  readonly canRequestInput: boolean;
   readonly batchEvent: {
     readonly sequence: number;
     readonly stepIndex: number;
@@ -50,9 +51,9 @@ export async function startWorkflowTask(input: {
   const { task, batchEvent, session } = input;
   try {
     const started = await startWorkflowToolRun({
+      agentContext: input.agentContext,
       agents: input.agents,
       callId: task.callId,
-      canRequestInput: input.canRequestInput,
       executeInput: task.executeInput,
       input: task.input,
       owner: input.owner,

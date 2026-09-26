@@ -1,7 +1,14 @@
+import { FatalError } from "#compiled/@workflow/core/index.js";
 import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session.js";
 import { AgentHandleError } from "#protocol/agent-handle-error.js";
+import {
+  REMOTE_AGENT_PROTOCOL_MISMATCH,
+  REMOTE_AGENT_PROTOCOL_VERSION,
+  formatRemoteAgentProtocolMismatch,
+  readRemoteAgentProtocolVersion,
+} from "#protocol/remote-agent-protocol.js";
 import {
   createEveCallbackRoutePath,
   createEveSessionCancelRoutePath,
@@ -42,6 +49,7 @@ import { writeConversationBaggage } from "#tracing/conversation-context.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),
+  protocolVersion: z.number().optional(),
   sessionId: z.string().min(1),
   status: z.literal("accepted"),
 });
@@ -79,7 +87,7 @@ export async function startRemoteAgentSession(input: {
     readonly lineage?: SubagentParentContext["lineage"];
   };
   readonly remote: ResolvedRuntimeRemoteAgentNode;
-  readonly session: HarnessSession;
+  readonly session: Pick<HarnessSession, "continuationToken">;
 }): Promise<RemoteAgentSessionCoordinates> {
   const callbackToken = input.parent?.continuationToken ?? input.session.continuationToken;
   if (!callbackToken) {
@@ -103,6 +111,7 @@ export async function startRemoteAgentSession(input: {
     message: string;
     operationId?: string;
     outputSchema?: object;
+    protocolVersion: number;
   } = {
     capabilities: {},
     callback: {
@@ -119,6 +128,7 @@ export async function startRemoteAgentSession(input: {
       remote: input.remote,
     }),
     outputSchema: normalizeRequestedOutputSchema(input.action.input.outputSchema),
+    protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
   };
   if (input.activityObserver !== undefined) requestBody.activityObserver = input.activityObserver;
   if (forwardedPrincipal !== undefined) {
@@ -161,6 +171,7 @@ export async function startRemoteAgentSession(input: {
   });
 
   if (!response.ok) {
+    await throwIfRemoteAgentProtocolMismatch(response, input.action.remoteAgentName);
     throw new Error(
       `Remote agent "${input.action.remoteAgentName}" create-session request failed with HTTP ${response.status}.`,
     );
@@ -181,8 +192,28 @@ export async function startRemoteAgentSession(input: {
       `Remote agent "${input.action.remoteAgentName}" create-session response was invalid.`,
     );
   }
+  const receiverVersion = readRemoteAgentProtocolVersion(parsed.data.protocolVersion);
+  if (receiverVersion !== REMOTE_AGENT_PROTOCOL_VERSION) {
+    throw new FatalError(
+      formatRemoteAgentProtocolMismatch({ name: input.action.remoteAgentName, receiverVersion }),
+    );
+  }
 
   return { sessionId: parsed.data.sessionId };
+}
+
+/** A receiver that speaks another protocol version rejects the create with its own version. */
+async function throwIfRemoteAgentProtocolMismatch(response: Response, name: string): Promise<void> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return;
+  }
+  if (body === null || typeof body !== "object") return;
+  if (Reflect.get(body, "code") !== REMOTE_AGENT_PROTOCOL_MISMATCH) return;
+  const receiverVersion = readRemoteAgentProtocolVersion(Reflect.get(body, "protocolVersion"));
+  throw new FatalError(formatRemoteAgentProtocolMismatch({ name, receiverVersion }));
 }
 
 function buildForwardedTraceAssertion(input: {
@@ -408,6 +439,7 @@ function setHeader(headers: Record<string, string>, name: string, value: string 
 /** Retires one exact remote child session through eve's authenticated reset route. */
 export async function resetRemoteAgentSession(input: {
   readonly headers?: Record<string, string>;
+  readonly reason?: string;
   readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
   readonly sessionId: string;
 }): Promise<ResetResponse> {
@@ -415,7 +447,7 @@ export async function resetRemoteAgentSession(input: {
   const response = await fetch(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionResetRoutePath(input.sessionId)),
     {
-      body: JSON.stringify({ reason: "Parent session ended" }),
+      body: JSON.stringify({ reason: input.reason ?? "Parent session ended" }),
       headers: { "content-type": "application/json", ...headers },
       method: "POST",
     },
@@ -449,7 +481,7 @@ export function resolveRemoteAgentForAction(input: {
   const definition = registered?.definition;
   if (input.dynamicRemoteAgent !== undefined) {
     if (definition === undefined) {
-      throw new Error(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
+      throw new FatalError(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
     }
     const credentials = resolveDynamicRemoteAgentCredentials(input.dynamicRemoteAgent);
     const config = input.dynamicRemoteAgent;
@@ -489,7 +521,7 @@ export function resolveRemoteAgentForAction(input: {
     return remote;
   }
   if (definition?.kind !== "remote") {
-    throw new Error(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
+    throw new FatalError(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
   }
   return definition;
 }

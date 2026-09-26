@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { parseCreateBody } from "#eve-channel/request.js";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 const sink = {
   url: "https://parent.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
@@ -29,6 +30,7 @@ describe("parseCreateBody activity relay", () => {
         callback,
         activityObserver: { sink, workIdentity },
         message: "research this",
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
       }),
     ).toMatchObject({ callback, activityObserver: { sink, workIdentity } });
   });
@@ -47,6 +49,7 @@ describe("parseCreateBody activity relay", () => {
       callback,
       activityObserver: { sink, workIdentity: identity },
       message: "hi",
+      protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
     });
     expect(response).toBeInstanceOf(Response);
     expect((response as Response).status).toBe(400);
@@ -60,6 +63,7 @@ describe("parseCreateBody activity relay", () => {
         workIdentity,
       },
       message: "hi",
+      protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
     });
     expect(response).toBeInstanceOf(Response);
     expect((response as Response).status).toBe(400);

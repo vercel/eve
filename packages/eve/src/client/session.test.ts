@@ -1418,16 +1418,6 @@ describe("ClientSession.streamSubagent", () => {
     expect(urls[0]!.pathname).toBe("/eve/v1/session/child_1/stream");
   });
 
-  it("rejects a subagent event from a different parent session", () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch");
-    const session = createSession();
-
-    expect(() => session.streamSubagent(calledEvent({ sessionId: "session_2" }))).toThrow(
-      "streamSubagent() requires a subagent.called event from session session_1, but it came from session session_2.",
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it("rejects a subagent event recorded before childStreamPath existed", () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const session = createSession();

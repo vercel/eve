@@ -21,6 +21,7 @@ export interface HookEventMap {
   readonly "approval.candidate": ProtocolEvent<"approval.candidate">;
   readonly "approval.settled": ProtocolEvent<"approval.settled">;
   readonly "actions.requested": ProtocolEvent<"actions.requested">;
+  readonly "agent.started": ProtocolEvent<"agent.started">;
   readonly "authorization.completed": ProtocolEvent<"authorization.completed">;
   readonly "authorization.required": ProtocolEvent<"authorization.required">;
   readonly "compaction.completed": ProtocolEvent<"compaction.completed">;

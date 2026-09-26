@@ -5,6 +5,8 @@ import type {
   WorkflowToolRunMessage,
 } from "#execution/tools/workflow/messages.js";
 import { workflowToolRunWorkflow } from "#execution/tools/workflow/workflow.js";
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
+import { AgentSessions } from "#execution/agent-sessions/session.js";
 
 const mocks = vi.hoisted(() => ({
   sleep: vi.fn(),
@@ -46,6 +48,7 @@ vi.mock("#execution/tools/workflow/owner.js", () => ({
 import { createChannelReader } from "#execution/tools/workflow/owner-channels.js";
 
 const input = {
+  agentContext: {} as AgentSessionContext,
   hookToken: "control",
   owner: { inbox: "parent" },
   callId: "call-1",
@@ -109,7 +112,11 @@ it("emits every persisted report before the terminal outcome", async () => {
   );
   expect(mocks.executeWorkflowBody).toHaveBeenCalledWith(
     expect.objectContaining({ owner: { inbox: "invocation-owner" } }),
-    { abortSignal: expect.any(AbortSignal), interruptSignal: expect.any(AbortSignal) },
+    {
+      abortSignal: expect.any(AbortSignal),
+      agentSessions: expect.any(AgentSessions),
+      interruptSignal: expect.any(AbortSignal),
+    },
   );
 });
 

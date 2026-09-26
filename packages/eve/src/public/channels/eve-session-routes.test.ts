@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
@@ -173,6 +174,7 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -213,6 +215,7 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -254,6 +257,7 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -303,6 +307,7 @@ describe("eve ID-addressed session routes", () => {
                 }
               : undefined,
             message: "hello",
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           }),
           headers: {
             "content-type": "application/json",
@@ -316,7 +321,7 @@ describe("eve ID-addressed session routes", () => {
       );
 
       expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         ok: true,
         sessionId: "wrun_A",
         status: "accepted",
@@ -368,6 +373,7 @@ describe("eve ID-addressed session routes", () => {
               url: "https://caller.example.com/eve/v1/callback/tok123",
             },
             message: "hello",
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           }),
           headers: {
             "content-type": "application/json",

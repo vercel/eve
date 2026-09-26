@@ -51,7 +51,7 @@ export default defineEval({
       input: isFourCallProgram,
       output: isFourElementLimitResult,
     });
-    t.calledSubagent("echo-marker", { count: 3, status: "completed" });
+    t.event("agent.started", { count: 3, data: { name: "echo-marker" } });
     t.messageIncludes("WORKFLOW_PROGRAM_SUBAGENT_LIMIT_REACHED");
   },
 });

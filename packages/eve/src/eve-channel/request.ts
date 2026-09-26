@@ -27,6 +27,11 @@ import {
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
 import {
+  REMOTE_AGENT_PROTOCOL_MISMATCH,
+  REMOTE_AGENT_PROTOCOL_VERSION,
+  readRemoteAgentProtocolVersion,
+} from "#protocol/remote-agent-protocol.js";
+import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
   type UploadPolicy,
@@ -74,6 +79,10 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
+  if (callback !== undefined) {
+    const protocolRejection = rejectRemoteAgentProtocolMismatch(payload.protocolVersion);
+    if (protocolRejection !== undefined) return protocolRejection;
+  }
 
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
@@ -336,6 +345,21 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   if (parsed.ok) return parsed.callback;
 
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
+}
+
+/** Delegating callers must speak this deployment's remote agent protocol. */
+function rejectRemoteAgentProtocolMismatch(value: unknown): Response | undefined {
+  const callerVersion = readRemoteAgentProtocolVersion(value);
+  if (callerVersion === REMOTE_AGENT_PROTOCOL_VERSION) return undefined;
+  return Response.json(
+    {
+      code: REMOTE_AGENT_PROTOCOL_MISMATCH,
+      error: `This deployment speaks eve remote agent protocol ${String(REMOTE_AGENT_PROTOCOL_VERSION)}, but the caller speaks protocol ${String(callerVersion)}. Upgrade both deployments to the same eve release.`,
+      ok: false,
+      protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+    },
+    { status: 409 },
+  );
 }
 
 function parseCapabilitiesField(value: unknown): SessionCapabilities | Response | undefined {

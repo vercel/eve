@@ -1,5 +1,8 @@
 import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
-import { emitWorkflowToolRunReportStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import {
+  emitAgentStartedStep,
+  emitWorkflowToolRunReportStep,
+} from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import type {
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
@@ -49,6 +52,13 @@ export async function handleWorkflowToolRunMessage(
         from: message.from,
         sessionWritable: input.cursor.sessionWritable,
         update: message.update,
+      });
+      return undefined;
+    case "agent-started":
+      await emitAgentStartedStep({
+        message,
+        parentSessionId: input.cursor.sessionState.sessionId,
+        sessionWritable: input.cursor.sessionWritable,
       });
       return undefined;
   }

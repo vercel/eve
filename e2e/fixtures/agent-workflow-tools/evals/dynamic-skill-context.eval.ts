@@ -1,4 +1,4 @@
-import { defineEval, type EveEvalTargetHandle } from "eve/evals";
+import { defineEval, type EveEvalTargetHandle, type EveEvalTurn } from "eve/evals";
 import { equals } from "eve/evals/expect";
 import type { DynamicSkillContextObservation } from "../dynamic-skill-context-audit";
 
@@ -28,6 +28,19 @@ function expectedAuth(actor: "alice" | "bob") {
   };
 }
 
+/** The child's reply: a `subagent.completed` event for the model's agent tool, the tool result for `ctx.agent`. */
+function readChildOutput(turn: EveEvalTurn, mode: "direct" | "waiting"): string {
+  if (mode === "waiting") {
+    const output = turn.toolCalls.find((call) => call.name === "blocking_agent")?.output;
+    if (typeof output !== "string") throw new Error("The waiting tool's child reply is missing.");
+    return output;
+  }
+  const completion = turn.events.find((event) => event.type === "subagent.completed");
+  if (completion?.type !== "subagent.completed")
+    throw new Error("The delegated child's completion event is missing.");
+  return completion.data.output;
+}
+
 export default (["direct", "waiting"] as const).map((mode) =>
   defineEval({
     description: `${mode} delegation preserves every dynamic-skill resolver context field across session start and later turns.`,
@@ -41,10 +54,7 @@ export default (["direct", "waiting"] as const).map((mode) =>
       initial.expectOk();
       initial.calledTool("load_skill", { count: 1, status: "completed" });
       const marker = mode === "direct" ? "Alice's hook audit" : "hook-audit:blocking";
-      const completion = initial.events.find((event) => event.type === "subagent.completed");
-      if (completion?.type !== "subagent.completed")
-        throw new Error("The delegated child's completion event is missing.");
-      const childOutput = completion.data.output;
+      const childOutput = readChildOutput(initial, mode);
       t.check(childOutput.startsWith("WORKFLOW-CHILD:"), equals(true)).label(
         "child returned its report",
       );

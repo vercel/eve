@@ -3,7 +3,8 @@ import type {
   StandardSchemaV1,
 } from "#compiled/@standard-schema/spec/index.js";
 import type { Approval } from "#approval/definition.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { MessageResult, SendTurnOptions } from "#client/types.js";
+import type { JsonObject } from "#shared/json.js";
 import {
   stampToolDefinition,
   type PublicToolDefinition,
@@ -13,55 +14,6 @@ import {
   type ToolInputResponse,
 } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
-
-export interface AgentInput {
-  readonly agentId?: string;
-  readonly message: string;
-  readonly outputSchema?: JsonObject;
-}
-
-type JsonSchemaProperties = Readonly<Record<string, JsonObject>>;
-type JsonSchemaRequiredKeys<
-  TProperties extends JsonSchemaProperties,
-  TRequired,
-> = TRequired extends readonly string[] ? Extract<TRequired[number], keyof TProperties> : never;
-type Simplify<TValue> = { [TKey in keyof TValue]: TValue[TKey] };
-type JsonSchemaObjectOutput<TProperties extends JsonSchemaProperties, TRequired> = Simplify<
-  {
-    -readonly [TKey in JsonSchemaRequiredKeys<TProperties, TRequired>]-?: JsonSchemaOutput<
-      TProperties[TKey]
-    >;
-  } & {
-    -readonly [
-      TKey in Exclude<keyof TProperties, JsonSchemaRequiredKeys<TProperties, TRequired>>
-    ]?: JsonSchemaOutput<TProperties[TKey]>;
-  }
->;
-
-type JsonSchemaOutput<TSchema> = TSchema extends { readonly const: infer TValue }
-  ? Extract<TValue, JsonValue>
-  : TSchema extends { readonly enum: readonly (infer TValue)[] }
-    ? Extract<TValue, JsonValue>
-    : TSchema extends {
-          readonly type: "object";
-          readonly properties: infer TProperties extends JsonSchemaProperties;
-          readonly required?: infer TRequired;
-        }
-      ? JsonSchemaObjectOutput<TProperties, TRequired>
-      : TSchema extends {
-            readonly type: "array";
-            readonly items: infer TItems extends JsonObject;
-          }
-        ? JsonSchemaOutput<TItems>[]
-        : TSchema extends { readonly type: "string" }
-          ? string
-          : TSchema extends { readonly type: "integer" | "number" }
-            ? number
-            : TSchema extends { readonly type: "boolean" }
-              ? boolean
-              : TSchema extends { readonly type: "null" }
-                ? null
-                : JsonValue;
 
 export interface WorkflowAgentMetadata {
   readonly description: string;
@@ -73,12 +25,44 @@ export type WorkflowStepToolContext = Pick<
   "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
 >;
 
-interface WorkflowAgent {
-  <const TOutputSchema extends JsonObject>(
-    target: string,
-    input: AgentInput & { readonly outputSchema: TOutputSchema },
-  ): Promise<JsonSchemaOutput<TOutputSchema>>;
-  (target: string, input: AgentInput): Promise<JsonValue>;
+/** Options for one message to a `ctx.agent` session. */
+export interface AgentSendOptions<TOutput = unknown> {
+  /** Structured output for the turn, as on the client's `send`. */
+  readonly outputSchema?: SendTurnOptions<TOutput>["outputSchema"];
+  /** Aborting cancels the turn this message started or joined; the turn still reports. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * How one agent turn ended, as the client's `MessageResult` reports it:
+ * `"waiting"` when the session waits for its next message, including after a
+ * cancelled turn, which carries neither `data` nor `message`; `"completed"`
+ * when the session ended with the turn; and `"failed"` when the turn failed.
+ */
+export type AgentMessageResult<TOutput = unknown> = Pick<
+  MessageResult<TOutput>,
+  "data" | "message" | "status"
+>;
+
+/** The response to one message sent to a `ctx.agent` session. */
+export interface AgentResponse<TOutput = unknown> {
+  /** Resolves when the turn the message started or joined ends. */
+  result(): Promise<AgentMessageResult<TOutput>>;
+}
+
+/**
+ * A session the workflow run owns, opened by its first `send` and ended when
+ * the run finishes. Only the run can address it.
+ */
+export interface AgentSession {
+  /**
+   * Delivers a message. It joins the session's running turn, whose result the
+   * response resolves, or starts the next turn when the session is idle.
+   */
+  send<TOutput = unknown>(
+    message: string,
+    options?: AgentSendOptions<TOutput>,
+  ): Promise<AgentResponse<TOutput>>;
 }
 
 /**
@@ -89,8 +73,11 @@ export type WorkflowToolContext = Pick<
   ToolContext,
   "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
 > & {
-  /** Invoke an agent by its invocation name. */
-  agent: WorkflowAgent;
+  /**
+   * Returns a new session with the agent of this invocation name. Nothing
+   * starts until the first `send`.
+   */
+  agent(name: string): AgentSession;
   /** Metadata for agents callable by this workflow, including hidden agents. */
   agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   /**

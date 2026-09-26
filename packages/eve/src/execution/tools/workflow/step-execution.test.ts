@@ -88,7 +88,7 @@ describe("workflow step authorization", () => {
         "Read ctx.agents in the workflow body and pass the required serializable metadata into the step.",
     },
     {
-      access: (ctx: WorkflowToolContext) => ctx.agent("researcher", { message: "Investigate" }),
+      access: (ctx: WorkflowToolContext) => ctx.agent("researcher"),
       capability: "ctx.agent()",
       guidance: "Call ctx.agent() in the workflow body.",
     },

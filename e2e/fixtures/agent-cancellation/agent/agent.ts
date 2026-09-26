@@ -2,7 +2,6 @@ import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
-const RECOVERY_REQUEST = "RESUME-CANCELLED-SLEEPER";
 const HITL_REQUEST = "GENERATED-PROGRAM-CHILD-HITL";
 
 async function respond(request: MockModelRequest): Promise<MockModelResponse | string> {
@@ -61,31 +60,6 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
             js: hitl
               ? `return await ctx.agent("sleeper", { message: ${JSON.stringify(HITL_REQUEST)} });`
               : 'return await ctx.agent("sleeper", { message: "Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled." });',
-          },
-          name: "workflow",
-        },
-      ],
-    };
-  }
-  if (message.includes("[Agents] listing")) {
-    return (
-      [...request.messages].reverse().find((entry) => entry.text.startsWith("[Agents]"))?.text ??
-      "No agents listed."
-    );
-  }
-  if (message.includes(RECOVERY_REQUEST)) {
-    const result = request.toolResults.find((entry) => entry.id === "resume-sleeper");
-    if (result !== undefined) {
-      return typeof result.output === "string" ? result.output : JSON.stringify(result.output);
-    }
-    const agentId = /agentId ("[^"]+")/u.exec(message)?.[1];
-    if (agentId === undefined) throw new Error("Recovery prompt has no sleeper agent id.");
-    return {
-      toolCalls: [
-        {
-          id: "resume-sleeper",
-          input: {
-            js: `return await ctx.agent("sleeper", { agentId: ${agentId}, message: ${JSON.stringify(RECOVERY_REQUEST)} });`,
           },
           name: "workflow",
         },

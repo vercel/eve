@@ -14,6 +14,7 @@ import type {
 import type {
   MessageStreamEvent,
   RuntimeTraceContext,
+  AgentStartedStreamEvent,
   SubagentCalledStreamEvent,
   TurnFailureStreamEvent,
 } from "#protocol/message.js";
@@ -147,10 +148,10 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   streamSubagent(
-    called: SubagentCalledStreamEvent,
+    started: AgentStartedStreamEvent | SubagentCalledStreamEvent,
     options: StreamOptions = {},
   ): AsyncIterable<MessageStreamEvent> {
-    return this.#session.streamSubagent(called, {
+    return this.#session.streamSubagent(started, {
       ...options,
       signal: options.signal ?? this.#signal,
     });

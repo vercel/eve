@@ -174,20 +174,20 @@ describe("turn cancellation descendant cascade", () => {
             ].join("\n"),
           });
           const parentIterator = response[Symbol.asyncIterator]();
-          const called = await readSubagentCalls({
+          const started = await readAgentStarts({
             count: 2,
             iterator: parentIterator,
-            label: "local and remote subagent dispatch",
+            label: "local and remote agent sessions",
           });
-          const localCalled = called.find((event) => event.data.remote === undefined);
-          const remoteCalled = called.find((event) => event.data.remote !== undefined);
-          if (localCalled === undefined || remoteCalled === undefined) {
-            throw new Error("Expected one local and one remote subagent.called event.");
+          const localStarted = started.find((event) => event.data.remote === undefined);
+          const remoteStarted = started.find((event) => event.data.remote !== undefined);
+          if (localStarted === undefined || remoteStarted === undefined) {
+            throw new Error("Expected one local and one remote agent.started event.");
           }
-          expect(remoteCalled.data.remote?.url).toBe(remoteServer.url);
+          expect(remoteStarted.data.remote?.url).toBe(remoteServer.url);
 
           const localIterator = parentClient.sessions
-            .attach(localCalled.data.childSessionId)
+            .attach(localStarted.data.sessionId)
             .stream()
             [Symbol.asyncIterator]();
 
@@ -196,7 +196,7 @@ describe("turn cancellation descendant cascade", () => {
             host: remoteServer.url,
           });
           const remoteIterator = remoteClient.sessions
-            .attach(remoteCalled.data.childSessionId)
+            .attach(remoteStarted.data.sessionId)
             .stream()
             [Symbol.asyncIterator]();
           await Promise.all([
@@ -241,7 +241,6 @@ describe("turn cancellation descendant cascade", () => {
           expectCancellationBoundary(localEvents);
           expectCancellationBoundary(remoteEvents);
           expectCancellationBoundary(parentEvents);
-          expect(parentEvents.some((event) => event.type === "subagent.completed")).toBe(false);
 
           const followUp = await (
             await parentSession.send("Reply with the exact string `still-alive` and nothing else.")
@@ -290,7 +289,7 @@ describe("turn cancellation descendant cascade", () => {
           iterator: response[Symbol.asyncIterator](),
           label: "root session-limit prompt",
         });
-        const calls = events.filter((event) => event.type === "subagent.called");
+        const calls = events.filter((event) => event.type === "agent.started");
         const requests = events.flatMap((event) =>
           event.type === "input.requested" ? event.data.requests : [],
         );
@@ -303,7 +302,7 @@ describe("turn cancellation descendant cascade", () => {
         const declined = await (await session.respond([{ optionId: "stop", requestId }])).result();
         expect(declined.status).toBe("waiting");
         expectCancellationBoundary(declined.events);
-        expect(declined.events.some((event) => event.type === "subagent.called")).toBe(false);
+        expect(declined.events.some((event) => event.type === "agent.started")).toBe(false);
       } catch (error) {
         throw new Error(
           [
@@ -320,20 +319,20 @@ describe("turn cancellation descendant cascade", () => {
   );
 });
 
-type SubagentCalledEvent = Extract<MessageStreamEvent, { type: "subagent.called" }>;
+type AgentStartedEvent = Extract<MessageStreamEvent, { type: "agent.started" }>;
 
-async function readSubagentCalls(input: {
+async function readAgentStarts(input: {
   readonly count: number;
   readonly iterator: AsyncIterator<MessageStreamEvent>;
   readonly label: string;
-}): Promise<readonly SubagentCalledEvent[]> {
+}): Promise<readonly AgentStartedEvent[]> {
   return await withinEventDeadline(
     (async () => {
-      const events: SubagentCalledEvent[] = [];
+      const events: AgentStartedEvent[] = [];
       while (events.length < input.count) {
         const next = await input.iterator.next();
         if (next.done) throw new Error(`Stream ended before ${input.label}.`);
-        if (next.value.type === "subagent.called") events.push(next.value);
+        if (next.value.type === "agent.started") events.push(next.value);
       }
       return events;
     })(),

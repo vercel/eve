@@ -26,9 +26,8 @@ export interface WorkflowProgramInput {
 
 export type WorkflowProgramOptions = Pick<WorkflowProgramInput, "maxSubagents">;
 
-interface WorkflowProgramAgentCall {
+export interface WorkflowProgramAgentCall {
   readonly input: {
-    readonly agentId?: string;
     readonly message: string;
     readonly outputSchema?: JsonObject;
   };
@@ -72,15 +71,10 @@ export function readWorkflowProgramAgentCall(value: unknown): WorkflowProgramAge
   if (typeof rawInput.message !== "string") {
     throw new TypeError('Workflow program ctx.agent() requires a "message" string.');
   }
-  if (rawInput.agentId !== undefined && typeof rawInput.agentId !== "string") {
-    throw new TypeError('Workflow program ctx.agent() "agentId" must be a string.');
-  }
   const input: {
-    agentId?: string;
     message: string;
     outputSchema?: JsonObject;
   } = { message: rawInput.message };
-  if (rawInput.agentId !== undefined) input.agentId = rawInput.agentId;
   if (rawInput.outputSchema !== undefined) {
     input.outputSchema = parseJsonObject(rawInput.outputSchema);
   }

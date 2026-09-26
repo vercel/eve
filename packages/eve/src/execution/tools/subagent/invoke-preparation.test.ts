@@ -34,7 +34,7 @@ describe("planAgentDispatch", () => {
           subagentRegistry: { subagentsByNodeId: new Map() },
           turnAgent: {},
         } as never,
-        ctx: {} as never,
+        ctx: { get: () => undefined } as never,
         session: session("root") as never,
       }),
     ).toMatchObject({
@@ -86,7 +86,7 @@ describe("planAgentDispatch", () => {
           },
           turnAgent: {},
         } as never,
-        ctx: {} as never,
+        ctx: { get: () => undefined } as never,
         knownAgentIds: [],
         session: session() as never,
       }),

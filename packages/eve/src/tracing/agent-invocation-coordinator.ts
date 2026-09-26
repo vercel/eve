@@ -102,28 +102,12 @@ export function prepareAgentInvocationTrace(input: {
     turnId,
     input.invocation.callId,
   );
-  const storedParentTraceContext = callerTraceContext ?? outerTrace;
-  const forwardedTracePolicy = readForwardedTraceAssertion(
-    storedParentTraceContext?.forwardedTracePolicy,
-  );
-  const parentTraceContext =
-    storedParentTraceContext?.decision === undefined
-      ? storedParentTraceContext
-      : {
-          ...storedParentTraceContext,
-          decision: applyLiveDeliveryAudienceCeiling(
-            storedParentTraceContext.decision,
-            liveAudience,
-            forwardedTracePolicy,
-            environment,
-          ),
-        };
   return {
-    dispatch: {
+    dispatch: toChildTraceDispatch({
+      conversation,
       conversationId,
-      originAudience: forwardedTracePolicy?.originAudience ?? liveAudience,
-      parentTraceContext,
-    },
+      stored: callerTraceContext ?? outerTrace,
+    }),
     fail: (result) =>
       recordNestedAgentInvocationTerminal({
         callId: input.invocation.callId,
@@ -137,5 +121,55 @@ export function prepareAgentInvocationTrace(input: {
         turnId,
       }),
     serializedContext,
+  };
+}
+
+/**
+ * The trace dispatch for sessions a workflow tool call's run opens with
+ * `ctx.agent`, read from the calling session when the run starts.
+ */
+export function resolveToolCallAgentTrace(input: {
+  readonly callId: string;
+  readonly conversation?: ConversationContext;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionId: string;
+  readonly turnId: string;
+}): AgentChildTraceDispatch {
+  const { serializedContext, sessionId, turnId } = input;
+  return toChildTraceDispatch({
+    conversation: input.conversation,
+    conversationId: readConversationId(serializedContext[ConversationIdKey.name]),
+    stored:
+      readActionTraceContext(serializedContext, sessionId, turnId, input.callId) ??
+      readTurnTraceContext(serializedContext, sessionId, turnId),
+  });
+}
+
+/** Caps a stored parent trace context to the live delivery audience. */
+function toChildTraceDispatch(input: {
+  readonly conversation?: ConversationContext;
+  readonly conversationId?: string;
+  readonly stored?: SessionTraceContext;
+}): AgentChildTraceDispatch {
+  const { stored } = input;
+  const liveAudience = input.conversation?.audience ?? "unknown";
+  const environment = input.conversation?.environment ?? "production";
+  const forwardedTracePolicy = readForwardedTraceAssertion(stored?.forwardedTracePolicy);
+  const parentTraceContext =
+    stored?.decision === undefined
+      ? stored
+      : {
+          ...stored,
+          decision: applyLiveDeliveryAudienceCeiling(
+            stored.decision,
+            liveAudience,
+            forwardedTracePolicy,
+            environment,
+          ),
+        };
+  return {
+    conversationId: input.conversationId,
+    originAudience: forwardedTracePolicy?.originAudience ?? liveAudience,
+    parentTraceContext,
   };
 }

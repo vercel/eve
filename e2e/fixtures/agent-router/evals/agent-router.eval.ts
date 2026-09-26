@@ -8,7 +8,7 @@ export default defineEval({
     turn.expectOk();
     turn.messageIncludes("AGENT-ROUTER-ROOT-COPY-OK");
     turn.calledTool("agent", { count: 1 });
-    turn.calledSubagent("agent", { count: 1, status: "completed" });
+    turn.event("agent.started", { count: 1, data: { name: "agent" } });
     t.succeeded();
     t.noFailedActions();
   },

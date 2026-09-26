@@ -12,7 +12,7 @@ export interface WorkflowToolRunOwner {
 }
 
 /**
- * Requests the owner must apply on the run's behalf because they touch
+ * Requests the owner applies for the model's agent tools because they touch
  * owner-held state: spawning an agent and releasing its handle afterwards.
  */
 export type WorkflowToolAgentRequest = AgentInvocationRequest | AgentSettlementRequest;
@@ -92,7 +92,20 @@ export interface WorkflowToolRunWithdrawMessage {
   readonly replyTo: string;
 }
 
+/** A session the run opened with `ctx.agent`, which the session announces as `agent.started`. */
+export interface StartedAgentSession {
+  readonly name: string;
+  readonly remote?: { readonly resolverId?: string; readonly url: string };
+  readonly sessionId: string;
+}
+
+export interface WorkflowToolRunAgentStartedMessage {
+  readonly from: WorkflowToolRunRef;
+  readonly session: StartedAgentSession;
+}
+
 export type WorkflowToolRunMessage =
+  | ({ readonly kind: "agent-started" } & WorkflowToolRunAgentStartedMessage)
   | ({ readonly kind: "report" } & WorkflowToolRunReport)
   | ({ readonly kind: "request" } & WorkflowToolRunRequestMessage)
   | ({ readonly kind: "withdraw" } & WorkflowToolRunWithdrawMessage)

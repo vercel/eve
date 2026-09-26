@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 /**
  * Integration coverage for forwarded principal across the create route and the
@@ -133,6 +134,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             url: "https://caller.example.com/eve/v1/callback/parent-token",
           },
           message: "check my dashboards",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -251,6 +253,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
               url: "https://caller.example.com/eve/v1/callback/parent-token",
             },
             message: "check my dashboards",
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           }),
           headers: {
             "content-type": "application/json",
@@ -305,6 +308,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             url: "https://caller.example.com/eve/v1/callback/parent-token",
           },
           message: "check my dashboards",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -343,6 +347,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
             url: "https://caller.example.com/eve/v1/callback/parent-token",
           },
           message: "check my dashboards",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
