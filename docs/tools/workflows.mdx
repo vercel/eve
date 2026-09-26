@@ -502,8 +502,11 @@ An unavailable name rejects the first `send`.
 | `signal`       | Aborting it cancels the turn the message started or joined. The turn still reports, as cancelled.        |
 
 A message sent while the session's turn is running joins that turn, and its response resolves with
-that turn's result. A message sent while the session is idle starts the next turn, and the session
-keeps its conversation between turns. `result()` returns the client's `MessageResult` fields:
+that turn's result. If the turn ends before the agent reads the message, the message starts the next
+turn instead, and its response resolves with that turn's result. The responses of earlier messages
+that are still waiting resolve with the same result. A message sent while the session is idle starts
+the next turn, and the session keeps its conversation between turns. `result()` returns the
+client's `MessageResult` fields:
 
 | Field     | Description                                                                                                                                                                                                         |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

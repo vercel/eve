@@ -90,10 +90,14 @@ export class AgentSessions {
   }
 }
 
-/** One turn of a session: its result and questions arrive on the turn's own hook. */
-interface AgentTurn {
+/**
+ * A sent message awaiting its reply. The reply, and the questions asked while
+ * the agent works on the message, arrive on the message's own hook.
+ */
+interface AwaitedReply {
+  readonly ended: Promise<AgentTurnEnd>;
   readonly hook: Hook<AgentTurnReply>;
-  readonly response: AgentResponse<unknown>;
+  readonly settle: (end: AgentTurnEnd) => void;
 }
 
 class RunAgentSession implements AgentSession {
@@ -102,7 +106,8 @@ class RunAgentSession implements AgentSession {
   readonly #owner: AgentSessionOwner;
   readonly #sessions: AgentSessions;
   #address: Promise<AgentSessionAddress> | undefined;
-  #turn: AgentTurn | undefined;
+  /** Oldest first. */
+  readonly #awaited: AwaitedReply[] = [];
 
   constructor(input: {
     readonly key: string;
@@ -124,35 +129,37 @@ class RunAgentSession implements AgentSession {
       throw new TypeError(`ctx.agent("${this.#name}").send() requires a non-empty message.`);
     }
     const outputSchema = serializeOutputSchema(options.outputSchema);
-    const running = this.#turn;
-    const turn = running ?? this.#startTurn(outputSchema !== undefined);
+    const reply = this.#awaitReply(outputSchema !== undefined);
     try {
       await this.#deliver({
         context: this.#owner.context,
         message,
         outputSchema,
-        replyTo: turn.hook.token,
+        replyTo: reply.hook.token,
       });
     } catch (error) {
-      if (running === undefined) await this.#closeTurn(turn);
+      this.#awaited.splice(this.#awaited.indexOf(reply), 1);
+      await releaseHook(reply.hook);
       throw error;
     }
-    if (options.signal !== undefined) this.#cancelTurnOnAbort(turn, options.signal);
-    return turn.response as AgentResponse<TOutput>;
+    if (options.signal !== undefined) this.#cancelTurnOnAbort(reply, options.signal);
+    const response: AgentResponse<unknown> = { result: () => reply.ended.then(unwrapTurnEnd) };
+    return response as AgentResponse<TOutput>;
   }
 
-  #startTurn(expectsData: boolean): AgentTurn {
+  #awaitReply(expectsData: boolean): AwaitedReply {
     const hook = createHook<AgentTurnReply>();
-    const ended = this.#readTurn(hook, expectsData);
-    const turn: AgentTurn = {
-      hook,
-      response: { result: () => ended.then(unwrapTurnEnd) },
-    };
-    this.#turn = turn;
-    return turn;
+    let settle: (end: AgentTurnEnd) => void = () => {};
+    const ended = new Promise<AgentTurnEnd>((resolve) => {
+      settle = resolve;
+    });
+    const reply: AwaitedReply = { ended, hook, settle };
+    this.#awaited.push(reply);
+    void this.#readTurn(hook, expectsData).then((end) => this.#settleThrough(reply, end));
+    return reply;
   }
 
-  /** Forwards the turn's questions up to the session and settles with its result. */
+  /** Forwards the turn's questions up to the session and returns its end. */
   async #readTurn(hook: Hook<AgentTurnReply>, expectsData: boolean): Promise<AgentTurnEnd> {
     try {
       for await (const reply of hook) {
@@ -178,17 +185,21 @@ class RunAgentSession implements AgentSession {
       };
     } catch (error) {
       return { error, kind: "failed" };
-    } finally {
-      await this.#closeTurn({ hook });
     }
   }
 
-  async #closeTurn(turn: Pick<AgentTurn, "hook">): Promise<void> {
-    if (this.#turn?.hook === turn.hook) this.#turn = undefined;
-    try {
-      await disposeHook(turn.hook);
-    } catch {
-      // The turn already has its outcome; releasing its hook is best effort.
+  /**
+   * A turn reports to the latest message it read, and the messages sent before
+   * it that still await a reply joined the same turn, so its end settles them
+   * all. A message the agent reads only after its turn ended starts the next
+   * turn and gets that turn's reply.
+   */
+  async #settleThrough(reply: AwaitedReply, end: AgentTurnEnd): Promise<void> {
+    const index = this.#awaited.indexOf(reply);
+    if (index < 0) return;
+    for (const settled of this.#awaited.splice(0, index + 1)) {
+      settled.settle(end);
+      await releaseHook(settled.hook);
     }
   }
 
@@ -214,9 +225,9 @@ class RunAgentSession implements AgentSession {
   }
 
   /** Aborting cancels only the turn the message went to, never a later one. */
-  #cancelTurnOnAbort(turn: AgentTurn, signal: AbortSignal): void {
+  #cancelTurnOnAbort(reply: AwaitedReply, signal: AbortSignal): void {
     const cancel = (): void => {
-      if (this.#turn !== turn || this.#address === undefined) return;
+      if (!this.#awaited.includes(reply) || this.#address === undefined) return;
       void this.#address
         .then((address) => cancelAgentSessionTurnStep({ address, context: this.#owner.context }))
         .catch(() => {});
@@ -226,6 +237,14 @@ class RunAgentSession implements AgentSession {
       return;
     }
     signal.addEventListener("abort", cancel, { once: true });
+  }
+}
+
+async function releaseHook(hook: Hook<AgentTurnReply>): Promise<void> {
+  try {
+    await disposeHook(hook);
+  } catch {
+    // The reply already has its outcome; releasing its hook is best effort.
   }
 }
 

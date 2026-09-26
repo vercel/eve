@@ -2,6 +2,7 @@ import type {
   DeliverHookPayload,
   SessionAuthContext,
   SessionCapabilities,
+  TurnCaller,
 } from "#channel/types.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
@@ -101,7 +102,7 @@ export class SessionExecution {
       if (outcome.kind === "park" && outcome.settled !== undefined) {
         await this.tasks.cancelWorking(turn.principal);
       }
-      return outcome;
+      return turn.caller === undefined ? outcome : { ...outcome, caller: turn.caller };
     } finally {
       turn.dispose();
     }
@@ -445,6 +446,8 @@ class ActiveTurn {
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
   private steeringController = new AbortController();
+  /** The delegated caller of the latest steering message the turn read. */
+  caller: TurnCaller | undefined;
 
   constructor(input: SessionExecutionInput, identity: SteeringTurn) {
     this.input = input;
@@ -520,7 +523,9 @@ class ActiveTurn {
       if (routed.kind === "turn") steering.push(routed.delivery);
     }
     if (steering.length === 0) return undefined;
-    return steering.length === 1 ? steering[0] : coalesceDeliveries(steering);
+    const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
+    if (delivery.caller !== undefined) this.caller = delivery.caller;
+    return delivery;
   }
 
   /** Removes the admitted events the task kernel applies at once. */

@@ -63,7 +63,8 @@ export interface AgentResponse<TOutput = unknown> {
 export interface AgentSession {
   /**
    * Delivers a message. It joins the session's running turn, whose result the
-   * response resolves, or starts the next turn when the session is idle.
+   * response resolves, or starts the next turn when the session is idle or the
+   * running turn ends before the agent reads it.
    */
   send<TOutput = unknown>(
     message: string,

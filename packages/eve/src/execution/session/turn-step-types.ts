@@ -1,4 +1,4 @@
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { TaskKernelCall } from "#execution/tasks/calls.js";
 import type { SettledTurn } from "#harness/types.js";
@@ -62,7 +62,13 @@ export type DurableStepResult = (
   DurableStepResultFields;
 
 /** The only two ways a locally executed conversational turn can settle. */
-export type TurnOutcome =
+export type TurnOutcome = {
+  /**
+   * The delegated caller of the latest message the turn read. A caller's
+   * later message awaits its reply at its own address, so the turn reports there.
+   */
+  readonly caller?: TurnCaller;
+} & (
   | {
       readonly kind: "done";
       readonly output: unknown;
@@ -75,4 +81,5 @@ export type TurnOutcome =
       readonly cancelled?: true;
       readonly kind: "park";
       readonly settled?: SettledTurn;
-    };
+    }
+);
