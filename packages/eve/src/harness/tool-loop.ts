@@ -32,6 +32,7 @@ import {
   AuthKey,
   HistoryStateKey,
   ParentSessionKey,
+  ScheduleIdKey,
   SessionCallbackKey,
   StaticModelReferenceKey,
 } from "#context/keys.js";
@@ -61,6 +62,7 @@ import {
   createCompactionCompletedEvent,
   createCompactionRequestedEvent,
   createContextClearedEvent,
+  createHeldTurnWaitingEvent,
   createInputResolvedEvent,
   createInputRequestedEvent,
   createResultCompletedEvent,
@@ -511,6 +513,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const callback = store?.get(SessionCallbackKey);
     const taskPrincipal = principalOf(store?.get(AuthKey));
     const hasDelegatedCaller = parent !== undefined || callback !== undefined;
+    // A person reads a root session, so its held turn shows a waiting boundary.
+    // A child's caller and a schedule get only the turn's real end.
+    const showsHeldBoundary = !hasDelegatedCaller && store?.get(ScheduleIdKey) === undefined;
     let activeAttemptScope: InstrumentationAttempt | undefined;
     const instrumentedEmit =
       stepInstrumentation?.createHandleEvent({
@@ -1655,7 +1660,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             interruptStreamOnFailure(streamResult.fullStream, generation.signal),
             {
               excludedActionToolNames,
-              holdsTurn: workingTaskIds(session, taskPrincipal).length > 0,
+              hidesHeldText:
+                !showsHeldBoundary && workingTaskIds(session, taskPrincipal).length > 0,
               tools: advertisedHarnessTools,
             },
           );
@@ -2000,6 +2006,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         runStep,
         session,
         coordinationTools: modelCallCoordinationTools,
+        showsHeldBoundary,
         taskPrincipal,
       });
     } catch (error) {
@@ -2532,6 +2539,8 @@ async function handleStepResult(input: {
   readonly runStep: StepFn;
   readonly coordinationTools: HarnessToolMap;
   readonly session: HarnessSession;
+  /** A held turn emits `session.waiting` with its `turnId`: true only for a root session. */
+  readonly showsHeldBoundary: boolean;
   /** Principal of the turn, whose working tasks hold it open. */
   readonly taskPrincipal: string;
 }): Promise<StepResult> {
@@ -2856,8 +2865,14 @@ async function handleStepResult(input: {
       nextSession = setHarnessEmissionState(nextSession, emissionState);
     }
     // The turn rule: no turn ends while its tasks work. The session waits for
-    // one to settle, then calls the model again in the same turn.
-    if (holdsTurn) return { held: { taskIds: workingTasks }, next: null, session: nextSession };
+    // one to settle, then calls the model again in the same turn. The turn
+    // stays open, so `turn.completed` waits for its real end.
+    if (holdsTurn) {
+      if (emit && input.showsHeldBoundary) {
+        await emit(createHeldTurnWaitingEvent(emissionState.turnId));
+      }
+      return { held: { taskIds: workingTasks }, next: null, session: nextSession };
+    }
     return { next: runStep, session: nextSession };
   }
 

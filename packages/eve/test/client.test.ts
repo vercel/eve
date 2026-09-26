@@ -88,7 +88,7 @@ function createEagerStreamResponse(
 ): Response {
   let turnId = "turn_001";
   for (const event of events) {
-    if ("data" in event && "turnId" in event.data) {
+    if ("data" in event && "turnId" in event.data && event.data.turnId !== undefined) {
       turnId = event.data.turnId;
       break;
     }

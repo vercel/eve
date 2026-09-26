@@ -121,6 +121,11 @@
  *             every record write goes through it, and the model-facing task
  *             markers appear only in `execution/tasks/render.ts`, which holds
  *             all of the kernel's model text.
+ *   rule 47 — A caller hears from its session only at a turn's real end.
+ *             Only `execution/session/program.ts` sends the caller's reply,
+ *             after the turn loop returns, and `execution/session/finalization.ts`
+ *             when the session ends. A held turn is still open, so nothing
+ *             inside the turn loop or the harness may reply.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -220,6 +225,7 @@ function isTsLike(relPath) {
  *   rule44: Violation[];
  *   rule45: { allowlist: Set<string>; violations: Violation[] };
  *   rule46: Violation[];
+ *   rule47: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -253,6 +259,7 @@ async function scanRepo(state) {
     checkRule44(posix, lines, state.rule44);
     checkRule45(posix, lines, state.rule45);
     checkRule46(posix, lines, state.rule46);
+    checkRule47(posix, lines, state.rule47);
   }
 }
 
@@ -454,6 +461,35 @@ function checkRule46(posix, lines, violations) {
       file: posix,
       line: idx + 1,
       message: `writes the model-facing task text "${marker}" outside execution/tasks/render.ts. Keep every string the model reads about tasks in the renderer and import it from there.`,
+    });
+  });
+}
+
+// ---------- Rule 47: one caller-reply site ----------
+
+const CALLER_REPLY_DEFINITION_FILE = "packages/eve/src/subagents/parent-notification.ts";
+const CALLER_REPLY_FILES = new Set([
+  "packages/eve/src/execution/session/program.ts",
+  "packages/eve/src/execution/session/finalization.ts",
+]);
+const CALLER_REPLY_CALL_RE = /\b(?:notifyTurnCallerStep|notifyCancelledTaskCallerStep)\(/;
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule47(posix, lines, violations) {
+  if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
+  if (posix === CALLER_REPLY_DEFINITION_FILE || CALLER_REPLY_FILES.has(posix)) return;
+  lines.forEach((line, idx) => {
+    if (!CALLER_REPLY_CALL_RE.test(line)) return;
+    violations.push({
+      rule: 47,
+      file: posix,
+      line: idx + 1,
+      message:
+        "sends a caller's reply outside execution/session/program.ts and execution/session/finalization.ts. A turn replies to its caller only at its real end, which the session program owns; finalization replies when the session ends.",
     });
   });
 }
@@ -1514,6 +1550,7 @@ async function main() {
       violations: /** @type {Violation[]} */ ([]),
     },
     rule46: /** @type {Violation[]} */ ([]),
+    rule47: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1630,6 +1667,9 @@ async function main() {
 
   // Rule 46
   violations.push(...state.rule46);
+
+  // Rule 47
+  violations.push(...state.rule47);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");
