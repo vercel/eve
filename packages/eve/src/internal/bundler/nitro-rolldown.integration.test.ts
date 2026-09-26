@@ -91,7 +91,7 @@ describe("buildSingleRolldownChunk", () => {
     }
   });
 
-  it("keeps authored warnings while silencing warnings from bundled dependencies", async () => {
+  it("keeps authored and unresolved-import warnings while silencing other dependency warnings", async () => {
     const dir = mkdtempSync(join(tmpdir(), "eve-rolldown-dependency-warning-"));
     const dependencyRoot = join(dir, "node_modules", "evaluator");
     const entryPath = join(dir, "entry.mjs");
@@ -107,7 +107,10 @@ describe("buildSingleRolldownChunk", () => {
         join(dependencyRoot, "package.json"),
         `${JSON.stringify({ main: "./index.js", name: "evaluator", version: "1.0.0" })}\n`,
       );
-      writeFileSync(join(dependencyRoot, "index.js"), 'export const fromDependency = eval("1");\n');
+      writeFileSync(
+        join(dependencyRoot, "index.js"),
+        'import "eve-missing-package";\nexport const fromDependency = eval("1");\n',
+      );
       writeFileSync(
         entryPath,
         'import { fromDependency } from "evaluator";\nexport const values = [fromDependency, eval("2")];\n',
@@ -124,8 +127,11 @@ describe("buildSingleRolldownChunk", () => {
       rmSync(dir, { force: true, recursive: true });
     }
 
-    expect(warnings.join("\n")).toContain("entry.mjs");
-    expect(warnings.join("\n")).not.toContain("evaluator");
+    expect(warnings).toHaveLength(2);
+    expect(warnings.find((message) => message.includes("[EVAL]"))).toContain("entry.mjs");
+    expect(warnings.find((message) => message.includes("[UNRESOLVED_IMPORT]"))).toContain(
+      "eve-missing-package",
+    );
   });
 
   it("inlines dynamic imports into one chunk instead of splitting", async () => {
