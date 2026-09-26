@@ -293,6 +293,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             : await resolveOnMessage({
                 auth: forwarded.auth,
                 config: input,
+                invocation:
+                  parent === undefined || body.operationId === undefined
+                    ? undefined
+                    : { operationId: body.operationId },
                 message: body.message,
                 request: req,
               });

@@ -235,7 +235,7 @@ export default eveChannel({
 });
 ```
 
-`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch creates a session or sends the first message to a prewarmed session. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
+`onMessage` must return an auth result. Return `title` alongside `auth` to set the title when the dispatch creates a session or sends the first message to a prewarmed session. For a create request from a trusted remote subagent, `ctx.eve.invocation.operationId` exposes the replay-stable operation identity eve already uses to recover that child session; applications can use it to idempotently admit related state before execution. It is absent for ordinary create requests and continuations. A successful canonical eve HTTP message always dispatches and therefore always produces or continues a session.
 
 ## Clients
 

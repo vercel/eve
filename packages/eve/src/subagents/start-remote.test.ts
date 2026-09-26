@@ -43,6 +43,7 @@ describe("startRemoteSubagent", () => {
       batchEvent: { sequence: 0, turnId: "parent-turn" },
       bundle: { subagentRegistry: { subagentsByNodeId: new Map() } },
       callbackBaseUrl: "https://parent.example",
+      capabilities: { requestInput: true },
       currentSession: { sessionId: "parent-session" },
       initiatorAuth: null,
       parent: {
@@ -63,6 +64,7 @@ describe("startRemoteSubagent", () => {
 
     expect(startRemoteAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
+        capabilities: { requestInput: true },
         activityObserver: {
           sink: taskObserver.sink,
           workIdentity: expect.objectContaining({

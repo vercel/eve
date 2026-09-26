@@ -12,6 +12,7 @@ import type {
   ActivityObserverConfig,
   CancelTurnResult,
   SessionAuthContext,
+  SessionCapabilities,
   SessionTraceContext,
 } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -66,6 +67,7 @@ export async function startRemoteAgentSession(input: {
   /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
+  readonly capabilities?: SessionCapabilities;
   readonly originAudience?: ChannelAudience;
   readonly activityObserver?: ActivityObserverConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
@@ -93,7 +95,7 @@ export async function startRemoteAgentSession(input: {
 
   const forwardedPrincipal = buildForwardedPrincipalField(input);
   const requestBody: {
-    capabilities: {};
+    capabilities: SessionCapabilities;
     callback: {
       callId: string;
       subagentName: string;
@@ -107,7 +109,7 @@ export async function startRemoteAgentSession(input: {
     operationId?: string;
     outputSchema?: object;
   } = {
-    capabilities: {},
+    capabilities: input.capabilities ?? {},
     callback: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
