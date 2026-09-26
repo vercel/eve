@@ -32,7 +32,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    exclude: ["**/node_modules/**", "test/scenarios/**", "test/vercel/**"],
+    exclude: ["**/node_modules/**", "test/scenarios/**"],
     globalSetup: ["./test/setup/clear-workflow-cache.ts"],
     include: ["src/**/*.integration.test.ts", "test/**/*.integration.test.ts"],
     setupFiles: ["./test/setup/mock-ai-gateway.ts"],
