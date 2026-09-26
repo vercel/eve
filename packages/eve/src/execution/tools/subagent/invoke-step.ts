@@ -42,7 +42,11 @@ import {
   AGENT_UNREACHABLE,
   formatAgentBusyMessage,
 } from "#subagents/agent-handle-errors.js";
-import { getBackgroundTasks, type TaskAgentDispatchContext } from "#harness/workflow-tool-runs.js";
+import {
+  getBackgroundTasks,
+  recordWorkflowTaskUsage,
+  type TaskAgentDispatchContext,
+} from "#harness/workflow-tool-runs.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import {
   clearProxyInputRequestsForChild,
@@ -467,6 +471,11 @@ export async function settleTaskAgentInvocationStep(input: {
       usage: input.result.outcome.usageDelta,
     }),
   );
+  if (input.taskId !== undefined)
+    session = {
+      ...session,
+      state: recordWorkflowTaskUsage(session.state, input.taskId, input.result.outcome.usageDelta),
+    };
   const task =
     input.taskId === undefined ? undefined : getBackgroundTasks(session.state).get(input.taskId);
   // A generated subagent task completes when the parent records its task outcome.

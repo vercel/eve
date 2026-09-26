@@ -423,6 +423,7 @@ describe("createInstrumentationHandleEvent", () => {
       scope,
       type: "action.completed",
       usage: {
+        costUsdComplete: false,
         inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
         inputTokens: 10,
         outputTokens: 5,

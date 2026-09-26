@@ -25,6 +25,8 @@ export interface WorkflowTaskPayload {
   readonly cohortId?: string;
   /** Parent-owned outcome. Read through readWorkflowTaskView before consuming it. */
   readonly outcome?: unknown;
+  /** Agent usage the parent settled before the outcome; the outcome then carries it. */
+  readonly usage?: TaskUsage;
 }
 
 /** Settled task data; identity and metadata belong to the owning task. */
@@ -151,6 +153,7 @@ function isWorkflowToolRun(value: unknown): value is WorkflowToolRun {
     isTaskMetadata(task.metadata) &&
     isTaskAgentDispatchContext(task.dispatchContext) &&
     (task.cohortId === undefined || isNonEmptyString(task.cohortId)) &&
+    (task.usage === undefined || isTaskUsage(task.usage)) &&
     (task.activityWorkIdentity === undefined ||
       parseActivityWorkIdentityV1(task.activityWorkIdentity) !== undefined)
   );
@@ -221,21 +224,24 @@ function copyWorkflowToolRun(entry: WorkflowToolRun): WorkflowToolRun {
   };
 }
 
+function isTaskUsage(usage: unknown): usage is TaskUsage {
+  return (
+    isObject(usage) &&
+    [
+      usage.cacheReadTokens,
+      usage.cacheWriteTokens,
+      usage.inputTokens,
+      usage.outputTokens,
+      ...(usage.costUsd === undefined ? [] : [usage.costUsd]),
+    ].every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0) &&
+    (usage.costUsdComplete === undefined || typeof usage.costUsdComplete === "boolean")
+  );
+}
+
 function parseTaskOutcome(value: unknown): TaskOutcome | undefined {
   if (!isObject(value) || value.inputRequests !== undefined) return undefined;
   const usage = value.usage;
-  if (
-    usage !== undefined &&
-    (!isObject(usage) ||
-      ![
-        usage.cacheReadTokens,
-        usage.cacheWriteTokens,
-        usage.inputTokens,
-        usage.outputTokens,
-        ...(usage.costUsd === undefined ? [] : [usage.costUsd]),
-      ].every((count) => typeof count === "number" && Number.isFinite(count) && count >= 0))
-  )
-    return undefined;
+  if (usage !== undefined && !isTaskUsage(usage)) return undefined;
   if (value.status === "cancelled") {
     if (value.lastOutput !== undefined) return undefined;
   } else {
@@ -434,6 +440,10 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
 export function recordWorkflowTaskView(
   state: SessionStateMap | undefined,
   view: TaskView,
+  options: {
+    /** An agent turn owned by the task has not settled, so its spend is unknown. */
+    readonly unsettledAgent?: boolean;
+  } = {},
 ): {
   readonly state: SessionStateMap | undefined;
   readonly view: TaskView;
@@ -459,18 +469,58 @@ export function recordWorkflowTaskView(
   if (previous !== undefined) {
     return { state, view: previous, firstOutcome: false };
   }
+  // Parent-settled usage is what session totals counted, so it wins over a reported view usage.
+  const { usage: settledUsage, ...task } = entry.task;
+  let usage = settledUsage ?? outcome.usage;
+  if (options.unsettledAgent === true && usage !== undefined)
+    usage = { ...usage, costUsdComplete: false };
   runs[index] = {
     ...entry,
     task: {
-      ...entry.task,
-      outcome,
+      ...task,
+      outcome: usage === undefined ? outcome : { ...outcome, usage },
     },
   };
   return {
     state: writeRegistry(state, { ...registry, runs }),
-    view,
+    view: usage === undefined ? view : { ...view, usage },
     firstOutcome: true,
   };
+}
+
+/**
+ * Adds one settled agent turn to a task that has no outcome yet. Cost stays
+ * absent once any settled turn lacks it, so the total never looks fully priced.
+ */
+export function recordWorkflowTaskUsage(
+  state: SessionStateMap | undefined,
+  taskId: string,
+  usage: TaskUsage,
+): SessionStateMap | undefined {
+  const registry = readRegistry(state);
+  const index = registry.runs.findIndex(
+    (entry) =>
+      entry.lifetime === "session" &&
+      entry.task.taskId === taskId &&
+      entry.task.outcome === undefined,
+  );
+  const entry = registry.runs[index];
+  if (entry === undefined || entry.lifetime !== "session") return state;
+  const previous = entry.task.usage;
+  const next: { -readonly [K in keyof TaskUsage]: TaskUsage[K] } = {
+    cacheReadTokens: (previous?.cacheReadTokens ?? 0) + usage.cacheReadTokens,
+    cacheWriteTokens: (previous?.cacheWriteTokens ?? 0) + usage.cacheWriteTokens,
+    inputTokens: (previous?.inputTokens ?? 0) + usage.inputTokens,
+    outputTokens: (previous?.outputTokens ?? 0) + usage.outputTokens,
+  };
+  if (previous?.costUsd !== undefined || usage.costUsd !== undefined)
+    next.costUsd = (previous?.costUsd ?? 0) + (usage.costUsd ?? 0);
+  next.costUsdComplete =
+    (previous?.costUsdComplete ?? (previous === undefined || previous.costUsd !== undefined)) &&
+    usage.costUsd !== undefined;
+  const runs = [...registry.runs];
+  runs[index] = { ...entry, task: { ...entry.task, usage: next } };
+  return writeRegistry(state, { ...registry, runs });
 }
 
 /** Removes only this turn's waiting calls. Session-owned task payloads are never pruned here. */

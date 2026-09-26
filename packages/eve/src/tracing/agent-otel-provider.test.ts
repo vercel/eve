@@ -38,6 +38,7 @@ import {
 import {
   createInstrumentationHooks,
   type InstrumentationActionKind,
+  type InstrumentationActionUsage,
   type InstrumentationAttemptScope,
   type InstrumentationContextRunner,
   type InstrumentationEvent,
@@ -45,7 +46,6 @@ import {
   type InstrumentationParentLineage,
   type InstrumentationPrincipalSummary,
   type InstrumentationTraceContext,
-  type InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { channelAudienceFromContext } from "#tracing/channel-audience-context.js";
@@ -144,7 +144,7 @@ function createRuntime(
 }
 
 async function emitAttempt(input: {
-  readonly actionUsage?: InstrumentationUsage;
+  readonly actionUsage?: InstrumentationActionUsage;
   readonly attemptIndex?: number;
   readonly attemptError?: Error;
   readonly channelAudience?: ChannelAudience;
@@ -292,6 +292,7 @@ async function emitAttempt(input: {
             outcome: "failed",
             scope,
             type: "action.failed",
+            usage: input.actionUsage,
           },
     );
   }
@@ -2889,6 +2890,8 @@ describe("createAgentOtelInstrumentation", () => {
     const runtime = createRuntime();
     await emitAttempt({
       actionUsage: {
+        costUsd: 0.125,
+        costUsdComplete: true,
         inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
         inputTokens: 10,
         outputTokens: 5,
@@ -2908,6 +2911,8 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.action.kind": "subagent-call",
       "agent.action.name": "weather",
       "agent.action.outcome": "completed",
+      "agent.usage.cost_usd": 0.125,
+      "agent.usage.cost_usd_complete": true,
       "agent.usage.cache_read_tokens": 3,
       "agent.usage.cache_write_tokens": 4,
       "agent.usage.input_tokens": 10,
@@ -2921,6 +2926,38 @@ describe("createAgentOtelInstrumentation", () => {
     expect(action?.attributes).not.toHaveProperty("gen_ai.operation.name");
     expect(byName(spans, "invoke_agent weather")).toHaveLength(1);
     expect(byName(spans, "execute_tool weather")).toHaveLength(1);
+  });
+
+  it("records incomplete settled usage on failed actions", async () => {
+    const runtime = createRuntime();
+    await emitAttempt({
+      actionUsage: {
+        costUsd: 0.125,
+        costUsdComplete: false,
+        inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
+        inputTokens: 10,
+        outputTokens: 5,
+      },
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-1",
+      toolError: new Error("stopped"),
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    expect(
+      byName(runtime.exporter.getFinishedSpans(), "agent.action")[0]?.attributes,
+    ).toMatchObject({
+      "agent.action.outcome": "failed",
+      "agent.usage.cache_read_tokens": 3,
+      "agent.usage.cache_write_tokens": 4,
+      "agent.usage.cost_usd": 0.125,
+      "agent.usage.cost_usd_complete": false,
+      "agent.usage.input_tokens": 10,
+      "agent.usage.output_tokens": 5,
+    });
   });
 
   it("captures model and tool inputs/outputs on the operation spans", async () => {

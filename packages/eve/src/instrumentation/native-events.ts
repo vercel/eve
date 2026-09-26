@@ -4,6 +4,7 @@ import { instrumentChannelDelivery } from "#instrumentation/channel-delivery.js"
 import type {
   InstrumentationActionFailedEvent,
   InstrumentationActionStartedEvent,
+  InstrumentationActionUsage,
   InstrumentationAttemptScope,
   InstrumentationHooks,
   InstrumentationInputRequestedEvent,
@@ -11,7 +12,6 @@ import type {
   InstrumentationParentLineage,
   InstrumentationPointEvent,
   InstrumentationTraceContext,
-  InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
@@ -279,6 +279,7 @@ async function publishActionTerminal(
       outcome: event.data.status,
       scope,
       type: "action.failed",
+      usage: actionUsage(event.data.result),
     } satisfies InstrumentationActionFailedEvent),
   );
 }
@@ -328,6 +329,7 @@ export async function publishBackgroundTaskSettlements(input: {
         outcome: view.status,
         scope: correlation.scope,
         type: "action.failed",
+        usage: instrumentationUsage(view.usage),
       } satisfies InstrumentationActionFailedEvent),
     );
   }
@@ -350,9 +352,14 @@ function readBackgroundTaskReceipt(
   return taskId === expectedTaskId ? { taskId } : undefined;
 }
 
-function instrumentationUsage(usage: TaskUsage | undefined): InstrumentationUsage | undefined {
+function instrumentationUsage(
+  usage: TaskUsage | undefined,
+): InstrumentationActionUsage | undefined {
   if (usage === undefined) return undefined;
-  return {
+  const result: {
+    -readonly [K in keyof InstrumentationActionUsage]: InstrumentationActionUsage[K];
+  } = {
+    costUsdComplete: usage.costUsdComplete ?? usage.costUsd !== undefined,
     inputTokenDetails: {
       cacheReadTokens: usage.cacheReadTokens,
       cacheWriteTokens: usage.cacheWriteTokens,
@@ -360,24 +367,14 @@ function instrumentationUsage(usage: TaskUsage | undefined): InstrumentationUsag
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
   };
+  if (usage.costUsd !== undefined) result.costUsd = usage.costUsd;
+  return result;
 }
 
-function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefined {
-  if (
-    result.kind !== "subagent-result" ||
-    result.origin !== "child" ||
-    result.usage === undefined
-  ) {
-    return undefined;
-  }
-  return {
-    inputTokenDetails: {
-      cacheReadTokens: result.usage.cacheReadTokens,
-      cacheWriteTokens: result.usage.cacheWriteTokens,
-    },
-    inputTokens: result.usage.inputTokens,
-    outputTokens: result.usage.outputTokens,
-  };
+function actionUsage(result: RuntimeActionResult): InstrumentationActionUsage | undefined {
+  return result.kind === "subagent-result" && result.origin === "child"
+    ? instrumentationUsage(result.usage)
+    : undefined;
 }
 
 function actionName(action: RuntimeActionRequest): string {

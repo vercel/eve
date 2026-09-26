@@ -11,7 +11,7 @@ import { startSubagent } from "#execution/tools/subagent/start.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
-import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import { getBackgroundTasks, registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import {
   AuthKey,
   InitiatorAuthKey,
@@ -541,6 +541,78 @@ describe("task-owned agent settlement", () => {
     expect(handles).toEqual(
       kind === "parked" ? [expect.objectContaining({ phase: "available" })] : [],
     );
+  });
+
+  it("records a settled child's priced usage on its owning task", async () => {
+    const owner = registerWorkflowToolRun(session, {
+      callId: "call-1",
+      toolName: "research",
+      lifetime: "session",
+      origin: { turnId: "turn", stepIndex: 0 },
+      address: { runId: "run", hookToken: "hook" },
+      task: {
+        taskId: "task-1",
+        metadata: { kind: "subagent", name: "research" },
+        dispatchContext: { auth: { current: null, initiator: null } },
+      },
+    });
+    vi.mocked(readDurableSession).mockReturnValue({
+      ...owner,
+      state: setAgentHandleStore(owner.state, {
+        handles: [
+          {
+            ...availableRecord,
+            callId: "call-1",
+            operationId: "operation-1",
+            phase: "claimed" as const,
+            ownerId: "task-1",
+          },
+        ],
+      }),
+    } as never);
+    const usageDelta = {
+      cacheReadTokens: 4,
+      cacheWriteTokens: 1,
+      costUsd: 0.02,
+      inputTokens: 20,
+      outputTokens: 5,
+    };
+
+    const result = {
+      callId: "call-1",
+      kind: "subagent-result" as const,
+      origin: "child" as const,
+      outcome: {
+        kind: "parked" as const,
+        result: { kind: "failed" as const, error: "stopped" },
+        usageDelta,
+      },
+      output: "stopped",
+      subagentName: "research",
+    };
+    const settled = await settleTaskAgentInvocationStep({
+      serializedContext: {},
+      result,
+      ownerId: "task-1",
+      sessionState: {} as never,
+      taskId: "task-1",
+    });
+
+    expect(
+      getBackgroundTasks(settled.sessionState.snapshot.session.state).get("task-1")?.run.task.usage,
+    ).toEqual({ ...usageDelta, costUsdComplete: true });
+
+    // A redelivered settlement no longer matches the released claim and adds nothing.
+    vi.mocked(readDurableSession).mockReturnValue(settled.sessionState.snapshot.session as never);
+    const duplicate = await settleTaskAgentInvocationStep({
+      serializedContext: {},
+      result,
+      ownerId: "task-1",
+      sessionState: settled.sessionState,
+      taskId: "task-1",
+    });
+    expect(duplicate.settled).toBe(false);
+    expect(duplicate.sessionState).toBe(settled.sessionState);
   });
 
   it("releases every remaining claim for a completed workflow run", async () => {

@@ -8,6 +8,8 @@ export const AGENT_SPAN_NAMES = {
 } as const;
 
 export const AGENT_USAGE_ATTRIBUTES = {
+  costUsd: "agent.usage.cost_usd",
+  costUsdComplete: "agent.usage.cost_usd_complete",
   inputTokens: "agent.usage.input_tokens",
   outputTokens: "agent.usage.output_tokens",
   cacheReadTokens: "agent.usage.cache_read_tokens",

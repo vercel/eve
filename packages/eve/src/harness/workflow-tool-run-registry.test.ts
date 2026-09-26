@@ -4,6 +4,7 @@ import type { SessionStateMap } from "#harness/types.js";
 import {
   getBackgroundTasks,
   readWorkflowTaskView,
+  recordWorkflowTaskUsage,
   recordWorkflowTaskView,
   findBlockingWorkflowToolRun,
   getWorkflowToolRuns,
@@ -276,6 +277,107 @@ describe("shared workflow invocation ownership", () => {
         },
       }),
     ).toThrow("Corrupt workflow task result");
+  });
+
+  it.each(["false", 0, 1])("rejects corrupt terminal cost completeness %s", (costUsdComplete) => {
+    const entry = task("task-a");
+    expect(() =>
+      readWorkflowTaskView({
+        ...entry.task,
+        outcome: {
+          status: "completed",
+          lastOutput: { type: "result", data: "done" },
+          usage: {
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputTokens: 1,
+            outputTokens: 1,
+            costUsdComplete,
+          },
+        },
+      }),
+    ).toThrow("Corrupt workflow task result");
+  });
+
+  it.each([
+    { second: 0.5, costUsd: 0.75, costUsdComplete: true },
+    { second: undefined, costUsd: 0.25, costUsdComplete: false },
+  ])(
+    "carries settled agent usage into the first outcome with known cost $costUsd",
+    ({ second, costUsd, costUsdComplete }) => {
+      const turn = { cacheReadTokens: 1, cacheWriteTokens: 2, inputTokens: 10, outputTokens: 3 };
+      let state = registerWorkflowToolRun<{ state?: SessionStateMap }>({}, task("task-a")).state;
+      state = recordWorkflowTaskUsage(state, "task-a", { ...turn, costUsd: 0.25 });
+      state = recordWorkflowTaskUsage(state, "task-a", { ...turn, costUsd: second });
+      const recorded = recordWorkflowTaskView(state, {
+        taskId: "task-a",
+        metadata: task("task-a").task.metadata,
+        status: "failed",
+        lastOutput: { type: "error", data: "stopped" },
+      });
+      const usage = {
+        cacheReadTokens: 2,
+        cacheWriteTokens: 4,
+        inputTokens: 20,
+        outputTokens: 6,
+        costUsd,
+        costUsdComplete,
+      };
+
+      expect(recorded.view.usage).toEqual(usage);
+      expect(getBackgroundTasks(recorded.state).get("task-a")?.usage).toEqual(usage);
+      expect(recordWorkflowTaskUsage(recorded.state, "task-a", turn)).toBe(recorded.state);
+    },
+  );
+
+  it("keeps settled agent usage when a cancellation reports its own usage", () => {
+    const settled = { cacheReadTokens: 1, cacheWriteTokens: 2, inputTokens: 10, outputTokens: 3 };
+    const state = recordWorkflowTaskUsage(
+      registerWorkflowToolRun<{ state?: SessionStateMap }>({}, task("task-a")).state,
+      "task-a",
+      {
+        ...settled,
+        costUsd: 0.25,
+      },
+    );
+    const recorded = recordWorkflowTaskView(state, {
+      taskId: "task-a",
+      metadata: task("task-a").task.metadata,
+      status: "cancelled",
+      usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 1, outputTokens: 1 },
+    });
+
+    expect(recorded.view.usage).toEqual({ ...settled, costUsd: 0.25, costUsdComplete: true });
+    expect(getBackgroundTasks(recorded.state).get("task-a")?.usage).toEqual({
+      ...settled,
+      costUsd: 0.25,
+      costUsdComplete: true,
+    });
+  });
+
+  it("keeps settled cost and marks it incomplete when an owned agent turn is unsettled", () => {
+    const settled = { cacheReadTokens: 1, cacheWriteTokens: 2, inputTokens: 10, outputTokens: 3 };
+    const state = recordWorkflowTaskUsage(
+      registerWorkflowToolRun<{ state?: SessionStateMap }>({}, task("task-a")).state,
+      "task-a",
+      { ...settled, costUsd: 0.25 },
+    );
+    const recorded = recordWorkflowTaskView(
+      state,
+      { taskId: "task-a", metadata: task("task-a").task.metadata, status: "cancelled" },
+      { unsettledAgent: true },
+    );
+
+    expect(recorded.view.usage).toStrictEqual({
+      ...settled,
+      costUsd: 0.25,
+      costUsdComplete: false,
+    });
+    expect(getBackgroundTasks(recorded.state).get("task-a")?.usage).toStrictEqual({
+      ...settled,
+      costUsd: 0.25,
+      costUsdComplete: false,
+    });
   });
 
   it("does not change lifetime on replay", () => {

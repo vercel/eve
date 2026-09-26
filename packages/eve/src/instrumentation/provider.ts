@@ -21,6 +21,7 @@ export type {
   InstrumentationActionOutcome,
   InstrumentationActionOutput,
   InstrumentationActionStartedEvent,
+  InstrumentationActionUsage,
   InstrumentationAttemptScope,
   InstrumentationChannelDeliveryInput,
   InstrumentationChannelDeliveryOutcome,

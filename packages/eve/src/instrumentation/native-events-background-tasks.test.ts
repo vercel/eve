@@ -123,6 +123,7 @@ describe("background task action instrumentation", () => {
       scope,
       type: "action.completed",
       usage: {
+        costUsdComplete: false,
         inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
         inputTokens: 10,
         outputTokens: 5,
@@ -168,6 +169,50 @@ describe("background task action instrumentation", () => {
       errorCode: input.errorCode,
       outcome: input.status,
       type: "action.failed",
+    });
+  });
+
+  it.each([
+    {
+      status: "completed" as const,
+      lastOutput: { data: "done", type: "result" as const },
+    },
+    { status: "failed" as const, lastOutput: { data: "stopped", type: "error" as const } },
+    { status: "cancelled" as const },
+  ])("reports settled agent cost when its task is $status", async (view) => {
+    const events: InstrumentationEvent[] = [];
+    const context = new ContextContainer();
+    const taskId = await emitBackgroundReceipt(context, events);
+    await contextStorage.run(context, async () => {
+      await publishBackgroundTaskSettlements({
+        hooks: recordingHooks(events),
+        views: [
+          {
+            ...view,
+            metadata: { kind: "subagent", name: "research" },
+            taskId,
+            usage: {
+              cacheReadTokens: 3,
+              cacheWriteTokens: 4,
+              costUsd: 0.125,
+              costUsdComplete: true,
+              inputTokens: 10,
+              outputTokens: 5,
+            },
+          },
+        ],
+      });
+    });
+
+    expect(events[1]).toMatchObject({
+      outcome: view.status,
+      usage: {
+        costUsd: 0.125,
+        costUsdComplete: true,
+        inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
+        inputTokens: 10,
+        outputTokens: 5,
+      },
     });
   });
 });

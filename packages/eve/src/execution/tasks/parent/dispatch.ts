@@ -11,6 +11,7 @@ import {
   type BackgroundWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
+import { hasClaimedAgentHandle } from "#subagents/handles/store.js";
 import { notifyTaskParent } from "#execution/tasks/child/notify.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import {
@@ -62,7 +63,12 @@ export async function executeTaskControlAction(input: {
       serializedContext: input.serializedContext,
       session,
     });
-    session = { ...session, state: recordWorkflowTaskView(session.state, view).state };
+    session = {
+      ...session,
+      state: recordWorkflowTaskView(session.state, view, {
+        unsettledAgent: hasClaimedAgentHandle(session.state, entry.task.taskId),
+      }).state,
+    };
     views.push(view);
   }
   return { result: createTaskViewsResult(action, views), session };

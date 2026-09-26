@@ -238,6 +238,9 @@ export function createAgentActionInstrumentation(input: {
   ): void {
     const span = startSpan(state);
     span.setAttribute("agent.action.outcome", event.outcome);
+    if (event.usage !== undefined) {
+      setAgentUsage(span, event.usage);
+    }
     if (event.type === "action.failed") {
       if (event.errorCode !== undefined) {
         span.setAttribute("agent.action.error.code", event.errorCode);
@@ -246,9 +249,6 @@ export function createAgentActionInstrumentation(input: {
     } else if (event.output.type === "error") {
       recordActionError(span, event.output.error);
     } else {
-      if (event.usage !== undefined) {
-        setAgentUsage(span, event.usage);
-      }
       if (input.recordOutputs && !isAgentInvocation(state.kind)) {
         const result = contentAttribute(event.output.output);
         if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);

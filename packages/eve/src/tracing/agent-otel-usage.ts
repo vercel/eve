@@ -1,11 +1,22 @@
 import type { Span } from "#compiled/@opentelemetry/api/index.js";
 
-import type { InstrumentationUsage } from "#instrumentation/lifecycle.js";
+import type {
+  InstrumentationActionUsage,
+  InstrumentationUsage,
+} from "#instrumentation/lifecycle.js";
 import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
 import { AGENT_USAGE_ATTRIBUTES } from "#tracing/agent-span-contract.js";
 
 /** Applies eve's structural token usage attributes to an agent span. */
 export function setAgentUsage(span: Span, usage: InstrumentationUsage): void {
+  if ("costUsdComplete" in usage && typeof usage.costUsdComplete === "boolean") {
+    const costUsdComplete = usage.costUsdComplete;
+    const actionUsage = usage as InstrumentationActionUsage;
+    if (actionUsage.costUsd !== undefined) {
+      span.setAttribute(AGENT_USAGE_ATTRIBUTES.costUsd, actionUsage.costUsd);
+    }
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.costUsdComplete, costUsdComplete);
+  }
   if (usage.inputTokens !== undefined) {
     span.setAttribute(AGENT_USAGE_ATTRIBUTES.inputTokens, usage.inputTokens);
   }
