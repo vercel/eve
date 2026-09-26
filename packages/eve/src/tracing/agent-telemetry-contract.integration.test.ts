@@ -2,7 +2,6 @@ import {
   BasicTracerProvider,
   InMemorySpanExporter,
   SimpleSpanProcessor,
-  type ReadableSpan,
 } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it, vi } from "vitest";
 import { SpanStatusCode } from "#compiled/@opentelemetry/api/index.js";
@@ -605,6 +604,146 @@ describe("exported agent telemetry contract", () => {
         expect(span.attributes).not.toHaveProperty("vercel.session_id");
       }
       expect(parsed.filter(isAgentTurnSpan)).toHaveLength(4);
+      for (const { name, runId, turnId, attributes } of [
+        {
+          name: "invoke_agent parent",
+          runId: "parent",
+          turnId: "turn_0",
+          attributes: {
+            "agent.name": "parent",
+            "agent.run.type": "session",
+            "agent.turn.sequence": 0,
+            "agent.turn.outcome": "completed",
+            "gen_ai.agent.name": "parent",
+            "gen_ai.operation.name": "invoke_agent",
+          },
+        },
+        {
+          name: "agent.step",
+          runId: "parent",
+          attributes: {
+            "agent.framework.name": "eve",
+            "agent.name": "parent",
+            "agent.step.attempt": 0,
+            "agent.step.index": 0,
+            "agent.turn.id": "turn_0",
+          },
+        },
+        {
+          name: "invoke_workflow coordinate",
+          runId: "parent",
+          attributes: {
+            "agent.action.call_id": "workflow",
+            "agent.action.kind": "tool-call",
+            "agent.action.name": "coordinate",
+            "agent.action.outcome": "completed",
+            "agent.step.attempt": 0,
+            "agent.step.index": 0,
+            "agent.turn.id": "turn_0",
+            "gen_ai.operation.name": "invoke_workflow",
+            "gen_ai.workflow.name": "coordinate",
+          },
+        },
+        {
+          name: "agent.action",
+          runId: "parent",
+          attributes: {
+            "agent.action.call_id": "nested",
+            "agent.action.kind": "subagent-call",
+            "agent.action.name": "child",
+            "agent.action.outcome": "completed",
+            "agent.invocation.role": "caller",
+            "agent.step.attempt": 0,
+            "agent.step.index": 0,
+            "agent.turn.id": "turn_0",
+            "gen_ai.agent.name": "child",
+          },
+        },
+        {
+          name: "agent.approval",
+          runId: "parent",
+          attributes: {
+            "agent.action.call_id": "workflow",
+            "agent.action.name": "coordinate",
+            "agent.approval.kind": "tool-approval",
+            "agent.approval.outcome": "approved",
+            "agent.approval.request_id": "approval",
+            "agent.turn.id": "turn_0",
+          },
+        },
+        {
+          name: "execute_tool coordinate",
+          runId: "parent",
+          attributes: {
+            "gen_ai.agent.name": "parent",
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.call.id": "workflow",
+            "gen_ai.tool.name": "coordinate",
+            "gen_ai.tool.type": "function",
+          },
+        },
+        {
+          name: "invoke_agent child",
+          runId: "child",
+          attributes: {
+            "agent.name": "child",
+            "agent.parent_call.id": "nested",
+            "agent.parent_run.id": "parent",
+            "agent.run.type": "subagent",
+            "agent.turn.id": "turn_0",
+            "agent.turn.sequence": 0,
+            "agent.turn.outcome": "completed",
+            "gen_ai.operation.name": "invoke_agent",
+          },
+        },
+        {
+          name: "agent.step",
+          runId: "child",
+          attributes: {
+            "agent.framework.name": "eve",
+            "agent.name": "child",
+            "agent.step.attempt": 0,
+            "agent.step.index": 0,
+            "agent.turn.id": "turn_0",
+          },
+        },
+        {
+          name: "chat test",
+          runId: "child",
+          attributes: {
+            "gen_ai.agent.name": "child",
+            "gen_ai.operation.name": "chat",
+            "gen_ai.provider.name": "test",
+            "gen_ai.request.model": "test",
+            "gen_ai.usage.input_tokens": 10,
+            "gen_ai.usage.output_tokens": 5,
+          },
+        },
+        ...(["failed", "cancelled"] as const).map((outcome, index) => ({
+          name: "invoke_agent parent",
+          runId: "parent",
+          turnId: `turn_${index + 1}`,
+          attributes: {
+            "agent.name": "parent",
+            "agent.run.type": "session",
+            "agent.turn.sequence": index + 1,
+            "agent.turn.outcome": outcome,
+            "gen_ai.operation.name": "invoke_agent",
+          },
+        })),
+      ]) {
+        const matches = parsed.filter(
+          (span) =>
+            span.name === name &&
+            span.attributes["agent.run.id"] === runId &&
+            (turnId === undefined || span.attributes["agent.turn.id"] === turnId),
+        );
+        expect(
+          matches,
+          `${name} (${runId}${turnId === undefined ? "" : `:${turnId}`})`,
+        ).toHaveLength(1);
+        expect(matches[0]!.attributes).toMatchObject(attributes);
+      }
       for (const activation of parsed.filter(isAgentTurnSpan)) {
         expect(activation.attributes["agent.principal.current.type"]).toBe("service");
         expect(activation.attributes["agent.principal.initiator.type"]).toBe("user");
@@ -641,7 +780,32 @@ describe("exported agent telemetry contract", () => {
       });
       expect(caller.attributes["gen_ai.usage.input_tokens"]).toBeUndefined();
       expect(caller.attributes["gen_ai.usage.output_tokens"]).toBeUndefined();
-      expect(normalizeTraceForest(parsed, exported)).toEqual([
+      expect(
+        parsed
+          .filter((span) => span.links.length > 0)
+          .map((span) => ({
+            source: `${span.name} ${String(span.attributes["agent.run.id"])}:${String(span.attributes["agent.turn.id"])}`,
+            links: span.links.map((link) => ({
+              type: link.attributes["eve.link.type"],
+              target:
+                parsed.find(
+                  (candidate) =>
+                    candidate.traceId === link.traceId && candidate.spanId === link.spanId,
+                )?.name ?? "external",
+            })),
+          }))
+          .toSorted((left, right) => left.source.localeCompare(right.source)),
+      ).toEqual([
+        {
+          source: "invoke_agent child child:turn_0",
+          links: [{ type: "agent.dispatch", target: "agent.action" }],
+        },
+        {
+          source: "invoke_agent parent parent:turn_0",
+          links: [{ type: "channel.request", target: "external" }],
+        },
+      ]);
+      expect(normalizeTraceForest(parsed)).toEqual([
         "conversation original-conversation",
         "trace parent:turn_0 outcome=completed channel=http:web delivery=delivery",
         "  invoked from external via channel.request",
@@ -661,6 +825,15 @@ describe("exported agent telemetry contract", () => {
         "trace parent:turn_2 outcome=cancelled channel=http:web delivery=delivery-cancelled",
         "  invoke_agent parent",
       ]);
+      expect(() =>
+        normalizeTraceForest(
+          parsed.map((span) =>
+            span.name === "execute_tool coordinate"
+              ? { ...span, parentSpanId: "0".repeat(16) }
+              : span,
+          ),
+        ),
+      ).toThrow(/Unreachable spans: execute_tool coordinate/u);
       expect(summarizeLocalTrace(parsed[0]!.traceId, parsed)).toMatchObject({
         inputTokens: 10,
         outputTokens: 5,
@@ -880,10 +1053,7 @@ describe("exported agent telemetry contract", () => {
   );
 });
 
-function normalizeTraceForest(
-  spans: readonly LocalTraceSpan[],
-  exported: readonly ReadableSpan[],
-): string[] {
+function normalizeTraceForest(spans: readonly LocalTraceSpan[]): string[] {
   const roots = spans.filter(
     (span) => span.parentSpanId === undefined && span.name.startsWith("invoke_agent "),
   );
@@ -896,17 +1066,17 @@ function normalizeTraceForest(
     ]),
   );
   const causalParents = new Map(
-    exported.flatMap((span) =>
+    spans.flatMap((span) =>
       span.links
         .filter(
           (link) =>
-            link.attributes?.["eve.link.type"] === "agent.dispatch" &&
-            aliases.has(link.context.traceId),
+            link.attributes["eve.link.type"] === "agent.dispatch" && aliases.has(link.traceId),
         )
-        .map((link) => [span.spanContext().traceId, link.context.traceId] as const),
+        .map((link) => [span.traceId, link.traceId] as const),
     ),
   );
   const byIdentity = new Map(spans.map((span) => [`${span.traceId}:${span.spanId}`, span]));
+  if (byIdentity.size !== spans.length) throw new Error("Duplicate span identities");
   const children = Map.groupBy(
     spans.filter((span) => span.parentSpanId !== undefined),
     (span) => `${span.traceId}:${span.parentSpanId!}`,
@@ -916,6 +1086,7 @@ function normalizeTraceForest(
   ];
   const lines =
     conversationIds.length === 1 ? [`conversation ${conversationIds[0]}`] : ["conversation mixed"];
+  const visited = new Set<string>();
   for (const root of roots.toSorted((left, right) => {
     if (causalParents.get(left.traceId) === right.traceId) return 1;
     if (causalParents.get(right.traceId) === left.traceId) return -1;
@@ -935,12 +1106,12 @@ function normalizeTraceForest(
           : ` channel=${String(channelKind)}:${String(channelName)} delivery=${String(deliveryId)}`
       }`,
     );
-    const links = exported
-      .filter((span) => span.spanContext().traceId === root.traceId)
+    const links = spans
+      .filter((span) => span.traceId === root.traceId)
       .flatMap((span) =>
         span.links.map((link) => {
-          const target = byIdentity.get(`${link.context.traceId}:${link.context.spanId}`);
-          const type = String(link.attributes?.["eve.link.type"] ?? "unknown");
+          const target = byIdentity.get(`${link.traceId}:${link.spanId}`);
+          const type = String(link.attributes["eve.link.type"] ?? "unknown");
           return `  invoked from ${
             target === undefined
               ? "external"
@@ -952,9 +1123,16 @@ function normalizeTraceForest(
     lines.push(...links);
     appendTree(root, 1);
   }
+  const unreachable = spans.filter((span) => !visited.has(`${span.traceId}:${span.spanId}`));
+  if (unreachable.length > 0) {
+    throw new Error(`Unreachable spans: ${unreachable.map((span) => span.name).join(", ")}`);
+  }
   return lines;
 
   function appendTree(span: LocalTraceSpan, depth: number): void {
+    const identity = `${span.traceId}:${span.spanId}`;
+    if (visited.has(identity)) throw new Error(`Repeated span: ${span.name}`);
+    visited.add(identity);
     lines.push(`${"  ".repeat(depth)}${spanLabel(span)}`);
     for (const child of (children.get(`${span.traceId}:${span.spanId}`) ?? []).toSorted(
       (left, right) => spanLabel(left).localeCompare(spanLabel(right)),

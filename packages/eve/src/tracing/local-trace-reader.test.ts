@@ -110,6 +110,39 @@ describe("parseLocalTraceSegment", () => {
     ]);
   });
 
+  it("normalizes cross-trace links and skips malformed link contexts", () => {
+    const callerTraceId = "2".repeat(32);
+    const callerSpanId = "b".repeat(16);
+    const [parsed] = parseLocalTraceSegment(
+      segment([
+        span({
+          links: [
+            {
+              attributes: [{ key: "eve.link.type", value: { stringValue: "agent.dispatch" } }],
+              droppedAttributesCount: 0,
+              flags: 257,
+              spanId: callerSpanId,
+              traceId: callerTraceId,
+            },
+            { spanId: "invalid", traceId: callerTraceId },
+            { spanId: callerSpanId, traceId: "invalid" },
+            { traceId: callerTraceId },
+            null,
+          ],
+        }),
+      ]),
+      TRACE_ID,
+    );
+
+    expect(parsed?.links).toEqual([
+      {
+        attributes: { "eve.link.type": "agent.dispatch" },
+        spanId: callerSpanId,
+        traceId: callerTraceId,
+      },
+    ]);
+  });
+
   it("parses status message and span kind", () => {
     const spans = parseLocalTraceSegment(
       segment([
@@ -126,10 +159,11 @@ describe("parseLocalTraceSegment", () => {
     expect(spans[0]!.kind).toBe(2);
   });
 
-  it("defaults to no events, status message, or kind", () => {
+  it("defaults to no events, links, status message, or kind", () => {
     const spans = parseLocalTraceSegment(segment([span()]), TRACE_ID);
 
     expect(spans[0]!.events).toEqual([]);
+    expect(spans[0]!.links).toEqual([]);
     expect(spans[0]!.statusMessage).toBeUndefined();
     expect(spans[0]!.kind).toBeUndefined();
   });
