@@ -8,8 +8,6 @@ import {
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 
-export const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
-
 export const RESOLVE_EXTENSIONS = [
   ".ts",
   ".tsx",
@@ -138,11 +136,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
       }
 
       const importerPath =
-        importer === undefined ||
-        importer.startsWith("\0") ||
-        importer.startsWith(CACHED_CHANNEL_PREFIX)
-          ? undefined
-          : resolve(importer);
+        importer === undefined || importer.startsWith("\0") ? undefined : resolve(importer);
 
       // Keep package imports authored directly by the app external by
       // default, but let symlinked/file workspace packages compile as
@@ -385,11 +379,7 @@ function isPackageImport(source: string): boolean {
     return false;
   }
 
-  if (source.startsWith("@/")) {
-    return false;
-  }
-
-  return !source.startsWith(CACHED_CHANNEL_PREFIX);
+  return !source.startsWith("@/");
 }
 
 export function isPathImport(source: string): boolean {

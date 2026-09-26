@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -221,51 +221,6 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     });
 
     expect(code).toContain("eve:durable-dynamic-callback");
-  });
-
-  it("preserves cached channel identity for relative channel imports", async () => {
-    const app = await createApp({
-      files: {
-        "agent/channels/support.ts": [
-          'export default { marker: "source-channel-instance" };',
-          "",
-        ].join("\n"),
-        "agent/tools/use_support_channel.ts": [
-          'import supportChannel from "../channels/support";',
-          "",
-          "export const result = supportChannel.marker;",
-          "",
-        ].join("\n"),
-      },
-      name: "cached-relative-channel-import",
-    });
-    const cache = new Map<string, unknown>();
-    const cacheKey = "__eveChannelModuleCache__";
-    const globals = globalThis as Record<string, unknown>;
-    const previousCache = globals[cacheKey];
-
-    try {
-      // Native realpath resolves symlinks (macOS /var) and Windows 8.3 short
-      // names (RUNNER~1); loading from the same canonical root keeps the
-      // bundler's resolved channel path equal to the cache key.
-      const appRoot = await realpath(app.appRoot);
-      cache.set(join(appRoot, "agent", "channels", "support.ts"), {
-        marker: "cached-channel-instance",
-      });
-      globals[cacheKey] = cache;
-
-      const moduleNamespace = await loadAuthoredModuleNamespace(
-        join(appRoot, "agent", "tools", "use_support_channel.ts"),
-      );
-
-      expect(moduleNamespace.result).toBe("cached-channel-instance");
-    } finally {
-      if (previousCache === undefined) {
-        delete globals[cacheKey];
-      } else {
-        globals[cacheKey] = previousCache;
-      }
-    }
   });
 
   it("explains when an installed package contains Node-incompatible extensionless ESM", async () => {

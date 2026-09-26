@@ -15,14 +15,12 @@ import {
   createFixedNamespaceScopePlugin,
 } from "#internal/bundler/extension-scope-plugin.js";
 import {
-  CACHED_CHANNEL_PREFIX,
   RESOLVE_EXTENSIONS,
   createDistributionPackageBoundaryPlugin,
   createGenerationPackageBoundaryPlugin,
   createRuntimeLoaderPackageBoundaryPlugin,
   isNodeModulesPath,
   normalizeExternalDependencies,
-  type RolldownResolveContext,
 } from "#internal/authored-package-boundary.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
@@ -48,7 +46,6 @@ const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
   "eve",
   "authored-modules",
 );
-const CHANNEL_MODULE_CACHE_KEY = "__eveChannelModuleCache__";
 
 export interface AuthoredModuleLoadOptions {
   readonly externalDependencies?: readonly string[];
@@ -58,12 +55,6 @@ export interface AuthoredModuleLoadOptions {
    * dependencies bundled with it) are scoped to this namespace at bundle time.
    */
   readonly extensionScopeNamespace?: string;
-}
-
-function getChannelModuleCache(): Map<string, unknown> | undefined {
-  return (globalThis as Record<string, unknown>)[CHANNEL_MODULE_CACHE_KEY] as
-    | Map<string, unknown>
-    | undefined;
 }
 
 /**
@@ -157,7 +148,6 @@ export async function bundleAuthoredModuleCode(
 ): Promise<string> {
   const packageRoot = resolveAuthoredPackageRoot(modulePath);
   return await buildAuthoredModuleBundle(modulePath, options, {
-    channelIdentity: true,
     packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot,
@@ -178,10 +168,6 @@ export async function bundleAuthoredModuleForGeneration(
   options: AuthoredModuleLoadOptions = {},
 ): Promise<string> {
   const code = await buildAuthoredModuleBundle(modulePath, options, {
-    // Generation bundles must not reference process state: the channel
-    // identity plugin emits reads of a process-global cache keyed by live
-    // source paths, which an immutable retained artifact cannot depend on.
-    channelIdentity: false,
     packageBoundaryPlugin: createGenerationPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot: resolveAuthoredPackageRoot(modulePath),
@@ -480,64 +466,14 @@ async function buildAuthoredModuleBundle(
   modulePath: string,
   options: AuthoredModuleLoadOptions,
   configuration: {
-    readonly channelIdentity: boolean;
     readonly packageBoundaryPlugin: Record<string, unknown>;
     readonly plugins: readonly Record<string, unknown>[];
     readonly sourcemap: false | "inline";
   },
 ): Promise<string> {
-  const channelCache = configuration.channelIdentity ? getChannelModuleCache() : undefined;
   const packageRoot = resolveAuthoredPackageRoot(modulePath);
   const tsconfigPath = resolveAuthoredTsConfigPath(packageRoot);
-  const channelIdentityPlugin =
-    channelCache && channelCache.size > 0
-      ? {
-          name: "eve-channel-identity",
-          async resolveId(
-            this: RolldownResolveContext,
-            source: string,
-            importer: string | undefined,
-            options: { kind: string },
-          ) {
-            if (!/channels[/\\]/.test(source) || options.kind !== "import-statement") {
-              return undefined;
-            }
-
-            const resolved = await this.resolve(source, importer, {
-              kind: options.kind,
-              skipSelf: true,
-            });
-
-            if (resolved === null || typeof resolved.id !== "string") {
-              return undefined;
-            }
-
-            const resolvedPath = resolve(resolved.id);
-
-            if (!channelCache.has(resolvedPath)) {
-              return undefined;
-            }
-
-            return { id: `${CACHED_CHANNEL_PREFIX}${resolvedPath}` };
-          },
-          load(id: string) {
-            if (!id.startsWith(CACHED_CHANNEL_PREFIX)) {
-              return undefined;
-            }
-
-            const cachedPath = id.slice(CACHED_CHANNEL_PREFIX.length);
-            return {
-              code: [
-                `const cache = globalThis["${CHANNEL_MODULE_CACHE_KEY}"];`,
-                `export default cache.get(${JSON.stringify(cachedPath)});`,
-              ].join("\n"),
-              moduleType: "js" as const,
-            };
-          },
-        }
-      : null;
   const plugins = [
-    channelIdentityPlugin,
     ...configuration.plugins,
     options.extensionScopeNamespace === undefined
       ? null

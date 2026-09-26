@@ -1,3 +1,6 @@
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
@@ -354,5 +357,53 @@ describe("mounted extension via directory form with override", () => {
         url: "https://weather.example.com",
       },
     ]);
+  });
+});
+
+describe("mounted extension subagent resources", () => {
+  it("materializes extension subagent resources under a Windows-safe directory", async () => {
+    const app = await createAppRoot("eve-mounted-extension-subagent-resources-", {
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "You are a precise assistant.\n",
+        "agent/extensions/crm.mjs": 'export { default } from "@acme/crm";\n',
+        "node_modules/@acme/crm/package.json": `${JSON.stringify({
+          name: "@acme/crm",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        })}\n`,
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
+          extension: 1,
+          subagent: 6,
+        }),
+        "node_modules/@acme/crm/extension/extension.mjs": [
+          'import { defineExtension } from "eve/extension";',
+          "export default defineExtension();",
+          "",
+        ].join("\n"),
+        "node_modules/@acme/crm/extension/subagents/reviewer/agent.mjs": [
+          "export default {",
+          '  model: "openai/gpt-5.4",',
+          '  description: "Review CRM notes.",',
+          "};",
+          "",
+        ].join("\n"),
+      },
+    });
+
+    const { paths } = await compileAgent({ startPath: app.appRoot });
+    const manifest = await loadCompiledManifest({
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+    });
+
+    const [subagent] = manifest.subagents;
+    expect(subagent?.nodeId).toContain(":");
+    const logicalPath = subagent?.agent.workspaceResourceRoot.logicalPath ?? "";
+    const [resourcesDirectory, nodeDirectory, ...nested] = logicalPath.split("/");
+    expect(resourcesDirectory).toBe("workspace-resources");
+    expect(nested).toEqual([]);
+    expect(nodeDirectory).toMatch(/^[^<>:"/\\|?*]+$/);
+    await expect(stat(join(paths.compileDirectoryPath, logicalPath))).resolves.toMatchObject({});
   });
 });
