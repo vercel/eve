@@ -45,7 +45,7 @@ export function buildAuthRequiredPublicText(input: {
   if (!input.hasUser) {
     return `Authorization required for ${input.displayName} (no triggering user)`;
   }
-  return `Connect with ${input.displayName} to continue`;
+  return `Connect with ${input.displayName} to continue this agent session`;
 }
 
 /**
