@@ -1,12 +1,7 @@
 import type { EveMessage, EveMessagePart } from "#client/message-reducer-types.js";
-import { reduceContentRun, selectContentRun } from "#client/content-run.js";
 
 type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
 type EveRunPart = Extract<EveMessagePart, { readonly type: "text" | "reasoning" }>;
-
-function latestRunIndex(message: EveAssistantMessage, type: EveRunPart["type"], stepIndex: number) {
-  return message.parts.findLastIndex((part) => part.type === type && part.stepIndex === stepIndex);
-}
 
 function transition(
   message: EveAssistantMessage,
@@ -18,25 +13,15 @@ function transition(
     | { readonly kind: "complete"; readonly text: string | null }
   ),
 ): EveAssistantMessage {
-  const index = latestRunIndex(message, input.type, input.stepIndex);
+  const index = message.parts.findLastIndex(
+    (part) => part.type === input.type && part.stepIndex === input.stepIndex,
+  );
   const previous = index === -1 ? undefined : (message.parts[index] as EveRunPart);
-  const event =
-    input.kind === "append"
-      ? { type: "append" as const, delta: input.delta }
-      : { type: "complete" as const, text: input.text };
-  const selection = selectContentRun(
-    previous === undefined ? undefined : { text: previous.text, status: previous.state ?? "done" },
-    event,
-  );
-  if (selection === "ignore") return message;
-  const current = selection === "current" ? previous : undefined;
-  const change = reduceContentRun(
-    current === undefined ? undefined : { text: current.text, status: "streaming" },
-    event,
-  );
-  if (change.type === "ignore") return message;
-  if (change.type === "remove") {
-    if (!current) return message;
+  if (input.kind === "append" && !input.delta) return message;
+  if (input.kind === "complete" && input.text === null && previous?.state !== "streaming")
+    return message;
+  const current = previous?.state === "streaming" ? previous : undefined;
+  if (input.kind === "complete" && input.text === null) {
     return {
       ...message,
       metadata: { ...message.metadata, status: "complete" },
@@ -44,9 +29,9 @@ function transition(
     };
   }
   const part: EveRunPart = {
-    state: change.run.status,
+    state: input.kind === "append" ? "streaming" : "done",
     stepIndex: input.stepIndex,
-    text: change.run.text,
+    text: input.kind === "append" ? (current?.text ?? "") + input.delta : (input.text ?? ""),
     type: input.type,
   };
   const parts = current

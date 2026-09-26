@@ -344,6 +344,15 @@ describe("EveAgentStore lifecycle", () => {
 });
 
 describe("EveAgentStore child following", () => {
+  it("rejects following with a custom reducer instead of silently dropping child events", () => {
+    expect(() =>
+      createStore({
+        reducer: defaultMessageReducer(),
+        followSubagents: true,
+      }),
+    ).toThrow("followSubagents requires the built-in conversationReducer");
+  });
+
   const parentCall = () =>
     stampTestEvents([
       createSubagentCalledEvent({
@@ -506,6 +515,74 @@ describe("EveAgentStore child following", () => {
           ?.status,
     ).toBe("open");
     expect(store.snapshot.events).toHaveLength(2);
+  });
+
+  it("retains child detail and cancellation through a later optimistic replay", async () => {
+    const parent = parentCall();
+    const childOutput = stampTestEvents([
+      createMessageCompletedEvent({
+        message: "Child result",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "child_turn",
+        finishReason: "stop",
+      }),
+    ])[0]!;
+    const childStream = controlledStreamResponse();
+    const cancelled = {
+      ...stampTestEvents([createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" })])[0]!,
+      meta: { at: "2026-01-01T00:00:00.000Z", id: "evt_test_0001" },
+    };
+    const live = controlledStreamResponse();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input).includes("child_1")) return childStream.response;
+      if (init?.method === "POST") return startedResponse("delivery_1");
+      return live.response;
+    });
+    const store = childStore(parent);
+    attachEveAgentStore(store);
+    childStream.emit(childOutput);
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.children.call_1?.observation).toMatchObject({
+        status: "following",
+        conversation: {
+          messages: [
+            expect.objectContaining({
+              parts: expect.arrayContaining([expect.objectContaining({ text: "Child result" })]),
+            }),
+          ],
+        },
+      }),
+    );
+    const sending = store.send({ message: "New question" });
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.messages.some((message) => message.metadata?.optimistic)).toBe(
+        true,
+      ),
+    );
+    live.emit(cancelled);
+    await vi.waitFor(() => expect(store.snapshot.events).toContainEqual(cancelled));
+    const confirmation = stampTestEvents([
+      createMessageReceivedEvent({ message: "New question", sequence: 2, turnId: "turn_2" }),
+      createSessionWaitingEvent(),
+    ]).map((event, index) => ({
+      ...event,
+      meta: { ...event.meta, id: `evt_test_000${index + 2}`, deliveryIds: ["delivery_1"] },
+    }));
+    for (const event of confirmation) live.emit(event);
+    await sending;
+    expect(store.snapshot.data.children.call_1?.observation).toMatchObject({
+      status: "ended",
+      outcome: "cancelled",
+      conversation: {
+        messages: [
+          expect.objectContaining({
+            parts: expect.arrayContaining([expect.objectContaining({ text: "Child result" })]),
+          }),
+        ],
+      },
+    });
+    expect(store.snapshot.events).toEqual([parent, cancelled, ...confirmation]);
   });
 
   it("keeps child conversations across a submitted message's optimistic reconciliation", async () => {
@@ -1787,6 +1864,49 @@ describe("EveAgentStore steering", () => {
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.events).toEqual([]);
     expect(store.snapshot.error).toBeUndefined();
+  });
+
+  it("keeps a failed steered send ahead of the active reply after replay", async () => {
+    const active = controlledStreamResponse();
+    const failedSend = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(active.response)
+      .mockReturnValueOnce(failedSend.promise);
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const first = store.send({ message: "First" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const events = stampTestEvents([
+      createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+      createMessageReceivedEvent({ message: "First", sequence: 1, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Reply",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    for (const event of events.slice(0, 3)) active.emit(event);
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.messages.some((message) => message.role === "assistant")).toBe(
+        true,
+      ),
+    );
+    const steering = store.send({ message: "Second", turnPolicy: "steer" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    failedSend.reject(new Error("Steering failed"));
+    await expect(steering).rejects.toThrow("Steering failed");
+    expect(store.snapshot.data.messages.map((message) => message.role)).toEqual([
+      "user",
+      "user",
+      "assistant",
+    ]);
+    expect(store.snapshot.data.messages[1]?.metadata?.status).toBe("failed");
+    active.emit(events[3]!);
+    await first;
   });
 
   it.each([true, false])(

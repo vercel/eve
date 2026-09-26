@@ -352,7 +352,7 @@ const agent = useEveAgent({ reducer: toolCounter });
 // agent.data is ToolLog
 ```
 
-`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). The default hook follows child streams and supplies `client.child.following`, `client.child.observed`, `client.child.ended`, and `client.child.unavailable` only when using its built-in reducer. `client.input.responded` notifies custom reducers that an answer was submitted, not that it was accepted. The default reducer waits for server settlement; the durable `input.resolved` event records the server-accepted outcome and lets replayed history rebuild the same HITL state. Return `data` unchanged for events your reducer does not handle.
+`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). With the built-in reducer, the default hook also projects `client.child.following`, `client.child.observed`, and `client.child.unavailable` while following child streams. Custom reducers do not receive child observations; passing `followSubagents: true` to an `EveAgentStore` with a custom reducer throws. `client.input.responded` notifies custom reducers that an answer was submitted, not that it was accepted. The default reducer waits for server settlement; the durable `input.resolved` event records the server-accepted outcome and lets replayed history rebuild the same HITL state. Return `data` unchanged for events your reducer does not handle.
 
 ## Resumable sessions
 

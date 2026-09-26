@@ -32,6 +32,7 @@ export class OptimisticMessageSubmissions<TData> {
       eventStartIndex,
       id: createSubmissionId(),
       message: summarizeUserContent(input.message),
+      turnId,
       requiresDeliveryId: true,
     };
     this.#pending = [...this.#pending, pending];
@@ -107,6 +108,7 @@ export class OptimisticMessageSubmissions<TData> {
           error: { message: error.message },
           message: pending.message,
           submissionId: pending.id,
+          turnId: pending.turnId,
         },
         type: "client.message.failed",
       },

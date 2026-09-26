@@ -160,6 +160,30 @@ describe("OptimisticMessageSubmissions", () => {
     expect(projection.data.messages[1]?.metadata?.optimistic).toBeUndefined();
   });
 
+  it("keeps a failed steered message ahead of its reply after replay", () => {
+    const { projection, submissions } = setup();
+    submissions.apply(received("First", ["first"]));
+    submissions.apply(
+      stampTestEvents([
+        createMessageCompletedEvent({
+          finishReason: "stop",
+          message: "Reply",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_first",
+        }),
+      ])[0]!,
+    );
+    const id = submissions.submit({ message: "Second" }, 2, "turn_first")!;
+    submissions.fail(new Error("Send failed"), id);
+    expect(projection.data.messages.map((message) => message.role)).toEqual([
+      "user",
+      "user",
+      "assistant",
+    ]);
+    expect(projection.data.messages[1]?.metadata?.status).toBe("failed");
+  });
+
   it("replaces a coalesced pair with one server bubble before the reply", () => {
     const { projection, submissions } = setup();
     submissions.apply(received("First", ["first"]));

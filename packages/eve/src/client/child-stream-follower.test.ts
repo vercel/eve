@@ -83,9 +83,9 @@ function setup() {
         data: { callId, event },
       });
     },
-    onSettled: (data) => {
+    onUnavailable: (data) => {
       state = conversationReducer.reduce(state, {
-        type: "client.child.settled",
+        type: "client.child.unavailable",
         data,
       });
     },
@@ -326,6 +326,19 @@ describe("child event acquisition", () => {
       "input.resolved",
       "session.waiting",
     ]);
+  });
+
+  it("attributes a child turn cancellation to the child rather than successful completion", async () => {
+    serve(() =>
+      response([
+        event({ type: "turn.cancelled", data: { sequence: 0, turnId: "child-turn" } }, 0),
+        waiting(1),
+      ]),
+    );
+    const owner = setup();
+    owner.parent(called("a"));
+    await vi.waitFor(() => expect(owner.state.children.a?.observation.status).toBe("ended"));
+    expect(owner.state.children.a?.observation).toMatchObject({ outcome: "cancelled" });
   });
 
   it("cancels a foreground child subscription with its originating turn", async () => {

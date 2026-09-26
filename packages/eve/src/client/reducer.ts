@@ -28,6 +28,8 @@ export interface ClientMessageFailedEvent {
     };
     readonly message: string;
     readonly submissionId: string;
+    /** Active turn receiving a steered follow-up, when known. */
+    readonly turnId?: string;
   };
   readonly type: "client.message.failed";
 }
@@ -56,10 +58,11 @@ export interface ClientInputRespondedEvent {
 export type EveAgentReducerEvent =
   | { readonly type: "client.child.following"; readonly data: { readonly callId: string } }
   | {
-      readonly type: "client.child.settled";
-      readonly data:
-        | { readonly callId: string; readonly outcome: "completed" | "failed" | "cancelled" }
-        | { readonly callId: string; readonly reason: "unsupported-stream" | "stream-error" };
+      readonly type: "client.child.unavailable";
+      readonly data: {
+        readonly callId: string;
+        readonly reason: "unsupported-stream" | "stream-error";
+      };
     }
   | {
       readonly type: "client.child.observed";

@@ -1,47 +1,43 @@
 import type { ChildCall, ConversationState } from "#client/conversation-state.js";
-import { subagentParentTransition } from "#client/subagent-lifecycle.js";
+import { isJsonObjectValue } from "#shared/json.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
-import type { EveAgentReducerEvent } from "#client/reducer.js";
-import type { MessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
+import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 
 export function initialConversationState(): ConversationState {
   return { messages: [], turns: {}, inputs: {}, children: {} };
 }
 
-export function childCall(called: SubagentCalledStreamEvent): ChildCall {
-  return {
-    callId: called.data.callId,
-    name: called.data.name,
-    childSessionId: called.data.childSessionId,
-    originTurnId: called.data.turnId,
-    background: false,
-    parentStatus: "dispatched",
-    observation: { status: "not-followed" },
-  };
+function updateChild(
+  state: ConversationState,
+  callId: string,
+  update: (call: ChildCall) => ChildCall,
+): ConversationState {
+  const call = state.children[callId];
+  if (call === undefined) return state;
+  const next = update(call);
+  return next === call ? state : { ...state, children: { ...state.children, [callId]: next } };
 }
 
-export function reduceChildCall(
-  state: ConversationState,
-  event: MessageStreamEvent,
-): ConversationState {
-  const transition = subagentParentTransition(event);
-  if (transition === undefined) return state;
-  if (transition.type === "called") {
-    const existing = state.children[transition.callId];
-    if (existing !== undefined) return state;
-    return {
-      ...state,
-      children: {
-        ...state.children,
-        [transition.callId]: childCall(event as SubagentCalledStreamEvent),
-      },
+function reduceChildCall(state: ConversationState, event: MessageStreamEvent): ConversationState {
+  if (event.type === "subagent.called") {
+    if (state.children[event.data.callId]) return state;
+    const child: ChildCall = {
+      callId: event.data.callId,
+      name: event.data.name,
+      childSessionId: event.data.childSessionId,
+      originTurnId: event.data.turnId,
+      background: false,
+      parentStatus: "dispatched",
+      observation: { status: "not-followed" },
     };
+    return { ...state, children: { ...state.children, [child.callId]: child } };
   }
-  if (transition.type === "turn-cancelled") {
+  if (event.type === "turn.cancelled") {
     let children = state.children;
     for (const child of Object.values(state.children)) {
       if (
-        child.originTurnId !== transition.turnId ||
+        child.originTurnId !== event.data.turnId ||
         child.background ||
         child.observation.status === "ended"
       )
@@ -64,17 +60,33 @@ export function reduceChildCall(
     }
     return children === state.children ? state : { ...state, children };
   }
-  const child = state.children[transition.callId];
-  if (child === undefined) return state;
-  const next =
-    transition.type === "background"
-      ? { ...child, background: true, parentStatus: "working" as const }
-      : { ...child, parentStatus: "reported-complete" as const };
-  return { ...state, children: { ...state.children, [child.callId]: next } };
+  if (event.type !== "subagent.completed" && event.type !== "action.result") return state;
+  const callId = event.type === "subagent.completed" ? event.data.callId : event.data.result.callId;
+  const background =
+    event.type === "subagent.completed"
+      ? event.data.backgroundTask !== undefined
+      : isWorkingReceipt(event);
+  if (event.type === "action.result" && !background) return state;
+  return updateChild(state, callId, (child) =>
+    background
+      ? { ...child, background: true, parentStatus: "working" }
+      : { ...child, parentStatus: "reported-complete" },
+  );
+}
+
+function isWorkingReceipt(event: Extract<MessageStreamEvent, { type: "action.result" }>): boolean {
+  const output = event.data.result.output;
+  return (
+    event.data.status === "completed" &&
+    isJsonObjectValue(output) &&
+    output.status === "working" &&
+    typeof output.taskId === "string" &&
+    typeof output.agentId === "string"
+  );
 }
 
 /** Applies lifecycle identity and closure to an already projected message state. */
-export function reduceConversationLifecycle(
+function reduceConversationLifecycle(
   state: ConversationState,
   event: EveAgentReducerEvent,
 ): ConversationState {
@@ -161,104 +173,86 @@ export function reduceConversationLifecycle(
   }
 }
 
-export type ScopedConversationEvent =
-  | { readonly scope: "root"; readonly event: EveAgentReducerEvent }
-  | { readonly scope: "child"; readonly callId: string; readonly event: MessageStreamEvent };
-
 const messageReducer = defaultMessageReducer();
 
 /** Pure reduction of accepted parent/child observations; followers own transport and replay. */
 export function reduceConversation(
   state: ConversationState,
-  observation: ScopedConversationEvent,
+  event: EveAgentReducerEvent,
 ): ConversationState {
-  if (observation.scope === "child") {
-    const call = state.children[observation.callId];
-    if (
-      call === undefined ||
-      call.parentStatus === "cancelled" ||
-      call.observation.status === "ended"
-    )
-      return state;
-    const previous =
-      call.observation.status === "following"
-        ? call.observation.conversation
-        : initialConversationState();
-    const conversation = reduceConversation(previous, { scope: "root", event: observation.event });
-    return {
-      ...state,
-      children: {
-        ...state.children,
-        [observation.callId]: { ...call, observation: { status: "following", conversation } },
-      },
-    };
-  }
-  if (observation.event.type === "client.child.following") {
-    const call = state.children[observation.event.data.callId];
-    if (
-      call === undefined ||
-      call.parentStatus === "cancelled" ||
-      (call.observation.status !== "not-followed" && call.observation.status !== "unavailable")
-    )
-      return state;
-    return {
-      ...state,
-      children: {
-        ...state.children,
-        [call.callId]: {
-          ...call,
-          observation: {
-            status: "following",
-            conversation:
-              call.observation.status === "unavailable"
-                ? (call.observation.conversation ?? initialConversationState())
-                : initialConversationState(),
-          },
+  if (event.type === "client.child.following") {
+    return updateChild(state, event.data.callId, (call) => {
+      if (
+        call.parentStatus === "cancelled" ||
+        (call.observation.status !== "not-followed" && call.observation.status !== "unavailable")
+      )
+        return call;
+      return {
+        ...call,
+        observation: {
+          status: "following",
+          conversation:
+            call.observation.status === "unavailable"
+              ? (call.observation.conversation ?? initialConversationState())
+              : initialConversationState(),
         },
-      },
-    };
-  }
-  if (observation.event.type === "client.child.settled") {
-    const call = state.children[observation.event.data.callId];
-    if (call === undefined || call.observation.status === "ended") return state;
-    const conversation =
-      call.observation.status === "following"
-        ? call.observation.conversation
-        : call.observation.status === "unavailable"
-          ? call.observation.conversation
-          : undefined;
-    const childObservation =
-      "outcome" in observation.event.data
-        ? {
-            status: "ended" as const,
-            conversation: conversation ?? initialConversationState(),
-            outcome: observation.event.data.outcome,
-          }
-        : {
-            status: "unavailable" as const,
-            reason: observation.event.data.reason,
-            conversation,
-          };
-    return {
-      ...state,
-      children: { ...state.children, [call.callId]: { ...call, observation: childObservation } },
-    };
-  }
-  if (observation.event.type === "client.child.observed") {
-    return reduceConversation(state, {
-      scope: "child",
-      callId: observation.event.data.callId,
-      event: observation.event.data.event,
+      };
     });
   }
-  const projected = messageReducer.reduce(state, observation.event);
-  const next = reduceConversationLifecycle({ ...state, ...projected }, observation.event);
-  return "meta" in observation.event ? reduceChildCall(next, observation.event) : next;
+  if (event.type === "client.child.unavailable") {
+    return updateChild(state, event.data.callId, (call) => {
+      if (call.observation.status === "ended") return call;
+      const conversation =
+        call.observation.status === "following" || call.observation.status === "unavailable"
+          ? call.observation.conversation
+          : undefined;
+      return {
+        ...call,
+        observation: { status: "unavailable", reason: event.data.reason, conversation },
+      };
+    });
+  }
+  if (event.type === "client.child.observed") {
+    return updateChild(state, event.data.callId, (call) => {
+      if (call.parentStatus === "cancelled" || call.observation.status === "ended") return call;
+      const childEvent = event.data.event;
+      const previous =
+        call.observation.status === "following"
+          ? call.observation.conversation
+          : initialConversationState();
+      const conversation = reduceConversation(previous, childEvent);
+      let observation: ChildCall["observation"] = { status: "following", conversation };
+      if (
+        childEvent.type === "session.waiting" ||
+        childEvent.type === "session.completed" ||
+        childEvent.type === "session.failed"
+      ) {
+        if (
+          childEvent.type !== "session.waiting" ||
+          !Object.values(conversation.inputs).some((input) => input.status === "open")
+        ) {
+          const lastTurn = Object.values(conversation.turns).at(-1);
+          observation = {
+            status: "ended",
+            conversation,
+            outcome:
+              childEvent.type === "session.failed" || lastTurn?.status === "failed"
+                ? "failed"
+                : lastTurn?.status === "cancelled"
+                  ? "cancelled"
+                  : "completed",
+          };
+        }
+      }
+      return { ...call, observation };
+    });
+  }
+  const projected = messageReducer.reduce(state, event);
+  const next = reduceConversationLifecycle({ ...state, ...projected }, event);
+  return "meta" in event ? reduceChildCall(next, event) : next;
 }
 
-export const conversationReducer = {
+export const conversationReducer: EveAgentReducer<ConversationState> = {
   initial: initialConversationState,
-  reduce(state: ConversationState, event: EveAgentReducerEvent): ConversationState {
-    return reduceConversation(state, { scope: "root", event });
-  },
+  reduce: reduceConversation,
 };

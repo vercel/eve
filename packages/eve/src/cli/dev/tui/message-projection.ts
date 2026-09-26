@@ -4,6 +4,7 @@ import type {
   EveMessagePart,
 } from "#client/message-reducer.js";
 import type { AgentTUIStreamEvent } from "./runner.js";
+import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 
 type ContentPart = Extract<EveMessagePart, { type: "text" | "reasoning" }>;
 type Block = { part: ContentPart; turnId: string; id: string };
@@ -28,7 +29,7 @@ export class TerminalMessageProjection {
     for (const message of data.messages) {
       if (message.role !== "assistant") continue;
       for (const part of message.parts) {
-        if (part.type === "dynamic-tool" && part.toolMetadata?.eve?.kind === "tool-call") {
+        if (isTerminalToolCallPart(part)) {
           this.announceTool(part.toolCallId);
         }
       }
@@ -119,8 +120,8 @@ export class TerminalMessageProjection {
     for (const message of data.messages) {
       if (message.role !== "assistant") continue;
       for (const part of message.parts) {
-        if (part.type !== "dynamic-tool" || part.toolMetadata?.eve?.kind !== "tool-call") continue;
-        if (part.toolMetadata.eve.inputRequest?.kind === "session-limit") continue;
+        if (!isTerminalToolCallPart(part)) continue;
+        if (part.toolMetadata?.eve?.inputRequest?.kind === "session-limit") continue;
         const old = this.#tools.get(part.toolCallId);
         // Tool results without an announced call do not have a terminal block.
         if (!this.#announcedTools.has(part.toolCallId)) continue;

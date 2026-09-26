@@ -18,6 +18,7 @@ import {
   type SessionEventStreamOptions,
 } from "#client/session-event-stream.js";
 import { EveAgentProjection } from "#client/eve-agent-projection.js";
+import { conversationReducer } from "#client/conversation-reducer.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
 import { followSubagents } from "#client/follow-subagents.js";
 import type { ChildStreamFollower } from "#client/child-stream-follower.js";
@@ -84,6 +85,8 @@ export class EveAgentStore<TData> {
 
   constructor(init: EveAgentStoreInit<TData>) {
     this.#autoPrewarm = init.prewarm ?? false;
+    if (init.followSubagents && init.reducer !== conversationReducer)
+      throw new Error("followSubagents requires the built-in conversationReducer.");
     this.#followChildStreams = init.followSubagents ?? false;
     this.#externalSession = init.session !== undefined;
     this.#client = this.#externalSession
@@ -660,10 +663,7 @@ export class EveAgentStore<TData> {
 
   #applyTerminalStreamFailure(event: MessageStreamEvent): void {
     const error = toTerminalStreamFailureError(event);
-    if (error === undefined) {
-      return;
-    }
-
+    if (error === undefined) return;
     this.#status = "error";
     this.#messageSubmissions.failAll(error);
 

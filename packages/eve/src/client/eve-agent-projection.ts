@@ -1,15 +1,14 @@
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 
-/** Owns reducer replay when optimistic events are replaced by server events. */
+/** Owns chronological reducer replay when optimistic events are replaced by server events. */
 export class EveAgentProjection<TData> {
   readonly #reducer: EveAgentReducer<TData>;
-  #events: readonly EveAgentReducerEvent[];
-  #childEvents: EveAgentReducerEvent[] = [];
+  #events: EveAgentReducerEvent[];
   #data: TData;
 
   constructor(reducer: EveAgentReducer<TData>, events: readonly EveAgentReducerEvent[]) {
     this.#reducer = reducer;
-    this.#events = events;
+    this.#events = [...events];
     this.#data = this.#reduce();
   }
 
@@ -19,20 +18,11 @@ export class EveAgentProjection<TData> {
 
   reset(): void {
     this.#events = [];
-    this.#childEvents = [];
     this.#data = this.#reducer.initial();
   }
 
   append(event: EveAgentReducerEvent): void {
-    if (
-      event.type === "client.child.observed" ||
-      event.type === "client.child.following" ||
-      event.type === "client.child.settled"
-    ) {
-      this.#childEvents.push(event);
-    } else {
-      this.#events = [...this.#events, event];
-    }
+    this.#events.push(event);
     this.#data = this.#reducer.reduce(this.#data, event);
   }
 
@@ -46,17 +36,14 @@ export class EveAgentProjection<TData> {
     replacement: EveAgentReducerEvent,
   ): void {
     const index = this.#events.findIndex(predicate);
-    this.#events =
-      index === -1
-        ? [...this.#events, replacement]
-        : this.#events.map((event, i) => (i === index ? replacement : event));
+    if (index === -1) this.#events.push(replacement);
+    else this.#events[index] = replacement;
     this.#data = this.#reduce();
   }
 
   #reduce(): TData {
     let data = this.#reducer.initial();
     for (const event of this.#events) data = this.#reducer.reduce(data, event);
-    for (const event of this.#childEvents) data = this.#reducer.reduce(data, event);
     return data;
   }
 }

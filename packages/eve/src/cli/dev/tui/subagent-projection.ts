@@ -1,5 +1,6 @@
 import type { ChildCall, ConversationState } from "#client/conversation-state.js";
 import type { EveDynamicToolPart } from "#client/message-reducer-types.js";
+import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 
 export interface SubagentView {
   begin(update: { callId: string; name: string }): void;
@@ -32,9 +33,7 @@ export type SubagentToolUpdate = {
 
 function tools(conversation: ConversationState): EveDynamicToolPart[] {
   return conversation.messages.flatMap((message) =>
-    message.role === "assistant"
-      ? message.parts.filter((part): part is EveDynamicToolPart => part.type === "dynamic-tool")
-      : [],
+    message.role === "assistant" ? message.parts.filter(isTerminalToolCallPart) : [],
   );
 }
 

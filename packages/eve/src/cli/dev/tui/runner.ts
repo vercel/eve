@@ -627,7 +627,8 @@ export class EveTUIRunner {
       getCall: (callId) => this.#conversation.children[callId],
       onFollowing: (callId) =>
         projectChild({ type: "client.child.following", data: { callId } }, callId),
-      onSettled: (data) => projectChild({ type: "client.child.settled", data }, data.callId),
+      onUnavailable: (data) =>
+        projectChild({ type: "client.child.unavailable", data }, data.callId),
       onChildEvent: (callId, event) =>
         projectChild({ type: "client.child.observed", data: { callId, event } }, callId),
     };

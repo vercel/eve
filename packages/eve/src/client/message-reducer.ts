@@ -74,7 +74,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
   switch (event.type) {
     case "client.child.observed":
     case "client.child.following":
-    case "client.child.settled":
+    case "client.child.unavailable":
       return data;
 
     case "client.message.submitted":
@@ -90,7 +90,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
           parts: [{ type: "text", text: event.data.message }],
           role: "user",
         },
-        event.type === "client.message.submitted" ? event.data.turnId : undefined,
+        event.data.turnId,
       );
 
     case "input.resolved": {

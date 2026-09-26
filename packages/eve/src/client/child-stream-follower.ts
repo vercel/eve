@@ -13,11 +13,10 @@ export interface ChildStreamFollowerOptions {
   getCall: (callId: string) => ChildCall | undefined;
   onChildEvent: (callId: string, event: MessageStreamEvent) => void;
   onFollowing: (callId: string) => void;
-  onSettled: (
-    result:
-      | { callId: string; outcome: "completed" | "failed" | "cancelled" }
-      | { callId: string; reason: "unsupported-stream" | "stream-error" },
-  ) => void;
+  onUnavailable: (result: {
+    callId: string;
+    reason: "unsupported-stream" | "stream-error";
+  }) => void;
   onToolCompleted?: (name: string, toolName: string, output: unknown) => Promise<void>;
   /** Retained by the transport owner across detach/reattach. */
   cursors?: Map<string, number>;
@@ -102,7 +101,7 @@ export class ChildStreamFollower {
     const { callId, childSessionId, name } = called.data;
     const session = this.#options.session(called.data.sessionId);
     if (session === undefined || typeof called.data.childStreamPath !== "string") {
-      this.#options.onSettled({
+      this.#options.onUnavailable({
         callId,
         reason: session === undefined ? "stream-error" : "unsupported-stream",
       });
@@ -134,35 +133,13 @@ export class ChildStreamFollower {
               event.data.result.output,
             );
           }
-          if (
-            event.type !== "session.waiting" &&
-            event.type !== "session.completed" &&
-            event.type !== "session.failed"
-          )
-            continue;
-          const call = this.#options.getCall(callId);
-          if (
-            event.type === "session.waiting" &&
-            call?.observation.status === "following" &&
-            Object.values(call.observation.conversation.inputs).some(
-              (input) => input.status === "open",
-            )
-          )
-            continue;
-          const turns =
-            call?.observation.status === "following"
-              ? Object.values(call.observation.conversation.turns)
-              : [];
-          const failed = turns.at(-1)?.status === "failed";
-          this.#options.onSettled({
-            callId,
-            outcome: event.type === "session.failed" || failed ? "failed" : "completed",
-          });
-          return;
+          if (this.#options.getCall(callId)?.observation.status === "ended") return;
         }
-        if (!controller.signal.aborted) this.#options.onSettled({ callId, reason: "stream-error" });
+        if (!controller.signal.aborted)
+          this.#options.onUnavailable({ callId, reason: "stream-error" });
       } catch {
-        if (!controller.signal.aborted) this.#options.onSettled({ callId, reason: "stream-error" });
+        if (!controller.signal.aborted)
+          this.#options.onUnavailable({ callId, reason: "stream-error" });
       } finally {
         controller.abort();
         if (this.#controllers.get(callId) === controller) this.#controllers.delete(callId);

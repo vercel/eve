@@ -22,7 +22,7 @@ export function followSubagents<TData>(input: {
     session: () => input.session,
     getCall: (callId) => (input.projection.data as ConversationState).children?.[callId],
     onFollowing: (callId) => project({ type: "client.child.following", data: { callId } }),
-    onSettled: (data) => project({ type: "client.child.settled", data }),
+    onUnavailable: (data) => project({ type: "client.child.unavailable", data }),
     onChildEvent: (callId, event) =>
       project({ type: "client.child.observed", data: { callId, event } }),
   });

@@ -165,6 +165,7 @@ describe("terminal child adapter", () => {
               type: "dynamic-tool",
               toolCallId: "search",
               toolName: "search",
+              toolMetadata: { eve: { kind: "tool-call", name: "search" } },
               input: {},
               state: "input-available",
             },
@@ -180,5 +181,44 @@ describe("terminal child adapter", () => {
       expect.objectContaining({ childCallId: "search", status: "executing" }),
     );
     expect(renderer.markChildToolCallId).toHaveBeenCalledWith("search");
+  });
+
+  it("does not render skill loads or nested delegations as child tool rows", () => {
+    const renderer = view();
+    const adapter = new TerminalSubagentProjection(renderer);
+    const conversation: ConversationState = {
+      ...initialConversationState(),
+      messages: [
+        {
+          id: "msg",
+          role: "assistant",
+          parts: [
+            {
+              type: "dynamic-tool",
+              toolCallId: "skill",
+              toolName: "load_skill",
+              input: {},
+              state: "input-available",
+              toolMetadata: { eve: { kind: "load-skill", name: "skill" } },
+            },
+            {
+              type: "dynamic-tool",
+              toolCallId: "nested",
+              toolName: "researcher",
+              input: {},
+              state: "input-available",
+              toolMetadata: { eve: { kind: "subagent-call", name: "researcher" } },
+            },
+          ],
+        },
+      ],
+    };
+    adapter.update(
+      withChild(child({ observation: { status: "following", conversation } })),
+      "delegate",
+    );
+    expect(renderer.upsertTool).not.toHaveBeenCalled();
+    expect(renderer.markChildToolCallId).not.toHaveBeenCalledWith("skill");
+    expect(renderer.markChildToolCallId).not.toHaveBeenCalledWith("nested");
   });
 });
