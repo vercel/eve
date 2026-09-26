@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  initialConversationState,
-  type ChildCall,
-  type ConversationState,
-} from "#client/conversation-state.js";
+import type { ChildCall, ConversationState } from "#client/conversation-state.js";
+import { initialConversationState } from "#client/conversation-reducer.js";
 import { TerminalSubagentProjection, type SubagentView } from "./subagent-projection.js";
 
 function view(): SubagentView {

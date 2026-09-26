@@ -70,19 +70,13 @@ export class TerminalMessageProjection {
         unchanged ??
         (atIndex && removed.has(atIndex) && sameKey(atIndex) ? atIndex : undefined) ??
         this.#blocks.findLast((block) => removed.has(block) && sameKey(block));
-      const id = old
-        ? old.id
-        : (() => {
-            const generation = this.#generations.get(key) ?? 0;
-            this.#generations.set(key, generation + 1);
-            return generation === 0 ? key : `${key}#${generation}`;
-          })();
+      const id = old?.id ?? this.#nextId(key);
       next.push({ part, turnId, id });
       if (old) removed.delete(old);
       if (unchanged) continue;
       const deltaType = part.type === "text" ? "assistant-delta" : "reasoning-delta";
       const completeType = part.type === "text" ? "assistant-complete" : "reasoning-complete";
-      if (!old || old.id !== id) {
+      if (!old) {
         if (part.state === "done") yield { type: completeType, id, text: part.text };
         else if (part.text) yield { type: deltaType, id, delta: part.text };
         continue;
@@ -104,6 +98,12 @@ export class TerminalMessageProjection {
       if (old.part.type === "text") yield { type: "assistant-remove", id: old.id };
     }
     this.#blocks = next;
+  }
+
+  #nextId(key: string): string {
+    const generation = this.#generations.get(key) ?? 0;
+    this.#generations.set(key, generation + 1);
+    return generation === 0 ? key : `${key}#${generation}`;
   }
 
   *finish(): Generator<AgentTUIStreamEvent> {
