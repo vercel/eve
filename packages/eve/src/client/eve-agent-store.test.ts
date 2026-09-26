@@ -5,6 +5,7 @@ import {
   detachEveAgentStore,
   EveAgentStore,
 } from "#client/eve-agent-store.js";
+import { Client } from "#client/client.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { conversationReducer } from "#client/conversation-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
@@ -278,6 +279,36 @@ describe("EveAgentStore lifecycle", () => {
     expect(seenStreamIndexes).toEqual([0, 1, 2, 3, 3]);
   });
 
+  it("reconciles optimistic conversation messages while a custom reducer counts server events", async () => {
+    const live = controlledStreamResponse();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse("delivery_1"))
+      .mockResolvedValueOnce(live.response);
+    const store = createStore({
+      reducer: {
+        initial: () => 0,
+        reduce: (count: number, event: { type: string }) =>
+          event.type === "message.received" ? count + 1 : count,
+      },
+    });
+    const sending = store.send({ message: "Hello" });
+    await vi.waitFor(() =>
+      expect(store.snapshot.conversation.messages[0]?.metadata?.optimistic).toBe(true),
+    );
+    expect(store.snapshot.data).toBe(0);
+    const events = turnEvents().map((event) => ({
+      ...event,
+      meta: { ...event.meta, deliveryIds: ["delivery_1"] },
+    }));
+    for (const event of events) live.emit(event);
+    await sending;
+    expect(store.snapshot.data).toBe(1);
+    expect(
+      store.snapshot.conversation.messages.filter((message) => message.role === "user"),
+    ).toHaveLength(1);
+    expect(store.snapshot.conversation.messages[0]?.metadata?.optimistic).toBeUndefined();
+  });
+
   it("surfaces transport errors", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
     const store = createStore({ reducer: defaultMessageReducer() });
@@ -301,6 +332,7 @@ describe("EveAgentStore lifecycle", () => {
     store.reset();
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.data.messages).toEqual([]);
+    expect(store.snapshot.conversation.messages).toEqual([]);
     expect(store.snapshot.error).toBeUndefined();
     expect(store.snapshot.events).toEqual([]);
   });
@@ -340,6 +372,7 @@ describe("EveAgentStore lifecycle", () => {
 
     expect(store.snapshot.status).toBe("submitted");
     expect(store.snapshot.data).toEqual(["client.input.responded"]);
+    expect(store.snapshot.conversation.inputs).toEqual({});
 
     start.resolve(startedResponse());
     await sending;
@@ -350,13 +383,25 @@ describe("EveAgentStore lifecycle", () => {
 });
 
 describe("EveAgentStore child following", () => {
-  it("rejects following with a custom reducer instead of silently dropping child events", () => {
-    expect(() =>
-      createStore({
-        reducer: defaultMessageReducer(),
-        followSubagents: true,
+  it("keeps child calls in canonical state with a custom view", () => {
+    const parent = stampTestEvents([
+      createSubagentCalledEvent({
+        callId: "call_1",
+        childSessionId: "child_1",
+        sessionId: "session_1",
+        sequence: 0,
+        name: "research",
+        toolName: "eve:subagent:research",
+        turnId: "turn_1",
+        workflowId: "workflow_1",
       }),
-    ).toThrow("followSubagents requires the built-in conversationReducer");
+    ])[0]!;
+    const store = createStore({
+      initialEvents: [parent],
+      reducer: { initial: () => 0, reduce: (count: number) => count + 1 },
+    });
+    expect(store.snapshot.data).toBe(1);
+    expect(store.snapshot.conversation.children.call_1?.childSessionId).toBe("child_1");
   });
 
   const parentCall = () =>
@@ -381,6 +426,43 @@ describe("EveAgentStore child following", () => {
       reducer: conversationReducer,
       followSubagents,
     });
+
+  it("updates canonical child observations without changing a custom view", async () => {
+    const parent = parentCall();
+    const childEvents = stampTestEvents([
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Done",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "child_turn",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("child_1")
+        ? streamResponse(childEvents)
+        : boundedStreamResponse([], 0),
+    );
+    const store = createStore({
+      host: "http://localhost",
+      initialSession: { sessionId: "session_1", streamIndex: 1 },
+      initialEvents: [parent],
+      followSubagents: true,
+      reducer: { initial: () => 0, reduce: (count: number) => count + 1 },
+    });
+    const statuses: string[] = [];
+    store.subscribe(() =>
+      statuses.push(store.snapshot.conversation.children.call_1?.observation.status ?? "missing"),
+    );
+    attachEveAgentStore(store);
+    await vi.waitFor(() =>
+      expect(store.snapshot.conversation.children.call_1?.observation.status).toBe("ended"),
+    );
+    expect(store.snapshot.data).toBe(1);
+    expect(statuses).toContain("following");
+    expect(statuses).toContain("ended");
+  });
 
   it("projects parent child-call facts without subscribing when following is disabled", () => {
     const parent = parentCall();
@@ -1675,6 +1757,108 @@ describe("EveAgentStore session resume", () => {
     expect(store.snapshot.session?.streamIndex).toBe(events.length);
   });
 
+  it("settles callback authorization independently of the custom view", async () => {
+    const [required, waiting, completed, settled] = stampTestEvents([
+      createAuthorizationRequiredEvent({
+        attemptId: "attempt_1",
+        description: "Linear",
+        name: "linear",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+        webhookUrl: "https://agent.example.com/callback",
+      }),
+      createSessionWaitingEvent(),
+      createAuthorizationCompletedEvent({
+        attemptId: "attempt_1",
+        name: "linear",
+        outcome: "authorized",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]);
+    const live = controlledStreamResponse();
+    live.response.headers.set("x-eve-stream-tail-index", "1");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(live.response);
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: { initial: () => 0, reduce: (count: number) => count + 1 },
+    });
+    const resuming = store.resume();
+    live.emit(required!);
+    live.emit(waiting!);
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
+    expect(store.snapshot.data).toBe(2);
+    expect(store.snapshot.conversation.messages[0]?.parts).toContainEqual(
+      expect.objectContaining({ state: "pending", type: "authorization" }),
+    );
+    live.emit(completed!);
+    live.emit(settled!);
+    await resuming;
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data).toBe(4);
+  });
+
+  it("keeps a custom view streaming until both same-name callback attempts settle", async () => {
+    const [first, second, waiting, firstCompleted, stillWaiting, secondCompleted, settled] =
+      stampTestEvents([
+        ...["first", "second"].map((attemptId, sequence) =>
+          createAuthorizationRequiredEvent({
+            attemptId,
+            description: "Linear",
+            name: "linear",
+            sequence,
+            stepIndex: 0,
+            turnId: "turn_1",
+            webhookUrl: `https://agent.example.com/callback/${attemptId}`,
+          }),
+        ),
+        createSessionWaitingEvent(),
+        createAuthorizationCompletedEvent({
+          attemptId: "first",
+          name: "linear",
+          outcome: "authorized",
+          sequence: 2,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createSessionWaitingEvent(),
+        createAuthorizationCompletedEvent({
+          attemptId: "second",
+          name: "linear",
+          outcome: "authorized",
+          sequence: 3,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createSessionWaitingEvent(),
+      ] as UnstampedMessageStreamEvent[]);
+    const live = controlledStreamResponse();
+    live.response.headers.set("x-eve-stream-tail-index", "2");
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(live.response);
+    const store = createStore({
+      initialSession: { sessionId: "session_1", streamIndex: 0 },
+      reducer: { initial: () => 0, reduce: (count: number) => count + 1 },
+    });
+    const resuming = store.resume();
+    for (const event of [first, second, waiting]) live.emit(event!);
+    await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
+    for (const event of [firstCompleted, stillWaiting]) live.emit(event!);
+    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(5));
+    expect(store.snapshot.status).toBe("streaming");
+    expect(
+      store.snapshot.conversation.messages.flatMap((message) =>
+        message.parts.filter((part) => part.type === "authorization" && part.state === "pending"),
+      ),
+    ).toHaveLength(1);
+    for (const event of [secondCompleted, settled]) live.emit(event!);
+    await resuming;
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data).toBe(7);
+  });
+
   it("keeps following when catch-up ends with pending authorization", async () => {
     const events = stampTestEvents([
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
@@ -1832,6 +2016,35 @@ describe("EveAgentStore steering", () => {
       ])[0]!,
     );
     await first;
+  });
+
+  it("steers a first turn that is still creating its session", async () => {
+    const live = controlledStreamResponse();
+    const created = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(created.promise)
+      .mockResolvedValueOnce(live.response)
+      .mockResolvedValueOnce(startedResponse("delivery_2"));
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const first = store.send({ message: "Write Alice a story." });
+    const steering = store.send({ message: "Make it short.", turnPolicy: "steer" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    created.resolve(startedResponse());
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(String(fetchMock.mock.calls[2]![1]!.body))).toMatchObject({
+      message: "Make it short.",
+      turnPolicy: "steer",
+    });
+    for (const event of turnEvents()) live.emit(event);
+    for (const event of turnEvents())
+      live.emit({
+        ...event,
+        meta: { ...event.meta, id: `steer-${event.meta.id}`, deliveryIds: ["delivery_2"] },
+      });
+    await Promise.all([first, steering]);
+    expect(store.snapshot.status).toBe("ready");
   });
 
   it("prepares a steering message once when the active turn finishes during preparation", async () => {
@@ -2295,5 +2508,87 @@ describe("EveAgentStore cancellation", () => {
     expect(signal?.aborted).toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(store.snapshot.status).toBe("ready");
+  });
+});
+
+describe("EveAgentStore session controls", () => {
+  const initialSession = { sessionId: "session_1", streamIndex: 0 };
+
+  it("echoes a message while caller preparation is still pending", async () => {
+    vi.spyOn(globalThis, "fetch");
+    const store = createStore({ reducer: conversationReducer, host: "http://localhost:3000" });
+    const preparation = Promise.withResolvers<never>();
+    store.setCallbacks({ prepareSend: () => preparation.promise });
+    const controller = new AbortController();
+    const send = store.send({ message: "Ask Bob about the release.", signal: controller.signal });
+
+    expect(store.snapshot.status).toBe("submitted");
+    expect(store.snapshot.conversation.messages).toEqual([
+      expect.objectContaining({
+        role: "user",
+        metadata: expect.objectContaining({ optimistic: true }),
+        parts: [expect.objectContaining({ text: "Ask Bob about the release." })],
+      }),
+    ]);
+    controller.abort();
+    await send;
+  });
+
+  it("reports compaction and clearing without a session instead of sending requests", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const store = createStore({ reducer: conversationReducer, host: "http://localhost:3000" });
+
+    await expect(store.compact()).resolves.toEqual({ status: "no_active_session" });
+    await expect(store.clear()).resolves.toEqual({ status: "no_active_session" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("compacts the current session through the configured client", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json({ ok: true, sessionId: "session_1", status: "accepted" }));
+    const store = createStore({
+      reducer: conversationReducer,
+      client: new Client({ host: "http://agent.example.com" }),
+      initialSession,
+    });
+
+    await expect(store.compact()).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+    expect(String(fetchMock.mock.calls[0]![0])).toBe(
+      "http://agent.example.com/eve/v1/session/session_1/compact",
+    );
+  });
+
+  it("retires the server session before the next send starts fresh", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ok: true, previousSessionId: "session_1", status: "reset" }),
+    );
+    const store = createStore({
+      reducer: conversationReducer,
+      host: "http://localhost:3000",
+      initialSession,
+      initialEvents: turnEvents(),
+    });
+
+    await expect(store.retire()).resolves.toEqual({
+      previousSessionId: "session_1",
+      status: "reset",
+    });
+    expect(store.snapshot.session).toBeUndefined();
+    expect(store.snapshot.conversation.messages).toEqual([]);
+  });
+
+  it("keeps the session and conversation when retiring fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("unavailable", { status: 503 }));
+    const store = createStore({
+      reducer: conversationReducer,
+      host: "http://localhost:3000",
+      initialSession,
+      initialEvents: turnEvents(),
+    });
+
+    await expect(store.retire()).rejects.toThrow();
+    expect(store.snapshot.session?.sessionId).toBe("session_1");
+    expect(store.snapshot.conversation.messages).not.toEqual([]);
   });
 });

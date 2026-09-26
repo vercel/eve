@@ -39,8 +39,6 @@ describe("runDevelopmentTui", () => {
       throw new Error("Expected two TUI runner invocations.");
     }
     expect(first.client).not.toBe(second.client);
-    expect(first.session).toBeUndefined();
-    expect(second.session).toBeUndefined();
   });
 
   it.each([

@@ -4,13 +4,19 @@ import type {
 } from "#protocol/message.js";
 import type { EveAuthorizationPart } from "#client/message-reducer-types.js";
 
+type MutableAuthorizationPart<T extends EveAuthorizationPart> = {
+  -readonly [K in keyof T]: T[K];
+};
+
 export function createAuthorizationRequiredPart(
   event: AuthorizationRequiredStreamEvent,
 ): EveAuthorizationPart {
   const displayName =
     event.data.authorization?.displayName ?? formatAuthorizationDisplayName(event.data.name);
 
-  return {
+  const part: MutableAuthorizationPart<
+    Extract<EveAuthorizationPart, { state: "required" | "pending" }>
+  > = {
     authorization: event.data.authorization,
     description: normalizeAuthorizationDescription(
       event.data.description,
@@ -19,12 +25,14 @@ export function createAuthorizationRequiredPart(
     ),
     displayName,
     name: event.data.name,
-    attemptId: event.data.attemptId,
     state: "required",
     stepIndex: event.data.stepIndex,
     turnId: event.data.turnId,
     type: "authorization",
   };
+  if (event.data.attemptId !== undefined) part.attemptId = event.data.attemptId;
+  if (event.data.webhookUrl !== undefined) part.awaitsCallback = true;
+  return part;
 }
 
 export function createAuthorizationCompletedPart(
@@ -36,7 +44,7 @@ export function createAuthorizationCompletedPart(
     existing?.displayName ??
     formatAuthorizationDisplayName(event.data.name);
 
-  return {
+  const part: MutableAuthorizationPart<Extract<EveAuthorizationPart, { state: "completed" }>> = {
     authorization:
       existing?.authorization || event.data.authorization
         ? { ...existing?.authorization, ...event.data.authorization }
@@ -46,14 +54,17 @@ export function createAuthorizationCompletedPart(
       buildCompletedAuthorizationDescription(displayName, event.data.outcome, event.data.reason),
     displayName,
     name: event.data.name,
-    attemptId: event.data.attemptId ?? existing?.attemptId,
     outcome: event.data.outcome,
-    reason: event.data.reason,
     state: "completed",
     stepIndex: existing?.stepIndex ?? event.data.stepIndex,
     turnId: existing?.turnId ?? event.data.turnId,
     type: "authorization",
   };
+  const attemptId = event.data.attemptId ?? existing?.attemptId;
+  if (attemptId !== undefined) part.attemptId = attemptId;
+  if (existing?.awaitsCallback) part.awaitsCallback = true;
+  if (event.data.reason !== undefined) part.reason = event.data.reason;
+  return part;
 }
 
 function buildCompletedAuthorizationDescription(

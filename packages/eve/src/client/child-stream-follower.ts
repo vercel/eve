@@ -17,7 +17,6 @@ export interface ChildStreamFollowerOptions {
     callId: string;
     reason: "unsupported-stream" | "stream-error";
   }) => void;
-  onToolCompleted?: (name: string, toolName: string, output: unknown) => Promise<void>;
   /** Retained by the transport owner across detach/reattach. */
   cursors?: Map<string, number>;
 }
@@ -98,7 +97,7 @@ export class ChildStreamFollower {
   }
 
   #follow(called: SubagentCalledStreamEvent): void {
-    const { callId, childSessionId, name } = called.data;
+    const { callId, childSessionId } = called.data;
     const session = this.#options.session(called.data.sessionId);
     if (session === undefined || typeof called.data.childStreamPath !== "string") {
       this.#options.onUnavailable({
@@ -122,17 +121,6 @@ export class ChildStreamFollower {
           if (controller.signal.aborted) return;
           this.#cursors.set(childSessionId, ++cursor);
           this.#options.onChildEvent(callId, event);
-          if (
-            event.type === "action.result" &&
-            event.data.status === "completed" &&
-            event.data.result.kind === "tool-result"
-          ) {
-            await this.#options.onToolCompleted?.(
-              name,
-              event.data.result.toolName,
-              event.data.result.output,
-            );
-          }
           if (this.#options.getCall(callId)?.observation.status === "ended") return;
         }
         if (!controller.signal.aborted)

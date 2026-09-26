@@ -130,7 +130,7 @@ Pass `onEvent`, `onError`, `onFinish`, or `onSessionChange` when the application
 
 ## Custom reducer
 
-Import `EveAgentReducer` from `eve/vue` when projecting events into application-specific state. The resulting `data` remains a `ComputedRef<TData>`. See [Custom reducer](./overview#custom-reducer) for the reducer contract and client projection events.
+Import `EveAgentReducer` from `eve/vue` when projecting events into application-specific state. The resulting `data` remains a `ComputedRef<TData>`; `conversation` remains a `ComputedRef<ConversationState>` regardless of your reducer. See [Custom reducer](./overview#custom-reducer) for the reducer contract and client projection events.
 
 ## What to read next
 

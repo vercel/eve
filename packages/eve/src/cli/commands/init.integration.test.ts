@@ -10,9 +10,9 @@ import { EveTUIRunner } from "#cli/dev/tui/runner.js";
 import { createDevBootProgressReporter } from "#cli/dev/boot-progress.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import * as liveRow from "#cli/ui/live-row.js";
-import { Client, MessageResponse } from "#client/index.js";
+import { Client } from "#client/index.js";
+import { FakeEveServer, reply } from "#cli/dev/tui/test/fake-eve-server.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
-import { stampTestEvents } from "#internal/testing/events.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { packageInstallResult, packageProcessResult } from "#internal/testing/package-process.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
@@ -137,6 +137,7 @@ async function createHostProject(
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("runInitCommand", () => {
@@ -215,34 +216,8 @@ describe("runInitCommand", () => {
         },
       };
       vi.spyOn(client, "info").mockResolvedValue(info);
-      const session = client.sessions.attach("session_init");
-      vi.spyOn(session, "stream").mockImplementation(async function* () {});
-      const send = vi.spyOn(session, "send").mockImplementation(
-        async () =>
-          new MessageResponse({
-            sessionId: "session_init",
-            cancelTurn: async () => ({ status: "no_active_turn" }),
-            createStream: async function* () {
-              yield* stampTestEvents([
-                { type: "turn.started", data: { sequence: 1, turnId: "turn_init" } },
-                {
-                  type: "message.completed",
-                  data: {
-                    sequence: 2,
-                    turnId: "turn_init",
-                    stepIndex: 0,
-                    finishReason: "stop",
-                    message: "Hello Alice, your agent is ready.",
-                  },
-                },
-                {
-                  type: "session.waiting",
-                  data: { continuationToken: "session_init", wait: "next-user-message" },
-                },
-              ]);
-            },
-          }),
-      );
+      const server = new FakeEveServer(reply("Hello Alice, your agent is ready."));
+      vi.stubGlobal("fetch", server.fetch);
       const handle = vi.fn(async () => {
         if (!connected) {
           const provider = await renderer.setupFlow.readSelect({
@@ -254,7 +229,7 @@ describe("runInitCommand", () => {
         }
         return { message: connected ? "Using existing connection." : "Model connected." };
       });
-      const readPrompt = vi.spyOn(renderer, "readPrompt");
+      const readInput = vi.spyOn(renderer, "readInput");
       deps.spawnPackageManager.mockImplementation(async (_manager, projectPath, args) => {
         expect(args).toContain("--onboard");
         const progress = startCliLiveRow(output, { output: screen, elapsed: true });
@@ -262,7 +237,6 @@ describe("runInitCommand", () => {
         report({ type: "phase-started", phase: "compiling internal artifacts" });
         const runner = new EveTUIRunner({
           client,
-          session,
           renderer,
           appRoot: projectPath,
           onboard: true,
@@ -284,7 +258,7 @@ describe("runInitCommand", () => {
           expect(screen.snapshot()).not.toContain("Starting your agent");
           input.enter();
         }
-        await vi.waitFor(() => expect(readPrompt).toHaveBeenCalled());
+        await vi.waitFor(() => expect(readInput).toHaveBeenCalled());
         expect(screen.snapshot()).not.toContain("/login");
         expect(screen.rawOutput()).not.toContain("Using existing connection.");
         expect(screen.rawOutput()).not.toContain("Model connected.");
@@ -295,7 +269,7 @@ describe("runInitCommand", () => {
         input.type("/exit");
         input.enter();
         await run;
-        expect(send).toHaveBeenCalledOnce();
+        expect(server.requestsTo("POST", "/eve/v1/session")).toHaveLength(1);
         expect(handle).toHaveBeenCalledOnce();
         expect(screen.snapshot()).not.toContain("Starting your agent");
         expect(screen.rawOutput()).not.toContain("compiling internal artifacts");

@@ -106,6 +106,8 @@ export type EveAuthorizationPart = {
   readonly displayName: string;
   readonly name: string;
   readonly attemptId?: string;
+  /** A callback can settle this attempt after the current turn ends. */
+  readonly awaitsCallback?: boolean;
   readonly stepIndex: number;
   readonly turnId: string;
   readonly type: "authorization";
@@ -113,7 +115,7 @@ export type EveAuthorizationPart = {
   | {
       readonly outcome?: never;
       readonly reason?: never;
-      readonly state: "required";
+      readonly state: "required" | "pending";
     }
   | {
       readonly outcome: EveAuthorizationOutcome;

@@ -1,5 +1,7 @@
+import type { Client } from "#client/client.js";
 import type { MessageResponse } from "#client/message-response.js";
 import type { EveAgentReducer } from "#client/reducer.js";
+import type { ConversationState } from "#client/conversation-state.js";
 import type { ClientSession } from "#client/session.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
@@ -27,6 +29,8 @@ export type PrepareSend = (input: SendTurnPayload) => SendTurnPayload | Promise<
 /** Immutable projected state of an eve frontend session store. */
 export interface EveAgentStoreSnapshot<TData> {
   readonly data: TData;
+  /** Canonical session facts, independent of the caller's data projection. */
+  readonly conversation: ConversationState;
   /** The latest session creation, stream, resume, or turn failure. */
   readonly error: Error | undefined;
   readonly events: readonly MessageStreamEvent[];
@@ -47,12 +51,14 @@ export interface EveAgentStoreCallbacks<TData> {
 }
 
 /**
- * Configuration for constructing an eve frontend session store. Pass either
- * connection options for a store-owned session or an existing `ClientSession`.
- * Saved events must be an ordered prefix of the same session stream.
+ * Configuration for constructing an eve frontend session store. Pass connection
+ * options or a configured `Client` for store-owned sessions, or an existing
+ * `ClientSession`. Saved events must be an ordered prefix of the same session stream.
  */
 export interface EveAgentStoreInit<TData> {
   readonly prewarm?: boolean;
+  /** Configured client for store-owned sessions; replaces `host`, `auth`, and `headers`. */
+  readonly client?: Client;
   readonly auth?: ClientAuth;
   readonly headers?: HeadersValue;
   readonly host?: string;
@@ -60,7 +66,7 @@ export interface EveAgentStoreInit<TData> {
   readonly initialEvents?: readonly MessageStreamEvent[];
   readonly initialSession?: ClientSessionState;
   readonly optimistic?: boolean;
-  /** Follow child streams with the built-in conversation reducer. Other reducers reject this option. */
+  /** Follow delegated child streams in canonical conversation state, regardless of the data reducer. */
   readonly followSubagents?: boolean;
   readonly reducer: EveAgentReducer<TData>;
   readonly session?: ClientSession;

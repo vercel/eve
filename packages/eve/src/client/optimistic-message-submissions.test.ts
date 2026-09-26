@@ -26,7 +26,7 @@ function received(
 
 function setup(optimistic = true) {
   const projection = new EveAgentProjection(defaultMessageReducer(), []);
-  return { projection, submissions: new OptimisticMessageSubmissions(projection, optimistic) };
+  return { projection, submissions: new OptimisticMessageSubmissions([projection], optimistic) };
 }
 
 describe("OptimisticMessageSubmissions", () => {

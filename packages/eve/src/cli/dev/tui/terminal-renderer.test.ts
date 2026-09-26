@@ -11,20 +11,45 @@ import {
   formatChangeDetectedLogLine,
 } from "#internal/nitro/host/dev-watcher-log.js";
 
-import type { AgentTUIStreamEvent, AgentTUIStreamResult, SubagentToolUpdate } from "./runner.js";
+import { initialConversationState, reduceConversation } from "#client/conversation-reducer.js";
+import type { EveAgentReducerEvent } from "#client/reducer.js";
+import { stampTestEvent } from "#internal/testing/events.js";
+import {
+  createMessageAppendedEvent,
+  createMessageCompletedEvent,
+  createTurnStartedEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
+import {
+  tuiSessionReducer,
+  type AgentTUIConversationView,
+  type TuiSessionData,
+} from "./conversation-view.js";
+import type { AgentTUISessionOptions } from "./runner.js";
 import { PROMPT_COMMANDS, promptCommandsFor } from "./prompt-commands.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
 import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
-function streamOf(events: AgentTUIStreamEvent[]): AgentTUIStreamResult {
+/** A session view over the conversation these events produce. */
+function conversationOf(
+  events: readonly EveAgentReducerEvent[],
+  options: { working?: boolean; data?: Partial<TuiSessionData> } = {},
+): AgentTUIConversationView {
   return {
-    events: new ReadableStream<AgentTUIStreamEvent>({
-      start(controller) {
-        for (const event of events) controller.enqueue(event);
-        controller.close();
-      },
-    }),
+    conversation: events.reduce(reduceConversation, initialConversationState()),
+    working: options.working ?? false,
+    data: { ...tuiSessionReducer.initial(), ...options.data },
+    failures: [],
   };
+}
+
+/** The composer's next submitted text, as the runner reads it. */
+async function readPrompt(
+  renderer: TerminalRenderer,
+  options?: AgentTUISessionOptions,
+): Promise<string | undefined> {
+  const input = await renderer.readInput(options);
+  return input?.type === "submit" ? input.text : undefined;
 }
 
 function agentInfoWithDynamicModel(): AgentInfoResult {
@@ -126,7 +151,7 @@ function agentInfoWithModel(
 describe("TerminalRenderer (inline scrollback)", () => {
   it("prints the dim wordmark tag as the parting line after a Ctrl-C exit", async () => {
     const { screen, input, renderer } = makeRenderer();
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     // Ctrl-C at the prompt restores the terminal inside the reader itself;
     // the runner's teardown-time shutdown() must still print the tag.
     input.ctrlC();
@@ -150,7 +175,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("names the session in the parting line once the runner reports it", async () => {
     const { screen, input, renderer } = makeRenderer();
     renderer.setSessionId("ses_0123456789");
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.ctrlC();
     input.ctrlC();
     await expect(prompt).rejects.toThrow("Interrupted");
@@ -164,7 +189,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const latest = makeRenderer();
     latest.renderer.setSessionId("ses_first");
     latest.renderer.setSessionId("ses_second");
-    const latestPrompt = latest.renderer.readPrompt();
+    const latestPrompt = readPrompt(latest.renderer);
     latest.input.ctrlC();
     latest.input.ctrlC();
     await expect(latestPrompt).rejects.toThrow("Interrupted");
@@ -176,7 +201,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("restores the terminal when a forced process exit preempts teardown", async () => {
     const before = process.listeners("exit");
     const { screen, input, renderer } = makeRenderer();
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     const added = process.listeners("exit").filter((listener) => !before.includes(listener));
     expect(added).toHaveLength(1);
 
@@ -211,552 +236,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("http://localhost:3000");
   });
 
-  it("updates the status model without repeating an unchanged agent card", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({
-      info: agentInfoWithModel("old-model"),
-      name: "Weather Agent",
-      serverUrl: "http://localhost:3000",
-    });
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-delta", id: "t1", delta: "still here" },
-        { type: "assistant-complete", id: "t1" },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "hello", continueSession: true },
-    );
-
-    renderer.renderAgentHeader({
-      info: agentInfoWithModel("new-model"),
-      name: "Weather Agent",
-      serverUrl: "http://localhost:3000",
-    });
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("new-model");
-    expect(snapshot).not.toContain("old-model");
-    expect(snapshot.match(/☰eve v\d/gu)).toHaveLength(1);
-    expect(snapshot).toContain("hello");
-    expect(snapshot).toContain("still here");
-    renderer.shutdown();
-  });
-
-  it("streams an assistant message and a tool call into scrollback", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        {
-          type: "step-start",
-        },
-        {
-          type: "tool-call",
-          toolCallId: "c1",
-          toolName: "get_weather",
-          input: { city: "SF" },
-        },
-        { type: "tool-result", toolCallId: "c1", output: { tempF: 73 } },
-        { type: "assistant-delta", id: "t1", delta: "It's **73°F** in SF." },
-        { type: "assistant-complete", id: "t1" },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "weather in SF?", continueSession: false },
-    );
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("weather in SF?");
-    expect(snapshot).toContain("get_weather");
-    expect(snapshot).toContain("It's 73°F in SF.");
-  });
-
-  it("reconciles content runs by ID across replacement and removal without changing surviving blocks", async () => {
-    const { screen, renderer } = makeRenderer();
-    const content = (
-      parts: Array<{ id: string; text: string; state: "streaming" | "done" }>,
-    ): AgentTUIStreamEvent => ({
-      type: "content-state",
-      data: {
-        messages: [
-          {
-            id: "turn:assistant",
-            role: "assistant",
-            parts: parts.map((part) => ({ ...part, type: "text" })),
-          },
-        ],
-      },
-    });
-    await renderer.renderStream(
-      streamOf([
-        content([{ id: "a", text: "First.", state: "done" }]),
-        content([
-          { id: "a", text: "First.", state: "done" },
-          { id: "marker", text: "<eve-empty-delivery/>", state: "streaming" },
-          { id: "answer", text: "Draft", state: "streaming" },
-        ]),
-        content([
-          { id: "a", text: "First.", state: "done" },
-          { id: "answer", text: "Revised", state: "done" },
-        ]),
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "continue", continueSession: false },
-    );
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("First.");
-    expect(snapshot).toContain("Revised");
-    expect(snapshot).not.toContain("<eve-empty-delivery/>");
-    expect(snapshot).not.toContain("Draft");
-  });
-
-  it("replaces discarded retry text with the authoritative completed message", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-delta", id: "t1", delta: "Discard this partial response." },
-        { type: "assistant-delta", id: "t1", delta: "Recovered answer." },
-        { type: "assistant-complete", id: "t1", text: "Recovered answer." },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "continue", continueSession: false },
-    );
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).not.toContain("Discard this partial response.");
-    expect(snapshot.match(/Recovered answer\./gu)).toHaveLength(1);
-  });
-
-  it("removes a streamed channel-delivery marker on null completion", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-delta", id: "text:t0:0", delta: "<eve-empty-delivery/>" },
-        { type: "assistant-remove", id: "text:t0:0" },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "continue", continueSession: false },
-    );
-    expect(screen.snapshot()).not.toContain("<eve-empty-delivery/>");
-  });
-
-  it("replaces streamed reasoning with the completed text in place", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        { type: "reasoning-delta", id: "r1", delta: "Draft" },
-        { type: "reasoning-complete", id: "r1", text: "Revised" },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "continue", continueSession: false, reasoning: "full" },
-    );
-    expect(screen.snapshot()).toContain("Revised");
-    expect(screen.snapshot()).not.toContain("Draft");
-  });
-
-  it("renders rejected tools as denied", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        {
-          type: "tool-call",
-          toolCallId: "c1",
-          toolName: "bash",
-          input: { command: "rm something" },
-        },
-        { type: "tool-rejected", toolCallId: "c1", reason: "Denied by user." },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "remove it", continueSession: false },
-    );
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Run rm something");
-    expect(snapshot).toContain("denied");
-    expect(snapshot).not.toContain("✓ Run");
-    renderer.shutdown();
-  });
-
-  it("renders web_fetch as a concise semantic activity", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        {
-          type: "tool-call",
-          toolCallId: "fetch-1",
-          toolName: "web_fetch",
-          input: {
-            format: "markdown",
-            url: "https://github.com/vercel/eve/issues/648",
-          },
-        },
-        {
-          type: "tool-result",
-          toolCallId: "fetch-1",
-          output: { content: "large fetched page" },
-        },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "fetch the issue", continueSession: false },
-    );
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Fetched https://github.com/vercel/eve/issues/648");
-    expect(snapshot).not.toContain("format=markdown");
-    expect(snapshot).not.toContain("large fetched page");
-    renderer.shutdown();
-  });
-
-  it("coalesces a same-status fetch cohort without merging call state", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        {
-          type: "tool-call",
-          toolCallId: "fetch-1",
-          toolName: "web_fetch",
-          input: { url: "https://one.example" },
-        },
-        {
-          type: "tool-call",
-          toolCallId: "fetch-2",
-          toolName: "web_fetch",
-          input: { url: "https://two.example" },
-        },
-        { type: "tool-result", toolCallId: "fetch-1", output: { content: "one" } },
-        { type: "tool-result", toolCallId: "fetch-2", output: { content: "two" } },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "call fetch twice in parallel", continueSession: false },
-    );
-
-    const snapshot = screen.snapshot();
-    // A fully settled batch collapses to one past-tense line; the item rail
-    // is gone from the transcript.
-    expect(snapshot).toContain("│ call fetch twice in parallel\n\n  ▪ Fetched 2 URLs");
-    expect(snapshot).not.toContain("https://one.example");
-    expect(snapshot).not.toContain("https://two.example");
-    renderer.shutdown();
-  });
-
-  it("partitions a fetch cohort with interleaved failures into per-outcome groups", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        {
-          type: "tool-call",
-          toolCallId: "fetch-1",
-          toolName: "web_fetch",
-          input: { url: "https://one.example" },
-        },
-        {
-          type: "tool-call",
-          toolCallId: "fetch-2",
-          toolName: "web_fetch",
-          input: { url: "https://two.example" },
-        },
-        {
-          type: "tool-call",
-          toolCallId: "fetch-3",
-          toolName: "web_fetch",
-          input: { url: "https://three.example" },
-        },
-        {
-          type: "tool-call",
-          toolCallId: "fetch-4",
-          toolName: "web_fetch",
-          input: { url: "https://four.example" },
-        },
-        { type: "tool-result", toolCallId: "fetch-1", output: { content: "one" } },
-        { type: "tool-error", toolCallId: "fetch-2", errorText: "status 403" },
-        { type: "tool-result", toolCallId: "fetch-3", output: { content: "three" } },
-        { type: "tool-error", toolCallId: "fetch-4", errorText: "status 429" },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "fetch four urls", continueSession: false },
-    );
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    // Successes collapse to a counted past-tense line; failures keep their
-    // itemized rail, newest call first, closed by the corner.
-    expect(snapshot).toContain("▪ Fetched 2 URLs");
-    expect(snapshot).not.toContain("https://one.example");
-    expect(snapshot).toContain(
-      "  ⨯ Fetch 2 URLs\n  │ https://four.example status 429\n  │ https://two.example  status 403\n  └",
-    );
-  });
-
-  it("renders a write as an all-added diff for a new file and a real diff after a read", async () => {
-    const { screen, renderer } = makeRenderer(120, 60);
-    await renderer.renderStream(
-      streamOf([
-        {
-          type: "tool-call",
-          toolCallId: "write-1",
-          toolName: "write_file",
-          input: { filePath: "/workspace/knicks.txt", content: "knicks\n" },
-        },
-        {
-          type: "tool-result",
-          toolCallId: "write-1",
-          output: { existed: false, path: "/workspace/knicks.txt" },
-        },
-        {
-          type: "tool-call",
-          toolCallId: "write-2",
-          toolName: "write_file",
-          input: { filePath: "/workspace/knicks.txt", content: "knicks\nnets\n" },
-        },
-        {
-          type: "tool-result",
-          toolCallId: "write-2",
-          output: { existed: true, path: "/workspace/knicks.txt" },
-        },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "write the teams", continueSession: false },
-    );
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    // First write: the file did not exist, so its content is all additions.
-    expect(snapshot).toContain("  ▪ Wrote /workspace/knicks.txt\n  │+ knicks\n  └");
-    // Second write diffs against the first write's cached content.
-    expect(snapshot).toContain("  │  knicks\n  │+ nets\n  └");
-  });
-
-  it("renders interleaved tool lifecycles in arrival order", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        {
-          type: "tool-call",
-          toolCallId: "first",
-          toolName: "first_search",
-          input: { query: "first" },
-        },
-        { type: "tool-result", toolCallId: "first", output: { result: "first result" } },
-        {
-          type: "tool-call",
-          toolCallId: "second",
-          toolName: "second_search",
-          input: { query: "second" },
-        },
-        { type: "tool-result", toolCallId: "second", output: { result: "second result" } },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "run both searches", continueSession: false },
-    );
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("▪ first_search");
-    expect(snapshot).toContain("first result");
-    expect(snapshot).toContain("▪ second_search");
-    expect(snapshot).toContain("second result");
-    expect(snapshot.indexOf("first_search")).toBeLessThan(snapshot.indexOf("second_search"));
-    renderer.shutdown();
-  });
-
-  it("renders a concurrent tool batch before any result arrives", async () => {
-    const { screen, renderer } = makeRenderer(120, 140);
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "search the tri-state area", continueSession: true },
-    );
-
-    const controller = streamController;
-    expect(controller).toBeDefined();
-    controller?.enqueue({ type: "step-start" });
-    for (let index = 1; index <= 100; index += 1) {
-      controller?.enqueue({
-        type: "tool-call",
-        toolCallId: `search-${index}`,
-        toolName: "web_search",
-        input: { query: `tri-state-${index}` },
-      });
-    }
-
-    await screen.waitForText("Search 100 queries");
-
-    const snapshot = screen.snapshot();
-    // Semantic copy coalesces the running batch into one counted row that
-    // lists the newest calls first and elides the rest; nothing may render
-    // as completed yet.
-    expect(snapshot.match(/tri-state-\d+/g)).toHaveLength(5);
-    expect(snapshot).toContain("tri-state-100");
-    expect(snapshot).toContain("(95 more)");
-    expect(snapshot).not.toContain("Searched");
-    expect(snapshot).not.toContain("web_search");
-
-    controller?.close();
-    await rendering;
-    renderer.shutdown();
-  });
-
-  it("shows a placeholder while a call's input streams, then upgrades it in place", async () => {
-    const { screen, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "fetch the page", continueSession: true },
-    );
-
-    const controller = streamController;
-    controller?.enqueue({ type: "step-start" });
-    controller?.enqueue({ type: "tool-call-preparing", toolCallId: "c1", toolName: "web_fetch" });
-    await screen.waitForText("Fetch …");
-
-    controller?.enqueue({
-      type: "tool-call",
-      toolCallId: "c1",
-      toolName: "web_fetch",
-      input: { url: "https://example.com" },
-    });
-    await screen.waitForText("Fetch https://example.com");
-
-    const snapshot = screen.snapshot();
-    // The placeholder upgraded in place: one block, no leftover "Fetch …" row.
-    expect(snapshot).not.toContain("Fetch …");
-    expect(countOccurrences(snapshot, "Fetch https://example.com")).toBe(1);
-
-    controller?.close();
-    await rendering;
-    renderer.shutdown();
-  });
-
-  it("renders a preparing subagent tool row and upgrades it with the full call", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "researcher",
-      childCallId: "cc1",
-      toolName: "web_fetch",
-      input: undefined,
-      status: "preparing",
-    });
-    expect(screen.snapshot()).toContain("Fetch …");
-
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "researcher",
-      childCallId: "cc1",
-      toolName: "web_fetch",
-      input: { url: "https://example.com" },
-      status: "executing",
-    });
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Fetch https://example.com");
-    expect(snapshot).not.toContain("Fetch …");
-    renderer.shutdown();
-  });
-
-  it("omits the interrupt hint while waiting for the first stream event", async () => {
-    const { screen, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "hello", continueSession: true },
-    );
-
-    await Promise.resolve();
-    expect(screen.snapshot()).toContain("Thinking (0s)");
-    expect(screen.snapshot()).not.toContain("Ctrl+C to interrupt");
-
-    streamController?.close();
-    await rendering;
-    renderer.shutdown();
-  });
-
-  it("keeps the authorization wait status while consuming a callback stream", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.setConnectionAuthPendingCount(1);
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { continueSession: true },
-    );
-
-    await Promise.resolve();
-    // The bar renders; connection state lives in its own section.
-    expect(screen.snapshot()).toContain("Thinking (0s)");
-
-    streamController?.close();
-    await rendering;
-    renderer.shutdown();
-  });
-
-  it("shows the live turn bar while waiting for the first stream event", async () => {
-    vi.useFakeTimers();
-    try {
-      const { screen, renderer } = makeRenderer();
-      renderer.renderAgentHeader({
-        name: "Weather Agent",
-        serverUrl: "http://localhost:3000",
-        info: agentInfoWithModel("gpt-5"),
-      });
-      let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-      const rendering = renderer.renderStream(
-        {
-          events: new ReadableStream<AgentTUIStreamEvent>({
-            start(controller) {
-              streamController = controller;
-            },
-          }),
-        },
-        { submittedPrompt: "hello", continueSession: true },
-      );
-
-      await Promise.resolve();
-      let lines = screen.snapshot().split("\n");
-      let barRow = lines.findIndex((line) => line === "• Thinking (0s)");
-      expect(barRow).toBeGreaterThan(-1);
-      // The pending prompt row wears the same default-color `❯` as the idle one
-      // beneath the bar; the status line follows it.
-      expect(lines[barRow + 1]).toBe("");
-      expect(lines[barRow + 2]).toContain("❯");
-      expect(lines[barRow + 4]).toContain("gpt-5");
-
-      // Advance past the second boundary so the shared paint ticker catches it.
-      await vi.advanceTimersByTimeAsync(2_100);
-      lines = screen.snapshot().split("\n");
-      barRow = lines.findIndex((line) => line.includes("Thinking (2s)"));
-      expect(barRow).toBeGreaterThan(-1);
-      expect(lines[barRow + 2]).toContain("❯");
-      expect(lines[barRow + 4]).toContain("gpt-5");
-
-      streamController?.close();
-      await rendering;
-      renderer.shutdown();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it("uses an ASCII fallback for the turn pulse", async () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
@@ -766,73 +245,23 @@ describe("TerminalRenderer (inline scrollback)", () => {
       captureForeignOutput: false,
       unicode: false,
     });
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
 
     input.type("hello");
     input.enter();
 
     expect(await prompt).toBe("hello");
+    renderer.renderConversation(conversationOf([], { working: true }));
     expect(screen.snapshot()).toContain("* Thinking (0s)");
     expect(screen.snapshot()).not.toContain("⊙");
     renderer.shutdown();
-  });
-
-  it("cooperatively cancels a running response on Ctrl+C and preserves the prompt", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const abort = vi.fn();
-    const cancel = vi.fn();
-    const rendering = renderer.renderStream(
-      {
-        abort,
-        cancel,
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "start a long response", continueSession: true },
-    );
-
-    streamController?.enqueue({
-      type: "assistant-delta",
-      id: "t1",
-      delta: "partial response",
-    });
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("partial response");
-    });
-
-    input.ctrlC();
-    expect(cancel).toHaveBeenCalledOnce();
-    expect(abort).not.toHaveBeenCalled();
-    expect(screen.snapshot()).toContain("Cancelling turn…");
-
-    streamController?.enqueue({ type: "turn-cancelled" });
-    streamController?.close();
-    await expect(rendering).resolves.toBeUndefined();
-
-    expect(screen.snapshot()).toContain("Cancelled");
-    expect(input.rawModes).toEqual([true]);
-    expect(screen.rawOutput()).toContain("\x1b[?2004h");
-
-    // Control returns to the prompt rather than exiting; the next prompt works.
-    const nextPrompt = renderer.readPrompt();
-    input.type("still here");
-    input.enter();
-    await expect(nextPrompt).resolves.toBe("still here");
-
-    renderer.shutdown();
-    expect(input.rawModes).toEqual([true, false]);
-    expect(screen.rawOutput()).toContain("\x1b[?2004l");
   });
 
   it("reassembles and renders a byte-split multi-line paste", async () => {
     const { screen, input, renderer } = makeRenderer();
     const text = "first 😀\nsecond 界";
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     for (const byte of Buffer.from(`\x1b[200~${text}\x1b[201~`)) {
       input.emit("data", Buffer.of(byte));
     }
@@ -852,7 +281,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("clears and arms on the first idle Ctrl+C, then exits on a second press", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("draft message");
     input.ctrlC();
     expect(renderer.exitRequested()).toBe(false);
@@ -865,7 +294,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(await prompt).toBe("real message");
 
     // Consecutive Ctrl+C presses on the now-empty prompt quit.
-    const second = renderer.readPrompt();
+    const second = readPrompt(renderer);
     input.ctrlC();
     expect(renderer.exitRequested()).toBe(false);
     expect(screen.snapshot()).toContain("Press Ctrl+C again to exit");
@@ -879,7 +308,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("does not yank-pop after a controller-owned repaint key", async () => {
     const { input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("one");
     input.send("\u0015"); // Ctrl+U
     input.type("two");
@@ -896,7 +325,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("windows a line longer than the terminal around the caret", async () => {
     const { screen, input, renderer } = makeRenderer(20); // narrow terminal
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("abcdefghijklmnopqrstuvwxyz"); // 26 chars into ~18 columns of room
 
     const snapshot = screen.snapshot();
@@ -912,7 +341,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("draws the block cursor over the character under it without inserting a cell", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("hello");
     input.left();
     input.left(); // caret between "hel" and "lo"
@@ -933,7 +362,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     vi.useFakeTimers();
     try {
       const { input, renderer } = makeRenderer();
-      const prompt = renderer.readPrompt();
+      const prompt = readPrompt(renderer);
       input.send("\x1b[200~first\nsecond"); // paste start, closing marker never arrives
       vi.advanceTimersByTime(1_100); // past the incomplete-paste flush
       input.type("X"); // input still works rather than being wedged
@@ -948,7 +377,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("inserts a newline on Shift+Enter and submits the whole multi-line buffer", async () => {
     const { input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("line one");
     input.send("\x1b[27;2;13~"); // Shift+Enter (xterm modifyOtherKeys)
     input.type("line two");
@@ -961,7 +390,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("moves the caret into the line above on ↑, then edits it", async () => {
     const { input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.send("\x1b[200~ab\ncd\x1b[201~"); // caret lands after "cd"
     input.up(); // to the end of "ab"
     input.type("X");
@@ -975,7 +404,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const { screen, input, renderer } = makeRenderer(40, 8);
     const lines = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`);
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.send(`\x1b[200~${lines.join("\n")}\x1b[201~`);
 
     expect(screen.snapshot().split("\n").length).toBeLessThanOrEqual(8);
@@ -994,748 +423,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("renders reused stream block ids across separate prompt turns", async () => {
-    const { screen, renderer } = makeRenderer();
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "tool-call", toolCallId: "call_get_weather", toolName: "get_weather", input: {} },
-        { type: "tool-result", toolCallId: "call_get_weather", output: { tempF: 72 } },
-        { type: "assistant-delta", id: "text:turn-0:0", delta: "first answer" },
-        { type: "assistant-complete", id: "text:turn-0:0" },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "first prompt", continueSession: true },
-    );
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "tool-call", toolCallId: "call_get_weather", toolName: "get_weather", input: {} },
-        { type: "tool-result", toolCallId: "call_get_weather", output: { tempF: 73 } },
-        { type: "assistant-delta", id: "text:turn-0:0", delta: "second answer" },
-        { type: "assistant-complete", id: "text:turn-0:0" },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "second prompt", continueSession: true },
-    );
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("first answer");
-    expect(snapshot).toContain("second answer");
-    expect(countOccurrences(snapshot, "get_weather")).toBe(2);
-  });
-
-  it("settles a tool block when its result arrives in a later stream pass", async () => {
-    const { screen, renderer } = makeRenderer();
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "tool-call", toolCallId: "call_bash", toolName: "bash", input: { command: "ls" } },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "list files", continueSession: true },
-    );
-    expect(screen.snapshot()).toContain("Run ls");
-    expect(screen.snapshot()).not.toContain("Ran ls");
-
-    await renderer.renderStream(
-      streamOf([
-        {
-          type: "tool-result",
-          toolCallId: "call_bash",
-          output: { exitCode: 0, stderr: "", stdout: "weather-codes.md\n" },
-        },
-        { type: "finish" },
-      ]),
-      { continueSession: true },
-    );
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("▪ Ran ls");
-  });
-
-  it("settles an authorization block when its callback arrives in a later stream pass", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "background", name: "researcher" });
-    renderer.backgroundSubagent({ callId: "background" });
-    renderer.upsertConnectionAuth({
-      name: "linear",
-      description: "Authorization required for linear",
-      state: "required",
-      challenge: { url: "https://connect.vercel.com/authorize/linear" },
-    });
-
-    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
-
-    renderer.upsertConnectionAuth({
-      name: "linear",
-      description: "Authorization required for linear",
-      state: "pending",
-      challenge: { url: "https://connect.vercel.com/authorize/linear" },
-    });
-    expect(screen.snapshot()).toContain("linear · authorization · pending");
-
-    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
-
-    renderer.upsertConnectionAuth({
-      name: "linear",
-      description: "Authorization required for linear",
-      state: "authorized",
-      challenge: { url: "https://connect.vercel.com/authorize/linear" },
-    });
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(countOccurrences(snapshot, "linear · authorization")).toBe(1);
-    expect(snapshot).toContain("linear · authorization · authorized");
-    expect(snapshot).toContain("Authorization complete");
-    expect(snapshot).not.toContain("linear · authorization · required");
-    expect(snapshot).not.toContain("linear · authorization · pending");
-    expect(snapshot).not.toContain("Authorization required for linear");
-    expect(snapshot).not.toContain("https://connect.vercel.com/authorize/linear");
-  });
-
-  it("keeps same-name authorization blocks separate by attempt", async () => {
-    const { screen, renderer } = makeRenderer(100, 50);
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.upsertConnectionAuth({
-      name: "linear",
-      attemptId: "alice",
-      description: "Alice's connection",
-      state: "pending",
-    });
-    renderer.upsertConnectionAuth({
-      name: "linear",
-      attemptId: "bob",
-      description: "Bob's connection",
-      state: "pending",
-    });
-    renderer.upsertConnectionAuth({
-      name: "linear",
-      attemptId: "alice",
-      description: "Alice's connection",
-      state: "authorized",
-    });
-    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
-    const snapshot = screen.snapshot();
-    expect(countOccurrences(snapshot, "linear · authorization")).toBe(2);
-    renderer.shutdown();
-    expect(snapshot).toContain("linear · authorization · authorized");
-    expect(snapshot).toContain("linear · authorization · pending");
-  });
-
-  it("does not commit partial live assistant rows while streaming over the viewport", async () => {
-    const { screen, renderer } = makeRenderer(34, 8);
-    const words = Array.from(
-      { length: 44 },
-      (_, index) => `word-${String(index + 1).padStart(2, "0")}`,
-    );
-    await renderer.renderStream(
-      streamOf([
-        ...words.map((word) => ({
-          type: "assistant-delta" as const,
-          id: "t1",
-          delta: `${word} `,
-        })),
-        { type: "assistant-complete", id: "t1" },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "overflow please", continueSession: false },
-    );
-
-    const snapshot = screen.snapshot();
-    expect(countOccurrences(snapshot, "word-01")).toBe(1);
-    expect(countOccurrences(snapshot, "word-22")).toBe(1);
-    expect(countOccurrences(snapshot, "word-44")).toBe(1);
-  });
-
-  it("strips terminal controls from streamed and out-of-band content", async () => {
-    const { screen, renderer } = makeRenderer(100, 40);
-    const osc = "\x1b]52;c;cGFzdGU=\x07";
-    const dcs = "\x1bPqpayload\x1b\\";
-    const c1Osc = "\u009d0;title\u009c";
-
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.upsertConnectionAuth({
-      name: `conn${osc}`,
-      description: `desc ${osc}`,
-      state: "required",
-      challenge: {
-        url: `https://example.com/${osc}`,
-        userCode: `code${dcs}`,
-        instructions: `follow ${c1Osc}`,
-      },
-      reason: `because ${osc}`,
-    });
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "reasoning-delta", id: "r1", delta: `safe reason ${osc}` },
-        { type: "reasoning-complete", id: "r1" },
-        {
-          type: "tool-call",
-          toolCallId: "c1",
-          toolName: `get_weather${osc}`,
-          input: { [`city${osc}`]: `SF${dcs}` },
-        },
-        { type: "tool-result", toolCallId: "c1", output: { text: `done ${c1Osc}` } },
-        { type: "assistant-delta", id: "t1", delta: `safe assistant ${osc}` },
-        { type: "assistant-complete", id: "t1" },
-        { type: "error", errorText: `session failed ${dcs}`, detail: `detail ${osc}` },
-        { type: "finish" },
-      ]),
-      { continueSession: true, reasoning: "full", tools: "full" },
-    );
-
-    renderer.upsertSubagentStep({
-      callId: "s1",
-      subagentName: `researcher${osc}`,
-      sectionKey: 0,
-      reasoning: `child reason ${osc}`,
-      message: `child message ${dcs}`,
-      finalized: true,
-    });
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: `researcher${osc}`,
-      childCallId: "cc1",
-      toolName: `lookup${osc}`,
-      input: { query: `weather${dcs}` },
-      status: "done",
-      output: { result: `clear${c1Osc}` },
-    });
-
-    const raw = screen.rawOutput();
-    expect(raw).toContain("safe assistant");
-    expect(raw).toContain("safe reason");
-    expect(raw).toContain("get_weather");
-    expect(raw).toContain("session failed");
-    expect(raw).toContain("researcher");
-    expect(raw).toContain("conn");
-    expect(raw).not.toContain("\x1b]");
-    expect(raw).not.toContain("\x1bP");
-    expect(raw).not.toContain("\x1b\\");
-    expect(raw).not.toContain("\x07");
-    expect(raw).not.toContain("\u009d");
-    expect(raw).not.toContain("\u009c");
-    renderer.shutdown();
-  });
-
-  it("nests subagent steps and tools under a subagent header", async () => {
-    const { screen, renderer } = makeRenderer();
-    // The runner makes the renderer interactive via the startup header before
-    // any subagent activity arrives.
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.upsertSubagentStep({
-      callId: "s1",
-      subagentName: "researcher",
-      sectionKey: 0,
-      reasoning: "comparing cities",
-      message: "Looking into NYC.",
-      finalized: true,
-    });
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "researcher",
-      childCallId: "cc1",
-      toolName: "get_weather",
-      input: { city: "NYC" },
-      status: "done",
-      output: { tempF: 61 },
-    });
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("※ subagent(researcher)");
-    expect(snapshot).toContain("get_weather");
-    renderer.shutdown();
-  });
-
-  it("keeps late background child output inside its section across parent turns", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "s1", name: "researcher" });
-    renderer.backgroundSubagent({ callId: "s1" });
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-delta", id: "parent-1", delta: "Research task started." },
-        { type: "assistant-complete", id: "parent-1" },
-        { type: "finish" },
-      ]),
-      { continueSession: true },
-    );
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-delta", id: "parent-2", delta: "It is still running." },
-        { type: "assistant-complete", id: "parent-2" },
-        { type: "finish" },
-      ]),
-      { continueSession: true, submittedPrompt: "cool" },
-    );
-
-    // The child emits after both parent turns. It still inserts beside its
-    // call's header, not at the current transcript edge beneath parent-2.
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "researcher",
-      childCallId: "dig-1",
-      toolName: "dig",
-      input: { phase: "sources" },
-      status: "executing",
-    });
-
-    const snapshot = screen.snapshot();
-    const header = snapshot.indexOf("※ subagent(researcher)");
-    const child = snapshot.indexOf("dig");
-    const firstParent = snapshot.indexOf("Research task started.");
-    const user = snapshot.indexOf("cool");
-    const secondParent = snapshot.indexOf("It is still running.");
-    expect(firstParent).toBeGreaterThan(-1);
-    expect(user).toBeGreaterThan(firstParent);
-    expect(secondParent).toBeGreaterThan(user);
-    expect(header).toBeGreaterThan(secondParent);
-    expect(child).toBeGreaterThan(header);
-    renderer.shutdown();
-  });
-
-  it("swaps a dispatch's preparing placeholder for the section header", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { continueSession: true },
-    );
-
-    // The model commits to the `agent` tool; its input streams.
-    streamController?.enqueue({
-      type: "tool-call-preparing",
-      toolCallId: "sub1",
-      toolName: "agent",
-    });
-    await screen.waitForText("Delegate");
-
-    // Subagent dispatches never upgrade the placeholder (their actions are
-    // not tool-call kind) — subagent.called supersedes it with the section.
-    renderer.markChildToolCallId("sub1");
-    renderer.beginSubagent({ callId: "sub1", name: "agent" });
-    await screen.waitForText("※ subagent(self)");
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("※ subagent(self)");
-    expect(snapshot).not.toContain("Delegate");
-
-    streamController?.close();
-    await rendering;
-    renderer.shutdown();
-
-    // The step-boundary ghost sweep must not take the section with it.
-    expect(screen.snapshot()).toContain("※ subagent(self)");
-  });
-
-  it("windows subagent children by latest activity, not announce order", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-
-    // A parallel batch: every call announced up front…
-    const names = ["web_fetch", "web_search", "bash", "read_file"];
-    const upsert = (i: number, status: "executing" | "done") => {
-      const update: SubagentToolUpdate = {
-        callId: "s1",
-        subagentName: "agent",
-        childCallId: `c${i}`,
-        toolName: names[i % names.length]!,
-        input: { url: `u${i}`, query: `q${i}`, command: `cmd${i}`, filePath: `f${i}` },
-        status,
-      };
-      if (status === "done") update.output = { ok: true };
-      renderer.upsertSubagentTool(update);
-    };
-    for (let i = 1; i <= 8; i += 1) upsert(i, "executing");
-    // …then the FIRST two settle: they are the most recent activity and
-    // must enter the window, displacing later-announced idle calls.
-    upsert(1, "done");
-    upsert(2, "done");
-
-    const snapshot = screen.snapshot();
-    // The window is the single most recently active call — c2 settled last.
-    expect(snapshot).toContain("Ran cmd2");
-    expect(snapshot).toContain("(7 more)");
-    expect(snapshot).not.toContain("cmd6");
-    renderer.shutdown();
-  });
-
-  it("collapses a completed section to its Done header and activity footnote", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.upsertSubagentStep({
-      callId: "s1",
-      subagentName: "echo-marker",
-      sectionKey: 0,
-      reasoning: "",
-      message: "SUBAGENT_TOKEN=echo-marker-9F2X",
-      finalized: true,
-    });
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "echo-marker",
-      childCallId: "cc1",
-      toolName: "web_fetch",
-      input: { url: "https://one.example" },
-      status: "done",
-      output: { ok: true },
-    });
-
-    // Mid-flight the section shows its newest child and closes on a bare
-    // corner (the tool arrived after the message, so it holds the window).
-    expect(screen.snapshot()).toContain("Fetched https://one.example");
-    expect(screen.snapshot()).not.toContain("Done");
-
-    renderer.completeSubagent({ authoritative: true, callId: "s1" });
-    const snapshot = screen.snapshot();
-    // Completed: the corner reports Done with the counted footnote and the
-    // children fold away — the parent's reply carries the conclusion.
-    expect(snapshot).toContain("※ subagent(echo-marker)");
-    expect(snapshot).toContain("  └ Done. Fetched 1 URL");
-    expect(snapshot).not.toContain("SUBAGENT_TOKEN=echo-marker-9F2X");
-    renderer.shutdown();
-  });
-
-  it("commits an authoritative background completion out of the live prompt region", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "s1", name: "researcher" });
-    renderer.backgroundSubagent({ callId: "s1" });
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "researcher",
-      childCallId: "dig-1",
-      toolName: "dig",
-      input: { phase: "sources" },
-      status: "done",
-      output: { ok: true },
-    });
-
-    renderer.completeSubagent({ authoritative: true, callId: "s1" });
-    const outputAfterCommit = screen.rawOutput().length;
-    const prompt = renderer.readPrompt();
-    input.type("next message");
-
-    // Prompt repaint must not redraw the completed subagent cohort: it has
-    // moved to immutable scrollback and no longer occupies the live region.
-    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
-    input.enter();
-    expect(await prompt).toBe("next message");
-    renderer.shutdown();
-  });
-
-  it("keeps the activity ticker running while a background subagent remains live", async () => {
-    vi.useFakeTimers();
-    try {
-      const { screen, renderer } = makeRenderer();
-      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-      renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
-      renderer.upsertSubagentTool({
-        callId: "background",
-        subagentName: "researcher",
-        childCallId: "child-hold",
-        toolName: "hold",
-        input: { durationMs: 45_000 },
-        status: "executing",
-      });
-
-      await renderer.renderStream(streamOf([{ type: "finish" }]), {
-        continueSession: true,
-        submittedPrompt: "start background work",
-      });
-      const outputBeforeTick = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(90);
-      expect(screen.rawOutput().length).toBeGreaterThan(outputBeforeTick);
-
-      renderer.completeSubagent({ authoritative: true, callId: "background" });
-      const outputAfterCompletion = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(180);
-      expect(screen.rawOutput()).toHaveLength(outputAfterCompletion);
-      renderer.shutdown();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps the ticker running when one of two background subagents completes", async () => {
-    vi.useFakeTimers();
-    try {
-      const { screen, renderer } = makeRenderer();
-      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-      const startBackground = (callId: string) => {
-        renderer.beginSubagent({ callId, name: "hang-worker" });
-        renderer.backgroundSubagent({ callId });
-        renderer.upsertSubagentTool({
-          callId,
-          subagentName: "hang-worker",
-          childCallId: `${callId}-hold`,
-          toolName: "hold",
-          input: { durationMs: 45_000 },
-          status: "executing",
-        });
-      };
-
-      startBackground("first");
-      await renderer.renderStream(streamOf([{ type: "finish" }]), {
-        continueSession: true,
-        submittedPrompt: "start first background worker",
-      });
-      await renderer.renderStream(
-        streamOf([
-          { type: "assistant-complete", id: "a", text: "Mock reply: a" },
-          { type: "finish" },
-        ]),
-        { continueSession: true, submittedPrompt: "a" },
-      );
-      startBackground("second");
-      await renderer.renderStream(streamOf([{ type: "finish" }]), {
-        continueSession: true,
-        submittedPrompt: "start second background worker",
-      });
-
-      renderer.completeSubagent({ authoritative: true, callId: "first" });
-      const outputBeforeTick = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(90);
-      expect(screen.rawOutput().length).toBeGreaterThan(outputBeforeTick);
-
-      renderer.completeSubagent({ authoritative: true, callId: "second" });
-      const outputAfterCompletion = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(180);
-      expect(screen.rawOutput()).toHaveLength(outputAfterCompletion);
-      renderer.shutdown();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("stops background activity ticking when a session boundary abandons its child", async () => {
-    vi.useFakeTimers();
-    try {
-      const { screen, renderer } = makeRenderer();
-      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-      renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
-      renderer.upsertSubagentTool({
-        callId: "background",
-        subagentName: "researcher",
-        childCallId: "child-hold",
-        toolName: "hold",
-        input: { durationMs: 45_000 },
-        status: "executing",
-      });
-
-      renderer.renderSessionBoundary();
-      const outputAfterBoundary = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(180);
-      expect(screen.rawOutput()).toHaveLength(outputAfterBoundary);
-      renderer.shutdown();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("commits completed foreground turns ahead of a live background subagent", async () => {
-    const { screen, renderer } = makeRenderer(48, 8);
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "background", name: "researcher" });
-    // These settled blocks arrive before the parent reports that the child
-    // is background work. Reclassifying the child must release them from its
-    // formerly leading live cohort.
-    renderer.renderNotice("EARLY_SETTLED_FOREGROUND_ONE");
-    renderer.renderNotice("EARLY_SETTLED_FOREGROUND_TWO");
-    renderer.backgroundSubagent({ callId: "background" });
-    renderer.upsertSubagentStep({
-      callId: "background",
-      subagentName: "researcher",
-      sectionKey: 0,
-      reasoning: "",
-      message: "still researching background details",
-      finalized: false,
-    });
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-complete", id: "answer-1", text: "FIRST_COMPLETED_ANSWER" },
-        { type: "finish" },
-      ]),
-      { continueSession: true, submittedPrompt: "FIRST_COMPLETED_PROMPT" },
-    );
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-complete", id: "answer-2", text: "SECOND_COMPLETED_ANSWER" },
-        { type: "finish" },
-      ]),
-      { continueSession: true, submittedPrompt: "SECOND_COMPLETED_PROMPT" },
-    );
-
-    const transcript = screen.snapshot();
-    expect(transcript).toContain("EARLY_SETTLED_FOREGROUND_ONE");
-    expect(transcript).toContain("EARLY_SETTLED_FOREGROUND_TWO");
-    expect(transcript).toContain("FIRST_COMPLETED_PROMPT");
-    expect(transcript).toContain("FIRST_COMPLETED_ANSWER");
-    expect(transcript).toContain("SECOND_COMPLETED_PROMPT");
-    expect(transcript).toContain("SECOND_COMPLETED_ANSWER");
-    expect(transcript).toContain("still researching background details");
-
-    renderer.completeSubagent({ authoritative: true, callId: "background" });
-    expect(screen.snapshot()).not.toContain("hidden while streaming");
-    renderer.shutdown();
-  });
-
-  it("keeps parent completion provisional until delayed child output reaches its boundary", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "s1", name: "researcher" });
-    renderer.upsertSubagentStep({
-      callId: "s1",
-      subagentName: "researcher",
-      sectionKey: 0,
-      reasoning: "",
-      message: "parent-visible output",
-      finalized: true,
-    });
-    renderer.completeSubagent({ authoritative: false, callId: "s1" });
-    expect(screen.rawOutput()).not.toContain("\x1b[32m※");
-    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
-
-    renderer.beginSubagent({ callId: "s1", name: "researcher" });
-    renderer.upsertSubagentStep({
-      callId: "s1",
-      subagentName: "researcher",
-      sectionKey: 1,
-      reasoning: "",
-      message: "delayed child output",
-      finalized: true,
-    });
-
-    expect(screen.snapshot()).toContain("delayed child output");
-    expect(screen.snapshot()).not.toContain("└ Done");
-
-    renderer.completeSubagent({ authoritative: true, callId: "s1" });
-    const outputAfterCommit = screen.rawOutput().length;
-    const prompt = renderer.readPrompt();
-    input.type("next");
-    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
-    input.enter();
-    await prompt;
-    renderer.shutdown();
-  });
-
-  it.each(["active", "idle"] as const)(
-    "settles only the %s cancelled turn's top-level tools",
-    async (mode) => {
-      const { screen, renderer } = makeRenderer();
-      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-      renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
-      renderer.upsertSubagentTool({
-        callId: "background",
-        subagentName: "researcher",
-        childCallId: "child-bash",
-        toolName: "bash",
-        input: { command: "background-child" },
-        status: "executing",
-      });
-      const result = streamOf([
-        {
-          type: "tool-call",
-          toolCallId: "current-bash",
-          toolName: "bash",
-          input: { command: "idle-current" },
-        },
-        { type: "turn-cancelled" },
-        { type: "finish" },
-      ]);
-
-      if (mode === "active") {
-        await renderer.renderStream(result, { continueSession: true });
-      } else {
-        await renderer.renderIdleStream(result, { continueSession: true });
-      }
-
-      const snapshot = screen.snapshot();
-      expect(snapshot).toContain("background-child");
-      expect(snapshot).toContain("idle-current");
-      expect(countOccurrences(snapshot, "interrupted")).toBe(1);
-      renderer.shutdown();
-    },
-  );
-
-  it("renders parallel calls to the same subagent as ordinal-numbered sections", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    const calls = [
-      ["s1", "echo-marker-1"],
-      ["s2", "echo-marker-2"],
-      ["s3", "echo-marker-3"],
-    ] as const;
-    for (const finalized of [false, true]) {
-      for (const [callId, token] of calls) {
-        renderer.upsertSubagentStep({
-          callId,
-          subagentName: "echo-marker",
-          sectionKey: 0,
-          reasoning: "",
-          message: `SUBAGENT_TOKEN=${token}`,
-          finalized,
-        });
-      }
-    }
-    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    // Each call keeps its own persistent section, told apart by ordinal.
-    expect(countOccurrences(snapshot, "※ subagent(echo-marker:")).toBe(3);
-    expect(snapshot).toContain("※ subagent(echo-marker:1)");
-    expect(snapshot).toContain("※ subagent(echo-marker:2)");
-    expect(snapshot).toContain("※ subagent(echo-marker:3)");
-    expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-1");
-    expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-2");
-    expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-3");
-  });
-
-  it("windows one subagent's children to the most recent row", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    for (let step = 1; step <= 8; step += 1) {
-      renderer.upsertSubagentStep({
-        callId: "s1",
-        subagentName: "echo-marker",
-        sectionKey: step,
-        reasoning: "",
-        message: `SUBAGENT_TOKEN=token-${step}`,
-        finalized: true,
-      });
-    }
-    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(countOccurrences(snapshot, "※ subagent(echo-marker)")).toBe(1);
-    // A lone call carries no ordinal; only the newest child row shows.
-    expect(snapshot).not.toContain("#1");
-    expect(snapshot).toContain("(7 more)");
-    expect(snapshot).not.toContain("SUBAGENT_TOKEN=token-7");
-    expect(snapshot).toContain("SUBAGENT_TOKEN=token-8");
-  });
-
   it("commits the one-line session boundary", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderNotice("anchor");
@@ -1746,107 +433,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("┌── Session restarted, clear context.");
   });
 
-  it("closes the dying turn's coda at the boundary", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    const prompt = renderer.readPrompt();
-    input.type("hey agent");
-    input.enter();
-    expect(await prompt).toBe("hey agent");
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "step-start" },
-        { type: "assistant-delta", id: "m1", delta: "working" },
-        { type: "assistant-complete", id: "m1" },
-        { type: "step-finish", usage: { inputTokens: 25_000, outputTokens: 40 } },
-        { type: "finish", usage: { inputTokens: 25_000, outputTokens: 40 } },
-      ]),
-      { continueSession: true },
-    );
-
-    renderer.renderSessionBoundary();
-    const snapshot = screen.snapshot();
-    // The dead turn's stats close before the boundary, not after it.
-    expect(snapshot.indexOf("Done in")).toBeGreaterThan(-1);
-    expect(snapshot.indexOf("Done in")).toBeLessThan(snapshot.indexOf("┌── Session restarted"));
-
-    // Control returning to the prompt must not add a second coda.
-    const second = renderer.readPrompt();
-    expect(countOccurrences(screen.snapshot(), "Done in")).toBe(1);
-    input.ctrlC();
-    expect(screen.snapshot()).toContain("❯");
-    input.ctrlC();
-    await expect(second).rejects.toThrow();
-    renderer.shutdown();
-  });
-
-  it("shows a typed mid-stream draft behind a dim inert prompt mark", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "hello", continueSession: true },
-    );
-    await Promise.resolve();
-
-    // Empty: the default-color prompt mark.
-    expect(screen.snapshot()).toContain("❯");
-
-    // A typed draft dims the mark — Enter is inert, so
-    // the cyan ready state would overclaim.
-    input.type("next question");
-    await screen.waitForText("❯ next question");
-    expect(screen.rawOutput()).toContain("\x1b[2m❯\x1b[22m");
-    expect(screen.rawOutput()).not.toContain("\x1b[36m❯");
-
-    streamController?.close();
-    await rendering;
-    renderer.shutdown();
-  });
-
-  it("renders an idle wake turn without corrupting the active prompt draft", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    const prompt = renderer.readPrompt();
-    input.type("draft in progress");
-
-    await renderer.renderIdleStream(
-      streamOf([
-        {
-          type: "tool-call",
-          input: { taskIds: ["task_123"] },
-          toolCallId: "cancel-1",
-          toolName: "task_cancel",
-        },
-        {
-          type: "tool-result",
-          output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
-          toolCallId: "cancel-1",
-        },
-        { type: "assistant-delta", id: "wake-1", delta: "Research finished." },
-        { type: "assistant-complete", id: "wake-1" },
-        { type: "finish" },
-      ]),
-      { continueSession: true },
-    );
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Research finished.");
-    expect(snapshot).toContain("draft in progress");
-    input.enter();
-    expect(await prompt).toBe("draft in progress");
-    renderer.shutdown();
-  });
-
   it("never submits an empty or whitespace-only prompt", async () => {
     const { input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.enter();
     input.type("   ");
     input.enter();
@@ -1860,12 +450,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("recalls a previous prompt with the up arrow", async () => {
     const { input, renderer } = makeRenderer();
 
-    const first = renderer.readPrompt();
+    const first = readPrompt(renderer);
     input.type("first message");
     input.enter();
     expect(await first).toBe("first message");
 
-    const second = renderer.readPrompt();
+    const second = readPrompt(renderer);
     input.type("draft");
     input.up();
     input.enter();
@@ -1967,22 +557,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("keeps a running command pending when an idle session stream closes", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderCommandInvocation("/model anthropic/claude-opus-4.6 default");
-    await renderer.renderIdleStream(streamOf([]));
-    renderer.finishCommand({
-      kind: "result",
-      message: "",
-      summary: "Model set to anthropic/claude-opus-4.6 default",
-    });
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toMatch(/^\* Model set to anthropic\/claude-opus-4.6 default$/m);
-    expect(snapshot).not.toContain("/model anthropic");
-  });
-
   it("replaces a settled command with its dimmed summary", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/add connection/notion");
@@ -2043,7 +617,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("invites with a quiet placeholder until typing starts", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     // A bare prompt before any info/turn has no status row (no ↑ 0 ↓ 0 counter).
     expect(screen.snapshot()).not.toContain("↑ 0");
     // Empty buffer: the default-color `❯` gutter with the message invitation.
@@ -2055,117 +629,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("❯ hello");
     expect(screen.snapshot()).not.toContain("Send a message…");
     input.enter();
-    expect(screen.snapshot()).toContain("Thinking (0s)");
     expect(await prompt).toBe("hello");
-    renderer.shutdown();
-  });
-
-  it("shows the live turn bar as soon as the prompt is submitted", async () => {
-    vi.useFakeTimers();
-    try {
-      const { screen, input, renderer } = makeRenderer();
-      const prompt = renderer.readPrompt();
-
-      input.type("hello");
-      input.enter();
-
-      expect(await prompt).toBe("hello");
-      expect(screen.snapshot()).toContain("• Thinking (0s)");
-
-      let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-      const rendering = renderer.renderStream(
-        {
-          events: new ReadableStream<AgentTUIStreamEvent>({
-            start(controller) {
-              streamController = controller;
-            },
-          }),
-        },
-        { continueSession: true },
-      );
-      await Promise.resolve();
-      // The stream keeps the same bar — one working indicator end to end.
-      expect(screen.snapshot()).not.toContain("⊙");
-      expect(screen.snapshot()).toContain("Thinking (0s)");
-
-      streamController?.close();
-      await rendering;
-      renderer.shutdown();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("commits an end-of-turn stats coda when control returns to the prompt", async () => {
-    const { screen, input, renderer } = makeRenderer();
-
-    const prompt = renderer.readPrompt();
-    input.type("hey agent");
-    input.enter();
-    expect(await prompt).toBe("hey agent");
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "step-start" },
-        { type: "assistant-delta", id: "m1", delta: "Hello!" },
-        { type: "step-finish", usage: { inputTokens: 18_000, outputTokens: 40 } },
-        { type: "step-start" },
-        { type: "assistant-complete", id: "m1" },
-        { type: "step-finish", usage: { inputTokens: 2_500, outputTokens: 3 } },
-        // The finish event repeats the last step's usage; it must not
-        // double-count into the turn total.
-        { type: "finish", usage: { inputTokens: 2_500, outputTokens: 3 } },
-      ]),
-      { continueSession: true },
-    );
-    // Mid-turn (before control returns to the prompt) there is no coda —
-    // multi-pass turns must end with exactly one.
-    expect(screen.snapshot()).not.toContain("\n└ ");
-
-    const second = renderer.readPrompt();
-    // Tokens are the turn's summed step usage, not the last report; the sum
-    // crossing the 20K input threshold is what earns the row.
-    expect(screen.snapshot()).toContain("Done in 1s (↑ 20.5K ↓ 43)");
-    input.ctrlC();
-    expect(screen.snapshot()).toContain("❯");
-    input.ctrlC();
-    await expect(second).rejects.toThrow();
-    renderer.shutdown();
-  });
-
-  it("closes a quick, cheap turn without a stats coda", async () => {
-    const { screen, input, renderer } = makeRenderer();
-
-    const prompt = renderer.readPrompt();
-    input.type("hey");
-    input.enter();
-    expect(await prompt).toBe("hey");
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "step-start" },
-        { type: "assistant-delta", id: "m1", delta: "Hi!" },
-        { type: "assistant-complete", id: "m1" },
-        { type: "step-finish", usage: { inputTokens: 4_500, outputTokens: 43 } },
-        { type: "finish", usage: { inputTokens: 4_500, outputTokens: 43 } },
-      ]),
-      { continueSession: true },
-    );
-
-    // Under 10s and under 20K turn input: no coda row.
-    const second = renderer.readPrompt();
-    expect(screen.snapshot()).not.toContain("\nDone in ");
-    input.ctrlC();
-    expect(screen.snapshot()).toContain("❯");
-    input.ctrlC();
-    await expect(second).rejects.toThrow();
     renderer.shutdown();
   });
 
   it("retires the placeholder after the first user message", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const first = renderer.readPrompt();
+    const first = readPrompt(renderer);
     expect(screen.snapshot()).toContain("❯ Send a message…");
     input.type("hello");
     input.enter();
@@ -2173,7 +644,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     // Once the user has spoken, the empty prompt keeps the default-color `❯` but
     // drops the invitation text; typing still colors the active `❯`.
-    const second = renderer.readPrompt();
+    const second = readPrompt(renderer);
     expect(screen.snapshot()).toContain("❯");
     expect(screen.snapshot()).not.toContain("Send a message…");
     input.type("again");
@@ -2182,589 +653,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("❯");
     input.ctrlC();
     await expect(second).rejects.toThrow();
-    renderer.shutdown();
-  });
-
-  it("keeps collapsed reasoning out of the transcript behind the turn bar", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({
-      name: "Weather Agent",
-      serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("gpt-5"),
-    });
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "weather in SF", continueSession: true },
-    );
-
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Thinking (0s)");
-    });
-    streamController?.enqueue({
-      type: "reasoning-delta",
-      id: "r1",
-      delta: "the plan is to check the forecast",
-    });
-    await Promise.resolve();
-    // The trace never reaches the screen; the bar carries the turn.
-    const lines = screen.snapshot().split("\n");
-    const barRow = lines.findIndex((line) => line.includes("Thinking (0s)"));
-    expect(barRow).toBeGreaterThan(-1);
-    expect(screen.snapshot()).not.toContain("the plan is to check the forecast");
-    // The pending prompt row holds its place below, then the status line.
-    expect(lines[barRow + 2]).toContain("❯");
-    expect(lines[barRow + 4]).toContain("gpt-5");
-
-    streamController?.enqueue({ type: "reasoning-complete", id: "r1" });
-    streamController?.close();
-    await rendering;
-    expect(screen.snapshot()).not.toContain("the plan is to check the forecast");
-    expect(screen.snapshot()).not.toContain("Thought for");
-    renderer.shutdown();
-  });
-
-  it("closes a long thinking turn with the coda, not a thought bar", async () => {
-    vi.useFakeTimers();
-    try {
-      const { screen, input, renderer } = makeRenderer();
-      const prompt = renderer.readPrompt();
-      input.type("hard question");
-      input.enter();
-      expect(await prompt).toBe("hard question");
-
-      let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-      const rendering = renderer.renderStream(
-        {
-          events: new ReadableStream<AgentTUIStreamEvent>({
-            start(controller) {
-              streamController = controller;
-            },
-          }),
-        },
-        { continueSession: true },
-      );
-      streamController?.enqueue({ type: "reasoning-delta", id: "r1", delta: "hm" });
-      await vi.advanceTimersByTimeAsync(12_000);
-      streamController?.enqueue({ type: "reasoning-complete", id: "r1" });
-      streamController?.close();
-      await rendering;
-
-      // 12s of wall clock qualifies the coda; the thought itself leaves no
-      // separate transcript bar.
-      const second = renderer.readPrompt();
-      expect(screen.snapshot()).toContain("Done in 12s");
-      expect(screen.snapshot()).not.toContain("Thought for");
-      input.ctrlC();
-      input.ctrlC();
-      await expect(second).rejects.toThrow();
-      renderer.shutdown();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("queues a mid-turn Enter into the pinned panel and drains it as the next prompt", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-
-    await vi.waitFor(() => {
-      // Empty draft: the pending prompt wears the same default-color `❯` as idle
-      // (readiness is signalled by the turn bar's absence, not the glyph).
-      expect(screen.snapshot()).toContain("❯");
-    });
-    input.type("follow-up question");
-    // Enter mid-turn queues the draft into the panel and clears the buffer.
-    input.enter();
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Queue 1/5");
-      expect(screen.snapshot()).toContain("└ follow-up question");
-    });
-
-    streamController?.close();
-    await rendering;
-
-    // The runner drains the queue as the next turn's prompt.
-    expect(renderer.takeQueuedPrompt()).toBe("follow-up question");
-    expect(renderer.takeQueuedPrompt()).toBeUndefined();
-    renderer.shutdown();
-  });
-
-  it("runs a mid-turn /cancel as a control instead of queueing it", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const cancel = vi.fn();
-    const rendering = renderer.renderStream(
-      {
-        cancel,
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("❯");
-    });
-    input.type("/cancel");
-    input.enter();
-
-    await vi.waitFor(() => {
-      expect(cancel).toHaveBeenCalledOnce();
-      expect(screen.snapshot()).toContain("* Cancellation requested");
-      expect(screen.snapshot()).not.toContain("/cancel");
-      expect(screen.snapshot()).toContain("Cancelling turn…");
-    });
-
-    streamController?.enqueue({ type: "turn-cancelled" });
-    streamController?.close();
-    await rendering;
-
-    expect(renderer.takeQueuedPrompt()).toBeUndefined();
-    expect(screen.snapshot()).toContain("Cancelled");
-    renderer.shutdown();
-  });
-
-  it("interrupts a pending /cancel on Ctrl+C and arms the next press to exit", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    const abort = vi.fn();
-    const cancel = vi.fn();
-    const rendering = renderer.renderStream(
-      {
-        abort,
-        cancel,
-        events: new ReadableStream<AgentTUIStreamEvent>(),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("❯");
-    });
-    input.type("/cancel");
-    input.enter();
-    await vi.waitFor(() => {
-      expect(cancel).toHaveBeenCalledOnce();
-      expect(screen.snapshot()).toContain("Cancelling turn…");
-    });
-
-    input.ctrlC();
-    await expect(rendering).resolves.toBeUndefined();
-
-    expect(abort).toHaveBeenCalledOnce();
-    expect(cancel).toHaveBeenCalledOnce();
-    expect(screen.snapshot()).toContain("Interrupted");
-
-    const prompt = renderer.readPrompt();
-    expect(screen.snapshot()).toContain("Press Ctrl+C again to exit");
-    input.ctrlC();
-    await expect(prompt).rejects.toThrow();
-    expect(renderer.exitRequested()).toBe(true);
-    renderer.shutdown();
-  });
-
-  it("steers each Enter message without cancelling the turn", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const cancel = vi.fn();
-    const accepted = Promise.withResolvers<void>();
-    const steer = vi.fn(() => accepted.promise);
-    const rendering = renderer.renderStream(
-      {
-        cancel,
-        steer,
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("❯");
-    });
-    input.type("go north");
-    input.enter();
-    input.type("go south");
-    input.enter();
-    expect(cancel).not.toHaveBeenCalled();
-    expect(steer).toHaveBeenNthCalledWith(1, "go north");
-    expect(steer).toHaveBeenNthCalledWith(2, "go south");
-    expect(screen.snapshot()).not.toContain("Queue");
-
-    accepted.resolve();
-    streamController?.enqueue({ type: "finish" });
-    streamController?.close();
-    await rendering;
-
-    expect(renderer.takeQueuedPrompt()).toBeUndefined();
-    renderer.shutdown();
-  });
-
-  it("cancels the turn on the first empty-queue Esc", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    const escape = async () => {
-      input.send("\x1b");
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    };
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const cancel = vi.fn();
-    const rendering = renderer.renderStream(
-      {
-        cancel,
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("❯");
-    });
-
-    await escape();
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(screen.snapshot()).toContain("Cancelling turn…");
-
-    streamController?.enqueue({ type: "turn-cancelled" });
-    streamController?.close();
-    await rendering;
-    expect(screen.snapshot()).toContain("Cancelled");
-    renderer.shutdown();
-  });
-
-  it("restores the submitted message when the turn is cancelled without an Esc", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "go north", continueSession: true },
-    );
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("│ go north");
-    });
-
-    // A stale cancel from a previous turn (or /cancel from another client)
-    // lands on this turn — no Esc was pressed in this stream.
-    streamController?.enqueue({ type: "turn-cancelled" });
-    streamController?.close();
-    await rendering;
-
-    expect(screen.snapshot()).toContain("cancelled from outside this prompt");
-    const prompt = renderer.readPrompt();
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("❯ go north");
-    });
-    input.enter();
-    expect(await prompt).toBe("go north");
-    renderer.shutdown();
-  });
-
-  it("does not restore the message when the user's own Esc cancelled the turn", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    const escape = async () => {
-      input.send("\x1b");
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    };
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        cancel: vi.fn(),
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "go north", continueSession: true },
-    );
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("│ go north");
-    });
-
-    await escape();
-    await escape();
-    streamController?.enqueue({ type: "turn-cancelled" });
-    streamController?.close();
-    await rendering;
-
-    expect(screen.snapshot()).not.toContain("cancelled from outside this prompt");
-    renderer.shutdown();
-  });
-
-  it("renders steered and queued prompts without provenance arrow rows", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    const closedStream = () =>
-      new ReadableStream<AgentTUIStreamEvent>({
-        start(controller) {
-          controller.close();
-        },
-      });
-
-    // Enter steers immediately without a cancellation key.
-    const steer = vi.fn(async () => {});
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const first = renderer.renderStream(
-      {
-        steer,
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("❯");
-    });
-    input.type("go north");
-    input.enter();
-    expect(steer).toHaveBeenCalledWith("go north");
-    expect(screen.snapshot()).not.toContain("Queue 1/5");
-    streamController?.enqueue({ type: "finish" });
-    streamController?.close();
-    await first;
-
-    expect(renderer.takeQueuedPrompt()).toBeUndefined();
-    let lines = screen.snapshot().split("\n");
-    const steerIndex = lines.findIndex((line) => line.includes("│ go north"));
-    expect(lines[steerIndex - 1]?.trim()).not.toBe("↑");
-
-    // Queue: a message that waited for the natural boundary.
-    let secondController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const second = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            secondController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "another task", continueSession: true },
-    );
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Thinking (");
-    });
-    input.type("go south");
-    input.enter();
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Queue 1/5");
-    });
-    secondController?.close();
-    await second;
-
-    const queued = renderer.takeQueuedPrompt();
-    expect(queued).toBe("go south");
-    await renderer.renderStream(
-      { events: closedStream() },
-      { submittedPrompt: queued, continueSession: true },
-    );
-    lines = screen.snapshot().split("\n");
-    const queueIndex = lines.findIndex((line) => line.includes("│ go south"));
-    expect(lines[queueIndex + 1]?.trim()).not.toBe("↑");
-
-    // The ordinary typed prompts carry no arrow.
-    const typedIndex = lines.findIndex((line) => line.includes("│ long task"));
-    expect(lines[typedIndex - 1]?.trim()).not.toBe("↑");
-    expect(lines[typedIndex + 1]?.trim()).not.toBe("↑");
-    renderer.shutdown();
-  });
-
-  it("preserves a rejected Enter steering message for recovery", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    const steer = vi.fn(async () => {
-      throw new Error("Session unavailable");
-    });
-    let controller: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        steer,
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(value) {
-            controller = value;
-          },
-        }),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-    await screen.waitForText("❯");
-    input.type("change direction");
-    input.enter();
-    await screen.waitForText("Steering failed");
-    expect(steer).toHaveBeenCalledWith("change direction");
-    controller?.enqueue({ type: "finish" });
-    controller?.close();
-    await rendering;
-    expect(renderer.takeQueuedPrompt()).toBe("change direction");
-    renderer.shutdown();
-  });
-
-  it("keeps slash commands out of the steering message", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    const steer = vi.fn(async () => {});
-    let controller: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        steer,
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(value) {
-            controller = value;
-          },
-        }),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-    await screen.waitForText("❯");
-    input.type("/model");
-    input.enter();
-    expect(steer).not.toHaveBeenCalled();
-    controller?.enqueue({ type: "finish" });
-    controller?.close();
-    await rendering;
-    expect(renderer.takeQueuedPrompt()).toBe("/model");
-    renderer.shutdown();
-  });
-
-  it("keeps the draft in place when the queue is full", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("❯");
-    });
-
-    for (let index = 1; index <= 5; index += 1) {
-      input.type(`message ${index}`);
-      input.enter();
-    }
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Queue 5/5");
-      expect(screen.snapshot()).toContain("queue full");
-    });
-
-    input.type("overflow");
-    input.enter();
-    // The sixth message is refused, not swallowed — it stays as the draft.
-    expect(screen.snapshot()).toContain("overflow");
-
-    streamController?.close();
-    await rendering;
-    expect(renderer.takeQueuedPrompt()).toBe(
-      "message 1\n\nmessage 2\n\nmessage 3\n\nmessage 4\n\nmessage 5",
-    );
-    renderer.shutdown();
-  });
-
-  it("restores undrained queued messages into the next prompt's buffer", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const abort = vi.fn();
-    const rendering = renderer.renderStream(
-      {
-        abort,
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("❯");
-    });
-    input.type("first");
-    input.enter();
-    input.type("second");
-    input.enter();
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("Queue 2/5");
-    });
-
-    // A lifecycle interruption skips the runner's queue drain…
-    renderer.requestInterrupt();
-    await rendering;
-    expect(abort).toHaveBeenCalledTimes(1);
-    void streamController;
-
-    // …so the prompt folds the undelivered messages back into the buffer.
-    const prompt = renderer.readPrompt();
-    await vi.waitFor(() => {
-      expect(screen.snapshot()).toContain("first");
-      expect(screen.snapshot()).toContain("second");
-    });
-    input.enter();
-    expect(await prompt).toBe("first\n\nsecond");
-    renderer.shutdown();
-  });
-
-  it("waitForIdlePrompt ignores the pending prompt and resolves only at idle", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
-          },
-        }),
-      },
-      { submittedPrompt: "long task", continueSession: true },
-    );
-
-    await vi.waitFor(() => {
-      // The pending prompt already shows `❯` — but the live bar keeps the
-      // idle predicate false.
-      expect(screen.snapshot()).toContain("❯");
-    });
-    await expect(screen.waitForIdlePrompt(200)).rejects.toThrow(/idle prompt/u);
-
-    streamController?.close();
-    await rendering;
-    const prompt = renderer.readPrompt();
-    await screen.waitForIdlePrompt(1_000);
-    input.ctrlC();
-    input.ctrlC();
-    await expect(prompt).rejects.toThrow();
     renderer.shutdown();
   });
 
@@ -2809,7 +697,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       queuedPrompt: "weather tomorrow\n\nand next week",
     });
 
-    const prompt = startupRenderer.readPrompt();
+    const prompt = readPrompt(startupRenderer);
     expect(screen.snapshot()).not.toContain("Queue 1/5");
     input.ctrlC();
     input.ctrlC();
@@ -2935,7 +823,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("seeds the editable buffer with an initial draft without auto-submitting", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt({ initialDraft: "hello world" });
+    const prompt = readPrompt(renderer, { initialDraft: "hello world" });
     // The seed is shown and the placeholder is suppressed — but no submit
     // happens until the user presses Enter, so they can edit it first.
     expect(screen.snapshot()).toContain("hello world");
@@ -2950,7 +838,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("strips control characters from an initial draft", async () => {
     const { input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt({
+    const prompt = readPrompt(renderer, {
       initialDraft: "safe\u001b[2Jafter\nnext\tvalue\u007f",
     });
     input.enter();
@@ -2971,38 +859,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("no");
     input.enter();
     await answer;
-    expect(screen.snapshot()).toContain("Thinking (0s)");
-    renderer.shutdown();
-  });
-
-  it("breathes between an answered question and the next tool block", async () => {
-    const { screen, input, renderer } = makeRenderer();
-
-    const answer = renderer.readInputQuestion({
-      requestId: "q1",
-      prompt: "Which framework do you mean?",
-      display: "text",
-    });
-    input.type("eve");
-    input.enter();
-    await answer;
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "step-start" },
-        {
-          type: "tool-call",
-          toolCallId: "t1",
-          toolName: "web_search",
-          input: { query: "eve framework" },
-        },
-        { type: "finish" },
-      ]),
-      { continueSession: true },
-    );
-
-    // The answered question and the following tool are separated by air.
-    expect(screen.snapshot()).toContain("⎿  eve\n\n");
+    expect(screen.snapshot()).not.toContain("Send a message…");
     renderer.shutdown();
   });
 
@@ -3134,56 +991,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("sweeps a preparing placeholder whose call never parses", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        { type: "step-start" },
-        // Announced, but no tool-call ever follows (the model emitted
-        // unparsable input and retried under a fresh id next step).
-        { type: "tool-call-preparing", toolCallId: "ghost-1", toolName: "web_search" },
-        { type: "step-finish", usage: { inputTokens: 10, outputTokens: 5 } },
-        { type: "step-start" },
-        {
-          type: "tool-call",
-          toolCallId: "retry-1",
-          toolName: "web_search",
-          input: { query: "eve framework" },
-        },
-        { type: "tool-result", toolCallId: "retry-1", output: { results: [] } },
-        { type: "step-finish", usage: { inputTokens: 10, outputTokens: 5 } },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "search", continueSession: false },
-    );
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    // The retry renders; the ghost placeholder never commits.
-    expect(snapshot).toContain("Searched eve framework");
-    expect(snapshot).not.toContain("Search …");
-  });
-
-  it("suppresses the tool block for ask_question calls", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        {
-          type: "tool-call",
-          toolCallId: "ask-1",
-          toolName: "ask_question",
-          input: { prompt: "Pick a color." },
-        },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "ask me", continueSession: false },
-    );
-    renderer.shutdown();
-
-    // The question surface is the call's representation; no `Ask …` block.
-    expect(screen.snapshot()).not.toContain("Ask Pick a color.");
-  });
-
   it("focuses the freeform editor when the cursor reaches its row", async () => {
     const { screen, input, renderer } = makeRenderer();
 
@@ -3281,7 +1088,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("leaves a fully typed known command as plain text in the input line", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/add");
     expect(screen.rawOutput()).not.toContain("[1m/add");
     expect(screen.rawOutput()).not.toContain("[34m/add");
@@ -3293,7 +1100,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("leaves unknown input unstyled in the input line", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     // Never passes through a known command, even if painted per keystroke
     // ("/li…" is not a known command).
     input.type("/lin is not a command");
@@ -3306,7 +1113,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("echoes slash commands as command lines, never as user messages", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/reset");
     input.enter();
     expect(await prompt).toBe("/reset");
@@ -3321,12 +1128,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("reassembles an arrow key split across reads", async () => {
     const { input, renderer } = makeRenderer();
 
-    const first = renderer.readPrompt();
+    const first = readPrompt(renderer);
     input.type("remembered");
     input.enter();
     await first;
 
-    const second = renderer.readPrompt();
+    const second = readPrompt(renderer);
     input.send("\x1b"); // ESC arrives on its own…
     input.send("[A"); // …and the CSI tail follows in a later read.
     input.enter();
@@ -3336,7 +1143,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("inserts text at the caret after moving left", async () => {
     const { input, renderer } = makeRenderer();
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("helo");
     input.left();
     input.type("l");
@@ -3476,140 +1283,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     renderer.shutdown();
     expect(stub.subscribed).toBe(false);
-  });
-
-  it("records tool failures in the diagnostic log even when tools are hidden", async () => {
-    const screen = new MockScreen({ columns: 80, rows: 30 });
-    const input = new MockUserInput();
-    const stub = stubDiagnostics();
-    const append = stub.append;
-    const renderer = new TerminalRenderer({
-      input,
-      output: screen,
-      captureForeignOutput: false,
-      tools: "hidden",
-      unicode: true,
-      diagnostics: stub.diagnostics,
-    });
-
-    await renderer.renderStream(
-      streamOf([
-        {
-          type: "tool-call",
-          toolCallId: "c1",
-          toolName: "bash",
-          input: { command: "curl https://example.com" },
-        },
-        { type: "tool-error", toolCallId: "c1", errorText: "exit code 7: connection refused" },
-        { type: "error", errorText: "Turn failed." },
-        { type: "finish" },
-      ]),
-      { submittedPrompt: "fetch it", continueSession: false },
-    );
-
-    expect(append).toHaveBeenCalledWith({
-      source: "tool",
-      summary: expect.stringContaining("failed"),
-      detail: "exit code 7: connection refused",
-    });
-    expect(append).toHaveBeenCalledWith({
-      source: "workflow",
-      summary: "Error: Turn failed.",
-      detail: "Turn failed.",
-    });
-    renderer.shutdown();
-  });
-
-  it("renders a cataloged summary for a recognized stream error and logs the raw dump", async () => {
-    const screen = new MockScreen({ columns: 100, rows: 30 });
-    const input = new MockUserInput();
-    const stub = stubDiagnostics();
-    const append = stub.append;
-    const renderer = new TerminalRenderer({
-      input,
-      output: screen,
-      captureForeignOutput: false,
-      unicode: true,
-      diagnostics: stub.diagnostics,
-    });
-
-    const failure = new TypeError("fetch failed", {
-      cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:3000"), {
-        code: "ECONNREFUSED",
-      }),
-    });
-    await renderer.renderStream(
-      {
-        events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            controller.error(failure);
-          },
-        }),
-      },
-      { submittedPrompt: "hello", continueSession: false },
-    );
-
-    // Transcript: curated headline, the structured hint, and the log
-    // pointer — no stack dump.
-    expect(screen.snapshot()).toContain("Network request failed");
-    expect(screen.snapshot()).toContain("Check your internet connection");
-    expect(screen.snapshot()).toContain("details: .eve/logs/dev.log");
-    expect(screen.snapshot()).not.toContain("    at ");
-    // Log: the raw inspection, cause chain included, hint structured.
-    expect(append).toHaveBeenCalledWith({
-      source: "workflow",
-      summary: expect.stringContaining("Network request failed"),
-      detail: expect.stringContaining("ECONNREFUSED"),
-      hint: expect.stringContaining("Check your internet connection"),
-    });
-    renderer.shutdown();
-  });
-
-  it("records session stats past display guards and reports at the turn boundary", async () => {
-    const screen = new MockScreen({ columns: 80, rows: 30 });
-    const input = new MockUserInput();
-    const stub = stubDiagnostics();
-    const renderer = new TerminalRenderer({
-      input,
-      output: screen,
-      captureForeignOutput: false,
-      tools: "hidden",
-      subagents: "hidden",
-      unicode: true,
-      diagnostics: stub.diagnostics,
-    });
-
-    renderer.upsertSubagentTool({
-      callId: "sub-1",
-      subagentName: "echo-marker",
-      childCallId: "child-1",
-      toolName: "echo",
-      input: {},
-      status: "executing",
-    });
-    await renderer.renderStream(
-      streamOf([
-        { type: "tool-call", toolCallId: "c1", toolName: "bash", input: {} },
-        { type: "tool-call", toolCallId: "c2", toolName: "bash", input: {} },
-        { type: "tool-call", toolCallId: "c3", toolName: "weather", input: {} },
-        { type: "step-finish", usage: { inputTokens: 100, outputTokens: 20 } },
-        { type: "step-finish", usage: { inputTokens: 40, outputTokens: 5 } },
-        // `finish` replays the last step's usage; only step-finish records.
-        { type: "finish", usage: { inputTokens: 40, outputTokens: 5 } },
-      ]),
-      { submittedPrompt: "run it", continueSession: false },
-    );
-
-    expect(stub.recordPrompt).toHaveBeenCalledTimes(1);
-    expect(stub.recordSubagentDispatch).toHaveBeenCalledWith("sub-1");
-    expect(stub.recordToolCall.mock.calls.map(([name]) => name)).toEqual([
-      "bash",
-      "bash",
-      "weather",
-    ]);
-    expect(stub.recordStepUsage).toHaveBeenCalledTimes(2);
-    expect(stub.reportStats).toHaveBeenCalled();
-    renderer.shutdown();
   });
 
   it("records captured sandbox log lines in the diagnostic log", () => {
@@ -3847,7 +1520,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       const input = new MockUserInput();
       const renderer = new TerminalRenderer({ input, output: screen, unicode: true });
       // Abandoned on purpose; shutdown() rejects it with InterruptedError.
-      renderer.readPrompt().catch(() => {});
+      readPrompt(renderer).catch(() => {});
 
       // Ctrl+R only redraws — it must not cycle the mode or show the hint.
       input.type("\u0012");
@@ -3953,47 +1626,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain(".env.local changed · reloading server…");
     expect(snapshot).not.toContain("Nitro worker");
-  });
-
-  it("settles a live rebuild cycle at stream end and starts the next one fresh", async () => {
-    const screen = new MockScreen({ columns: 100, rows: 40 });
-    const input = new MockUserInput();
-    const renderer = new TerminalRenderer({
-      input,
-      output: screen,
-      captureForeignOutput: true,
-      logs: "all",
-      unicode: true,
-    });
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-
-    // The rebuild line lands mid-stream, after the assistant block opened.
-    async function* events(): AsyncGenerator<AgentTUIStreamEvent> {
-      yield { type: "assistant-delta", id: "t1", delta: "hello there" };
-      process.stdout.write(
-        `${formatChangeDetectedLogLine("/app", [{ event: "change", path: "/app/agent/agent.ts" }])}\n`,
-      );
-      yield { type: "finish" };
-    }
-    await renderer.renderStream(
-      { events: events() },
-      { submittedPrompt: "hi", continueSession: true },
-    );
-
-    // Stream-end finalize froze the cycle mid-"rebuilding"; the next change
-    // detected after it opens a fresh row instead of rewriting the old one.
-    process.stdout.write(
-      `${formatChangeDetectedLogLine("/app", [
-        { event: "change", path: "/app/agent/tools/lookup.ts" },
-      ])}\n`,
-    );
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot.indexOf("agent/agent.ts changed · rebuilding…")).toBeGreaterThan(-1);
-    expect(snapshot.indexOf("agent/agent.ts changed · rebuilding…")).toBeLessThan(
-      snapshot.indexOf("tools/lookup.ts changed · rebuilding…"),
-    );
   });
 
   it("settles the in-place rebuild status when other output interleaves", () => {
@@ -4166,37 +1798,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.requestInterrupt();
     await expect(approval).rejects.toThrow();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     expect(screen.snapshot()).not.toContain("Approve random_color?");
     renderer.requestInterrupt();
     await expect(prompt).rejects.toThrow();
     renderer.shutdown();
-  });
-
-  it("marks a tool block denied when the user rejects the approval", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        { type: "tool-call", toolCallId: "c1", toolName: "delete_files", input: { path: "/" } },
-        { type: "tool-approval-request", approvalId: "a1", toolCallId: "c1" },
-      ]),
-      { submittedPrompt: "clean up", continueSession: true },
-    );
-
-    const approval = renderer.readToolApproval({
-      approvalId: "a1",
-      toolCallId: "c1",
-      toolName: "delete_files",
-      input: { path: "/" },
-    });
-    input.type("n");
-    expect(await approval).toEqual({ approved: false, reason: "Denied by user." });
-    expect(screen.snapshot()).toContain("Thinking (0s)");
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("delete_files");
-    expect(snapshot).toContain("→ denied");
   });
 
   it("stops the turn ticker while a later human-input request is open", async () => {
@@ -4747,30 +2353,6 @@ describe("TerminalRenderer setup flow session", () => {
     await expect(answer).resolves.toBeUndefined();
     renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
-  });
-
-  it("does not repaint while inherited stdio owns the terminal", async () => {
-    vi.useFakeTimers();
-    try {
-      const { screen, renderer } = makeRenderer();
-      renderer.setupFlow.begin("Add integration");
-      renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
-      let release!: () => void;
-      const inherited = renderer.setupFlow.withInheritedStdio(
-        () => new Promise<void>((resolve) => (release = resolve)),
-      );
-      const outputDuringHandoff = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(180);
-      expect(screen.rawOutput()).toHaveLength(outputDuringHandoff);
-
-      release();
-      await inherited;
-      renderer.setupFlow.end();
-      renderer.shutdown();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("discards inherited subprocess output when restoring the transcript", async () => {
@@ -5404,15 +2986,15 @@ describe("TerminalRenderer command echo spacing", () => {
     const { screen, input, renderer } = makeRenderer();
 
     renderer.renderNotice("assistant said something");
-    const prompt = renderer.readPrompt();
-    input.type("/connect");
+    const prompt = readPrompt(renderer);
+    input.type("/info");
     input.enter();
     await prompt;
     renderer.finishCommand({ kind: "result", message: "Project linked." });
     renderer.shutdown();
 
     const lines = screen.snapshot().split("\n");
-    const echoIndex = lines.findIndex((line) => line.includes("│ /connect"));
+    const echoIndex = lines.findIndex((line) => line.includes("/info"));
     expect(echoIndex).toBeGreaterThan(0);
     expect(lines[echoIndex - 1]).toBe("");
     const resultIndex = lines.findIndex((line) => line.includes("⎿  Project linked."));
@@ -5424,7 +3006,7 @@ describe("TerminalRenderer command typeahead", () => {
   it("offers command suggestions while the draft is a lone slash token", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/");
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("/help");
@@ -5443,7 +3025,7 @@ describe("TerminalRenderer command typeahead", () => {
   it("collapses a complete command into an inline argument hint", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/model");
     const snapshot = screen.snapshot();
     // The prompt row carries the dim argument shape inline (the caret sits
@@ -5478,7 +3060,7 @@ describe("TerminalRenderer command typeahead", () => {
         argumentSuggestions: async () => suggestions.promise,
       });
 
-      const prompt = renderer.readPrompt();
+      const prompt = readPrompt(renderer);
       input.type("/model ");
       expect(screen.snapshot()).not.toContain("Loading models…");
 
@@ -5508,7 +3090,7 @@ describe("TerminalRenderer command typeahead", () => {
         argumentSuggestions: async () => [{ value: "openai/gpt-5", label: "GPT-5" }],
       });
 
-      const prompt = renderer.readPrompt();
+      const prompt = readPrompt(renderer);
       input.type("/model ");
       await vi.advanceTimersByTimeAsync(499);
       expect(screen.snapshot()).toContain("openai/gpt-5");
@@ -5538,7 +3120,7 @@ describe("TerminalRenderer command typeahead", () => {
       ],
     });
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/model sol");
     await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-6-sol"));
     input.enter();
@@ -5570,7 +3152,7 @@ describe("TerminalRenderer command typeahead", () => {
           : [],
     });
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/model claude");
     await vi.waitFor(() => expect(screen.snapshot()).toContain("anthropic/claude-sonnet-5"));
     input.enter();
@@ -5593,7 +3175,7 @@ describe("TerminalRenderer command typeahead", () => {
           : [],
     });
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/add slack");
     await vi.waitFor(() => expect(screen.snapshot()).toContain("channel/slack"));
     input.send("\t");
@@ -5606,7 +3188,7 @@ describe("TerminalRenderer command typeahead", () => {
   it("tab completes the highlighted command without submitting", async () => {
     const { input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/mo");
     input.send("\t");
     input.type("anthropic/claude-opus-4.8");
@@ -5619,7 +3201,7 @@ describe("TerminalRenderer command typeahead", () => {
   it("enter completes and submits the highlighted command from a prefix", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/ad");
     input.enter();
     expect(await prompt).toBe("/add");
@@ -5632,7 +3214,7 @@ describe("TerminalRenderer command typeahead", () => {
   it("submits an alias as typed instead of canonicalizing it", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/quit");
     input.enter();
     expect(await prompt).toBe("/quit");
@@ -5643,7 +3225,7 @@ describe("TerminalRenderer command typeahead", () => {
 
   it("keeps a submitted /help invocation above its transient drawer", async () => {
     const { input, renderer, screen } = makeRenderer();
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/help");
     input.enter();
     expect(await prompt).toBe("/help");
@@ -5698,7 +3280,7 @@ describe("TerminalRenderer command typeahead", () => {
     input.enter();
     const selection = await help;
     expect(selection).toBe("/model ");
-    const prompt = renderer.readPrompt({ initialDraft: selection });
+    const prompt = readPrompt(renderer, { initialDraft: selection });
     await vi.waitFor(() => expect(screen.snapshot()).toContain("openai/gpt-5"));
     expect(screen.snapshot()).toContain("│ /model");
     expect(screen.snapshot()).not.toContain("❯ /model");
@@ -5720,7 +3302,7 @@ describe("TerminalRenderer command typeahead", () => {
 
   it("keeps a submitted /info invocation above its transient drawer", async () => {
     const { input, renderer, screen } = makeRenderer();
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/info");
     input.enter();
     expect(await prompt).toBe("/info");
@@ -5790,12 +3372,12 @@ describe("TerminalRenderer command typeahead", () => {
   it("moves the suggestion highlight with arrows instead of recalling history", async () => {
     const { input, renderer } = makeRenderer();
 
-    const first = renderer.readPrompt();
+    const first = readPrompt(renderer);
     input.type("an earlier prompt");
     input.enter();
     await first;
 
-    const second = renderer.readPrompt();
+    const second = readPrompt(renderer);
     input.type("/");
     input.down();
     input.enter();
@@ -5818,13 +3400,13 @@ describe("TerminalRenderer command typeahead", () => {
       "/loglevel all",
       "/traces",
     ]) {
-      const prompt = renderer.readPrompt();
+      const prompt = readPrompt(renderer);
       input.type(text);
       input.enter();
       await prompt;
     }
 
-    const recalled = renderer.readPrompt();
+    const recalled = readPrompt(renderer);
     input.up();
     input.enter();
     expect(await recalled).toBe("an earlier prompt");
@@ -5834,7 +3416,7 @@ describe("TerminalRenderer command typeahead", () => {
   it("escape dismisses the suggestions until the draft changes", async () => {
     const { screen, input, renderer } = makeRenderer();
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/");
     expect(screen.snapshot()).toContain("Show available commands");
 
@@ -5877,7 +3459,7 @@ describe("TerminalRenderer command typeahead", () => {
       availablePromptCommands: promptCommandsFor("remote"),
     });
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/");
     const snapshot = screen.snapshot();
     expect(snapshot).not.toContain("Authenticate with Vercel");
@@ -5898,7 +3480,7 @@ describe("TerminalRenderer command typeahead", () => {
       availablePromptCommands: promptCommandsFor("remote"),
     });
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     input.type("/model");
     input.enter();
 
@@ -5925,7 +3507,7 @@ describe("TerminalRenderer status line", () => {
       }),
     });
 
-    const prompt = renderer.readPrompt();
+    const prompt = readPrompt(renderer);
     renderer.setVercelStatus(vercelStatus);
 
     expect(screen.snapshot()).toContain("⚠ ai-gateway");
@@ -5959,111 +3541,6 @@ describe("TerminalRenderer status line", () => {
     await prompt;
     renderer.shutdown();
   });
-
-  it("shows dynamic model below the prompt after replacing a static model", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    const info = agentInfoWithModel("openai/gpt-5.6-sol");
-    const header = { name: "Weather Agent", serverUrl: "http://localhost:3000", info };
-    renderer.renderAgentHeader(header);
-    const prompt = renderer.readPrompt();
-    renderer.renderAgentHeader({ ...header, info: agentInfoWithDynamicModel() });
-    const lines = screen.snapshot().split("\n");
-    const promptRow = lines.findIndex((line) => line.includes("❯"));
-    expect(promptRow).toBeGreaterThan(-1);
-    const footer = lines.slice(promptRow + 1).join("\n");
-    expect(footer).toContain("dynamic model");
-    expect(footer).not.toContain("openai/gpt-5.6-sol");
-    expect(footer).not.toContain("⚠ ai-gateway");
-    input.type("done");
-    input.enter();
-    await prompt;
-    await renderer.renderStream(
-      {
-        events: (async function* (): AsyncIterable<AgentTUIStreamEvent> {
-          yield { type: "step-start", modelId: "openai/gpt-5.6-luna" };
-          expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-luna");
-          yield { type: "step-start", modelId: "openai/gpt-5.6-sol" };
-          expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
-          expect(screen.snapshot()).not.toContain("openai/gpt-5.6-luna");
-          yield { type: "finish" };
-        })(),
-      },
-      { submittedPrompt: "hi", continueSession: true },
-    );
-    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
-    await renderer.renderStream(
-      {
-        events: (async function* (): AsyncIterable<AgentTUIStreamEvent> {
-          yield { type: "turn-start", turnId: "next-turn" };
-          expect(screen.snapshot()).toContain("dynamic model");
-          expect(screen.snapshot()).not.toContain("openai/gpt-5.6-sol");
-          yield { type: "step-start", modelId: "openai/gpt-5.6-luna" };
-          yield { type: "finish" };
-        })(),
-      },
-      { submittedPrompt: "hello again", continueSession: true },
-    );
-    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-luna");
-    renderer.renderSessionBoundary();
-    expect(screen.snapshot()).toContain("dynamic model");
-    expect(screen.snapshot()).not.toContain("openai/gpt-5.6-luna");
-    renderer.shutdown();
-  });
-
-  it("clears an idle turn's model before resolution and preserves same-turn continuations", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({
-      name: "Weather Agent",
-      serverUrl: "http://localhost:3000",
-      info: agentInfoWithDynamicModel(),
-    });
-    await renderer.renderIdleStream(
-      streamOf([
-        { type: "turn-start", turnId: "first" },
-        { type: "step-start", modelId: "openai/gpt-5.6-sol" },
-      ]),
-    );
-    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
-    await renderer.renderIdleStream(streamOf([{ type: "turn-start", turnId: "first" }]));
-    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-sol");
-    await renderer.renderIdleStream(
-      streamOf([
-        { type: "turn-start", turnId: "wake" },
-        { type: "error", errorText: "Model selection failed" },
-      ]),
-    );
-    expect(screen.snapshot()).toContain("dynamic model");
-    expect(screen.snapshot()).not.toContain("openai/gpt-5.6-sol");
-    expect(screen.snapshot()).toContain("Model selection failed");
-    renderer.shutdown();
-  });
-
-  it.each([null, 42, {}, "x".repeat(10_000)])(
-    "bounds model display data without interrupting the stream (%#)",
-    async (modelId) => {
-      const { screen, renderer } = makeRenderer(320);
-      renderer.renderAgentHeader({
-        name: "Weather Agent",
-        serverUrl: "http://localhost:3000",
-        info: agentInfoWithDynamicModel(),
-      });
-      await renderer.renderIdleStream(
-        streamOf([
-          { type: "step-start", modelId } as AgentTUIStreamEvent,
-          { type: "assistant-complete", id: "answer", text: "Hello Alice." },
-        ]),
-      );
-      expect(screen.snapshot()).toContain("Hello Alice.");
-      expect(screen.snapshot()).toContain("dynamic model");
-      if (typeof modelId === "string") {
-        expect(screen.snapshot()).toContain("x".repeat(256));
-        expect(screen.snapshot()).not.toContain("x".repeat(257));
-      } else {
-        expect(screen.snapshot()).not.toContain("dynamic model ·");
-      }
-      renderer.shutdown();
-    },
-  );
 
   it("suppresses the status line while a setup flow panel is open", () => {
     const { screen, renderer } = makeRenderer();
@@ -6128,27 +3605,6 @@ describe("TerminalRenderer status line", () => {
     renderer.shutdown();
   });
 
-  it("keeps the token flow off the status line after a turn reports usage", async () => {
-    const { screen, renderer } = makeRenderer();
-    await renderer.renderStream(
-      streamOf([
-        { type: "step-start" },
-        { type: "assistant-delta", id: "t1", delta: "Hi." },
-        { type: "assistant-complete", id: "t1" },
-        { type: "step-finish", usage: { inputTokens: 500, outputTokens: 300 } },
-        { type: "finish", usage: { inputTokens: 500, outputTokens: 300 } },
-      ]),
-      { submittedPrompt: "hello", continueSession: true },
-    );
-
-    // Token flow belongs to the end-of-turn coda; the settled footer keeps
-    // only the quiet `· Ready` row and its turn-scoped stats.
-    const snapshot = screen.snapshot();
-    expect(snapshot).not.toContain("↑ 500");
-    expect(snapshot).not.toContain("↓ 300");
-    renderer.shutdown();
-  });
-
   it("renders the reasoning level and fast marker on the model segment", () => {
     const { screen, renderer } = makeRenderer(100);
     renderer.renderNotice("anchor");
@@ -6195,42 +3651,6 @@ describe("TerminalRenderer status line", () => {
     expect(snapshot).not.toContain("↯");
     renderer.shutdown();
   });
-
-  it("keeps the model and Vercel segments across reset while tokens stay clear", async () => {
-    // 100 columns: all four segments fit at full fidelity, no drop order.
-    const { screen, renderer } = makeRenderer(100);
-    renderer.renderAgentHeader({
-      name: "Weather Agent",
-      serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("anthropic/claude-sonnet-5", {
-        kind: "gateway",
-        connected: true,
-        credential: "oidc",
-      }),
-    });
-    renderer.setVercelStatus({ ...vercelStatus });
-    await renderer.renderStream(
-      streamOf([
-        { type: "step-start" },
-        { type: "assistant-delta", id: "t1", delta: "Hi." },
-        { type: "assistant-complete", id: "t1" },
-        { type: "finish", usage: { inputTokens: 500, outputTokens: 300 } },
-      ]),
-      { submittedPrompt: "hello", continueSession: true },
-    );
-    expect(screen.snapshot()).not.toContain("↑ 500 ↓ 300");
-
-    renderer.reset();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("anthropic/claude-sonnet-5");
-    expect(snapshot).toContain("· ai-gateway(oidc:my-agent)");
-    // A fresh conversation clears the token flow entirely (↑ 0 ↓ 0 is noise).
-    expect(snapshot).not.toContain("↑ 0");
-    expect(snapshot).not.toContain("↑ 500");
-    expect(snapshot).not.toContain("hello");
-    renderer.shutdown();
-  });
 });
 
 describe("setup interaction transitions", () => {
@@ -6269,4 +3689,146 @@ describe("setup interaction transitions", () => {
       expect(screen.snapshot()).not.toContain("Add to your agent");
     },
   );
+});
+
+describe("TerminalRenderer conversation", () => {
+  let sequence = 0;
+  const stamped = (event: UnstampedMessageStreamEvent) => stampTestEvent(event, ++sequence);
+  const turn = (turnId: string) => stamped(createTurnStartedEvent({ sequence: 0, turnId }));
+  const appended = (turnId: string, messageDelta: string) =>
+    stamped(createMessageAppendedEvent({ messageDelta, sequence: 1, stepIndex: 0, turnId }));
+  const completed = (turnId: string, message: string) =>
+    stamped(createMessageCompletedEvent({ message, sequence: 2, stepIndex: 0, turnId }));
+
+  it("streams prose in the live region and commits it whole once it settles", async () => {
+    const { screen, renderer } = makeRenderer(34, 8);
+    const prompt = readPrompt(renderer);
+    const words = Array.from(
+      { length: 44 },
+      (_, index) => `word-${String(index + 1).padStart(2, "0")}`,
+    );
+    const streaming = [turn("turn_1"), ...words.map((word) => appended("turn_1", `${word} `))];
+
+    renderer.renderConversation(conversationOf(streaming, { working: true }));
+    expect(screen.snapshot()).toContain("earlier rows hidden");
+    expect(screen.snapshot()).not.toContain("word-01");
+
+    renderer.renderConversation(
+      conversationOf([...streaming, completed("turn_1", words.join(" "))]),
+    );
+    const snapshot = screen.snapshot();
+    expect(countOccurrences(snapshot, "word-01")).toBe(1);
+    expect(countOccurrences(snapshot, "word-44")).toBe(1);
+    expect(snapshot).not.toContain("earlier rows hidden");
+    renderer.requestInterrupt();
+    await prompt.catch(() => {});
+  });
+
+  it("rides the turn bar above an open composer and closes a long turn with a coda", async () => {
+    vi.useFakeTimers();
+    try {
+      const { screen, renderer } = makeRenderer();
+      const first = readPrompt(renderer);
+      renderer.renderConversation(conversationOf([turn("turn_1")], { working: true }));
+      let lines = screen.snapshot().split("\n");
+      const bar = lines.findIndex((line) => line === "• Thinking (0s)");
+      expect(bar).toBeGreaterThan(-1);
+      expect(lines[bar + 2]).toContain("❯");
+
+      await vi.advanceTimersByTimeAsync(12_000);
+      renderer.renderConversation(
+        conversationOf([turn("turn_1"), completed("turn_1", "Alice's summary is ready.")], {
+          data: { usage: { inputTokens: 1_200, outputTokens: 300 } },
+        }),
+      );
+      lines = screen.snapshot().split("\n");
+      expect(lines.some((line) => line.includes("Thinking ("))).toBe(false);
+      expect(screen.snapshot()).toMatch(/Done in 12s/u);
+      renderer.requestInterrupt();
+      await first.catch(() => {});
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("asks to cancel on Esc while work runs, then stops following on a second Ctrl+C", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    renderer.renderConversation(conversationOf([turn("turn_1")], { working: true }));
+
+    const cancel = renderer.readInput();
+    input.send("\x1b");
+    await expect(cancel).resolves.toEqual({ type: "cancel" });
+    const interrupt = renderer.readInput();
+    expect(screen.snapshot()).toContain("Cancelling turn…");
+    input.ctrlC();
+    await expect(interrupt).resolves.toEqual({ type: "interrupt" });
+
+    // The interrupt counts as the first exit press at the next idle prompt.
+    renderer.renderConversation(conversationOf([]));
+    const idle = renderer.readInput();
+    expect(screen.snapshot()).toContain("Press Ctrl+C again to exit");
+    input.ctrlC();
+    await expect(idle).rejects.toThrow("Interrupted");
+  });
+
+  it("submits a message typed while work runs", async () => {
+    const { input, renderer } = makeRenderer();
+    renderer.renderConversation(conversationOf([turn("turn_1")], { working: true }));
+    const submitted = renderer.readInput();
+    input.type("Include Bob's note.");
+    input.enter();
+    await expect(submitted).resolves.toEqual({ type: "submit", text: "Include Bob's note." });
+    renderer.shutdown();
+  });
+
+  it("keeps the draft when the composer closes for another surface", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const controller = new AbortController();
+    const closed = renderer.readInput({ signal: controller.signal });
+    input.type("half a thought");
+    controller.abort();
+    await expect(closed).resolves.toBeUndefined();
+
+    const reopened = readPrompt(renderer);
+    expect(screen.snapshot()).toContain("❯ half a thought");
+    input.enter();
+    await expect(reopened).resolves.toBe("half a thought");
+    renderer.shutdown();
+  });
+
+  it("settles the old conversation at a session boundary so a new session can reuse its ids", async () => {
+    const { screen, renderer } = makeRenderer();
+    const prompt = readPrompt(renderer);
+    renderer.renderConversation(
+      conversationOf([turn("turn_1"), appended("turn_1", "Alice's draft")], { working: true }),
+    );
+    renderer.renderSessionBoundary();
+    renderer.renderConversation(conversationOf([]));
+    renderer.renderConversation(
+      conversationOf([turn("turn_1"), completed("turn_1", "Bob's fresh start.")]),
+    );
+    const snapshot = screen.snapshot();
+    expect(countOccurrences(snapshot, "Alice's draft")).toBe(1);
+    expect(countOccurrences(snapshot, "Bob's fresh start.")).toBe(1);
+    expect(snapshot.indexOf("Alice's draft")).toBeLessThan(snapshot.indexOf("Session restarted"));
+    renderer.requestInterrupt();
+    await prompt.catch(() => {});
+  });
+
+  it("names the dynamic model the running turn resolved", async () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderAgentHeader({
+      name: "Weather Agent",
+      serverUrl: "http://localhost:3000",
+      info: agentInfoWithDynamicModel(),
+    });
+    const prompt = readPrompt(renderer);
+    expect(screen.snapshot()).toContain("dynamic model");
+    renderer.renderConversation(
+      conversationOf([turn("turn_1")], { data: { modelId: "openai/gpt-5.6-luna" } }),
+    );
+    expect(screen.snapshot()).toContain("dynamic model · openai/gpt-5.6-luna");
+    renderer.requestInterrupt();
+    await prompt.catch(() => {});
+  });
 });

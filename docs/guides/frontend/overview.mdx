@@ -70,21 +70,22 @@ export function Chat() {
 
 `useEveAgent()` returns the current UI state plus commands:
 
-| Field     | What it is                                                                                              |
-| --------- | ------------------------------------------------------------------------------------------------------- |
-| `data`    | Projected conversation state. Includes `messages`, root `turns` and `inputs`, and optional child state. |
-| `status`  | `"ready"`, `"resuming"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer.               |
-| `error`   | The latest session creation, stream, resume, or turn failure.                                           |
-| `events`  | Raw eve stream events for this session.                                                                 |
-| `session` | Serializable fixed session cursor (`sessionId`, `streamIndex`).                                         |
-| `prewarm` | Create the durable session without starting a turn.                                                     |
-| `send`    | Send text or a multi-part message, with per-turn options.                                               |
-| `respond` | Answer pending HITL input requests, with per-turn options.                                              |
-| `resume`  | Replay an attached session and follow its in-flight turn.                                               |
-| `cancel`  | Request durable cancellation of the active turn.                                                        |
-| `reset`   | Clear local events, data, errors, and the local session cursor.                                         |
+| Field          | What it is                                                                                |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| `data`         | The selected projection: `ConversationState` by default, or your custom reducer's state.  |
+| `conversation` | Canonical conversation state, including messages, root turns and inputs, and child state. |
+| `status`       | `"ready"`, `"resuming"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer. |
+| `error`        | The latest session creation, stream, resume, or turn failure.                             |
+| `events`       | Raw eve stream events for this session.                                                   |
+| `session`      | Serializable fixed session cursor (`sessionId`, `streamIndex`).                           |
+| `prewarm`      | Create the durable session without starting a turn.                                       |
+| `send`         | Send text or a multi-part message, with per-turn options.                                 |
+| `respond`      | Answer pending HITL input requests, with per-turn options.                                |
+| `resume`       | Replay an attached session and follow its in-flight turn.                                 |
+| `cancel`       | Request durable cancellation of the active turn.                                          |
+| `reset`        | Clear local events, data, errors, and the local session cursor.                           |
 
-Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
+Most chat UIs only need `data.messages` and `status` with the default reducer. Use `conversation` for session state when a custom reducer shapes `data`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
 
 Pass `prewarm: true` to start a workflow when the chat mounts and after each reset:
 
@@ -178,7 +179,7 @@ When the root agent delegates, its stream emits `subagent.called` with the child
 
 The default reducer keeps a background subagent's working receipt on its original tool part. The call's parent-reported lifecycle is available at `data.children[callId].parentStatus`; a parent completion does not replace the original receipt output. Not every task has a parent completion event, so this field alone cannot report failure or cancellation.
 
-The default hook stores one call record per delegation at `data.children[callId]`. Each record includes the child session ID, name, originating turn, background flag, and parent-reported status. These parent facts are available even with `followSubagents: false`. By default, the hook also follows child streams while mounted. Narrow `child.observation.status` before reading its call-scoped `conversation.messages`, `inputs`, and `turns`: `"not-followed"` has no child detail, `"following"` has live detail, and `"ended"` has the observed detail and outcome. `"unavailable"` means child observation failed or is unsupported; it does not mean the child failed. Parent completion may precede the child's last event and does not establish a child outcome. `data.inputs` and `data.turns` describe root events only. A reused child session produces separate call-scoped records; a later call does not repeat an earlier call's content. Custom reducers do not follow children automatically.
+The default hook stores one call record per delegation at `data.children[callId]`. Each record includes the child session ID, name, originating turn, background flag, and parent-reported status. These parent facts are available even with `followSubagents: false`. By default, the hook also follows child streams while mounted. Narrow `child.observation.status` before reading its call-scoped `conversation.messages`, `inputs`, and `turns`: `"not-followed"` has no child detail, `"following"` has live detail, and `"ended"` has the observed detail and outcome. `"unavailable"` means child observation failed or is unsupported; it does not mean the child failed. Parent completion may precede the child's last event and does not establish a child outcome. `data.inputs` and `data.turns` describe root events only. A reused child session produces separate call-scoped records; a later call does not repeat an earlier call's content. When you pass a custom reducer, `data` contains your view; `conversation.children` still tracks child calls and their observations.
 
 Detailed child progress is separate from the root `data.messages`. If you manage your own session rather than using the default hook, pass a `subagent.called` event from `events` to [`session.streamSubagent()`](../client/streaming#follow-a-subagent). It follows local and remote children through the parent, so the browser never calls a remote deployment directly. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
 
@@ -262,7 +263,7 @@ For a question with `allowFreeform`, render a text input and send `{ requestId, 
 
 ## Authorization prompts
 
-Connections and tools that need OAuth or another grant emit `authorization.required`. The default reducer projects that into an `authorization` message part with the display name, instructions, device code, and user-facing sign-in URL. When multiple people authorize the same connection in one session, the client matches completion to the corresponding `attemptId`, not merely the connection name. Render that part as a normal chat message, then keep the session cursor; eve resumes the parked turn when the callback completes and updates the part after `authorization.completed`:
+Connections and tools that need OAuth or another grant emit `authorization.required`. The default reducer projects that into an `authorization` message part with the display name, instructions, device code, and user-facing sign-in URL. When multiple people authorize the same connection in one session, the client matches completion to the corresponding `attemptId`, not merely the connection name. The part starts as `required`; a callback-backed request becomes `pending` when the session waits for its callback, then `completed` when eve reports the outcome. A request without a callback stays `required` while the session waits. Render the part as a normal chat message and keep the session cursor so eve can resume the parked turn:
 
 ```tsx
 import type { EveMessagePart } from "eve/react";
@@ -290,7 +291,7 @@ function AuthorizationPrompt({ part }: { part: EveMessagePart }) {
 }
 ```
 
-For fully custom state machines, `authorization.required` and `authorization.completed` are still available on `events` and `onEvent`.
+With a custom reducer, authorization attempts remain available in `conversation.messages`; `authorization.required` and `authorization.completed` are also available on `events` and `onEvent`.
 
 ## Attach page context per turn
 
@@ -351,10 +352,10 @@ const toolCounter: EveAgentReducer<ToolLog> = {
 };
 
 const agent = useEveAgent({ reducer: toolCounter });
-// agent.data is ToolLog
+// agent.data is ToolLog; agent.conversation remains ConversationState.
 ```
 
-`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). With the built-in reducer, the default hook also projects `client.child.following`, `client.child.observed`, and `client.child.unavailable` while following child streams. Custom reducers do not receive child observations; passing `followSubagents: true` to an `EveAgentStore` with a custom reducer throws. `client.input.responded` notifies custom reducers that an answer was submitted, not that it was accepted. The default reducer waits for server settlement; the durable `input.resolved` event records the server-accepted outcome and lets replayed history rebuild the same HITL state. Return `data` unchanged for events your reducer does not handle.
+`reduce(data, event)` receives authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). The custom reducer only shapes `data`: the client maintains `conversation` separately for authorization, input requests, turns, and child following. Child observations update `conversation.children`, not the custom reducer. The built-in reducer makes `data` and `conversation` the same state. `client.input.responded` tells a custom reducer an answer was submitted, not that the server accepted it; the durable `input.resolved` event confirms settlement. Return `data` unchanged for events your reducer does not handle.
 
 ## Resumable sessions
 

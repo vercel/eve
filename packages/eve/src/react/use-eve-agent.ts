@@ -39,9 +39,9 @@ export type { PrepareSend };
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
 /**
- * Snapshot of an eve agent session: `data` (the reducer projection), `events`
- * (the authoritative server stream), `session` (resumable cursor), `status`,
- * and `error`.
+ * Snapshot of an eve agent session: `conversation` (canonical state), `data`
+ * (the selected view), `events` (the authoritative server stream), `session`
+ * (resumable cursor), `status`, and `error`.
  */
 export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
 
@@ -112,7 +112,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default true
    */
   readonly optimistic?: boolean;
-  /** Follow delegated child streams into `data.children` with the default reducer. @default true */
+  /** Follow delegated child streams into `conversation.children`. @default true */
   readonly followSubagents?: boolean;
   /**
    * Prewarm an owned session when true. React observes this value across renders;
@@ -184,7 +184,7 @@ export function useEveAgent<TData>(
       initialEvents: options.initialEvents,
       initialSession: options.initialSession,
       optimistic: options.optimistic,
-      followSubagents: options.reducer === undefined && (options.followSubagents ?? true),
+      followSubagents: options.followSubagents ?? true,
       reducer,
       session: options.session,
     });

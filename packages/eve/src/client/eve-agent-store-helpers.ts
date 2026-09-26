@@ -1,4 +1,4 @@
-import { updatePendingAuthorizations } from "#client/session-utils.js";
+import { conversationAuthorizations, type ConversationState } from "#client/conversation-state.js";
 import type { ActiveTurn } from "#client/eve-agent-store-state.js";
 import type { MessageResponse } from "#client/message-response.js";
 import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
@@ -19,19 +19,22 @@ export function activeTurnForOptimisticFollowUp(
   return lastTurn?.type === "turn.started" ? lastTurn.data.turnId : undefined;
 }
 
-export function isSettledSessionTail(events: readonly MessageStreamEvent[]): boolean {
+export function isSettledSessionTail(
+  events: readonly MessageStreamEvent[],
+  conversation: ConversationState,
+): boolean {
   const tail = events.at(-1);
   return (
     tail !== undefined &&
     isCurrentTurnBoundaryEvent(tail) &&
-    (tail.type !== "session.waiting" || collectPendingAuthorizations(events).size === 0)
+    (tail.type !== "session.waiting" || !hasPendingAuthorizations(conversation))
   );
 }
 
-export function collectPendingAuthorizations(events: readonly MessageStreamEvent[]): Set<string> {
-  const pending = new Set<string>();
-  for (const event of events) updatePendingAuthorizations(pending, event);
-  return pending;
+export function hasPendingAuthorizations(conversation: ConversationState): boolean {
+  return conversationAuthorizations(conversation).some(
+    (part) => part.state === "pending" || (part.state === "required" && part.awaitsCallback),
+  );
 }
 
 export function assertExclusiveTurnInput(input: SendTurnPayload): void {
@@ -106,6 +109,28 @@ export function createActiveTurn(
     resolveResponse: response.resolve,
   };
   return turn;
+}
+
+/** Counts confirmed steered messages toward the active turn's accepted follow-ups. */
+export function countFollowUpDeliveries(
+  turn: ActiveTurn,
+  reconciliation: {
+    readonly alreadyProjected: boolean;
+    readonly event: MessageStreamEvent;
+    readonly ids: readonly string[];
+  },
+): void {
+  let followed = 0;
+  for (const id of reconciliation.ids) {
+    if (turn.followUpSubmissionIds.delete(id)) followed += 1;
+  }
+  if (followed === 0) return;
+  if (reconciliation.alreadyProjected) {
+    turn.receivedFollowUps += followed;
+  } else {
+    const previous = turn.receivedFollowUpEvents.get(reconciliation.event) ?? 0;
+    turn.receivedFollowUpEvents.set(reconciliation.event, previous + followed);
+  }
 }
 
 export async function followSteeredTurns(

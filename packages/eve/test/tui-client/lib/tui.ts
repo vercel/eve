@@ -9,6 +9,7 @@
 export {
   AUTHORED_ARTIFACTS_UPDATED_LOG_LINE,
   EveTUIRunner,
+  FakeEveServer,
   createPromptCommandHandler,
   promptCommandsFor,
   type EveTUIRunnerOptions,

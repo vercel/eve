@@ -343,6 +343,23 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     case "authorization.completed":
       return completeAuthorization(data, event);
 
+    case "session.waiting": {
+      let changed = false;
+      const messages = data.messages.map((message) => {
+        if (message.role !== "assistant") return message;
+        const parts = message.parts.map((part) => {
+          if (part.type !== "authorization" || part.state !== "required" || !part.awaitsCallback)
+            return part;
+          changed = true;
+          return { ...part, state: "pending" as const };
+        });
+        return parts.some((part, index) => part !== message.parts[index])
+          ? { ...message, parts }
+          : message;
+      });
+      return changed ? { ...data, messages } : data;
+    }
+
     case "message.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
         messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
@@ -616,7 +633,7 @@ function findPendingAuthorizationPart(
       const part = message.parts[partIndex];
       if (
         part?.type === "authorization" &&
-        part.state === "required" &&
+        (part.state === "required" || part.state === "pending") &&
         (attemptId === undefined
           ? part.attemptId === undefined && part.name === name
           : part.attemptId === attemptId)

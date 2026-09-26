@@ -16,6 +16,10 @@ export class EveAgentProjection<TData> {
     return this.#data;
   }
 
+  get reducer(): EveAgentReducer<TData> {
+    return this.#reducer;
+  }
+
   reset(): void {
     this.#events = [];
     this.#data = this.#reducer.initial();

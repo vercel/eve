@@ -1,4 +1,4 @@
-import type { EveMessageData } from "#client/message-reducer-types.js";
+import type { EveAuthorizationPart, EveMessageData } from "#client/message-reducer-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
 export interface ConversationTurn {
@@ -52,4 +52,15 @@ export interface ConversationState extends EveMessageData {
 /** Inputs awaiting an answer, including requests introduced in earlier turns. */
 export function openConversationInputs(state: ConversationState): readonly ConversationInput[] {
   return Object.values(state.inputs).filter((input) => input.status === "open");
+}
+
+/** Authorization attempts remain visible across turns, including parked callbacks. */
+export function conversationAuthorizations(
+  state: ConversationState,
+): readonly EveAuthorizationPart[] {
+  return state.messages.flatMap((message) =>
+    message.role === "assistant"
+      ? message.parts.filter((part): part is EveAuthorizationPart => part.type === "authorization")
+      : [],
+  );
 }

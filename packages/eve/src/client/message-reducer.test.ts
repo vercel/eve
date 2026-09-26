@@ -887,6 +887,7 @@ describe("defaultMessageReducer", () => {
             description: "Authorization required for Notion",
             displayName: "Notion",
             name: "notion",
+            awaitsCallback: true,
             state: "required",
             stepIndex: 0,
             turnId: "turn_1",
@@ -895,6 +896,54 @@ describe("defaultMessageReducer", () => {
         ],
         role: "assistant",
       },
+    ]);
+  });
+
+  it("parks only callback-backed authorization attempts until their later completion", () => {
+    const reducer = defaultMessageReducer();
+    const required = (name: string, attemptId: string, webhookUrl?: string) =>
+      createAuthorizationRequiredEvent({
+        name,
+        attemptId,
+        description: `Connect ${name}`,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+        webhookUrl,
+      });
+    const before = reduceServerEvents(reducer, reducer.initial(), [
+      required("linear", "alice", "https://example.com/callback"),
+      required("linear", "bob"),
+    ]);
+    const parked = reduceServerEvents(reducer, before, [
+      {
+        type: "session.waiting",
+        data: { wait: "next-user-message", continuationToken: "session-id" },
+      },
+    ]);
+    const parts = (data: typeof parked) =>
+      data.messages.flatMap((message) =>
+        message.role === "assistant"
+          ? message.parts.filter((part) => part.type === "authorization")
+          : [],
+      );
+    expect(parts(parked)).toEqual([
+      expect.objectContaining({ attemptId: "alice", state: "pending" }),
+      expect.objectContaining({ attemptId: "bob", state: "required" }),
+    ]);
+    const completed = reduceServerEvents(reducer, parked, [
+      createAuthorizationCompletedEvent({
+        name: "linear",
+        attemptId: "alice",
+        outcome: "authorized",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+    ]);
+    expect(parts(completed)).toEqual([
+      expect.objectContaining({ attemptId: "alice", state: "completed", outcome: "authorized" }),
+      expect.objectContaining({ attemptId: "bob", state: "required" }),
     ]);
   });
 
@@ -945,6 +994,7 @@ describe("defaultMessageReducer", () => {
             description: "Sign in to Notion to continue.",
             displayName: "Notion",
             name: "notion",
+            awaitsCallback: true,
             outcome: "authorized",
             state: "completed",
             stepIndex: 0,

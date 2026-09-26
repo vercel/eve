@@ -94,19 +94,19 @@ Type a message and press `Enter` to send it. When the agent asks a question or r
 
 The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, and **Running** while tools execute. A blinking dot and elapsed time indicate progress, with token counts shown when available. The activity line disappears when the turn finishes or needs your input.
 
-While a turn is running, `Enter` sends your message immediately as steering. Before assistant output begins, the runtime interrupts pending model generation and continues the same turn with your correction. Executing tools finish safely. After output begins, steering applies at the next workflow boundary and preserves streamed text.
+The prompt stays open while the agent works, including turns the agent starts on its own, such as background task results. While a turn is running, `Enter` sends your message immediately as steering. Before assistant output begins, the runtime interrupts pending model generation and continues the same turn with your correction. Executing tools finish safely. After output begins, steering applies at the next workflow boundary and preserves streamed text.
 
-Slash commands wait until the turn ends, except `/cancel`, which cancels directly. If the session does not support steering, messages queue for the next turn. Press `Esc` or `Ctrl+C` to cancel a turn with no queued messages. With queued messages, these keys select the oldest message for steering, or for the next turn if steering is unavailable. If a direct cancellation requested with `/cancel` or `Ctrl+C` does not settle, press `Ctrl+C` to stop waiting. The UI then returns to the prompt and asks you to press `Ctrl+C` again to exit. At an idle prompt, press `Ctrl+C` twice to exit.
+Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or run `/cancel`, to cancel a running turn. If you cancel before the turn has started, eve waits for that turn's ID before sending cancellation, so the request cannot cancel a later turn. If a cancellation does not settle, press `Ctrl+C` again to stop waiting: eve starts a new session, and the next `Ctrl+C` exits. At an idle prompt, press `Ctrl+C` twice to exit.
 
-| Key           | Action                                                                                                                  |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `Enter`       | Send the current message or answer.                                                                                     |
-| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                                                       |
-| `Esc`         | Cancel a running turn, or steer with the oldest queued message.                                                         |
-| `Ctrl+C`      | Cancel or steer during a turn; stop a pending cancellation, then exit on the next press; press twice to exit when idle. |
-| `↑` / `↓`     | Move through input lines or sent-message history.                                                                       |
-| `Ctrl+L`      | Cycle log display modes.                                                                                                |
-| `Ctrl+R`      | Redraw the screen.                                                                                                      |
+| Key           | Action                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| `Enter`       | Send the current message or answer.                                                                        |
+| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                                          |
+| `Esc`         | Cancel a running turn.                                                                                     |
+| `Ctrl+C`      | Cancel a running turn; press again to stop waiting and start a new session; press twice to exit when idle. |
+| `↑` / `↓`     | Move through input lines or sent-message history.                                                          |
+| `Ctrl+L`      | Cycle log display modes.                                                                                   |
+| `Ctrl+R`      | Redraw the screen.                                                                                         |
 
 ## Logs and traces
 

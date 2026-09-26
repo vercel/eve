@@ -51,6 +51,8 @@ export interface UseEveAgentReturn<TData> {
   readonly cancel: () => Promise<CancelSessionResult>;
   /** Projected state: the reducer folds every stream event into this value. */
   readonly data: ComputedRef<TData>;
+  /** Canonical session state, regardless of the chosen data reducer. */
+  readonly conversation: ComputedRef<ConversationState>;
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: ComputedRef<Error | undefined>;
   /** Raw server events from this session (authoritative stream). */
@@ -129,7 +131,7 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default true
    */
   readonly optimistic?: boolean;
-  /** Follow delegated child streams into `data.children` with the default reducer. @default true */
+  /** Follow delegated child streams into `conversation.children`. @default true */
   readonly followSubagents?: boolean;
   /** Prewarm an owned session on mount and after reset. @default false */
   readonly prewarm?: boolean;
@@ -183,7 +185,7 @@ export function useEveAgent<TData>(
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
     optimistic: options.optimistic,
-    followSubagents: options.reducer === undefined && (options.followSubagents ?? true),
+    followSubagents: options.followSubagents ?? true,
     prewarm: options.prewarm,
     reducer,
     session: options.session,
@@ -215,6 +217,7 @@ export function useEveAgent<TData>(
   return {
     cancel: () => store.cancel(),
     data: computed(() => snapshot.value.data),
+    conversation: computed(() => snapshot.value.conversation),
     error: computed(() => snapshot.value.error),
     events: computed(() => snapshot.value.events),
     prewarm: () => store.prewarm(),
