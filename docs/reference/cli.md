@@ -229,6 +229,8 @@ Local development mounts bundled development extensions without adding files to 
 
 A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`. No Vercel project, channels, integrations, or review step is required before chat. Use `/model` to change models and settings, and `/add` to install an addition. Other `--input` text stays editable in the prompt. See [Terminal UI](../guides/dev-tui) for credential precedence and login options.
 
+### Local development lifecycle
+
 Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
 
 Local dev keeps immutable runtime generations under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. Each generation contains the compiled authored module graph and runtime resources rather than a recursive copy of the app or workspace. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; `/new` terminally retires that session before clearing the transcript, and the next prompt starts a fresh session with a new session-scoped sandbox on first sandbox use. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
@@ -238,6 +240,22 @@ With the built-in local Workflow World, `eve dev` cancels unfinished runs whose 
 Local development records traces under `.eve/traces/` by default and bounds that store by age, size, and a keep-newest floor. Configure it with `EVE_TRACES*` in `.env.local`, or disable the destination with `agent/instrumentation/local.ts`; see [`eve traces`](#retention) for the rules and defaults.
 
 `eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
+
+### Local workflow recovery
+
+With the built-in local Workflow World, a new `eve dev` server leaves previous invocations' runs dormant by default, including deliveries triggered by timers or hooks. Source-watcher rebuilds and worker restarts within the same server retain current runs' eligibility.
+
+Pass `eve dev --resume` to attempt recovery of unfinished runs from previous invocations. Recovery requires a retained snapshot with readable generation metadata. Changes to the eve framework or authored workflow sources do not prevent the attempt, but replay can fail.
+
+Runs with malformed generation metadata remain stored and dormant for that server invocation. Startup with `--resume` reports skipped generations without blocking other eligible runs. Restore malformed snapshot metadata from a backup or start a new session.
+
+At startup and after snapshot pruning, `eve dev` cancels unfinished runs whose runtime snapshots are missing. This includes waiting conversations and session timeout workflows. Cancellation records the reason in the run history without a terminal warning; normal run-data retention still applies. Stopping `eve dev` does not intentionally cancel runs whose snapshots remain available.
+
+Recovery limits:
+
+- Custom Workflow Worlds do not use this cleanup and recovery policy; `eve dev --resume` rejects them.
+- `eve dev --resume` refuses to attach to an already running local server. The flag requires starting a server.
+- `eve dev --resume` recovers workflows, not the terminal transcript or a particular TUI conversation.
 
 ## `eve remote`
 
