@@ -125,7 +125,6 @@ it("settles a later turn's call when a replied run from an earlier turn shares i
       kind: "outcome",
       from: {
         callId: "call",
-        execution: "blocking",
         input: {},
         runId: "run-b",
         sequence: 0,
