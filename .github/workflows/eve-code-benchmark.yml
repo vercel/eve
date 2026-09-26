@@ -87,7 +87,7 @@ jobs:
         with:
           harness: ${{ needs.request.outputs.harness }}
           agent-repository: vercel/eve
-          agent-path: packages/eve-code
+          agent-paths: '["packages/eve-code"]'
           agent-ref: ${{ needs.request.outputs.sha }}
           dataset: swe-lean
           # The PR comment's ranking tables show these plus each dimension's winner.
