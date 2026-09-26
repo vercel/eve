@@ -222,10 +222,12 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     }
 
     const startKey = `${inherited?.nodeId ?? input.nodeId}\0${input.sessionId}`;
-    const concurrentStart = pendingSandboxStarts.get(startKey);
-    if (concurrentStart !== undefined) {
+    // A failed start wakes every waiter at once; re-check so only one retries.
+    let concurrentStart = pendingSandboxStarts.get(startKey);
+    while (concurrentStart !== undefined) {
       persisted = await concurrentStart;
       if (persisted !== null) return await resumePersisted(definition, session);
+      concurrentStart = pendingSandboxStarts.get(startKey);
     }
 
     const starting = startHandle(definition, session);
