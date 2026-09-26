@@ -39,7 +39,10 @@ export {
   type WorkflowStepToolContext,
   type WorkflowToolContext,
   type WorkflowToolDefinition,
-  type AgentInput,
+  type AgentMessageResult,
+  type AgentResponse,
+  type AgentSendOptions,
+  type AgentSession,
   type WorkflowAgentMetadata,
 } from "#tools/workflow-definition.js";
 export type {

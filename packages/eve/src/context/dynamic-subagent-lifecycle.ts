@@ -193,11 +193,18 @@ export function getDynamicSubagentSelection(
   input: ContextReader,
   nodeId: string,
 ): Exclude<DurableDynamicSubagentSelection, null> | undefined {
-  const turn = input.get(TurnDynamicSubagentSelectionsKey) ?? {};
-  if (Object.hasOwn(turn, nodeId)) {
-    return turn[nodeId] ?? undefined;
-  }
+  return readDynamicSubagentSelections(input)[nodeId] ?? undefined;
+}
 
-  const session = input.get(SessionDynamicSubagentSelectionsKey) ?? {};
-  return session[nodeId] ?? undefined;
+/**
+ * The dynamic subagents selected for the current turn, by node id. A turn
+ * selection overrides the session's, and `null` withdraws one.
+ */
+export function readDynamicSubagentSelections(
+  input: ContextReader,
+): Readonly<Record<string, DurableDynamicSubagentSelection>> {
+  return {
+    ...input.get(SessionDynamicSubagentSelectionsKey),
+    ...input.get(TurnDynamicSubagentSelectionsKey),
+  };
 }

@@ -5,6 +5,7 @@ import type {
   RuntimeIdentity,
   RuntimeTraceContext,
   MessageStreamEvent,
+  AgentStartedStreamEvent,
   SubagentCalledStreamEvent,
 } from "#protocol/message.js";
 import type {
@@ -332,7 +333,7 @@ interface EveEvalSessionDriver {
    * children use the parent-origin proxy.
    */
   streamSubagent(
-    called: SubagentCalledStreamEvent,
+    started: AgentStartedStreamEvent | SubagentCalledStreamEvent,
     options?: StreamOptions,
   ): AsyncIterable<MessageStreamEvent>;
 }

@@ -21,11 +21,10 @@ describe("workflow", () => {
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expect(definition.description).toContain(
-      "ctx.agent(name, { message: string, agentId?: string, outputSchema?: object })",
+      "ctx.agent(name, { message: string, outputSchema?: object })",
     );
-    expect(definition.description).toContain(
-      "resolves directly to the child's JSON-serializable output",
-    );
+    expect(definition.description).toContain("Each call starts a new agent");
+    expect(definition.description).toContain("resolves directly to the agent's reply");
     expect(definition.description).toContain("does not return an agent metadata wrapper");
     expect(definition.description).toContain("owning agent resolves the target");
     expect(definition.description).toContain(
@@ -52,9 +51,7 @@ describe("workflow", () => {
     expect(inputSchema).toMatchObject({
       properties: {
         js: {
-          description: expect.stringContaining(
-            "resolves directly to the child's JSON-serializable output",
-          ),
+          description: expect.stringContaining("resolves directly to the agent's reply"),
         },
       },
     });

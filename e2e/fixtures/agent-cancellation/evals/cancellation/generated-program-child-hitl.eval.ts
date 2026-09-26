@@ -23,7 +23,7 @@ export default defineEval({
       count: 1,
       output: /CHILD_HITL_RESULT=.*GENERATED-HITL-MARKER/su,
     });
-    t.calledSubagent("sleeper", { count: 1, status: "completed" });
+    t.event("agent.started", { count: 1, data: { name: "sleeper" } });
     t.messageIncludes("CHILD_HITL_RESULT=");
     t.messageIncludes("GENERATED-HITL-MARKER");
     t.noFailedActions();

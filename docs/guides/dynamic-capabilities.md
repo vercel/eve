@@ -139,7 +139,8 @@ failure and omits the subagent.
 The resolved set applies to local and remote direct delegation. An authored workflow tool can
 also call a selected subagent through `ctx.agent`. A generated program can call it through the
 provided `workflow` tool. eve checks availability again before starting the child, so a stale or
-manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
+manually constructed call fails: a subagent tool call with `SUBAGENT_UNAVAILABLE`, and a
+`ctx.agent` session's first `send()` with an error saying the subagent is not available. Treat conditional
 availability as capability composition, not as the only authorization
 boundary: sensitive child tools still need their own authorization and
 approval checks.

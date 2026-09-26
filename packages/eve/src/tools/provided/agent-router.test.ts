@@ -22,7 +22,7 @@ describe("agentRouter", () => {
     vi.mocked(evaluate).mockResolvedValue({
       answers: { route: { choice: "operator", type: "choice" } },
     } as never);
-    const agent = vi.fn().mockResolvedValue("operated");
+    const { agent, send } = replyingAgent("operated");
     const abortSignal = new AbortController().signal;
     const ctx = workflowContext({
       abortSignal,
@@ -50,11 +50,12 @@ describe("agentRouter", () => {
         },
       },
     });
-    expect(agent).toHaveBeenCalledWith("operator", { message: "Deploy the service" });
+    expect(agent).toHaveBeenCalledWith("operator");
+    expect(send).toHaveBeenCalledWith("Deploy the service", { signal: abortSignal });
   });
 
   it("ignores agents without descriptions", async () => {
-    const agent = vi.fn().mockResolvedValue("researched");
+    const { agent, send } = replyingAgent("researched");
     const ctx = workflowContext({
       agent,
       agents: {
@@ -67,11 +68,12 @@ describe("agentRouter", () => {
       "researched",
     );
     expect(evaluate).not.toHaveBeenCalled();
-    expect(agent).toHaveBeenCalledWith("researcher", { message: "Investigate" });
+    expect(agent).toHaveBeenCalledWith("researcher");
+    expect(send).toHaveBeenCalledWith("Investigate", { signal: expect.any(AbortSignal) });
   });
 
   it("invokes the only available described agent without evaluation", async () => {
-    const agent = vi.fn().mockResolvedValue("researched");
+    const { agent, send } = replyingAgent("researched");
     const ctx = workflowContext({
       agent,
       agents: { researcher: { description: "Investigate and explain." } },
@@ -81,7 +83,8 @@ describe("agentRouter", () => {
       "researched",
     );
     expect(evaluate).not.toHaveBeenCalled();
-    expect(agent).toHaveBeenCalledWith("researcher", { message: "Investigate" });
+    expect(agent).toHaveBeenCalledWith("researcher");
+    expect(send).toHaveBeenCalledWith("Investigate", { signal: expect.any(AbortSignal) });
   });
 
   it("rejects an agent map without descriptions before evaluation", async () => {
@@ -96,6 +99,14 @@ describe("agentRouter", () => {
     expect(evaluate).not.toHaveBeenCalled();
   });
 });
+
+/** An agent whose session replies to every message with `message`. */
+function replyingAgent(message: string) {
+  const send = vi.fn(async () => ({
+    result: async () => ({ data: undefined, message, status: "waiting" as const }),
+  }));
+  return { agent: vi.fn(() => ({ send })), send };
+}
 
 function workflowContext(
   input: Pick<WorkflowToolContext, "agent" | "agents"> &

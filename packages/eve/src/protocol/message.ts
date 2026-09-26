@@ -391,6 +391,32 @@ export interface SubagentCalledStreamEvent {
 }
 
 /**
+ * Stream event emitted when a workflow run opens a session with `ctx.agent`.
+ * `callId` is the tool call whose run opened it; follow the session with
+ * `session.streamSubagent(event)`.
+ */
+export interface AgentStartedStreamEvent {
+  data: {
+    callId: string;
+    name: string;
+    /** The opened session's id. */
+    sessionId: string;
+    /** A local session's stream route, or the parent-origin proxy for a remote one. */
+    streamPath: string;
+    /**
+     * Where a remote session runs, read by the parent's stream proxy. As on
+     * `subagent.called`, `resolverId` keys the authored credential functions,
+     * never resolved header values.
+     */
+    remote?: {
+      resolverId?: string;
+      url: string;
+    };
+  };
+  type: "agent.started";
+}
+
+/**
  * Stream event emitted when an inline subagent execution starts.
  */
 export interface SubagentStartedStreamEvent {
@@ -751,6 +777,7 @@ export interface SessionCompletedStreamEvent {
  */
 export type UnstampedMessageStreamEvent =
   | ActionInputAppendedStreamEvent
+  | AgentStartedStreamEvent
   | ApprovalCandidateStreamEvent
   | ApprovalSettledStreamEvent
   | ContextClearedStreamEvent
@@ -1379,6 +1406,36 @@ export function createSubagentCalledEvent(input: {
     },
     type: "subagent.called",
   };
+}
+
+/**
+ * Creates the `agent.started` event for one session a workflow run opened.
+ */
+export function createAgentStartedEvent(input: {
+  readonly callId: string;
+  readonly name: string;
+  readonly parentSessionId: string;
+  readonly remote?: {
+    readonly resolverId?: string;
+    readonly url: string;
+  };
+  readonly sessionId: string;
+}): AgentStartedStreamEvent {
+  const data: AgentStartedStreamEvent["data"] = {
+    callId: input.callId,
+    name: input.name,
+    sessionId: input.sessionId,
+    streamPath: createEveSessionStreamRoutePath(input.sessionId),
+  };
+  if (input.remote !== undefined) {
+    data.remote = input.remote;
+    data.streamPath = createEveSubagentStreamRoutePath({
+      callId: input.callId,
+      childSessionId: input.sessionId,
+      parentSessionId: input.parentSessionId,
+    });
+  }
+  return { data, type: "agent.started" };
 }
 
 /**

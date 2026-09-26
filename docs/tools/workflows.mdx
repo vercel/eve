@@ -14,7 +14,7 @@ holding compute.
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
-the session's channel, `ctx.agents` for effective callable-agent descriptions, and `ctx.agent` for durable agent delegation. Use `yield` to report
+the session's channel, `ctx.agents` for effective callable-agent descriptions, and `ctx.agent` for sessions with other agents. Use `yield` to report
 progress and `await` on a workflow operation to wait durably. Values needed after a durable wait
 stay in local variables in the workflow body.
 
@@ -113,7 +113,8 @@ export default workflow({ maxSubagents: 20 });
 ```
 
 The model supplies an async function body through the tool's `js` input. Its only host capability is
-`ctx.agent(name, { message, agentId?, outputSchema? })`. This can invoke subagents configured with `tool: false` or hidden by a same-named `disableTool()` file. Include those path-derived names in the workflow tool description or agent instructions when the model writes the program. For example:
+`ctx.agent(name, { message, outputSchema? })`, which sends the message to a new session with that
+agent and resolves to its reply, or to the structured value when `outputSchema` is set. This can invoke subagents configured with `tool: false` or hidden by a same-named `disableTool()` file. Include those path-derived names in the workflow tool description or agent instructions when the model writes the program. For example:
 
 ```js
 const [triage, review] = await Promise.all([
@@ -125,12 +126,13 @@ return { triage, review };
 
 `maxSubagents` defaults to `100` and must be an integer from `1` through `128`. The generated
 program cannot access the workflow context, session state,
-credentials, imports, or ordinary tools. Agent authorization, questions, approvals, cancellation,
-and `agentId` continuation use the same owner-managed behavior as direct `ctx.agent` calls.
+credentials, imports, or ordinary tools. Each call starts a new child session; a program cannot
+continue a child from an earlier call. Agent authorization, questions, approvals, and cancellation
+behave as they do for sessions an authored workflow tool opens with `ctx.agent`.
 
 The sandbox resumes after every pending call in the current batch settles. `Promise.all` supports
 fan-out followed by fan-in, but `Promise.race` does not resume after only the first child settles.
-A child failure is thrown at the corresponding `ctx.agent` call, so generated code can catch it.
+A failed child turn throws at the corresponding `ctx.agent` call, so generated code can catch it.
 The program must return a JSON-serializable value.
 
 ### Migrate from `experimental_workflow`
@@ -159,10 +161,10 @@ an agent catalog. Calls use the same target resolution, availability, and author
 ### Migrate an authored workflow tool
 
 Replace `defineTool` with `defineWorkflowTool`, keep the executor's `"use workflow"` directive,
-and replace `agent(ctx, input)` and `ask(ctx, request)` with `ctx.agent(target, input)` and
-`ctx.ask(request)`. The `eve/workflow` entry point has been removed. Import `WorkflowToolContext`,
-`AgentInput`, `ToolInputRequest`, `ToolInputRequestOptions`, and `ToolInputResponse` from `eve/tools`
-when you need explicit types.
+and replace `agent(ctx, input)` and `ask(ctx, request)` with an agent session from
+[`ctx.agent(name)`](#delegate-work-ctxagent) and `ctx.ask(request)`. The `eve/workflow` entry point
+has been removed. Import `WorkflowToolContext`, `AgentSession`, `ToolInputRequest`,
+`ToolInputRequestOptions`, and `ToolInputResponse` from `eve/tools` when you need explicit types.
 
 `ctx.ask` no longer accepts `dismissible`, and its `dismissed` status is now `cancelled`. To stop
 asking once a new message arrives, pass `ctx.interruptSignal`:
@@ -324,24 +326,52 @@ and can only show the model's input. Both compose: `approval` before the run, `c
 
 ## Delegate work: `ctx.agent`
 
-Workflow tools can call a subagent and wait for its result:
+`ctx.agent(name)` returns a session with an agent, shaped like the TypeScript client's session. The
+session opens on its first `send`, and each `response.result()` resolves when that message's turn
+ends:
 
 ```ts
-const result = await ctx.agent("reviewer", {
-  message: "Review the deployment plan for security risks.",
-  outputSchema: {
-    type: "object",
-    properties: {
-      findings: { type: "array", items: { type: "string" } },
-    },
-    required: ["findings"],
-  },
+import { z } from "zod";
+
+const reviewer = ctx.agent("reviewer");
+const response = await reviewer.send("Review the deployment plan for security risks.", {
+  outputSchema: z.object({ findings: z.array(z.string()) }),
+  signal: ctx.abortSignal,
 });
+const { data, message, status } = await response.result();
 ```
 
-The first argument is an available agent target. On the root agent, `"agent"` starts or continues a copy of the root agent. A declared subagent uses its path-derived name and remains callable when hidden with `tool: false` or `disableTool()`. Delegated root copies and declared subagent contexts do not expose the built-in root-copy target. The invocation name `agent` is reserved, so a declared subagent cannot shadow it. eve assigns each call a replay-stable invocation identity, including repeated and parallel calls to the same target. Pass `agentId` to
-continue an existing child. An inline `outputSchema` requires structured output and determines the
-return type, so `result` in the example is typed as `{ findings: string[] }`.
+The name is an available agent target. On the root agent, `"agent"` starts a copy of the root agent.
+A declared subagent uses its path-derived name and remains callable when hidden with `tool: false`
+or `disableTool()`. Delegated root copies and declared subagent contexts do not expose the built-in
+root-copy target. The invocation name `agent` is reserved, so a declared subagent cannot shadow it.
+An unavailable name rejects the first `send`.
+
+`send(message, options?)` accepts:
+
+| Option         | Description                                                                                              |
+| -------------- | -------------------------------------------------------------------------------------------------------- |
+| `outputSchema` | Structured output for the turn, as a Standard JSON Schema such as a Zod schema, or a JSON Schema object. |
+| `signal`       | Aborting it cancels the turn the message started or joined. The turn still reports, as cancelled.        |
+
+A message sent while the session's turn is running joins that turn, and its response resolves with
+that turn's result. A message sent while the session is idle starts the next turn, and the session
+keeps its conversation between turns. `result()` returns the client's `MessageResult` fields:
+
+| Field     | Description                                                                                                                                                                                                         |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`    | The structured value, when the turn requested `outputSchema`.                                                                                                                                                       |
+| `message` | The agent's final reply text, when the turn did not request `outputSchema`.                                                                                                                                         |
+| `status`  | `"waiting"` when the session waits for its next message, `"completed"` when the session ended with the turn, or `"failed"` when the turn failed. A cancelled turn is `"waiting"` with neither `data` nor `message`. |
+
+Every `ctx.agent(name)` call returns a new session that only the workflow run can address. The model
+does not see it; it sees what the tool returns. The session runs as the caller's principal with the
+caller's capabilities, and a person answers its questions and sign-ins at the root session, as for
+any subagent. The session ends when the run finishes, which cancels any turn still running.
+
+The parent stream announces each session with `agent.started`, which carries the tool call's
+`callId`, the agent `name`, the child's `sessionId`, and a `streamPath`. Pass the event to
+[`session.streamSubagent()`](/docs/guides/client/streaming#follow-a-subagent) to follow the child.
 
 ### Route to a hidden subagent with Jev
 
@@ -422,12 +452,15 @@ export default defineWorkflowTool({
       ctx.abortSignal,
     );
 
-    return ctx.agent(target, { message: task });
+    const response = await ctx.agent(target).send(task, { signal: ctx.abortSignal });
+    const { message, status } = await response.result();
+    if (status === "failed") throw new Error(`${target} could not complete the task.`);
+    return message ?? null;
   },
 });
 ```
 
-The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. Jev returns the typed `"researcher" | "operator"` choice, and the selected subagent's result becomes the `agent-router` tool result.
+The evaluation runs in a step so workflow replay records its result instead of making the routing request again. The parent model receives `agent-router`, but not `researcher` or `operator`. Jev returns the typed `"researcher" | "operator"` choice, and the selected subagent's reply becomes the `agent-router` tool result.
 
 `ctx.agents` is a replay-stable metadata snapshot taken when the workflow starts. In a top-level root workflow, `ctx.agents.agent` always represents the root-copy target and carries the root's authored `description` when provided. The snapshot also includes declared agents hidden from the parent model with `tool: false` or `disableTool()`, but exposes no model definitions, credentials, or callbacks. A delegated root copy omits `agent`, so `agentRouter()` cannot select another root copy recursively. Invocation still checks each target's availability through `ctx.agent()`.
 
@@ -441,7 +474,7 @@ import { agentRouter } from "eve/tools/agent-router";
 export default agentRouter();
 ```
 
-Its input is `{ message: string }`. `agentRouter()` ignores entries without a non-empty description. With two or more described targets, it sends the message and effective descriptions to Jev, then invokes the selected name through `ctx.agent()`. It invokes a sole target without evaluation. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
+Its input is `{ message: string }`. `agentRouter()` ignores entries without a non-empty description. With two or more described targets, it sends the message and effective descriptions to Jev, then sends the message to a new session with the selected agent through `ctx.agent()` and returns its reply. It invokes a sole target without evaluation. In a top-level root session, the candidates include the root-copy `agent`; delegated root copies and declared subagent contexts include only their declared targets.
 
 When an authored tool accepts a JSON Schema supplied by the model, represent that input with a permissive object such as `z.looseObject({})`. Avoid `z.record(z.string(), z.json())`: its generated JSON Schema uses `propertyNames`, which OpenAI does not support. Validate the supplied value at the point where your tool consumes it.
 

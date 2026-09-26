@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 60,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 60],
+    current: 61,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 61],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -63,13 +63,14 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       57: "agentRouter() no longer accepts a model-facing outputSchema; structured subagent output is requested only through ctx.agent().",
       58: "Workflow tools no longer accept execution or return background task receipts; every call blocks until it settles.",
       59: "ctx.ask() no longer accepts dismissible and reports a withdrawn request as cancelled instead of dismissed; workflow tool contexts carry interruptSignal.",
+      60: "ctx.agent(name) now returns a session handle: send() delivers a message and its response result() resolves the turn; ctx.agent(name, { message, agentId }) and AgentInput were removed.",
     },
   },
   dynamicTool: {
-    current: 58,
+    current: 59,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
-      58,
+      59,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -103,11 +104,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       55: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
       56: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
       57: 'input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request.',
+      58: "Stream events gained agent.started, which a session publishes when a workflow run opens a ctx.agent session.",
     },
   },
   channel: {
-    current: 35,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31, 35],
+    current: 36,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31, 36],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
@@ -124,20 +126,22 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       32: "Run mode and caller-supplied output schemas were removed from channel operations; sessions always park, and send options, audience inputs, and ConversationContext no longer carry mode, while from().send() and from().respond() no longer accept outputSchema.",
       33: "Background task delivery was removed: sends no longer accept taskDeliveryPolicy and message.completed always carries text.",
       34: 'input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request.',
+      35: "Stream events gained agent.started, which a session publishes when a workflow run opens a ctx.agent session.",
     },
   },
   schedule: {
-    current: 18,
-    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18],
+    current: 19,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       16: "Background task delivery was removed: sends no longer accept taskDeliveryPolicy and message.completed always carries text.",
       17: 'input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request.',
+      18: "Stream events gained agent.started, which a session publishes when a workflow run opens a ctx.agent session.",
     },
   },
   subagent: {
-    current: 23,
-    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 23],
+    current: 24,
+    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 24],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -147,11 +151,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       20: "Run mode was removed and agent definitions no longer declare outputSchema; sessions always park, ConversationContext no longer carries mode, and structured output is requested per turn.",
       21: "Background task execution was removed: subagent results no longer carry backgroundTask, message.completed always carries text, and experimental.tasks is gone.",
       22: 'input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request.',
+      23: "Stream events gained agent.started, which a session publishes when a workflow run opens a ctx.agent session.",
     },
   },
   connection: {
-    current: 30,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 30],
+    current: 31,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 31],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -160,11 +165,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       27: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
       28: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
       29: 'input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request.',
+      30: "Stream events gained agent.started, which a session publishes when a workflow run opens a ctx.agent session.",
     },
   },
   hook: {
-    current: 30,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 27, 30],
+    current: 31,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 27, 31],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -180,28 +186,31 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       26: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       28: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
       29: 'input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request.',
+      30: "Stream events gained agent.started, which a session publishes when a workflow run opens a ctx.agent session.",
     },
   },
   skill: { current: 2, supported: [1, 2], dropped: {} },
   dynamicSkill: {
-    current: 25,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 25],
+    current: 26,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 26],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       22: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
       23: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
       24: 'input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request.',
+      25: "Stream events gained agent.started, which a session publishes when a workflow run opens a ctx.agent session.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 26,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 26],
+    current: 27,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 27],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       23: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
       24: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
       25: 'input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request.',
+      26: "Stream events gained agent.started, which a session publishes when a workflow run opens a ctx.agent session.",
     },
   },
   config: { current: 1, supported: [1], dropped: {} },

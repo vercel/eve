@@ -100,6 +100,7 @@ export type {
   ActionPartialStreamEvent,
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
+  AgentStartedStreamEvent,
   AssistantStepFinishReason,
   AuthorizationOutcome,
   CompactionCompletedStreamEvent,

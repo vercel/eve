@@ -1,8 +1,9 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
-import { agent } from "#execution/tools/subagent/invoke-agent.js";
-import type { AgentInput, WorkflowToolContext } from "#tools/workflow-definition.js";
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
+import type { AgentSessions } from "#execution/agent-sessions/session.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
   type WorkflowToolRunOutcome,
@@ -17,14 +18,11 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolContext } from "#tools/definition.js";
 
 export interface WorkflowBodyDefinition {
+  /** Everything the run needs to open `ctx.agent` sessions for its caller. */
+  readonly agentContext: AgentSessionContext;
   /** Snapshot added for new runs; absent only when resuming an older durable payload. */
   readonly agents?: WorkflowToolContext["agents"];
   readonly callId: string;
-  /**
-   * Whether the owning session can reach a human. `false` makes `ctx.ask()`
-   * resolve as `unavailable` instead of waiting for an answer no one can give.
-   */
-  readonly canRequestInput?: boolean;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
 
@@ -40,12 +38,18 @@ export interface WorkflowBodyInput extends WorkflowBodyDefinition {
 
 export interface WorkflowBodyResult {
   readonly outcome: WorkflowToolRunOutcome;
+  /** Progress reports the body sent; the run relays each before the outcome. */
   readonly reportCount: number;
 }
 
-/** The call's signals, owned by the run: commands on its control hook abort them. */
-export interface WorkflowBodySignals {
+/**
+ * What the run owns and lends its body: the call's signals, which commands on
+ * the run's control hook abort, and the `ctx.agent` sessions the run ends when
+ * it finishes.
+ */
+export interface WorkflowBodyRun {
   readonly abortSignal: AbortSignal;
+  readonly agentSessions: AgentSessions;
   readonly interruptSignal: AbortSignal;
 }
 
@@ -57,13 +61,14 @@ type WorkflowToolExecute = (
 /** Executes one registered workflow body and reports progress to its owner. */
 export async function executeWorkflowBody(
   input: WorkflowBodyInput & { readonly runId?: string },
-  signals: WorkflowBodySignals,
+  run: WorkflowBodyRun,
 ): Promise<WorkflowBodyResult> {
-  const signal = signals.abortSignal;
+  const signal = run.abortSignal;
   const from = createWorkflowBodyRef(input);
-  const ctx = createWorkflowBodyContext(input, signals);
+  const ctx = createWorkflowBodyContext(input, run);
   attachWorkflowToolRunContext(ctx, {
-    canRequestInput: input.canRequestInput,
+    // A caller that can't reach a person resolves `ctx.ask()` as `unavailable`.
+    canRequestInput: input.agentContext.capabilities?.requestInput === true,
     from,
     owner: input.owner,
   });
@@ -130,7 +135,7 @@ function resolveWorkflowToolExecute(input: WorkflowBodyInput): WorkflowToolExecu
 
 function createWorkflowBodyContext(
   input: WorkflowBodyInput,
-  signals: WorkflowBodySignals,
+  run: WorkflowBodyRun,
 ): ToolContext & WorkflowToolContext {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
@@ -138,8 +143,7 @@ function createWorkflowBodyContext(
     );
   };
   const ctx: ToolContext & WorkflowToolContext = {
-    agent: ((target: string, agentInput: AgentInput) =>
-      agent(ctx, target, agentInput)) as WorkflowToolContext["agent"],
+    agent: (name) => run.agentSessions.open(name),
     agents: Object.freeze(
       Object.fromEntries(
         Object.entries(input.agents ?? {}).map(([name, metadata]) => [
@@ -149,9 +153,9 @@ function createWorkflowBodyContext(
       ),
     ),
     ask: (request, options) => ask(ctx, request, options),
-    abortSignal: signals.abortSignal,
+    abortSignal: run.abortSignal,
     callId: input.callId,
-    interruptSignal: signals.interruptSignal,
+    interruptSignal: run.interruptSignal,
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),

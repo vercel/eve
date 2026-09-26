@@ -110,7 +110,11 @@ try {
   });
 
   it("enforces the total call budget through the real sandbox", async () => {
-    const agent = vi.fn().mockResolvedValue("ok");
+    const agent = vi.fn(() => ({
+      send: async () => ({
+        result: async () => ({ data: undefined, message: "ok", status: "waiting" }),
+      }),
+    }));
     const ctx = {
       abortSignal: new AbortController().signal,
       agent,

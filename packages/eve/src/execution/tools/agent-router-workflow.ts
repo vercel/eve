@@ -11,7 +11,12 @@ export async function executeAgentRouterTool(
   "use workflow";
 
   const target = await chooseTarget(input.message, descriptions(ctx), ctx.abortSignal);
-  return ctx.agent(target, { message: input.message });
+  const response = await ctx.agent(target).send(input.message, { signal: ctx.abortSignal });
+  const { message, status } = await response.result();
+  if (status === "failed") {
+    throw new Error(`Agent "${target}" failed to handle the task.`);
+  }
+  return message ?? null;
 }
 
 async function chooseTarget(

@@ -7,21 +7,12 @@ import {
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
-import type { RuntimeAgentDispatchRequest } from "#shared/action-types.js";
 import type {
+  RuntimeAgentDispatchRequest,
   RuntimeSubagentDispatchFailure,
-  RuntimeSubagentDispatchRequest,
 } from "#shared/action-types.js";
-import type { JsonObject } from "#shared/json.js";
 import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-agent.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
-import {
-  SessionDynamicSubagentSelectionsKey,
-  TurnDynamicSubagentSelectionsKey,
-  type DurableDynamicSubagentSelection,
-} from "#context/keys.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import {
   isAgentHandleAction,
@@ -29,14 +20,12 @@ import {
   type RuntimeSession,
 } from "#subagents/handle-dispatch.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
-import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import {
-  createRecursiveAgentRootOnlyResult,
-  createUnavailableDynamicSubagentResult,
-  getSubagentName,
-} from "#execution/dispatch-action-failures.js";
+  getDynamicSubagentSelection,
+  readDynamicSubagentSelections,
+} from "#context/dynamic-subagent-lifecycle.js";
+import { resolveAgentAction, resolveAgentStartTarget } from "#execution/agent-sessions/target.js";
 import type { SubagentStartTarget } from "#execution/tools/subagent/start.js";
-import type { SubagentInputSource } from "#subagents/tool.js";
 import { createLogger } from "#internal/logging.js";
 
 const log = createLogger("execution.agent-invocation");
@@ -62,10 +51,11 @@ export async function prepareOwnerAgentInvocation(input: {
   const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const event = getHarnessEmissionState(durableSession.state);
-  const action = resolveAgentInvocationAction({
-    ctx,
+  const action = resolveAgentAction({
+    bundle: ctx.require(BundleKey),
+    callId: input.invocationId,
+    dynamicSelections: readDynamicSubagentSelections(ctx),
     input: input.invocation,
-    invocationId: input.invocationId,
   });
   return await prepareActionDispatch({
     batch: {
@@ -124,71 +114,12 @@ export function planAgentDispatch(input: {
       callId: input.action.callId,
     });
   }
-  return classifyFreshStart(input);
-}
-
-function classifyFreshStart(input: {
-  readonly action: RuntimeAgentDispatchRequest;
-  readonly bundle: CompiledBundle;
-  readonly ctx: ContextReader;
-  readonly session: RuntimeSession;
-}): Extract<OwnerAgentDispatchPlanEntry, { kind: "reject" | "start" }> {
-  const { action } = input;
-  const registry = input.bundle.subagentRegistry.subagentsByNodeId;
-  const isDynamicSubagent =
-    input.bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true;
-  const dynamicSubagentSelection = isDynamicSubagent
-    ? getDynamicSubagentSelection(input.ctx, action.nodeId)
-    : undefined;
-  if (
-    isDynamicSubagent &&
-    (dynamicSubagentSelection === undefined ||
-      (action.kind === "subagent-call" && dynamicSubagentSelection.kind !== "subagent") ||
-      (action.kind === "remote-agent-call" && dynamicSubagentSelection.kind !== "remote"))
-  ) {
-    log.warn("dynamic subagent call blocked after availability changed", {
-      callId: action.callId,
-      nodeId: action.nodeId,
-      subagentName: getSubagentName(action),
-    });
-    return { kind: "reject", result: createUnavailableDynamicSubagentResult(action) };
-  }
-  if (isRecursiveAgentAction(action, registry) && input.session.rootSessionId !== undefined) {
-    log.warn("recursive agent call blocked outside the root session", {
-      callId: action.callId,
-      nodeId: action.nodeId,
-      rootSessionId: input.session.rootSessionId,
-      subagentName: action.subagentName,
-    });
-    return { kind: "reject", result: createRecursiveAgentRootOnlyResult(action) };
-  }
-  if (action.kind === "remote-agent-call") {
-    return {
-      kind: "start",
-      target: {
-        action,
-        dynamicRemoteAgent:
-          dynamicSubagentSelection?.kind === "remote"
-            ? dynamicSubagentSelection.remoteAgent
-            : undefined,
-        kind: "remote",
-      },
-    };
-  }
-  const dynamicAgentConfig =
-    dynamicSubagentSelection?.kind === "subagent"
-      ? dynamicSubagentSelection.agentConfig
-      : undefined;
-  const registered = registry.get(action.nodeId);
-  const description =
-    dynamicAgentConfig?.description ??
-    (registered?.definition.kind === "subagent" ? registered.definition.description : undefined);
-  const source: SubagentInputSource =
-    description === undefined ? { type: "runtime" } : { description, type: "local" };
-  return {
-    kind: "start",
-    target: { action, dynamicSubagentAgentConfig: dynamicAgentConfig, kind: "local", source },
-  };
+  return resolveAgentStartTarget({
+    action: input.action,
+    bundle: input.bundle,
+    dynamicSelections: readDynamicSubagentSelections(input.ctx),
+    isRootSession: input.session.rootSessionId === undefined,
+  });
 }
 
 function ownerPlanReusesSandbox(input: {
@@ -207,65 +138,4 @@ function ownerPlanReusesSandbox(input: {
         .kind === "parent"
     );
   });
-}
-
-function isRecursiveAgentAction(
-  action: RuntimeAgentDispatchRequest,
-  subagentsByNodeId: ReadonlyMap<string, unknown>,
-): action is RuntimeSubagentDispatchRequest {
-  return (
-    action.kind === "subagent-call" &&
-    action.subagentName === "agent" &&
-    !subagentsByNodeId.has(action.nodeId)
-  );
-}
-
-export function resolveAgentInvocationAction(input: {
-  readonly ctx: ContextReader;
-  readonly input: AgentInvocationRequest["input"];
-  readonly invocationId: string;
-}): RuntimeAgentDispatchRequest {
-  const bundle = input.ctx.require(BundleKey);
-  const registered = bundle.subagentRegistry.subagentsByName.get(input.input.target);
-  const dynamicSelection =
-    registered === undefined
-      ? Object.values({
-          ...input.ctx.get(SessionDynamicSubagentSelectionsKey),
-          ...input.ctx.get(TurnDynamicSubagentSelectionsKey),
-        }).find(
-          (selection: DurableDynamicSubagentSelection) =>
-            selection !== null && selection.prepared?.name === input.input.target,
-        )
-      : undefined;
-  const definition =
-    registered?.definition ??
-    dynamicSelection?.prepared ??
-    (input.input.target === AGENT_TOOL_NAME && bundle.nodeId === undefined
-      ? {
-          description: AGENT_TOOL_DESCRIPTION,
-          kind: "subagent" as const,
-          name: AGENT_TOOL_NAME,
-          nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-        }
-      : undefined);
-  if (definition === undefined) {
-    throw new Error(`Agent target "${input.input.target}" is not available to this agent.`);
-  }
-  const actionInput: {
-    agentId?: string;
-    message: string;
-    outputSchema?: JsonObject;
-  } = { message: input.input.message };
-  if (input.input.agentId !== undefined) actionInput.agentId = input.input.agentId;
-  if (input.input.outputSchema !== undefined) actionInput.outputSchema = input.input.outputSchema;
-  const common = {
-    callId: input.invocationId,
-    description: definition.description ?? "",
-    input: actionInput,
-    name: definition.name,
-    nodeId: definition.nodeId,
-  };
-  return definition.kind === "remote"
-    ? { ...common, kind: "remote-agent-call", remoteAgentName: definition.name }
-    : { ...common, kind: "subagent-call", subagentName: definition.name };
 }

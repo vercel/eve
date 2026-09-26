@@ -45,6 +45,8 @@ import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import { resolveWorkflowAgentMetadata } from "#execution/tools/subagent/metadata.js";
+import { readDynamicSubagentSelections } from "#context/dynamic-subagent-lifecycle.js";
+import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 
 /** Input shared by direct and Workflow-originated owner-side dispatch. */
@@ -71,6 +73,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   readonly bundle: CompiledBundle;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
+  readonly dynamicSubagentSelections: DynamicSubagentSelections;
   readonly inheritedConversation: Parameters<
     typeof buildSubagentRunInput
   >[0]["inheritedConversation"];
@@ -212,6 +215,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     bundle,
     capabilities: ctx.get(CapabilitiesKey),
     channelMetadata: ctx.get(ChannelInstrumentationKey),
+    dynamicSubagentSelections: readDynamicSubagentSelections(ctx),
     inheritedConversation: ctx.get(ConversationContextKey),
     fanoutSize: input.fanoutSize ?? batch.localFanoutSize ?? 0,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,

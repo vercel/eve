@@ -2,30 +2,28 @@ import { defineEval } from "eve/evals";
 
 export default defineEval({
   description:
-    "An authored waiting workflow tool blocks on two parallel agent() calls and returns both inline results.",
+    "An authored waiting workflow tool blocks on two parallel ctx.agent sessions and returns both inline results.",
   timeoutMs: 60_000,
   async test(t) {
     const turn = await t.send("WORKFLOW-AGENT-FANOUT-START");
     turn.expectOk();
     turn.calledTool("fanout_agents", { count: 1, status: "completed" });
-    turn.event("subagent.called", { data: { name: "workflow-marker" }, count: 2 });
-    turn.eventsSatisfy("parallel invocations keep distinct calls and child sessions", (events) => {
-      const calls = events.flatMap((event) =>
-        event.type === "subagent.called" && event.data.name === "workflow-marker"
-          ? [event.data]
-          : [],
+    turn.event("agent.started", { data: { name: "workflow-marker" }, count: 2 });
+    turn.eventsSatisfy("parallel sessions are distinct children of one tool call", (events) => {
+      const started = events.flatMap((event) =>
+        event.type === "agent.started" && event.data.name === "workflow-marker" ? [event.data] : [],
       );
       return (
-        calls.length === 2 &&
-        new Set(calls.map((call) => call.callId)).size === 2 &&
-        new Set(calls.map((call) => call.childSessionId)).size === 2
+        started.length === 2 &&
+        new Set(started.map((session) => session.callId)).size === 1 &&
+        new Set(started.map((session) => session.sessionId)).size === 2
       );
     });
     turn.messageIncludes("api:replica-0");
     turn.messageIncludes("api:replica-1");
     turn.eventsSatisfy("both children start before the waiting tool resolves", (events) => {
       const called = events.flatMap((event, index) =>
-        event.type === "subagent.called" && event.data.name === "workflow-marker" ? [index] : [],
+        event.type === "agent.started" && event.data.name === "workflow-marker" ? [index] : [],
       );
       const toolResult = events.findIndex(
         (event) =>

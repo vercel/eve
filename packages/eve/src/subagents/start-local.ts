@@ -3,6 +3,7 @@ import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
+import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workflow-runtime.js";
 import { SUBAGENT_START_FAILED } from "#subagents/agent-handle-errors.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -49,10 +50,11 @@ export async function startLocalSubagent(input: {
     auth: input.auth,
     capabilities: input.capabilities,
     channelMetadata: input.channelMetadata,
+    continuationKey: `${input.session.sessionId}:${action.callId}`,
     inheritedConversation: input.inheritedConversation,
-    fanoutSize: input.fanoutSize,
     initiatorAuth: input.initiatorAuth,
     graph: input.bundle.graph,
+    limits: resolveRemainingSessionTokenLimits(input.session, input.fanoutSize),
     parent: input.parent,
     activityObserver: input.activityObserver,
     sandboxSessionId: input.sandboxSessionId,

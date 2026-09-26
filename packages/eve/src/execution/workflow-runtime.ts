@@ -291,7 +291,7 @@ export function createWorkflowRuntime(config: {
     async dispatchSession<TCommand extends SessionCommand>(
       input: DispatchSessionInput<TCommand>,
     ): Promise<SessionCommandResult<TCommand>> {
-      return await dispatchWorkflowCommand({ sessionId: input.sessionId }, input.command);
+      return await dispatchWorkflowSessionCommand(input);
     },
 
     async getEventStream(
@@ -450,6 +450,13 @@ function inactiveCommandResult<TCommand extends SessionCommand>(
         ? { status: "no_active_turn" as const }
         : { status: "no_active_session" as const };
   return result as SessionCommandResult<TCommand>;
+}
+
+/** Sends one command to a session through its stable command inbox. */
+export async function dispatchWorkflowSessionCommand<TCommand extends SessionCommand>(
+  input: DispatchSessionInput<TCommand>,
+): Promise<SessionCommandResult<TCommand>> {
+  return await dispatchWorkflowCommand({ sessionId: input.sessionId }, input.command);
 }
 
 /** Requests cancellation through a session's stable command inbox. */

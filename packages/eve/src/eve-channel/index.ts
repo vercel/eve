@@ -22,8 +22,8 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
-  type SubagentCalledStreamEvent,
 } from "#protocol/message.js";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 import {
   EVE_ACTIVITY_ROUTE_PATTERN,
   EVE_CALLBACK_ROUTE_PATTERN,
@@ -76,9 +76,11 @@ import {
   requireSessionId,
 } from "#eve-channel/request.js";
 import { attachClientContext } from "#internal/client-context.js";
+import type { ParsedCreateBody } from "#eve-channel/create-request.js";
 import {
-  findRemoteSubagentBinding,
+  findRemoteAgentBinding,
   healthResponse,
+  type RemoteAgentBinding,
   normalizeEveCors,
   resolveOnMessage,
 } from "#eve-channel/support.js";
@@ -97,6 +99,18 @@ const log = createLogger("eve.channel");
  * Default-export the result as your `agent/channels/eve.ts` channel; reach for
  * {@link defineChannel} directly only for a custom transport.
  */
+/** A delegating caller checks that this deployment speaks its remote agent protocol. */
+function createdSessionBody(sessionId: string, body: ParsedCreateBody) {
+  const created: {
+    ok: true;
+    protocolVersion?: number;
+    sessionId: string;
+    status: "accepted";
+  } = { ok: true, sessionId, status: "accepted" };
+  if (body.callback !== undefined) created.protocolVersion = REMOTE_AGENT_PROTOCOL_VERSION;
+  return created;
+}
+
 export function eveChannel(input: EveChannelInput): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
 
@@ -231,16 +245,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (operationToken !== undefined) {
           const owner = await args.resolveSession(operationToken);
           if (owner !== undefined) {
-            return Response.json(
-              { ok: true, sessionId: owner.id, status: "accepted" },
-              {
-                headers: {
-                  "cache-control": "no-store",
-                  [EVE_SESSION_ID_HEADER]: owner.id,
-                },
-                status: 202,
+            return Response.json(createdSessionBody(owner.id, body), {
+              headers: {
+                "cache-control": "no-store",
+                [EVE_SESSION_ID_HEADER]: owner.id,
               },
-            );
+              status: 202,
+            });
           }
         }
 
@@ -336,16 +347,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
-        return Response.json(
-          { ok: true, sessionId: handle.sessionId, status: "accepted" },
-          {
-            headers: {
-              "cache-control": "no-store",
-              [EVE_SESSION_ID_HEADER]: handle.sessionId,
-            },
-            status: 202,
+        return Response.json(createdSessionBody(handle.sessionId, body), {
+          headers: {
+            "cache-control": "no-store",
+            [EVE_SESSION_ID_HEADER]: handle.sessionId,
           },
-        );
+          status: 202,
+        });
       }),
 
       POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -598,10 +606,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           childSessionId,
           parentSessionId,
         });
-        let binding: SubagentCalledStreamEvent;
+        let binding: RemoteAgentBinding;
         try {
           const parent = args.attachSession(parentSessionId);
-          const found = await findRemoteSubagentBinding({
+          const found = await findRemoteAgentBinding({
             callId,
             childSessionId,
             childStreamPath,
@@ -629,18 +637,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         let headers: Record<string, string>;
         try {
-          headers = await resolveHeaders({
-            name: binding.data.toolName,
-            resolverId: binding.data.remote!.resolverId,
-            url: binding.data.remote!.url,
-          });
+          headers = await resolveHeaders(binding);
         } catch {
           return Response.json({ error: "Subagent stream not found.", ok: false }, { status: 404 });
         }
 
         const upstreamUrl = new URL(
           createEveSessionStreamRoutePath(childSessionId).replace(/^\/+/, ""),
-          `${binding.data.remote!.url.replace(/\/+$/, "")}/`,
+          `${binding.url.replace(/\/+$/, "")}/`,
         );
         if (startIndex !== undefined) {
           upstreamUrl.searchParams.set("startIndex", String(startIndex));
