@@ -5,6 +5,7 @@ import { releaseSessionHooksStep } from "#execution/session-inbox/release-step.j
 import type { DeliverPayload, HookPayload, SessionCommand } from "#channel/types.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import type { TaskCancelDueMessage } from "#execution/tasks/hard-stop-workflow.js";
 
 /** All session addresses accept the same protocol. Callback routes construct
  * their own message kind; they never accept arbitrary session commands. */
@@ -17,6 +18,7 @@ export type SessionInboxPayload =
   | HookPayload
   | SessionCommand
   | WorkflowToolRunMessage
+  | TaskCancelDueMessage
   | AuthorizationCallbackPayload;
 
 interface Source {
@@ -37,6 +39,8 @@ export interface SessionInboxReader {
   /** Removes every payload accepted so far, in arrival order. */
   drain(): SessionInboxPayload[];
   hasPending(): boolean;
+  /** Resolves once a payload is ready or the inbox closes, without consuming anything. */
+  whenPending(): Promise<void>;
   /**
    * Called from the pump the moment an interrupt (`cancel`, `reset`,
    * `session-timeout`) is accepted, ahead of any consumer read. Handlers must
@@ -46,6 +50,11 @@ export interface SessionInboxReader {
   onInterrupt(handler: (payload: SessionInboxPayload) => void): () => void;
   /** Observes deliveries without consuming them; replays unread deliveries on subscription. */
   onDelivery(handler: (payload: SessionInboxPayload) => void): () => void;
+  /**
+   * Observes run announcements without consuming them; replays unread
+   * announcements on subscription. Handlers must be synchronous.
+   */
+  onAnnouncement(handler: (payload: WorkflowToolRunAnnouncement) => void): () => void;
   restore(payloads: readonly SessionInboxPayload[]): void;
 }
 
@@ -80,6 +89,7 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   const waiters = new Set<() => void>();
   const interruptHandlers = new Set<(payload: SessionInboxPayload) => void>();
   const deliveryHandlers = new Set<(payload: SessionInboxPayload) => void>();
+  const announcementHandlers = new Set<(payload: WorkflowToolRunAnnouncement) => void>();
   let failure: { error: unknown } | undefined;
 
   const notify = (): void => {
@@ -102,6 +112,8 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
           for (const handler of deliveryHandlers) handler(result.value);
         if (isInterrupt(result.value))
           for (const handler of interruptHandlers) handler(result.value);
+        if (isAnnouncement(result.value))
+          for (const handler of announcementHandlers) handler(result.value);
         notify();
       }
     } catch (error) {
@@ -174,6 +186,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       if (failure !== undefined) throw failure.error;
       return queue.length > 0;
     },
+    async whenPending() {
+      while (failure === undefined && queue.length === 0 && !closed()) await wait();
+    },
     onInterrupt(handler) {
       interruptHandlers.add(handler);
       return () => interruptHandlers.delete(handler);
@@ -183,6 +198,11 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       for (const payload of queue)
         if (payload.kind === "send" || payload.kind === "deliver") handler(payload);
       return () => deliveryHandlers.delete(handler);
+    },
+    onAnnouncement(handler) {
+      announcementHandlers.add(handler);
+      for (const payload of queue) if (isAnnouncement(payload)) handler(payload);
+      return () => announcementHandlers.delete(handler);
     },
     restore(payloads) {
       if (sources.length === 0)
@@ -214,9 +234,23 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
 export function isWorkflowMessage(value: SessionInboxPayload): value is WorkflowToolRunMessage {
   return (
     value.kind === "agent-started" ||
+    value.kind === "started" ||
     value.kind === "report" ||
     value.kind === "request" ||
     value.kind === "withdraw" ||
     value.kind === "outcome"
   );
+}
+
+/**
+ * Run messages that only publish an event on the session's stream. Handling
+ * one reads and writes no session state, so it need not wait for a boundary.
+ */
+export type WorkflowToolRunAnnouncement = Extract<
+  WorkflowToolRunMessage,
+  { readonly kind: "agent-started" | "report" }
+>;
+
+export function isAnnouncement(value: SessionInboxPayload): value is WorkflowToolRunAnnouncement {
+  return value.kind === "agent-started" || value.kind === "report";
 }

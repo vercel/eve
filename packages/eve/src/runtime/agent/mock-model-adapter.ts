@@ -23,7 +23,7 @@ import {
   getLastUserPromptText,
   getPromptContentText,
   getPromptText,
-  isAgentsAnnouncementText,
+  isFrameworkAnnouncementText,
 } from "#runtime/agent/bootstrap-model-utils.js";
 import {
   findRelevantSkill,
@@ -490,7 +490,7 @@ function getLastAuthoredToolResult(prompt: BootstrapPrompt): BootstrapToolResult
       // and the adapter then re-issues the same deterministic tool call —
       // for subagent starts that collides on the derived operation id and
       // fatally fails the parent session.
-      if (isAgentsAnnouncementText(getPromptContentText(message.content).trim())) {
+      if (isFrameworkAnnouncementText(getPromptContentText(message.content).trim())) {
         continue;
       }
       return null;

@@ -273,7 +273,7 @@ export function collectDurableDynamicToolCallbacks(input: {
   };
   readonly approval?: Approval<never>;
   readonly approvalKey?: (...args: never[]) => unknown;
-  readonly execute: (...args: never[]) => unknown;
+  readonly execute?: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
   const labelComplete = readDurableDynamicCallback(input.label?.complete);

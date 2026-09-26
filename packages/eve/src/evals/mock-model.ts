@@ -3,6 +3,7 @@ import { MockLanguageModelV3 } from "ai/test";
 
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { AGENTS_SNIPPET_LABEL } from "#subagents/handles/prompt.js";
+import { TASK_RESULT_TAG, TASKS_NOTE_LABEL } from "#execution/tasks/render.js";
 import { isPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 
 type GenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
@@ -177,9 +178,15 @@ function createRequest(options: GenerateOptions): MockModelRequest {
   };
 }
 
+/** Framework-injected listings and task results, which no one authored. */
 function isFrameworkScaffolding(message: string): boolean {
   const text = message.trim();
-  return text.startsWith(AGENTS_SNIPPET_LABEL) || isPendingApprovalsSnippet(text);
+  return (
+    text.startsWith(AGENTS_SNIPPET_LABEL) ||
+    text.startsWith(TASKS_NOTE_LABEL) ||
+    text.startsWith(TASK_RESULT_TAG) ||
+    isPendingApprovalsSnippet(text)
+  );
 }
 
 function extractMessageText(message: GenerateOptions["prompt"][number]): string {

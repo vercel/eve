@@ -1,4 +1,8 @@
-import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
+import {
+  isWorkflowToolDefinition,
+  readWorkflowToolEntryPoints,
+  type WorkflowToolEntryPoint,
+} from "#tools/workflow-definition.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
@@ -41,9 +45,16 @@ type NormalizedAuthoredTool = Readonly<
     readonly hasApproval: boolean;
     readonly hasExecute: boolean;
     readonly hasModelOutputProjection: boolean;
+    readonly workflow?: CompiledWorkflowEntry;
     readonly workflowProgram?: WorkflowProgramOptions;
   }
 >;
+
+/** The compiled entry point of a `defineWorkflowTool()` definition. */
+interface CompiledWorkflowEntry {
+  readonly entryPoint: WorkflowToolEntryPoint;
+  readonly workflowId: string;
+}
 type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
@@ -95,14 +106,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
 
   const record = expectObjectRecord(value, message);
-  const workflowId = readWorkflowFunctionId(record.execute);
-  if (isWorkflowToolDefinition(value)) {
-    if (workflowId === undefined) {
-      throw new Error(
-        `${message} defineWorkflowTool() requires a compiled workflow executor. Start execute with "use workflow" and export defineWorkflowTool() as the default export of a static tool module.`,
-      );
-    }
-  } else if (workflowId !== undefined) {
+  const workflow = isWorkflowToolDefinition(value)
+    ? readCompiledWorkflowEntry(record, message)
+    : undefined;
+  if (workflow === undefined && readWorkflowFunctionId(record.execute) !== undefined) {
     throw new Error(
       `${message} Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
     );
@@ -115,12 +122,12 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       "auth",
       "description",
       "execute",
-      "execution",
       "inputSchema",
       "approval",
       "approvalKey",
       "outputSchema",
       "toModelOutput",
+      ...(workflow === undefined ? [] : [workflow.entryPoint]),
     ],
     message,
   );
@@ -131,7 +138,8 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const behavior = readToolBehavior(value);
   const workflowProgram = readWorkflowProgramOptions(value);
-  const hasExecute = record.execute !== undefined;
+  // A workflow tool's entry point is its executor; the runtime loads the module for its hooks.
+  const hasExecute = workflow !== undefined || record.execute !== undefined;
   if (!hasExecute && behavior?.handling?.kind !== "dispatch") {
     expectFunction(record.execute, message);
   }
@@ -152,7 +160,9 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   if (workflowProgram !== undefined) {
     definition.workflowProgram = workflowProgram;
   }
-  if (hasExecute) {
+  if (workflow !== undefined) {
+    definition.workflow = workflow;
+  } else if (hasExecute) {
     definition.execute = expectFunction(record.execute, message) as ToolExecuteFn;
   }
   if (outputSchema !== undefined) {
@@ -194,4 +204,20 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     kind: "tool",
     definition,
   };
+}
+
+/** Reads the one entry point `defineWorkflowTool()` accepted, which the build compiled to a workflow. */
+function readCompiledWorkflowEntry(
+  record: Record<string, unknown>,
+  message: string,
+): CompiledWorkflowEntry {
+  const [entryPoint] = readWorkflowToolEntryPoints(record);
+  const workflowId =
+    entryPoint === undefined ? undefined : readWorkflowFunctionId(record[entryPoint]);
+  if (entryPoint === undefined || workflowId === undefined) {
+    throw new Error(
+      `${message} defineWorkflowTool() requires a compiled workflow executor. Start execute or task with "use workflow" and export defineWorkflowTool() as the default export of a static tool module.`,
+    );
+  }
+  return { entryPoint, workflowId };
 }

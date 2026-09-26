@@ -8,6 +8,7 @@ import {
   type AgentMessageResult,
   type WorkflowAgentMetadata,
   type WorkflowStepToolContext,
+  type WorkflowTaskContext,
   type WorkflowToolContext,
 } from "#tools/workflow-definition.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -48,6 +49,31 @@ describe("defineWorkflowTool", () => {
     expectTypeOf(definition.execute).parameter(0).toEqualTypeOf<{ service: string }>();
   });
 
+  it("infers a task's input and gives it a context without interruptSignal", () => {
+    const definition = defineWorkflowTool({
+      description: "Deploy",
+      inputSchema: z.object({ service: z.string() }),
+      async task(input, ctx) {
+        expectTypeOf(input).toEqualTypeOf<{ service: string }>();
+        expectTypeOf(ctx).toEqualTypeOf<WorkflowTaskContext>();
+        // @ts-expect-error Steering never interrupts a task.
+        void ctx.interruptSignal;
+        return { deployed: input.service };
+      },
+    });
+    expectTypeOf(definition.task).parameter(0).toEqualTypeOf<{ service: string }>();
+  });
+
+  it.each([
+    ["none", {}],
+    ["execute and task", { execute: async () => null, task: async () => null }],
+  ])("requires exactly one entry point (%s)", (found, entryPoints) => {
+    const definition = { description: "Deploy", inputSchema: {}, ...entryPoints };
+    expect(() => defineWorkflowTool(definition as never)).toThrow(
+      `Define exactly one of execute(input, ctx), task(input, ctx), or serve(receive, ctx); this tool defines ${found}.`,
+    );
+  });
+
   it("exposes only step-safe capabilities on WorkflowStepToolContext", () => {
     const useStepContext = (ctx: WorkflowStepToolContext) => {
       void ctx.getToken;
@@ -64,7 +90,7 @@ describe("defineWorkflowTool", () => {
     expectTypeOf(useStepContext).parameter(0).toEqualTypeOf<WorkflowStepToolContext>();
   });
 
-  it("rejects the removed execution option", () => {
+  it("rejects the replaced execution option", () => {
     const definition = {
       description: "Report a deployment",
       execution: "background",
@@ -74,7 +100,7 @@ describe("defineWorkflowTool", () => {
       },
     };
     expect(() => defineWorkflowTool(definition)).toThrow(
-      '"execution" was removed; workflow tool calls now block until they settle.',
+      '"execution" was replaced by task(). Define task(input, ctx) to run each call as a task.',
     );
   });
 

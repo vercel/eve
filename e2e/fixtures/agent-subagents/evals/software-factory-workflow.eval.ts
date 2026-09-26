@@ -29,9 +29,11 @@ export default defineEval({
 
     turn.expectOk();
     t.succeeded();
-    t.calledTool("workflow", {
+    t.calledTool("workflow", { count: 1 });
+    // The workflow tool runs as a task: its result settles the task, not the call.
+    t.event("task.settled", {
       count: 1,
-      output: (observed) => isDeepStrictEqual(observed, expected),
+      data: { output: (observed) => isDeepStrictEqual(observed, expected), status: "completed" },
     });
     t.event("agent.started", { count: 1, data: { name: TRIAGE } });
     t.event("agent.started", { count: 1, data: { name: REVIEW } });

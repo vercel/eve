@@ -7,6 +7,7 @@ import {
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
+import { startTaskRun } from "#execution/tasks/start.js";
 import { captureAgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
@@ -35,7 +36,7 @@ export async function dispatchCoordinationStep(
   const results: RuntimeActionResult[] = [];
 
   for (const task of prepared.plan) {
-    const started = await startWorkflowTask({
+    const start = {
       agentContext: captureAgentSessionContext(prepared, task.callId),
       agents: prepared.workflowAgents,
       auth: prepared.auth,
@@ -45,7 +46,15 @@ export async function dispatchCoordinationStep(
       parentSession: prepared.parentSession,
       session: nextSession,
       task,
-    });
+    };
+    const started =
+      task.entry.entryPoint === "task"
+        ? await startTaskRun({
+            ...start,
+            sessionWritable: input.sessionWritable,
+            taskId: task.entry.taskId,
+          })
+        : await startWorkflowTask(start);
     nextSession = started.session;
     if (started.result !== undefined) results.push(started.result);
   }

@@ -3,8 +3,9 @@ import {
   mayContainWorkflowDirective,
   readWorkflowDirective,
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
+import { WORKFLOW_TOOL_ENTRY_POINTS } from "#tools/workflow-entry-point.js";
 
-const HOISTED_EXECUTE_NAME = "execute";
+const ENTRY_POINT_METHODS = WORKFLOW_TOOL_ENTRY_POINTS.map((name) => `"${name}"`).join(" or ");
 
 type AstNode = {
   async?: boolean;
@@ -41,6 +42,13 @@ interface DirectiveFunctionNode {
   readonly fn: AstNode;
 }
 
+/** A default-exported definition's entry-point method: its property and function. */
+interface EntryPointMethod {
+  readonly fn: AstNode;
+  readonly name: string;
+  readonly property: AstNode;
+}
+
 export interface AuthoredWorkflowDirectiveSource {
   readonly hasDirectives: boolean;
   readonly hasWorkflowDirective: boolean;
@@ -49,9 +57,10 @@ export interface AuthoredWorkflowDirectiveSource {
 
 /**
  * The directive transform understands one shape: a top-level `async function`
- * whose first statement is the directive. A marked `defineWorkflowTool` executor is hoisted
- * into that shape here; every other placement is a build error, because an
- * ignored directive would run side effects inline in a replayed body.
+ * whose first statement is the directive. A marked `defineWorkflowTool` entry
+ * point (`execute` or `task`) is hoisted into that shape here; every other
+ * placement is a build error, because an ignored directive would run side
+ * effects inline in a replayed body.
  */
 export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
@@ -75,7 +84,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       throw new Error(
         `${JSON.stringify(directive)} in "${input.filePath}" is a module-level directive. ` +
           `Put it as the first statement of the function it marks: a top-level "async function" declaration` +
-          ` or the "execute" method of a default-exported defineWorkflowTool().`,
+          ` or the ${ENTRY_POINT_METHODS} method of a default-exported defineWorkflowTool().`,
       );
     }
   }
@@ -92,15 +101,9 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     if (declaration !== undefined) allowed.add(declaration);
   }
 
-  const executeProperty = findDefaultExportExecuteProperty(body);
-  const executeFunction =
-    executeProperty !== undefined &&
-    isAstNode(executeProperty.value) &&
-    isFunctionLike(executeProperty.value)
-      ? executeProperty.value
-      : undefined;
-  if (executeFunction !== undefined) {
-    allowed.add(executeFunction);
+  const entryPoints = findDefaultExportEntryPoints(body);
+  for (const entryPoint of entryPoints) {
+    allowed.add(entryPoint.fn);
   }
 
   const found = collectDirectiveFunctions(program as AstNode);
@@ -113,7 +116,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
       throw new Error(
         `${JSON.stringify(entry.directive)} in "${input.filePath}" marks ${describeFunction(entry.fn)}. ` +
           `Workflow directives must mark a top-level "async function" declaration` +
-          ` or the "execute" method of a default-exported defineWorkflowTool().`,
+          ` or the ${ENTRY_POINT_METHODS} method of a default-exported defineWorkflowTool().`,
       );
     }
     if (entry.fn.async !== true) {
@@ -122,16 +125,20 @@ export async function prepareAuthoredWorkflowDirectives(input: {
           `Declare it with "async function".`,
       );
     }
-    if (entry.fn === executeFunction && entry.directive !== "use workflow") {
+    const entryPoint = entryPoints.find((candidate) => candidate.fn === entry.fn);
+    if (entryPoint !== undefined && entry.directive !== "use workflow") {
       throw new Error(
-        `"use step" in "${input.filePath}" marks the default export's "execute" method. ` +
-          `A tool's "execute" can be a workflow ("use workflow"); steps are the helper functions it calls.`,
+        `"use step" in "${input.filePath}" marks the default export's "${entryPoint.name}" method. ` +
+          `A tool's "${entryPoint.name}" can be a workflow ("use workflow"); steps are the helper functions it calls.`,
       );
     }
   }
 
-  const hoist = found.find((entry) => entry.fn === executeFunction);
-  if (hoist === undefined || executeProperty === undefined) {
+  // defineWorkflowTool() accepts one entry point, so only one is hoisted.
+  const hoisted = entryPoints.find((entryPoint) =>
+    found.some((entry) => entry.fn === entryPoint.fn),
+  );
+  if (hoisted === undefined) {
     return {
       hasDirectives: true,
       hasWorkflowDirective,
@@ -139,37 +146,43 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     };
   }
 
-  if (declaresTopLevelBinding(body, HOISTED_EXECUTE_NAME)) {
+  if (declaresTopLevelBinding(body, hoisted.name)) {
     throw new Error(
-      `"use workflow" in "${input.filePath}" marks the "execute" method, but the module also declares a top-level "${HOISTED_EXECUTE_NAME}" binding. ` +
-        `eve hoists that method to a top-level "async function ${HOISTED_EXECUTE_NAME}"; rename the existing binding.`,
+      `"use workflow" in "${input.filePath}" marks the "${hoisted.name}" method, but the module also declares a top-level "${hoisted.name}" binding. ` +
+        `eve hoists that method to a top-level "async function ${hoisted.name}"; rename the existing binding.`,
     );
   }
 
   return {
     hasDirectives: true,
     hasWorkflowDirective,
-    source: hoistExecuteMethod(input.source, executeProperty, hoist.fn),
+    source: hoistEntryPointMethod(input.source, hoisted),
   };
 }
 
-function findDefaultExportExecuteProperty(body: readonly AstNode[]): AstNode | undefined {
+function findDefaultExportEntryPoints(body: readonly AstNode[]): EntryPointMethod[] {
   const exported = body.find((statement) => statement.type === "ExportDefaultDeclaration");
   const declaration = exported?.declaration;
   const definition =
     declaration?.type === "CallExpression" ? declaration.arguments?.[0] : declaration;
-  if (definition?.type !== "ObjectExpression") return undefined;
+  if (definition?.type !== "ObjectExpression") return [];
 
-  return definition.properties?.find(
-    (property) =>
-      property.type === "Property" &&
-      property.kind === "init" &&
-      property.computed !== true &&
-      readPropertyName(property.key) === HOISTED_EXECUTE_NAME,
-  );
+  const methods: EntryPointMethod[] = [];
+  for (const property of definition.properties ?? []) {
+    if (property.type !== "Property" || property.kind !== "init" || property.computed === true) {
+      continue;
+    }
+    const name = readPropertyName(property.key);
+    const fn = property.value;
+    if (name === undefined || !WORKFLOW_TOOL_ENTRY_POINTS.some((entry) => entry === name)) continue;
+    if (!isAstNode(fn) || !isFunctionLike(fn)) continue;
+    methods.push({ fn, name, property });
+  }
+  return methods;
 }
 
-function hoistExecuteMethod(source: string, property: AstNode, fn: AstNode): string {
+function hoistEntryPointMethod(source: string, method: EntryPointMethod): string {
+  const { fn, name, property } = method;
   if (
     property.start === undefined ||
     property.end === undefined ||
@@ -177,7 +190,7 @@ function hoistExecuteMethod(source: string, property: AstNode, fn: AstNode): str
     fn.body.start === undefined ||
     fn.body.end === undefined
   ) {
-    throw new Error("Cannot hoist an execute method without source ranges.");
+    throw new Error(`Cannot hoist a "${name}" method without source ranges.`);
   }
 
   const params = fn.params ?? [];
@@ -191,9 +204,9 @@ function hoistExecuteMethod(source: string, property: AstNode, fn: AstNode): str
   const returnTypeText = sliceNode(source, fn.returnType);
   const bodyText = source.slice(fn.body.start, fn.body.end);
   const star = fn.generator === true ? "*" : "";
-  const declaration = `async function${star} ${HOISTED_EXECUTE_NAME}${typeParametersText}(${paramsText})${returnTypeText} ${bodyText}`;
+  const declaration = `async function${star} ${name}${typeParametersText}(${paramsText})${returnTypeText} ${bodyText}`;
 
-  return `${source.slice(0, property.start)}${HOISTED_EXECUTE_NAME}${source.slice(property.end)}\n${declaration}\n`;
+  return `${source.slice(0, property.start)}${name}${source.slice(property.end)}\n${declaration}\n`;
 }
 
 function sliceNode(source: string, node: AstNode | null | undefined): string {

@@ -1,14 +1,12 @@
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
+import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
 import type { JsonValue } from "#shared/json.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#tools/schema.js";
 
 export interface WorkflowToolHarnessDefinitionInput {
   readonly definition: HarnessToolDefinition;
   readonly executeInput?: (input: unknown) => JsonValue;
-  /** Selected agent definition's runtime graph ID; absent for authored workflow tools. */
-  readonly nodeId?: string;
-
   readonly workflowId: string;
 }
 
@@ -20,7 +18,6 @@ export function createWorkflowToolHarnessDefinition(
     ...input.definition,
     execute: undefined,
     executeInput: input.executeInput,
-    nodeId: input.nodeId,
     workflowId: input.workflowId,
   };
 }
@@ -28,8 +25,9 @@ export function createWorkflowToolHarnessDefinition(
 export function createPreparedWorkflowToolHarnessDefinition(
   tool: PreparedRuntimeTool,
 ): HarnessToolDefinition {
-  if (tool.task === undefined) {
-    throw new Error(`Prepared tool "${tool.name}" is not backed by a workflow task.`);
+  const workflowId = workflowIdForHandling(tool.behavior?.handling);
+  if (workflowId === undefined) {
+    throw new Error(`Prepared tool "${tool.name}" is not backed by a workflow.`);
   }
   return createWorkflowToolHarnessDefinition({
     definition: {
@@ -40,7 +38,6 @@ export function createPreparedWorkflowToolHarnessDefinition(
       outputSchema: toOutputSchema(tool.outputSchema),
       rootOnly: tool.rootOnly,
     },
-    nodeId: tool.task.nodeId,
-    workflowId: tool.task.workflowId,
+    workflowId,
   });
 }

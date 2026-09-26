@@ -55,5 +55,6 @@ export default defineEval({
     // The eval watches both the parent and the sleeper session; each one's turn is cancelled once.
     t.event("turn.cancelled", { count: 2 });
     t.event("agent.started", { count: 1, data: { name: "sleeper" } });
+    t.event("task.settled", { count: 1, data: { status: "cancelled" } });
   },
 });

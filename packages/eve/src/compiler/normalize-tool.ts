@@ -6,7 +6,7 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { TASK_KERNEL_TOOL_NAMES } from "#execution/tasks/calls.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -53,6 +53,12 @@ export async function compileToolEntry(
   const toolName = stripLogicalPathExtension(source.logicalPath)
     .replace(/^tools\//, "")
     .replaceAll("/", "-");
+
+  if (TASK_KERNEL_TOOL_NAMES.includes(toolName)) {
+    throw new Error(
+      `Tool "${source.logicalPath}" uses the reserved name "${toolName}". Rename its path; eve reserves "${toolName}" for its built-in task tool.`,
+    );
+  }
 
   if (entry.kind === "disabled") {
     return { kind: "disabled", name: toolName };
@@ -101,20 +107,20 @@ export async function compileToolEntry(
     };
   }
 
-  const workflowId = readWorkflowFunctionId(entry.definition.execute);
+  const { workflow } = entry.definition;
   const shape = {
-    suspend: workflowId === undefined ? ("none" as const) : ("workflow" as const),
+    suspend: workflow === undefined ? ("none" as const) : ("workflow" as const),
   };
   return {
     kind: "tool",
     definition: {
       availableInSubagents: entry.definition.availableInSubagents,
       behavior:
-        workflowId === undefined
+        workflow === undefined
           ? entry.definition.behavior === undefined
             ? { availability: [], shape }
             : { ...entry.definition.behavior, shape }
-          : { availability: [], handling: { kind: "workflow-tool", workflowId }, shape },
+          : { availability: [], handling: { kind: "workflow-tool", ...workflow }, shape },
       description: entry.definition.description,
       exportName: source.exportName,
       hasExecute: entry.definition.hasExecute,

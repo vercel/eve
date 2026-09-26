@@ -1,6 +1,7 @@
 import { getPendingAuthorization } from "#harness/authorization.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
-import { getPendingCoordinationBatch } from "#harness/coordination.js";
+import { getPendingCoordinationBatch, pendingCoordinationCallIds } from "#harness/coordination.js";
+import type { TaskKernelCall } from "#execution/tasks/calls.js";
 import type { HarnessSession } from "#harness/types.js";
 
 /** Derives the workflow fields used to select the next action at the park boundary. */
@@ -9,6 +10,7 @@ export function derivePendingState(session: HarnessSession): {
   readonly hasPendingAuthorization: boolean;
   readonly hasPendingInputBatch: boolean;
   readonly pendingCoordinationCallIds?: readonly string[];
+  readonly pendingKernelCalls?: readonly TaskKernelCall[];
 } {
   const batch = getPendingCoordinationBatch(session.state);
   const pendingAuth = getPendingAuthorization(session.state);
@@ -22,6 +24,7 @@ export function derivePendingState(session: HarnessSession): {
   if (batch === undefined) return base;
   return {
     ...base,
-    pendingCoordinationCallIds: batch.tasks.map((request) => request.callId),
+    pendingCoordinationCallIds: pendingCoordinationCallIds(batch),
+    pendingKernelCalls: batch.kernelCalls ?? [],
   };
 }

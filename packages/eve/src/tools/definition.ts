@@ -346,7 +346,7 @@ export function stampToolDefinition<
     readonly description: string;
     readonly inputSchema?: unknown;
     readonly outputSchema?: unknown;
-    readonly execute: (...args: never[]) => unknown;
+    readonly execute?: (...args: never[]) => unknown;
     readonly label?: ToolLabelDefinition;
     readonly approval?: Approval<never>;
     readonly approvalKey?: (...args: never[]) => unknown;

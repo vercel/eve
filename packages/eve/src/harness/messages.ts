@@ -17,7 +17,8 @@ export type FrameworkMessageKind =
   | "context.compaction"
   | "memory.load"
   | "execution.continuation"
-  | "execution.retry";
+  | "execution.retry"
+  | "task.result";
 
 /** Semantic classification for every user-role message in model history. */
 export type UserMessageKind = "user" | FrameworkMessageKind;
@@ -108,7 +109,8 @@ export function isFrameworkMessageKind(value: unknown): value is FrameworkMessag
     value === "context.compaction" ||
     value === "memory.load" ||
     value === "execution.continuation" ||
-    value === "execution.retry"
+    value === "execution.retry" ||
+    value === "task.result"
   );
 }
 

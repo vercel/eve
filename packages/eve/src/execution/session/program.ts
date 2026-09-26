@@ -208,16 +208,30 @@ async function runSessionLoop(
 
   const nextParkedActivity = async (
     expectedAttemptIds: ReadonlySet<string>,
-  ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" }>> => {
+  ): Promise<
+    Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" | "task-cancel-due" }>
+  > => {
     while (true) {
       const next = await nextTurnDelivery({
         cursor,
         expectedAttemptIds,
+        hasWorkingTasks: () => execution.tasks.hasWorkingTasks(),
         inbox,
         queue,
       });
-      if (next.kind !== "workflow") return next;
-      await execution.handleWorkflowMessage(next.message);
+      if (next.kind === "workflow") {
+        await execution.handleWorkflowMessage(next.message);
+        continue;
+      }
+      if (next.kind === "task-cancel-due") {
+        await execution.tasks.hardStopOverdue();
+        continue;
+      }
+      if (next.kind === "cancel-working-tasks") {
+        await execution.tasks.cancelAll();
+        continue;
+      }
+      return next;
     }
   };
 
@@ -343,6 +357,7 @@ async function runSessionLoop(
             serializedContext: cursor.serializedContext,
             sessionState: cursor.sessionState,
           });
+          await execution.tasks.cancelAll();
           await settleCancelledTurn();
           // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };

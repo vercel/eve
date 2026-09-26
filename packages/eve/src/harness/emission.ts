@@ -258,6 +258,11 @@ interface EmittedStreamContent {
 
 interface StreamActionEmissionOptions {
   readonly excludedActionToolNames: ReadonlySet<string>;
+  /**
+   * The turn's tasks are working, so a text step can't end the turn: it
+   * reports `"tool-calls"` and channels don't post it as the reply.
+   */
+  readonly holdsTurn?: boolean;
   readonly tools: HarnessToolMap;
 }
 
@@ -295,6 +300,15 @@ export async function emitStreamContent(
       await orderedEmitter.closeAndDrain();
     }
   }
+}
+
+/** A held turn's text step isn't the turn's reply, so it reports `"tool-calls"` as channels expect. */
+function reportedFinishReason(
+  finishReason: AssistantStepFinishReason,
+  holdsTurn: boolean,
+): AssistantStepFinishReason {
+  if (holdsTurn && finishReason === "stop") return "tool-calls";
+  return finishReason;
 }
 
 async function consumeStreamContent(
@@ -665,7 +679,7 @@ async function consumeStreamContent(
   if (finishReason !== "content-filter" && currentMessage.trim().length > 0) {
     await emitFn(
       createMessageCompletedEvent({
-        finishReason,
+        finishReason: reportedFinishReason(finishReason, options?.holdsTurn === true),
         message: currentMessage,
         sequence: state.sequence,
         stepIndex: state.stepIndex,

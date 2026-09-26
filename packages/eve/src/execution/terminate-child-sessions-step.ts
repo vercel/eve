@@ -1,7 +1,13 @@
 import { deserializeContext } from "#context/serialize.js";
 import type { ContextContainer } from "#context/container.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
-import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  readDurableSession,
+  type DurableSession,
+  type DurableSessionState,
+} from "#execution/durable-session-store.js";
+import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
+import { liveTaskRuns, readTaskTable } from "#execution/tasks/table.js";
 import {
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
@@ -16,7 +22,7 @@ const log = createLogger("execution.terminate-child-sessions");
 
 /**
  * Terminates children the parent holds handles to when the parent session
- * ends.
+ * ends, and stops the session's task runs.
  *
  * Every nonterminal `agent/local`/`agent/self` handle is covered: `running`
  * and `parked` handles carry a confirmed address; a `starting` handle has
@@ -39,6 +45,8 @@ export async function terminateChildSessionsStep(input: {
     });
     return;
   }
+
+  await stopTaskRuns(session);
 
   const handles = getAgentHandleStore(session.state)?.handles ?? [];
   const hasRemoteHandle = handles.some(
@@ -124,4 +132,10 @@ export async function terminateChildSessionsStep(input: {
       });
     }
   }
+}
+
+/** Session end ends every task, including cancelled runs that haven't confirmed yet. */
+async function stopTaskRuns(session: DurableSession): Promise<void> {
+  const runs = liveTaskRuns(readTaskTable(session.state));
+  await Promise.all(runs.map((run) => cancelWorkflowToolRun(run, "The session ended.")));
 }

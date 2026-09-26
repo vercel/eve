@@ -187,7 +187,6 @@ describe("dynamic subagent lifecycle", () => {
     expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
       "workflow//eve//subagentToolExecuteWorkflow",
     );
-    expect(buildDynamicSubagentTools(ctx)[0]?.nodeId).toEqual(expect.any(String));
 
     await dispatchDynamicSubagentEvent({
       ctx,
@@ -198,7 +197,6 @@ describe("dynamic subagent lifecycle", () => {
     expect(buildDynamicSubagentTools(ctx)[0]?.workflowId).toBe(
       "workflow//eve//subagentToolExecuteWorkflow",
     );
-    expect(buildDynamicSubagentTools(ctx)[0]?.nodeId).toEqual(expect.any(String));
   });
 
   it("exposes a dynamic selection without root configuration", async () => {

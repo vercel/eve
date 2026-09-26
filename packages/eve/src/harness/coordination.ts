@@ -6,6 +6,7 @@ import type {
   RuntimeActionRequest,
   RuntimeActionResult,
   RuntimeWorkflowTaskRequest,
+  WorkflowToolRunEntry,
 } from "#shared/action-types.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -22,6 +23,8 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { TaskKernelCall } from "#execution/tasks/calls.js";
+import { startsTasks } from "#execution/tasks/model-step.js";
 import {
   accumulateSessionUsage,
   getTurnUsageState,
@@ -72,6 +75,8 @@ interface PendingCoordinationEventMetadata {
 export interface PendingCoordinationBatch {
   /** Authored-tool and subagent workflow tasks pending coordination. */
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+  /** `task_wait` and `task_cancel` calls, which the session answers itself. */
+  readonly kernelCalls?: readonly TaskKernelCall[];
   readonly event: PendingCoordinationEventMetadata;
   readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
@@ -125,18 +130,22 @@ export function clearPendingCoordinationBatch(session: HarnessSession): HarnessS
 export function setPendingCoordinationBatch(input: {
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly event: PendingCoordinationEventMetadata;
+  readonly kernelCalls?: readonly TaskKernelCall[];
   readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
-  assertUniqueCoordinationCallIds(input.tasks);
-  const state = { ...input.session.state };
-  state[PENDING_COORDINATION_BATCH_KEY] = {
+  const kernelCalls = input.kernelCalls ?? [];
+  assertUniqueCoordinationCallIds([...input.tasks, ...kernelCalls]);
+  const batch: PendingCoordinationBatch = {
     tasks: [...input.tasks],
     event: input.event,
     localFanoutSize: input.localFanoutSize,
     responseMessages: [...input.responseMessages],
-  } satisfies PendingCoordinationBatch;
+  };
+  const state = { ...input.session.state };
+  state[PENDING_COORDINATION_BATCH_KEY] =
+    kernelCalls.length === 0 ? batch : { ...batch, kernelCalls: [...kernelCalls] };
 
   return { ...input.session, state };
 }
@@ -182,9 +191,15 @@ function resolveResultsForCoordinationBatch(input: {
   readonly state: SessionStateMap | undefined;
 }): RuntimeActionResult[] | undefined {
   return resolveRuntimeActionResultsForCallIds({
-    pendingCallIds: input.batch.tasks.map((request) => request.callId),
+    pendingCallIds: pendingCoordinationCallIds(input.batch),
     results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
   });
+}
+
+/** Every call a pending batch waits on: workflow runs and kernel calls. */
+export function pendingCoordinationCallIds(batch: PendingCoordinationBatch): readonly string[] {
+  const kernelCallIds = (batch.kernelCalls ?? []).map((call) => call.callId);
+  return [...batch.tasks.map((request) => request.callId), ...kernelCallIds];
 }
 
 /**
@@ -410,6 +425,7 @@ export function createRuntimeActionRequestFromToolCall(input: {
 
 /** Projects one deferred harness tool call into a workflow run request. */
 export function createCoordinationRequestFromToolCall(input: {
+  readonly entry: WorkflowToolRunEntry;
   readonly toolCall: TypedToolCall<ToolSet>;
   readonly tools: HarnessToolMap;
 }): RuntimeWorkflowTaskRequest {
@@ -423,6 +439,7 @@ export function createCoordinationRequestFromToolCall(input: {
   });
   return {
     callId: input.toolCall.toolCallId,
+    entry: input.entry,
     executeInput: definition.executeInput?.(inputObject),
     input: inputObject,
     kind: "workflow-task",
@@ -475,7 +492,12 @@ async function projectToolResultOutput(
   result: Extract<RuntimeActionResult, { kind: "tool-result" }>,
   definition: HarnessToolDefinition | undefined,
 ): Promise<ToolResultPart["output"]> {
-  if (result.isError === true || definition?.toModelOutput === undefined) {
+  // A task tool's call result is its receipt; `toModelOutput` projects the task's result.
+  if (
+    result.isError === true ||
+    definition?.toModelOutput === undefined ||
+    startsTasks(definition)
+  ) {
     return toToolResultOutput(result);
   }
   return normalizeToolModelOutput({

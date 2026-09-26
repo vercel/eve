@@ -37,6 +37,7 @@ function createMockInbox(reads: readonly ScriptedRead[]): SessionInbox {
     hasPending() {
       return remaining.length > 0;
     },
+    whenPending: () => new Promise<void>(() => {}),
     async next() {
       const read = remaining.shift();
       if (read === undefined) throw new Error("Mock inbox exhausted.");
@@ -46,6 +47,7 @@ function createMockInbox(reads: readonly ScriptedRead[]): SessionInbox {
     onDelivery() {
       return () => {};
     },
+    onAnnouncement: () => () => {},
     onInterrupt() {
       return () => {};
     },
@@ -94,6 +96,7 @@ function waitInput(inbox: SessionInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
     expectedAttemptIds: new Set(["attempt-1"]),
+    hasWorkingTasks: () => false,
     inbox: inbox,
     cursor,
     queue: new SessionInputQueue(),

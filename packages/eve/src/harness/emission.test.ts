@@ -472,7 +472,6 @@ describe("emitStreamContent action requests", () => {
           description: "Delegate work to a subagent.",
           inputSchema: jsonSchema({ type: "object" }),
           name: "delegate",
-          nodeId: "subagents/researcher",
           workflowId: "workflow//./agent/subagents/researcher//execute",
         },
       ],

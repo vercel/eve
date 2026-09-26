@@ -3,7 +3,10 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { serializeInputSchema, toInputSchema } from "#tools/schema.js";
 import { getRun } from "#internal/workflow/runtime.js";
-import { type WorkflowToolDefinition, defineWorkflowTool } from "#tools/workflow-definition.js";
+import {
+  type WorkflowExecuteToolDefinition,
+  defineWorkflowTool,
+} from "#tools/workflow-definition.js";
 
 const DEPLOY_INPUT_SCHEMA = toInputSchema({
   additionalProperties: false,
@@ -55,7 +58,7 @@ export async function createWorkflowToolRuntime(input: {
         loadNamespace: async () => ({
           default: defineWorkflowTool({
             description: `Deploys a service (${input.toolName}).`,
-            execute: input.execute as WorkflowToolDefinition["execute"],
+            execute: input.execute as WorkflowExecuteToolDefinition["execute"],
             inputSchema: serializeInputSchema(input.inputSchema ?? DEPLOY_INPUT_SCHEMA) ?? {},
           }),
         }),

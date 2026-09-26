@@ -1,7 +1,7 @@
 import type { BootstrapPrompt } from "#runtime/agent/bootstrap-model-utils.js";
 import {
   getPromptContentText,
-  isAgentsAnnouncementText,
+  isFrameworkAnnouncementText,
 } from "#runtime/agent/bootstrap-model-utils.js";
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
@@ -144,7 +144,7 @@ function getTrailingUserText(prompt: BootstrapPrompt): string {
     const text = getPromptContentText(message.content);
     // Framework-injected [Agents] announcements are scaffolding, not part
     // of the turn's authored ask.
-    if (isAgentsAnnouncementText(text.trim())) continue;
+    if (isFrameworkAnnouncementText(text.trim())) continue;
     texts.unshift(text);
   }
 

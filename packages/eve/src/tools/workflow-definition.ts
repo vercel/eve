@@ -14,6 +14,12 @@ import {
   type ToolInputResponse,
 } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
+import {
+  WORKFLOW_TOOL_ENTRY_POINTS,
+  type WorkflowToolEntryPoint,
+} from "#tools/workflow-entry-point.js";
+
+export type { WorkflowToolEntryPoint };
 
 export interface WorkflowAgentMetadata {
   readonly description: string;
@@ -65,13 +71,10 @@ export interface AgentSession {
   ): Promise<AgentResponse<TOutput>>;
 }
 
-/**
- * Context supplied to a workflow tool body. When passed directly to a step,
- * eve replaces it with {@link WorkflowStepToolContext}.
- */
-export type WorkflowToolContext = Pick<
+/** Members the context of every workflow tool entry point shares. */
+export type WorkflowSharedContext = Pick<
   ToolContext,
-  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
+  "session" | "toolName" | "getToken" | "requireAuth"
 > & {
   /**
    * Returns a new session with the agent of this invocation name. Nothing
@@ -86,74 +89,157 @@ export type WorkflowToolContext = Pick<
    * `options.signal` or the call's `abortSignal` aborts.
    */
   ask(request: ToolInputRequest, options?: ToolInputRequestOptions): PromiseLike<ToolInputResponse>;
-  /**
-   * Aborts once, on the first steering message that arrives while the turn
-   * waits on this call. What it means is the tool's choice: a body that
-   * ignores it keeps going, and one that should stop early races or passes it.
-   */
-  readonly interruptSignal: AbortSignal;
 };
+
+/**
+ * Context of an `execute(input, ctx)` call, which the turn waits on. When
+ * passed directly to a step, eve replaces it with {@link WorkflowStepToolContext}.
+ */
+export type WorkflowToolContext = WorkflowSharedContext &
+  Pick<ToolContext, "abortSignal" | "callId"> & {
+    /**
+     * Aborts once, on the first steering message that arrives while the turn
+     * waits on this call. What it means is the tool's choice: a body that
+     * ignores it keeps going, and one that should stop early races or passes it.
+     */
+    readonly interruptSignal: AbortSignal;
+  };
+
+/**
+ * Context of a `task(input, ctx)` call, which runs as a task. Steering never
+ * interrupts a task, so it has no `interruptSignal`. When passed directly to a
+ * step, eve replaces it with {@link WorkflowStepToolContext}.
+ */
+export type WorkflowTaskContext = WorkflowSharedContext &
+  Pick<ToolContext, "abortSignal" | "callId">;
 
 const WORKFLOW_TOOL_BRAND = Symbol.for("eve:workflow-tool-brand");
 
-/** A static tool whose executor runs as a durable workflow. Its executor must start with "use workflow". */
-export interface WorkflowToolDefinition<
-  TInput = unknown,
-  TOutput = unknown,
-> extends PublicToolDefinition<TInput, TOutput> {
+interface WorkflowToolDefinitionBase<TInput, TOutput> extends PublicToolDefinition<
+  TInput,
+  TOutput
+> {
   readonly [WORKFLOW_TOOL_BRAND]: true;
-  execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
+/** A workflow tool whose calls are ordinary tool calls: the turn waits until each settles. */
+export interface WorkflowExecuteToolDefinition<
+  TInput = unknown,
+  TOutput = unknown,
+> extends WorkflowToolDefinitionBase<TInput, TOutput> {
+  execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
+  task?: never;
+}
+
+/**
+ * A workflow tool whose every call runs as a task: the model gets a receipt at
+ * once and the conversation continues, and the result arrives later in a
+ * `task.result` message.
+ */
+export interface WorkflowTaskToolDefinition<
+  TInput = unknown,
+  TOutput = unknown,
+> extends WorkflowToolDefinitionBase<TInput, TOutput> {
+  task(input: TInput, ctx: WorkflowTaskContext): Promise<TOutput> | AsyncIterable<TOutput>;
+  execute?: never;
+}
+
+/**
+ * A static tool whose entry point runs as a durable workflow and must start
+ * with "use workflow". It defines exactly one entry point.
+ */
+export type WorkflowToolDefinition<TInput = unknown, TOutput = unknown> =
+  | WorkflowExecuteToolDefinition<TInput, TOutput>
+  | WorkflowTaskToolDefinition<TInput, TOutput>;
+
+type Unbranded<T> = T extends unknown ? Omit<T, typeof WORKFLOW_TOOL_BRAND> : never;
 type WorkflowReturn<T> = T extends AsyncIterable<infer Output> ? Output : Awaited<T>;
 type Schema = StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>;
-type Definition<TInput, TReturn> = Omit<
-  WorkflowToolDefinition<TInput, WorkflowReturn<TReturn>>,
-  typeof WORKFLOW_TOOL_BRAND | "execute"
-> & {
+type EntryPointReturn<TOutput> = Promise<TOutput> | AsyncIterable<TOutput>;
+type InferOutput<TSchema extends StandardJSONSchemaV1<unknown, unknown>> =
+  StandardJSONSchemaV1.InferOutput<TSchema>;
+type InferInput<TSchema extends Schema> = StandardSchemaV1.InferOutput<TSchema>;
+
+type DefinitionFields<TInput, TReturn> = Omit<
+  WorkflowToolDefinitionBase<TInput, WorkflowReturn<TReturn>>,
+  typeof WORKFLOW_TOOL_BRAND
+>;
+type ExecuteDefinition<TInput, TReturn> = DefinitionFields<TInput, TReturn> & {
   execute(input: TInput, ctx: WorkflowToolContext): TReturn;
+  task?: never;
+};
+type TaskDefinition<TInput, TReturn> = DefinitionFields<TInput, TReturn> & {
+  task(input: TInput, ctx: WorkflowTaskContext): TReturn;
+  execute?: never;
+};
+type WithSchemas<TDefinition, TInputSchema, TOutputSchema> = Omit<
+  TDefinition,
+  "inputSchema" | "outputSchema"
+> & {
+  inputSchema: TInputSchema;
+  outputSchema: TOutputSchema;
+};
+type WithInputSchema<TDefinition, TSchema> = Omit<TDefinition, "inputSchema"> & {
+  inputSchema: TSchema;
 };
 
 export function defineWorkflowTool<
   TInputSchema extends Schema,
   TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
-  TReturn extends
-    | Promise<StandardJSONSchemaV1.InferOutput<TOutputSchema>>
-    | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>,
+  TReturn extends EntryPointReturn<InferOutput<TOutputSchema>>,
 >(
-  definition: Omit<
-    Definition<StandardSchemaV1.InferOutput<TInputSchema>, TReturn>,
-    "inputSchema" | "outputSchema"
-  > & {
-    inputSchema: TInputSchema;
-    outputSchema: TOutputSchema;
-  },
-): WorkflowToolDefinition<
-  StandardSchemaV1.InferOutput<TInputSchema>,
-  StandardJSONSchemaV1.InferOutput<TOutputSchema>
->;
+  definition: WithSchemas<
+    ExecuteDefinition<InferInput<TInputSchema>, TReturn>,
+    TInputSchema,
+    TOutputSchema
+  >,
+): WorkflowExecuteToolDefinition<InferInput<TInputSchema>, InferOutput<TOutputSchema>>;
+export function defineWorkflowTool<
+  TInputSchema extends Schema,
+  TOutputSchema extends StandardJSONSchemaV1<unknown, unknown>,
+  TReturn extends EntryPointReturn<InferOutput<TOutputSchema>>,
+>(
+  definition: WithSchemas<
+    TaskDefinition<InferInput<TInputSchema>, TReturn>,
+    TInputSchema,
+    TOutputSchema
+  >,
+): WorkflowTaskToolDefinition<InferInput<TInputSchema>, InferOutput<TOutputSchema>>;
 export function defineWorkflowTool<
   TSchema extends Schema,
-  TReturn extends Promise<unknown> | AsyncIterable<unknown>,
+  TReturn extends EntryPointReturn<unknown>,
 >(
-  definition: Omit<Definition<StandardSchemaV1.InferOutput<TSchema>, TReturn>, "inputSchema"> & {
-    inputSchema: TSchema;
-  },
-): WorkflowToolDefinition<StandardSchemaV1.InferOutput<TSchema>, WorkflowReturn<TReturn>>;
-export function defineWorkflowTool<TReturn extends Promise<unknown> | AsyncIterable<unknown>>(
-  definition: Definition<Record<string, unknown>, TReturn> & { inputSchema: JsonObject },
-): WorkflowToolDefinition<Record<string, unknown>, WorkflowReturn<TReturn>>;
+  definition: WithInputSchema<ExecuteDefinition<InferInput<TSchema>, TReturn>, TSchema>,
+): WorkflowExecuteToolDefinition<InferInput<TSchema>, WorkflowReturn<TReturn>>;
+export function defineWorkflowTool<
+  TSchema extends Schema,
+  TReturn extends EntryPointReturn<unknown>,
+>(
+  definition: WithInputSchema<TaskDefinition<InferInput<TSchema>, TReturn>, TSchema>,
+): WorkflowTaskToolDefinition<InferInput<TSchema>, WorkflowReturn<TReturn>>;
+export function defineWorkflowTool<TReturn extends EntryPointReturn<unknown>>(
+  definition: ExecuteDefinition<Record<string, unknown>, TReturn> & { inputSchema: JsonObject },
+): WorkflowExecuteToolDefinition<Record<string, unknown>, WorkflowReturn<TReturn>>;
+export function defineWorkflowTool<TReturn extends EntryPointReturn<unknown>>(
+  definition: TaskDefinition<Record<string, unknown>, TReturn> & { inputSchema: JsonObject },
+): WorkflowTaskToolDefinition<Record<string, unknown>, WorkflowReturn<TReturn>>;
 export function defineWorkflowTool<TInput = unknown, TOutput = unknown>(
-  definition: Omit<WorkflowToolDefinition<TInput, TOutput>, typeof WORKFLOW_TOOL_BRAND>,
-): WorkflowToolDefinition<TInput, TOutput>;
-export function defineWorkflowTool<TInput, TOutput>(
-  definition: Omit<WorkflowToolDefinition<TInput, TOutput>, typeof WORKFLOW_TOOL_BRAND>,
-): WorkflowToolDefinition<TInput, TOutput> {
+  definition: Unbranded<WorkflowExecuteToolDefinition<TInput, TOutput>>,
+): WorkflowExecuteToolDefinition<TInput, TOutput>;
+export function defineWorkflowTool<TInput = unknown, TOutput = unknown>(
+  definition: Unbranded<WorkflowTaskToolDefinition<TInput, TOutput>>,
+): WorkflowTaskToolDefinition<TInput, TOutput>;
+export function defineWorkflowTool(
+  definition: Unbranded<WorkflowToolDefinition>,
+): WorkflowToolDefinition {
   if ("execution" in definition) {
-    throw new Error('"execution" was removed; workflow tool calls now block until they settle.');
+    throw new Error(
+      '"execution" was replaced by task(). Define task(input, ctx) to run each call as a task.',
+    );
   }
+  assertOneEntryPoint(definition);
   stampToolDefinition(definition, "defineWorkflowTool");
   return Object.assign(definition, { [WORKFLOW_TOOL_BRAND]: true as const });
 }
@@ -161,5 +247,23 @@ export function defineWorkflowTool<TInput, TOutput>(
 export function isWorkflowToolDefinition(value: unknown): boolean {
   return (
     typeof value === "object" && value !== null && Reflect.get(value, WORKFLOW_TOOL_BRAND) === true
+  );
+}
+
+/** The entry points a definition defines; a workflow tool defines exactly one. */
+export function readWorkflowToolEntryPoints(definition: object): WorkflowToolEntryPoint[] {
+  return WORKFLOW_TOOL_ENTRY_POINTS.filter(
+    (entryPoint) => Reflect.get(definition, entryPoint) !== undefined,
+  );
+}
+
+const ENTRY_POINT_LIST = new Intl.ListFormat("en", { type: "conjunction" });
+
+function assertOneEntryPoint(definition: object): void {
+  const defined = readWorkflowToolEntryPoints(definition);
+  if (defined.length === 1) return;
+  const found = defined.length === 0 ? "none" : ENTRY_POINT_LIST.format(defined);
+  throw new Error(
+    `Define exactly one of execute(input, ctx), task(input, ctx), or serve(receive, ctx); this tool defines ${found}.`,
   );
 }

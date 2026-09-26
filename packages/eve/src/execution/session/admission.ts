@@ -19,6 +19,7 @@ type SessionAdmission =
   | { readonly kind: "cancel" }
   | { readonly kind: "consumed" }
   | { readonly kind: "runtime-action-result"; readonly payload: RuntimeActionResultHookPayload }
+  | { readonly kind: "task-cancel-due" }
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage };
 
 /**
@@ -36,6 +37,7 @@ export async function admitSessionInboxPayload(
   if (value.kind === "runtime-action-result")
     return { kind: "runtime-action-result", payload: value };
   if (isWorkflowMessage(value)) return { kind: "workflow", message: value };
+  if (value.kind === "task.cancel-due") return { kind: "task-cancel-due" };
   if (value.kind === "authorization-callback") {
     input.queue.enqueueAuthorization(value.payloads);
     return { kind: "consumed" };

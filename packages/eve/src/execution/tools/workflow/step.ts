@@ -226,6 +226,7 @@ async function reportAuthorization(
     name: challenge.name,
     sequence: run.from.sequence,
     stepIndex: run.from.stepIndex,
+    taskId: run.from.taskId,
     turnId: run.from.turnId,
     authorization: challenge.challenge,
   };

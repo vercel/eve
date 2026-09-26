@@ -320,6 +320,7 @@ describe("compileAgentManifest source graph", () => {
     expect(compiled.tools.find((tool) => tool.name === "durable")?.behavior).toEqual({
       availability: [],
       handling: {
+        entryPoint: "execute",
         kind: "workflow-tool",
         workflowId: "workflow//example/tool//execute",
       },
@@ -355,11 +356,10 @@ describe("compileAgentManifest source graph", () => {
       hasExecute: false,
     });
     expect(graph.root.turnAgent.tools.find((tool) => tool.name === "agent")).toMatchObject({
-      rootOnly: true,
-      task: {
-        nodeId: "__root__",
-        workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
+      behavior: {
+        handling: { kind: "dispatch", target: { kind: "self-agent-call", nodeId: "__root__" } },
       },
+      rootOnly: true,
     });
     expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
       behavior: {
@@ -693,6 +693,23 @@ describe("compileAgentManifest source graph", () => {
       compileAgentManifest(discovered, { sourceRegistries: [registry([])] }),
     ).rejects.toThrow(
       'Subagent "subagents/agent" uses the reserved name "agent". Rename its path; eve reserves "agent" for the built-in root-copy target.',
+    );
+  });
+
+  it("reserves the task kernel's tool names", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/task_cancel.ts",
+        loadNamespace: async () => ({
+          default: defineTool({ description: "Cancel.", inputSchema: {}, execute: () => null }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'Tool "tools/task_cancel.ts" uses the reserved name "task_cancel". Rename its path; eve reserves "task_cancel" for its built-in task tool.',
     );
   });
 

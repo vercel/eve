@@ -1,6 +1,7 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { jsonValuesEqual } from "#shared/json.js";
+import { principalOf } from "#execution/tasks/principal.js";
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
 
@@ -109,15 +110,12 @@ export class SessionInputQueue {
     this.entries[index] = { delivery, kind: "delivery", sequence };
   }
 
-  takeSteering(
-    admitted: ReadonlySet<number>,
-    callerCallId: string | undefined,
-  ): TurnSelection | undefined {
+  takeSteering(admitted: ReadonlySet<number>, turn: SteeringTurn): TurnSelection | undefined {
     const steering = this.entries.filter(
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, callerCallId),
+        isSteeringDelivery(entry.delivery, turn),
     );
     if (steering.length === 0) return undefined;
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
@@ -211,23 +209,30 @@ export class SessionInputQueue {
   }
 }
 
-export function isSteeringDelivery(
-  delivery: DeliverHookPayload,
-  callerCallId: string | undefined,
-): boolean {
+/** The running turn a delivery may steer. */
+export interface SteeringTurn {
+  /** The delegated caller's call id, when a caller started the turn. */
+  readonly callerCallId: string | undefined;
+  readonly principal: string;
+}
+
+/**
+ * Only the turn's own principal steers it; another principal's message waits
+ * for the turn to end. A delivery without auth acts as the session's current
+ * identity, which is the turn's.
+ */
+export function isSteeringDelivery(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {
   return (
     (delivery.turnPolicy ?? "steer") === "steer" &&
-    (delivery.caller === undefined || delivery.caller.callId === callerCallId)
+    (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
+    (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
   );
 }
 
 /** A steering delivery with a message for the model, not only answers to requests. */
-export function isSteeringMessage(
-  delivery: DeliverHookPayload,
-  callerCallId: string | undefined,
-): boolean {
+export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {
   return (
-    isSteeringDelivery(delivery, callerCallId) &&
+    isSteeringDelivery(delivery, turn) &&
     delivery.payloads.some(
       (payload) => payload.message !== undefined && payload.inputResponses === undefined,
     )

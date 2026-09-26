@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { RuntimeRegistryError } from "../src/internal/runtime-registry.js";
-import {
-  createPreparedRuntimeSubagentTool,
-  createRuntimeSubagentRegistry,
-} from "../src/runtime/subagents/registry.js";
+import { createRuntimeSubagentRegistry } from "../src/runtime/subagents/registry.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA as subagentToolInputSchema } from "../src/tools/framework/agent-contract.js";
 import type { ResolvedRuntimeSubagentNode } from "../src/runtime/types.js";
 
@@ -93,23 +90,6 @@ describe("createRuntimeSubagentRegistry", () => {
         ],
       }),
     ).toThrowError(RuntimeRegistryError);
-  });
-
-  it("prepares subagent tools as workflow tools", () => {
-    const definition = createResolvedRuntimeSubagentNode({
-      description: "Investigate one task in depth.",
-      logicalPath: "subagents/researcher",
-      name: "researcher",
-      nodeId: "subagents/researcher",
-      sourceId: "subagents/researcher",
-    });
-
-    const prepared = createPreparedRuntimeSubagentTool(definition);
-
-    expect(prepared.task).toEqual({
-      nodeId: definition.nodeId,
-      workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
-    });
   });
 });
 
