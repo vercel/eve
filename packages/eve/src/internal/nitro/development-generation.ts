@@ -1,5 +1,5 @@
-import { rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
+import { finalizeDevelopmentGenerationMetadata } from "#internal/nitro/dev-runtime-generation-metadata.js";
 import { getDevelopmentFrameworkFingerprint } from "#internal/workflow/development-runtime-compatibility.js";
 
 import type { AuthoredWorkflowModules } from "#internal/workflow-bundle/builder-support.js";
@@ -23,6 +23,7 @@ export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapsh
 
 interface DevelopmentGenerationPruneState {
   requested: boolean;
+  reconciliationPending: boolean;
   running: Promise<void> | undefined;
   onRuntimePruned?: () => Promise<void>;
 }
@@ -60,14 +61,11 @@ export async function stageDevelopmentGeneration(
       runtimeAppRoot: snapshot.runtimeAppRoot,
     });
 
-    await writeFile(
-      join(snapshot.snapshotRoot, "generation.json"),
-      `${JSON.stringify({
-        runtimeAppRoot: snapshot.runtimeAppRoot,
-        frameworkFingerprint: await getDevelopmentFrameworkFingerprint(),
-        workflowSourceFingerprint: prepared.workflowSourceFingerprint,
-      })}\n`,
-    );
+    await finalizeDevelopmentGenerationMetadata(snapshot.snapshotRoot, {
+      runtimeAppRoot: snapshot.runtimeAppRoot,
+      frameworkFingerprint: await getDevelopmentFrameworkFingerprint(),
+      workflowSourceFingerprint: prepared.workflowSourceFingerprint,
+    });
 
     return prepared.workflowSourceFingerprint === undefined
       ? {
@@ -155,6 +153,7 @@ function requestDevelopmentGenerationPrune(
 ): void {
   const state: DevelopmentGenerationPruneState = developmentGenerationPruneStates.get(appRoot) ?? {
     requested: false,
+    reconciliationPending: false,
     running: undefined,
   };
   developmentGenerationPruneStates.set(appRoot, state);
@@ -173,9 +172,20 @@ function startDevelopmentGenerationPruning(
     while (state.requested) {
       state.requested = false;
       const onRuntimePruned = state.onRuntimePruned;
-      await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot });
+      let removedSnapshots: boolean;
       try {
-        await onRuntimePruned?.();
+        removedSnapshots = await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot });
+      } catch (error) {
+        // A failed prune may already have removed some snapshots.
+        state.reconciliationPending ||= onRuntimePruned !== undefined;
+        throw error;
+      }
+      state.reconciliationPending ||= removedSnapshots && onRuntimePruned !== undefined;
+      try {
+        if (state.reconciliationPending && onRuntimePruned !== undefined) {
+          await onRuntimePruned();
+          state.reconciliationPending = false;
+        }
       } catch (error) {
         console.warn(`[eve:dev] failed to reconcile expired Workflow runs: ${String(error)}`);
       }
@@ -188,8 +198,11 @@ function startDevelopmentGenerationPruning(
       state.running = undefined;
       if (state.requested) {
         startDevelopmentGenerationPruning(appRoot, state);
-      } else {
+      } else if (!state.reconciliationPending) {
         developmentGenerationPruneStates.delete(appRoot);
+      } else {
+        // Retry failed cleanup on the next activation, even if its prune is a no-op.
+        state.onRuntimePruned = undefined;
       }
     });
 }

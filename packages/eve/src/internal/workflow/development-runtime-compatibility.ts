@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
-import { basename, join, relative } from "node:path";
+import { join, relative } from "node:path";
+import { readDevelopmentGenerationMetadata } from "#internal/nitro/dev-runtime-generation-metadata.js";
 
 import {
   resolvePackageCompiledFilePath,
@@ -48,18 +49,26 @@ export async function readDevelopmentGenerationAvailability(
   generationId: string,
   activeGenerationId: string,
 ): Promise<DevelopmentGenerationAvailability> {
-  const metadata = await readMetadata(appRoot, generationId);
-  if (metadata === undefined) {
+  const retained = await readDevelopmentGenerationMetadata(appRoot, generationId);
+  if (retained.kind === "missing") {
     return { kind: "missing", reason: "Development runtime snapshot is no longer available" };
   }
   const active =
     generationId === activeGenerationId
-      ? metadata
-      : await readMetadata(appRoot, activeGenerationId);
+      ? retained
+      : await readDevelopmentGenerationMetadata(appRoot, activeGenerationId);
+  if (retained.kind === "invalid" || active.kind === "invalid") {
+    return {
+      kind: "incompatible",
+      reason:
+        "Development generation metadata is invalid. Restore the affected snapshot from a backup or start a new session.",
+    };
+  }
+  const { metadata } = retained;
   if (
-    active === undefined ||
+    active.kind !== "ready" ||
     metadata.frameworkFingerprint !== (await getDevelopmentFrameworkFingerprint()) ||
-    metadata.workflowSourceFingerprint !== active?.workflowSourceFingerprint
+    metadata.workflowSourceFingerprint !== active.metadata.workflowSourceFingerprint
   ) {
     return {
       kind: "incompatible",
@@ -68,44 +77,4 @@ export async function readDevelopmentGenerationAvailability(
     };
   }
   return { kind: "ready", runtimeAppRoot: metadata.runtimeAppRoot };
-}
-
-async function readMetadata(
-  appRoot: string,
-  generationId: string,
-): Promise<
-  | {
-      runtimeAppRoot: string;
-      frameworkFingerprint?: string;
-      workflowSourceFingerprint?: string;
-    }
-  | undefined
-> {
-  if (
-    !generationId ||
-    generationId === "." ||
-    generationId === ".." ||
-    basename(generationId) !== generationId
-  ) {
-    throw new Error("Workflow run references an invalid development generation.");
-  }
-  let source: string;
-  try {
-    source = await readFile(
-      join(appRoot, ".eve", "dev-runtime", "snapshots", generationId, "generation.json"),
-      "utf8",
-    );
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
-    throw error;
-  }
-  const metadata = JSON.parse(source);
-  if (
-    metadata === null ||
-    typeof metadata !== "object" ||
-    typeof metadata.runtimeAppRoot !== "string"
-  ) {
-    throw new Error(`Development generation "${generationId}" has invalid metadata.`);
-  }
-  return metadata;
 }
