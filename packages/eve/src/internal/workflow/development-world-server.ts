@@ -1,4 +1,8 @@
-import { readDevelopmentGenerationAvailability } from "#internal/workflow/development-runtime-compatibility.js";
+import {
+  readDevelopmentGenerationAvailability,
+  type DevelopmentGenerationAvailability,
+} from "#internal/workflow/development-runtime-compatibility.js";
+import { listDevelopmentGenerationIds } from "#internal/nitro/dev-runtime-generation-metadata.js";
 
 import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
 import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
@@ -62,6 +66,10 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   readonly #resolveActiveGenerationId: () => string;
   readonly #transportSecret: string;
   readonly #world: World;
+  readonly #incompatibleGenerations = new Map<
+    string,
+    Extract<DevelopmentGenerationAvailability, { kind: "incompatible" }>
+  >();
   #closed = false;
   #started = false;
   #reconciliation: Promise<void> = Promise.resolve();
@@ -89,6 +97,20 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   async start(): Promise<void> {
     if (this.#started) {
       return;
+    }
+    // Queue redelivery starts with the World. Decide admission before it can wake retained runs.
+    const recoveryGenerationId = this.#resolveActiveGenerationId();
+    this.#incompatibleGenerations.clear();
+    for (const generationId of await listDevelopmentGenerationIds(this.#appRoot)) {
+      if (generationId === recoveryGenerationId) continue;
+      const availability = await readDevelopmentGenerationAvailability(
+        this.#appRoot,
+        generationId,
+        recoveryGenerationId,
+      );
+      if (availability.kind === "incompatible") {
+        this.#incompatibleGenerations.set(generationId, availability);
+      }
     }
     await this.#world.start?.();
     this.#started = true;
@@ -177,7 +199,10 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
           );
         }
         for (const run of page.data) {
-          const availability = await this.#generationAvailability(run.deploymentId);
+          const availability = await readDevelopmentGenerationAvailability(
+            this.#appRoot,
+            run.deploymentId,
+          );
           if (availability.kind === "missing") runIds.push(run.runId);
         }
         cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
@@ -278,12 +303,11 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     return header !== null && timingSafeEqualStrings(header, this.#transportSecret);
   }
 
-  #generationAvailability(generationId: string) {
-    return readDevelopmentGenerationAvailability(
-      this.#appRoot,
-      generationId,
-      this.#resolveActiveGenerationId(),
-    );
+  async #generationAvailability(generationId: string): Promise<DevelopmentGenerationAvailability> {
+    const availability = await readDevelopmentGenerationAvailability(this.#appRoot, generationId);
+    // Pruning still expires a run, even when startup refused its recovery.
+    if (availability.kind !== "ready") return availability;
+    return this.#incompatibleGenerations.get(generationId) ?? availability;
   }
 }
 
