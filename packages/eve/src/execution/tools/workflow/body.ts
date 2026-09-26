@@ -3,9 +3,14 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { AgentSessions } from "#execution/agent-sessions/session.js";
-import type { WorkflowTaskContext, WorkflowToolContext } from "#tools/workflow-definition.js";
+import type {
+  WorkflowSharedContext,
+  WorkflowTaskContext,
+  WorkflowToolContext,
+} from "#tools/workflow-definition.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
+  type WorkflowToolRunControlMessage,
   type WorkflowToolRunOutcome,
   type WorkflowToolRunOwner,
   type WorkflowToolRunRef,
@@ -37,50 +42,95 @@ export interface WorkflowBodyDefinition {
 
 export interface WorkflowBodyInput extends WorkflowBodyDefinition {
   readonly owner: WorkflowToolRunOwner;
+  readonly runId?: string;
 }
 
 export interface WorkflowBodyResult {
   readonly outcome: WorkflowToolRunOutcome;
-  /** Progress reports the body sent; the run relays each before the outcome. */
-  readonly reportCount: number;
+  /** Reports and replies the body sent; the run relays each before the outcome. */
+  readonly messageCount: number;
 }
 
 /**
- * What the run owns and lends its body: the call's signals, which commands on
- * the run's control hook abort, and the `ctx.agent` sessions the run ends when
- * it finishes.
+ * How the session's commands reach a running body. What a command means
+ * depends on the entry point: a cancel ends an `execute` or `task` call, but
+ * only the current stretch of work of a `serve` task.
  */
-export interface WorkflowBodyRun {
-  readonly abortSignal: AbortSignal;
-  readonly agentSessions: AgentSessions;
-  readonly interruptSignal: AbortSignal;
+export interface WorkflowBodyControl {
+  /** Aborts when the run stops for good; the run then settles as cancelled. */
+  readonly runSignal: AbortSignal;
+  apply(command: WorkflowToolRunControlMessage): void;
 }
 
-type WorkflowBodyContext = ToolContext & (WorkflowToolContext | WorkflowTaskContext);
+/** A body the run started, and how its commands reach it. */
+export interface StartedWorkflowBody {
+  readonly control: WorkflowBodyControl;
+  readonly result: Promise<WorkflowBodyResult>;
+}
 
-type WorkflowEntryPointFunction = (
+type WorkflowCallContext = ToolContext & (WorkflowToolContext | WorkflowTaskContext);
+
+type WorkflowCallEntryPoint = (
   input: unknown,
-  ctx: WorkflowBodyContext,
+  ctx: WorkflowCallContext,
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
 
-/** Executes one registered workflow body and reports progress to its owner. */
-export async function executeWorkflowBody(
-  input: WorkflowBodyInput & { readonly runId?: string },
-  run: WorkflowBodyRun,
+/** The signals of an `execute` or `task` call, which the run's commands abort. */
+class WorkflowCallSignals implements WorkflowBodyControl {
+  private readonly abort = new AbortController();
+  private readonly interrupt = new AbortController();
+
+  get runSignal(): AbortSignal {
+    return this.abort.signal;
+  }
+
+  get interruptSignal(): AbortSignal {
+    return this.interrupt.signal;
+  }
+
+  apply(command: WorkflowToolRunControlMessage): void {
+    switch (command.kind) {
+      case "cancel":
+      case "end":
+        this.abort.abort(new WorkflowToolRunCancelledError(command.reason));
+        return;
+      case "interrupt":
+        this.interrupt.abort();
+        return;
+      case "call":
+        // Only a `serve` task takes later calls.
+        return;
+    }
+  }
+}
+
+/** Starts the body of an `execute` or `task` call, which serves the call the run started with. */
+export function startCallBody(
+  input: WorkflowBodyInput,
+  agentSessions: AgentSessions,
+): StartedWorkflowBody {
+  const signals = new WorkflowCallSignals();
+  return { control: signals, result: executeCallBody(input, signals, agentSessions) };
+}
+
+/** Executes one call's registered workflow body and reports progress to its owner. */
+async function executeCallBody(
+  input: WorkflowBodyInput,
+  signals: WorkflowCallSignals,
+  agentSessions: AgentSessions,
 ): Promise<WorkflowBodyResult> {
-  const signal = run.abortSignal;
   const from = createWorkflowBodyRef(input);
-  const ctx = createWorkflowBodyContext(input, run);
+  const ctx = createCallContext(input, signals, agentSessions);
   attachWorkflowToolRunContext(ctx, {
     // A caller that can't reach a person resolves `ctx.ask()` as `unavailable`.
     canRequestInput: input.agentContext.capabilities?.requestInput === true,
     from,
     owner: input.owner,
   });
-  let reportCount = 0;
+  let messageCount = 0;
 
   try {
-    const entryPoint = resolveWorkflowEntryPoint(input);
+    const entryPoint = resolveWorkflowEntryPoint<WorkflowCallEntryPoint>(input);
     const result = entryPoint(input.executeInput ?? input.input, ctx);
     let output: JsonValue;
     if (!isAsyncIterable(result)) {
@@ -93,29 +143,33 @@ export async function executeWorkflowBody(
         last = next.value;
         const report: WorkflowToolRunReport = { from, update: next.value };
         await resumeHookStep(input.owner.inbox, { kind: "report", ...report });
-        reportCount += 1;
+        messageCount += 1;
         next = await iterator.next();
       }
       output = (next.value as JsonValue | undefined) ?? last ?? null;
     }
-    return { outcome: { output, status: "completed" }, reportCount };
+    return { messageCount, outcome: { output, status: "completed" } };
   } catch (error) {
-    if (signal.aborted) {
-      return {
-        outcome: {
-          reason:
-            signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
-          status: "cancelled",
-        },
-        reportCount,
-      };
-    }
-    return { outcome: { error: normalizeSerializableError(error), status: "failed" }, reportCount };
+    return { messageCount, outcome: toFailedOutcome(error, signals.runSignal) };
   }
 }
 
+/** A body's failure, or its cancellation when the run stopped. */
+export function toFailedOutcome(error: unknown, runSignal: AbortSignal): WorkflowToolRunOutcome {
+  if (runSignal.aborted) {
+    const { reason } = runSignal;
+    return {
+      reason: reason instanceof Error ? reason.message : String(reason ?? ""),
+      status: "cancelled",
+    };
+  }
+  return { error: normalizeSerializableError(error), status: "failed" };
+}
+
 export function createWorkflowBodyRef(
-  input: WorkflowBodyDefinition & { readonly runId?: string },
+  input: WorkflowBodyDefinition & {
+    readonly runId?: string;
+  },
 ): WorkflowToolRunRef {
   const ref: WorkflowToolRunRef = {
     callId: input.callId,
@@ -126,34 +180,35 @@ export function createWorkflowBodyRef(
     toolName: input.toolName,
     turnId: input.session.turn.id,
   };
-  return input.entry.entryPoint === "task" ? { ...ref, taskId: input.entry.taskId } : ref;
+  return input.entry.entryPoint === "execute" ? ref : { ...ref, taskId: input.entry.taskId };
 }
 
-function resolveWorkflowEntryPoint(input: WorkflowBodyInput): WorkflowEntryPointFunction {
+export function resolveWorkflowEntryPoint<TEntryPoint>(input: WorkflowBodyInput): TEntryPoint {
   const entryPoint = readRegisteredWorkflow(input.workflowId);
   if (typeof entryPoint !== "function") {
     throw new Error(
       `Tool "${input.toolName}" is not registered as a workflow in this deployment (${input.workflowId}). The tool was renamed or removed after this run started.`,
     );
   }
-  return entryPoint as WorkflowEntryPointFunction;
+  return entryPoint as TEntryPoint;
 }
 
 /**
- * The context the entry point gets: a task's, or, for an `execute` call the
- * turn waits on, the same plus `interruptSignal`.
+ * The members every entry point's context shares, bound to the run. `ask`
+ * is the entry point's own, since what it may ask for depends on its calls.
  */
-function createWorkflowBodyContext(
+export function createSharedContext(
   input: WorkflowBodyInput,
-  run: WorkflowBodyRun,
-): WorkflowBodyContext {
+  agentSessions: AgentSessions,
+  askPerson: WorkflowSharedContext["ask"],
+): Omit<ToolContext, "abortSignal" | "callId"> & WorkflowSharedContext {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
       `ctx.${member} is not available inside a workflow tool; ${hint}. Tool "${input.toolName}" runs as a durable workflow body, which only replays deterministic code.`,
     );
   };
-  const ctx: ToolContext & WorkflowTaskContext = {
-    agent: (name) => run.agentSessions.open(name),
+  return {
+    agent: (name) => agentSessions.open(name),
     agents: Object.freeze(
       Object.fromEntries(
         Object.entries(input.agents ?? {}).map(([name, metadata]) => [
@@ -162,9 +217,7 @@ function createWorkflowBodyContext(
         ]),
       ),
     ),
-    ask: (request, options) => ask(ctx, request, options),
-    abortSignal: run.abortSignal,
-    callId: input.callId,
+    ask: askPerson,
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),
@@ -176,12 +229,24 @@ function createWorkflowBodyContext(
     session: input.session,
     toolName: input.toolName,
   };
-  switch (input.entry.entryPoint) {
-    case "execute":
-      return Object.assign(ctx, { interruptSignal: run.interruptSignal });
-    case "task":
-      return ctx;
-  }
+}
+
+/**
+ * The context of an `execute` or `task` call: a task's, or, for an `execute`
+ * call the turn waits on, the same plus `interruptSignal`.
+ */
+function createCallContext(
+  input: WorkflowBodyInput,
+  signals: WorkflowCallSignals,
+  agentSessions: AgentSessions,
+): WorkflowCallContext {
+  const ctx: ToolContext & WorkflowTaskContext = {
+    ...createSharedContext(input, agentSessions, (request, options) => ask(ctx, request, options)),
+    abortSignal: signals.runSignal,
+    callId: input.callId,
+  };
+  if (input.entry.entryPoint !== "execute") return ctx;
+  return Object.assign(ctx, { interruptSignal: signals.interruptSignal });
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<JsonValue> {
@@ -190,4 +255,11 @@ function isAsyncIterable(value: unknown): value is AsyncIterable<JsonValue> {
     value !== null &&
     typeof (value as AsyncIterable<JsonValue>)[Symbol.asyncIterator] === "function"
   );
+}
+
+export class WorkflowToolRunCancelledError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "WorkflowToolRunCancelledError";
+  }
 }

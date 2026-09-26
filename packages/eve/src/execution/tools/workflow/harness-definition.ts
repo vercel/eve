@@ -1,3 +1,5 @@
+import { withTaskIdInput } from "#execution/tasks/task-id-input.js";
+import { entryPointOf } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
@@ -10,12 +12,19 @@ export interface WorkflowToolHarnessDefinitionInput {
   readonly workflowId: string;
 }
 
-/** Workflow tools run outside the model step, so the harness definition carries no `execute`. */
+/**
+ * Workflow tools run outside the model step, so the harness definition carries
+ * no `execute`. A `serve` tool's model input gains `taskId`.
+ */
 export function createWorkflowToolHarnessDefinition(
   input: WorkflowToolHarnessDefinitionInput,
 ): HarnessToolDefinition {
+  const definition =
+    entryPointOf(input.definition) === "serve"
+      ? withTaskIdInput(input.definition)
+      : input.definition;
   return {
-    ...input.definition,
+    ...definition,
     execute: undefined,
     executeInput: input.executeInput,
     workflowId: input.workflowId,

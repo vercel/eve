@@ -31,7 +31,7 @@ import type { JsonValue } from "#shared/json.js";
 /** Whether a run's message changes a task record. */
 export function isTaskRunMessage(message: WorkflowToolRunMessage): message is TaskRunMessage {
   if (message.from.taskId === undefined) return false;
-  return message.kind === "started" || message.kind === "outcome";
+  return message.kind === "started" || message.kind === "reply" || message.kind === "outcome";
 }
 
 /**

@@ -5,7 +5,9 @@ import {
 } from "#internal/workflow-bundle/workflow-directive-ast.js";
 import { WORKFLOW_TOOL_ENTRY_POINTS } from "#tools/workflow-entry-point.js";
 
-const ENTRY_POINT_METHODS = WORKFLOW_TOOL_ENTRY_POINTS.map((name) => `"${name}"`).join(" or ");
+const ENTRY_POINT_METHODS = new Intl.ListFormat("en", { type: "disjunction" }).format(
+  WORKFLOW_TOOL_ENTRY_POINTS.map((name) => `"${name}"`),
+);
 
 type AstNode = {
   async?: boolean;

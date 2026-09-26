@@ -4,6 +4,9 @@ import {
   type WorkflowToolEntryPoint,
 } from "#tools/workflow-definition.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { TASK_ID_INPUT } from "#execution/tasks/task-id-input.js";
+import { isObject } from "#shared/guards.js";
+import type { JsonObject } from "#shared/json.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
@@ -135,6 +138,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     record.inputSchema === undefined
       ? null
       : serializeInputSchema(record.inputSchema as ToolSchemaSource);
+  if (workflow?.entryPoint === "serve") assertNoOwnTaskIdInput(inputSchema, message);
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const behavior = readToolBehavior(value);
   const workflowProgram = readWorkflowProgramOptions(value);
@@ -216,8 +220,17 @@ function readCompiledWorkflowEntry(
     entryPoint === undefined ? undefined : readWorkflowFunctionId(record[entryPoint]);
   if (entryPoint === undefined || workflowId === undefined) {
     throw new Error(
-      `${message} defineWorkflowTool() requires a compiled workflow executor. Start execute or task with "use workflow" and export defineWorkflowTool() as the default export of a static tool module.`,
+      `${message} defineWorkflowTool() requires a compiled workflow executor. Start execute, task, or serve with "use workflow" and export defineWorkflowTool() as the default export of a static tool module.`,
     );
   }
   return { entryPoint, workflowId };
+}
+
+/** eve adds `taskId` to a `serve` tool's model input, so the tool's own input can't use it. */
+function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string): void {
+  const properties = inputSchema?.properties;
+  if (!isObject(properties) || !(TASK_ID_INPUT in properties)) return;
+  throw new Error(
+    `${message} inputSchema declares "${TASK_ID_INPUT}", which eve adds to a serve tool's model input to send a call to a running task. Rename the field.`,
+  );
 }

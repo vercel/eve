@@ -15,6 +15,14 @@ export const TASK_CANCEL_TASK_ID_DESCRIPTION = "The id of the task to stop.";
 export const TASK_SYSTEM_BLOCK =
   "Every subagent call and some tools start a task and return its id right away; the task keeps working while you continue. Results arrive in <task_result> messages. When you need a result to continue, call task_wait; it returns when any task has a result. Start independent tasks first, then wait. To correct or continue an agent, or any task that accepts more input, call its tool again with its taskId. You cannot end your turn while tasks you started are working; eve waits for them and gives you their results. A new message interrupts your wait but not your tasks: decide whether it changes the work, then keep the tasks, correct an agent with taskId, or stop a task with task_cancel. Never use sleep to wait for a task.";
 
+/** Appended to a `serve` tool's description. */
+export const SERVE_TOOL_DESCRIPTION =
+  "To send this task more input, call this tool again with its taskId; without taskId, each call starts a new task.";
+
+/** Describes the `taskId` eve adds to a `serve` tool's model input. */
+export const TASK_ID_INPUT_DESCRIPTION =
+  "The id of a task this tool started, to send it this input. Omit it to start a new task.";
+
 /** Labels the `context.state` note that lists the caller's tasks. */
 export const TASKS_NOTE_LABEL = "[Tasks]";
 
@@ -28,8 +36,19 @@ const TASK_RESULTS_MAX_BYTES = 50 * 1024;
 const TASK_RESULTS_MAX_LINES = 2_000;
 const TRUNCATED_MARKER = "[truncated]";
 
-export function renderTaskReceipt(taskId: string): string {
-  return `Started task ${taskId}.`;
+/** The receipt for a call that starts a task; a resumable task's says how to reach it again. */
+export function renderTaskReceipt(task: {
+  readonly id: string;
+  readonly resumable: boolean;
+  readonly tool: string;
+}): string {
+  if (!task.resumable) return `Started task ${task.id}.`;
+  return `Started task ${task.id}. Call ${task.tool} again with taskId ${task.id} to send it another message.`;
+}
+
+/** The receipt for a call that reaches a resumable task by its `taskId`. */
+export function renderTaskSentReceipt(taskId: string): string {
+  return `Sent to task ${taskId}.`;
 }
 
 export function renderUnknownTaskError(taskId: string, tool: string): string {
@@ -178,18 +197,32 @@ function isModelOutput(
   return (type === "text" || type === "json" || type === "content") && "value" in value;
 }
 
-/** A tool's working tasks, as the `[Tasks]` note lists them. */
+/** A task as the `[Tasks]` note lists it. */
 export interface ListedTask {
   readonly id: string;
   readonly tool: string;
 }
 
-export function renderTasksNote(working: readonly ListedTask[]): string {
-  const tasks = working.map(
-    (task) =>
-      `<task id="${escapeAttribute(task.id)}" tool="${escapeAttribute(task.tool)}" status="working"/>`,
-  );
-  return [TASKS_NOTE_LABEL, "<tasks>", ...tasks, "</tasks>"].join("\n");
+/** The `[Tasks]` note: working tasks, then idle resumable tasks when there are any. */
+export function renderTasksNote(input: {
+  readonly idle: readonly ListedTask[];
+  readonly working: readonly ListedTask[];
+}): string {
+  const lines = [TASKS_NOTE_LABEL, "<tasks>"];
+  for (const task of input.working) {
+    lines.push(`<task ${listedTaskAttributes(task)} status="working"/>`);
+  }
+  lines.push("</tasks>");
+  if (input.idle.length > 0) {
+    lines.push("<idle>");
+    for (const task of input.idle) lines.push(`<task ${listedTaskAttributes(task)}/>`);
+    lines.push("</idle>");
+  }
+  return lines.join("\n");
+}
+
+function listedTaskAttributes(task: ListedTask): string {
+  return `id="${escapeAttribute(task.id)}" tool="${escapeAttribute(task.tool)}"`;
 }
 
 function formatDuration(ms: number): string {

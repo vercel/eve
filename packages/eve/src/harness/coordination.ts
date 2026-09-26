@@ -6,7 +6,7 @@ import type {
   RuntimeActionRequest,
   RuntimeActionResult,
   RuntimeWorkflowTaskRequest,
-  WorkflowToolRunEntry,
+  WorkflowToolCallEntry,
 } from "#shared/action-types.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
@@ -24,7 +24,7 @@ import {
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { TaskKernelCall } from "#execution/tasks/calls.js";
-import { startsTasks } from "#execution/tasks/model-step.js";
+import { startsTasks } from "#execution/tasks/tool-entry-point.js";
 import {
   accumulateSessionUsage,
   getTurnUsageState,
@@ -423,9 +423,13 @@ export function createRuntimeActionRequestFromToolCall(input: {
   return definition?.workflowId === undefined ? action : markRuntimeWorkflowToolAction(action);
 }
 
-/** Projects one deferred harness tool call into a workflow run request. */
+/**
+ * Projects one deferred harness tool call into a workflow run request. The
+ * input is the tool's own, without anything eve added to its model input.
+ */
 export function createCoordinationRequestFromToolCall(input: {
-  readonly entry: WorkflowToolRunEntry;
+  readonly entry: WorkflowToolCallEntry;
+  readonly input: JsonObject;
   readonly toolCall: TypedToolCall<ToolSet>;
   readonly tools: HarnessToolMap;
 }): RuntimeWorkflowTaskRequest {
@@ -433,15 +437,11 @@ export function createCoordinationRequestFromToolCall(input: {
   if (definition?.workflowId === undefined) {
     throw new Error(`Deferred tool "${input.toolCall.toolName}" has no workflow.`);
   }
-  const inputObject = resolveToolCallInputObject(input.toolCall.input, {
-    callId: input.toolCall.toolCallId,
-    toolName: input.toolCall.toolName,
-  });
   return {
     callId: input.toolCall.toolCallId,
     entry: input.entry,
-    executeInput: definition.executeInput?.(inputObject),
-    input: inputObject,
+    executeInput: definition.executeInput?.(input.input),
+    input: input.input,
     kind: "workflow-task",
     toolName: input.toolCall.toolName,
     workflowId: definition.workflowId,

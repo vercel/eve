@@ -77,7 +77,10 @@ export async function cancelDescendantTurnsStep(input: {
 
   await Promise.all([
     ...workflowToolRuns.map((record) =>
-      cancelWorkflowToolRun(record.address, "The turn that called the tool was cancelled."),
+      cancelWorkflowToolRun(record.address, {
+        kind: "cancel",
+        reason: "The turn that called the tool was cancelled.",
+      }),
     ),
     ...running.map((handle) =>
       handle.address.kind === "agent/remote"

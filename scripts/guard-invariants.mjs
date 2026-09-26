@@ -434,7 +434,7 @@ const TASK_KERNEL_DIR = "packages/eve/src/execution/tasks/";
 const TASK_TABLE_FILE_RE = /^packages\/eve\/src\/execution\/tasks\/table[\w-]*\.ts$/;
 const TASK_RENDER_FILE = `${TASK_KERNEL_DIR}render.ts`;
 const TASK_TABLE_KEY = '"eve.taskTable"';
-const TASK_MODEL_MARKERS = ["<task_result", "[Tasks]", "Started task "];
+const TASK_MODEL_MARKERS = ["<task_result", "[Tasks]", "Started task ", "Sent to task "];
 
 /**
  * @param {string} posix

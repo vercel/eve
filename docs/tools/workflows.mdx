@@ -13,7 +13,8 @@ call to an `execute(input, ctx)` tool blocks its turn until the workflow settles
 agent receives the workflow's output as the tool result. While the body waits durably, the turn
 parks without holding compute. A `task(input, ctx)` tool runs each call as a
 [task](#run-calls-as-tasks-task) instead: the model gets a receipt at once and the result arrives
-later.
+later. A `serve(receive, ctx)` tool runs a [resumable task](#resumable-tasks-serve), which the
+model can send more calls by its `taskId`.
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
@@ -70,9 +71,10 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 ### Rules
 
 - Export `defineWorkflowTool({ ... })` as the default export. Define exactly one entry point,
-  `execute` or `task`, as an async function or async generator, written inline or referenced as a
-  top-level `async function` in the same module or an imported application module. Defining
-  neither, or both, throws at definition time. Start the entry point with `"use workflow"` as its
+  `execute`, `task`, or `serve`, written inline or referenced as a top-level `async function` in
+  the same module or an imported application module. `execute` and `task` can be async functions
+  or async generators; `serve` is an async function. Defining none, or more than one, throws at
+  definition time. Start the entry point with `"use workflow"` as its
   first statement. A missing directive is a build error, even if another function in the module
   has one.
 - `"use step"` marks a top-level `async function` in the tool module, or any module it imports, as a
@@ -84,7 +86,9 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 - In an `execute` body, `ctx` is a `WorkflowToolContext` with `session`, `callId`, `toolName`,
   `abortSignal`, `interruptSignal`, `agent`, `agents`, and `ask`. A `task` body gets a
   `WorkflowTaskContext` with the same members except `interruptSignal`, because steering never
-  interrupts a task.
+  interrupts a task. A `serve` body gets a `WorkflowServeContext` with `session`, `toolName`,
+  `agent`, `agents`, `ask`, and `reply`; each call it receives carries its own `callId` and
+  `abortSignal`.
   A `"use step"` helper that receives `ctx` directly gets a restricted `WorkflowStepToolContext` with
   `session`, `callId`, `toolName`, `abortSignal`, `getToken`, and `requireAuth`. Read `ctx.agents`, call
   `ctx.agent()`, and call `ctx.ask()` in the workflow body; pass only the serializable values the step needs.
@@ -92,8 +96,8 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
-`ctx.agent`, `ctx.agents`, and `ctx.ask` are available only on `WorkflowToolContext` and
-`WorkflowTaskContext` in the workflow body.
+`ctx.agent`, `ctx.agents`, and `ctx.ask` are available only on `WorkflowToolContext`,
+`WorkflowTaskContext`, and `WorkflowServeContext` in the workflow body.
 Ordinary tools, channel handlers, schedule handlers, and workflow steps do not receive these methods. Type
 step helpers with `WorkflowStepToolContext` from `eve/tools` when they need step-safe context capabilities.
 
@@ -264,7 +268,7 @@ Each call is a task with its own id, `<tool>-<6 characters>`:
 - **Waiting:** the model gets `task_wait`, which parks the turn until one of its tasks settles, a
   new message arrives, or an optional timeout passes, and `task_cancel`, which stops a task. Both
   are offered, with a short system prompt block that explains tasks, only when the agent has a
-  `task` tool. See [`task_wait` and `task_cancel`](/docs/concepts/built-in-tools#task_wait-and-task_cancel).
+  `task` or `serve` tool. See [`task_wait` and `task_cancel`](/docs/concepts/built-in-tools#task_wait-and-task_cancel).
 - **Turn end:** a turn can't end while tasks it started are working. When the model ends such a
   turn, eve waits as `task_wait` would, appends the results, and calls the model again in the same
   turn. A `final_output` call made while tasks work returns an error naming them. `turn.completed`
@@ -278,7 +282,8 @@ Each call is a task with its own id, `<tool>-<6 characters>`:
   message and decides whether to keep or cancel each task.
 - **Cancellation:** `task_cancel`, `session.cancel()`, a failed turn, and the end of the session
   stop a task. Its `abortSignal` aborts, cancelled work never reports back, and a run that hasn't
-  finished 30 seconds after the cancel is stopped.
+  finished 30 seconds after the cancel is stopped. A [resumable task](#resumable-tasks-serve)
+  stays available instead.
 - **Callers:** only the caller that started a task can wait on or cancel it, and only that
   caller's messages steer its turn. Anonymous callers share one identity.
 - **Limit:** at most 32 tasks work at once in a session. A call past the limit fails with
@@ -286,6 +291,75 @@ Each call is a task with its own id, `<tool>-<6 characters>`:
 
 The stream reports `task.started` when a call starts a task and `task.settled` when it settles,
 with the task's `output` or `error`. See [task events](/docs/concepts/sessions-runs-and-streaming#task-events).
+
+## Resumable tasks: `serve`
+
+Define `serve(receive, ctx)` when the model should be able to send a running task more input, such
+as a revision request. A `serve` body runs once per task and gets its calls from `receive()`
+instead of taking an input:
+
+```ts title="agent/tools/release-plan.ts"
+import { defineWorkflowTool } from "eve/tools";
+import { z } from "zod";
+import { revise, type Plan } from "../lib/release-plan";
+
+export default defineWorkflowTool({
+  description: "Draft a release plan and revise it on request.",
+  inputSchema: z.object({ request: z.string() }),
+  async serve(receive, ctx) {
+    "use workflow";
+    let plan: Plan | undefined;
+    for (;;) {
+      const { input, abortSignal } = await receive(); // the first call, then each by taskId
+      try {
+        plan = await revise(plan, input.request, { signal: abortSignal });
+        ctx.reply(plan); // a result; the task stays available
+      } catch (error) {
+        if (!abortSignal.aborted) throw error; // cancelled: wait for the next call
+      }
+    }
+  },
+});
+```
+
+A `serve` tool's calls are tasks, with the receipts, results, waiting, turn rule, callers, and
+limit [described above](#run-calls-as-tasks-task). What differs:
+
+- **`receive()`:** resolves with the next call, `{ input, callId, abortSignal }`, with `input`
+  validated by `inputSchema`. The first `receive()` resolves at once with the call that started
+  the task, without a step or a durable wait, and replays deterministically. After that, it
+  resolves with each call made with the task's `taskId`, in arrival order. Calls that arrive while
+  the body isn't waiting are kept. A pending `receive()` is shared, so calling it again returns the
+  same promise and a `Promise.race` it loses never drops a call.
+- **`taskId` on the model input:** eve adds an optional `taskId` to the tool's model input and
+  appends a sentence explaining it to the description. A call without `taskId` starts a new task,
+  whose receipt names it: `Started task release-plan-7k2m9q. Call release-plan again with taskId
+release-plan-7k2m9q to send it another message.` A call with `taskId` goes to that task and
+  returns `Sent to task release-plan-7k2m9q.` The build fails if `inputSchema` declares its own
+  `taskId`.
+- **Unknown tasks:** the id must name an unfinished task this tool started for the same caller;
+  otherwise the call fails with `UNKNOWN_TASK`.
+- **Results:** `ctx.reply(output)` settles every call received so far with `output`, and each
+  settled call delivers its own result. The task then goes idle until its next call. A reply with
+  no call left to settle is dropped, and `ctx.ask` throws while no call is waiting for a result.
+  Returning settles the calls still waiting and ends the task; a throw fails them. `serve` is not
+  a generator, so it can't `yield` progress.
+- **Working and idle:** a resumable task is working while one of its calls has no result, and idle
+  otherwise. An idle task doesn't hold the turn and doesn't count toward the limit of 32; a call
+  that makes it work again does. The `[Tasks]` note lists the caller's 10 most recently used idle
+  tasks after its working ones, so the model can find them again.
+- **One `abortSignal` per stretch of work:** a stretch starts when a call reaches an idle task and
+  ends when a reply or a cancel settles its calls. Calls that arrive during a stretch share its
+  signal, and the next stretch gets a new one, so a task can be cancelled any number of times.
+- **Cancellation:** `task_cancel`, `session.cancel()`, and a failed turn settle the task's waiting
+  calls as `cancelled` and abort the stretch's `abortSignal`. The run keeps waiting for more calls,
+  so the task becomes idle and stays available, and no run is stopped after 30 seconds.
+  `task_cancel` on an idle task returns `{ status: "already_finished" }`. To stay available, a body
+  must catch its stretch's abort and return to `receive()`, as the example does; an abort that
+  escapes the body finishes the task. A body that ignores the signal keeps working, and its reply
+  is dropped.
+- **Finishing:** the task finishes when its body returns or throws, or when the session ends,
+  which aborts the current stretch's signal and rejects a pending `receive()`.
 
 ## Authorize inside a step
 
@@ -760,7 +834,7 @@ successful dispatch attempt. Use an application idempotency key for side effects
 only once.
 
 The workflow id derives from the entry point's module path and function name. Inline entry points
-use the tool module and the name `execute` or `task`; imported ones use their declaring module and
+use the tool module and the name `execute`, `task`, or `serve`; imported ones use their declaring module and
 name.
 Renaming or moving that function creates a new workflow. Runs in flight finish on the deployment that started them; a run that
 resumes on a deployment without its tool fails with an error naming the missing workflow.

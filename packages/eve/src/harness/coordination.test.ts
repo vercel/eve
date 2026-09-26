@@ -235,6 +235,7 @@ describe("createCoordinationRequestFromToolCall", () => {
     expect(
       createCoordinationRequestFromToolCall({
         entry: { entryPoint: "execute" },
+        input: toolCall.input,
         toolCall,
         tools: new Map([
           [

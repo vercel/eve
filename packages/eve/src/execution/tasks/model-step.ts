@@ -11,48 +11,35 @@ import {
   renderTasksNote,
   TASK_SYSTEM_BLOCK,
   TASKS_NOTE_LABEL,
+  type ListedTask,
   type RenderedTaskResult,
 } from "#execution/tasks/render.js";
 import {
   createTask,
+  idleTasks,
   readTaskTable,
   takeTaskResults,
   workingTasks,
   writeTaskTable,
   type DeliveredTaskResult,
+  type TaskRecord,
 } from "#execution/tasks/table.js";
+import { splitTaskIdInput } from "#execution/tasks/task-id-input.js";
+import { entryPointOf, startsTasks } from "#execution/tasks/tool-entry-point.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createFrameworkUserMessage, type HarnessModelMessage } from "#harness/messages.js";
 import type { HarnessEmitFn, HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { createMessageReceivedEvent } from "#protocol/message.js";
-import type { WorkflowToolRunEntry } from "#shared/action-types.js";
+import type { WorkflowToolCallEntry } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
-import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
 import { taskCancelTool } from "#tools/provided/task-cancel.js";
 import { taskWaitTool } from "#tools/provided/task-wait.js";
 
 // What the model step does for tasks: it offers the kernel's tools, commits a
 // record for each call that starts a task, delivers settled results, keeps the
 // `[Tasks]` note current, and tells the turn rule which tasks still work.
-
-/**
- * The entry point a deferred tool's calls run through. Tools that aren't
- * workflow tools, such as agents, are called like `execute`.
- */
-function entryPointOf(definition: HarnessToolDefinition | undefined): WorkflowToolEntryPoint {
-  const handling = definition?.behavior?.handling;
-  if (handling?.kind === "dispatch" && handling.target.kind === "workflow-tool-call") {
-    return handling.target.entryPoint;
-  }
-  return "execute";
-}
-
-/** Whether each call to the tool starts a task. */
-export function startsTasks(definition: HarnessToolDefinition | undefined): boolean {
-  return entryPointOf(definition) === "task";
-}
 
 export function isTaskKernelTool(definition: HarnessToolDefinition | undefined): boolean {
   return (
@@ -82,36 +69,63 @@ export function taskSystemMessages(tools: HarnessToolMap): SystemModelMessage[] 
   return offersTasks(tools) ? [{ content: TASK_SYSTEM_BLOCK, role: "system" }] : [];
 }
 
+/** A deferred call as the model made it, before the session knows what it enters. */
+export interface DeferredCall {
+  readonly callId: string;
+  readonly definition: HarnessToolDefinition | undefined;
+  /** The call's model input. */
+  readonly input: JsonObject;
+  readonly principal: string;
+  readonly toolName: string;
+  readonly turnId: string;
+}
+
+/** How a deferred call enters its workflow, with the tool's own input. */
+export interface CommittedCallEntry {
+  readonly entry: WorkflowToolCallEntry;
+  readonly input: JsonObject;
+  readonly session: HarnessSession;
+}
+
 /**
- * The entry point a deferred call's run invokes. A call that starts a task
- * commits the task's record alongside the call, so the run starts with its id.
+ * How a deferred call enters its workflow. A call that starts a task commits
+ * the task's record alongside the call, so the run starts with its id; a
+ * `serve` tool's call with `taskId` goes to that task's `receive()`, which the
+ * session checks when it sends the call.
  */
-export function commitCallEntry(
-  session: HarnessSession,
-  input: {
-    readonly callId: string;
-    readonly definition: HarnessToolDefinition | undefined;
-    readonly principal: string;
-    readonly toolName: string;
-    readonly turnId: string;
-  },
-): { readonly entry: WorkflowToolRunEntry; readonly session: HarnessSession } {
-  switch (entryPointOf(input.definition)) {
+export function commitCallEntry(session: HarnessSession, call: DeferredCall): CommittedCallEntry {
+  const entryPoint = entryPointOf(call.definition);
+  switch (entryPoint) {
     case "execute":
-      return { entry: { entryPoint: "execute" }, session };
-    case "task": {
-      const created = createTask(readTaskTable(session.state), {
-        callId: input.callId,
-        creator: input.principal,
-        name: input.toolName,
-        turnId: input.turnId,
-      });
-      return {
-        entry: { entryPoint: "task", taskId: created.taskId },
-        session: writeTaskTable(session, created.table),
-      };
+      return { entry: { entryPoint }, input: call.input, session };
+    case "task":
+      return commitTask(session, call, entryPoint, call.input);
+    case "serve": {
+      const { input, taskId } = splitTaskIdInput(call.input);
+      if (taskId === undefined) return commitTask(session, call, entryPoint, input);
+      return { entry: { entryPoint: "receive", taskId }, input, session };
     }
   }
+}
+
+function commitTask(
+  session: HarnessSession,
+  call: DeferredCall,
+  entryPoint: "task" | "serve",
+  input: JsonObject,
+): CommittedCallEntry {
+  const created = createTask(readTaskTable(session.state), {
+    callId: call.callId,
+    creator: call.principal,
+    name: call.toolName,
+    resumable: entryPoint === "serve",
+    turnId: call.turnId,
+  });
+  return {
+    entry: { entryPoint, taskId: created.taskId },
+    input,
+    session: writeTaskTable(session, created.table),
+  };
 }
 
 export function toTaskKernelCall(input: {
@@ -228,11 +242,17 @@ function resolveTasksNote(input: {
   readonly principal: string;
   readonly session: HarnessSession;
 }): string | undefined {
-  const working = workingTasks(readTaskTable(input.session.state), input.principal);
+  const table = readTaskTable(input.session.state);
+  const working = workingTasks(table, input.principal).map(toListedTask);
+  const idle = idleTasks(table, input.principal).map(toListedTask);
   const latest = input.messages.findLast(isTasksNote);
-  if (latest === undefined && working.length === 0) return undefined;
-  const rendered = renderTasksNote(working.map((record) => ({ id: record.id, tool: record.name })));
+  if (latest === undefined && working.length === 0 && idle.length === 0) return undefined;
+  const rendered = renderTasksNote({ idle, working });
   return latest?.content === rendered ? undefined : rendered;
+}
+
+function toListedTask(record: TaskRecord): ListedTask {
+  return { id: record.id, tool: record.name };
 }
 
 function isTasksNote(message: ModelMessage): boolean {

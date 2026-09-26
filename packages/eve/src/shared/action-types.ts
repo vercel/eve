@@ -114,20 +114,33 @@ export const runtimeRemoteAgentDispatchRequestSchema = z
   .strict();
 
 /**
- * The entry point a deferred call's run invokes: `execute`, which the turn
- * waits on, or `task`, with the id the call's model step committed.
+ * The entry point a new run invokes: `execute`, which the turn waits on, or
+ * `task` or `serve`, with the id of the task the call's model step committed.
  */
-export type WorkflowToolRunEntry = z.infer<typeof workflowToolRunEntrySchema>;
+export type WorkflowToolRunEntry = Exclude<
+  WorkflowToolCallEntry,
+  { readonly entryPoint: "receive" }
+>;
 
-const workflowToolRunEntrySchema = z.discriminatedUnion("entryPoint", [
+/**
+ * How a deferred call enters its tool's workflow: through the entry point of
+ * a new run, or, for a call with `taskId` to a `serve` tool, through the
+ * `receive()` of the running task that id names.
+ */
+export type WorkflowToolCallEntry = z.infer<typeof workflowToolCallEntrySchema>;
+
+const workflowToolCallEntrySchema = z.discriminatedUnion("entryPoint", [
   z.object({ entryPoint: z.literal("execute") }).strict(),
   z.object({ entryPoint: z.literal("task"), taskId: z.string() }).strict(),
+  z.object({ entryPoint: z.literal("serve"), taskId: z.string() }).strict(),
+  z.object({ entryPoint: z.literal("receive"), taskId: z.string() }).strict(),
 ]);
 
 /**
  * One workflow task requested by the harness. The turn owner starts the
- * durable run named by `workflowId`; the turn waits for an `execute` call's
- * result, while a `task` call is answered with its receipt.
+ * durable run named by `workflowId`, or sends the call to the running task it
+ * names; the turn waits for an `execute` call's result, while a call to a task
+ * is answered with its receipt.
  *
  * Tasks are the coordination contract for authored workflow tools and
  * subagents. They are intentionally separate from `RuntimeActionRequest`.
@@ -137,7 +150,7 @@ export type RuntimeWorkflowTaskRequest = z.infer<typeof runtimeWorkflowTaskReque
 export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
-    entry: workflowToolRunEntrySchema,
+    entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,
     kind: z.literal("workflow-task"),
