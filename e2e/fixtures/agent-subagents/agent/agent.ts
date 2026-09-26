@@ -3,6 +3,12 @@ import { defineAgent, defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
 
 import { WORKSPACE_FORWARDING_MARKER, WORKSPACE_LOOKUP_MESSAGE } from "../constants";
+import {
+  isNotebookDirective,
+  isNotebookEntry,
+  respondAsNotebookKeeper,
+  respondAsNotebookParent,
+} from "./lib/notebook.js";
 
 if (process.env.EVE_E2E_MODEL === "mock") {
   process.env.EVE_MOCK_AUTHORED_MODELS = "1";
@@ -81,6 +87,9 @@ const workspaceDispatcher = mockModel({
     };
   },
 });
+const notebookParent = mockModel({ modelId: "notebook-parent", respond: respondAsNotebookParent });
+// The remote keeper is a root session of this deployment, reached through remote-loopback.
+const notebookKeeper = mockModel({ modelId: "notebook-keeper", respond: respondAsNotebookKeeper });
 /** Reads the id of a tool's task from the latest framework-injected `[Tasks]` note. */
 function findListedTaskId(
   messages: readonly { readonly role: string; readonly text: string }[],
@@ -120,6 +129,12 @@ export default defineAgent({
         }
         if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
           return { model: workspaceDispatcher, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isNotebookEntry)) {
+          return { model: notebookKeeper, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isNotebookDirective)) {
+          return { model: notebookParent, modelContextWindowTokens: 1_000_000 };
         }
         return { model: defaultModel, modelContextWindowTokens };
       },
