@@ -1,7 +1,8 @@
 import { defineTool } from "eve/tools";
-import { z } from "zod";
 
-const EXPECTED_CONCURRENT_CALLS = 10;
+import { FANOUT_LABELS } from "../lib/fanout";
+
+const EXPECTED_CONCURRENT_CALLS = FANOUT_LABELS.length;
 const BARRIER_TIMEOUT_MS = 15_000;
 
 interface Barrier {
@@ -14,12 +15,14 @@ interface Barrier {
 let activeBarrier: Barrier | undefined;
 
 export default defineTool({
-  description:
-    "Test-only tool: waits for ten concurrent calls before releasing them. Only call when the user explicitly asks to use `fanout-barrier`.",
-  inputSchema: z.object({
-    label: z.string(),
-  }),
-  async execute(input) {
+  description: "Waits until every call in the same model step has started, then releases them.",
+  inputSchema: {
+    type: "object",
+    properties: { label: { type: "string" } },
+    required: ["label"],
+    additionalProperties: false,
+  },
+  async execute(input: { label: string }) {
     const barrier = joinBarrier();
 
     try {
@@ -39,7 +42,7 @@ function joinBarrier(): Barrier {
   activeBarrier = barrier;
 
   if (barrier.arrived >= EXPECTED_CONCURRENT_CALLS) {
-    throw new Error("fanout-barrier received more than ten concurrent calls");
+    throw new Error(`fanout-barrier received more than ${EXPECTED_CONCURRENT_CALLS} calls`);
   }
 
   barrier.arrived += 1;
@@ -65,7 +68,11 @@ async function waitForRelease(released: Promise<void>): Promise<void> {
       released,
       new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => {
-          reject(new Error("fanout-barrier timed out waiting for ten concurrent calls"));
+          reject(
+            new Error(
+              `fanout-barrier timed out waiting for ${EXPECTED_CONCURRENT_CALLS} concurrent calls`,
+            ),
+          );
         }, BARRIER_TIMEOUT_MS);
       }),
     ]);

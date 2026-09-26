@@ -141,6 +141,9 @@ Fixture eval configs use the shared `e2eJudgeModel()` helper, which returns an O
 `agent-workflow-stress` uses eve's `mockModel` fixture helper so its 100-turn
 runs stay fast and deterministic. Its concurrent and sequential evals cover
 high-volume session execution and repeated session resumption respectively.
+Its parallel-tool-calls eval scripts ten tool calls into one model step and
+proves the durable runtime executes them concurrently, which a live model
+cannot guarantee because it may split the calls across steps.
 
 ## Fixtures
 
