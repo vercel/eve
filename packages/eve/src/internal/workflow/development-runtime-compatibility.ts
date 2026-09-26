@@ -75,7 +75,7 @@ export async function readDevelopmentGenerationAvailability(
     return {
       kind: "incompatible",
       reason:
-        "Development runtime is incompatible with the retained workflow. Restore the original eve build and workflow sources to resume it, or start a new session.",
+        "The retained generation does not match the startup eve build or authored workflow sources, or lacks recovery metadata. Its stored runs are preserved. Restore the original build and sources, then restart with --resume, or start a new session.",
     };
   }
   return { kind: "ready", runtimeAppRoot: metadata.runtimeAppRoot };

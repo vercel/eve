@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-At server startup, local development skips retained workflows whose framework build or authored workflow sources no longer match, or whose snapshot metadata is malformed, and reports why recovery was skipped. Those runs remain stored and dormant for that server invocation; hot reload preserves existing behavior for admitted runs, including follow-up turns, cancellation, and starting a new conversation.
+Local development now leaves previous invocations' workflows dormant by default; use `eve dev --resume` to attempt recovery, with warnings for retained runs that fail conservative startup checks. Recovery decisions last for the server invocation without changing hot-reload behavior for admitted runs, including follow-up turns, cancellation, and starting a new conversation.
