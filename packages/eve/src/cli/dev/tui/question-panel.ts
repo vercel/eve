@@ -96,7 +96,9 @@ export function renderQuestionChoices(
 function renderFreeformRow(state: QuestionPanelState, theme: Theme, width: number): string {
   const c = theme.colors;
   const focused = state.cursor === state.options.length;
-  const budget = Math.max(4, width - 5);
+  // Reserve the block cursor's trailing cell so an input at the width limit
+  // never clips its caret.
+  const budget = Math.max(4, width - 6);
   if (!focused) {
     const visible = visibleLine(state.editor, budget, theme.glyph.ellipsis);
     const value =

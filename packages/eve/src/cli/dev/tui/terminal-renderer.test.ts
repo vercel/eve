@@ -4057,6 +4057,26 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("clears a pending approval drawer when interrupted externally", async () => {
+    const { screen, renderer } = makeRenderer();
+    const approval = renderer.readToolApproval({
+      approvalId: "a1",
+      toolCallId: "c1",
+      toolName: "random_color",
+      input: {},
+    });
+    expect(screen.snapshot()).toContain("Approve random_color?");
+
+    renderer.requestInterrupt();
+    await expect(approval).rejects.toThrow();
+
+    const prompt = renderer.readPrompt();
+    expect(screen.snapshot()).not.toContain("Approve random_color?");
+    renderer.requestInterrupt();
+    await expect(prompt).rejects.toThrow();
+    renderer.shutdown();
+  });
+
   it("marks a tool block denied when the user rejects the approval", async () => {
     const { screen, input, renderer } = makeRenderer();
     await renderer.renderStream(

@@ -103,7 +103,7 @@ export interface ThemeGlyphs {
   elbow: string;
   /** `▔` — strong full-width rule opening the bottom question panel. */
   hrule: string;
-  /** `─` — light rule segment framing the end-of-turn stats line. */
+  /** `─` — light rule segment framing drawers and panel boundaries. */
   dash: string;
   /** `▏` — the synthetic input caret. */
   caret: string;

@@ -589,7 +589,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #devRebuildSequence = 0;
   #pendingEchoedPrompt?: string;
   /** The open HITL drawer, painted above the input area. */
-  #questionPanel?: (width: number) => ReturnType<typeof renderTransientDrawer>;
+  #hitlDrawer?: (width: number) => ReturnType<typeof renderTransientDrawer>;
   #transientPanel?: (width: number) => ReturnType<typeof renderTransientDrawer>;
   #transientPanelClose?: () => void;
   /** The active setup flow's bordered panel: progress, question, status. */
@@ -1291,7 +1291,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#turnIndicator = { kind: "idle" };
     this.#interrupted = false;
     let approvalCursor = 0;
-    this.#questionPanel = (width) =>
+    this.#hitlDrawer = (width) =>
       renderTransientDrawer(
         [
           `  ${this.#theme.colors.bold(`Approve ${formatToolApprovalTitle(request)}?`)}`,
@@ -1313,7 +1313,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     return await new Promise((resolve, reject) => {
       const approve = () => {
-        this.#questionPanel = undefined;
+        this.#hitlDrawer = undefined;
         this.#startWorking();
         this.#status = STATUS.processing;
         this.#detachInput();
@@ -1321,7 +1321,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         resolve({ approved: true });
       };
       const deny = () => {
-        this.#questionPanel = undefined;
+        this.#hitlDrawer = undefined;
         this.#startWorking();
         this.#status = STATUS.processing;
         this.#markToolDenied(request.toolCallId);
@@ -1360,7 +1360,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             break;
           case "ctrl-c":
             this.#interrupted = true;
-            this.#questionPanel = undefined;
+            this.#hitlDrawer = undefined;
             this.#stop();
             reject(interruptedError());
             break;
@@ -1395,7 +1395,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // the question: it resolves `undefined`, the runner returns to the
     // prompt, and the server records the still-parked request as `ignored`
     // when the user's next message resumes the turn.
-    let mode: "overlay" | "text" = hasOptions ? "overlay" : "text";
+    let mode: "select" | "text" = hasOptions ? "select" : "text";
     let cursorIndex = 0;
     let editor = EMPTY_LINE;
 
@@ -1403,7 +1403,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     // The panel closure reads the mutable interaction state at paint time,
     // so key handlers only update it and repaint.
-    const overlayPanel = (width: number) =>
+    const selectDrawer = (width: number) =>
       renderTransientDrawer(
         renderQuestionPanel(
           {
@@ -1454,11 +1454,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
     };
 
-    const enterOverlay = () => {
-      mode = "overlay";
+    const enterSelectDrawer = () => {
+      mode = "select";
       this.#inputActive = false;
       this.#removeBlock(sectionKey);
-      this.#questionPanel = overlayPanel;
+      this.#hitlDrawer = selectDrawer;
       this.#status = "";
       syncFreeformCaret();
       this.#paint();
@@ -1466,7 +1466,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const enterTextMode = () => {
       mode = "text";
-      this.#questionPanel = textPanel;
+      this.#hitlDrawer = textPanel;
       this.#inputActive = true;
       this.#syncInput(editor);
       this.#status = "";
@@ -1474,7 +1474,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#paint();
     };
 
-    if (mode === "overlay") enterOverlay();
+    if (mode === "select") enterSelectDrawer();
     else enterTextMode();
 
     const finalize = (resolved: {
@@ -1482,7 +1482,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       text?: string;
       label: string;
     }): AgentTUIInputQuestionResponse => {
-      this.#questionPanel = undefined;
+      this.#hitlDrawer = undefined;
       this.#upsertBlock({
         id: sectionKey,
         kind: "question",
@@ -1506,7 +1506,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // Dismissal resolves `undefined` — no answer travels and the question stays
     // open; the transcript records it compactly instead of keeping its options.
     const dismiss = () => {
-      this.#questionPanel = undefined;
+      this.#hitlDrawer = undefined;
       this.#upsertBlock({
         id: sectionKey,
         kind: "question",
@@ -1551,7 +1551,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             return;
           }
           this.#interrupted = true;
-          this.#questionPanel = undefined;
+          this.#hitlDrawer = undefined;
           this.#stopCaretBlink();
           this.#stop();
           reject(interruptedError());
@@ -1563,7 +1563,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           return;
         }
 
-        if (mode === "overlay") {
+        if (mode === "select") {
           const textNavigation = setupSelectionIntent(key, {
             textNavigation: !isOnFreeformRow(),
           });
@@ -3312,6 +3312,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   };
 
   #stop() {
+    this.#hitlDrawer = undefined;
     const closeTransientPanel = this.#transientPanelClose;
     if (closeTransientPanel !== undefined) {
       this.#transientPanelClose = undefined;
@@ -4500,8 +4501,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     // The HITL drawer opens one row below the transcript, then owns the
     // footer down to its controls with no status line beneath it.
-    if (this.#questionPanel !== undefined) {
-      const drawer = this.#questionPanel(width);
+    if (this.#hitlDrawer !== undefined) {
+      const drawer = this.#hitlDrawer(width);
       return [...rows, ...drawer.rows, ...drawer.controls];
     }
 
@@ -4659,7 +4660,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // Every waiting state — a streaming turn, a just-submitted prompt, a
     // question answer or approval resuming — shows the one live turn bar,
     // with the inert prompt anchored beneath it while a stream owns the
-    // turn. The `└ Done in …` coda is this bar's settled form.
+    // turn. The `Done in … (↑ … ↓ …)` coda is this bar's settled form.
     const waitingOnStream = turnIndicator.kind === "waiting" && this.#flowlessStatus === undefined;
     if (this.#streamDraftActive || waitingOnStream) {
       rows.push(this.#streamingTurnBar(width));
