@@ -1,5 +1,14 @@
 # eve
 
+## 0.67.2
+
+### Patch Changes
+
+- 03d1f42: Internal cleanup: helpers that only tests used are moved out of the published runtime or removed, and internal modules no longer export symbols used only in their own file. There is no user-visible change.
+- 03d1f42: Cancelling a turn no longer logs "tool execution failed" at error level for the tool that was running. Real tool failures are still logged.
+- 03d1f42: Remove more unused internal modules and helpers from the `eve` package. This is internal cleanup with no user-visible behavior change.
+- a6ae201: Parallel tool calls from subagents that share a sandbox no longer race to start it. In one process they now wait for a single start, and a Docker sandbox that loses the container name race to another process attaches to the winner's container instead of failing with `Conflict. The container name ... is already in use`.
+
 ## 0.67.1
 
 ### Patch Changes
