@@ -20,7 +20,7 @@ import {
 import { EveAgentProjection } from "#client/eve-agent-projection.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
 import { followSubagents } from "#client/follow-subagents.js";
-import type { SubagentPump } from "#client/subagent-pump.js";
+import type { ChildStreamFollower } from "#client/child-stream-follower.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
@@ -60,7 +60,7 @@ export class EveAgentStore<TData> {
   readonly #autoPrewarm: boolean;
   #attached = false;
   #stream: SessionEventStream | undefined;
-  #subagentPump: SubagentPump | undefined;
+  #childStreamFollower: ChildStreamFollower | undefined;
   readonly #childCursors = new Map<string, number>();
   readonly #followChildStreams: boolean;
   readonly #pendingAuthorizations = new Set<string>();
@@ -375,7 +375,7 @@ export class EveAgentStore<TData> {
 
   [attachStore](): void {
     this.#attached = true;
-    if (this.#followChildStreams && this.#subagentPump === undefined) this.#followSubagents();
+    if (this.#followChildStreams && !this.#childStreamFollower) this.#followSubagents();
     if (this.#autoPrewarm && this.#session === undefined) void this.prewarm().catch(() => {});
   }
 
@@ -383,16 +383,16 @@ export class EveAgentStore<TData> {
     this.#attached = false;
     this.#stream?.close();
     this.#stream = undefined;
-    this.#subagentPump?.abortAll();
-    this.#subagentPump = undefined;
+    this.#childStreamFollower?.abortAll();
+    this.#childStreamFollower = undefined;
     this.#activeTurn?.abortController.abort();
     this.#resetPrewarm();
     this.#resumePromise = undefined;
   }
 
   reset(): void {
-    this.#subagentPump?.abortAll();
-    this.#subagentPump = undefined;
+    this.#childStreamFollower?.abortAll();
+    this.#childStreamFollower = undefined;
     this.#childCursors.clear();
     this.#stream?.close();
     this.#stream = undefined;
@@ -569,8 +569,8 @@ export class EveAgentStore<TData> {
 
   #followSubagents(): void {
     if (!this.#session) return;
-    this.#subagentPump?.abortAll();
-    this.#subagentPump = followSubagents({
+    this.#childStreamFollower?.abortAll();
+    this.#childStreamFollower = followSubagents({
       session: this.#session,
       projection: this.#projection,
       events: this.#events,
@@ -621,8 +621,8 @@ export class EveAgentStore<TData> {
     updatePendingAuthorizations(this.#pendingAuthorizations, event);
     this.#events = [...this.#events, event];
     this.#handleReconciliation(this.#messageSubmissions.apply(event));
-    this.#subagentPump?.acceptParentEvent(event);
-    if (event.type === "turn.cancelled") this.#subagentPump?.reconcile();
+    this.#childStreamFollower?.acceptParentEvent(event);
+    if (event.type === "turn.cancelled") this.#childStreamFollower?.reconcile();
     this.#callbacks.onEvent?.(event);
     this.#applyTerminalStreamFailure(event);
     const settled = isCurrentTurnBoundaryEvent(event) && this.#pendingAuthorizations.size === 0;

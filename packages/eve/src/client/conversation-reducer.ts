@@ -8,7 +8,7 @@ import { defaultMessageReducer } from "#client/message-reducer.js";
 import type { EveAgentReducerEvent } from "#client/reducer.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 
-export type ConversationObservation =
+export type ScopedConversationEvent =
   | { readonly scope: "root"; readonly event: EveAgentReducerEvent }
   | { readonly scope: "child"; readonly callId: string; readonly event: MessageStreamEvent };
 
@@ -17,7 +17,7 @@ const messageReducer = defaultMessageReducer();
 /** Pure reduction of accepted parent/child observations; followers own transport and replay. */
 export function reduceConversation(
   state: ConversationState,
-  observation: ConversationObservation,
+  observation: ScopedConversationEvent,
 ): ConversationState {
   if (observation.scope === "child") {
     const call = state.children[observation.callId];

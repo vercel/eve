@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client, type MessageStreamEvent } from "#client/index.js";
 import { conversationReducer } from "#client/conversation-reducer.js";
 import type { ConversationState } from "#client/conversation-state.js";
-import { SubagentPump } from "#client/subagent-pump.js";
+import { ChildStreamFollower } from "#client/child-stream-follower.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
@@ -66,7 +66,7 @@ function serve(
 function setup() {
   let state: ConversationState = conversationReducer.initial();
   const observed: { callId: string; event: MessageStreamEvent }[] = [];
-  const pump = new SubagentPump({
+  const follower = new ChildStreamFollower({
     session: (parentSessionId) =>
       new Client({ host: "http://localhost:3000" }).sessions.attach(parentSessionId),
     getCall: (callId) => state.children[callId],
@@ -91,24 +91,24 @@ function setup() {
     },
   });
   return {
-    pump,
+    follower,
     observed,
     get state() {
       return state;
     },
     parent(c: SubagentCalledStreamEvent) {
       state = conversationReducer.reduce(state, event(c, 0));
-      pump.acceptParentEvent(event(c, 0));
+      follower.acceptParentEvent(event(c, 0));
     },
     project(entry: MessageStreamEvent) {
       state = conversationReducer.reduce(state, entry);
-      pump.acceptParentEvent(entry);
+      follower.acceptParentEvent(entry);
     },
     cancel(turnId: string) {
       const cancelled = event({ type: "turn.cancelled", data: { sequence: 0, turnId } }, 0);
       state = conversationReducer.reduce(state, cancelled);
-      pump.acceptParentEvent(cancelled);
-      pump.reconcile();
+      follower.acceptParentEvent(cancelled);
+      follower.reconcile();
     },
   };
 }
@@ -351,7 +351,7 @@ describe("child event acquisition", () => {
       outcome: "cancelled",
     });
     await vi.waitFor(() => expect(requests[0]?.signal?.aborted).toBe(true));
-    owner.pump.abortAll();
+    owner.follower.abortAll();
   });
 
   it("keeps a background child subscribed after its originating turn is cancelled", async () => {
@@ -397,7 +397,7 @@ describe("child event acquisition", () => {
       observation: { status: "following" },
     });
     expect(requests[0]?.signal?.aborted).toBe(false);
-    owner.pump.abortAll();
+    owner.follower.abortAll();
   });
 
   it("reports observation failure without attributing it to the child", async () => {

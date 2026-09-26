@@ -1237,7 +1237,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * Applies a wake-initiated turn without taking input ownership from the
    * prompt. Paints use the same live region, so the editor redraws around
-   * incoming tool and assistant blocks exactly as it does for subagent pumps.
+   * incoming tool and assistant blocks exactly as it does for child streams.
    */
   async renderIdleStream(
     result: AgentTUIStreamResult,
@@ -1810,7 +1810,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * A background receipt closes the model tool call, not the child. Mark the
    * header running so turn finalization cannot commit immutable scrollback
-   * before the child pump has folded in its later events.
+   * before the child follower has folded in its later events.
    */
   backgroundSubagent(update: { callId: string }): void {
     const header = this.#blockById.get(subagentHeaderId(update.callId));

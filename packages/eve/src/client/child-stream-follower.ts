@@ -8,7 +8,7 @@ const childStreamReconnectPolicy = {
   streamOpenReconnectPolicy: { maxAttempts: Infinity },
 } as const satisfies StreamReconnectPolicy;
 
-export interface SubagentPumpOptions {
+export interface ChildStreamFollowerOptions {
   session: (parentSessionId: string) => ClientSession | undefined;
   getCall: (callId: string) => ChildCall | undefined;
   onChildEvent: (callId: string, event: MessageStreamEvent) => void;
@@ -24,8 +24,8 @@ export interface SubagentPumpOptions {
 }
 
 /** Acquires call-scoped child events; conversation state owns their meaning. */
-export class SubagentPump {
-  readonly #options: SubagentPumpOptions;
+export class ChildStreamFollower {
+  readonly #options: ChildStreamFollowerOptions;
   readonly #calls = new Map<string, SubagentCalledStreamEvent>();
   readonly #active = new Map<string, string>();
   readonly #queued = new Map<string, string[]>();
@@ -33,7 +33,7 @@ export class SubagentPump {
   readonly #controllers = new Map<string, AbortController>();
   #disposed = false;
 
-  constructor(options: SubagentPumpOptions) {
+  constructor(options: ChildStreamFollowerOptions) {
     this.#options = options;
     this.#cursors = options.cursors ?? new Map();
   }

@@ -33,7 +33,10 @@ import {
 } from "#services/dev-client.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { SubagentPump, type SubagentPumpOptions } from "#client/subagent-pump.js";
+import {
+  ChildStreamFollower,
+  type ChildStreamFollowerOptions,
+} from "#client/child-stream-follower.js";
 import type { SubagentView } from "./subagent-projection.js";
 export type {
   SubagentStepUpdate,
@@ -585,7 +588,7 @@ export class EveTUIRunner {
   #activeRegistrySetup?: string;
   /** True only while the idle prompt owns terminal input. */
   #readingPrompt = false;
-  readonly #subagentPump: SubagentPump;
+  readonly #childStreamFollower: ChildStreamFollower;
   readonly #subagentProjection?: TerminalSubagentProjection;
   /**
    * Attempt identity → latest known state for one MCP connection
@@ -619,7 +622,7 @@ export class EveTUIRunner {
       this.#conversation = conversationReducer.reduce(this.#conversation, event);
       this.#subagentProjection?.update(this.#conversation, callId);
     };
-    const pumpOptions: SubagentPumpOptions = {
+    const followerOptions: ChildStreamFollowerOptions = {
       session: (parentSessionId) => this.#client?.sessions.attach(parentSessionId) ?? this.#session,
       getCall: (callId) => this.#conversation.children[callId],
       onFollowing: (callId) =>
@@ -632,12 +635,12 @@ export class EveTUIRunner {
       this.#subagentProjection = new TerminalSubagentProjection(this.#renderer.subagents);
     }
     if (options.appRoot !== undefined) {
-      pumpOptions.onToolCompleted = async (subagentName, toolName, output) => {
+      followerOptions.onToolCompleted = async (subagentName, toolName, output) => {
         const address = registryHandoffAddress(subagentName, toolName, output);
         if (address !== undefined) this.#queueRegistrySetup(address);
       };
     }
-    this.#subagentPump = new SubagentPump(pumpOptions);
+    this.#childStreamFollower = new ChildStreamFollower(followerOptions);
     this.#name = options.name ?? "eve";
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
@@ -774,7 +777,7 @@ export class EveTUIRunner {
       this.#lifecycle?.signal.removeEventListener("abort", onStop);
       this.#disposed = true;
       this.#authProbeAbort.abort();
-      this.#subagentPump.abortAll();
+      this.#childStreamFollower.abortAll();
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
       this.#renderer.shutdown?.();
       // Drops any in-flight link probe so a late resolution cannot paint
@@ -1206,7 +1209,7 @@ export class EveTUIRunner {
    * In-flight subagent child-session streams are aborted.
    */
   #startNewSession(): void {
-    this.#subagentPump.abortAll();
+    this.#childStreamFollower.abortAll();
     this.#subagentProjection?.reset();
     this.#conversation = conversationReducer.initial();
     this.#seenEvents = createEventDeduper();
@@ -1635,8 +1638,8 @@ export class EveTUIRunner {
         },
         turnState,
         onSubagentEvent: (event) => {
-          this.#subagentPump.acceptParentEvent(event);
-          this.#subagentPump.reconcile();
+          this.#childStreamFollower.acceptParentEvent(event);
+          this.#childStreamFollower.reconcile();
           if (event.type === "subagent.called")
             this.#subagentProjection?.update(this.#conversation, event.data.callId);
           if (event.type === "subagent.completed" || event.type === "action.result") {
@@ -2381,7 +2384,7 @@ async function* eveEventsToTUIStream(
         // `subagent.started` and `subagent.event` are not emitted by the
         // current harness — the parent stream only sees `called` and
         // `completed`. All intermediate child content is observed via
-        // the runner's parallel child-session stream pump.
+        // the runner's parallel child-stream follower.
         break;
 
       case "subagent.completed":

@@ -371,7 +371,7 @@ describe("registryHandoffAddress", () => {
         }),
       renderStream: vi.fn(async (result) => {
         for await (const _event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
-          // Consume the parent stream while the child pump follows its session.
+          // Consume the parent stream while the child follower follows its session.
         }
       }),
       suspendPromptForInput: () => promptSuspended.resolve(),
@@ -4351,7 +4351,7 @@ describe("EveTUIRunner renderer teardown", () => {
       name: "Weather Agent",
       renderer: fakeRenderer({
         // Hold the second prompt open until the child boundary finishes the
-        // section — exiting the run loop aborts the child pump.
+        // section — exiting the run loop aborts the child follower.
         readPrompt: vi
           .fn()
           .mockResolvedValueOnce("delegate")
@@ -5712,7 +5712,7 @@ describe("EveTUIRunner session id reporting", () => {
 describe("EveTUIRunner cancelled-turn subagent settling", () => {
   it("settles subagent sections when the turn is explicitly cancelled", async () => {
     // A child stream that never ends on its own — it only stops when the
-    // pump aborts it (the scoped cancellation path under test).
+    // follower aborts it (the scoped cancellation path under test).
     const client = stubClient();
     vi.stubGlobal(
       "fetch",
