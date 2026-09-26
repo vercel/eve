@@ -148,7 +148,7 @@ function createWorkflowBodyContext(
         ]),
       ),
     ),
-    ask: (request) => ask(ctx, request),
+    ask: (request, options) => ask(ctx, request, options),
     abortSignal: signals.abortSignal,
     callId: input.callId,
     interruptSignal: signals.interruptSignal,

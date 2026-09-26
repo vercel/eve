@@ -365,7 +365,7 @@ describe("routeProxiedDeliverStep", () => {
         [
           "ask-1",
           {
-            answerHook: { question: { allowFreeform: true, dismissible: true }, runId: "run-1" },
+            answerHook: { question: { allowFreeform: true }, runId: "run-1" },
             childContinuationToken: "answer-token",
             kind: "question",
           },
@@ -419,7 +419,6 @@ describe("routeProxiedDeliverStep", () => {
             answerHook: {
               question: {
                 allowFreeform: false,
-                dismissible: false,
                 options: [{ id: "approve", label: "Approve" }],
               },
               runId: "run-1",

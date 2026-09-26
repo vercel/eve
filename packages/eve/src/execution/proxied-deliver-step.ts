@@ -9,10 +9,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import {
-  resumeWorkflowToolRunAnswers,
-  resumeWorkflowToolRunDismissal,
-} from "#execution/tools/workflow/answer.js";
+import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import {
@@ -41,7 +38,6 @@ interface ChildBucket {
   readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  readonly dismissedRequestIds: string[];
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
   readonly retireRequestIds: string[];
@@ -91,14 +87,12 @@ export async function routeProxiedDeliverStep(input: {
         answerHook: forChild.answerHook,
         childContinuationToken: forChild.childContinuationToken,
         childSessionInbox: forChild.childSessionInbox,
-        dismissedRequestIds: [],
         metadata: [],
         payloads: [],
         retireRequestIds: [],
       };
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
-      child.dismissedRequestIds.push(...(forChild.dismissedRequestIds ?? []));
       child.retireRequestIds.push(...forChild.retireRequestIds);
       if (routed.forSelf === undefined && childIndex === 0) {
         for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
@@ -116,13 +110,9 @@ export async function routeProxiedDeliverStep(input: {
     if (child.answerHook !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
       await resumeWorkflowToolRunAnswers(child.childContinuationToken, responses);
-      if (child.dismissedRequestIds.length > 0) {
-        await resumeWorkflowToolRunDismissal(child.childContinuationToken);
-      }
       if (child.answerHook.question !== undefined) {
         await emitQuestionResolutions({
-          dismissedRequestIds: child.dismissedRequestIds,
-          responses,
+          resolutions: responses.map(toAnsweredResolution),
           sessionState: durableSession.state,
           sessionWritable: input.sessionWritable,
         });
@@ -171,36 +161,27 @@ export async function routeProxiedDeliverStep(input: {
   return { ...context, kind: "continue", remainder };
 }
 
+function toAnsweredResolution(response: InputResponse): InputResolution {
+  return { kind: "question", outcome: "answered", requestId: response.requestId, response };
+}
+
 // A `ctx.ask()` question is resolved by its workflow, not the harness, so the
 // parent announces the resolution. A blocking run starts from the pending
 // coordination batch, which carries the coordinates of its request.
-async function emitQuestionResolutions(input: {
-  readonly dismissedRequestIds: readonly string[];
-  readonly responses: readonly InputResponse[];
+export async function emitQuestionResolutions(input: {
+  readonly resolutions: readonly InputResolution[];
   readonly sessionState: Parameters<typeof getPendingCoordinationBatch>[0];
   readonly sessionWritable: WritableStream<Uint8Array>;
 }): Promise<void> {
   const event = getPendingCoordinationBatch(input.sessionState)?.event;
-  if (event === undefined) return;
-  const resolutions: InputResolution[] = [
-    ...input.responses.map((response) => ({
-      kind: "question" as const,
-      outcome: "answered" as const,
-      requestId: response.requestId,
-      response,
-    })),
-    ...input.dismissedRequestIds.map((requestId) => ({
-      kind: "question" as const,
-      outcome: "ignored" as const,
-      requestId,
-    })),
-  ];
-  if (resolutions.length === 0) return;
+  if (event === undefined || input.resolutions.length === 0) return;
   const writer = input.sessionWritable.getWriter();
   try {
     await writer.write(
       encodeMessageStreamEvent(
-        stampMessageStreamEvent(createInputResolvedEvent({ resolutions, ...event })),
+        stampMessageStreamEvent(
+          createInputResolvedEvent({ resolutions: input.resolutions, ...event }),
+        ),
       ),
     );
   } finally {

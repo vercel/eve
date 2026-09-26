@@ -212,5 +212,10 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
 }
 
 export function isWorkflowMessage(value: SessionInboxPayload): value is WorkflowToolRunMessage {
-  return value.kind === "report" || value.kind === "request" || value.kind === "outcome";
+  return (
+    value.kind === "report" ||
+    value.kind === "request" ||
+    value.kind === "withdraw" ||
+    value.kind === "outcome"
+  );
 }

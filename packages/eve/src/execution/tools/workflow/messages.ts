@@ -86,9 +86,16 @@ export interface WorkflowToolRunOutcomeMessage {
   readonly result: WorkflowToolRunOutcome;
 }
 
+/** A `ctx.ask()` request sent under `replyTo` was withdrawn before anyone answered it. */
+export interface WorkflowToolRunWithdrawMessage {
+  readonly from: WorkflowToolRunRef;
+  readonly replyTo: string;
+}
+
 export type WorkflowToolRunMessage =
   | ({ readonly kind: "report" } & WorkflowToolRunReport)
   | ({ readonly kind: "request" } & WorkflowToolRunRequestMessage)
+  | ({ readonly kind: "withdraw" } & WorkflowToolRunWithdrawMessage)
   | ({ readonly kind: "outcome" } & WorkflowToolRunOutcomeMessage);
 
 /**

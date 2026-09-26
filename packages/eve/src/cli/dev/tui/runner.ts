@@ -1128,7 +1128,7 @@ export class EveTUIRunner {
               // Every pending question was skipped without an answer. Fall
               // back to the prompt rather than sending an empty response set:
               // the questions stay open, and the server decides whether the
-              // user's next message answers, dismisses, or leaves them.
+              // user's next message answers them or steers the turn.
               break;
             }
 

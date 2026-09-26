@@ -160,9 +160,7 @@ describe("routeDeliverPayload", () => {
 
 describe("routeDeliverPayload message resolution", () => {
   function askSession(
-    questions: ReadonlyArray<
-      readonly [requestId: string, question: { allowFreeform?: boolean; dismissible?: boolean }]
-    >,
+    questions: ReadonlyArray<readonly [requestId: string, question: { allowFreeform?: boolean }]>,
   ): HarnessSession {
     let session = createSession();
     for (const [requestId, question] of questions) {
@@ -197,7 +195,7 @@ describe("routeDeliverPayload message resolution", () => {
     const routed = routeDeliverPayload({
       payload: { message: "production" },
       resolveMessage: true,
-      state: askSession([["ask-1", { dismissible: true }]]).state,
+      state: askSession([["ask-1", {}]]).state,
     });
 
     expect(routed.forSelf).toBeUndefined();
@@ -208,14 +206,13 @@ describe("routeDeliverPayload message resolution", () => {
         retireRequestIds: ["ask-1"],
       },
     ]);
-    expect(routed.forChildren[0]?.dismissedRequestIds).toBeUndefined();
   });
 
   it("answers the only pending question with free text when it allows it", () => {
     const routed = routeDeliverPayload({
       payload: { message: "Use the canary pool" },
       resolveMessage: true,
-      state: askSession([["ask-1", { allowFreeform: true, dismissible: true }]]).state,
+      state: askSession([["ask-1", { allowFreeform: true }]]).state,
     });
 
     expect(routed.forSelf).toBeUndefined();
@@ -224,33 +221,25 @@ describe("routeDeliverPayload message resolution", () => {
     ]);
   });
 
-  it("dismisses dismissible questions and keeps an unrelated message for the turn", () => {
+  it("keeps a message for the turn when several questions are pending", () => {
     const routed = routeDeliverPayload({
       payload: { message: "Actually, check the logs first." },
       resolveMessage: true,
       state: askSession([
-        ["ask-1", { dismissible: true }],
+        ["ask-1", {}],
         ["ask-2", {}],
       ]).state,
     });
 
     expect(routed.forSelf).toEqual({ message: "Actually, check the logs first." });
-    expect(routed.forChildren).toEqual([
-      {
-        answerHook: expect.objectContaining({ runId: "run-ask-1" }),
-        childContinuationToken: "hook-ask-1",
-        dismissedRequestIds: ["ask-1"],
-        payload: { inputResponses: [] },
-        retireRequestIds: ["ask-1"],
-      },
-    ]);
+    expect(routed.forChildren).toEqual([]);
   });
 
   it("does not answer a question while a subagent question is also pending", () => {
     const session = upsertProxyInputRequests({
       entries: [["child-ask", { childContinuationToken: "child-token", kind: "question" }]],
       forChildContinuationToken: "child-token",
-      session: askSession([["ask-1", { allowFreeform: true, dismissible: true }]]),
+      session: askSession([["ask-1", { allowFreeform: true }]]),
     });
     const routed = routeDeliverPayload({
       payload: { message: "Use the canary pool" },
@@ -259,13 +248,13 @@ describe("routeDeliverPayload message resolution", () => {
     });
 
     expect(routed.forSelf).toEqual({ message: "Use the canary pool" });
-    expect(routed.forChildren).toMatchObject([{ dismissedRequestIds: ["ask-1"] }]);
+    expect(routed.forChildren).toEqual([]);
   });
 
   it("leaves questions alone unless a person's message may resolve them", () => {
     const routed = routeDeliverPayload({
       payload: { message: "production" },
-      state: askSession([["ask-1", { dismissible: true }]]).state,
+      state: askSession([["ask-1", {}]]).state,
     });
 
     expect(routed.forSelf).toEqual({ message: "production" });
@@ -295,7 +284,7 @@ describe("routeDeliverPayload message resolution", () => {
         message: "production",
       },
       resolveMessage: true,
-      state: askSession([["ask-1", { dismissible: true }]]).state,
+      state: askSession([["ask-1", {}]]).state,
     });
 
     expect(routed.forSelf).toEqual({ message: "production" });

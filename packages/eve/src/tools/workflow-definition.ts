@@ -9,6 +9,7 @@ import {
   type PublicToolDefinition,
   type ToolContext,
   type ToolInputRequest,
+  type ToolInputRequestOptions,
   type ToolInputResponse,
 } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
@@ -92,8 +93,12 @@ export type WorkflowToolContext = Pick<
   agent: WorkflowAgent;
   /** Metadata for agents callable by this workflow, including hidden agents. */
   agents: Readonly<Record<string, WorkflowAgentMetadata>>;
-  /** Ask the human on the session's channel; awaiting the answer suspends the run. */
-  ask(request: ToolInputRequest): PromiseLike<ToolInputResponse>;
+  /**
+   * Ask the human on the session's channel; awaiting the answer suspends the
+   * run. The request is withdrawn, resolving as `cancelled`, when
+   * `options.signal` or the call's `abortSignal` aborts.
+   */
+  ask(request: ToolInputRequest, options?: ToolInputRequestOptions): PromiseLike<ToolInputResponse>;
   /**
    * Aborts once, on the first steering message that arrives while the turn
    * waits on this call. What it means is the tool's choice: a body that

@@ -111,12 +111,6 @@ export interface ToolInputRequest {
    * {@link options}.
    */
   readonly allowFreeform?: boolean;
-  /**
-   * Whether the user's next message may skip the question. When `true`, a
-   * message that does not answer it resolves the request as `dismissed`, and
-   * the message reaches the agent as usual.
-   */
-  readonly dismissible?: boolean;
   /** Rendering hint: confirmation buttons, a selection list, or a text field. */
   readonly display?: "confirmation" | "select" | "text";
   /** Selectable answers. */
@@ -128,7 +122,8 @@ export interface ToolInputRequest {
  * The outcome of a {@link ToolInputRequest}.
  *
  * - `answered`: the user picked an option or typed an answer.
- * - `dismissed`: the user moved on without answering a `dismissible` request.
+ * - `cancelled`: the request was withdrawn unanswered because the ask's
+ *   `signal` or the call's `abortSignal` aborted.
  * - `unavailable`: the session cannot reach a human, such as a scheduled run,
  *   so the request resolved immediately without being shown.
  */
@@ -140,8 +135,18 @@ export type ToolInputResponse =
       /** Free text, when the user typed an answer. */
       readonly text?: string;
     }
-  | { readonly status: "dismissed" }
+  | { readonly status: "cancelled" }
   | { readonly status: "unavailable" };
+
+/** Options for `ctx.ask` in a `defineWorkflowTool` executor. */
+export interface ToolInputRequestOptions {
+  /**
+   * Withdraws the request when it aborts: the ask resolves as `cancelled`
+   * and the channel stops offering the question. Pass `ctx.interruptSignal`
+   * to stop asking once a new message arrives.
+   */
+  readonly signal?: AbortSignal;
+}
 
 /**
  * Authored tool context. Passed as the last argument to

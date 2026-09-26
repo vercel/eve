@@ -66,7 +66,7 @@ it("binds workflow-only methods to the run context", async () => {
     expect(Object.isFrozen(ctx.agents.reviewer)).toBe(true);
     const answer = await ctx.ask(question);
     const result = await ctx.agent(target, invocation);
-    expect(mocks.ask).toHaveBeenCalledWith(ctx, question);
+    expect(mocks.ask).toHaveBeenCalledWith(ctx, question, undefined);
     expect(mocks.agent).toHaveBeenCalledWith(ctx, target, invocation);
     return { answer, result };
   });
