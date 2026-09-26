@@ -385,6 +385,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "dataforseo",
+    name: "DataForSEO",
+    kind: "connection",
+    tagline: "Run SEO, keyword, and SERP data lookups through DataForSEO's MCP server.",
+    surfaces: { scaffoldable: true, registry: true, gallery: false },
+    connection: {
+      description:
+        "DataForSEO: run SEO, keyword, and SERP data lookups through DataForSEO's MCP server.",
+      mcp: { url: "https://mcp.dataforseo.com/v3/mcp" },
+    },
+  },
+  {
     slug: "vercel",
     name: "Vercel",
     kind: "connection",

@@ -513,6 +513,23 @@
       ]
     },
     {
+      "name": "connection/dataforseo",
+      "type": "registry:item",
+      "title": "DataForSEO",
+      "description": "Run SEO, keyword, and SERP data lookups through DataForSEO's MCP server.",
+      "envVars": {
+        "DATAFORSEO_USERNAME": "",
+        "DATAFORSEO_PASSWORD": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/dataforseo.ts",
+          "type": "registry:file",
+          "target": "agent/connections/dataforseo.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/vercel",
       "type": "registry:item",
       "title": "Vercel",
