@@ -1,24 +1,24 @@
-import { isJsonObjectValue } from "#shared/json.js";
+import { authorizationKey } from "#client/session-utils.js";
+import { conversationReducer } from "#client/conversation-reducer.js";
+import type { EveMessageData } from "#client/message-reducer-types.js";
+import type { EveAgentReducerEvent } from "#client/reducer.js";
+import { openConversationInputs, type ConversationState } from "#client/conversation-state.js";
+import { TerminalToolProjection } from "./message-projection.js";
+import { TerminalSubagentProjection } from "./subagent-projection.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
 import { SteeringStream } from "#cli/dev/tui/steering-stream.js";
 import {
   type ActionResultStreamEvent,
-  type ActionsRequestedStreamEvent,
   type AgentInfoResult,
   type AuthorizationCompletedStreamEvent,
   type ConnectionAuthorizationOutcome,
   type AuthorizationRequiredStreamEvent,
   type InputOption,
   type InputRequest,
-  type InputRequestedStreamEvent,
   type InputResponse,
-  type MessageAppendedStreamEvent,
-  type ReasoningAppendedStreamEvent,
   type SessionFailedStreamEvent,
   type StepCompletedStreamEvent,
   type MessageStreamEvent,
-  type SubagentCalledStreamEvent,
-  type SubagentCompletedStreamEvent,
   Client,
   ClientSession,
 } from "#client/index.js";
@@ -26,7 +26,7 @@ import { renderApplicationInfo } from "#cli/commands/info.js";
 import type { EveCliSetupStepEvent, EveCliSetupTerminalEvent } from "#cli/telemetry/index.js";
 import type { OnboardingScreenEvent } from "./setup-commands.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { createEventDeduper } from "#protocol/event-dedupe.js";
+import { createEventDeduper, type EventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import {
   createDevelopmentRuntimeArtifactRefresher,
@@ -34,13 +34,16 @@ import {
 } from "#services/dev-client.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
+import {
+  ChildStreamFollower,
+  type ChildStreamFollowerOptions,
+} from "#client/child-stream-follower.js";
+import type { SubagentView } from "./subagent-projection.js";
 export type {
-  SubagentRun,
   SubagentStepUpdate,
   SubagentToolUpdate,
   SubagentView,
-} from "./subagent-pump.js";
+} from "./subagent-projection.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 
 import {
@@ -172,10 +175,12 @@ export type AgentTUIStreamEvent =
   | { type: "turn-start"; turnId: string }
   | { type: "step-start"; modelId?: string }
   | { type: "step-finish"; usage?: AgentTUIStreamUsage }
+  | { type: "content-state"; data: EveMessageData }
   | { type: "assistant-delta"; id: string; delta: string }
   | { type: "assistant-complete"; id: string; text?: string | null }
+  | { type: "assistant-remove"; id: string }
   | { type: "reasoning-delta"; id: string; delta: string }
-  | { type: "reasoning-complete"; id: string }
+  | { type: "reasoning-complete"; id: string; text?: string }
   | { type: "tool-call-preparing"; toolCallId: string; toolName: string }
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
   | { type: "tool-approval-request"; approvalId: string; toolCallId: string }
@@ -576,12 +581,8 @@ export class EveTUIRunner {
   readonly #vercelStatus?: VercelStatusTracker;
   readonly #mcpConnectionStatus?: McpConnectionStatusTracker;
   #agentInfo?: AgentInfoResult;
-  /**
-   * approval-id → input-request map populated as `input.requested` events
-   * stream in. Used to translate the renderer's approval responses back into
-   * eve `InputResponse[]` payloads on the next `send()`.
-   */
-  readonly #pendingInputRequests = new Map<string, InputRequest>();
+  #conversation: ConversationState = conversationReducer.initial();
+  #seenEvents = createEventDeduper();
   /** Idle wake result handed from the prompt follower into the normal HITL response loop. */
   #idleInputResult?: AgentTUIStreamResult;
   /** Registry setups queued by tool results on root or child streams. */
@@ -589,23 +590,12 @@ export class EveTUIRunner {
   #activeRegistrySetup?: string;
   /** True only while the idle prompt owns terminal input. */
   #readingPrompt = false;
+  readonly #childStreamFollower: ChildStreamFollower;
+  readonly #subagentProjection?: TerminalSubagentProjection;
   /**
-   * callId → live state for one subagent dispatch. Persists across turn
-   * boundaries because a subagent dispatched in one turn may not emit
-   * `subagent.completed` until a later turn (e.g. after a HITL approval).
-   * Each run holds per-step text accumulators (so reasoning + message land
-   * in the same section per child step) and per-tool state.
-   */
-  readonly #subagentPump: SubagentPump;
-  /**
-   * callId → AbortController for the parallel child-session stream pump
-   * launched on `subagent.called`. Cancelled on `subagent.completed`, when
-   * the session resets, or when the runner shuts down.
-   */
-  /**
-   * name → latest known state for one MCP connection
-   * authorization lifecycle. Persists across turns because a turn that
-   * suspends on a webhook callback resumes in a later turn — the
+   * Attempt identity → latest known state for one MCP connection
+   * authorization lifecycle (name for legacy events). Persists across turns:
+   * a turn suspended on a webhook callback resumes later — the
    * `_required`/`_pending` events fire in turn N and the `_completed`
    * event may not arrive until turn N+1. Each entry holds enough
    * context to re-render the body section idempotently from any
@@ -613,7 +603,7 @@ export class EveTUIRunner {
    */
   readonly #connectionAuthRuns = new Map<string, ConnectionAuthRun>();
   /**
-   * Set of connection names currently in the `pending` state — i.e.
+   * Set of authorization attempt keys currently in the `pending` state — i.e.
    * the workflow is suspended waiting on the framework-owned OAuth
    * callback. Used to drive the renderer's bottom-bar hint.
    */
@@ -630,16 +620,30 @@ export class EveTUIRunner {
     if (options.client !== undefined) this.#client = options.client;
     if (options.lifecycle !== undefined) this.#lifecycle = options.lifecycle;
     this.#renderer = createRenderer(options);
-    const pumpOptions: SubagentPumpOptions = { formatActionResultError };
-    if (this.#client !== undefined) pumpOptions.client = this.#client;
-    if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
+    const projectChild = (event: EveAgentReducerEvent, callId: string) => {
+      this.#conversation = conversationReducer.reduce(this.#conversation, event);
+      this.#subagentProjection?.update(this.#conversation, callId);
+    };
+    const followerOptions: ChildStreamFollowerOptions = {
+      session: (parentSessionId) => this.#client?.sessions.attach(parentSessionId) ?? this.#session,
+      getCall: (callId) => this.#conversation.children[callId],
+      onFollowing: (callId) =>
+        projectChild({ type: "client.child.following", data: { callId } }, callId),
+      onUnavailable: (data) =>
+        projectChild({ type: "client.child.unavailable", data }, data.callId),
+      onChildEvent: (callId, event) =>
+        projectChild({ type: "client.child.observed", data: { callId, event } }, callId),
+    };
+    if (this.#renderer.subagents !== undefined) {
+      this.#subagentProjection = new TerminalSubagentProjection(this.#renderer.subagents);
+    }
     if (options.appRoot !== undefined) {
-      pumpOptions.onToolCompleted = async (subagentName, toolName, output) => {
+      followerOptions.onToolCompleted = async (subagentName, toolName, output) => {
         const address = registryHandoffAddress(subagentName, toolName, output);
         if (address !== undefined) this.#queueRegistrySetup(address);
       };
     }
-    this.#subagentPump = new SubagentPump(pumpOptions);
+    this.#childStreamFollower = new ChildStreamFollower(followerOptions);
     this.#name = options.name ?? "eve";
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
@@ -776,7 +780,7 @@ export class EveTUIRunner {
       this.#lifecycle?.signal.removeEventListener("abort", onStop);
       this.#disposed = true;
       this.#authProbeAbort.abort();
-      this.#subagentPump.abortAll();
+      this.#childStreamFollower.abortAll();
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
       this.#renderer.shutdown?.();
       // Drops any in-flight link probe so a late resolution cannot paint
@@ -1133,6 +1137,10 @@ export class EveTUIRunner {
               break;
             }
 
+            this.#conversation = conversationReducer.reduce(this.#conversation, {
+              type: "client.input.responded",
+              data: { createdAt: Date.now(), responses },
+            });
             streamWithoutPrompt = true;
             pendingInputResponses = responses;
             prompt = undefined;
@@ -1204,8 +1212,10 @@ export class EveTUIRunner {
    * In-flight subagent child-session streams are aborted.
    */
   #startNewSession(): void {
-    this.#subagentPump.abortAll();
-    this.#pendingInputRequests.clear();
+    this.#childStreamFollower.abortAll();
+    this.#subagentProjection?.reset();
+    this.#conversation = conversationReducer.initial();
+    this.#seenEvents = createEventDeduper();
     this.#connectionAuthRuns.clear();
     this.#pendingConnectionAuths.clear();
     this.#renderer.setConnectionAuthPendingCount?.(0);
@@ -1624,13 +1634,29 @@ export class EveTUIRunner {
           }
         },
         events: steering ?? events,
-        pendingInputRequests: this.#pendingInputRequests,
+        getConversation: () => this.#conversation,
+        seenEvents: this.#seenEvents,
+        onConversationChange: (state) => {
+          this.#conversation = state;
+        },
         turnState,
-        onSubagentCalled: (called) => this.#subagentPump.begin(called),
-        onSubagentBackgrounded: (callId) => this.#subagentPump.background(callId),
-        onSubagentCompleted: (callId) => this.#subagentPump.settle(callId),
-        // Cancellation is turn-scoped; background descendants survive.
-        onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
+        onSubagentEvent: (event) => {
+          this.#childStreamFollower.acceptParentEvent(event);
+          this.#childStreamFollower.reconcile();
+          if (event.type === "subagent.called")
+            this.#subagentProjection?.update(this.#conversation, event.data.callId);
+          if (event.type === "subagent.completed" || event.type === "action.result") {
+            const callId =
+              event.type === "subagent.completed" ? event.data.callId : event.data.result.callId;
+            this.#subagentProjection?.update(this.#conversation, callId);
+          }
+          if (event.type === "turn.cancelled") {
+            for (const call of Object.values(this.#conversation.children)) {
+              if (call.originTurnId === event.data.turnId)
+                this.#subagentProjection?.update(this.#conversation, call.callId);
+            }
+          }
+        },
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
         onRegistryHandoff:
@@ -1996,6 +2022,7 @@ export class EveTUIRunner {
   #handleConnectionAuthRequired(event: AuthorizationRequiredStreamEvent): void {
     const run: ConnectionAuthRun = {
       name: event.data.name,
+      attemptId: event.data.attemptId,
       description: event.data.description,
       state: "required",
     };
@@ -2005,7 +2032,7 @@ export class EveTUIRunner {
     if (event.data.webhookUrl !== undefined) {
       run.webhookUrl = event.data.webhookUrl;
     }
-    this.#connectionAuthRuns.set(event.data.name, run);
+    this.#connectionAuthRuns.set(authorizationKey(event.data), run);
     this.#emitConnectionAuthUpdate(run);
   }
 
@@ -2023,7 +2050,7 @@ export class EveTUIRunner {
     for (const run of this.#connectionAuthRuns.values()) {
       if (run.state !== "required" || run.webhookUrl === undefined) continue;
       run.state = "pending";
-      this.#pendingConnectionAuths.add(run.name);
+      this.#pendingConnectionAuths.add(authorizationKey(run));
       this.#emitConnectionAuthUpdate(run);
       added = true;
     }
@@ -2035,9 +2062,10 @@ export class EveTUIRunner {
   }
 
   #handleConnectionAuthCompleted(event: AuthorizationCompletedStreamEvent): void {
-    const existing = this.#connectionAuthRuns.get(event.data.name);
+    const existing = this.#connectionAuthRuns.get(authorizationKey(event.data));
     const run: ConnectionAuthRun = existing ?? {
       name: event.data.name,
+      attemptId: event.data.attemptId,
       description: "",
       state: event.data.outcome,
     };
@@ -2045,8 +2073,8 @@ export class EveTUIRunner {
     if (event.data.reason !== undefined) {
       run.reason = event.data.reason;
     }
-    this.#connectionAuthRuns.set(event.data.name, run);
-    this.#pendingConnectionAuths.delete(event.data.name);
+    this.#connectionAuthRuns.set(authorizationKey(event.data), run);
+    this.#pendingConnectionAuths.delete(authorizationKey(event.data));
     this.#emitConnectionAuthUpdate(run);
     this.#renderer.setConnectionAuthPendingCount?.(this.#pendingConnectionAuths.size);
   }
@@ -2054,6 +2082,7 @@ export class EveTUIRunner {
   #emitConnectionAuthUpdate(run: ConnectionAuthRun): void {
     const update: ConnectionAuthUpdate = {
       name: run.name,
+      attemptId: run.attemptId,
       description: run.description,
       state: run.state,
     };
@@ -2105,12 +2134,11 @@ function formatAgentUpdateNotice(
 type EveStreamTranslatorInput = {
   events: AsyncIterable<MessageStreamEvent>;
   onAssistantResponse?: () => void;
-  pendingInputRequests: Map<string, InputRequest>;
+  getConversation: () => ConversationState;
+  seenEvents: EventDeduper;
+  onConversationChange: (state: ConversationState) => void;
   turnState: AgentTUITurnState;
-  onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
-  onSubagentBackgrounded?: (callId: string) => void;
-  onSubagentCompleted?: (callId: string) => void;
-  onTurnCancelled?: (turnId: string) => void;
+  onSubagentEvent?: (event: MessageStreamEvent) => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
   /** Opens a setup-bearing registry item in the existing `/add` flow. */
@@ -2152,31 +2180,21 @@ async function* eveEventsToTUIStream(
 ): AsyncIterable<AgentTUIStreamEvent> {
   const {
     events,
-    pendingInputRequests,
+    getConversation,
+    seenEvents,
+    onConversationChange,
     turnState,
-    onSubagentCalled,
-    onSubagentBackgrounded,
-    onSubagentCompleted,
-    onTurnCancelled,
+    onSubagentEvent,
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
     onRegistryHandoff,
     onTerminalFailure,
     failureHintOverride,
   } = input;
-  const textParts = new Map<string, StreamPartState>();
-  const reasoningParts = new Map<string, StreamPartState>();
-  const toolNames = new Map<string, string>();
-  // Dropping re-delivered events here means every case below is a new emission.
-  const seenEvents = createEventDeduper();
-  // Counts `step.started` events. The harness reuses `stepIndex` across the
-  // model calls of one turn (e.g. the post-subagent call restarts at the same
-  // index), so a part key alone cannot distinguish a new message under a
-  // reused key from a re-emission. A fresh `step.started` since the part
-  // completed is the discriminator.
-  let stepEpoch = 0;
-  const knownToolCalls = new Set<string>();
-  const seenInputRequestIds = new Set<string>();
+  const reducer = conversationReducer;
+  const toolProjection = new TerminalToolProjection();
+  toolProjection.restore(getConversation());
+
   // The harness reports one underlying failure as a cascade (`step.failed` →
   // `turn.failed` → `session.failed`) with an identical payload on each
   // event. Render it once, not three times.
@@ -2194,6 +2212,49 @@ async function* eveEventsToTUIStream(
       continue;
     }
 
+    if (event.type === "actions.requested") {
+      for (const action of event.data.actions) {
+        if (action.kind === "tool-call") toolProjection.announceTool(action.callId);
+      }
+    } else if (event.type === "input.requested") {
+      for (const request of event.data.requests) {
+        if (request.action.kind === "tool-call" && request.kind !== "session-limit") {
+          toolProjection.announceTool(request.action.callId);
+        }
+      }
+    }
+    if (event.type === "turn.started") {
+      if (event.data.turnId !== turnState.turnId) visibleTurnCompleted = false;
+      turnState.turnId = event.data.turnId;
+      yield { type: "turn-start", turnId: event.data.turnId };
+    } else if (event.type === "step.started") {
+      yield { type: "step-start", modelId: event.data.modelId };
+    }
+    const previous = getConversation();
+    const messageData = reducer.reduce(previous, event);
+    if (messageData !== previous) {
+      onConversationChange(messageData);
+      if (
+        event.type === "subagent.called" ||
+        event.type === "subagent.completed" ||
+        event.type === "action.result" ||
+        event.type === "turn.cancelled"
+      ) {
+        onSubagentEvent?.(event);
+      }
+      if (event.type === "message.appended" && event.data.messageDelta)
+        input.onAssistantResponse?.();
+      yield { type: "content-state", data: messageData };
+      yield* toolProjection.transitions(messageData);
+    }
+    const openInputs = openConversationInputs(messageData);
+    turnState.pendingApprovals = openInputs
+      .filter((input) => input.request.kind === "tool-approval")
+      .map((input) => toAgentTUIToolApprovalRequest(input.request));
+    turnState.pendingQuestions = openInputs
+      .filter((input) => input.request.kind !== "tool-approval")
+      .map((input) => input.request);
+
     switch (event.type) {
       case "session.started":
       case "message.received":
@@ -2201,296 +2262,54 @@ async function* eveEventsToTUIStream(
         break;
 
       case "turn.started":
-        // Recorded so key-driven cancellation can scope its request to the
-        // turn the user is watching; a cancel that arrives after the
-        // boundary then no-ops instead of hitting the next turn.
-        if (event.data.turnId !== turnState.turnId) visibleTurnCompleted = false;
-        turnState.turnId = event.data.turnId;
-        yield { type: "turn-start", turnId: event.data.turnId };
-        break;
-
       case "step.started":
-        stepEpoch += 1;
-        yield { type: "step-start", modelId: event.data.modelId };
         break;
 
       case "step.completed": {
         const stepEvent = event as StepCompletedStreamEvent;
         latestStepUsage = stepEvent.data.usage;
-        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
         yield { type: "step-finish", usage: stepEvent.data.usage };
         break;
       }
 
-      case "message.appended": {
-        const appended = event as MessageAppendedStreamEvent;
-        const base = textPartId(appended.data.turnId, appended.data.stepIndex);
-        const state = partStateFor(textParts, base);
-
-        if (state.completed) {
-          // No intervening `step.started`: a retry of the same model call.
-          if (stepEpoch <= state.completedEpoch) break;
-          // A fresh model call reusing this part key (the harness restarts
-          // `stepIndex` after a park/resume, e.g. post-subagent): open a new
-          // message generation so it renders as its own block.
-          state.generation += 1;
-          state.text = "";
-          state.completed = false;
-        }
-
-        const delta = appended.data.messageDelta;
-        if (delta.length === 0) break;
-        state.text += delta;
-        if (delta) input.onAssistantResponse?.();
-        yield { type: "assistant-delta", id: partGenerationId(base, state.generation), delta };
+      case "message.appended":
+      case "message.completed":
+      case "reasoning.appended":
+      case "reasoning.completed":
         break;
-      }
 
-      case "message.completed": {
-        const base = textPartId(event.data.turnId, event.data.stepIndex);
-        const state = partStateFor(textParts, base);
-        const message = event.data.message;
-
-        if (state.completed) {
-          if (message === null) break;
-          if (stepEpoch <= state.completedEpoch) break;
-          // Channels that skip per-delta events: a new full message under a
-          // reused key after a fresh model call.
-          state.generation += 1;
-          state.text = message;
-          state.completedEpoch = stepEpoch;
-          yield {
-            type: "assistant-complete",
-            id: partGenerationId(base, state.generation),
-            text: message,
-          };
-          break;
-        }
-
-        const id = partGenerationId(base, state.generation);
-        if (message !== null) {
-          if (state.text.length === 0) {
-            state.text = message;
-            state.completed = true;
-            state.completedEpoch = stepEpoch;
-            yield { type: "assistant-complete", id, text: message };
-          } else if (message.startsWith(state.text)) {
-            const suffix = message.slice(state.text.length);
-            if (suffix.length > 0) {
-              if (suffix) input.onAssistantResponse?.();
-              yield { type: "assistant-delta", id, delta: suffix };
-            }
-            state.text = message;
-            state.completed = true;
-            state.completedEpoch = stepEpoch;
-            yield { type: "assistant-complete", id };
-          } else {
-            state.text = message;
-            state.completed = true;
-            state.completedEpoch = stepEpoch;
-            yield { type: "assistant-complete", id, text: message };
-          }
-        } else if (state.text.length > 0) {
-          state.completed = true;
-          state.completedEpoch = stepEpoch;
-          yield { type: "assistant-complete", id };
-        }
+      case "actions.requested":
         break;
-      }
 
-      case "reasoning.appended": {
-        const appended = event as ReasoningAppendedStreamEvent;
-        const base = reasoningPartId(appended.data.turnId, appended.data.stepIndex);
-        const state = partStateFor(reasoningParts, base);
-
-        if (state.completed) {
-          if (stepEpoch <= state.completedEpoch) break;
-          state.generation += 1;
-          state.text = "";
-          state.completed = false;
-        }
-
-        const delta = appended.data.reasoningDelta;
-        if (delta.length === 0) break;
-        state.text += delta;
-        yield { type: "reasoning-delta", id: partGenerationId(base, state.generation), delta };
-        break;
-      }
-
-      case "reasoning.completed": {
-        const base = reasoningPartId(event.data.turnId, event.data.stepIndex);
-        const state = partStateFor(reasoningParts, base);
-        const next = event.data.reasoning;
-
-        if (state.completed) {
-          if (next.length === 0) break;
-          if (stepEpoch <= state.completedEpoch) break;
-          state.generation += 1;
-          state.text = next;
-          state.completedEpoch = stepEpoch;
-          const id = partGenerationId(base, state.generation);
-          yield { type: "reasoning-delta", id, delta: next };
-          yield { type: "reasoning-complete", id };
-          break;
-        }
-
-        const id = partGenerationId(base, state.generation);
-        if (state.text.length === 0 && next.length > 0) {
-          state.text = next;
-          yield { type: "reasoning-delta", id, delta: next };
-        } else if (next.length > 0 && !next.startsWith(state.text)) {
-          yield { type: "reasoning-complete", id };
-          state.generation += 1;
-          state.text = next;
-          state.completed = true;
-          state.completedEpoch = stepEpoch;
-          const replacementId = partGenerationId(base, state.generation);
-          yield { type: "reasoning-delta", id: replacementId, delta: next };
-          yield { type: "reasoning-complete", id: replacementId };
-          break;
-        }
-
-        state.completed = true;
-        state.completedEpoch = stepEpoch;
-        yield { type: "reasoning-complete", id };
-        break;
-      }
-
-      case "actions.requested": {
-        const data = (event as ActionsRequestedStreamEvent).data;
-        const actions = data.actions.filter((action) => action.kind === "tool-call");
-        if (actions.length === 0) break;
-
-        for (const action of actions) {
-          toolNames.set(action.callId, action.toolName);
-          if (knownToolCalls.has(action.callId)) continue;
-          knownToolCalls.add(action.callId);
-          yield {
-            type: "tool-call",
-            toolCallId: action.callId,
-            toolName: action.toolName,
-            input: action.input,
-          };
-        }
-        break;
-      }
-
-      case "input.requested": {
-        const data = (event as InputRequestedStreamEvent).data;
-        const requests = data.requests.filter((request) => request.action.kind === "tool-call");
-        if (requests.length === 0) break;
-
-        for (const request of requests) {
-          const toolCallId = request.action.callId;
-          toolNames.set(toolCallId, request.action.toolName);
-
-          // The session-limit continuation is harness-authored — no model
-          // tool call exists behind it, so fabricating a transcript entry
-          // would render a phantom call. Its question rendering already
-          // carries the prompt copy.
-          if (request.kind !== "session-limit" && !knownToolCalls.has(toolCallId)) {
-            knownToolCalls.add(toolCallId);
-            yield {
-              type: "tool-call",
-              toolCallId,
-              toolName: request.action.toolName,
-              input: request.action.input,
-            };
-          }
-
-          if (seenInputRequestIds.has(request.requestId)) continue;
-          seenInputRequestIds.add(request.requestId);
-          pendingInputRequests.set(request.requestId, request);
-
-          if (request.kind !== "tool-approval") {
-            upsertPendingQuestion(turnState, request);
-            continue;
-          }
-
-          upsertPendingApproval(turnState, request);
-          yield {
-            type: "tool-approval-request",
-            approvalId: request.requestId,
-            toolCallId,
-          };
-        }
-        break;
-      }
-
-      case "approval.candidate": {
-        if (event.data.outcome === "pending") break;
-        const request = pendingInputRequests.get(event.data.requestId);
-        if (request !== undefined) upsertPendingApproval(turnState, request);
-        break;
-      }
-
+      case "input.requested":
       case "approval.settled":
-      case "input.resolved": {
-        const requestIds = new Set(
-          event.type === "input.resolved"
-            ? event.data.resolutions.map((resolution) => resolution.requestId)
-            : [event.data.requestId],
-        );
-        for (const requestId of requestIds) pendingInputRequests.delete(requestId);
-        turnState.pendingApprovals = turnState.pendingApprovals.filter(
-          (request) => !requestIds.has(request.approvalId),
-        );
-        turnState.pendingQuestions = turnState.pendingQuestions.filter(
-          (request) => !requestIds.has(request.requestId),
-        );
+      case "input.resolved":
+        // The conversation ledger owns request identity and closure.
         break;
-      }
+
+      case "approval.candidate":
+        break;
 
       case "action.result": {
         const resultEvent = event as ActionResultStreamEvent;
-        const result = resultEvent.data.result;
-        const output = "output" in result ? result.output : undefined;
         if (
-          resultEvent.data.status === "completed" &&
-          isJsonObjectValue(output) &&
-          output.status === "working" &&
-          typeof output.taskId === "string" &&
-          typeof output.agentId === "string"
+          resultEvent.data.result.kind === "tool-result" &&
+          resultEvent.data.status === "completed"
         ) {
-          onSubagentBackgrounded?.(result.callId);
-        }
-        if (resultEvent.data.result.kind !== "tool-result") {
-          break;
-        }
-        const callId = resultEvent.data.result.callId;
-        if (!knownToolCalls.has(callId)) {
-          // Results for calls this turn never announced (e.g. subagent
-          // dispatches, which surface through the subagent section instead)
-          // have no tool block to attach to.
-          break;
-        }
-        switch (resultEvent.data.status) {
-          case "completed": {
-            const output = resultEvent.data.result.output;
-            yield {
-              type: "tool-result",
-              toolCallId: callId,
-              output,
-            };
-            const address = registryHandoffAddress(undefined, toolNames.get(callId), output);
+          const tool = messageData.messages
+            .flatMap((message) => message.parts)
+            .find(
+              (part) =>
+                part.type === "dynamic-tool" && part.toolCallId === resultEvent.data.result.callId,
+            );
+          if (toolProjection.hasTool(resultEvent.data.result.callId)) {
+            const address = registryHandoffAddress(
+              undefined,
+              tool?.type === "dynamic-tool" ? tool.toolName : undefined,
+              resultEvent.data.result.output,
+            );
             if (address !== undefined) await onRegistryHandoff?.(address);
-            break;
           }
-          case "failed":
-            yield {
-              type: "tool-error",
-              toolCallId: callId,
-              errorText: formatActionResultError(resultEvent),
-            };
-            break;
-          case "rejected":
-            yield {
-              type: "tool-rejected",
-              toolCallId: callId,
-              reason: formatActionResultError(resultEvent),
-            };
-            break;
         }
         break;
       }
@@ -2510,8 +2329,6 @@ async function* eveEventsToTUIStream(
         const failure = toFailureEvent(event, emittedFailures, failureHintOverride);
         if (failure) yield failure;
         turnState.boundaryEvent = event.type;
-        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
         yield {
           type: "finish",
           usage: latestStepUsage,
@@ -2523,8 +2340,6 @@ async function* eveEventsToTUIStream(
       case "session.waiting":
       case "session.completed":
         turnState.boundaryEvent = event.type;
-        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
         yield {
           type: "finish",
           usage: latestStepUsage,
@@ -2534,43 +2349,27 @@ async function* eveEventsToTUIStream(
 
       case "turn.completed":
         visibleTurnCompleted = true;
-        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
         break;
 
       case "turn.cancelled":
         // Explicit cooperative cancellation preserves the session.
         // `session.waiting` follows and finishes the stream normally.
-        onTurnCancelled?.(event.data.turnId);
-        yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-        yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
         yield { type: "turn-cancelled" };
         break;
 
-      case "subagent.called": {
-        // Re-delivery within this translator was filtered above; run creation
-        // and re-entry from a later translator live in the pump's begin().
-        onSubagentCalled?.(event as SubagentCalledStreamEvent);
+      case "subagent.called":
         break;
-      }
 
       case "subagent.started":
       case "subagent.event":
         // `subagent.started` and `subagent.event` are not emitted by the
         // current harness — the parent stream only sees `called` and
         // `completed`. All intermediate child content is observed via
-        // the runner's parallel child-session stream pump.
+        // the runner's parallel child-stream follower.
         break;
 
-      case "subagent.completed": {
-        const completed = event as SubagentCompletedStreamEvent;
-        if (completed.data.backgroundTask === undefined) {
-          onSubagentCompleted?.(completed.data.callId);
-        } else {
-          onSubagentBackgrounded?.(completed.data.callId);
-        }
+      case "subagent.completed":
         break;
-      }
 
       case "authorization.required":
         onConnectionAuthRequired?.(event as AuthorizationRequiredStreamEvent);
@@ -2587,8 +2386,6 @@ async function* eveEventsToTUIStream(
   }
 
   if (!sentFinish) {
-    yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
-    yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
     yield { type: "finish", usage: latestStepUsage };
   }
 }
@@ -2615,18 +2412,6 @@ function createTurnState(): AgentTUITurnState {
   };
 }
 
-function upsertPendingApproval(state: AgentTUITurnState, request: InputRequest): void {
-  const approval = toAgentTUIToolApprovalRequest(request);
-  const index = state.pendingApprovals.findIndex(
-    (candidate) => candidate.approvalId === approval.approvalId,
-  );
-  if (index === -1) {
-    state.pendingApprovals.push(approval);
-  } else {
-    state.pendingApprovals[index] = approval;
-  }
-}
-
 function toAgentTUIToolApprovalRequest(request: InputRequest): AgentTUIToolApprovalRequest {
   return {
     approvalId: request.requestId,
@@ -2634,75 +2419,6 @@ function toAgentTUIToolApprovalRequest(request: InputRequest): AgentTUIToolAppro
     toolName: request.action.toolName,
     input: request.action.input,
   };
-}
-
-function upsertPendingQuestion(state: AgentTUITurnState, request: InputRequest): void {
-  const index = state.pendingQuestions.findIndex(
-    (candidate) => candidate.requestId === request.requestId,
-  );
-  if (index === -1) {
-    state.pendingQuestions.push(request);
-  } else {
-    state.pendingQuestions[index] = request;
-  }
-}
-
-function textPartId(turnId: string, stepIndex: number): string {
-  return `text:${turnId}:${stepIndex}`;
-}
-
-function reasoningPartId(turnId: string, stepIndex: number): string {
-  return `reasoning:${turnId}:${stepIndex}`;
-}
-
-/**
- * Per-part-key accumulation state for one assistant text or reasoning trace.
- *
- * eve names parts by `turnId:stepIndex`, but the harness reuses `stepIndex`
- * across the model calls of one turn (the post-park call restarts at the same
- * index). `generation` disambiguates: each fresh model call that reuses a
- * completed key opens generation N+1, which renders as its own block.
- */
-type StreamPartState = {
-  generation: number;
-  /** Accumulated text of the current generation. */
-  text: string;
-  completed: boolean;
-  /** Value of the step epoch when the current generation completed. */
-  completedEpoch: number;
-};
-
-function partStateFor(parts: Map<string, StreamPartState>, base: string): StreamPartState {
-  let state = parts.get(base);
-  if (state === undefined) {
-    state = {
-      generation: 0,
-      text: "",
-      completed: false,
-      completedEpoch: 0,
-    };
-    parts.set(base, state);
-  }
-  return state;
-}
-
-/** Generation 0 keeps the bare key so block ids stay stable for the common case. */
-function partGenerationId(base: string, generation: number): string {
-  return generation === 0 ? base : `${base}#${generation}`;
-}
-
-/** Closes every still-open generation at a step or turn boundary. */
-function* closeOpenParts(
-  parts: Map<string, StreamPartState>,
-  type: "assistant-complete" | "reasoning-complete",
-  stepEpoch: number,
-): Generator<AgentTUIStreamEvent> {
-  for (const [base, state] of parts) {
-    if (state.completed || state.text.length === 0) continue;
-    state.completed = true;
-    state.completedEpoch = stepEpoch;
-    yield { type, id: partGenerationId(base, state.generation) };
-  }
 }
 
 function isPostTurnVisibleEvent(event: MessageStreamEvent): boolean {
@@ -2728,17 +2444,6 @@ function isPostTurnVisibleEvent(event: MessageStreamEvent): boolean {
       return true;
     default:
       return false;
-  }
-}
-
-function formatActionResultError(event: ActionResultStreamEvent): string {
-  if (event.data.error?.message) return event.data.error.message;
-  const output = event.data.result.output;
-  if (typeof output === "string") return output;
-  try {
-    return JSON.stringify(output);
-  } catch {
-    return "Tool execution failed.";
   }
 }
 
@@ -2813,6 +2518,7 @@ export type ConnectionAuthState = "required" | "pending" | ConnectionAuthorizati
 
 export type ConnectionAuthUpdate = {
   name: string;
+  attemptId?: string;
   description: string;
   state: ConnectionAuthState;
   challenge?: ConnectionAuthChallenge;
@@ -2821,6 +2527,7 @@ export type ConnectionAuthUpdate = {
 
 type ConnectionAuthRun = {
   name: string;
+  attemptId?: string;
   description: string;
   state: ConnectionAuthState;
   challenge?: ConnectionAuthChallenge;

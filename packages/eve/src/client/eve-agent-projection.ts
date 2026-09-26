@@ -1,14 +1,14 @@
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
 
-/** Owns reducer replay when optimistic events are replaced by server events. */
+/** Owns chronological reducer replay when optimistic events are replaced by server events. */
 export class EveAgentProjection<TData> {
   readonly #reducer: EveAgentReducer<TData>;
-  #events: readonly EveAgentReducerEvent[];
+  #events: EveAgentReducerEvent[];
   #data: TData;
 
   constructor(reducer: EveAgentReducer<TData>, events: readonly EveAgentReducerEvent[]) {
     this.#reducer = reducer;
-    this.#events = events;
+    this.#events = [...events];
     this.#data = this.#reduce();
   }
 
@@ -22,7 +22,7 @@ export class EveAgentProjection<TData> {
   }
 
   append(event: EveAgentReducerEvent): void {
-    this.#events = [...this.#events, event];
+    this.#events.push(event);
     this.#data = this.#reducer.reduce(this.#data, event);
   }
 
@@ -36,10 +36,8 @@ export class EveAgentProjection<TData> {
     replacement: EveAgentReducerEvent,
   ): void {
     const index = this.#events.findIndex(predicate);
-    this.#events =
-      index === -1
-        ? [...this.#events, replacement]
-        : this.#events.map((event, i) => (i === index ? replacement : event));
+    if (index === -1) this.#events.push(replacement);
+    else this.#events[index] = replacement;
     this.#data = this.#reduce();
   }
 

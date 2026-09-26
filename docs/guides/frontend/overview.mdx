@@ -53,7 +53,7 @@ export function Chat() {
         <article key={message.id}>
           <header>{message.role}</header>
           {message.parts.map((part, index) =>
-            part.type === "text" ? <p key={index}>{part.text}</p> : null,
+            part.type === "text" ? <p key={part.id ?? index}>{part.text}</p> : null,
           )}
         </article>
       ))}
@@ -70,19 +70,19 @@ export function Chat() {
 
 `useEveAgent()` returns the current UI state plus commands:
 
-| Field     | What it is                                                                                |
-| --------- | ----------------------------------------------------------------------------------------- |
-| `data`    | Projected UI state from the reducer. Defaults to `{ messages }`.                          |
-| `status`  | `"ready"`, `"resuming"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer. |
-| `error`   | The latest session creation, stream, resume, or turn failure.                             |
-| `events`  | Raw eve stream events for this session.                                                   |
-| `session` | Serializable fixed session cursor (`sessionId`, `streamIndex`).                           |
-| `prewarm` | Create the durable session without starting a turn.                                       |
-| `send`    | Send text or a multi-part message, with per-turn options.                                 |
-| `respond` | Answer pending HITL input requests, with per-turn options.                                |
-| `resume`  | Replay an attached session and follow its in-flight turn.                                 |
-| `cancel`  | Request durable cancellation of the active turn.                                          |
-| `reset`   | Clear local events, data, errors, and the local session cursor.                           |
+| Field     | What it is                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------------- |
+| `data`    | Projected conversation state. Includes `messages`, root `turns` and `inputs`, and optional child state. |
+| `status`  | `"ready"`, `"resuming"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer.               |
+| `error`   | The latest session creation, stream, resume, or turn failure.                                           |
+| `events`  | Raw eve stream events for this session.                                                                 |
+| `session` | Serializable fixed session cursor (`sessionId`, `streamIndex`).                                         |
+| `prewarm` | Create the durable session without starting a turn.                                                     |
+| `send`    | Send text or a multi-part message, with per-turn options.                                               |
+| `respond` | Answer pending HITL input requests, with per-turn options.                                              |
+| `resume`  | Replay an attached session and follow its in-flight turn.                                               |
+| `cancel`  | Request durable cancellation of the active turn.                                                        |
+| `reset`   | Clear local events, data, errors, and the local session cursor.                                         |
 
 Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
 
@@ -158,8 +158,8 @@ change the option from `false` to `true` again, reset, or send a message to reco
 The hook keeps consuming one session stream across turns and idle periods. Replies,
 authorization updates, and turns started elsewhere all update the same projection, including
 background-task results that arrive during another send. Separately delivered participant messages
-remain separate bubbles even when they steer the same active turn; a single event that coalesces
-multiple deliveries remains one bubble. Runtime-authored task input remains in the
+remain separate bubbles before that turn's assistant response, even when they arrive after the
+response begins. A single event that coalesces multiple deliveries remains one bubble. Runtime-authored task input remains in the
 event stream with `data.kind: "execution.background_task"`, but the default reducer does not render
 it as a participant message. A turn settling does not close the connection. The transport reconnects from its cursor after a disconnect or the
 server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
@@ -170,9 +170,17 @@ the reset, it prepares the next owned session; otherwise, the next send creates 
 supplied `session` remains externally owned and is never replaced by prewarming or reset. Use
 `initialSession` with `resume: true` to restore a saved chat.
 
-`data.messages` are eve-owned `EveMessage[]`. Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
+`data.messages` are eve-owned `EveMessage[]`. Assistant text and reasoning parts have a stable `id` from the event that created the part. Appends and completion retain that ID; a null completion removes the provisional part. Use `part.id` to key streamed assistant content, including successive text parts within one step. Older events without an ID get a best-effort fallback. User text parts may not have an ID.
 
-When the root agent delegates, its stream emits `subagent.called` with the child's `childSessionId`, then `subagent.completed` when the parent records a successful result, for both blocking and background invocations. A background working receipt appears in `action.result`, without a completion event. The child session can remain available for reuse. Task notifications wake the parent with completion, failure, or cancellation. Detailed child progress lives on the child session's stream instead of being flattened into the root `data.messages`. When your UI needs live subagent activity, attach a [client session](../client/overview#sessions) to the parent and pass the `subagent.called` event from `events` to [`streamSubagent()`](../client/streaming#follow-a-subagent). It follows local and remote children through the parent, so the browser never calls a remote deployment directly. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
+Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
+
+When the root agent delegates, its stream emits `subagent.called` with the child's `childSessionId`, then `subagent.completed` when the parent records a successful result, for both blocking and background invocations. A background working receipt appears in `action.result` before the task settles; it is not itself a completion event. The child session can remain available for reuse. Task notifications wake the parent with completion, failure, or cancellation.
+
+The default reducer keeps a background subagent's working receipt on its original tool part. The call's parent-reported lifecycle is available at `data.children[callId].parentStatus`; a parent completion does not replace the original receipt output. Not every task has a parent completion event, so this field alone cannot report failure or cancellation.
+
+The default hook stores one call record per delegation at `data.children[callId]`. Each record includes the child session ID, name, originating turn, background flag, and parent-reported status. These parent facts are available even with `followSubagents: false`. By default, the hook also follows child streams while mounted. Narrow `child.observation.status` before reading its call-scoped `conversation.messages`, `inputs`, and `turns`: `"not-followed"` has no child detail, `"following"` has live detail, and `"ended"` has the observed detail and outcome. `"unavailable"` means child observation failed or is unsupported; it does not mean the child failed. Parent completion may precede the child's last event and does not establish a child outcome. `data.inputs` and `data.turns` describe root events only. A reused child session produces separate call-scoped records; a later call does not repeat an earlier call's content. Custom reducers do not follow children automatically.
+
+Detailed child progress is separate from the root `data.messages`. If you manage your own session rather than using the default hook, pass a `subagent.called` event from `events` to [`session.streamSubagent()`](../client/streaming#follow-a-subagent). It follows local and remote children through the parent, so the browser never calls a remote deployment directly. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
 
 ## Sending and streaming
 
@@ -200,7 +208,7 @@ To steer an active turn with a follow-up, send the message with `turnPolicy: "st
 await agent.send(message, { turnPolicy: "steer" });
 ```
 
-Other message sends and HITL responses reject while the hook is processing a turn. Call `cancel()` to stop the durable server-side turn without replacing it, and `reset()` to clear local state so the next send starts a fresh durable session.
+Other message sends and HITL responses reject while the hook is processing a turn. The default `data.inputs` ledger keeps each request's originating `turnId` and `stepIndex`, response and settlement status, including requests left open after their originating turn ends; `data.activeTurnId` tracks the current root turn when known. `data.children[callId]` keeps the child's ledger separately. These fields describe observed events, not whether the server will accept an in-flight response. Call `cancel()` to stop the durable server-side turn without replacing it, and `reset()` to clear local state so the next send starts a fresh durable session.
 
 `cancel()` can be called as soon as `status` is `"submitted"`; the hook waits for the active response to identify its turn when necessary, sends one guarded cancellation request, and keeps the event stream attached. The promise resolves when eve accepts the request or reports that no turn is active, and rejects if the cancellation request fails. The turn then settles on the same stream as `turn.cancelled` followed by `session.waiting`, so the session is safe to continue.
 
@@ -218,16 +226,12 @@ received attachment as a `file` part on the user message. The part includes `med
 
 ## Human-in-the-loop prompts
 
-Tools opt into approval with `approval`, and workflow tools such as the opt-in `ask_question` tool ask the user a question with `ctx.ask()` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest`. Scan every message because an unrelated turn can add newer messages while an approval stays open, then answer through the same session with `respond()`:
+Tools opt into approval with `approval`, and workflow tools such as the opt-in `ask_question` tool ask the user a question with `ctx.ask()` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event. The default projection keeps open requests in `data.inputs`, including requests introduced on earlier turns while unrelated work continues. Render from that ledger and answer through the same session with `respond()`. The request also appears on its originating `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest` for inline display:
 
 ```tsx
-const pendingRequests = agent.data.messages
-  .flatMap((message) => message.parts)
-  .flatMap((part) => {
-    if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
-    const request = part.toolMetadata?.eve?.inputRequest;
-    return request ? [request] : [];
-  });
+import { openConversationInputs } from "eve/react";
+
+const pendingRequests = openConversationInputs(agent.data).map((input) => input.request);
 
 const inputDisabled = ["submitted", "streaming", "resuming"].includes(agent.status);
 
@@ -258,7 +262,7 @@ For a question with `allowFreeform`, render a text input and send `{ requestId, 
 
 ## Authorization prompts
 
-Connections and tools that need OAuth or another grant emit `authorization.required`. The default reducer projects that into an `authorization` message part with the display name, instructions, device code, and user-facing sign-in URL. Render that part as a normal chat message, then keep the session cursor; eve resumes the parked turn when the callback completes and updates the part after `authorization.completed`:
+Connections and tools that need OAuth or another grant emit `authorization.required`. The default reducer projects that into an `authorization` message part with the display name, instructions, device code, and user-facing sign-in URL. When multiple people authorize the same connection in one session, the client matches completion to the corresponding `attemptId`, not merely the connection name. Render that part as a normal chat message, then keep the session cursor; eve resumes the parked turn when the callback completes and updates the part after `authorization.completed`:
 
 ```tsx
 import type { EveMessagePart } from "eve/react";
@@ -326,11 +330,11 @@ const agent = useEveAgent({
 });
 ```
 
-The `optimistic` option (default `true`) projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only. `events` stays the authoritative eve stream. For an existing session, the hook reconciles each placeholder with the server's delivery ID, so an unrelated or identical message cannot consume it.
+The `optimistic` option (default `true`) projects submitted user messages into `data` before eve confirms them with a `message.received` event. Steered follow-ups appear before the active turn's assistant response once the turn is known; if the send fails, the failed placeholder stays in place. These are reducer-facing projection events only. `events` stays the authoritative eve stream. For an existing session, the hook reconciles each placeholder with the server's delivery ID, so an unrelated or identical message cannot consume it.
 
 ## Custom reducer
 
-The default reducer projects events into `{ messages }` (`EveMessageData`). When you want `data` shaped differently, pass a `reducer` implementing `EveAgentReducer<TData>`:
+The default hook uses `conversationReducer`, which includes the `EveMessageData` message fields plus turn and input state (`ConversationState`). When you want `data` shaped differently, pass a `reducer` implementing `EveAgentReducer<TData>`:
 
 ```tsx
 import { useEveAgent } from "eve/react";
@@ -350,7 +354,7 @@ const agent = useEveAgent({ reducer: toolCounter });
 // agent.data is ToolLog
 ```
 
-`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). `client.input.responded` notifies custom reducers that an answer was submitted, not that it was accepted. The default reducer waits for server settlement; the durable `input.resolved` event records the server-accepted outcome and lets replayed history rebuild the same HITL state. Return `data` unchanged for events your reducer does not handle.
+`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). With the built-in reducer, the default hook also projects `client.child.following`, `client.child.observed`, and `client.child.unavailable` while following child streams. Custom reducers do not receive child observations; passing `followSubagents: true` to an `EveAgentStore` with a custom reducer throws. `client.input.responded` notifies custom reducers that an answer was submitted, not that it was accepted. The default reducer waits for server settlement; the durable `input.resolved` event records the server-accepted outcome and lets replayed history rebuild the same HITL state. Return `data` unchanged for events your reducer does not handle.
 
 ## Resumable sessions
 

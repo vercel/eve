@@ -8,7 +8,6 @@ import type {
   EveMessageData,
   EveDynamicToolPart,
   EveMessage,
-  EveMessageMetadata,
   EveMessagePart,
 } from "#client/message-reducer-types.js";
 import {
@@ -24,10 +23,10 @@ import {
   optimisticUserMessageId,
   partKey,
   projectReceivedParts,
-  removeStreamingToolPartsForTurn,
   upsertMessage,
 } from "#client/message-reducer-primitives.js";
 import { messageRun } from "#client/message-run-parts.js";
+
 import type { InputResponse } from "#shared/input.js";
 import type { AuthorizationCompletedStreamEvent, InputResolution } from "#protocol/message.js";
 
@@ -73,27 +72,26 @@ export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
 
 function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): EveMessageData {
   switch (event.type) {
-    case "client.message.submitted":
-      return upsertMessage(data, {
-        id: optimisticUserMessageId(event.data.submissionId),
-        metadata: {
-          optimistic: true,
-          status: "submitted",
-        },
-        parts: [{ type: "text", text: event.data.message }],
-        role: "user",
-      });
+    case "client.child.observed":
+    case "client.child.following":
+    case "client.child.unavailable":
+      return data;
 
+    case "client.message.submitted":
     case "client.message.failed":
-      return upsertMessage(data, {
-        id: optimisticUserMessageId(event.data.submissionId),
-        metadata: {
-          optimistic: true,
-          status: "failed",
+      return upsertMessage(
+        data,
+        {
+          id: optimisticUserMessageId(event.data.submissionId),
+          metadata: {
+            optimistic: true,
+            status: event.type === "client.message.failed" ? "failed" : "submitted",
+          },
+          parts: [{ type: "text", text: event.data.message }],
+          role: "user",
         },
-        parts: [{ type: "text", text: event.data.message }],
-        role: "user",
-      });
+        event.data.turnId,
+      );
 
     case "input.resolved": {
       let next = data;
@@ -105,25 +103,42 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "message.received":
       if (event.data.kind === "execution.background_task") return data;
-      return upsertMessage(data, {
-        id: `${receivedMessageEventId(event)}:user`,
-        metadata: {
-          status: "complete",
-          turnId: event.data.turnId,
+      return upsertMessage(
+        data,
+        {
+          id: `${receivedMessageEventId(event)}:user`,
+          metadata: {
+            status: "complete",
+            turnId: event.data.turnId,
+          },
+          parts: projectReceivedParts(event.data.parts, event.data.message),
+          role: "user",
         },
-        parts: projectReceivedParts(event.data.parts, event.data.message),
-        role: "user",
-      });
+        event.data.turnId,
+      );
 
     case "step.started":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
         ensureStepStartPart(message, event.data.stepIndex),
       );
 
+    case "step.completed": {
+      const existing = data.messages.find(
+        (message) => message.role === "assistant" && message.metadata?.turnId === event.data.turnId,
+      );
+      if (existing === undefined) return data;
+      return updateAssistantMessage(data, event.data.turnId, (message) => ({
+        ...message,
+        parts: closeStreamingRuns(message.parts, event.data.stepIndex),
+      }));
+    }
+
     case "reasoning.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        messageRun.append(ensureStepStartPart(message, event.data.stepIndex), {
+        messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
+          kind: "append",
           delta: event.data.reasoningDelta,
+          id: event.meta?.id,
           stepIndex: event.data.stepIndex,
           type: "reasoning",
         }),
@@ -131,10 +146,11 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "reasoning.completed":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        messageRun.upsert(ensureStepStartPart(message, event.data.stepIndex), {
-          state: "done",
+        messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
+          kind: "complete",
           stepIndex: event.data.stepIndex,
           text: event.data.reasoning,
+          id: event.meta?.id,
           type: "reasoning",
         }),
       );
@@ -163,18 +179,14 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         type: "dynamic-tool",
       };
 
-      if (existing !== undefined) {
-        return updateToolPart(data, event.data.callId, nextPart);
-      }
-
-      return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertPart(ensureStepStartPart(message, event.data.stepIndex), nextPart),
-      );
+      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, nextPart);
     }
 
     case "actions.requested": {
       let next = data;
       for (const action of event.data.actions) {
+        const existing = findToolPart(next, action.callId);
+        if (existing !== undefined && existing.state !== "input-streaming") continue;
         const descriptor = normalizeActionRequest(action);
         next = updateAssistantMessage(next, event.data.turnId, (message) =>
           upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
@@ -194,6 +206,12 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     case "input.requested": {
       let next = data;
       for (const request of event.data.requests) {
+        const existing = findToolPart(next, request.action.callId);
+        if (
+          existing?.approval?.id === request.requestId ||
+          (existing !== undefined && isSettledToolPart(existing))
+        )
+          continue;
         const descriptor = normalizeActionRequest(request.action);
         next = updateAssistantMessage(next, event.data.turnId, (message) =>
           upsertPart(ensureStepStartPart(message, event.data.stepIndex), {
@@ -225,36 +243,27 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       if (existing === undefined) return data;
       if (event.data.outcome === "approved") {
         return updateToolPart(data, existing.toolCallId, {
+          ...toolPartIdentity(existing),
           approval: { approved: true, id: event.data.requestId, reason: undefined },
-          input: existing.input,
           state: "approval-responded",
-          stepIndex: existing.stepIndex,
-          toolCallId: existing.toolCallId,
-          toolMetadata: existing.toolMetadata,
-          toolName: existing.toolName,
-          type: "dynamic-tool",
         });
       }
       return updateToolPart(data, existing.toolCallId, {
+        ...toolPartIdentity(existing),
         approval: {
           approved: false,
           id: event.data.requestId,
           reason: "Tool execution was cancelled.",
         },
-        input: existing.input,
         state: "output-denied",
-        stepIndex: existing.stepIndex,
-        toolCallId: existing.toolCallId,
-        toolMetadata: existing.toolMetadata,
-        toolName: existing.toolName,
-        type: "dynamic-tool",
       });
     }
 
     case "action.result": {
       const descriptor = normalizeActionResult(event.data.result);
       const existing = findToolPart(data, event.data.result.callId);
-      const denied = event.data.error?.code === "TOOL_EXECUTION_DENIED";
+      const denied =
+        event.data.status === "rejected" || event.data.error?.code === "TOOL_EXECUTION_DENIED";
       const failed = event.data.status === "failed" && !denied;
       const approvalId = existing?.approval?.id ?? event.data.result.callId;
       const toolMetadata = mergeToolMetadata(
@@ -297,15 +306,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         };
       }
 
-      if (existing !== undefined) {
-        // Approved tool results can arrive on a later runtime turn; keep
-        // the UI lifecycle anchored to the original tool call.
-        return updateToolPart(data, event.data.result.callId, nextPart);
-      }
-
-      return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertPart(ensureStepStartPart(message, event.data.stepIndex), nextPart),
-      );
+      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, nextPart);
     }
 
     case "action.partial": {
@@ -328,13 +329,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         type: "dynamic-tool",
       };
 
-      if (existing !== undefined) {
-        return updateToolPart(data, event.data.result.callId, nextPart);
-      }
-
-      return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertPart(ensureStepStartPart(message, event.data.stepIndex), nextPart),
-      );
+      return upsertToolPart(data, event.data.turnId, event.data.stepIndex, nextPart);
     }
 
     case "authorization.required":
@@ -350,35 +345,37 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "message.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        messageRun.append(ensureStepStartPart(message, event.data.stepIndex), {
+        messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
+          kind: "append",
           delta: event.data.messageDelta,
+          id: event.meta?.id,
           stepIndex: event.data.stepIndex,
           type: "text",
         }),
       );
 
     case "message.completed":
-      return updateAssistantMessage(data, event.data.turnId, (message) => {
-        if (event.data.message === null) {
-          return removeTextPart(message, event.data.stepIndex);
-        }
-
-        return messageRun.upsert(ensureStepStartPart(message, event.data.stepIndex), {
-          state: "done",
+      return updateAssistantMessage(data, event.data.turnId, (message) =>
+        messageRun.transition(ensureStepStartPart(message, event.data.stepIndex), {
+          kind: "complete",
           stepIndex: event.data.stepIndex,
           text: event.data.message,
+          id: event.meta?.id,
           type: "text",
-        });
-      });
+        }),
+      );
 
     case "result.completed":
-      return updateAssistantMetadata(data, event.data.turnId, { result: event.data.result });
+      return updateAssistantMessage(data, event.data.turnId, (message) => ({
+        ...message,
+        metadata: { ...message.metadata, result: event.data.result },
+      }));
 
     case "turn.completed":
       return updateAssistantMessage(data, event.data.turnId, (message) => ({
         ...message,
         metadata: { ...message.metadata, status: "complete" },
-        parts: removeStreamingToolParts(message.parts),
+        parts: removeStreamingToolParts(closeStreamingRuns(message.parts)),
       }));
 
     case "turn.cancelled":
@@ -387,17 +384,20 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return updateAssistantMessage(data, event.data.turnId, (message) => ({
         ...message,
         metadata: { ...message.metadata, status: "complete" },
-        parts: removeStreamingToolParts(
-          message.parts.map((part) =>
-            (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
-              ? { ...part, state: "done" }
-              : part,
-          ),
-        ),
+        parts: removeStreamingToolParts(closeStreamingRuns(message.parts)),
       }));
 
-    case "turn.failed":
-      return removeStreamingToolPartsForTurn(data, event.data.turnId);
+    case "turn.failed": {
+      const existing = data.messages.find(
+        (message) => message.role === "assistant" && message.metadata?.turnId === event.data.turnId,
+      );
+      if (existing === undefined) return data;
+      return updateAssistantMessage(data, event.data.turnId, (message) => ({
+        ...message,
+        metadata: { ...message.metadata, status: "complete" },
+        parts: removeStreamingToolParts(closeStreamingRuns(message.parts)),
+      }));
+    }
 
     case "session.failed":
       return data;
@@ -405,6 +405,19 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     default:
       return data;
   }
+}
+
+function closeStreamingRuns(
+  parts: readonly EveMessagePart[],
+  stepIndex?: number,
+): readonly EveMessagePart[] {
+  return parts.map((part) =>
+    (part.type === "text" || part.type === "reasoning") &&
+    part.state === "streaming" &&
+    (stepIndex === undefined || part.stepIndex === stepIndex)
+      ? { ...part, state: "done" }
+      : part,
+  );
 }
 
 function removeStreamingToolParts(parts: readonly EveMessagePart[]): readonly EveMessagePart[] {
@@ -423,11 +436,9 @@ function respondToInputRequest(data: EveMessageData, response: InputResponse): E
   }
 
   return updateToolPart(data, existing.toolCallId, {
+    ...toolPartIdentity(existing),
     approval,
-    input: existing.input,
     state: "approval-responded",
-    stepIndex: existing.stepIndex,
-    toolCallId: existing.toolCallId,
     toolMetadata: mergeToolMetadata(existing.toolMetadata, {
       eve: {
         inputResponse: response,
@@ -435,8 +446,6 @@ function respondToInputRequest(data: EveMessageData, response: InputResponse): E
         name: existing.toolMetadata?.eve?.name ?? existing.toolName,
       },
     }),
-    toolName: existing.toolName,
-    type: "dynamic-tool",
   });
 }
 
@@ -449,15 +458,21 @@ function resolveInputRequest(data: EveMessageData, resolution: InputResolution):
   if (!existing) return data;
 
   return updateToolPart(data, existing.toolCallId, {
-    input: existing.input,
+    ...toolPartIdentity(existing),
     output: { status: resolution.outcome },
     state: "output-available",
-    stepIndex: existing.stepIndex,
-    toolCallId: existing.toolCallId,
-    toolMetadata: existing.toolMetadata,
-    toolName: existing.toolName,
-    type: "dynamic-tool",
   });
+}
+
+function toolPartIdentity(part: EveDynamicToolPart) {
+  return {
+    input: part.input,
+    stepIndex: part.stepIndex,
+    toolCallId: part.toolCallId,
+    toolMetadata: part.toolMetadata,
+    toolName: part.toolName,
+    type: part.type,
+  };
 }
 
 function updateAssistantMessage(
@@ -472,20 +487,6 @@ function updateAssistantMessage(
 
   const message = existing ?? createAssistantMessage(turnId);
   return upsertMessage(data, update(message));
-}
-
-function updateAssistantMetadata(
-  data: EveMessageData,
-  turnId: string,
-  metadata: EveMessageMetadata,
-): EveMessageData {
-  return updateAssistantMessage(data, turnId, (message) => ({
-    ...message,
-    metadata: {
-      ...message.metadata,
-      ...metadata,
-    },
-  }));
 }
 
 function createAssistantMessage(turnId: string): EveAssistantMessage {
@@ -533,22 +534,19 @@ function upsertPart(message: EveAssistantMessage, next: EveMessagePart): EveAssi
   };
 }
 
-function removeTextPart(message: EveAssistantMessage, stepIndex: number): EveAssistantMessage {
-  const parts = message.parts.filter(
-    (part) => part.type !== "text" || part.stepIndex !== stepIndex,
-  );
-  if (parts.length === message.parts.length) {
-    return message;
-  }
-
-  return {
-    ...message,
-    metadata: {
-      ...message.metadata,
-      status: "complete",
-    },
-    parts,
-  };
+function upsertToolPart(
+  data: EveMessageData,
+  turnId: string,
+  stepIndex: number,
+  part: EveDynamicToolPart,
+): EveMessageData {
+  // A later result still belongs to the turn that opened the call.
+  const updated = updateToolPart(data, part.toolCallId, part);
+  return updated !== data
+    ? updated
+    : updateAssistantMessage(data, turnId, (message) =>
+        upsertPart(ensureStepStartPart(message, stepIndex), part),
+      );
 }
 
 function updateToolPart(
@@ -575,33 +573,13 @@ function completeAuthorization(
   data: EveMessageData,
   event: AuthorizationCompletedStreamEvent,
 ): EveMessageData {
-  const existing = findLatestPendingAuthorizationPart(data, event.data.name);
+  const existing = findPendingAuthorizationPart(data, event.data.name, event.data.attemptId);
   const next = createAuthorizationCompletedPart(event, existing);
 
-  if (existing !== undefined) {
-    return updateAuthorizationPart(data, existing, next);
-  }
-
-  return updateAssistantMessage(data, event.data.turnId, (message) =>
-    upsertPart(ensureStepStartPart(message, event.data.stepIndex), next),
+  const turnId = existing?.turnId ?? event.data.turnId;
+  return updateAssistantMessage(data, turnId, (message) =>
+    upsertPart(ensureStepStartPart(message, next.stepIndex), next),
   );
-}
-
-function updateAuthorizationPart(
-  data: EveMessageData,
-  existing: EveAuthorizationPart,
-  next: EveAuthorizationPart,
-): EveMessageData {
-  const message = data.messages.find(
-    (candidate): candidate is EveAssistantMessage =>
-      candidate.role === "assistant" && candidate.parts.some((part) => part === existing),
-  );
-
-  if (!message) {
-    return data;
-  }
-
-  return upsertMessage(data, upsertPart(message, next));
 }
 
 function findToolPart(data: EveMessageData, toolCallId: string): EveDynamicToolPart | undefined {
@@ -623,9 +601,10 @@ function isSettledToolPart(part: EveDynamicToolPart): boolean {
   );
 }
 
-function findLatestPendingAuthorizationPart(
+function findPendingAuthorizationPart(
   data: EveMessageData,
   name: string,
+  attemptId: string | undefined,
 ): EveAuthorizationPart | undefined {
   for (let messageIndex = data.messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
     const message = data.messages[messageIndex];
@@ -635,7 +614,13 @@ function findLatestPendingAuthorizationPart(
 
     for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
       const part = message.parts[partIndex];
-      if (part?.type === "authorization" && part.state === "required" && part.name === name) {
+      if (
+        part?.type === "authorization" &&
+        part.state === "required" &&
+        (attemptId === undefined
+          ? part.attemptId === undefined && part.name === name
+          : part.attemptId === attemptId)
+      ) {
         return part;
       }
     }

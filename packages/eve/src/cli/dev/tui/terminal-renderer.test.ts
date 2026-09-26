@@ -269,6 +269,45 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("It's 73°F in SF.");
   });
 
+  it("reconciles content runs by ID across replacement and removal without changing surviving blocks", async () => {
+    const { screen, renderer } = makeRenderer();
+    const content = (
+      parts: Array<{ id: string; text: string; state: "streaming" | "done" }>,
+    ): AgentTUIStreamEvent => ({
+      type: "content-state",
+      data: {
+        messages: [
+          {
+            id: "turn:assistant",
+            role: "assistant",
+            parts: parts.map((part) => ({ ...part, type: "text" })),
+          },
+        ],
+      },
+    });
+    await renderer.renderStream(
+      streamOf([
+        content([{ id: "a", text: "First.", state: "done" }]),
+        content([
+          { id: "a", text: "First.", state: "done" },
+          { id: "marker", text: "<eve-empty-delivery/>", state: "streaming" },
+          { id: "answer", text: "Draft", state: "streaming" },
+        ]),
+        content([
+          { id: "a", text: "First.", state: "done" },
+          { id: "answer", text: "Revised", state: "done" },
+        ]),
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "continue", continueSession: false },
+    );
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("First.");
+    expect(snapshot).toContain("Revised");
+    expect(snapshot).not.toContain("<eve-empty-delivery/>");
+    expect(snapshot).not.toContain("Draft");
+  });
+
   it("replaces discarded retry text with the authoritative completed message", async () => {
     const { screen, renderer } = makeRenderer();
     await renderer.renderStream(
@@ -284,6 +323,33 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).not.toContain("Discard this partial response.");
     expect(snapshot.match(/Recovered answer\./gu)).toHaveLength(1);
+  });
+
+  it("removes a streamed channel-delivery marker on null completion", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "text:t0:0", delta: "<eve-empty-delivery/>" },
+        { type: "assistant-remove", id: "text:t0:0" },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "continue", continueSession: false },
+    );
+    expect(screen.snapshot()).not.toContain("<eve-empty-delivery/>");
+  });
+
+  it("replaces streamed reasoning with the completed text in place", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        { type: "reasoning-delta", id: "r1", delta: "Draft" },
+        { type: "reasoning-complete", id: "r1", text: "Revised" },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "continue", continueSession: false, reasoning: "full" },
+    );
+    expect(screen.snapshot()).toContain("Revised");
+    expect(screen.snapshot()).not.toContain("Draft");
   });
 
   it("renders rejected tools as denied", async () => {
@@ -1032,6 +1098,35 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("https://connect.vercel.com/authorize/linear");
   });
 
+  it("keeps same-name authorization blocks separate by attempt", async () => {
+    const { screen, renderer } = makeRenderer(100, 50);
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    renderer.upsertConnectionAuth({
+      name: "linear",
+      attemptId: "alice",
+      description: "Alice's connection",
+      state: "pending",
+    });
+    renderer.upsertConnectionAuth({
+      name: "linear",
+      attemptId: "bob",
+      description: "Bob's connection",
+      state: "pending",
+    });
+    renderer.upsertConnectionAuth({
+      name: "linear",
+      attemptId: "alice",
+      description: "Alice's connection",
+      state: "authorized",
+    });
+    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
+    const snapshot = screen.snapshot();
+    expect(countOccurrences(snapshot, "linear · authorization")).toBe(2);
+    renderer.shutdown();
+    expect(snapshot).toContain("linear · authorization · authorized");
+    expect(snapshot).toContain("linear · authorization · pending");
+  });
+
   it("does not commit partial live assistant rows while streaming over the viewport", async () => {
     const { screen, renderer } = makeRenderer(34, 8);
     const words = Array.from(
@@ -1516,6 +1611,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       finalized: true,
     });
     renderer.completeSubagent({ authoritative: false, callId: "s1" });
+    expect(screen.rawOutput()).not.toContain("\x1b[32m※");
     await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
 
     renderer.beginSubagent({ callId: "s1", name: "researcher" });

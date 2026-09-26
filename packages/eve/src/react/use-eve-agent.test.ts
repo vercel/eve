@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useEveAgent, type UseEveAgentHelpers } from "#react/use-eve-agent.js";
 import type { EveMessageData } from "#client/message-reducer.js";
+import type { ConversationState } from "#client/conversation-state.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
@@ -76,6 +77,9 @@ function createAbortError(): Error {
 
 function optimisticUserData(message: string, status: "failed" | "submitted") {
   return {
+    children: {},
+    inputs: {},
+    turns: {},
     messages: [
       {
         id: expect.stringMatching(/^optimistic:/),
@@ -94,8 +98,11 @@ function completedTurnData(input: {
   readonly assistantMessage?: string;
   readonly turnId: string;
   readonly userMessage: string;
-}): EveMessageData {
+}): ConversationState {
   return {
+    children: {},
+    inputs: {},
+    turns: {},
     messages: [
       {
         id: expect.stringMatching(/^evt_.+:user$/),
@@ -118,6 +125,7 @@ function completedTurnData(input: {
               parts: [
                 { type: "step-start" as const },
                 {
+                  id: expect.stringMatching(/^evt_/),
                   state: "done" as const,
                   stepIndex: 0,
                   text: input.assistantMessage,

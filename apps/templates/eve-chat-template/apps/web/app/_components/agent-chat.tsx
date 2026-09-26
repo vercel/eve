@@ -5,6 +5,7 @@ import type {
   AuthorizationRequiredStreamEvent,
   ClientSession,
   ClientSessionState,
+  ConversationState,
   EveAgentStoreSnapshot,
   EveMessageData,
   MessageStreamEvent,
@@ -13,7 +14,7 @@ import type {
   SendTurnOptions,
 } from "eve/client";
 import type { EveMessage } from "eve/react";
-import { defaultMessageReducer, useEveAgent } from "eve/react";
+import { conversationReducer, useEveAgent } from "eve/react";
 import {
   AlertCircleIcon,
   ChevronDownIcon,
@@ -49,7 +50,7 @@ import {
 import type { ActiveChat, SetupStatus, Viewer } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 
-type AgentSnapshot = EveAgentStoreSnapshot<EveMessageData>;
+type AgentSnapshot = EveAgentStoreSnapshot<ConversationState>;
 
 export type DraftHandlers = {
   readonly clearDraft: () => void;
@@ -124,8 +125,8 @@ function attachClientSession(session: ClientSessionState | undefined): ClientSes
   });
 }
 
-function reduceEventsToMessageData(events: readonly MessageStreamEvent[]): EveMessageData {
-  const reducer = defaultMessageReducer();
+function reduceEventsToMessageData(events: readonly MessageStreamEvent[]): ConversationState {
+  const reducer = conversationReducer;
   let data = reducer.initial();
 
   for (const event of events) {

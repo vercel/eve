@@ -18,11 +18,15 @@ import {
   type SessionEventStreamOptions,
 } from "#client/session-event-stream.js";
 import { EveAgentProjection } from "#client/eve-agent-projection.js";
+import { conversationReducer } from "#client/conversation-reducer.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
+import { followSubagents } from "#client/follow-subagents.js";
+import type { ChildStreamFollower } from "#client/child-stream-follower.js";
 import type { ClientSession } from "#client/session.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import {
+  activeTurnForOptimisticFollowUp,
   assertExclusiveTurnInput,
   createAbortSignal,
   createActiveTurn,
@@ -57,15 +61,15 @@ export class EveAgentStore<TData> {
   readonly #autoPrewarm: boolean;
   #attached = false;
   #stream: SessionEventStream | undefined;
+  #childStreamFollower: ChildStreamFollower | undefined;
+  readonly #childCursors = new Map<string, number>();
+  readonly #followChildStreams: boolean;
   readonly #pendingAuthorizations = new Set<string>();
   readonly #externalSession: boolean;
   readonly #optimistic: boolean;
   readonly #projection: EveAgentProjection<TData>;
   readonly #subscribers = new Set<() => void>();
-
-  /** Ids already folded into the projection: `initialEvents` and a reconnect can overlap. */
   #seenEvents = createEventDeduper();
-
   #activeTurn: ActiveTurn | undefined;
   #callbacks: EveAgentStoreCallbacks<TData> = {};
   #error: Error | undefined;
@@ -81,6 +85,9 @@ export class EveAgentStore<TData> {
 
   constructor(init: EveAgentStoreInit<TData>) {
     this.#autoPrewarm = init.prewarm ?? false;
+    if (init.followSubagents && init.reducer !== conversationReducer)
+      throw new Error("followSubagents requires the built-in conversationReducer.");
+    this.#followChildStreams = init.followSubagents ?? false;
     this.#externalSession = init.session !== undefined;
     this.#client = this.#externalSession
       ? undefined
@@ -89,8 +96,6 @@ export class EveAgentStore<TData> {
           headers: init.headers,
           host: init.host ?? "",
         });
-    // Seed the deduper from the saved log so a live stream that replays the
-    // same prefix does not double-apply it.
     const initialEvents: MessageStreamEvent[] = [];
     for (const event of init.initialEvents ?? []) {
       if (this.#seenEvents.admit(event)) initialEvents.push(event);
@@ -150,6 +155,7 @@ export class EveAgentStore<TData> {
         const created = await client.sessions.create({ signal: controller.signal });
         if (generation !== this.#prewarmGeneration) return;
         this.#session = created.session;
+        if (this.#followChildStreams && this.#attached) this.#followSubagents();
         this.#error = undefined;
         if (this.#status === "error") this.#status = "ready";
         this.#callbacks.onSessionChange?.(created.session.state);
@@ -217,9 +223,7 @@ export class EveAgentStore<TData> {
           ));
       assertExclusiveTurnInput(preparedInput);
 
-      if (!this.#isActiveTurn(turn)) {
-        return;
-      }
+      if (!this.#isActiveTurn(turn)) return;
 
       const submissionId = this.#messageSubmissions.submit(preparedInput, this.#events.length);
       this.#projectInputResponses(preparedInput);
@@ -253,17 +257,13 @@ export class EveAgentStore<TData> {
         turn.receivedFollowUpEvents.delete(event);
       }
 
-      if (!this.#isActiveTurn(turn)) {
-        return;
-      }
+      if (!this.#isActiveTurn(turn)) return;
 
       await followSteeredTurns(turn, reader, () => this.#isActiveTurn(turn));
       if (!this.#isActiveTurn(turn)) return;
       this.#status = this.#error === undefined ? "ready" : "error";
     } catch (error) {
-      if (!this.#isActiveTurn(turn)) {
-        return;
-      }
+      if (!this.#isActiveTurn(turn)) return;
 
       if (isAbortError(error)) {
         this.#status = "ready";
@@ -372,6 +372,7 @@ export class EveAgentStore<TData> {
 
   [attachStore](): void {
     this.#attached = true;
+    if (this.#followChildStreams && !this.#childStreamFollower) this.#followSubagents();
     if (this.#autoPrewarm && this.#session === undefined) void this.prewarm().catch(() => {});
   }
 
@@ -379,12 +380,17 @@ export class EveAgentStore<TData> {
     this.#attached = false;
     this.#stream?.close();
     this.#stream = undefined;
+    this.#childStreamFollower?.abortAll();
+    this.#childStreamFollower = undefined;
     this.#activeTurn?.abortController.abort();
     this.#resetPrewarm();
     this.#resumePromise = undefined;
   }
 
   reset(): void {
+    this.#childStreamFollower?.abortAll();
+    this.#childStreamFollower = undefined;
+    this.#childCursors.clear();
     this.#stream?.close();
     this.#stream = undefined;
     this.#pendingAuthorizations.clear();
@@ -400,6 +406,7 @@ export class EveAgentStore<TData> {
     this.#seenEvents = createEventDeduper();
     this.#messageSubmissions.reset();
     this.#projection.reset();
+    if (this.#followChildStreams && this.#attached) this.#followSubagents();
     this.#error = undefined;
     this.#status = "ready";
     this.#callbacks.onSessionChange?.(this.#session?.state);
@@ -429,7 +436,11 @@ export class EveAgentStore<TData> {
     }
     if (!this.#isActiveTurn(turn)) return await this.#submit(preparedInput);
 
-    const submissionId = this.#messageSubmissions.submit(preparedInput, this.#events.length);
+    const submissionId = this.#messageSubmissions.submit(
+      preparedInput,
+      this.#events.length,
+      activeTurnForOptimisticFollowUp(this.#events),
+    );
     if (submissionId !== undefined) turn.followUpSubmissionIds.add(submissionId);
     this.#publish();
     this.#ensureStream({
@@ -502,6 +513,7 @@ export class EveAgentStore<TData> {
       const created = await this.#client.sessions.create({ ...input, message: input.message });
       input.signal?.throwIfAborted();
       this.#session = created.session;
+      if (this.#followChildStreams && this.#attached) this.#followSubagents();
       this.#callbacks.onSessionChange?.(created.session.state);
       this.#publish();
       return {
@@ -552,6 +564,18 @@ export class EveAgentStore<TData> {
     return this.#stream;
   }
 
+  #followSubagents(): void {
+    if (!this.#session) return;
+    this.#childStreamFollower?.abortAll();
+    this.#childStreamFollower = followSubagents({
+      session: this.#session,
+      projection: this.#projection,
+      events: this.#events,
+      publish: () => this.#publish(),
+      cursors: this.#childCursors,
+    });
+  }
+
   #resetPrewarm(): void {
     this.#prewarmGeneration += 1;
     this.#prewarmController?.abort();
@@ -577,9 +601,7 @@ export class EveAgentStore<TData> {
   }
 
   #projectInputResponses(input: SendTurnPayload): void {
-    if (input.inputResponses === undefined || input.inputResponses.length === 0) {
-      return;
-    }
+    if (!input.inputResponses?.length) return;
 
     this.#projection.append({
       data: {
@@ -596,6 +618,8 @@ export class EveAgentStore<TData> {
     updatePendingAuthorizations(this.#pendingAuthorizations, event);
     this.#events = [...this.#events, event];
     this.#handleReconciliation(this.#messageSubmissions.apply(event));
+    this.#childStreamFollower?.acceptParentEvent(event);
+    if (event.type === "turn.cancelled") this.#childStreamFollower?.reconcile();
     this.#callbacks.onEvent?.(event);
     this.#applyTerminalStreamFailure(event);
     const settled = isCurrentTurnBoundaryEvent(event) && this.#pendingAuthorizations.size === 0;
@@ -633,10 +657,7 @@ export class EveAgentStore<TData> {
 
   #applyTerminalStreamFailure(event: MessageStreamEvent): void {
     const error = toTerminalStreamFailureError(event);
-    if (error === undefined) {
-      return;
-    }
-
+    if (error === undefined) return;
     this.#status = "error";
     this.#messageSubmissions.failAll(error);
 

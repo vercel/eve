@@ -41,7 +41,7 @@ export function isInterruptedError(error: unknown): boolean {
 
 /**
  * Recognizes errors raised by aborting an in-flight fetch/stream (e.g. the
- * subagent child-session pump being cancelled). These are expected shutdown
+ * child-stream follower being cancelled). These are expected shutdown
  * noise, not failures to surface.
  */
 export function isAbortLikeError(error: unknown): boolean {

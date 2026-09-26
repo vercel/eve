@@ -1,4 +1,6 @@
 import { StringDecoder } from "node:string_decoder";
+import { authorizationKey } from "#client/session-utils.js";
+import type { EveMessageData, EveMessagePart } from "#client/message-reducer-types.js";
 import type { DevDiagnostics } from "../diagnostics.js";
 
 import type {
@@ -1236,7 +1238,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * Applies a wake-initiated turn without taking input ownership from the
    * prompt. Paints use the same live region, so the editor redraws around
-   * incoming tool and assistant blocks exactly as it does for subagent pumps.
+   * incoming tool and assistant blocks exactly as it does for child streams.
    */
   async renderIdleStream(
     result: AgentTUIStreamResult,
@@ -1809,7 +1811,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * A background receipt closes the model tool call, not the child. Mark the
    * header running so turn finalization cannot commit immutable scrollback
-   * before the child pump has folded in its later events.
+   * before the child follower has folded in its later events.
    */
   backgroundSubagent(update: { callId: string }): void {
     const header = this.#blockById.get(subagentHeaderId(update.callId));
@@ -1832,8 +1834,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   completeSubagent(update: { authoritative: boolean; callId: string }): void {
     const header = this.#blockById.get(subagentHeaderId(update.callId));
     if (header === undefined) return;
-    header.status = "done";
     if (update.authoritative) {
+      header.status = "done";
       this.#backgroundSubagentCallIds.delete(update.callId);
       this.#provisionalSubagentCallIds.delete(update.callId);
       for (const block of this.#blocks) {
@@ -1874,7 +1876,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#connectionAuth === "hidden") return;
     const terminalMessage = connectionAuthTerminalMessage(update.state);
     this.#upsertBlock({
-      id: connectionAuthSectionId(update.name),
+      id: connectionAuthSectionId(authorizationKey(update)),
       kind: "connection-auth",
       title: `${stripTerminalControls(update.name)} · authorization · ${update.state}`,
       body: formatConnectionAuthContent(update, terminalMessage),
@@ -1972,6 +1974,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#modelTurnId = undefined;
     this.#childToolCallIds.clear();
     this.#parentToolBlockIds.clear();
+    this.#contentParts.clear();
     this.#subagentHeaders.clear();
     this.#backgroundSubagentCallIds.clear();
     this.#provisionalSubagentCallIds.clear();
@@ -3877,6 +3880,39 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
+  #contentParts = new Map<string, Extract<EveMessagePart, { type: "text" | "reasoning" }>>();
+
+  #renderContentState(data: EveMessageData, displayModes: DisplayModes): void {
+    const previous = this.#contentParts;
+    let changed = false;
+    const next = new Map<string, Extract<EveMessagePart, { type: "text" | "reasoning" }>>();
+    for (const message of data.messages) {
+      if (message.role !== "assistant") continue;
+      for (const [index, part] of message.parts.entries()) {
+        if (part.type !== "text" && part.type !== "reasoning") continue;
+        const id = `${part.type}:${part.id ?? `${message.id}:${index}`}`;
+        next.set(id, part);
+        const old = previous.get(id);
+        if (old?.text === part.text && old.state === part.state) continue;
+        if (part.type === "reasoning" && displayModes.reasoning !== "full") continue;
+        // Keep a completed run mutable until the stream boundary: a later
+        // null completion can still retract another provisional run.
+        if (part.type === "text") this.#upsertAssistantBlock(id, part.text, true, false);
+        else this.#upsertReasoningBlock(id, part.text, true, displayModes, false);
+        changed = true;
+      }
+    }
+    for (const [id, part] of previous) {
+      if (next.has(id)) continue;
+      if (part.type === "text" || displayModes.reasoning === "full") {
+        this.#removeBlock(id);
+        changed = true;
+      }
+    }
+    this.#contentParts = next;
+    if (changed) this.#paint();
+  }
+
   #applyStreamEvent(
     event: AgentTUIStreamEvent,
     displayModes: DisplayModes,
@@ -3885,6 +3921,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const previousActivity = turnActivityLabel(turnState);
     updateTurnActivity(turnState, event);
     switch (event.type) {
+      case "content-state":
+        this.#renderContentState(event.data, displayModes);
+        break;
+
       case "turn-start":
         if (event.turnId !== this.#modelTurnId) {
           this.#modelTurnId = event.turnId;
@@ -3926,6 +3966,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
       }
 
+      case "assistant-remove":
+        turnState.text.delete(event.id);
+        this.#removeBlock(event.id);
+        this.#paint();
+        break;
+
       case "assistant-complete": {
         const existing = turnState.text.get(event.id) ?? "";
         const text = typeof event.text === "string" ? stripTerminalControls(event.text) : existing;
@@ -3949,7 +3995,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
       case "reasoning-complete": {
         if (displayModes.reasoning === "hidden") break;
-        const text = turnState.reasoning.get(event.id) ?? "";
+        const text =
+          typeof event.text === "string"
+            ? stripTerminalControls(event.text)
+            : (turnState.reasoning.get(event.id) ?? "");
+        turnState.reasoning.set(event.id, text);
         if (displayModes.reasoning === "full") {
           this.#upsertReasoningBlock(event.id, text, false, displayModes);
           break;
@@ -4077,14 +4127,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
-  #upsertAssistantBlock(id: string, text: string, live: boolean): void {
+  #upsertAssistantBlock(id: string, text: string, live: boolean, paint = true): void {
     const content = stripTerminalControls(text).trim();
     if (content.length === 0) return;
     this.#upsertBlock({ id, kind: "assistant", body: content, live });
-    this.#paint();
+    if (paint) this.#paint();
   }
 
-  #upsertReasoningBlock(id: string, text: string, live: boolean, displayModes: DisplayModes): void {
+  #upsertReasoningBlock(
+    id: string,
+    text: string,
+    live: boolean,
+    displayModes: DisplayModes,
+    paint = true,
+  ): void {
     const content = stripTerminalControls(text).trim();
     if (content.length === 0) return;
     this.#upsertBlock({
@@ -4094,7 +4150,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       collapsed: collapseReasoning(displayModes.reasoning, live),
       live,
     });
-    this.#paint();
+    if (paint) this.#paint();
   }
 
   #upsertNativeTool(
@@ -5531,8 +5587,8 @@ function subagentToolSectionId(callId: string, childCallId: string): string {
   return `subagent:${callId}:tool:${childCallId}`;
 }
 
-function connectionAuthSectionId(connectionName: string): string {
-  return `connection-auth:${connectionName}`;
+function connectionAuthSectionId(key: string): string {
+  return `connection-auth:${key}`;
 }
 
 function connectionAuthTerminalMessage(state: ConnectionAuthUpdate["state"]): string | undefined {

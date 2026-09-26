@@ -1,0 +1,270 @@
+import { describe, expect, it } from "vitest";
+import { conversationReducer, reduceConversation } from "#client/conversation-reducer.js";
+import { openConversationInputs } from "#client/conversation-state.js";
+import { stampTestEvents } from "#internal/testing/events.js";
+import { createActionResultEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+
+function called(callId = "child-call", childSessionId = "child-session") {
+  return stampTestEvents([
+    {
+      type: "subagent.called",
+      data: {
+        callId,
+        childSessionId,
+        childStreamPath: `/children/${callId}`,
+        name: "researcher",
+        sessionId: "root",
+        turnId: "root-turn",
+        sequence: 0,
+        toolName: "agent",
+        workflowId: "workflow",
+      },
+    } as UnstampedMessageStreamEvent,
+  ])[0]!;
+}
+
+function request(requestId: string, turnId: string) {
+  return stampTestEvents([
+    {
+      type: "input.requested",
+      data: {
+        requests: [
+          {
+            action: {
+              callId: `tool-${requestId}`,
+              input: {},
+              kind: "tool-call",
+              toolName: "lookup",
+            },
+            kind: "tool-approval",
+            prompt: "Approve?",
+            requestId,
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId,
+      },
+    } as UnstampedMessageStreamEvent,
+  ])[0]!;
+}
+
+describe("conversation reducer child calls", () => {
+  it("creates useful parent-only call state without inventing child details", () => {
+    let state = conversationReducer.reduce(conversationReducer.initial(), called());
+    expect(state.children["child-call"]).toMatchObject({
+      name: "researcher",
+      originTurnId: "root-turn",
+      parentStatus: "dispatched",
+      observation: { status: "not-followed" },
+    });
+    const receipt = stampTestEvents([
+      {
+        type: "action.result",
+        data: {
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "root-turn",
+          status: "completed",
+          result: {
+            kind: "tool-result",
+            toolName: "agent",
+            callId: "child-call",
+            output: { status: "working", taskId: "task", agentId: "agent" },
+          },
+        },
+      } as UnstampedMessageStreamEvent,
+    ])[0]!;
+    state = conversationReducer.reduce(state, receipt);
+    expect(state.children["child-call"]).toMatchObject({
+      background: true,
+      parentStatus: "working",
+      observation: { status: "not-followed" },
+    });
+  });
+
+  it("scopes root and child input IDs, and preserves child state through parent events", () => {
+    let state = conversationReducer.reduce(conversationReducer.initial(), called());
+    state = conversationReducer.reduce(state, request("same-id", "root-turn"));
+    state = conversationReducer.reduce(state, {
+      type: "client.child.following",
+      data: { callId: "child-call" },
+    });
+    state = reduceConversation(state, {
+      type: "client.child.observed",
+      data: { callId: "child-call", event: request("same-id", "child-turn") },
+    });
+    const child = state.children["child-call"]!;
+    expect(child.observation.status).toBe("following");
+    if (child.observation.status !== "following") return;
+    expect(openConversationInputs(child.observation.conversation)).toHaveLength(1);
+    expect(openConversationInputs(state)).toHaveLength(1);
+    const settled = stampTestEvents([
+      {
+        type: "approval.settled",
+        data: {
+          outcome: "approved",
+          requestId: "same-id",
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "root-turn",
+        },
+      } as UnstampedMessageStreamEvent,
+    ])[0]!;
+    state = conversationReducer.reduce(state, settled);
+    expect(openConversationInputs(state)).toHaveLength(0);
+    expect(state.children["child-call"]?.observation).toMatchObject({
+      status: "following",
+      conversation: { inputs: { "same-id": { status: "open" } } },
+    });
+  });
+
+  it("distinguishes provisional parent completion from observed child closure", () => {
+    let state = conversationReducer.reduce(conversationReducer.initial(), called());
+    state = conversationReducer.reduce(state, {
+      type: "client.child.following",
+      data: { callId: "child-call" },
+    });
+    const completed = stampTestEvents([
+      {
+        type: "subagent.completed",
+        data: { callId: "child-call", subagentName: "researcher", output: "done" },
+      } as UnstampedMessageStreamEvent,
+    ])[0]!;
+    state = conversationReducer.reduce(state, completed);
+    expect(state.children["child-call"]).toMatchObject({
+      parentStatus: "reported-complete",
+      observation: { status: "following" },
+    });
+    state = conversationReducer.reduce(state, {
+      type: "client.child.observed",
+      data: {
+        callId: "child-call",
+        event: stampTestEvents([
+          {
+            type: "session.waiting",
+            data: { continuationToken: "child", wait: "next-user-message" },
+          } as UnstampedMessageStreamEvent,
+        ])[0]!,
+      },
+    });
+    expect(state.children["child-call"]?.observation).toMatchObject({
+      status: "ended",
+      outcome: "completed",
+    });
+  });
+
+  it("retains partial child detail across a failed observation and a resumed follower", () => {
+    let state = conversationReducer.reduce(conversationReducer.initial(), called());
+    state = conversationReducer.reduce(state, {
+      type: "client.child.following",
+      data: { callId: "child-call" },
+    });
+    state = conversationReducer.reduce(state, {
+      type: "client.child.observed",
+      data: { callId: "child-call", event: request("lookup", "child-turn") },
+    });
+    state = conversationReducer.reduce(state, {
+      type: "client.child.unavailable",
+      data: { callId: "child-call", reason: "stream-error" },
+    });
+    expect(state.children["child-call"]?.observation).toMatchObject({
+      status: "unavailable",
+      conversation: { inputs: { lookup: { status: "open" } } },
+    });
+    state = conversationReducer.reduce(state, {
+      type: "client.child.following",
+      data: { callId: "child-call" },
+    });
+    const resolution = stampTestEvents([
+      {
+        type: "input.resolved",
+        data: {
+          resolutions: [{ kind: "tool-approval", requestId: "lookup", outcome: "approved" }],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "child-turn",
+        },
+      } as UnstampedMessageStreamEvent,
+    ])[0]!;
+    state = reduceConversation(state, {
+      type: "client.child.observed",
+      data: { callId: "child-call", event: resolution },
+    });
+    expect(state.children["child-call"]?.observation).toMatchObject({
+      status: "following",
+      conversation: { inputs: { lookup: { status: "settled" } } },
+    });
+  });
+
+  it("treats only successful working receipts as background dispatch", () => {
+    const working = createActionResultEvent({
+      result: {
+        kind: "subagent-result",
+        callId: "child-call",
+        subagentName: "researcher",
+        origin: "child",
+        outcome: {
+          kind: "terminal",
+          result: { kind: "succeeded", output: "working" },
+          usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
+        },
+        output: { status: "working", taskId: "task", agentId: "agent" },
+      },
+      turnId: "root-turn",
+      stepIndex: 0,
+      sequence: 0,
+    });
+    const state = conversationReducer.reduce(conversationReducer.initial(), called());
+    const failed = stampTestEvents([
+      { ...working, data: { ...working.data, status: "failed" } },
+    ])[0]!;
+    expect(conversationReducer.reduce(state, failed).children["child-call"]?.background).toBe(
+      false,
+    );
+    const completed = stampTestEvents([working])[0]!;
+    expect(conversationReducer.reduce(state, completed).children["child-call"]).toMatchObject({
+      background: true,
+      parentStatus: "working",
+    });
+  });
+
+  it("cancels only foreground calls from the originating turn", () => {
+    let state = conversationReducer.initial();
+    state = conversationReducer.reduce(state, called("foreground"));
+    state = conversationReducer.reduce(state, called("background"));
+    const receipt = stampTestEvents([
+      {
+        type: "action.result",
+        data: {
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "root-turn",
+          status: "completed",
+          result: {
+            kind: "tool-result",
+            toolName: "agent",
+            callId: "background",
+            output: { status: "working", taskId: "task", agentId: "agent" },
+          },
+        },
+      } as UnstampedMessageStreamEvent,
+    ])[0]!;
+    state = conversationReducer.reduce(state, receipt);
+    state = conversationReducer.reduce(
+      state,
+      stampTestEvents([
+        {
+          type: "turn.cancelled",
+          data: { sequence: 2, turnId: "root-turn" },
+        } as UnstampedMessageStreamEvent,
+      ])[0]!,
+    );
+    expect(state.children.foreground).toMatchObject({
+      parentStatus: "cancelled",
+      observation: { status: "not-followed" },
+    });
+    expect(state.children.background?.observation.status).toBe("not-followed");
+  });
+});

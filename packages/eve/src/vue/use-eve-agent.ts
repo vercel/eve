@@ -13,7 +13,8 @@ import {
 import { resolveEveAgentHost } from "#client/agent-host.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
-import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
+import { conversationReducer } from "#client/conversation-reducer.js";
+import type { ConversationState } from "#client/conversation-state.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
   CancelSessionResult,
@@ -128,12 +129,14 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default true
    */
   readonly optimistic?: boolean;
+  /** Follow delegated child streams into `data.children` with the default reducer. @default true */
+  readonly followSubagents?: boolean;
   /** Prewarm an owned session on mount and after reset. @default false */
   readonly prewarm?: boolean;
   /**
    * Projects stream events into `TData`.
    *
-   * @default defaultMessageReducer()
+   * @default conversationReducer
    */
   readonly reducer?: EveAgentReducer<TData>;
   /** Replay the attached durable session after mount. Requires `initialSession` or `session`. */
@@ -147,8 +150,8 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
 }
 
 export function useEveAgent(
-  options?: UseEveAgentOptions<EveMessageData>,
-): UseEveAgentReturn<EveMessageData>;
+  options?: UseEveAgentOptions<ConversationState>,
+): UseEveAgentReturn<ConversationState>;
 
 export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> & { readonly reducer: EveAgentReducer<TData> },
@@ -158,8 +161,8 @@ export function useEveAgent<TData>(
  * Vue composable that drives one eve session and projects its event stream into
  * reactive UI state.
  *
- * Without a `reducer`, events project into `EveMessageData` via
- * `defaultMessageReducer()`; pass `reducer` to project into a custom `TData`.
+ * Without a `reducer`, events project into conversation state including message parts;
+ * pass `reducer` to project into a custom `TData`.
  * Returns reactive refs (`data`, `error`, `events`, `session`, `status`) plus
  * `prewarm`, `send`, `respond`, `resume`, `cancel`, and `reset`. Configuration is read once on store creation;
  * remount to change it. On scope dispose, the in-flight request is detached and
@@ -171,7 +174,7 @@ export function useEveAgent<TData>(
   if (options.resume && options.initialSession === undefined && options.session === undefined) {
     throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
   }
-  const reducer = options.reducer ?? (defaultMessageReducer() as EveAgentReducer<TData>);
+  const reducer = options.reducer ?? (conversationReducer as EveAgentReducer<TData>);
 
   const store = new EveAgentStore<TData>({
     auth: options.auth,
@@ -180,6 +183,7 @@ export function useEveAgent<TData>(
     initialEvents: options.initialEvents,
     initialSession: options.initialSession,
     optimistic: options.optimistic,
+    followSubagents: options.reducer === undefined && (options.followSubagents ?? true),
     prewarm: options.prewarm,
     reducer,
     session: options.session,

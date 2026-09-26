@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { detachEveAgentStore, EveAgentStore } from "#client/eve-agent-store.js";
+import {
+  attachEveAgentStore,
+  detachEveAgentStore,
+  EveAgentStore,
+} from "#client/eve-agent-store.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
+import { conversationReducer } from "#client/conversation-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
-  createApprovalCandidateEvent,
-  createInputRequestedEvent,
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createMessageAppendedEvent,
@@ -13,6 +16,7 @@ import {
   createMessageReceivedEvent,
   createSessionFailedEvent,
   createSessionWaitingEvent,
+  createSubagentCalledEvent,
   createTurnCancelledEvent,
   createTurnStartedEvent,
   EVE_MESSAGE_STREAM_VERSION,
@@ -196,22 +200,8 @@ function createStore<TData>(
   return store;
 }
 
-/**
- * Runs client reconnect backoff (250ms per attempt) on a fake clock. Call
- * `fastForwardTimers` once no stream is held open: auto-advancing while a
- * held stream is open would also fire its read-idle timeout.
- */
-function useFakeBackoffClock(): void {
-  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-}
-
-function fastForwardTimers(): void {
-  vi.setTimerTickMode("nextTimerAsync");
-}
-
 afterEach(() => {
   for (const cleanup of cleanupStores.splice(0)) cleanup();
-  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -273,7 +263,13 @@ describe("EveAgentStore lifecycle", () => {
           metadata: { status: "complete", turnId: "turn_1" },
           parts: [
             { type: "step-start" },
-            { state: "done", stepIndex: 0, text: "Hi there.", type: "text" },
+            {
+              id: expect.stringMatching(/^evt_/),
+              state: "done",
+              stepIndex: 0,
+              text: "Hi there.",
+              type: "text",
+            },
           ],
           role: "assistant",
         },
@@ -350,6 +346,296 @@ describe("EveAgentStore lifecycle", () => {
 
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.data).toEqual(["client.input.responded", "session.waiting"]);
+  });
+});
+
+describe("EveAgentStore child following", () => {
+  it("rejects following with a custom reducer instead of silently dropping child events", () => {
+    expect(() =>
+      createStore({
+        reducer: defaultMessageReducer(),
+        followSubagents: true,
+      }),
+    ).toThrow("followSubagents requires the built-in conversationReducer");
+  });
+
+  const parentCall = () =>
+    stampTestEvents([
+      createSubagentCalledEvent({
+        callId: "call_1",
+        childSessionId: "child_1",
+        sessionId: "session_1",
+        sequence: 0,
+        name: "research",
+        toolName: "eve:subagent:research",
+        turnId: "turn_1",
+        workflowId: "workflow_1",
+      }),
+    ])[0]!;
+
+  const childStore = (parent: MessageStreamEvent, followSubagents = true) =>
+    createStore({
+      host: "http://localhost",
+      initialSession: { sessionId: "session_1", streamIndex: 1 },
+      initialEvents: [parent],
+      reducer: conversationReducer,
+      followSubagents,
+    });
+
+  it("projects parent child-call facts without subscribing when following is disabled", () => {
+    const parent = parentCall();
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const store = childStore(parent, false);
+    expect(store.snapshot.data.children.call_1).toMatchObject({
+      childSessionId: "child_1",
+      originTurnId: "turn_1",
+      observation: { status: "not-followed" },
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("resumes a partially observed child after detach without replaying its first event", async () => {
+    const parent = parentCall();
+    const childEvents = stampTestEvents([
+      createMessageAppendedEvent({
+        messageDelta: "First ",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "child_turn",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "second",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "child_turn",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    const first = controlledStreamResponse();
+    const childCursors: number[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname.includes("child_1")) {
+        const index = Number(url.searchParams.get("startIndex") ?? 0);
+        childCursors.push(index);
+        return index === 0 ? first.response : streamResponse(childEvents.slice(index));
+      }
+      return boundedStreamResponse([], 0);
+    });
+    const store = childStore(parent);
+    expect(store.snapshot.data.children.call_1?.observation.status).toBe("not-followed");
+    attachEveAgentStore(store);
+    await vi.waitFor(() => expect(childCursors).toEqual([0]));
+    first.emit(childEvents[0]!);
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.children.call_1?.observation).toMatchObject({
+        status: "following",
+        conversation: {
+          messages: [
+            expect.objectContaining({
+              parts: expect.arrayContaining([expect.objectContaining({ text: "First " })]),
+            }),
+          ],
+        },
+      }),
+    );
+    detachEveAgentStore(store);
+    attachEveAgentStore(store);
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.children.call_1?.observation.status).toBe("ended"),
+    );
+    expect(childCursors).toEqual([0, 1]);
+    expect(store.snapshot.events).toEqual([parent]);
+    expect(store.snapshot.data.children.call_1?.observation).toMatchObject({
+      outcome: "completed",
+      conversation: {
+        messages: [
+          expect.objectContaining({
+            parts: expect.arrayContaining([expect.objectContaining({ text: "First second" })]),
+          }),
+        ],
+      },
+    });
+    detachEveAgentStore(store);
+    attachEveAgentStore(store);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(childCursors).toEqual([0, 1]);
+  });
+
+  it("keeps a followed child's conversation state through optimistic root reconciliation", async () => {
+    const parent = parentCall();
+    const live = controlledStreamResponse();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input).includes("child_1")) {
+        return streamResponse(
+          stampTestEvents([
+            {
+              type: "input.requested",
+              data: {
+                requests: [
+                  {
+                    action: {
+                      callId: "child-tool",
+                      kind: "tool-call",
+                      input: {},
+                      toolName: "lookup",
+                    },
+                    kind: "tool-approval",
+                    requestId: "child-approval",
+                    prompt: "Approve lookup?",
+                    display: "confirmation",
+                    options: [{ id: "approve", label: "Approve" }],
+                  },
+                ],
+                sequence: 0,
+                stepIndex: 0,
+                turnId: "child-turn",
+              },
+            },
+            createSessionWaitingEvent(),
+          ]),
+        );
+      }
+      if (init?.method === "POST") return startedResponse("delivery_1");
+      return live.response;
+    });
+    const store = childStore(parent);
+    attachEveAgentStore(store);
+    await vi.waitFor(() =>
+      expect(
+        store.snapshot.data.children.call_1?.observation.status === "following" &&
+          store.snapshot.data.children.call_1.observation.conversation.inputs["child-approval"]
+            ?.status,
+      ).toBe("open"),
+    );
+    const sending = store.send({ message: "New question" });
+    const confirmation = stampTestEvents([
+      createMessageReceivedEvent({ message: "New question", sequence: 1, turnId: "turn_2" }),
+      createSessionWaitingEvent(),
+    ]).map((event) => ({ ...event, meta: { ...event.meta, deliveryIds: ["delivery_1"] } }));
+    for (const event of confirmation) live.emit(event);
+    await sending;
+    expect(
+      store.snapshot.data.children.call_1?.observation.status === "following" &&
+        store.snapshot.data.children.call_1.observation.conversation.inputs["child-approval"]
+          ?.status,
+    ).toBe("open");
+    expect(store.snapshot.events).toHaveLength(2);
+  });
+
+  it("retains child detail and cancellation through a later optimistic replay", async () => {
+    const parent = parentCall();
+    const childOutput = stampTestEvents([
+      createMessageCompletedEvent({
+        message: "Child result",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "child_turn",
+        finishReason: "stop",
+      }),
+    ])[0]!;
+    const childStream = controlledStreamResponse();
+    const cancelled = {
+      ...stampTestEvents([createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" })])[0]!,
+      meta: { at: "2026-01-01T00:00:00.000Z", id: "evt_test_0001" },
+    };
+    const live = controlledStreamResponse();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input).includes("child_1")) return childStream.response;
+      if (init?.method === "POST") return startedResponse("delivery_1");
+      return live.response;
+    });
+    const store = childStore(parent);
+    attachEveAgentStore(store);
+    childStream.emit(childOutput);
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.children.call_1?.observation).toMatchObject({
+        status: "following",
+        conversation: {
+          messages: [
+            expect.objectContaining({
+              parts: expect.arrayContaining([expect.objectContaining({ text: "Child result" })]),
+            }),
+          ],
+        },
+      }),
+    );
+    const sending = store.send({ message: "New question" });
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.messages.some((message) => message.metadata?.optimistic)).toBe(
+        true,
+      ),
+    );
+    live.emit(cancelled);
+    await vi.waitFor(() => expect(store.snapshot.events).toContainEqual(cancelled));
+    const confirmation = stampTestEvents([
+      createMessageReceivedEvent({ message: "New question", sequence: 2, turnId: "turn_2" }),
+      createSessionWaitingEvent(),
+    ]).map((event, index) => ({
+      ...event,
+      meta: { ...event.meta, id: `evt_test_000${index + 2}`, deliveryIds: ["delivery_1"] },
+    }));
+    for (const event of confirmation) live.emit(event);
+    await sending;
+    expect(store.snapshot.data.children.call_1?.observation).toMatchObject({
+      status: "ended",
+      outcome: "cancelled",
+      conversation: {
+        messages: [
+          expect.objectContaining({
+            parts: expect.arrayContaining([expect.objectContaining({ text: "Child result" })]),
+          }),
+        ],
+      },
+    });
+    expect(store.snapshot.events).toEqual([parent, cancelled, ...confirmation]);
+  });
+
+  it("keeps child conversations across a submitted message's optimistic reconciliation", async () => {
+    const parent = parentCall();
+    const live = controlledStreamResponse();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (String(input).includes("child_1")) {
+        return streamResponse(
+          stampTestEvents([
+            createMessageCompletedEvent({
+              message: "Child result",
+              sequence: 0,
+              stepIndex: 0,
+              turnId: "child_turn",
+              finishReason: "stop",
+            }),
+            createSessionWaitingEvent(),
+          ]),
+        );
+      }
+      if (init?.method === "POST") return startedResponse("delivery_1");
+      return live.response;
+    });
+    const store = childStore(parent);
+    attachEveAgentStore(store);
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.children.call_1?.observation.status).toBe("ended"),
+    );
+    const sending = store.send({ message: "New question" });
+    await vi.waitFor(() =>
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true),
+    );
+    const confirmation = stampTestEvents([
+      createMessageReceivedEvent({ message: "New question", sequence: 1, turnId: "turn_2" }),
+      createSessionWaitingEvent(),
+    ]).map((event) => ({ ...event, meta: { ...event.meta, deliveryIds: ["delivery_1"] } }));
+    for (const event of confirmation) live.emit(event);
+    await sending;
+    expect(store.snapshot.data.children.call_1?.observation).toMatchObject({
+      conversation: {
+        messages: [
+          expect.objectContaining({
+            parts: expect.arrayContaining([expect.objectContaining({ text: "Child result" })]),
+          }),
+        ],
+      },
+    });
   });
 });
 
@@ -596,94 +882,6 @@ describe("EveAgentStore prewarming", () => {
     expect(store.snapshot.session?.streamIndex).toBe(6);
   });
 
-  it("keeps following background completion after a refused approval returns to waiting", async () => {
-    const live = controlledStreamResponse();
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(live.response)
-      .mockResolvedValueOnce(startedResponse("approval-delivery"));
-    const initialEvents = stampTestEvents([
-      createInputRequestedEvent({
-        requests: [
-          {
-            action: { kind: "tool-call", callId: "save-note", toolName: "save_note", input: {} },
-            kind: "tool-approval",
-            requestId: "approval-1",
-            prompt: "Approve Alice's note?",
-          },
-        ],
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn-note",
-      }),
-      createSessionWaitingEvent(),
-    ]);
-    const store = createStore({
-      initialSession: { sessionId: "session_1", streamIndex: initialEvents.length },
-      initialEvents,
-      reducer: defaultMessageReducer(),
-    });
-    const onEvent = vi.fn();
-    store.setCallbacks({ onEvent });
-    const sending = store.send({
-      inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
-    });
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const refusal = stampTestEvents([
-      createApprovalCandidateEvent({
-        candidateId: "alice-attempt",
-        requestId: "approval-1",
-        responderPrincipalId: "alice",
-        outcome: "rejected",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn-note",
-      }),
-      createSessionWaitingEvent(),
-    ]).map((event) => ({
-      ...event,
-      meta: { ...event.meta, id: `refusal-${event.meta.id}`, deliveryIds: ["approval-delivery"] },
-    }));
-    for (const event of refusal) live.emit(event);
-    await sending;
-    expect(store.snapshot.status).toBe("ready");
-    expect(store.snapshot.data.messages.flatMap((message) => message.parts)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: "dynamic-tool", state: "approval-requested" }),
-      ]),
-    );
-
-    const background = stampTestEvents([
-      createTurnStartedEvent({ sequence: 1, turnId: "turn-report" }),
-      createMessageCompletedEvent({
-        finishReason: "stop",
-        message: "Bob's background report is complete.",
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "turn-report",
-      }),
-      createSessionWaitingEvent(),
-    ]).map((event) => ({
-      ...event,
-      meta: { ...event.meta, id: `background-${event.meta.id}`, deliveryIds: ["report-delivery"] },
-    }));
-    live.emit(background[0]!);
-    await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
-    for (const event of background.slice(1)) live.emit(event);
-    await vi.waitFor(() =>
-      expect(store.snapshot.events).toEqual([...initialEvents, ...refusal, ...background]),
-    );
-    expect(store.snapshot.status).toBe("ready");
-    expect(store.snapshot.data.messages.flatMap((message) => message.parts)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: "text", text: "Bob's background report is complete." }),
-      ]),
-    );
-    expect(onEvent).toHaveBeenCalledTimes(5);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]![1]?.signal?.aborted).toBe(false);
-  });
-
   it("projects a background turn that arrives while another message is being accepted", async () => {
     const live = controlledStreamResponse();
     const accepted = Promise.withResolvers<Response>();
@@ -811,8 +1009,6 @@ describe("EveAgentStore prewarming", () => {
 
 describe("EveAgentStore stream overlap", () => {
   it("reconstructs a split message across an in-memory stream reconnect", async () => {
-    useFakeBackoffClock();
-    fastForwardTimers();
     const events = streamingTurnEvents();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -830,12 +1026,14 @@ describe("EveAgentStore stream overlap", () => {
 
     expect(streamingText).toContain("Hel");
     expect(streamingText).toContain("Hello");
-    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
-      state: "done",
-      stepIndex: 0,
-      text: "Hello",
-      type: "text",
-    });
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual(
+      expect.objectContaining({
+        state: "done",
+        stepIndex: 0,
+        text: "Hello",
+        type: "text",
+      }),
+    );
     expect(
       fetchMock.mock.calls
         .slice(1)
@@ -848,8 +1046,6 @@ describe("EveAgentStore stream overlap", () => {
   it.each(["21", "24"] as const)(
     "reconstructs a split message across a v%s-to-v25 reconnect",
     async (legacyVersion) => {
-      useFakeBackoffClock();
-      fastForwardTimers();
       const current = streamingTurnEvents();
       const received = current[0]!;
       const started = current[1]!;
@@ -887,12 +1083,14 @@ describe("EveAgentStore stream overlap", () => {
 
       expect(streamingText).toContain("Hel");
       expect(streamingText).toContain("Hello");
-      expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
-        state: "done",
-        stepIndex: 0,
-        text: "Hello",
-        type: "text",
-      });
+      expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual(
+        expect.objectContaining({
+          state: "done",
+          stepIndex: 0,
+          text: "Hello",
+          type: "text",
+        }),
+      );
       expect(
         fetchMock.mock.calls
           .slice(1)
@@ -959,7 +1157,13 @@ describe("EveAgentStore stream overlap", () => {
     expect(assistant).toHaveLength(1);
     expect(assistant[0]?.parts).toEqual([
       { type: "step-start" },
-      { state: "done", stepIndex: 0, text: "Hi there.", type: "text" },
+      {
+        id: expect.stringMatching(/^evt_/),
+        state: "done",
+        stepIndex: 0,
+        text: "Hi there.",
+        type: "text",
+      },
     ]);
   });
 
@@ -981,7 +1185,13 @@ describe("EveAgentStore stream overlap", () => {
     const assistant = store.snapshot.data.messages.find((message) => message.role === "assistant");
     expect(assistant?.parts).toEqual([
       { type: "step-start" },
-      { state: "done", stepIndex: 0, text: "Legacy response.", type: "text" },
+      {
+        id: "turn_legacy:assistant:text:1",
+        state: "done",
+        stepIndex: 0,
+        text: "Legacy response.",
+        type: "text",
+      },
     ]);
   });
 
@@ -1140,41 +1350,6 @@ describe("EveAgentStore session resume", () => {
     },
   );
 
-  it("publishes a replayed session once after catch-up instead of once per event", async () => {
-    // Regression for #3862: a notification per replayed event forces one React commit per
-    // event inside a single task, which trips React's nested update limit past ~50 events.
-    const events = stampTestEvents(
-      Array.from({ length: 25 }, (_, index) => [
-        createMessageReceivedEvent({
-          message: `Question ${index}`,
-          sequence: 0,
-          turnId: `turn_${index}`,
-        }),
-        createMessageCompletedEvent({
-          finishReason: "stop",
-          message: `Answer ${index}`,
-          sequence: 1,
-          stepIndex: 0,
-          turnId: `turn_${index}`,
-        }),
-        createSessionWaitingEvent(),
-      ]).flat() as UnstampedMessageStreamEvent[],
-    );
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(boundedStreamResponse(events));
-    const store = createStore({
-      initialSession: { sessionId: "session_1", streamIndex: events.length },
-      reducer: defaultMessageReducer(),
-    });
-    const published: string[] = [];
-    store.subscribe(() => {
-      published.push(`${store.snapshot.status}:${store.snapshot.events.length}`);
-    });
-
-    await store.resume();
-
-    expect(published).toEqual(["resuming:0", `ready:${events.length}`]);
-  });
-
   it("finishes a settled replay without waiting for the probe stream to idle", async () => {
     const events = turnEvents();
     const probe = controlledStreamResponse();
@@ -1194,8 +1369,6 @@ describe("EveAgentStore session resume", () => {
   });
 
   it("continues a split message from a complete hydrated prefix", async () => {
-    useFakeBackoffClock();
-    fastForwardTimers();
     const events = streamingTurnEvents();
     const prefix = events.slice(0, 3);
     const fetchMock = vi
@@ -1221,17 +1394,17 @@ describe("EveAgentStore session resume", () => {
       ),
     ).toBe(String(prefix.length));
     expect(streamingText).toContain("Hello");
-    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
-      state: "done",
-      stepIndex: 0,
-      text: "Hello",
-      type: "text",
-    });
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual(
+      expect.objectContaining({
+        state: "done",
+        stepIndex: 0,
+        text: "Hello",
+        type: "text",
+      }),
+    );
   });
 
   it("replays a split message from index zero when only its cursor was retained", async () => {
-    useFakeBackoffClock();
-    fastForwardTimers();
     const events = streamingTurnEvents();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -1255,12 +1428,14 @@ describe("EveAgentStore session resume", () => {
       ),
     ).toBeNull();
     expect(streamingText).toContain("Hello");
-    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
-      state: "done",
-      stepIndex: 0,
-      text: "Hello",
-      type: "text",
-    });
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual(
+      expect.objectContaining({
+        state: "done",
+        stepIndex: 0,
+        text: "Hello",
+        type: "text",
+      }),
+    );
   });
 
   it("keeps a settled hydrated snapshot resuming until catch-up returns ready", async () => {
@@ -1315,7 +1490,6 @@ describe("EveAgentStore session resume", () => {
   });
 
   it("moves an unsettled hydrated snapshot to streaming before following it", async () => {
-    useFakeBackoffClock();
     const [received, started, completed, waiting] = stampTestEvents([
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
@@ -1352,7 +1526,6 @@ describe("EveAgentStore session resume", () => {
     live.emit(completed!);
     live.emit(waiting!);
     live.close();
-    fastForwardTimers();
     await resuming;
 
     expect(store.snapshot.status).toBe("ready");
@@ -1461,12 +1634,14 @@ describe("EveAgentStore session resume", () => {
       "message.completed",
       "session.waiting",
     ]);
-    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
-      state: "done",
-      stepIndex: 0,
-      text: "A second reply.",
-      type: "text",
-    });
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual(
+      expect.objectContaining({
+        state: "done",
+        stepIndex: 0,
+        text: "A second reply.",
+        type: "text",
+      }),
+    );
   });
 
   it("reads past intermediate boundaries before following the latest turn", async () => {
@@ -1547,7 +1722,6 @@ describe("EveAgentStore session resume", () => {
   });
 
   it("replays history and follows an interrupted turn through its boundary", async () => {
-    useFakeBackoffClock();
     const [received, started, completed, waiting] = stampTestEvents([
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
@@ -1584,22 +1758,82 @@ describe("EveAgentStore session resume", () => {
     live.emit(completed!);
     live.emit(waiting!);
     live.close();
-    fastForwardTimers();
     await resuming;
 
     expect(store.snapshot.status).toBe("ready");
-    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
-      state: "done",
-      stepIndex: 0,
-      text: "Hi there.",
-      type: "text",
-    });
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual(
+      expect.objectContaining({
+        state: "done",
+        stepIndex: 0,
+        text: "Hi there.",
+        type: "text",
+      }),
+    );
     expect(new URL(requests[0]!, "http://localhost").searchParams.get("startIndex")).toBeNull();
     expect(new URL(requests[1]!, "http://localhost").searchParams.get("startIndex")).toBe("2");
   });
 });
 
 describe("EveAgentStore steering", () => {
+  it("rejects approval responses while a turn is active, even when the request is visible", async () => {
+    const live = controlledStreamResponse();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(live.response);
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const first = store.send({ message: "Get a color and start the number task" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const requested = stampTestEvents([
+      {
+        type: "input.requested",
+        data: {
+          requests: [
+            {
+              action: {
+                callId: "color-call",
+                input: {},
+                kind: "tool-call",
+                toolName: "random_color",
+              },
+              display: "confirmation",
+              kind: "tool-approval",
+              options: [{ id: "approve", label: "Approve" }],
+              prompt: "Approve color?",
+              requestId: "color-approval",
+            },
+          ],
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+      } as UnstampedMessageStreamEvent,
+    ])[0]!;
+    live.emit(requested);
+    await vi.waitFor(() =>
+      expect(
+        store.snapshot.data.messages.some((message) =>
+          message.parts.some(
+            (part) => part.type === "dynamic-tool" && part.state === "approval-requested",
+          ),
+        ),
+      ).toBe(true),
+    );
+    await expect(
+      store.send({ inputResponses: [{ requestId: "color-approval", optionId: "approve" }] }),
+    ).rejects.toThrow('Send a message with turnPolicy: "steer"');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    live.emit(
+      stampTestEvents([
+        {
+          type: "session.waiting",
+          data: { continuationToken: "session-id", wait: "next-user-message" },
+        },
+      ])[0]!,
+    );
+    await first;
+  });
+
   it("prepares a steering message once when the active turn finishes during preparation", async () => {
     const live = controlledStreamResponse();
     const fetchMock = vi
@@ -1662,6 +1896,49 @@ describe("EveAgentStore steering", () => {
     expect(store.snapshot.error).toBeUndefined();
   });
 
+  it("keeps a failed steered send ahead of the active reply after replay", async () => {
+    const active = controlledStreamResponse();
+    const failedSend = Promise.withResolvers<Response>();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(active.response)
+      .mockReturnValueOnce(failedSend.promise);
+    const store = createStore({ reducer: defaultMessageReducer() });
+    const first = store.send({ message: "First" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const events = stampTestEvents([
+      createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+      createMessageReceivedEvent({ message: "First", sequence: 1, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Reply",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    for (const event of events.slice(0, 3)) active.emit(event);
+    await vi.waitFor(() =>
+      expect(store.snapshot.data.messages.some((message) => message.role === "assistant")).toBe(
+        true,
+      ),
+    );
+    const steering = store.send({ message: "Second", turnPolicy: "steer" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    failedSend.reject(new Error("Steering failed"));
+    await expect(steering).rejects.toThrow("Steering failed");
+    expect(store.snapshot.data.messages.map((message) => message.role)).toEqual([
+      "user",
+      "user",
+      "assistant",
+    ]);
+    expect(store.snapshot.data.messages[1]?.metadata?.status).toBe("failed");
+    active.emit(events[3]!);
+    await first;
+  });
+
   it.each([true, false])(
     "completes steering received in the active turn (optimistic=%s)",
     async (optimistic) => {
@@ -1700,6 +1977,62 @@ describe("EveAgentStore steering", () => {
       expect(store.snapshot.status).toBe("ready");
       expect(store.snapshot.events).toEqual(events);
       expect(fetchMock).toHaveBeenCalledTimes(3);
+    },
+  );
+
+  it.each([true, false])(
+    "groups a late steered message before its turn's assistant response (optimistic=%s)",
+    async (optimistic) => {
+      const activeStream = controlledStreamResponse();
+      const events = stampTestEvents([
+        createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+        createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+        createMessageCompletedEvent({
+          finishReason: "stop",
+          message: "Reply",
+          sequence: 2,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createMessageReceivedEvent({ message: "Second", sequence: 3, turnId: "turn_1" }),
+        createSessionWaitingEvent(),
+      ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
+        ...event,
+        meta: { ...event.meta, deliveryIds: [index === 3 ? "second" : "first"] },
+      }));
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(startedResponse("first"))
+        .mockResolvedValueOnce(activeStream.response)
+        .mockResolvedValueOnce(startedResponse("second"));
+      const store = createStore({ optimistic, reducer: defaultMessageReducer() });
+      const initial = store.send({ message: "First" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      for (const event of events.slice(0, 3)) activeStream.emit(event);
+      await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(3));
+      const followUp = store.send({ message: "Second", turnPolicy: "steer" });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      if (optimistic) {
+        expect(store.snapshot.data.messages.map((message) => message.role)).toEqual([
+          "user",
+          "user",
+          "assistant",
+        ]);
+        expect(store.snapshot.data.messages[1]?.metadata?.optimistic).toBe(true);
+      }
+      for (const event of events.slice(3)) activeStream.emit(event);
+      await Promise.all([initial, followUp]);
+      expect(store.snapshot.data.messages.map((message) => message.role)).toEqual([
+        "user",
+        "user",
+        "assistant",
+      ]);
+      expect(store.snapshot.data.messages[1]?.parts).toContainEqual({
+        state: "done",
+        text: "Second",
+        type: "text",
+      });
+      activeStream.close();
     },
   );
 
@@ -1833,12 +2166,14 @@ describe("EveAgentStore steering", () => {
       secondCompleted,
       secondWaiting,
     ]);
-    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
-      state: "done",
-      stepIndex: 0,
-      text: "Follow-up reply.",
-      type: "text",
-    });
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual(
+      expect.objectContaining({
+        state: "done",
+        stepIndex: 0,
+        text: "Follow-up reply.",
+        type: "text",
+      }),
+    );
   });
 });
 

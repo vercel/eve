@@ -1,8 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { effectScope } from "vue";
 
+import {
+  detachEveAgentStore,
+  EveAgentStore,
+  type EveAgentStoreSnapshot,
+} from "#client/eve-agent-store.js";
+import { defaultMessageReducer } from "#client/message-reducer.js";
+import type { ClientSessionState } from "#client/types.js";
 import { useEveAgent } from "#vue/use-eve-agent.js";
 import type { EveMessageData } from "#client/message-reducer.js";
+import type { ConversationState } from "#client/conversation-state.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
@@ -12,6 +20,7 @@ import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionWaitingEvent,
+  createSessionFailedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { stampTestEvents } from "#internal/testing/events.js";
@@ -66,8 +75,11 @@ function completedTurnData(input: {
   readonly assistantMessage?: string;
   readonly turnId: string;
   readonly userMessage: string;
-}): EveMessageData {
+}): ConversationState {
   return {
+    children: {},
+    inputs: {},
+    turns: {},
     messages: [
       {
         id: expect.stringMatching(/^evt_.+:user$/),
@@ -90,6 +102,7 @@ function completedTurnData(input: {
               parts: [
                 { type: "step-start" as const },
                 {
+                  id: expect.stringMatching(/^evt_/),
                   state: "done" as const,
                   stepIndex: 0,
                   text: input.assistantMessage,
@@ -103,9 +116,249 @@ function completedTurnData(input: {
   };
 }
 
+const cleanupStores: Array<() => void> = [];
+function createStore<TData>(
+  init: ConstructorParameters<typeof EveAgentStore<TData>>[0],
+): EveAgentStore<TData> {
+  const store = new EveAgentStore<TData>(init);
+  cleanupStores.push(() => detachEveAgentStore(store));
+  return store;
+}
+
 afterEach(() => {
+  for (const cleanup of cleanupStores.splice(0)) cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+describe("EveAgentStore (Vue composable backing store)", () => {
+  it("starts in ready status with empty data", () => {
+    const store = createStore({
+      reducer: defaultMessageReducer(),
+    });
+
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages).toEqual([]);
+    expect(store.snapshot.error).toBeUndefined();
+    expect(store.snapshot.events).toEqual([]);
+  });
+
+  it("notifies subscribers on state changes", async () => {
+    const store = createStore({
+      reducer: defaultMessageReducer(),
+    });
+
+    const snapshots: EveAgentStoreSnapshot<EveMessageData>[] = [];
+    store.subscribe(() => {
+      snapshots.push(store.snapshot);
+    });
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
+
+    await store.send({ message: "Hello" });
+
+    expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots.at(-1)?.status).toBe("error");
+  });
+
+  it("sends a message and projects streamed events", async () => {
+    const events = [
+      createMessageReceivedEvent({
+        message: "Hello",
+        sequence: 0,
+        turnId: "turn_1",
+      }),
+      createMessageCompletedEvent({
+        message: "Hi there.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ];
+
+    const startResponse = createDeferred<Response>();
+    vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(startResponse.promise)
+      .mockResolvedValueOnce(createEagerStreamResponse(events));
+
+    const store = createStore({
+      reducer: defaultMessageReducer(),
+    });
+
+    const seenEvents: UnstampedMessageStreamEvent[] = [];
+    const seenSessions: Array<ClientSessionState | undefined> = [];
+    store.setCallbacks({
+      onEvent(event) {
+        seenEvents.push(event);
+      },
+      onSessionChange(session) {
+        seenSessions.push(session);
+      },
+    });
+
+    const sendPromise = store.send({ message: "Hello" });
+    await Promise.resolve();
+
+    expect(store.snapshot.status).toBe("submitted");
+    expect(store.snapshot.data).toEqual({
+      messages: [
+        {
+          id: expect.stringMatching(/^optimistic:/),
+          metadata: { optimistic: true, status: "submitted" },
+          parts: [{ text: "Hello", type: "text" }],
+          role: "user",
+        },
+      ],
+    });
+
+    startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
+    await sendPromise;
+
+    expect(seenEvents).toEqual(stampTestEvents(events));
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data).toEqual({
+      messages: completedTurnData({
+        assistantMessage: "Hi there.",
+        turnId: "turn_1",
+        userMessage: "Hello",
+      }).messages,
+    });
+    expect(seenSessions.map((session) => session?.streamIndex)).toEqual([0, 1, 2, 3, 3]);
+  });
+
+  it("surfaces transport errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
+
+    const store = createStore({
+      reducer: defaultMessageReducer(),
+    });
+
+    const seenErrors: Error[] = [];
+    store.setCallbacks({
+      onError(error) {
+        seenErrors.push(error);
+      },
+    });
+
+    await store.send({ message: "Hello" });
+
+    expect(seenErrors.map((e) => e.message)).toEqual(["Network failed"]);
+    expect(store.snapshot.status).toBe("error");
+    expect(store.snapshot.error?.message).toBe("Network failed");
+  });
+
+  it("surfaces terminal stream failures as store errors", async () => {
+    const events = [
+      createMessageReceivedEvent({
+        message: "Hello",
+        sequence: 0,
+        turnId: "turn_1",
+      }),
+      createSessionFailedEvent({
+        code: "MODEL_CALL_FAILED",
+        message: "Bad Request",
+        sessionId: "session_1",
+      }),
+    ];
+
+    const startResponse = createDeferred<Response>();
+    vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(startResponse.promise)
+      .mockResolvedValueOnce(createEagerStreamResponse(events));
+
+    const store = createStore({
+      reducer: defaultMessageReducer(),
+    });
+
+    const seenErrors: Error[] = [];
+    store.setCallbacks({
+      onError(error) {
+        seenErrors.push(error);
+      },
+    });
+
+    const sendPromise = store.send({ message: "Hello" });
+    startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
+    await sendPromise;
+
+    expect(seenErrors.map((e) => e.message)).toEqual(["Bad Request"]);
+    expect(store.snapshot.status).toBe("error");
+    expect(store.snapshot.error?.message).toBe("Bad Request");
+  });
+
+  it("resets state and creates a new session", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("fail"));
+
+    const store = createStore({
+      reducer: defaultMessageReducer(),
+    });
+
+    await store.send({ message: "Hello" });
+    expect(store.snapshot.status).toBe("error");
+
+    store.reset();
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data.messages).toEqual([]);
+    expect(store.snapshot.error).toBeUndefined();
+    expect(store.snapshot.events).toEqual([]);
+  });
+
+  it("unsubscribe removes the listener", () => {
+    const store = createStore({
+      reducer: defaultMessageReducer(),
+    });
+
+    let callCount = 0;
+    const unsub = store.subscribe(() => {
+      callCount += 1;
+    });
+
+    store.reset();
+    expect(callCount).toBe(1);
+
+    unsub();
+    store.reset();
+    expect(callCount).toBe(1);
+  });
+
+  it("projects input responses before the resumed stream returns", async () => {
+    const startResponse = createDeferred<Response>();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) =>
+      init?.method === "POST"
+        ? await startResponse.promise
+        : createEagerStreamResponse([createSessionWaitingEvent()]),
+    );
+
+    const store = createStore<readonly string[]>({
+      initialSession: {
+        sessionId: "session_1",
+        streamIndex: 0,
+      },
+      reducer: {
+        initial() {
+          return [];
+        },
+        reduce(data, event) {
+          return [...data, event.type];
+        },
+      },
+    });
+
+    const sendPromise = store.send({
+      inputResponses: [{ optionId: "cancel", requestId: "approval_1" }],
+    });
+    await Promise.resolve();
+
+    expect(store.snapshot.status).toBe("submitted");
+    expect(store.snapshot.data).toEqual(["client.input.responded"]);
+
+    startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
+    await sendPromise;
+
+    expect(store.snapshot.status).toBe("ready");
+    expect(store.snapshot.data).toEqual(["client.input.responded", "session.waiting"]);
+  });
 });
 
 describe("useEveAgent (Vue composable wiring)", () => {

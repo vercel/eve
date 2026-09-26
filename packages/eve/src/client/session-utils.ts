@@ -13,6 +13,7 @@ export interface PendingAuthorization {
   readonly authorization?: AuthorizationRequiredStreamEvent["data"]["authorization"];
   readonly description: string;
   readonly name: string;
+  readonly attemptId?: string;
   readonly webhookUrl?: string;
 }
 
@@ -33,26 +34,32 @@ export function summarizeTurnEvents(
   let boundary: UnstampedMessageStreamEvent | undefined;
   let failure: TurnFailureStreamEvent | undefined;
   let message: string | undefined;
-  const inputRequests: InputRequest[] = [];
+  const inputRequests = new Map<string, InputRequest>();
   const pendingAuthorizations = new Map<string, PendingAuthorization>();
 
   for (const event of events) {
     if (isCurrentTurnBoundaryEvent(event)) boundary = event;
     if (isTurnFailureEvent(event)) failure = event;
     if (isFinalMessageCompleted(event)) message = event.data.message ?? undefined;
-    if (event.type === "input.requested") inputRequests.push(...event.data.requests);
+    if (event.type === "input.requested") {
+      for (const request of event.data.requests) inputRequests.set(request.requestId, request);
+    }
+    if (event.type === "approval.settled") inputRequests.delete(event.data.requestId);
+    if (event.type === "input.resolved") {
+      for (const resolution of event.data.resolutions) inputRequests.delete(resolution.requestId);
+    }
     if (event.type === "authorization.required") {
-      pendingAuthorizations.set(event.data.name, event.data);
+      pendingAuthorizations.set(authorizationKey(event.data), event.data);
     }
     if (event.type === "authorization.completed") {
-      pendingAuthorizations.delete(event.data.name);
+      pendingAuthorizations.delete(authorizationKey(event.data));
     }
   }
 
   return {
     boundary,
     failure,
-    inputRequests,
+    inputRequests: [...inputRequests.values()],
     message,
     pendingAuthorizations: [...pendingAuthorizations.values()],
     status:
@@ -82,10 +89,17 @@ function isFinalMessageCompleted(
   return event.type === "message.completed" && event.data.finishReason !== "tool-calls";
 }
 
+export function authorizationKey(data: {
+  readonly name: string;
+  readonly attemptId?: string;
+}): string {
+  return data.attemptId === undefined ? `name:${data.name}` : `attempt:${data.attemptId}`;
+}
+
 export function updatePendingAuthorizations(pending: Set<string>, event: MessageStreamEvent): void {
   if (event.type === "authorization.required" && event.data.webhookUrl !== undefined) {
-    pending.add(event.data.name);
+    pending.add(authorizationKey(event.data));
   } else if (event.type === "authorization.completed") {
-    pending.delete(event.data.name);
+    pending.delete(authorizationKey(event.data));
   }
 }
