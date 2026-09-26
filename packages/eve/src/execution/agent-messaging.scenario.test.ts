@@ -200,6 +200,26 @@ export default defineWorkflowTool({
 });
 `;
 
+const LOCAL_HITL_DESCRIPTOR: ScenarioAppDescriptor = {
+  files: {
+    "agent/agent.ts": createHitlParentAgentSource(),
+    "agent/channels/eve.ts": EVE_CHANNEL_SOURCE,
+    "agent/instructions.md": "Delegate the approval question.\n",
+    "agent/tools/delegate-approval.ts": HITL_PARENT_TOOL_SOURCE.replace(
+      '"remote-hitl-child"',
+      '"local-hitl-child"',
+    ),
+    "agent/subagents/local-hitl-child/agent.ts": HITL_CHILD_AGENT_SOURCE.replace(
+      "defineAgent({ model,",
+      'defineAgent({ description: "Ask the parent for approval.", model,',
+    ),
+    "agent/subagents/local-hitl-child/instructions.md": "Ask the parent for approval.\n",
+    "agent/subagents/local-hitl-child/tools/ask-parent.ts": HITL_TOOL_SOURCE,
+  },
+  installDependencies: true,
+  name: "local-hitl-agent",
+};
+
 const REMOTE_HITL_AGENT_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
     "agent/agent.ts": HITL_CHILD_AGENT_SOURCE,
@@ -305,6 +325,87 @@ describe("agent messaging", () => {
           [`stdout:\n${server.stdout()}`, `stderr:\n${server.stderr()}`].join("\n\n"),
           { cause: error },
         );
+      } finally {
+        await server.stop();
+      }
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "proxies two independent local child questions to the root parent",
+    async () => {
+      const app = await scenarioApp(LOCAL_HITL_DESCRIPTOR);
+      const server = await startScriptedEveDev(app.appRoot);
+      try {
+        const client = new Client({ host: server.url });
+        const { session: parentSession, response } = await client.sessions.create({
+          message: "Delegate the approval question to the local child.",
+        });
+        const firstTurn = await response.result();
+        expect(firstTurn.status).toBe("waiting");
+        expect(firstTurn.message).toContain("working");
+        const parentEvents = await waitForParentEvents({
+          session: parentSession,
+          label: "two local child questions before answering",
+          ready: (events) => filterEventsByType(events, "input.requested").length === 2,
+        }).catch(async () => {
+          const rootEvents = (await parentSession.snapshot()).events;
+          const childId = filterEventsByType(rootEvents, "subagent.called")[0]?.data.childSessionId;
+          const childEvents =
+            childId === undefined ? [] : (await client.sessions.attach(childId).snapshot()).events;
+          const outstanding = (events: readonly HandleMessageStreamEvent[]) =>
+            filterEventsByType(events, "input.requested").flatMap((event) =>
+              event.data.requests.map((request) => ({
+                prompt: request.prompt,
+                requestId: request.requestId,
+                sequence: event.data.sequence,
+                stepIndex: event.data.stepIndex,
+                turnId: event.data.turnId,
+              })),
+            );
+          throw new Error(
+            `Local HITL boundary: child=${JSON.stringify(outstanding(childEvents))}; root=${JSON.stringify(outstanding(rootEvents))}`,
+          );
+        });
+        const requests = filterEventsByType(parentEvents, "input.requested").flatMap(
+          (event) => event.data.requests,
+        );
+        expect(requests.map((request) => request.prompt).sort()).toEqual([
+          "What is the approval word for Alice?",
+          "What is the approval word for Bob?",
+        ]);
+        expect(indexesOf(parentEvents, "session.waiting")[0]).toBeLessThan(
+          indexesOf(parentEvents, "input.requested")[0]!,
+        );
+        for (const request of requests) {
+          const person = request.prompt.includes("Alice") ? "Alice" : "Bob";
+          await parentSession.respond([
+            { requestId: request.requestId, text: `${HITL_ANSWER}-${person}` },
+          ]);
+        }
+        const finalEvents = await waitForParentEvents({
+          session: parentSession,
+          label: "local child result on root parent",
+          ready: (events) =>
+            filterEventsByType(events, "message.completed").some(
+              (event) => event.data.message === HITL_PARENT_RESULT,
+            ),
+        });
+        const call = filterEventsByType(finalEvents, "subagent.called")[0];
+        if (call?.data.childSessionId === undefined) throw new Error("Missing child session id.");
+        const childSnapshot = await client.sessions.attach(call.data.childSessionId).snapshot();
+        expect(
+          filterEventsByType(childSnapshot.events, "message.completed").map(
+            (event) => event.data.message,
+          ),
+        ).toContain(HITL_CHILD_RESULT);
+        expect(filterEventsByType(finalEvents, "session.failed")).toHaveLength(0);
+        expect(filterEventsByType(childSnapshot.events, "session.failed")).toHaveLength(0);
+      } catch (error) {
+        throw new Error(`stdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`, {
+          cause: error,
+        });
       } finally {
         await server.stop();
       }

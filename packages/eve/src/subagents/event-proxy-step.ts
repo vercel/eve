@@ -8,6 +8,7 @@ import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { publishChannelEvent } from "#execution/publish-channel-event.js";
 import { forwardTaskEventToSessionCallback } from "#execution/task-event-callback.js";
+import { withInputSource } from "#subagents/input-source.js";
 import {
   createDurableSessionState,
   type DurableSession,
@@ -128,14 +129,20 @@ export async function emitProxiedSubagentEvent(input: {
       // A remote session must forward even requests originating in its own
       // workflow tools; only the outermost parent owns channel delivery.
       const inputSource =
-        input.hookPayload.kind === "subagent-input-request"
+        event.type === "input.requested" && input.hookPayload.kind === "subagent-input-request"
           ? JSON.stringify([
               input.hookPayload.childContinuationToken,
               input.hookPayload.inputSource ?? null,
             ])
           : undefined;
       if (await forwardTaskEventToSessionCallback(ctx, event, inputSource)) return;
-      await publishChannelEvent({ adapter, adapterCtx, ctx, event, writer });
+      await publishChannelEvent({
+        adapter,
+        adapterCtx: withInputSource(adapterCtx, inputSource),
+        ctx,
+        event,
+        writer,
+      });
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
