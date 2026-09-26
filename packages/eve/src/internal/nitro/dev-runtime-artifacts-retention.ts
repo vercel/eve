@@ -19,7 +19,7 @@ export async function recordRetiredDevelopmentRuntimeArtifactsSnapshot(
   );
 }
 
-/** Applies the bounded retention policy within one dev snapshot directory. */
+/** Applies retention and reports whether any snapshots were removed. */
 export async function pruneDevelopmentRuntimeArtifactsSnapshotDirectory(input: {
   readonly activeSnapshotRoot: string | undefined;
   readonly gracePeriodMs?: number;
@@ -27,9 +27,9 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshotDirectory(input: {
   readonly protectAll: boolean;
   readonly retainCount?: number;
   readonly snapshotsDirectory: string;
-}): Promise<void> {
+}): Promise<boolean> {
   if (input.protectAll) {
-    return;
+    return false;
   }
   const now = input.now ?? Date.now();
   const gracePeriodMs = Math.max(
@@ -45,7 +45,7 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshotDirectory(input: {
     entries = await readdir(input.snapshotsDirectory, { withFileTypes: true });
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return;
+      return false;
     }
     throw error;
   }
@@ -101,7 +101,7 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshotDirectory(input: {
       .map((snapshot) => snapshot.path),
   );
 
-  await Promise.all(
+  const removed = await Promise.all(
     snapshots.map(async (snapshot) => {
       if (
         snapshot.active ||
@@ -111,11 +111,13 @@ export async function pruneDevelopmentRuntimeArtifactsSnapshotDirectory(input: {
         (snapshot.retiredAt !== undefined && now - snapshot.retiredAt <= gracePeriodMs) ||
         (!snapshot.activated && now - snapshot.mtimeMs <= gracePeriodMs)
       ) {
-        return;
+        return false;
       }
       await rm(snapshot.path, { force: true, recursive: true });
+      return true;
     }),
   );
+  return removed.some(Boolean);
 }
 
 async function readRetiredAt(snapshotRoot: string): Promise<number | undefined> {
