@@ -22,6 +22,7 @@ import { resolvePackageRoot } from "#internal/application/package.js";
 import { resolveDevelopmentRuntimeArtifactsSnapshotsDirectory } from "#internal/nitro/dev-runtime-generation-metadata.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
+const DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA = "generation.json";
 const DEV_RUNTIME_ARTIFACTS_POINTER_VERSION = 2;
 
 interface DevelopmentRuntimeArtifactsPointerV1 {
@@ -131,6 +132,10 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
       ),
       snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
     });
+    await writeFile(
+      join(snapshotRoot, DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA),
+      `${JSON.stringify({ runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot })}\n`,
+    );
   } catch (error) {
     await rm(snapshotRoot, { force: true, recursive: true }).catch(() => {});
     throw error;

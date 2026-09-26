@@ -12,20 +12,9 @@ vi.mock("node:fs/promises", () => ({
 beforeEach(() => files.clear());
 
 it.each([
-  [
-    "old",
-    {
-      runtimeAppRoot: "/old",
-      recoveryVersion: 1,
-      frameworkFingerprint: "older build",
-      workflowSourceFingerprint: "older workflow",
-    },
-    "ready",
-  ],
-  ["legacy", { runtimeAppRoot: "/old" }, "ineligible"],
-  ["invalid-version", { runtimeAppRoot: "/old", recoveryVersion: 2 }, "ineligible"],
-  ["invalid-schema", { runtimeAppRoot: 42, recoveryVersion: 1 }, "ineligible"],
-] as const)("reads %s recovery metadata", async (generationId, metadata, kind) => {
+  ["old", { runtimeAppRoot: "/old" }, "ready"],
+  ["invalid-schema", { runtimeAppRoot: 42 }, "ineligible"],
+] as const)("reads %s generation metadata", async (generationId, metadata, kind) => {
   files.set(
     `/app/.eve/dev-runtime/snapshots/${generationId}/generation.json`,
     JSON.stringify(metadata),
