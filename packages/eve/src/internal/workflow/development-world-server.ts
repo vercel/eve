@@ -21,6 +21,7 @@ import {
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
   DEVELOPMENT_WORLD_OPERATIONS,
+  type DevelopmentGenerationAdmission,
   type DevelopmentWorldRequest,
 } from "#internal/workflow/development-world-protocol.js";
 
@@ -302,7 +303,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     return generationId;
   }
 
-  async #generationAvailability(generationId: string) {
+  async #generationAvailability(generationId: string): Promise<DevelopmentGenerationAdmission> {
     const activeGenerationId = this.#admitActiveGeneration();
     const availability = await readDevelopmentGenerationAvailability(
       this.#appRoot,
@@ -310,8 +311,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
       activeGenerationId,
     );
     if (availability.kind === "missing") return availability;
-    if (!this.#resume && !this.#admittedGenerations.has(generationId))
-      return { kind: "dormant" as const };
+    if (!this.#resume && !this.#admittedGenerations.has(generationId)) return { kind: "dormant" };
     return availability;
   }
 }
