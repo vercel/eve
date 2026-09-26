@@ -20,6 +20,7 @@ import { defineMemory } from "#public/memory/index.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
+  ConversationIdKey,
   HistoryStateKey,
   InitiatorAuthKey,
   LiveStepDynamicModelSelectionKey,
@@ -5819,7 +5820,9 @@ describe("createToolLoopHarness", () => {
       model: null,
       context: undefined,
     });
-    expect(stepResult.providerOptions).toEqual({ gateway: { caching: "auto" } });
+    expect(stepResult.providerOptions).toEqual({
+      gateway: { caching: "auto", sessionId: "test-session" },
+    });
   });
 
   it("emits assistant/tool events in response order when a step completes after tool work", async () => {
@@ -8927,6 +8930,34 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("groups Gateway compaction under the forwarded trace conversation", async () => {
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    vi.mocked(compactMessages).mockResolvedValue([
+      createFrameworkUserMessage("context.compaction", "Summary"),
+      { content: "summary", role: "assistant" },
+    ]);
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "ok", role: "assistant" }] },
+      text: "ok",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const { emit } = createEventCollector();
+    const config = createTestConfig(emit, {
+      resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
+    });
+    const session = createTestSession({ rootSessionId: "root-session" });
+    const ctx = new ContextContainer();
+    ctx.set(ConversationIdKey, "forwarded-conversation");
+
+    await contextStorage.run(ctx, () => createToolLoopHarness(config)(session, { message: "Hi" }));
+
+    expect(vi.mocked(compactMessages).mock.calls[0]?.[3]).toEqual({
+      gateway: { sessionId: "forwarded-conversation" },
+    });
+  });
+
   it("resolves model and step capabilities before compacting the final request", async () => {
     vi.mocked(shouldCompact).mockReturnValue(true);
     const compactedHistory: HarnessModelMessage[] = [
@@ -9679,9 +9710,9 @@ describe("createToolLoopHarness", () => {
         firstPrompt.tools,
       ]);
       expect(modelCalls.map((call) => call.providerOptions)).toEqual([
-        { gateway: { caching: "auto" } },
-        { gateway: { caching: "auto" } },
-        { gateway: { caching: "auto" } },
+        { gateway: { caching: "auto", sessionId: "test-session" } },
+        { gateway: { caching: "auto", sessionId: "test-session" } },
+        { gateway: { caching: "auto", sessionId: "test-session" } },
       ]);
       expect(modelCalls.map((call) => call.messages)).toEqual([
         [{ content: "Add 1 and 2.", kind: "user" as const, role: "user" }],
@@ -9750,11 +9781,11 @@ describe("createToolLoopHarness", () => {
       };
 
       await expect(readProviderOptions(0)).resolves.toEqual({
-        gateway: { caching: "auto" },
+        gateway: { caching: "auto", sessionId: "test-session" },
         openai: { safetyIdentifier: invocationOwnerKey(auth), store: false },
       });
       await expect(readProviderOptions(1)).resolves.toEqual({
-        gateway: { caching: "auto" },
+        gateway: { caching: "auto", sessionId: "test-session" },
         openai: { safetyIdentifier: invocationOwnerKey(nextAuth), store: false },
       });
     });
@@ -9791,7 +9822,7 @@ describe("createToolLoopHarness", () => {
         context: undefined,
       });
       expect(stepResult.providerOptions).toEqual({
-        gateway: { caching: "auto" },
+        gateway: { caching: "auto", sessionId: "test-session" },
       });
     });
 
@@ -9837,7 +9868,7 @@ describe("createToolLoopHarness", () => {
         context: undefined,
       });
       expect(stepResult.providerOptions).toEqual({
-        gateway: { order: ["anthropic", "bedrock"], caching: "auto" },
+        gateway: { order: ["anthropic", "bedrock"], caching: "auto", sessionId: "test-session" },
       });
     });
 
@@ -9883,7 +9914,7 @@ describe("createToolLoopHarness", () => {
         context: undefined,
       });
       expect(stepResult.providerOptions).toEqual({
-        gateway: { caching: false },
+        gateway: { caching: false, sessionId: "test-session" },
       });
     });
 

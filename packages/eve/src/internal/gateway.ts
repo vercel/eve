@@ -1,6 +1,7 @@
 import type { LanguageModel } from "ai";
 
 import { appendPackageUserAgent, withPackageUserAgent } from "#internal/user-agent.js";
+import { resolveConversationId } from "#tracing/conversation-context.js";
 
 const GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh";
 
@@ -31,4 +32,27 @@ export function resolveProviderHeaders(model: LanguageModel): Record<string, str
 
 export function isGatewayModel(model: LanguageModel): boolean {
   return typeof model === "string" || model.provider?.split(".")[0] === "gateway";
+}
+
+/** Groups Gateway generations under the same identity used by eve's agent spans. */
+export function mergeGatewaySessionId(
+  model: LanguageModel,
+  providerOptions: Readonly<Record<string, unknown>> | undefined,
+  rootSessionId: string,
+): Record<string, unknown> | undefined {
+  if (!isGatewayModel(model)) return providerOptions;
+
+  const gateway = providerOptions?.gateway;
+  const gatewayOptions =
+    gateway !== null && typeof gateway === "object" && !Array.isArray(gateway)
+      ? (gateway as Record<string, unknown>)
+      : undefined;
+  if (typeof gatewayOptions?.sessionId === "string" && gatewayOptions.sessionId.trim()) {
+    return providerOptions;
+  }
+
+  return {
+    ...providerOptions,
+    gateway: { ...gatewayOptions, sessionId: resolveConversationId(rootSessionId) },
+  };
 }

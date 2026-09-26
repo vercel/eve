@@ -60,6 +60,13 @@ at either provider path takes precedence and is forwarded unchanged. When
 `auth.current` is `null`, eve does not add an identifier. The same rules apply
 to compaction calls.
 
+For AI Gateway model calls, eve sets `providerOptions.gateway.sessionId` to the
+`gen_ai.conversation.id` used by Agent Runs. By default, all turns in a
+conversation, including delegated subagents and compaction calls routed through
+Gateway, share that ID so their Gateway generations can be found together.
+Direct-provider calls do not receive the option. An authored `gateway.sessionId`
+takes precedence; AI Gateway hashes IDs longer than 256 characters.
+
 ### Choose the model dynamically
 
 To select a model from the incoming prompt with an AI SDK evaluation model, use

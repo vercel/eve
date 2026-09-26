@@ -19,7 +19,7 @@ import {
 import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { readClientContext } from "#internal/client-context.js";
-import { resolveProviderHeaders } from "#internal/gateway.js";
+import { mergeGatewaySessionId, resolveProviderHeaders } from "#internal/gateway.js";
 import { createErrorId, createLogger, formatError, logError } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
@@ -1617,6 +1617,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         emissionState,
         emitStepStarted: opts.suppressStepStartedEmission !== true,
         marker,
+        model,
         session,
       });
 
@@ -3128,10 +3129,10 @@ async function maybeCompact(input: {
   });
   const compactionModelReference =
     session.agent.compactionModelReference ?? requireSessionModelReference(session);
-  const providerOptions = mergeProviderSafetyIdentifier(
-    compactionModelReference,
-    compaction.providerOptions,
-    input.auth,
+  const providerOptions = mergeGatewaySessionId(
+    compaction.model,
+    mergeProviderSafetyIdentifier(compactionModelReference, compaction.providerOptions, input.auth),
+    session.rootSessionId ?? session.sessionId,
   ) as Parameters<typeof compactMessages>[3];
 
   if (emit) {

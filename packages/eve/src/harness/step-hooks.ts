@@ -1,6 +1,7 @@
 import type {
   ContentPart,
   GenerateTextOnStepStartCallback,
+  LanguageModel,
   LanguageModelUsage,
   ModelMessage,
   PrepareStepFunction,
@@ -33,6 +34,7 @@ import {
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
 import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
+import { mergeGatewaySessionId } from "#internal/gateway.js";
 import {
   collectActionPresentation,
   createPresentedRuntimeActionRequestFromToolCall,
@@ -95,6 +97,7 @@ interface StepHooksInput {
    */
   readonly emitStepStarted?: boolean;
   readonly marker: AnthropicCacheMarker | undefined;
+  readonly model: LanguageModel;
   readonly session: HarnessSession;
 }
 
@@ -186,10 +189,14 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     };
 
     const modelReference = requireSessionModelReference(session);
-    const providerOptions = mergeProviderSafetyIdentifier(
-      modelReference,
-      modelReference.providerOptions,
-      input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
+    const providerOptions = mergeGatewaySessionId(
+      input.model,
+      mergeProviderSafetyIdentifier(
+        modelReference,
+        modelReference.providerOptions,
+        input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
+      ),
+      session.rootSessionId ?? session.sessionId,
     );
     if (input.cachePath.kind === "gateway-auto") {
       stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<
