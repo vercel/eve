@@ -18,6 +18,7 @@ const PORT_ENV = "PORT";
 
 export function createDevelopmentWorkflowWorld(input: {
   readonly appRoot: string;
+  readonly resume?: boolean;
   readonly preparedHost: PreparedDevelopmentApplicationHost;
   readonly transportSecret: string;
 }): ParentDevelopmentWorkflowWorld | undefined {
@@ -30,10 +31,13 @@ export function createDevelopmentWorkflowWorld(input: {
       input.preparedHost.compileResult.manifest.config.experimental?.workflow?.world,
     )
   ) {
+    if (input.resume)
+      throw new Error("--resume is supported only with the built-in local Workflow World.");
     return undefined;
   }
   return createParentDevelopmentWorkflowWorld({
     agentName: input.preparedHost.compileResult.manifest.config.name,
+    resume: input.resume,
     appRoot: input.appRoot,
     resolveActiveGenerationId: () => {
       const snapshot = readActiveDevelopmentRuntimeArtifactsSnapshot(input.appRoot);

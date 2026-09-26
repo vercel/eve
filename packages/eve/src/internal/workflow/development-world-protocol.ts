@@ -1,3 +1,4 @@
+import type { DevelopmentGenerationAvailability } from "#internal/workflow/development-runtime-compatibility.js";
 import type { AgentWorkflowWorldDefinition } from "#shared/agent-definition.js";
 import { resolveWorkflowWorldImport } from "#internal/workflow/world-target.js";
 
@@ -61,3 +62,14 @@ export interface DevelopmentWorldCall {
   readonly arguments: readonly unknown[];
   readonly operation: DevelopmentWorldOperation;
 }
+
+export type DevelopmentGenerationAdmission =
+  | DevelopmentGenerationAvailability
+  | { readonly kind: "dormant" };
+
+export interface DevelopmentGenerationAvailabilityCall {
+  readonly operation: "eve.getGenerationAvailability";
+  readonly generationId: string;
+}
+
+export type DevelopmentWorldRequest = DevelopmentWorldCall | DevelopmentGenerationAvailabilityCall;

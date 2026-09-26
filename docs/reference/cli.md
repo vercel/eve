@@ -208,25 +208,28 @@ eve dev [options]
 
 Starts a local development server and terminal UI. To connect the UI to an existing agent, use `eve remote connect --url <url>`.
 
-| Flag                                | Type   | Default            | Description                                 |
-| ----------------------------------- | ------ | ------------------ | ------------------------------------------- |
-| `--host <host>`                     | string | all interfaces     | Host interface to bind                      |
-| `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                           |
-| `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI  |
-| `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions |
-| `--name <name>`                     | string | app folder name    | Title shown in the terminal UI              |
-| `--input <text>`                    | string | none               | Pre-fill the prompt input                   |
-| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering                         |
-| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering                         |
-| `--subagents <mode>`                | enum   | `auto-collapsed`   | Subagent-section rendering                  |
-| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering          |
-| `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                  |
-| `--context-size <tokens>`           | number | none               | Model context window size                   |
-| `--logs <mode>`                     | enum   | `stderr`           | Server and agent logs to show               |
+| Flag                                | Type   | Default            | Description                                                     |
+| ----------------------------------- | ------ | ------------------ | --------------------------------------------------------------- |
+| `--host <host>`                     | string | all interfaces     | Host interface to bind                                          |
+| `--port <port>`                     | number | `$PORT`, then 2000 | Port to listen on                                               |
+| `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                      |
+| `--resume`                          | flag   | off                | Attempt recovery of retained runs from previous dev invocations |
+| `--no-default-extensions`           | flag   | extensions on      | Do not mount bundled development extensions                     |
+| `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                  |
+| `--input <text>`                    | string | none               | Pre-fill the prompt input                                       |
+| `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering                                             |
+| `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering                                             |
+| `--subagents <mode>`                | enum   | `auto-collapsed`   | Subagent-section rendering                                      |
+| `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering                              |
+| `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                                      |
+| `--context-size <tokens>`           | number | none               | Model context window size                                       |
+| `--logs <mode>`                     | enum   | `stderr`           | Server and agent logs to show                                   |
 
 Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification) for details.
 
 A fresh `eve init` opens the TUI and reuses an available model connection or opens `/login`. No Vercel project, channels, integrations, or review step is required before chat. Use `/model` to change models and settings, and `/add` to install an addition. Other `--input` text stays editable in the prompt. See [Terminal UI](../guides/dev-tui) for credential precedence and login options.
+
+### Local development lifecycle
 
 Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
 
@@ -235,6 +238,24 @@ Local dev keeps immutable runtime generations under `.eve/dev-runtime/snapshots/
 Local development records traces under `.eve/traces/` by default and bounds that store by age, size, and a keep-newest floor. Configure it with `EVE_TRACES*` in `.env.local`, or disable the destination with `agent/instrumentation/local.ts`; see [`eve traces`](#retention) for the rules and defaults.
 
 `eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
+
+### Local workflow recovery
+
+With the built-in local Workflow World, a new `eve dev` server leaves previous invocations' runs dormant by default, including deliveries triggered by timers or hooks. A new message or control request addressed to a dormant conversation fails instead of being accepted without a response; the HTTP channel reports its usual request failure. Start a new conversation, or restart `eve dev` with `--resume` to attempt recovery. Already-open event streams are not changed by this request guard. Source-watcher rebuilds and worker restarts within the same server retain current runs' eligibility.
+
+Pass `eve dev --resume` to attempt recovery of unfinished runs from previous invocations. Recovery requires a retained snapshot with readable generation metadata. Snapshots from older eve versions with a valid `runtimeAppRoot` remain eligible. Changes to the eve framework or authored workflow sources do not prevent the attempt, but replay can fail and leave the run terminally failed after executing some work. Use `--resume` only when you want to try continuing those previous runs.
+
+Runs with malformed generation metadata remain stored and dormant for that server invocation, including later timer and hook deliveries. Startup with `--resume` reports why recovery was skipped without blocking other eligible runs. Restore malformed snapshot metadata from a backup or start a new session.
+
+Recovery eligibility is decided before startup queue delivery begins. Hot reload does not recheck admitted runs against the latest workflow sources, so follow-up turns, cancellation, and `/new` retain their existing behavior. Changing an authored workflow body while it is running can likewise cause replay failure.
+
+At startup and after snapshot pruning, `eve dev` cancels unfinished runs whose runtime snapshots are missing. This includes waiting conversations and session timeout workflows. Cancellation records the reason in the run history without a terminal warning; normal run-data retention still applies. Stopping `eve dev` does not intentionally cancel runs whose snapshots remain available.
+
+Recovery limits:
+
+- Custom Workflow Worlds do not use this cleanup and recovery policy; `eve dev --resume` rejects them.
+- `eve dev --resume` refuses to attach to an already running local server. The flag requires starting a server.
+- `eve dev --resume` recovers workflows, not the terminal transcript or a particular TUI conversation.
 
 ## `eve remote`
 

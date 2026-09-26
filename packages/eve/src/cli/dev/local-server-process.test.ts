@@ -60,9 +60,14 @@ describe("createDevelopmentServer", () => {
   });
 
   it("starts and hands cleanup to the child", async () => {
-    const server = createDevelopmentServer("/tmp/app", { port: 2000 });
+    const server = createDevelopmentServer("/tmp/app", { port: 2000, resume: true });
     const started = server.start();
     await vi.waitFor(() => expect(mocks.fork).toHaveBeenCalled());
+    expect(mocks.fork).toHaveBeenCalledWith(
+      expect.any(String),
+      [JSON.stringify({ port: 2000, resume: true })],
+      expect.any(Object),
+    );
     child.emit("message", {
       type: "started",
       handle: { kind: "started", appRoot: "/tmp/app", url: "http://127.0.0.1:2000" },

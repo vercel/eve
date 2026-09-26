@@ -383,6 +383,7 @@ describe("bare eve command", () => {
 
     expect(findApplicationRoot).toHaveBeenCalledWith(resolve(process.cwd()));
     expect(startHost).toHaveBeenCalledWith("/resolved/app", {
+      resume: undefined,
       existing: "attach-if-unconfigured",
       host: undefined,
       onBootProgress: expect.any(Function),
@@ -620,6 +621,22 @@ describe("eve dev --input", () => {
     expect(startHost).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ developmentExtensions: { enabled: [] } }),
+    );
+  });
+
+  it("passes explicit recovery to the local host", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    await runInteractiveDev(["dev", "--resume"], { startHost });
+    expect(startHost).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ resume: true }),
     );
   });
 
@@ -1075,6 +1092,7 @@ describe("eve dev local server ownership", () => {
     const runDevelopmentTui = await runInteractiveDev(["dev"], { startHost });
 
     expect(startHost).toHaveBeenCalledWith(expect.any(String), {
+      resume: undefined,
       existing: "attach-if-unconfigured",
       host: undefined,
       onBootProgress: expect.any(Function),

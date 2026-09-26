@@ -1,13 +1,8 @@
-import {
-  EntityConflictError,
-  RunExpiredError,
-  WorkflowRunNotFoundError,
-} from "#compiled/@workflow/errors/index.js";
+import { isInactiveWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 
 import type { SessionCommand } from "#channel/types.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
-import { walkCauseChain } from "#shared/errors.js";
 
 /** Settles side effects owned by a session candidate that lost its continuation claim. */
 export async function settleContinuationConflictStep(input: {
@@ -34,19 +29,6 @@ async function cancelCollector(runId: string): Promise<void> {
       cancelReason: "Session candidate did not acquire continuation ownership",
     });
   } catch (error) {
-    if (!isInactiveRun(error)) throw error;
+    if (!isInactiveWorkflowRunError(error)) throw error;
   }
-}
-
-function isInactiveRun(error: unknown): boolean {
-  for (const candidate of walkCauseChain(error)) {
-    if (
-      WorkflowRunNotFoundError.is(candidate) ||
-      RunExpiredError.is(candidate) ||
-      EntityConflictError.is(candidate)
-    ) {
-      return true;
-    }
-  }
-  return false;
 }

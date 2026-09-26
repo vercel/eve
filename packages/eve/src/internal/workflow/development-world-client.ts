@@ -6,8 +6,6 @@ import type {
   World,
 } from "#compiled/@workflow/world/index.js";
 import { resolvePackageSourceFilePath } from "#internal/application/package.js";
-import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
 
 import {
   decodeDevelopmentWorldJson,
@@ -19,7 +17,8 @@ import {
   getDevelopmentWorkflowGeneration,
   withDevelopmentWorkflowGeneration,
 } from "#internal/workflow/development-generation-context.js";
-import { LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH } from "#internal/workflow/local-world-data-directory.js";
+import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
+import { isMissingWorkflowRunError } from "#internal/workflow/is-inactive-workflow-run-error.js";
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
@@ -28,6 +27,8 @@ import {
   DEVELOPMENT_WORKFLOW_TRANSPORT_HEADER,
   DEVELOPMENT_WORKFLOW_WORLD_ROUTE,
   DEVELOPMENT_WORLD_OPERATIONS,
+  type DevelopmentGenerationAdmission,
+  type DevelopmentGenerationAvailabilityCall,
   type DevelopmentWorldCall,
   type DevelopmentWorldOperation,
 } from "#internal/workflow/development-world-protocol.js";
@@ -45,8 +46,7 @@ const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 export class MissingDevelopmentGenerationError extends Error {
   constructor(generationId: string, cause?: unknown) {
     super(
-      `Workflow run references missing development generation "${generationId}". ` +
-        `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard the app's active local Workflow runs.`,
+      `Workflow run references missing development generation "${generationId}". Start a new local session.`,
       cause === undefined ? undefined : { cause },
     );
     this.name = "MissingDevelopmentGenerationError";
@@ -65,6 +65,19 @@ async function call<T>(
     method: "POST",
   });
   return decodeDevelopmentWorldValue(await response.text()) as T;
+}
+
+async function getGenerationAvailability(
+  generationId: string,
+): Promise<DevelopmentGenerationAdmission> {
+  const response = await fetchDevelopmentWorld(DEVELOPMENT_WORKFLOW_WORLD_ROUTE, {
+    body: encodeDevelopmentWorldValue({
+      operation: "eve.getGenerationAvailability",
+      generationId,
+    } satisfies DevelopmentGenerationAvailabilityCall),
+    method: "POST",
+  });
+  return decodeDevelopmentWorldValue(await response.text()) as DevelopmentGenerationAdmission;
 }
 
 /**
@@ -190,7 +203,13 @@ function createQueueHandler(
     try {
       const appRoot = readRequiredEnvironment(DEVELOPMENT_WORKER_APP_ROOT_ENV);
       const generationId = await resolveDeliveryGenerationId(message);
-      const runtimeAppRoot = await readGenerationRuntimeAppRoot(appRoot, generationId);
+      if (generationId === undefined) return Response.json({ ok: true });
+      const availability = await getGenerationAvailability(generationId);
+      if (availability.kind === "missing")
+        throw new MissingDevelopmentGenerationError(generationId);
+      if (availability.kind === "ineligible" || availability.kind === "dormant")
+        return Response.json({ ok: true });
+      const runtimeAppRoot = availability.runtimeAppRoot;
       const result = await withDevelopmentWorkflowGeneration(
         {
           generationId,
@@ -214,10 +233,14 @@ function createQueueHandler(
       );
     } catch (error) {
       if (error instanceof MissingDevelopmentGenerationError) {
-        // Retrying cannot bring the generation back; acknowledge the
-        // delivery so the queue stops redelivering, and leave the loud
-        // error for the user to act on.
-        console.error(`[eve:dev] ${error.message}`);
+        const runId = resolveDeliveryRunId(message);
+        if (runId !== undefined) {
+          try {
+            await cancelExpiredDevelopmentRun(createDevelopmentWorkflowWorld(), runId);
+          } catch (cleanupError) {
+            return Response.json(String(cleanupError), { status: 500 });
+          }
+        }
         return Response.json({ ok: true });
       }
       return Response.json(String(error), { status: 500 });
@@ -234,7 +257,7 @@ function createQueueHandler(
  * the parent's queue and authenticated with the transport secret; nothing
  * an untrusted caller controls participates.
  */
-async function resolveDeliveryGenerationId(message: unknown): Promise<string> {
+async function resolveDeliveryGenerationId(message: unknown): Promise<string | undefined> {
   // Capability probes may name a run before start() persists its record.
   if (!isRecord(message) || message.__healthCheck === true) {
     return await call<string>("resolveLatestDeploymentId");
@@ -245,67 +268,29 @@ async function resolveDeliveryGenerationId(message: unknown): Promise<string> {
       ? runInput.deploymentId
       : await call<string>("resolveLatestDeploymentId");
   }
-  const runId =
-    typeof message.runId === "string"
-      ? message.runId
-      : typeof message.workflowRunId === "string"
-        ? message.workflowRunId
-        : undefined;
+  const runId = resolveDeliveryRunId(message);
   if (runId === undefined) {
     return await call<string>("resolveLatestDeploymentId");
   }
-  const run = await call<{ readonly deploymentId: string }>("runs.get", [
-    runId,
-    { resolveData: "none" },
-  ]);
-  return run.deploymentId;
+  try {
+    const run = await call<{ readonly deploymentId: string }>("runs.get", [
+      runId,
+      { resolveData: "none" },
+    ]);
+    return run.deploymentId;
+  } catch (error) {
+    if (!isMissingWorkflowRunError(error)) throw error;
+    return undefined;
+  }
 }
 
-async function readGenerationRuntimeAppRoot(
-  appRoot: string,
-  generationId: string,
-): Promise<string> {
-  if (
-    generationId.length === 0 ||
-    generationId === "." ||
-    generationId === ".." ||
-    basename(generationId) !== generationId
-  ) {
-    throw new Error(`Workflow run references invalid development generation "${generationId}".`);
-  }
-  const metadataPath = join(
-    appRoot,
-    ".eve",
-    "dev-runtime",
-    "snapshots",
-    generationId,
-    "generation.json",
-  );
-  let source: string;
-  try {
-    source = await readFile(metadataPath, "utf8");
-  } catch (error) {
-    if (isFileNotFoundError(error)) {
-      throw new MissingDevelopmentGenerationError(generationId, error);
-    }
-    throw error;
-  }
-  let metadata: unknown;
-  try {
-    metadata = JSON.parse(source);
-  } catch (error) {
-    throw new Error(`Development generation "${generationId}" has invalid metadata.`, {
-      cause: error,
-    });
-  }
-  if (!isRecord(metadata) || typeof metadata.runtimeAppRoot !== "string") {
-    throw new Error(`Development generation "${generationId}" has invalid metadata.`);
-  }
-  return metadata.runtimeAppRoot;
-}
-
-function isFileNotFoundError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
+function resolveDeliveryRunId(message: unknown): string | undefined {
+  if (!isRecord(message) || message.__healthCheck === true) return undefined;
+  return typeof message.runId === "string"
+    ? message.runId
+    : typeof message.workflowRunId === "string"
+      ? message.workflowRunId
+      : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
