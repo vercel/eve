@@ -57,6 +57,10 @@ This consumes the stream until the current turn boundary:
 - `session.completed`
 - `session.failed`
 
+A `session.waiting` event with a `turnId` is not a boundary: the turn is held
+open while its [tasks](/docs/tools/workflows#run-calls-as-tasks-task) work, so
+`result()` resolves with the final reply after they finish.
+
 `result()` closes that HTTP stream, including when fetch instrumentation clones
 the response for tracing. The durable session remains available for follow-up
 turns after `session.waiting`.
@@ -74,7 +78,7 @@ for await (const event of response) {
   }
 
   if (event.type === "message.completed" && event.data.finishReason !== "tool-calls") {
-    console.log("\nfinal:", event.data.message);
+    console.log("\nmessage:", event.data.message);
   }
 }
 ```
@@ -95,7 +99,7 @@ for await (const event of response) {
 
 After reconnecting without local state, replay the earlier events or wait for the completed event instead of appending a later delta to an empty value. Apply the same rule to `reasoningDelta` and `inputTextDelta`. If a model provider fails after partial output and eve retries the call, the durable stream keeps events from both attempts. A later completed event replaces provisional text only when the failed attempt did not already complete that block; the protocol has no attempt identity with which to retract earlier completed blocks.
 
-The eve client validates the stream version on every connection. It accepts v21–v24 cumulative message and reasoning append events and v24 offset-based tool-input appends, then exposes them through the current delta-only `MessageStreamEvent` contract. This also applies when an automatic reconnect reaches a newer deployment. A missing or unsupported `x-eve-stream-version` header fails the stream instead of treating unknown JSON as the current event type.
+The eve client validates the stream version on every connection. It accepts v21 through v26. v25 and v26 events already use the current delta-only `MessageStreamEvent` contract, and the client normalizes v21–v24 cumulative message and reasoning append events and v24 offset-based tool-input appends to it. This also applies when an automatic reconnect reaches a newer deployment. A missing or unsupported `x-eve-stream-version` header fails the stream instead of treating unknown JSON as the current event type.
 
 ## Handle event types
 

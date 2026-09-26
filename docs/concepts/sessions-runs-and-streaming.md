@@ -95,10 +95,10 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                    |
 | `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                     |
 | `step.failed`             | A model step failed; carries `{ code, message, details? }`.                                                                  |
-| `turn.completed`          | The turn finished.                                                                                                           |
+| `turn.completed`          | The turn finished. A turn held open by working tasks emits it only at its real end.                                          |
 | `turn.failed`             | The turn failed; carries `{ code, message, details? }`.                                                                      |
 | `turn.cancelled`          | The turn was cancelled before finishing; always followed by `session.waiting`.                                               |
-| `session.waiting`         | The session parked and is ready for the next message.                                                                        |
+| `session.waiting`         | The session parked and is ready for the next message. With `turnId`, a root session's turn is held while its tasks work.     |
 | `session.failed`          | The session failed.                                                                                                          |
 | `session.completed`       | The session reached a terminal end.                                                                                          |
 
@@ -110,7 +110,7 @@ The default client reducer accumulates assistant text, reasoning, and streamed t
 
 If a model provider fails after partial output and eve retries the call, the durable stream keeps events from both attempts. When the failed attempt emitted only deltas, a later completed event lets replaceable projections converge on the successful attempt. A completed block does not mean the provider attempt itself later succeeded; removing abandoned completed blocks would require attempt identity, which these events do not carry.
 
-The client validates the `x-eve-stream-version` header on every connection. It normalizes v21–v24 cumulative message and reasoning appends, plus v24 offset-based tool-input appends, to the v25 delta-only contract. This lets a reconnect cross deployments without changing the reducer input. A current server performs the same normalization when replaying a session written by an earlier deployment. A missing or unsupported version, or an append whose fields do not match its declared version, fails instead of being interpreted as a current event.
+The client validates the `x-eve-stream-version` header on every connection. It accepts v21 through v26 and normalizes v21–v24 cumulative message and reasoning appends, plus v24 offset-based tool-input appends, to the delta-only contract that v25 introduced. This lets a reconnect cross deployments without changing the reducer input. A current server performs the same normalization when replaying a session written by an earlier deployment. A missing or unsupported version, or an append whose fields do not match its declared version, fails instead of being interpreted as a current event.
 
 When a streamed tool input becomes a validated call, its `action.input.appended` events precede the matching `actions.requested` event. The default client reducer projects the potentially incomplete JSON as a `dynamic-tool` part with `state: "input-streaming"` and cumulative text in `inputText`. `actions.requested` replaces that part with `state: "input-available"` and the validated `input`. Excluded internal actions never publish their input stream.
 
