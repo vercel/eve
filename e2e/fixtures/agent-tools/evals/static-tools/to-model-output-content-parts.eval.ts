@@ -69,7 +69,6 @@ function assistantAnswers(events: readonly MessageStreamEvent[]): readonly strin
   return events.flatMap((event) =>
     event.type === "message.completed" &&
     event.data.finishReason !== "tool-calls" &&
-    event.data.message !== null &&
     event.data.message.trim().length > 0
       ? [event.data.message]
       : [],

@@ -215,7 +215,7 @@ export default disableTool();
 
 ### `agent`
 
-`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, always runs in the background, and returns a task receipt immediately. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
+`agent` delegates a subtask to a fresh copy of the root agent. It is root-only and waits for the child's reply, which it returns as the tool result. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
 
 ```sh
 eve add tool/agent
@@ -228,26 +228,6 @@ export { default } from "eve/tools/agent";
 An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot:
 
 ```ts title="agent/tools/agent.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
-### `task_cancel`
-
-`task_cancel` lets the root session cancel background tasks.
-
-```sh
-eve add tool/task_cancel
-```
-
-```ts title="agent/tools/task_cancel.ts"
-export { default } from "eve/tools/task_cancel";
-```
-
-The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it:
-
-```ts title="agent/tools/task_cancel.ts"
 import { disableTool } from "eve/tools";
 
 export default disableTool();
@@ -400,4 +380,4 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `slee
 - [Tools](../tools): define your own tools, gate them on approval, and shape their output with `toModelOutput`
 - [Dynamic capabilities](../guides/dynamic-capabilities): generate the tool set per session with `defineDynamic`
 - [Sandbox](../sandbox): configure the sandbox used by shell and file tools
-- [Subagents](../subagents): declare specialists that the model can call as background tasks
+- [Subagents](../subagents): declare specialists that the model can delegate to

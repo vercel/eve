@@ -88,7 +88,6 @@ export async function resolveToolDefinition(
       description: definition.description,
       execute,
       executeInput,
-      execution: definition.execution,
       exportName: definition.exportName,
       inputSchema,
       logicalPath: definition.logicalPath,

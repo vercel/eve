@@ -17,7 +17,6 @@ import {
   SessionDynamicToolMetadataKey,
   TurnDynamicToolMetadataKey,
   StepDynamicToolMetadataKey,
-  TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -28,7 +27,6 @@ import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
-import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { once } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import {
@@ -835,21 +833,13 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     });
   });
 
-  // Regression: turn-local context (task state, dynamic skill announcement) was
+  // Regression: turn-local context (a dynamic skill announcement) was
   // appended as a user message after the approval response. The AI SDK reads
   // approvals only from the tail tool message, so the approved tool never ran
   // and the provider rejected the prompt with a tool call that had no output.
-  it.each(
-    [
-      {
-        label: "dynamic skill announcement",
-        historyKey: "availableSkills" as const,
-      },
-      { label: "task state", historyKey: "taskState" as const },
-    ].flatMap((context) => [false, true].map((restoredAnchor) => ({ ...context, restoredAnchor }))),
-  )(
-    "executes the approved tool when $label is injected on the resume step (restored anchor: $restoredAnchor)",
-    async ({ historyKey, restoredAnchor }) => {
+  it.each([false, true])(
+    "executes the approved tool when a dynamic skill announcement is injected on the resume step (restored anchor: %s)",
+    async (restoredAnchor) => {
       const siblingCall = {
         input: { command: "whoami" },
         toolCallId: "call-sibling",
@@ -862,7 +852,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         toolName: "bash",
         type: "tool-result" as const,
       };
-      let session = appendPendingInputBatch({
+      const session = appendPendingInputBatch({
         requests: [pendingApprovalInputRequest],
         // The parked shape when a gated call shares a step with an ungated one.
         responseMessages: [
@@ -872,27 +862,8 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         session: createBaseSession(),
       });
       const ctx = new ContextContainer();
-      const runtimeContextAnnouncement =
-        historyKey === "taskState"
-          ? '[Task state]\n{"tasks":[{"name":"analysis","status":"pending","taskId":"analysis"}]}'
-          : "Available skills\n- policy: Tenant policy";
-      if (historyKey === "taskState") {
-        ctx.set(TurnTaskDeliveryKey, "initiating");
-        session = registerWorkflowToolRun(session, {
-          callId: "analysis",
-          toolName: "analysis",
-          lifetime: "session" as const,
-          origin: { turnId: "turn-1", stepIndex: 0 },
-          address: { runId: "task-run", hookToken: "task-token" },
-          task: {
-            dispatchContext: { auth: { current: null, initiator: null } },
-            metadata: { kind: "report-probe", name: "analysis" },
-            taskId: "analysis",
-          },
-        });
-      } else {
-        ctx.set(PendingSkillAnnouncementKey, runtimeContextAnnouncement);
-      }
+      const runtimeContextAnnouncement = "Available skills\n- policy: Tenant policy";
+      ctx.set(PendingSkillAnnouncementKey, runtimeContextAnnouncement);
       const execute = vi.fn(async () => "/workspace");
       const model = createModel();
       const runStep = createToolLoopHarness(createConfig(model, execute));
@@ -950,7 +921,9 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
           (message) => message.content === runtimeContextAnnouncement,
         ),
       ).toHaveLength(1);
-      expect(ctx.get(HistoryStateKey)).toMatchObject({ [historyKey]: runtimeContextAnnouncement });
+      expect(ctx.get(HistoryStateKey)).toMatchObject({
+        availableSkills: runtimeContextAnnouncement,
+      });
     },
   );
 

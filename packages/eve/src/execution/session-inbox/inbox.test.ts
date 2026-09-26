@@ -101,7 +101,6 @@ describe("createSessionInbox", () => {
       kind: "report",
       from: {
         callId: "call",
-        execution: "blocking",
         input: {},
         runId: "tool-run",
         sequence: 0,

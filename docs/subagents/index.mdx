@@ -9,41 +9,11 @@ Use a subagent to run independent work in parallel, narrow the available tools, 
 - Use a [declared local subagent](#declared-subagents) for a specialist with its own directory and authored capabilities, rather than inheriting the root's.
 - Use a [remote agent](./guides/remote-agents) to delegate to a separately deployed eve agent, with its own configuration and authentication.
 
-A subagent can finish a model turn while background tasks started in that turn are still running.
-That turn yields; its interim reply does not complete the caller's delegated task. Background work started by an earlier turn does not hold the reply, and a turn that ends with an error always answers the caller. If the child session expires, resets, or closes before replying, the delegated task fails and reports the usage accumulated since its previous settlement.
-After the nested tasks finish, the subagent resumes and returns its final result to
-the caller. This applies to root-agent copies, declared local subagents, and remote
-subagents. The subagent session remains available for later calls.
-
-## Completion batching
-
-Overlapping background work owned by a session forms a cohort. Tasks launched in
-later user turns join the open cohort while earlier work is still pending or its
-terminal results await delivery. With `taskDeliveryPolicy: "cohort"`, eve holds
-completion, failure, and cancellation notifications
-until every task in that cohort has completed, failed, or been cancelled, then
-delivers all outcomes together in one parent turn. Partial settlements
-do not invoke the parent model. Work started after the cohort settles forms a new
-cohort.
-
-New channel sessions default to `"auto"`; schedules default to `"cohort"`.
-Pass `taskDeliveryPolicy` to `send(...)` to select or update the session policy. See
-[Background task results](/docs/channels/overview#background-task-results).
-
-With `"auto"`, a terminal outcome can start a parent turn while other tasks are
-still running. The parent reports independently useful results and stays silent
-when a useful answer depends on unfinished tasks. Ready results may share a turn.
-The reporting context includes the whole cohort and every available output,
-including previously withheld results, for a later combined report.
-
-The setting applies to background tools and built-in, declared, and remote
-subagents owned by the session. Internal subagent sessions use `"cohort"` for
-background work they start.
-
-User messages, input requests, authorization events, failures, and cancellation
-are handled without waiting for the cohort. Child lifecycle events are processed
-before completion delivery so usage accounting and handle cleanup stay ordered.
-To follow work in progress, subscribe to the child session streams.
+Each subagent call blocks the calling turn until the child replies, and the child's final result is
+the tool result. If the child session expires, resets, or closes before replying, the call fails
+and reports the usage accumulated since its previous settlement. This applies to root-agent copies,
+declared local subagents, and remote subagents. The subagent session remains available for later
+calls.
 
 ## The built-in `agent` tool
 
@@ -52,11 +22,11 @@ The root session receives `agent` by default. The model calls it to delegate a t
 ```ts
 {
   message: string;  // everything the child needs; it does not see the parent's history
-  agentId?: string; // continue or steer an existing child
+  agentId?: string; // continue an existing child
 }
 ```
 
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` always runs in the background and needs no configuration: each call returns `{ status: "working", taskId, agentId }`, then task notifications wake the parent with completion, failure, or cancellation. Give parallel children non-overlapping write scopes.
+The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. The built-in `agent` needs no configuration. Each call waits for the child's reply and returns it as the tool result, and several `agent` calls in one response run in parallel. Give parallel children non-overlapping write scopes.
 
 `agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
 
@@ -102,9 +72,7 @@ export default defineAgent({
 
 The parent can alternatively export `disableTool()` from a same-named tool path, such as `agent/tools/researcher.ts`. This suppresses the derived model tool without removing `researcher` from the workflow invocation registry. A same-named authored tool replaces the model-facing surface while the workflow can still call the underlying subagent with `ctx.agent("researcher", ...)`.
 
-Every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with completion, failure, or cancellation. Human input requests surface separately on the parent session.
-
-`task_cancel` is available to sessions that own background tasks, including a child that starts nested background work. Cancelling a delegated agent task also requests cancellation of its child's nested background tasks, even after that child's model turn has yielded. The child does not start another model turn for notifications from that cancelled work. This applies to self, local, and remote delegation. The calling model receives the cancellation receipt in the `task_cancel` result; a later report of that same outcome does not start another model turn.
+A declared local or remote subagent call waits for the child's reply and returns it as the tool result. Human input requests from the child surface on the parent session while the call waits. Cancelling the calling turn also cancels the child's current turn.
 
 A mounted extension can also contribute declared subagents from `extension/subagents/`. The mount namespace prefixes the subagent visible to the consuming agent node: mounting an extension as `crm` exposes its `reviewer` subagent as `crm__reviewer`. The contributed subagent keeps its own isolated tools, connections, skills, hooks, instructions, sandbox, and nested subagents, and its modules can read configuration from the extension handle. See [Extensions](./extensions#add-a-subagent) for the authoring and override behavior.
 
@@ -249,7 +217,7 @@ A directly declared subagent's tool name is the bare path-derived name, with no 
 ```ts
 {
   message: string;  // all context the child needs; it never sees the parent's history
-  agentId?: string; // continue or steer an existing child
+  agentId?: string; // continue an existing child
 }
 ```
 
@@ -259,21 +227,17 @@ Do not rely on subagent delegation by itself as an approval boundary. Put sensit
 
 Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, pass the `subagent.called` event to [`session.streamSubagent()`](./guides/client/streaming#follow-a-subagent) on a client session attached to the parent. It reads `subagent.called.data.childStreamPath`: the child's own session stream for a local child, or a parent-origin proxy for a remote child, which the parent authenticates to the remote deployment.
 
-Both blocking and background invocations emit `subagent.called` after dispatch and `subagent.completed` after the parent records successful completion. Completion carries the actual output and identifies the same invocation by `callId`; the child session can remain available for reuse. A background working receipt is returned as an `action.result` tool output and does not emit completion. Background completion events do not wait for the cohort report. Failure and cancellation are not successful completion; task notifications retain those outcomes.
+Every invocation emits `subagent.called` after dispatch and `subagent.completed` after the parent records successful completion. Completion carries the actual output and identifies the same invocation by `callId`; the child session can remain available for reuse. Failure and cancellation do not emit `subagent.completed`; the failed tool result carries the error.
 
-Channels with activity reporting attribute the backing agent's tool activity to its background task. Local and remote subagents share the task's progress item rather than adding a separate agent item. Continuing or steering a child with `agentId` attaches its new activity to the new task; the previous task keeps its completed or cancelled status. This applies to the built-in `agent` and declared subagent tools, not to child invocations inside custom workflow tools. Activity reporting is best-effort and does not change task execution or result delivery.
+Channels with activity reporting show a subagent's tool activity beneath that subagent's progress item. Activity reporting is best-effort and does not change execution or result delivery.
 
-A background task that was already admitted survives cancellation of the turn that started it; background work that has not yet been admitted is rejected with the cancelled step. Use `task_cancel` to stop an admitted task. Cancellation delivers the task's final notification to an active parent even if the task must be stopped forcibly. Parent-session finalization cancels remaining live tasks.
-
-Subagent model calls automatically retry classified transient provider failures, including overload errors delivered after a stream starts. eve makes at most three fresh model-call attempts, repeating only the current uncommitted call by default so completed earlier Workflow steps, tool results, and sandbox work remain available to the child. A declared subagent that opts into [Workflow checkpoint batching](./agent-config#workflow-checkpoint-batching) can instead repeat the uncommitted calls and inline tool executions in its current batch. Other recoverable task errors fall back to Workflow's durable step retry from the last committed session snapshot. Exhausting the transient model-call attempts or the dedicated empty-response reissue returns one failed task result instead of stacking both retry budgets; terminal errors fail immediately.
+Subagent model calls automatically retry classified transient provider failures, including overload errors delivered after a stream starts. eve makes at most three fresh model-call attempts, repeating only the current uncommitted call by default so completed earlier Workflow steps, tool results, and sandbox work remain available to the child. A declared subagent that opts into [Workflow checkpoint batching](./agent-config#workflow-checkpoint-batching) can instead repeat the uncommitted calls and inline tool executions in its current batch. Other recoverable errors fall back to Workflow's durable step retry from the last committed session snapshot. Exhausting the transient model-call attempts or the dedicated empty-response reissue returns one failed result instead of stacking both retry budgets; terminal errors fail immediately.
 
 ## Agent messaging
 
 A child parks after answering instead of terminating, keeping its session and conversation history alive. A failed child turn can also leave the child parked — its latest status shows the error and the parent may message it again. Pass a parked child's `agentId` to the same subagent tool with a new `message` to continue that session. Omitting `agentId` (or passing an empty string or `null`) always starts a new child, and an `agentId` that matches no known agent falls back to starting a new child rather than failing. Passing a known `agentId` through a different subagent tool fails with `AGENT_MISMATCH`.
 
-To steer a running background child, call the same subagent tool with its `agentId` and the updated `message`. Before answer output or local tool execution begins, steering interrupts the child's pending model generation and applies the update in the same turn. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed Workflow boundary. The receipt retains the same `agentId` and `taskId`; steering does not cancel the task, replace its completion callback, or undo tool side effects that have already occurred.
-
-A child that is still starting, or is owned by a blocking workflow invocation rather than an admitted background task, continues to return `AGENT_BUSY`. Delivery failures are reported to the caller; eve does not start a replacement child session to hide them.
+A call that names a child that is still starting or running returns `AGENT_BUSY`. Delivery failures are reported to the caller; eve does not start a replacement child session to hide them.
 
 Whenever the set of parked (resumable) children changes, eve appends a framework-injected note to the conversation — labeled `[Agents]` and carrying an `<agents>` block — listing each child's `agentId`, name, and latest status. The static system prompt tells the model the note is injected by eve, not written by the user. The note is appended only when the listing changes (an append-only design that preserves the provider prompt cache), the most recent note is authoritative, and children that are starting or running do not appear until they park again.
 

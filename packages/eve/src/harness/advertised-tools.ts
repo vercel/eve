@@ -2,7 +2,7 @@ import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
-type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "taskId">;
+type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId">;
 
 type AdvertisedToolMapInput = {
   readonly session: AdvertisedToolSession;
@@ -104,10 +104,6 @@ function shouldHideTool(
   ) {
     return delegated;
   }
-  if (definition.behavior?.availability.includes("delegated-task-child") === true) {
-    return session.taskId === undefined;
-  }
-
   return false;
 }
 

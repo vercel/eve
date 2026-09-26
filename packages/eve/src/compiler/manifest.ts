@@ -814,12 +814,12 @@ const compiledDynamicConnectionDefinitionSchema: z.ZodType<CompiledDynamicConnec
 
 const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
   .object({
-    availability: z.array(z.enum(["delegated-task-child", "root-session"])).readonly(),
+    availability: z.array(z.literal("root-session")).readonly(),
     handling: z
       .discriminatedUnion("kind", [
         z
           .object({
-            action: z.enum(["self-agent", "task-cancel"]),
+            action: z.literal("self-agent"),
             kind: z.literal("dispatch"),
           })
           .strict(),
@@ -840,7 +840,6 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
     presentation: z.literal("load-skill").optional(),
     shape: z
       .object({
-        lifetime: z.enum(["step", "task"]),
         suspend: z.enum(["none", "workflow"]),
       })
       .strict()
@@ -853,7 +852,6 @@ const compiledToolDefinitionSchema = z
     availableInSubagents: z.boolean().optional(),
     behavior: compiledToolBehaviorSchema.optional(),
     description: z.string(),
-    execution: z.literal("background").optional(),
     exportName: z.string().optional(),
     hasExecute: z.boolean(),
     hasModelOutputProjection: z.boolean(),

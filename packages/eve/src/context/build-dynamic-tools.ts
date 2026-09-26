@@ -103,12 +103,6 @@ export function replayDynamicTools(
   if (metadata.length > 0 && scope.sessionId.length === 0) {
     throw new Error("Dynamic tool replay requires a session id.");
   }
-  const background = metadata.find((entry) => entry.execution === "background");
-  if (background !== undefined) {
-    throw new Error(
-      `Dynamic tool "${background.name}" used removed background execution. Move durable background work to a static defineWorkflowTool().`,
-    );
-  }
   return metadata.map((entry) => {
     const owner = { ...entry, ...scope };
     const approvalKeyReference = entry.callbacks.approvalKey;
@@ -159,7 +153,6 @@ export function replayDynamicTools(
       }),
       inputSchema: replayDynamicToolSchema(entry, owner, "inputSchema")!,
       name: entry.name,
-      execution: entry.execution,
       approval: buildReplayedApproval(entry, owner),
       ...(approvalKeyReference === undefined
         ? {}

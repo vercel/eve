@@ -21,7 +21,7 @@ const verifier = {
 };
 const stage = {
   id: "stage",
-  kind: "task" as const,
+  kind: "subagent" as const,
   name: "verify_stage",
   parentId: verifier.id,
   rootSessionId: "session",
@@ -37,7 +37,7 @@ const reviewer = {
 };
 const reviewStage = {
   id: "review-stage",
-  kind: "task" as const,
+  kind: "subagent" as const,
   name: "review_stage",
   parentId: reviewer.id,
   rootSessionId: "session",

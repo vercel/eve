@@ -76,54 +76,6 @@ When eve doesn't ship a channel for your surface, build one with `defineChannel`
 
 A cross-channel `send(...)` supplies input to the agent and invokes the model on the destination channel. eve does not currently provide a direct cross-channel provider-message queue. To post without starting a turn, use the provider API. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when delivery also needs application-managed retries and deduplication.
 
-## Background task results
-
-Pass `taskDeliveryPolicy` to `send(...)` to choose how the session reports background results:
-
-- `"auto"` (default for new channel sessions): ready results can invoke the parent while other tasks continue. The parent reports results that are useful independently and stays silent when a useful answer needs unfinished work.
-- `"cohort"`: wait for overlapping tasks to settle, then deliver their terminal outcomes together.
-
-```ts title="agent/channels/reports.ts"
-import { defineChannel, POST } from "eve/channels";
-import { localDev, routeAuth } from "eve/channels/auth";
-
-export default defineChannel({
-  routes: [
-    POST("/reports", async (request, { from }) => {
-      const auth = await routeAuth(request, localDev());
-      if (auth instanceof Response) return auth;
-      const session = await from("daily-report").send("Prepare the daily reports.", {
-        auth,
-        taskDeliveryPolicy: "cohort",
-      });
-      return Response.json({ sessionId: session.id });
-    }),
-  ],
-});
-```
-
-The option is available on channel-local `from(...).send(...)`, cross-channel
-`to(...).send(...)`, fixed-session `send(...)`, Chat SDK `bridge.send(...)`, and client
-sends. An explicit value
-updates the session's policy, including pending background tasks; later sends that
-omit it preserve that policy. A cross-channel send carries its setting through the
-receiver's `from(...).send(...)` unless that call supplies an explicit value.
-
-[Schedules](../schedules#background-task-results) default new sessions to `"cohort"`.
-A schedule handler can pass `taskDeliveryPolicy: "auto"` to `send(...)` to override
-that default. Child sessions use their own policy.
-
-With `"auto"`, a model call may finish without a user-visible message. Results
-already queued from the same cohort may share a turn. Each reporting turn receives
-the whole cohort, including pending tasks and available outputs, so previously
-withheld results remain available for a later combined report.
-
-Input requests and explicit task messages remain eligible for delivery under
-either policy. Failure and cancellation update task state immediately; their
-automatic reports follow the selected policy. User messages follow `turnPolicy`.
-See [Completion batching](../subagents#completion-batching) for cohort membership
-and result ordering.
-
 ## Relationship to the Chat SDK
 
 eve uses the [Chat SDK's card-builder components](https://chat-sdk.dev/docs/api/cards) (Cards, Buttons, Actions, etc.) for composing rich Slack messages. When you build a card with the [Slack channel](./slack), the underlying primitives come from the Chat SDK and get converted to Slack Block Kit at post time.

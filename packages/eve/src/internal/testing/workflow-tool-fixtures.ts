@@ -160,18 +160,6 @@ export async function* reportingDeployWorkflow(
   return { plan };
 }
 
-export async function* backgroundDeployWorkflow(
-  input: DeployInput,
-  _ctx: WorkflowToolContext,
-): AsyncGenerator<string, { readonly plan: string }> {
-  "use workflow";
-
-  const plan = await planDeployStep(input.service);
-  yield `planned ${input.service}`;
-  yield `review ${plan}`;
-  return { plan };
-}
-
 async function planDeployStep(service: string): Promise<string> {
   "use step";
 

@@ -6,7 +6,6 @@ import type {
   SessionCallback,
   SessionCapabilities,
   TurnPolicy,
-  TaskDeliveryPolicy,
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
@@ -34,10 +33,7 @@ import {
 } from "#public/channels/upload-policy.js";
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import {
-  parseTaskDeliveryPolicyField,
-  parseTurnPolicyField,
-} from "#eve-channel/delivery-policy-request.js";
+import { parseTurnPolicyField } from "#eve-channel/turn-policy-request.js";
 import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
 
 const SESSION_STREAM_HEARTBEAT_MS = 10_000;
@@ -89,8 +85,6 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
     if (observerRejection !== undefined) return observerRejection;
   }
 
-  const taskDeliveryPolicy = parseTaskDeliveryPolicyField(payload.taskDeliveryPolicy, message);
-  if (taskDeliveryPolicy instanceof Response) return taskDeliveryPolicy;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
 
@@ -113,7 +107,6 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   }
 
   const result: ParsedCreateBody = {
-    taskDeliveryPolicy,
     activityObserver,
     callback,
     capabilities,
@@ -126,7 +119,6 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 }
 
 interface ParsedSessionMessageBody {
-  taskDeliveryPolicy?: TaskDeliveryPolicy;
   activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   message?: string | UserContent;
@@ -156,8 +148,6 @@ export function parseSessionMessageBody(
   if (inputResponses instanceof Response) return inputResponses;
   const context = parseClientContextField(payload.clientContext);
   if (context instanceof Response) return context;
-  const taskDeliveryPolicy = parseTaskDeliveryPolicyField(payload.taskDeliveryPolicy, message);
-  if (taskDeliveryPolicy instanceof Response) return taskDeliveryPolicy;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
   const turnPolicy = parseTurnPolicyField(payload.turnPolicy);
@@ -188,13 +178,10 @@ export function parseSessionMessageBody(
     context,
     outputSchema,
     turnPolicy,
-    taskDeliveryPolicy,
   };
 }
 
 interface ParsedCancelTurnBody {
-  taskId?: string;
-  tasks?: boolean;
   turnId?: string;
 }
 
@@ -205,31 +192,13 @@ export async function parseCancelTurnBody(req: Request): Promise<ParsedCancelTur
   if (tokenRejection !== null) return tokenRejection;
 
   const turnId = payload.turnId;
-  const taskId = payload.taskId;
-  const tasks = payload.tasks;
   if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
     return Response.json(
       { error: "Expected 'turnId' to be a non-empty string.", ok: false },
       { status: 400 },
     );
   }
-  if (tasks !== undefined && typeof tasks !== "boolean") {
-    return Response.json(
-      { error: "Expected 'tasks' to be a boolean.", ok: false },
-      { status: 400 },
-    );
-  }
-  if (taskId !== undefined && (typeof taskId !== "string" || taskId.length === 0)) {
-    return Response.json(
-      { error: "Expected 'taskId' to be a non-empty string.", ok: false },
-      { status: 400 },
-    );
-  }
-  const result: ParsedCancelTurnBody = {};
-  if (typeof taskId === "string") result.taskId = taskId;
-  if (typeof tasks === "boolean") result.tasks = tasks;
-  if (typeof turnId === "string") result.turnId = turnId;
-  return result;
+  return typeof turnId === "string" ? { turnId } : {};
 }
 
 export async function parseJsonRequest(req: Request): Promise<Record<string, unknown> | Response> {

@@ -1,14 +1,8 @@
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { SettledTurn, StepResult } from "#harness/types.js";
+import type { SettledTurn } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-
-/** A settled turn as the session parks it. The session, not the harness, decides caller delivery. */
-export interface ParkedSettledTurn extends SettledTurn {
-  /** False while background tasks started by this turn are still working. */
-  readonly notifyCaller: boolean;
-}
 
 /** Trusted runtime-action results collected by the session owner. */
 export interface RuntimeActionResultStepInput {
@@ -38,10 +32,6 @@ export interface TurnStepInput {
 }
 
 interface DurableStepResultFields {
-  /** Pre-step context plus the observability state owned by committed background tasks. */
-  readonly backgroundTaskContext?: Record<string, unknown>;
-  readonly backgroundTaskState?: DurableSessionState;
-  readonly backgroundTasks?: StepResult["backgroundTasks"];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
@@ -62,7 +52,7 @@ export type DurableStepResult = (
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
-      readonly settled?: ParkedSettledTurn;
+      readonly settled?: SettledTurn;
     }
 ) &
   DurableStepResultFields;
@@ -80,5 +70,5 @@ export type TurnOutcome =
       readonly authorizationAttemptIds?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
-      readonly settled?: ParkedSettledTurn;
+      readonly settled?: SettledTurn;
     };

@@ -273,40 +273,4 @@ describe("projectActivityEvents", () => {
       },
     ]);
   });
-
-  it("keeps delegated work active for a background receipt", () => {
-    expect(
-      projectActivityEvents({
-        at: "2026-01-01T00:00:02Z",
-        event: {
-          data: {
-            result: {
-              backgroundTask: { status: "working", taskId: "task-1" },
-              callId: "child-1",
-              kind: "subagent-result",
-              origin: "child",
-              outcome: {
-                kind: "parked",
-                result: { kind: "succeeded", output: "working" },
-                usageDelta: {
-                  cacheReadTokens: 0,
-                  cacheWriteTokens: 0,
-                  inputTokens: 0,
-                  outputTokens: 0,
-                },
-              },
-              output: "working",
-              subagentName: "researcher",
-            },
-            sequence: 0,
-            status: "completed",
-            stepIndex: 0,
-            turnId: "turn",
-          },
-          type: "action.result",
-        },
-        lineage: { ...lineage, sessionId: "root", turnId: "turn" },
-      }),
-    ).toEqual([]);
-  });
 });

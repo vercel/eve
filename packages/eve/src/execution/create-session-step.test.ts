@@ -18,27 +18,6 @@ const TestTurnAgent: RuntimeTurnAgent = {
 };
 
 describe("createSessionStep", () => {
-  it("preserves task ownership without injecting progress-reporting instructions", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {},
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
-
-    const { state } = await createSessionStep({
-      compiledArtifactsSource: { kind: "bundled" },
-      continuationToken: "subagent:test",
-      sessionId: "sess-child",
-      taskId: "task-1",
-    });
-
-    expect(state.snapshot.session.agent.system).not.toContain("Background task updates");
-    expect(state.snapshot.session.agent.system).not.toContain("task_update");
-    expect(state.snapshot.session.taskId).toBe("task-1");
-    expect(state.snapshot.session.state).toBeUndefined();
-  });
-
   it("defaults root sessions to the root input token budget", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {

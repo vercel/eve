@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 58,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 58],
+    current: 59,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 59],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -61,13 +61,14 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       53: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       56: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       57: "agentRouter() no longer accepts a model-facing outputSchema; structured subagent output is requested only through ctx.agent().",
+      58: "Workflow tools no longer accept execution or return background task receipts; every call blocks until it settles.",
     },
   },
   dynamicTool: {
-    current: 56,
+    current: 57,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
-      56,
+      57,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -99,11 +100,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       51: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       53: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       55: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
+      56: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
     },
   },
   channel: {
-    current: 33,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31, 33],
+    current: 34,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 29, 31, 34],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       19: "Continuation rekey was removed; channel extensions must use additive continuation.alias instead.",
@@ -118,18 +120,20 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       28: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       30: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       32: "Run mode and caller-supplied output schemas were removed from channel operations; sessions always park, and send options, audience inputs, and ConversationContext no longer carry mode, while from().send() and from().respond() no longer accept outputSchema.",
+      33: "Background task delivery was removed: sends no longer accept taskDeliveryPolicy and message.completed always carries text.",
     },
   },
   schedule: {
-    current: 16,
-    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+    current: 17,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      16: "Background task delivery was removed: sends no longer accept taskDeliveryPolicy and message.completed always carries text.",
     },
   },
   subagent: {
-    current: 21,
-    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 21],
+    current: 22,
+    supported: [3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 22],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -137,22 +141,24 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       17: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
       18: "Removed experimental.instrumentationProviders; instrumentation is now always enabled for root agents.",
       20: "Run mode was removed and agent definitions no longer declare outputSchema; sessions always park, ConversationContext no longer carries mode, and structured output is requested per turn.",
+      21: "Background task execution was removed: subagent results no longer carry backgroundTask, message.completed always carries text, and experimental.tasks is gone.",
     },
   },
   connection: {
-    current: 28,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 28],
+    current: 29,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 29],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       23: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       25: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       27: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
+      28: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
     },
   },
   hook: {
-    current: 28,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 27, 28],
+    current: 29,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 25, 27, 29],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -166,24 +172,27 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       16: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       24: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
       26: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
+      28: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
     },
   },
   skill: { current: 2, supported: [1, 2], dropped: {} },
   dynamicSkill: {
-    current: 23,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 23],
+    current: 24,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 24],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       22: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
+      23: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 24,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 24],
+    current: 25,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22, 25],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
       23: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
+      24: "Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text.",
     },
   },
   config: { current: 1, supported: [1], dropped: {} },

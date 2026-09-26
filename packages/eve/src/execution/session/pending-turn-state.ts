@@ -22,8 +22,6 @@ export function derivePendingState(session: HarnessSession): {
   if (batch === undefined) return base;
   return {
     ...base,
-    pendingCoordinationCallIds: [...batch.runtimeActions, ...batch.tasks].map(
-      (request) => request.callId,
-    ),
+    pendingCoordinationCallIds: batch.tasks.map((request) => request.callId),
   };
 }

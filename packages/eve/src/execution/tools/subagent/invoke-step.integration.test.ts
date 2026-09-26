@@ -76,12 +76,12 @@ describe("blocking workflow agent continuation", () => {
     }));
   });
 
-  it("forwards inherited activity when starting a background subagent", async () => {
+  it("forwards inherited activity when starting a subagent", async () => {
     const activityObserver = {
       sink: { url: "https://parent.example/activity", version: 1 as const },
       workIdentity: {
-        id: "work:task",
-        kind: "task" as const,
+        id: "work:slack",
+        kind: "subagent" as const,
         name: "slack",
         parentId: "work:root",
         rootSessionId: "root-session",

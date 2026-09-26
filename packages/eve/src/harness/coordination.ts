@@ -5,7 +5,6 @@ import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
-  RuntimeToolCallActionRequest,
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
@@ -71,8 +70,6 @@ interface PendingCoordinationEventMetadata {
  * authority for continuing, settling, and cancelling children.
  */
 export interface PendingCoordinationBatch {
-  /** Framework task controls deferred to the turn owner. */
-  readonly runtimeActions: readonly RuntimeToolCallActionRequest[];
   /** Authored-tool and subagent workflow tasks pending coordination. */
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly event: PendingCoordinationEventMetadata;
@@ -102,7 +99,6 @@ export function getPendingCoordinationBatch(
   const batch = value as PendingCoordinationBatch;
 
   if (
-    !Array.isArray(batch.runtimeActions) ||
     !Array.isArray(batch.tasks) ||
     !Array.isArray(batch.responseMessages) ||
     typeof batch.event !== "object" ||
@@ -127,17 +123,15 @@ export function clearPendingCoordinationBatch(session: HarnessSession): HarnessS
  * Stores one pending coordination batch on the session.
  */
 export function setPendingCoordinationBatch(input: {
-  readonly runtimeActions: readonly RuntimeToolCallActionRequest[];
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly event: PendingCoordinationEventMetadata;
   readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
-  assertUniqueCoordinationCallIds([...input.runtimeActions, ...input.tasks]);
+  assertUniqueCoordinationCallIds(input.tasks);
   const state = { ...input.session.state };
   state[PENDING_COORDINATION_BATCH_KEY] = {
-    runtimeActions: [...input.runtimeActions],
     tasks: [...input.tasks],
     event: input.event,
     localFanoutSize: input.localFanoutSize,
@@ -188,9 +182,7 @@ function resolveResultsForCoordinationBatch(input: {
   readonly state: SessionStateMap | undefined;
 }): RuntimeActionResult[] | undefined {
   return resolveRuntimeActionResultsForCallIds({
-    pendingCallIds: [...input.batch.runtimeActions, ...input.batch.tasks].map(
-      (request) => request.callId,
-    ),
+    pendingCallIds: input.batch.tasks.map((request) => request.callId),
     results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
   });
 }
@@ -244,11 +236,6 @@ export async function resolvePendingCoordination(input: {
     // Dispatch failures never settle handles: the dispatch step already
     // rejected (deleted) the handle when it synthesized the failure.
     if (result.kind !== "subagent-result" || result.origin !== "child") {
-      continue;
-    }
-    // A background receipt confirms task admission, not child-turn settlement.
-    // The task snapshot later carries the actual parked/terminal outcome.
-    if (readBackgroundTaskReceipt(result) !== undefined) {
       continue;
     }
     const handle = findRunningAgentHandle(nextSession.state, { callId: result.callId });
@@ -326,8 +313,7 @@ export async function resolvePendingCoordination(input: {
       if (
         result.kind === "subagent-result" &&
         result.origin === "child" &&
-        result.outcome.result.kind === "succeeded" &&
-        readBackgroundTaskReceipt(result) === undefined
+        result.outcome.result.kind === "succeeded"
       ) {
         const data = {
           callId: result.callId,
@@ -398,12 +384,6 @@ export async function resolvePendingCoordination(input: {
   };
 }
 
-function readBackgroundTaskReceipt(
-  result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
-): { readonly status: "working"; readonly taskId: string } | undefined {
-  return "backgroundTask" in result ? result.backgroundTask : undefined;
-}
-
 /**
  * Projects one AI SDK tool call into the eve runtime-action contract.
  */
@@ -428,43 +408,27 @@ export function createRuntimeActionRequestFromToolCall(input: {
   return definition?.workflowId === undefined ? action : markRuntimeWorkflowToolAction(action);
 }
 
-/** Projects one deferred harness tool call into task/control coordination. */
+/** Projects one deferred harness tool call into a workflow run request. */
 export function createCoordinationRequestFromToolCall(input: {
   readonly toolCall: TypedToolCall<ToolSet>;
   readonly tools: HarnessToolMap;
-}):
-  | { readonly kind: "runtime-action"; readonly request: RuntimeToolCallActionRequest }
-  | { readonly kind: "task"; readonly request: RuntimeWorkflowTaskRequest } {
+}): RuntimeWorkflowTaskRequest {
   const definition = input.tools.get(input.toolCall.toolName);
+  if (definition?.workflowId === undefined) {
+    throw new Error(`Deferred tool "${input.toolCall.toolName}" has no workflow.`);
+  }
   const inputObject = resolveToolCallInputObject(input.toolCall.input, {
     callId: input.toolCall.toolCallId,
     toolName: input.toolCall.toolName,
   });
-  if (definition?.runtimeAction?.kind === "task-control") {
-    return {
-      kind: "runtime-action",
-      request: {
-        callId: input.toolCall.toolCallId,
-        input: inputObject,
-        kind: "tool-call",
-        toolName: input.toolCall.toolName,
-      },
-    };
-  }
-  if (definition?.workflowId !== undefined) {
-    return {
-      kind: "task",
-      request: {
-        callId: input.toolCall.toolCallId,
-        executeInput: definition.executeInput?.(inputObject),
-        input: inputObject,
-        kind: "workflow-task",
-        toolName: input.toolCall.toolName,
-        workflowId: definition.workflowId,
-      },
-    };
-  }
-  throw new Error(`Deferred tool "${input.toolCall.toolName}" has no task or runtime action.`);
+  return {
+    callId: input.toolCall.toolCallId,
+    executeInput: definition.executeInput?.(inputObject),
+    input: inputObject,
+    kind: "workflow-task",
+    toolName: input.toolCall.toolName,
+    workflowId: definition.workflowId,
+  };
 }
 
 /**

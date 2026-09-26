@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import type { SubagentHookObservation } from "../subagent-hook-audit";
 
-export default (["direct", "waiting", "background"] as const).map((mode) =>
+export default (["direct", "waiting"] as const).map((mode) =>
   defineEval({
     description: `${mode} subagent hooks preserve parent context, skills, and sandbox writes.`,
     async test(t) {
@@ -10,20 +10,10 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
       );
       initial.expectOk();
       initial.calledTool("load_skill", { count: 1, status: "completed" });
-      const marker =
-        mode === "direct"
-          ? "Alice's hook audit"
-          : `hook-audit:${mode === "waiting" ? "blocking" : "background"}`;
-      const completed =
-        mode === "waiting"
-          ? initial
-          : await t.target
-              .watchTurn(initial.sessionId, { startIndex: initial.session.state.streamIndex })
-              .result();
-      completed.expectOk();
-      completed.messageIncludes(marker);
+      const marker = mode === "direct" ? "Alice's hook audit" : "hook-audit:blocking";
+      initial.messageIncludes(marker);
 
-      const audit = await completed.session.send(
+      const audit = await initial.session.send(
         "Alice reviews the recorded hook observations for Bob's completed report. SUBAGENT-HOOKS:AUDIT",
       );
       audit.expectOk();
@@ -46,7 +36,7 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
           const completion = events.find((event) => event.type === "subagent.completed");
           if (completion?.type !== "subagent.completed") return false;
           if (!completion.data.output.startsWith("WORKFLOW-CHILD:")) return false;
-          if (!completed.message?.includes(completion.data.output)) return false;
+          if (!initial.message?.includes(completion.data.output)) return false;
           const records = observations as SubagentHookObservation[];
           return (
             records.every(

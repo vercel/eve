@@ -2,12 +2,7 @@ import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent, defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
 
-import {
-  SCHEDULED_REMOTE_CHILD_SCENARIO,
-  SCHEDULED_REMOTE_ROOT_SCENARIO,
-  WORKSPACE_FORWARDING_MARKER,
-  WORKSPACE_LOOKUP_MESSAGE,
-} from "../constants";
+import { WORKSPACE_FORWARDING_MARKER, WORKSPACE_LOOKUP_MESSAGE } from "../constants";
 
 if (process.env.EVE_E2E_MODEL === "mock") {
   process.env.EVE_MOCK_AUTHORED_MODELS = "1";
@@ -65,21 +60,12 @@ const workspaceDispatcher = mockModel({
     ) {
       return "The workspace lookup was submitted.";
     }
-    const previous = [...request.toolResults]
-      .reverse()
-      .find((result) => result.name === "remote-loopback")?.output;
-    const agentId =
-      previous !== null &&
-      typeof previous === "object" &&
-      "agentId" in previous &&
-      typeof previous.agentId === "string"
-        ? previous.agentId
-        : undefined;
+    const agentId = findAnnouncedAgentId(request.messages, "remote-loopback");
     const requestCount = request.messages.filter(
       (message) => message.role === "user" && message.text.includes(WORKSPACE_FORWARDING_MARKER),
     ).length;
     if (requestCount > 1 && agentId === undefined) {
-      throw new Error("Workspace continuation has no existing remote agent receipt.");
+      throw new Error("Workspace continuation has no remote agent in the <agents> note.");
     }
     return {
       toolCalls: [
@@ -92,53 +78,16 @@ const workspaceDispatcher = mockModel({
     };
   },
 });
-const scheduledRemoteModel = mockModel({
-  modelId: "scheduled-remote-completion",
-  respond(request) {
-    if (request.userMessages.some((message) => message.includes(SCHEDULED_REMOTE_CHILD_SCENARIO))) {
-      return "SCHEDULED-REMOTE-CHILD-RESULT";
-    }
-
-    const remote = completedTaskOutput(request.userMessages, "remote-loopback");
-    if (remote !== undefined) return `SCHEDULED-REMOTE-FINAL ${remote}`;
-    if (!request.toolResults.some((result) => result.id === "scheduled-remote")) {
-      return {
-        toolCalls: [
-          {
-            id: "scheduled-remote",
-            input: { message: SCHEDULED_REMOTE_CHILD_SCENARIO },
-            name: "remote-loopback",
-          },
-        ],
-      };
-    }
-    return "Weekly report could not be completed before delivery because the analytics query did not return a result.";
-  },
-});
-
-function completedTaskOutput(messages: readonly string[], name: string): string | undefined {
-  const prefix = "[Task state]\n";
-  const state = [...messages].reverse().find((message) => message.startsWith(prefix));
-  if (state === undefined) return undefined;
-  const parsed: unknown = JSON.parse(state.slice(prefix.length));
-  if (parsed === null || typeof parsed !== "object") return undefined;
-  const tasks = Reflect.get(parsed, "tasks");
-  if (!Array.isArray(tasks)) return undefined;
-  const task = tasks.find(
-    (candidate) =>
-      candidate !== null &&
-      typeof candidate === "object" &&
-      Reflect.get(candidate, "name") === name &&
-      Reflect.get(candidate, "status") === "completed",
-  );
-  if (task === undefined) return undefined;
-  const output = Reflect.get(task, "output");
-  return output !== null &&
-    typeof output === "object" &&
-    Reflect.get(output, "type") === "result" &&
-    typeof Reflect.get(output, "data") === "string"
-    ? (Reflect.get(output, "data") as string)
-    : undefined;
+/** Reads the id the framework-injected `[Agents]` note lists for a parked child. */
+function findAnnouncedAgentId(
+  messages: readonly { readonly role: string; readonly text: string }[],
+  name: string,
+): string | undefined {
+  const announcement = [...messages]
+    .reverse()
+    .find((message) => message.role === "user" && message.text.startsWith("[Agents]"));
+  const pattern = new RegExp(`<agent id="([^"]+)" name="${name}">`);
+  return announcement?.text.match(pattern)?.[1];
 }
 
 export default defineAgent({
@@ -168,15 +117,6 @@ export default defineAgent({
         }
         if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
           return { model: workspaceDispatcher, modelContextWindowTokens: 1_000_000 };
-        }
-        if (
-          messages.some(
-            (message) =>
-              message.includes(SCHEDULED_REMOTE_ROOT_SCENARIO) ||
-              message.includes(SCHEDULED_REMOTE_CHILD_SCENARIO),
-          )
-        ) {
-          return { model: scheduledRemoteModel, modelContextWindowTokens: 1_000_000 };
         }
         return { model: defaultModel, modelContextWindowTokens };
       },

@@ -59,14 +59,11 @@ export interface RoutedChildDelivery {
   readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  readonly childResponseUrl?: string;
   /** Answer-hook requests the user moved past; each hook resumes as `dismissed`. */
   readonly dismissedRequestIds?: readonly string[];
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
   /** Parent-visible request IDs safe to retire once this bucket is forwarded. */
   readonly retireRequestIds: readonly string[];
-  /** Present when the child is owned by a task run, which delivers on the parent's behalf. */
-  readonly taskId?: string;
 }
 
 /**
@@ -85,13 +82,11 @@ interface ChildResponseBucket {
   readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  readonly childResponseUrl?: string;
   readonly dismissedRequestIds: string[];
   /** Parent-visible request IDs answered in this bucket. */
   readonly parentRequestIds: string[];
   readonly responses: InputResponse[];
   readonly routes: ProxyInputRequest[];
-  readonly taskId?: string;
 }
 
 /**
@@ -124,12 +119,9 @@ export function routeDeliverPayload(input: {
   let parentAction: RoutedDeliverPayload["parentAction"];
 
   const bucketFor = (route: ProxyInputRequest): ChildResponseBucket => {
-    const bucketKey = [
-      route.childContinuationToken,
-      route.childSessionInbox?.sessionId ?? "",
-      route.childResponseUrl ?? "local",
-      route.taskId ?? "",
-    ].join("\0");
+    const bucketKey = [route.childContinuationToken, route.childSessionInbox?.sessionId ?? ""].join(
+      "\0",
+    );
     const existing = responsesByChild.get(bucketKey);
     if (existing !== undefined) return existing;
     const bucket: ChildResponseBucket = {
@@ -142,8 +134,6 @@ export function routeDeliverPayload(input: {
         childSessionInbox: route.childSessionInbox,
       }),
       ...(route.answerHook !== undefined && { answerHook: route.answerHook }),
-      ...(route.childResponseUrl !== undefined && { childResponseUrl: route.childResponseUrl }),
-      ...(route.taskId !== undefined && { taskId: route.taskId }),
     };
     responsesByChild.set(bucketKey, bucket);
     return bucket;
@@ -167,7 +157,7 @@ export function routeDeliverPayload(input: {
 
     const bucket = bucketFor(route);
     bucket.parentRequestIds.push(response.requestId);
-    bucket.responses.push(toChildInputResponse(response, route));
+    bucket.responses.push(response);
     bucket.routes.push(route);
   }
 
@@ -181,12 +171,10 @@ export function routeDeliverPayload(input: {
       answerHook,
       childContinuationToken,
       childSessionInbox,
-      childResponseUrl,
       dismissedRequestIds,
       parentRequestIds,
       responses,
       routes,
-      taskId,
     }): RoutedChildDelivery => {
       const responseIds = new Set(parentRequestIds);
       const retireRequestIds = new Set([...responseIds, ...dismissedRequestIds]);
@@ -210,8 +198,6 @@ export function routeDeliverPayload(input: {
         ...(dismissedRequestIds.length > 0 && { dismissedRequestIds }),
         ...(childSessionInbox !== undefined && { childSessionInbox }),
         ...(answerHook !== undefined && { answerHook }),
-        ...(childResponseUrl !== undefined && { childResponseUrl }),
-        ...(taskId !== undefined && { taskId }),
       };
     },
   );
@@ -308,10 +294,4 @@ function sameBatch(
     route.batch?.requestIds.length === input.batch.requestIds.length &&
     route.batch.requestIds.every((requestId, index) => requestId === input.batch.requestIds[index])
   );
-}
-
-function toChildInputResponse(response: InputResponse, route: ProxyInputRequest): InputResponse {
-  return route.childRequestId === undefined
-    ? response
-    : { ...response, requestId: route.childRequestId };
 }

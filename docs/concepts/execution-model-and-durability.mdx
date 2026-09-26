@@ -97,9 +97,8 @@ Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up fro
 
 With `experimental.workflow.modelCallsPerStep` greater than `1`, an
 interrupted Workflow step can also repeat earlier model calls and inline tool
-executions from the same batch. Approval, input, blocking coordination, and
-background-task boundaries still force a checkpoint before eve waits or
-acknowledges the work.
+executions from the same batch. Approval, input, and blocking coordination
+boundaries still force a checkpoint before eve waits.
 
 Steering can interrupt pending model generation before assistant output begins.
 An executing tool finishes safely, then the batch yields before another model
@@ -115,14 +114,11 @@ For ordinary tools, eve manages the workflow around your executor. Use [`defineW
 
 Some work has to wait, including a human approving a [tool](../tools) or an interactive OAuth sign-in for a [connection](../connections). At those points the turn parks durably. The workflow suspends and holds no compute until the input it's waiting on arrives, even if that's much later. When it does, the conversation picks up exactly where it left off.
 
-Background execution is a separate choice about result delivery. A background workflow tool
-returns a task receipt so the parent turn can continue; the tool's workflow may then run or
-suspend independently. A default workflow tool can suspend too, with its original tool call
-still pending. Declare background work with `defineWorkflowTool`; `defineTool` always executes
-inside its initiating step.
+A workflow tool can suspend too, with its original tool call still pending and the turn parked
+until the workflow settles. `defineTool` always executes inside its initiating step.
 
-An awaited workflow operation provides the durable wait. A generator's `yield` reports progress
-in default execution; background workflow tools consume yields without publishing progress. See [background execution](../tools#background-execution) and
+An awaited workflow operation provides the durable wait. A generator's `yield` reports progress.
+See [durable waits](../tools#durable-waits) and
 [workflow suspension](../tools/workflows#how-suspension-works) for the execution and result rules.
 
 ## Message delivery and steering
@@ -154,7 +150,7 @@ never starts a replacement session for an address that is mid-handoff.
 
 When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`. Before assistant output begins, the session owner signals pending model generation to stop, then applies the correction within the same turn and with the same turn ID. This includes model requests that perform provider-managed search before answering; interrupted search work may run again. Reasoning and search progress do not count as assistant output.
 
-An executing eve tool finishes and commits its result before steering reaches the next model request. Steering does not cancel the turn or its background tasks. After assistant output starts, steering applies at the next committed workflow boundary and preserves streamed text. A message that reaches the boundary after the turn has settled starts another turn.
+An executing eve tool finishes and commits its result before steering reaches the next model request. Steering does not cancel the turn. After assistant output starts, steering applies at the next committed workflow boundary and preserves streamed text. A message that reaches the boundary after the turn has settled starts another turn.
 
 Once eve publishes an input request or begins publishing turn completion or failure, eve finishes committing that boundary before applying new messages.
 
