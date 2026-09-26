@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import { buildAdapterContext } from "#channel/adapter-context.js";
+import { writeChannelEvent } from "#execution/publish-channel-event.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
@@ -16,11 +18,13 @@ import {
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
+import { readInputSource } from "#subagents/input-source.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
 function fixture(turnId = "parent-turn") {
   const order: string[] = [];
   const events: MessageStreamEvent[] = [];
+  const adapterInputs: Array<{ type: string; inputSource: string | undefined }> = [];
   const typed = vi.fn(async (event: MessageStreamEvent, _ctx: HookContext) => {
     order.push(`typed:${event.type}`);
   });
@@ -31,14 +35,17 @@ function fixture(turnId = "parent-turn") {
     kind: "proxy-hook-test",
     "input.requested"(data, ctx) {
       order.push("channel:input.requested");
+      adapterInputs.push({ type: "input.requested", inputSource: readInputSource(ctx) });
       ctx.state.pendingRequests = data.requests;
       ctx.session.continuation?.alias("parent-thread");
     },
-    "turn.completed"() {
+    "turn.completed"(_data, ctx) {
       order.push("channel:turn.completed");
+      adapterInputs.push({ type: "turn.completed", inputSource: readInputSource(ctx) });
     },
-    "session.waiting"() {
+    "session.waiting"(_data, ctx) {
       order.push("channel:session.waiting");
+      adapterInputs.push({ type: "session.waiting", inputSource: readInputSource(ctx) });
     },
   };
   const turnAgent = { id: "parent", model: { id: "unused" }, tools: [] };
@@ -106,6 +113,7 @@ function fixture(turnId = "parent-turn") {
     sessionWritable,
     events,
     order,
+    adapterInputs,
     request,
     typed,
     wildcard,
@@ -157,6 +165,45 @@ describe("proxied stream hooks", () => {
       ]);
     },
   );
+
+  it("keeps nested input sources event-scoped and distinct for the same child", async () => {
+    const f = fixture();
+    const sources = ["nested-source-a", "nested-source-b", undefined];
+    for (const inputSource of sources) {
+      await emitProxiedSubagentEvent({
+        ...f,
+        hookPayload: { ...f.hookPayload, inputSource },
+      });
+    }
+
+    const adapter = f.ctx.require(ChannelKey);
+    const writer = f.sessionWritable.getWriter();
+    try {
+      await writeChannelEvent({
+        adapter,
+        adapterCtx: buildAdapterContext(adapter, f.ctx),
+        ctx: f.ctx,
+        event: { type: "input.requested", data: f.hookPayload.event },
+        writer,
+      });
+    } finally {
+      writer.releaseLock();
+    }
+
+    expect(f.adapterInputs).toEqual([
+      ...sources.flatMap((inputSource) => [
+        {
+          type: "input.requested",
+          inputSource: JSON.stringify(["child-token", inputSource ?? null]),
+        },
+        { type: "turn.completed", inputSource: undefined },
+        { type: "session.waiting", inputSource: undefined },
+      ]),
+      { type: "input.requested", inputSource: undefined },
+    ]);
+    expect(readInputSource(f.ctx.require(ChannelKey))).toBeUndefined();
+    expect(readInputSource(f.ctx.require(ChannelKey).state!)).toBeUndefined();
+  });
 
   it("retains pre-recorded task response destinations and child request IDs", async () => {
     const f = fixture();

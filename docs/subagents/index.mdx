@@ -102,7 +102,7 @@ export default defineAgent({
 
 The parent can alternatively export `disableTool()` from a same-named tool path, such as `agent/tools/researcher.ts`. This suppresses the derived model tool without removing `researcher` from the workflow invocation registry. A same-named authored tool replaces the model-facing surface while the workflow can still call the underlying subagent with `ctx.agent("researcher", ...)`.
 
-Every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with completion, failure, or cancellation. Human input requests surface separately on the parent session.
+Every declared local or remote subagent runs as a durable background task: the call returns `{ status: "working", taskId, agentId }` immediately, then task notifications wake the parent with completion, failure, or cancellation. Human input requests surface separately on the parent session. Concurrent `ctx.ask()` questions from a local or remote child's workflow remain independently answerable; use each parent-visible request ID when calling `session.respond()`.
 
 `task_cancel` is available to sessions that own background tasks, including a child that starts nested background work. Cancelling a delegated agent task also requests cancellation of its child's nested background tasks, even after that child's model turn has yielded. The child does not start another model turn for notifications from that cancelled work. This applies to self, local, and remote delegation. The calling model receives the cancellation receipt in the `task_cancel` result; a later report of that same outcome does not start another model turn.
 

@@ -261,6 +261,43 @@ describe("deliverTaskInputResponsesStep", () => {
 });
 
 describe("notifyTaskParent", () => {
+  it("deduplicates replays without collapsing input sources in the same step", async () => {
+    for (const [replyTo, inputSource] of [
+      ["remote", "alice"],
+      ["remote", "bob"],
+      ["remote", "alice"],
+      ["other", "alice"],
+    ]) {
+      await notifyTaskParent({
+        token: "parent-token",
+        taskId: "task-1",
+        request: {
+          from: {
+            callId: "call-1",
+            execution: "background",
+            input: {},
+            runId: "run-1",
+            sequence: 0,
+            stepIndex: 0,
+            toolName: "worker",
+            turnId: "turn-1",
+          },
+          replyTo: replyTo!,
+          inputSource,
+          request: { kind: "ask", request: { prompt: "Approval word?" } },
+        },
+      });
+    }
+    const ids = vi
+      .mocked(resumeSessionInbox)
+      .mock.calls.map(([, command]) =>
+        command.kind === "send" ? command.taskDeliveryId : undefined,
+      );
+    expect(ids[0]).toBeDefined();
+    expect(ids[0]).toBe(ids[2]);
+    expect(new Set(ids).size).toBe(3);
+  });
+
   it("forwards an agent invocation through the typed task envelope", async () => {
     const request = {
       from: {

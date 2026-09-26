@@ -76,6 +76,7 @@ export interface WorkflowToolRunRequestMessage {
   readonly from: WorkflowToolRunRef;
   readonly replyTo: string;
   readonly request: WorkflowToolRequest;
+  readonly inputSource?: string;
   readonly requestCoordinates?: {
     readonly sequence: number;
     readonly stepIndex: number;

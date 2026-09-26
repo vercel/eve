@@ -217,6 +217,58 @@ describe("workflowToolRunWorkflow", () => {
     });
   });
 
+  it("answers independent sources oldest-first and replaces only a source's pending batch", async () => {
+    queueCommand({ kind: "ready" });
+    const request = (inputSource: string, requestId: string) =>
+      queueOwnerRequest({
+        ...bufferedAgentRequest,
+        replyTo: "remote-session",
+        inputSource,
+        requestCoordinates: { sequence: 0, stepIndex: 0, turnId: "child-turn" },
+        request: {
+          kind: "input-batch",
+          requests: [
+            {
+              kind: "question",
+              requestId,
+              prompt: "Approval word?",
+              action: { kind: "tool-call", callId: "ask", toolName: "ask", input: {} },
+            },
+          ],
+        },
+      });
+    const answer = (requestId: string) =>
+      mocks.raceChannelReads.mockResolvedValueOnce({
+        channel: "commands",
+        next: {
+          done: false,
+          value: {
+            kind: "input-response",
+            childContinuationToken: "remote-session",
+            taskId: initialView.taskId,
+            inputResponses: [{ requestId, text: "approved" }],
+          },
+        },
+      });
+    mocks.deliverTaskInputResponsesStep.mockResolvedValue("delivered");
+    request("alice", "alice-1");
+    request("bob", "bob-1");
+    answer("alice-1");
+    request("alice", "alice-2");
+    request("bob", "bob-2");
+    answer("alice-1"); // Already answered; adding a batch must not restore it.
+    answer("bob-1"); // Superseded within Bob's source.
+    answer("bob-2");
+    answer("alice-2");
+    mocks.raceChannelReads.mockResolvedValueOnce({ channel: "commands", next: { done: true } });
+
+    await workflowToolRunWorkflow(workflowInput);
+
+    expect(
+      mocks.deliverTaskInputResponsesStep.mock.calls.map(([input]) => input.requestIds),
+    ).toEqual([["alice-1"], ["bob-2"], ["alice-2"]]);
+  });
+
   it("acknowledges discarded authorization prompts after cancellation", async () => {
     queueCommand({ kind: "ready" });
     queueCommand({ kind: "cancel" });

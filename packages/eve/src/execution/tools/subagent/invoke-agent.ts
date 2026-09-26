@@ -128,6 +128,7 @@ export async function invokeAgent(
       if (reply.kind === "subagent-input-request") {
         await resumeHookStep(owner.inbox, {
           kind: "request",
+          inputSource: reply.inputSource,
           from: run,
           // Current session inboxes use their physical token. A remote child's
           // create-once operation hook is already a narrowed reply capability.

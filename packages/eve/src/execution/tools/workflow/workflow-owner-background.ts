@@ -25,6 +25,7 @@ import {
   readTaskInputRequestId,
   type TaskCommand,
   type TaskInboundAnswerInput,
+  type TaskInputRequest,
   type TaskRunInboundPayload,
   type TaskView,
 } from "#tasks/types.js";
@@ -45,6 +46,7 @@ export async function createBackgroundWorkflowOwner(
   let view = input.initialView;
   let updateIndex = 0;
   const answerHooks = new Map<string, AnswerHookRoute>();
+  const inputBatches = new Map<string, readonly TaskInputRequest[]>();
   const bodyController = new AbortController();
   try {
     await claimHookOwnership(commands);
@@ -99,11 +101,16 @@ export async function createBackgroundWorkflowOwner(
     if (request.requestCoordinates === undefined) {
       answerHooks.set(request.replyTo, { runId: request.from.runId });
     }
+    const source = JSON.stringify([request.replyTo, request.inputSource ?? null]);
+    const requests = workflowToolRunInputRequests(request);
+    const batches = new Map(inputBatches);
+    batches.set(source, requests);
     const accepted = applyTransition({
       kind: "require-input",
-      inputRequests: workflowToolRunInputRequests(request),
+      inputRequests: [...batches.values()].flat(),
     });
     if (!accepted) return;
+    inputBatches.set(source, requests);
     await notifyTaskParent({
       request,
       taskId: view.taskId,
@@ -152,6 +159,17 @@ export async function createBackgroundWorkflowOwner(
     const result = applyTaskTransition(view, command);
     if (result.action !== "accepted") return false;
     view = result.view;
+    if (command.kind === "answered") {
+      const answered = new Set(command.requestIds);
+      for (const [source, requests] of inputBatches) {
+        const remaining = requests.filter((request) => {
+          const requestId = readTaskInputRequestId(request);
+          return requestId === undefined || !answered.has(requestId);
+        });
+        if (remaining.length === 0) inputBatches.delete(source);
+        else inputBatches.set(source, remaining);
+      }
+    }
     return true;
   }
 

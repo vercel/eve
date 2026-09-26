@@ -79,6 +79,7 @@ const taskEventCallbackSchema = z.discriminatedUnion("kind", [
     childSessionId: z.string(),
     event: taskInputEventSchema,
     kind: z.literal("task.input-requested"),
+    inputSource: z.string().min(1).optional(),
     subagentName: z.string(),
     taskId: z.string(),
   }),
@@ -209,6 +210,7 @@ function projectTaskEvent(
         childSessionId: payload.childSessionId,
         event: payload.event,
         kind: "subagent-input-request",
+        ...(payload.inputSource !== undefined && { inputSource: payload.inputSource }),
         subagentName: payload.subagentName,
       }
     : {

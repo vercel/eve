@@ -94,6 +94,7 @@ function taskNotificationCommand(
 
   const coordinates = message.requestCoordinates ?? message.from;
   const delivery: TaskInputRequestDelivery = {
+    inputSource: message.inputSource,
     replyTo: message.replyTo,
     requests: workflowToolRunInputRequests(message),
     sequence: coordinates.sequence,
@@ -104,7 +105,15 @@ function taskNotificationCommand(
   return {
     kind: "send",
     payload: { task: { inputRequests: [delivery] } },
-    taskDeliveryId: `${taskId}:input:${coordinates.turnId}:${coordinates.stepIndex}:${coordinates.sequence}`,
+    taskDeliveryId: JSON.stringify([
+      taskId,
+      "input",
+      message.replyTo,
+      message.inputSource ?? null,
+      coordinates.turnId,
+      coordinates.stepIndex,
+      coordinates.sequence,
+    ]),
   };
 }
 

@@ -82,26 +82,68 @@ describe("upsertProxyInputRequests", () => {
     ).toBe(0);
   });
 
-  it("replaces prior entries for the same child continuation token", () => {
+  it("replaces prior entries only for the same child input source", () => {
     let session = upsertProxyInputRequests({
-      entries: [["req-1", { childContinuationToken: "child-a", kind: "question" }]],
+      entries: [
+        ["req-1", { childContinuationToken: "child-a", inputSource: "source-1", kind: "question" }],
+      ],
       forChildContinuationToken: "child-a",
+      inputSource: "source-1",
       session: createSession(),
+    });
+    session = upsertProxyInputRequests({
+      entries: [
+        ["req-2", { childContinuationToken: "child-a", inputSource: "source-2", kind: "question" }],
+      ],
+      forChildContinuationToken: "child-a",
+      inputSource: "source-2",
+      session,
+    });
+    expect(Object.fromEntries(getProxyInputRequests(session.state))).toEqual({
+      "req-1": { childContinuationToken: "child-a", inputSource: "source-1", kind: "question" },
+      "req-2": { childContinuationToken: "child-a", inputSource: "source-2", kind: "question" },
     });
 
     session = upsertProxyInputRequests({
-      entries: [["req-2", { childContinuationToken: "child-a", kind: "question" }]],
+      entries: [
+        ["req-3", { childContinuationToken: "child-a", inputSource: "source-1", kind: "question" }],
+      ],
+      forChildContinuationToken: "child-a",
+      inputSource: "source-1",
+      session,
+    });
+    expect(Object.fromEntries(getProxyInputRequests(session.state))).toEqual({
+      "req-2": { childContinuationToken: "child-a", inputSource: "source-2", kind: "question" },
+      "req-3": { childContinuationToken: "child-a", inputSource: "source-1", kind: "question" },
+    });
+  });
+
+  it("keeps independent source-less and sourced batches sharing a child token", () => {
+    let session = upsertProxyInputRequests({
+      entries: [["req-source-less", { childContinuationToken: "child-a", kind: "question" }]],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+    session = upsertProxyInputRequests({
+      entries: [
+        [
+          "req-sourced",
+          { childContinuationToken: "child-a", inputSource: "source-1", kind: "question" },
+        ],
+      ],
+      forChildContinuationToken: "child-a",
+      inputSource: "source-1",
+      session,
+    });
+    session = upsertProxyInputRequests({
+      entries: [["req-new-harness", { childContinuationToken: "child-a", kind: "question" }]],
       forChildContinuationToken: "child-a",
       session,
     });
-
-    const entries = getProxyInputRequests(session.state);
-    expect(entries.size).toBe(1);
-    expect(entries.get("req-1")).toBeUndefined();
-    expect(entries.get("req-2")).toEqual({
-      childContinuationToken: "child-a",
-      kind: "question",
-    });
+    expect([...getProxyInputRequests(session.state).keys()].sort()).toEqual([
+      "req-new-harness",
+      "req-sourced",
+    ]);
   });
 
   it("drops a prior child's batch when its request ID is claimed by another child", () => {

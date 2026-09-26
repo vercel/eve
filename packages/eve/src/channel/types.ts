@@ -356,6 +356,8 @@ export interface SubagentInputRequestEvent {
  * `input.requested` handler and the parent's runtime loop.
  */
 export interface SubagentInputRequestHookPayload {
+  /** Identifies an independent request source within the child's answer destination. */
+  readonly inputSource?: string;
   readonly callId: string;
   readonly childContinuationToken: string;
   readonly childSessionId: string;

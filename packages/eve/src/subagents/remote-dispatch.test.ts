@@ -281,6 +281,7 @@ describe("startRemoteAgentSession", () => {
     const childSessionId = await startRemoteAgentSession({
       action: createAction(),
       callbackBaseUrl: "https://caller.example.com",
+      capabilities: { requestInput: true },
       remote: {
         ...createRemoteAgent(),
         headers: { Traceparent: "00-authored", "x-static": "yes" },
@@ -344,7 +345,7 @@ describe("startRemoteAgentSession", () => {
         "Caller message:",
         "find the marker",
       ].join("\n"),
-      capabilities: {},
+      capabilities: { requestInput: true },
     });
     expect(
       readForwardedParentSessionBaggage(
@@ -357,6 +358,42 @@ describe("startRemoteAgentSession", () => {
       turn: { id: "parent-turn", sequence: 0 },
     });
   });
+
+  it.each([
+    { capabilities: { requestInput: false }, expected: { requestInput: false } },
+    { capabilities: undefined, expected: {} },
+  ])(
+    "preserves disabled or absent input capability in the remote create request ($capabilities)",
+    async ({ capabilities, expected }) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { ok: true, sessionId: "remote-session", status: "accepted" },
+            { status: 202 },
+          ),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await startRemoteAgentSession({
+        action: createAction(),
+        callbackBaseUrl: "https://caller.example.com",
+        capabilities,
+        remote: createRemoteAgent(),
+        session: {
+          agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+          compaction: { recentWindowSize: 10, threshold: 100000 },
+          continuationToken: "eve:parent-token",
+          history: [],
+          sessionId: "parent-session",
+          state: {},
+        },
+      });
+
+      const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+      expect(body.capabilities).toEqual(expected);
+    },
+  );
 
   it("binds a task id to an opaque invocation callback token", async () => {
     const fetchMock = vi

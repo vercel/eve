@@ -7,6 +7,8 @@ import type { ContextContainer } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { publishChannelEvent } from "#execution/publish-channel-event.js";
+import { forwardTaskEventToSessionCallback } from "#execution/task-event-callback.js";
+import { withInputSource } from "#subagents/input-source.js";
 import {
   createDurableSessionState,
   type DurableSession,
@@ -79,6 +81,7 @@ export async function emitRecordedTaskInputRequestStep(input: {
     hookPayload: {
       callId: input.request.taskId,
       childContinuationToken: input.request.replyTo,
+      inputSource: input.request.inputSource,
       childSessionId: input.request.taskId,
       event: {
         requests: (input.request.requests ?? [input.request.request]) as never,
@@ -123,9 +126,23 @@ export async function emitProxiedSubagentEvent(input: {
     // A re-emitted child event is a distinct event on the parent stream, so it
     // gets its own id rather than the child's.
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-      // The child event is already routed; do not forward it again or apply
-      // the parent's scheduled-turn suppression from createSessionEventSink.
-      await publishChannelEvent({ adapter, adapterCtx, ctx, event, writer });
+      // A remote session must forward even requests originating in its own
+      // workflow tools; only the outermost parent owns channel delivery.
+      const inputSource =
+        event.type === "input.requested" && input.hookPayload.kind === "subagent-input-request"
+          ? JSON.stringify([
+              input.hookPayload.childContinuationToken,
+              input.hookPayload.inputSource ?? null,
+            ])
+          : undefined;
+      if (await forwardTaskEventToSessionCallback(ctx, event, inputSource)) return;
+      await publishChannelEvent({
+        adapter,
+        adapterCtx: withInputSource(adapterCtx, inputSource),
+        ctx,
+        event,
+        writer,
+      });
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
@@ -166,6 +183,7 @@ export async function emitProxiedSubagentEvent(input: {
           ? proxyEntries
           : proxyEntries.map(([requestId, route]) => [requestId, { ...route, answerHook }]),
       forChildContinuationToken: input.hookPayload.childContinuationToken,
+      inputSource: input.hookPayload.inputSource,
       session: scopedSession,
     });
   }
