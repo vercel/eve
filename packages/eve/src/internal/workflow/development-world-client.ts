@@ -19,7 +19,8 @@ import {
   getDevelopmentWorkflowGeneration,
   withDevelopmentWorkflowGeneration,
 } from "#internal/workflow/development-generation-context.js";
-import { LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH } from "#internal/workflow/local-world-data-directory.js";
+import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
+import { isMissingDevelopmentRunError } from "#internal/workflow/is-inactive-development-run-error.js";
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
@@ -45,8 +46,7 @@ const WORKFLOW_LOCAL_BASE_URL_ENV = "WORKFLOW_LOCAL_BASE_URL";
 export class MissingDevelopmentGenerationError extends Error {
   constructor(generationId: string, cause?: unknown) {
     super(
-      `Workflow run references missing development generation "${generationId}". ` +
-        `Remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard the app's active local Workflow runs.`,
+      `Workflow run references missing development generation "${generationId}". Start a new local session.`,
       cause === undefined ? undefined : { cause },
     );
     this.name = "MissingDevelopmentGenerationError";
@@ -190,6 +190,7 @@ function createQueueHandler(
     try {
       const appRoot = readRequiredEnvironment(DEVELOPMENT_WORKER_APP_ROOT_ENV);
       const generationId = await resolveDeliveryGenerationId(message);
+      if (generationId === undefined) return Response.json({ ok: true });
       const runtimeAppRoot = await readGenerationRuntimeAppRoot(appRoot, generationId);
       const result = await withDevelopmentWorkflowGeneration(
         {
@@ -214,10 +215,14 @@ function createQueueHandler(
       );
     } catch (error) {
       if (error instanceof MissingDevelopmentGenerationError) {
-        // Retrying cannot bring the generation back; acknowledge the
-        // delivery so the queue stops redelivering, and leave the loud
-        // error for the user to act on.
-        console.error(`[eve:dev] ${error.message}`);
+        const runId = resolveDeliveryRunId(message);
+        if (runId !== undefined) {
+          try {
+            await cancelExpiredDevelopmentRun(createDevelopmentWorkflowWorld(), runId);
+          } catch (cleanupError) {
+            return Response.json(String(cleanupError), { status: 500 });
+          }
+        }
         return Response.json({ ok: true });
       }
       return Response.json(String(error), { status: 500 });
@@ -234,7 +239,7 @@ function createQueueHandler(
  * the parent's queue and authenticated with the transport secret; nothing
  * an untrusted caller controls participates.
  */
-async function resolveDeliveryGenerationId(message: unknown): Promise<string> {
+async function resolveDeliveryGenerationId(message: unknown): Promise<string | undefined> {
   // Capability probes may name a run before start() persists its record.
   if (!isRecord(message) || message.__healthCheck === true) {
     return await call<string>("resolveLatestDeploymentId");
@@ -245,20 +250,29 @@ async function resolveDeliveryGenerationId(message: unknown): Promise<string> {
       ? runInput.deploymentId
       : await call<string>("resolveLatestDeploymentId");
   }
-  const runId =
-    typeof message.runId === "string"
-      ? message.runId
-      : typeof message.workflowRunId === "string"
-        ? message.workflowRunId
-        : undefined;
+  const runId = resolveDeliveryRunId(message);
   if (runId === undefined) {
     return await call<string>("resolveLatestDeploymentId");
   }
-  const run = await call<{ readonly deploymentId: string }>("runs.get", [
-    runId,
-    { resolveData: "none" },
-  ]);
-  return run.deploymentId;
+  try {
+    const run = await call<{ readonly deploymentId: string }>("runs.get", [
+      runId,
+      { resolveData: "none" },
+    ]);
+    return run.deploymentId;
+  } catch (error) {
+    if (!isMissingDevelopmentRunError(error)) throw error;
+    return undefined;
+  }
+}
+
+function resolveDeliveryRunId(message: unknown): string | undefined {
+  if (!isRecord(message) || message.__healthCheck === true) return undefined;
+  return typeof message.runId === "string"
+    ? message.runId
+    : typeof message.workflowRunId === "string"
+      ? message.workflowRunId
+      : undefined;
 }
 
 async function readGenerationRuntimeAppRoot(

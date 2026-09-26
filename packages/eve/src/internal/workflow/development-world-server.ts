@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 
+import { cancelExpiredDevelopmentRun } from "#internal/workflow/cancel-expired-development-run.js";
 import type { ValidQueueName, World } from "#compiled/@workflow/world/index.js";
 import { createWorld } from "#compiled/@workflow/world-local/index.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
@@ -44,6 +45,7 @@ export interface ParentDevelopmentWorkflowWorld {
   close(): Promise<void>;
   handleRequest(request: Request): Promise<Response | undefined>;
   start(): Promise<void>;
+  reconcileExpiredRuns(): Promise<void>;
 }
 
 export function createParentDevelopmentWorkflowWorld(input: {
@@ -63,6 +65,7 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
   readonly #world: World;
   #closed = false;
   #started = false;
+  #reconciliation: Promise<void> = Promise.resolve();
 
   constructor(input: {
     readonly agentName: string;
@@ -88,30 +91,19 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     if (this.#started) {
       return;
     }
-    const referencedGenerationIds = await this.#collectActiveTurnGenerationIds();
-    const missingGenerationIds = new Set<string>();
-    for (const generationId of referencedGenerationIds) {
-      if (!this.#generationExists(generationId)) {
-        missingGenerationIds.add(generationId);
-      }
-    }
-    if (missingGenerationIds.size > 0) {
-      // One poisoned run must not take the rest of the app's active runs
-      // down with it: quarantine its deliveries and keep booting.
-      console.error(
-        `[eve:dev] ${String(missingGenerationIds.size)} active local Workflow run(s) reference development generations that no longer exist ` +
-          `(${[...missingGenerationIds].join(", ")}). Their deliveries are quarantined; ` +
-          `remove "${LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH}" to discard the app's active local Workflow runs.`,
-      );
-    }
     await this.#world.start?.();
     this.#started = true;
-    await reenqueueActiveDevelopmentRuns({
-      enqueue: this.#queue.bind(this),
-      prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
-      quarantinedGenerationIds: missingGenerationIds,
-      world: this.#world,
-    });
+    try {
+      await this.#reconcileExpiredRuns();
+      await reenqueueActiveDevelopmentRuns({
+        enqueue: this.#queue.bind(this),
+        prefix: deriveEveWorkflowQueuePrefix(this.#agentName),
+        world: this.#world,
+      });
+    } catch (error) {
+      this.#started = false;
+      throw error;
+    }
   }
 
   async close(): Promise<void> {
@@ -120,6 +112,8 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     }
     this.#closed = true;
     this.#started = false;
+    // Reconciliation failures belong to their caller, not a later shutdown.
+    await this.#reconciliation.catch(() => undefined);
     await this.#world.close?.();
   }
 
@@ -134,8 +128,27 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
     return undefined;
   }
 
-  async #collectActiveTurnGenerationIds(): Promise<ReadonlySet<string>> {
-    const generationIds = new Set<string>();
+  async reconcileExpiredRuns(): Promise<void> {
+    if (!this.#started || this.#closed) return;
+    await this.#reconcileExpiredRuns();
+  }
+
+  #reconcileExpiredRuns(): Promise<void> {
+    this.#reconciliation = this.#reconciliation
+      .catch(() => undefined)
+      .then(async () => {
+        if (this.#closed) return;
+        const runIds = await this.#collectExpiredRunIds();
+        for (const runId of runIds) {
+          await cancelExpiredDevelopmentRun(this.#world, runId);
+        }
+      });
+    return this.#reconciliation;
+  }
+
+  async #collectExpiredRunIds(): Promise<readonly string[]> {
+    // Finish pagination before cancellation changes the status-filtered result set.
+    const runIds: string[] = [];
     for (const status of ["pending", "running"] as const) {
       let cursor: string | undefined;
       do {
@@ -153,11 +166,13 @@ class LocalParentDevelopmentWorkflowWorld implements ParentDevelopmentWorkflowWo
             { cause: error },
           );
         }
-        for (const run of page.data) generationIds.add(run.deploymentId);
+        for (const run of page.data) {
+          if (!this.#generationExists(run.deploymentId)) runIds.push(run.runId);
+        }
         cursor = page.hasMore ? (page.cursor ?? undefined) : undefined;
       } while (cursor !== undefined);
     }
-    return generationIds;
+    return runIds;
   }
 
   async #handleCall(request: Request): Promise<Response> {
@@ -286,7 +301,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 async function reenqueueActiveDevelopmentRuns(input: {
   readonly enqueue: World["queue"];
   readonly prefix: string;
-  readonly quarantinedGenerationIds: ReadonlySet<string>;
   readonly world: World;
 }): Promise<void> {
   for (const status of ["pending", "running"] as const) {
@@ -307,9 +321,6 @@ async function reenqueueActiveDevelopmentRuns(input: {
         );
       }
       for (const run of page.data) {
-        if (input.quarantinedGenerationIds.has(run.deploymentId)) {
-          continue;
-        }
         await input.enqueue(`${input.prefix}${run.workflowName}` as ValidQueueName, {
           runId: run.runId,
         });

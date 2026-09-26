@@ -318,9 +318,7 @@ export function readActiveDevelopmentRuntimeArtifactsSnapshot(
   };
 }
 
-/**
- * Reads a revision token for the latest dev runtime artifact snapshot.
- */
+/** Reads a revision token for the latest dev runtime artifact snapshot. */
 export function readDevelopmentRuntimeArtifactsRevision(
   appRoot: string,
 ): DevelopmentRuntimeArtifactsRevision {

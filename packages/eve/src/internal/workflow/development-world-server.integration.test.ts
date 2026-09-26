@@ -3,23 +3,23 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { EntityConflictError, RunExpiredError } from "#compiled/@workflow/errors/index.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { pruneDevelopmentRuntimeArtifactsSnapshots } from "#internal/nitro/dev-runtime-artifacts.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { getDevelopmentWorkflowGeneration } from "#internal/workflow/development-generation-context.js";
 import { deriveEveWorkflowQueuePrefix } from "#internal/workflow/queue-namespace.js";
 import {
   decodeDevelopmentWorldValue,
   encodeDevelopmentWorldValue,
+  serializeDevelopmentWorldError,
 } from "#internal/workflow/development-world-codec.js";
 import { createDevelopmentWorkflowWorld } from "#internal/workflow/development-world-client.js";
 import {
   createParentDevelopmentWorkflowWorld,
   type ParentDevelopmentWorkflowWorld,
 } from "#internal/workflow/development-world-server.js";
-import {
-  LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH,
-  resolveLocalWorkflowWorldDataDirectory,
-} from "#internal/workflow/local-world-data-directory.js";
+import { resolveLocalWorkflowWorldDataDirectory } from "#internal/workflow/local-world-data-directory.js";
 import {
   DEVELOPMENT_WORKER_APP_ROOT_ENV,
   DEVELOPMENT_WORKFLOW_DELIVERY_HEADER,
@@ -172,12 +172,12 @@ describe("parent development Workflow World", () => {
     }
   });
 
-  it("quarantines runs referencing missing generations without refusing to boot", async () => {
+  it("quietly cancels orphaned runs at startup and preserves their cancellation reason", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-missing-generation-");
     await seedGeneration(appRoot, "generation-a");
     const first = createWorld({ activeGenerationId: () => "generation-a", appRoot });
     await first.start();
-    await callWorld(first, "events.create", [
+    const created = await callWorld(first, "events.create", [
       null,
       {
         eventData: {
@@ -199,17 +199,146 @@ describe("parent development Workflow World", () => {
     const restarted = createWorld({ activeGenerationId: () => "generation-b", appRoot });
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
-      // One poisoned run must not take the app's other active runs down:
-      // boot proceeds, the poisoned run's deliveries are quarantined, and
-      // the failure is reported explicitly.
       await expect(restarted.start()).resolves.toBeUndefined();
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("generation-a"));
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining(LOCAL_WORKFLOW_WORLD_DATA_DIRECTORY_RELATIVE_PATH),
-      );
+      expect(errorSpy).not.toHaveBeenCalled();
+      const runId = readCreatedRunId(created);
+      await expect(callWorld(restarted, "runs.get", [runId])).resolves.toMatchObject({
+        status: "cancelled",
+      });
+      const events = await callWorld(restarted, "events.list", [{ runId }]);
+      expect(events).toMatchObject({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            eventType: "run_cancelled",
+            eventData: { cancelReason: "Development runtime snapshot is no longer available" },
+          }),
+        ]),
+      });
     } finally {
       errorSpy.mockRestore();
       await restarted.close();
+    }
+  });
+
+  it("recovers retained runs across restarts without recovering cancelled orphans", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-recovery-");
+    await seedGeneration(appRoot, "retained");
+    const first = createWorld({ activeGenerationId: () => "retained", appRoot });
+    await first.start();
+    const runIds: string[] = [];
+    try {
+      for (const deploymentId of ["retained", "missing"]) {
+        runIds.push(
+          readCreatedRunId(
+            await callWorld(first, "events.create", [
+              null,
+              {
+                eventType: "run_created",
+                specVersion: 6,
+                eventData: {
+                  deploymentId,
+                  executionContext: {},
+                  input: new Uint8Array(),
+                  workflowName: workflowEntryReference.workflowId,
+                },
+              },
+            ]),
+          ),
+        );
+      }
+    } finally {
+      await first.close();
+    }
+    const deliveries: string[] = [];
+    process.env.WORKFLOW_LOCAL_BASE_URL = "http://eve-dev.local";
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      const message = JSON.parse(new TextDecoder().decode(init?.body as Uint8Array)) as {
+        runId: string;
+      };
+      deliveries.push(message.runId);
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    const restarted = createWorld({ activeGenerationId: () => "retained", appRoot });
+    try {
+      await restarted.start();
+      await expect.poll(() => deliveries).toEqual([runIds[0]]);
+      await expect(callWorld(restarted, "runs.get", [runIds[1]])).resolves.toMatchObject({
+        status: "cancelled",
+      });
+    } finally {
+      await restarted.close();
+    }
+  });
+
+  it("reconciles explicitly after pruning, preserves retained runs, and skips cleanup after close", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-pruning-");
+    await seedGeneration(appRoot, "old");
+    await seedGeneration(appRoot, "retained");
+    const world = createWorld({ activeGenerationId: () => "retained", appRoot });
+    await world.start();
+    const createRun = async (deploymentId: string) =>
+      readCreatedRunId(
+        await callWorld(world, "events.create", [
+          null,
+          {
+            eventData: {
+              deploymentId,
+              executionContext: {},
+              input: new Uint8Array(),
+              workflowName: workflowEntryReference.workflowId,
+            },
+            eventType: "run_created",
+            specVersion: 6,
+          },
+        ]),
+      );
+    try {
+      const old = await createRun("old");
+      const running = await createRun("old");
+      await callWorld(world, "events.create", [
+        running,
+        { eventType: "run_started", specVersion: 6 },
+      ]);
+      const terminal = await createRun("old");
+      await callWorld(world, "events.create", [
+        terminal,
+        { eventType: "run_completed", specVersion: 6, eventData: { output: new Uint8Array() } },
+      ]);
+      const retained = await createRun("retained");
+      await writeFile(join(appRoot, ".eve", "dev-runtime", "snapshots", "old", "activated"), "");
+      await writeFile(
+        join(appRoot, ".eve", "dev-runtime", "snapshots", "old", "retired.json"),
+        JSON.stringify({ retiredAt: 0 }),
+      );
+      await pruneDevelopmentRuntimeArtifactsSnapshots({
+        appRoot,
+        gracePeriodMs: 60_000,
+        retainCount: 0,
+      });
+      await expect(callWorld(world, "runs.get", [old])).resolves.toMatchObject({
+        status: "pending",
+      });
+      await world.reconcileExpiredRuns();
+      for (const runId of [old, running]) {
+        await expect(callWorld(world, "runs.get", [runId])).resolves.toMatchObject({
+          status: "cancelled",
+        });
+      }
+      await expect(callWorld(world, "runs.get", [terminal])).resolves.toMatchObject({
+        status: "completed",
+      });
+      await expect(callWorld(world, "runs.get", [retained])).resolves.toMatchObject({
+        status: "pending",
+      });
+      await world.close();
+      await rm(join(appRoot, ".eve", "dev-runtime", "snapshots", "retained"), { recursive: true });
+      await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot });
+      await world.reconcileExpiredRuns();
+      await expect(callWorld(world, "runs.get", [retained])).resolves.toMatchObject({
+        status: "pending",
+      });
+    } finally {
+      await world.close();
     }
   });
 
@@ -286,9 +415,72 @@ describe("parent development Workflow World", () => {
       // never runs.
       expect(response.status).toBe(200);
       expect(handled).not.toHaveBeenCalled();
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("generation-a"));
+      expect(errorSpy).not.toHaveBeenCalled();
+      await expect(callWorld(world, "runs.get", [runId])).resolves.toMatchObject({
+        status: "cancelled",
+      });
     } finally {
       errorSpy.mockRestore();
+      await world.close();
+    }
+  });
+
+  it("acknowledges stale deliveries whose run no longer exists", async () => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-missing-run-");
+    await seedGeneration(appRoot, "generation-a");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+    try {
+      await world.start();
+      const handled = vi.fn(async () => undefined);
+      const handler = createDevelopmentWorkflowWorld().createQueueHandler(QUEUE_PREFIX, handled);
+      for (const payload of [
+        { runId: RUN_ID },
+        { workflowRunId: RUN_ID },
+        { runId: RUN_ID, runInput: { deploymentId: "missing" } },
+      ]) {
+        const response = await handler(
+          new Request("http://localhost/.well-known/workflow/v1/flow", {
+            body: JSON.stringify(payload),
+            headers: deliveryHeaders({}),
+            method: "POST",
+          }),
+        );
+        expect(response.status, await response.text()).toBe(200);
+      }
+      expect(handled).not.toHaveBeenCalled();
+    } finally {
+      await world.close();
+    }
+  });
+
+  it.each([
+    { error: new RunExpiredError("run expired"), status: 200 },
+    { error: new EntityConflictError("storage conflict"), status: 500 },
+    { error: new Error("storage unavailable"), status: 500 },
+  ])("returns $status when delivery run lookup fails with $error", async ({ error, status }) => {
+    const appRoot = await createScratchDirectory("eve-parent-workflow-run-lookup-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+    connectWorkerToWorld(world, appRoot);
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(encodeDevelopmentWorldValue(serializeDevelopmentWorldError(error)), {
+          status: 500,
+        }),
+    );
+    try {
+      const handled = vi.fn(async () => undefined);
+      const handler = createDevelopmentWorkflowWorld().createQueueHandler(QUEUE_PREFIX, handled);
+      const response = await handler(
+        new Request("http://localhost/.well-known/workflow/v1/flow", {
+          body: JSON.stringify({ runId: RUN_ID }),
+          headers: deliveryHeaders({}),
+          method: "POST",
+        }),
+      );
+      expect(response.status).toBe(status);
+      expect(handled).not.toHaveBeenCalled();
+    } finally {
       await world.close();
     }
   });

@@ -22,6 +22,7 @@ export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapsh
 interface DevelopmentGenerationPruneState {
   requested: boolean;
   running: Promise<void> | undefined;
+  onRuntimePruned?: () => Promise<void>;
 }
 
 const developmentGenerationPruneStates = new Map<string, DevelopmentGenerationPruneState>();
@@ -85,6 +86,7 @@ export async function stageDevelopmentGeneration(
 export async function activateDevelopmentGeneration(input: {
   readonly appRoot: string;
   readonly generation: DevelopmentGeneration;
+  readonly onRuntimePruned?: () => Promise<void>;
 }): Promise<void> {
   const activation = await activateDevelopmentGenerationTransaction(input);
   activation.commit();
@@ -93,6 +95,7 @@ export async function activateDevelopmentGeneration(input: {
 export async function activateDevelopmentGenerationTransaction(input: {
   readonly appRoot: string;
   readonly generation: DevelopmentGeneration;
+  readonly onRuntimePruned?: () => Promise<void>;
 }): Promise<DevelopmentRuntimeArtifactsActivation> {
   const activation = await activateDevelopmentRuntimeArtifactsSnapshotTransaction({
     appRoot: input.appRoot,
@@ -106,7 +109,7 @@ export async function activateDevelopmentGenerationTransaction(input: {
       }
       settled = true;
       activation.commit();
-      requestDevelopmentGenerationPrune(input.appRoot);
+      requestDevelopmentGenerationPrune(input.appRoot, input.onRuntimePruned);
     },
     async rollback() {
       if (settled) {
@@ -124,13 +127,17 @@ export async function discardDevelopmentGeneration(
   await rm(generation.snapshotRoot, { force: true, recursive: true });
 }
 
-function requestDevelopmentGenerationPrune(appRoot: string): void {
-  const state = developmentGenerationPruneStates.get(appRoot) ?? {
+function requestDevelopmentGenerationPrune(
+  appRoot: string,
+  onRuntimePruned: (() => Promise<void>) | undefined,
+): void {
+  const state: DevelopmentGenerationPruneState = developmentGenerationPruneStates.get(appRoot) ?? {
     requested: false,
     running: undefined,
   };
   developmentGenerationPruneStates.set(appRoot, state);
   state.requested = true;
+  state.onRuntimePruned = onRuntimePruned;
   if (state.running === undefined) {
     startDevelopmentGenerationPruning(appRoot, state);
   }
@@ -143,7 +150,13 @@ function startDevelopmentGenerationPruning(
   state.running = (async () => {
     while (state.requested) {
       state.requested = false;
+      const onRuntimePruned = state.onRuntimePruned;
       await pruneDevelopmentRuntimeArtifactsSnapshots({ appRoot });
+      try {
+        await onRuntimePruned?.();
+      } catch (error) {
+        console.warn(`[eve:dev] failed to reconcile expired Workflow runs: ${String(error)}`);
+      }
     }
   })()
     .catch((error) => {
