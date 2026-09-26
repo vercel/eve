@@ -47,9 +47,11 @@ describe("SessionExecution checkpoints", () => {
       claimSessionHooks: vi.fn(),
       drain: () => [],
       hasPending: () => false,
+      whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(),
       restore: vi.fn(),
       onDelivery: () => () => {},
+      onAnnouncement: () => () => {},
       onInterrupt: () => () => {},
     };
     let signal: AbortSignal | undefined;
@@ -86,12 +88,14 @@ describe("SessionExecution checkpoints", () => {
         claimSessionHooks: vi.fn(),
         drain: () => pending.splice(0),
         hasPending: () => pending.length > 0,
+        whenPending: () => new Promise<void>(() => {}),
         next: vi.fn(),
         restore: vi.fn(),
         onDelivery: (handler) => {
           deliver = handler;
           return () => {};
         },
+        onAnnouncement: () => () => {},
         onInterrupt: (handler) => {
           interrupt = handler;
           return () => {};
@@ -146,8 +150,10 @@ describe("SessionExecution checkpoints", () => {
         return snapshot;
       },
       hasPending: () => pending.length > 0,
+      whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(),
       restore: vi.fn(),
+      onAnnouncement: () => () => {},
       onInterrupt: () => () => {},
       onDelivery: (handler) => {
         notify = handler;
@@ -196,8 +202,10 @@ describe("SessionExecution checkpoints", () => {
       claimSessionHooks: vi.fn(),
       drain: () => pending.splice(0),
       hasPending: () => pending.length > 0,
+      whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(),
       restore: vi.fn(),
+      onAnnouncement: () => () => {},
       onInterrupt: () => () => {},
       onDelivery: (handler) => {
         notify = handler;
@@ -258,8 +266,10 @@ describe("SessionExecution checkpoints", () => {
         claimSessionHooks: vi.fn(),
         drain: () => [],
         hasPending: () => false,
+        whenPending: () => new Promise<void>(() => {}),
         next: vi.fn(),
         restore: vi.fn(),
+        onAnnouncement: () => () => {},
         onInterrupt: () => () => {},
         onDelivery: (handler) => {
           notify = handler;
@@ -291,8 +301,10 @@ describe("SessionExecution checkpoints", () => {
         .mockReturnValueOnce([{ kind: "cancel" }])
         .mockReturnValue([]),
       hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
+      onAnnouncement: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -340,8 +352,10 @@ describe("SessionExecution checkpoints", () => {
         .mockReturnValueOnce([followUp, { kind: "cancel" }])
         .mockReturnValue([]),
       hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
+      onAnnouncement: () => () => {},
       onInterrupt: vi.fn((handler) => {
         interrupt = handler;
         return () => {};
@@ -387,8 +401,10 @@ describe("SessionExecution checkpoints", () => {
       claimSessionHooks: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([steering]).mockReturnValue([]),
       hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
+      onAnnouncement: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -443,8 +459,10 @@ describe("SessionExecution checkpoints", () => {
       claimSessionHooks: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([followUp]).mockReturnValue([]),
       hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
+      onAnnouncement: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -490,8 +508,10 @@ describe("SessionExecution checkpoints", () => {
         claimSessionHooks: vi.fn(),
         drain: vi.fn(() => []),
         hasPending: vi.fn(() => false),
+        whenPending: () => new Promise<void>(() => {}),
         next: vi.fn(() => new Promise<never>(() => {})),
         onDelivery: vi.fn(() => () => {}),
+        onAnnouncement: () => () => {},
         onInterrupt: vi.fn(() => () => {}),
         restore: vi.fn(),
       };
@@ -537,9 +557,11 @@ describe("SessionExecution checkpoints", () => {
       claimSessionHooks: vi.fn(),
       drain: vi.fn().mockReturnValueOnce([cancel, followUp]).mockReturnValue([]),
       hasPending: () => false,
+      whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(),
       restore: vi.fn(),
       onDelivery: () => () => {},
+      onAnnouncement: () => () => {},
       onInterrupt: (handler) => {
         interrupt = handler;
         return () => {};
@@ -585,8 +607,10 @@ describe("SessionExecution checkpoints", () => {
       claimSessionHooks: vi.fn(),
       drain: vi.fn(() => []),
       hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => runtimePayloads.shift()),
       onDelivery: vi.fn(() => () => {}),
+      onAnnouncement: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };

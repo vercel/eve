@@ -51,7 +51,8 @@ export async function emitAgentStartedStep(input: {
   await writeSessionEvent(input.sessionWritable, event);
 }
 
-async function writeSessionEvent(
+/** Writes one event straight to the session stream; call from a step. */
+export async function writeSessionEvent(
   sessionWritable: WritableStream<Uint8Array>,
   event: UnstampedMessageStreamEvent,
 ): Promise<void> {

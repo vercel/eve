@@ -176,6 +176,7 @@ describe("compiler artifacts", () => {
         behavior: {
           availability: [],
           handling: {
+            entryPoint: "execute",
             kind: "workflow-tool",
             workflowId: `workflow//${packageInfo.name}@${packageInfo.version}//executeSleepTool`,
           },

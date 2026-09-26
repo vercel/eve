@@ -831,6 +831,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
           .strict(),
         z
           .object({
+            entryPoint: z.enum(["execute", "task"]),
             kind: z.literal("workflow-tool"),
             workflowId: z.string(),
           })

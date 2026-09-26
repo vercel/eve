@@ -116,6 +116,11 @@
  *             eve: a provided tool that needs a private hook means authors
  *             cannot build the same tool. Files that predate the rule are
  *             baselined and may only leave the baseline.
+ *   rule 46 — The task kernel owns its records and its words. Only
+ *             `execution/tasks/table*.ts` names the session's task table, so
+ *             every record write goes through it, and the model-facing task
+ *             markers appear only in `execution/tasks/render.ts`, which holds
+ *             all of the kernel's model text.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -214,6 +219,7 @@ function isTsLike(relPath) {
  *   rule43: Violation[];
  *   rule44: Violation[];
  *   rule45: { allowlist: Set<string>; violations: Violation[] };
+ *   rule46: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -246,6 +252,7 @@ async function scanRepo(state) {
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
     checkRule45(posix, lines, state.rule45);
+    checkRule46(posix, lines, state.rule46);
   }
 }
 
@@ -376,9 +383,12 @@ const PROVIDED_TOOL_EXTRA_IMPORTS = new Set([
   "#tools/schema.js",
 ]);
 
-// The task kernel's `task_wait` and `task_cancel` read the session's task table
-// directly. When they land, list their files here rather than in the baseline.
-const PROVIDED_KERNEL_TOOL_FILES = new Set();
+// The task kernel's `task_wait` and `task_cancel` are kernel machinery, not
+// authored tools: they take their model text from the kernel directly.
+const PROVIDED_KERNEL_TOOL_FILES = new Set([
+  "packages/eve/src/tools/provided/task-cancel.ts",
+  "packages/eve/src/tools/provided/task-wait.ts",
+]);
 
 const IMPORT_SPECIFIER_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/;
 
@@ -407,6 +417,43 @@ function checkRule45(posix, lines, state) {
       file: posix,
       line: idx + 1,
       message: `imports "${specifier}", which is not a public eve entry point. Provided tools use only the API authors have: import from the matching entry in packages/eve/package.json "exports" (for example "#public/tools/index.js" for eve/tools), or make the capability public first.`,
+    });
+  });
+}
+
+// ---------- Rule 46: the task kernel owns its records and model text ----------
+
+const TASK_KERNEL_DIR = "packages/eve/src/execution/tasks/";
+const TASK_TABLE_FILE_RE = /^packages\/eve\/src\/execution\/tasks\/table[\w-]*\.ts$/;
+const TASK_RENDER_FILE = `${TASK_KERNEL_DIR}render.ts`;
+const TASK_TABLE_KEY = '"eve.taskTable"';
+const TASK_MODEL_MARKERS = ["<task_result", "[Tasks]", "Started task "];
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule46(posix, lines, violations) {
+  if (!posix.startsWith("packages/eve/src/") || posix.endsWith(".test.ts")) return;
+  lines.forEach((line, idx) => {
+    if (line.includes(TASK_TABLE_KEY) && !TASK_TABLE_FILE_RE.test(posix)) {
+      violations.push({
+        rule: 46,
+        file: posix,
+        line: idx + 1,
+        message:
+          "names the session's task table outside execution/tasks/table*.ts. Read and write task records through the table module's helpers.",
+      });
+    }
+    if (posix === TASK_RENDER_FILE || /^\s*(?:\/?\*|\/\/)/.test(line)) return;
+    const marker = TASK_MODEL_MARKERS.find((candidate) => line.includes(candidate));
+    if (marker === undefined) return;
+    violations.push({
+      rule: 46,
+      file: posix,
+      line: idx + 1,
+      message: `writes the model-facing task text "${marker}" outside execution/tasks/render.ts. Keep every string the model reads about tasks in the renderer and import it from there.`,
     });
   });
 }
@@ -1466,6 +1513,7 @@ async function main() {
       allowlist: new Set(baseline.rule45_providedToolPrivateImportAllowlist),
       violations: /** @type {Violation[]} */ ([]),
     },
+    rule46: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1579,6 +1627,9 @@ async function main() {
 
   // Rule 45
   violations.push(...state.rule45.violations);
+
+  // Rule 46
+  violations.push(...state.rule46);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

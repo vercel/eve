@@ -85,6 +85,7 @@ import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
   ACTIVITY_COLLECTOR_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
+  TASK_HARD_STOP_WORKFLOW_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
 } from "#execution/stable-workflow-names.js";
@@ -122,6 +123,11 @@ export const sessionTimeoutWorkflowReference = {
 /** Stable workflow reference for root-session activity collectors. */
 export const activityCollectorWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${ACTIVITY_COLLECTOR_WORKFLOW_NAME}`,
+};
+
+/** Stable workflow reference for the sleeper that hard-stops cancelled task runs. */
+export const taskHardStopWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${TASK_HARD_STOP_WORKFLOW_NAME}`,
 };
 
 /** Stable workflow reference for authored workflow tool runs. */

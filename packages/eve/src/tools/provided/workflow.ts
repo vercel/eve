@@ -2,9 +2,9 @@ import {
   DEFAULT_WORKFLOW_PROGRAM_MAX_SUBAGENTS,
   parseWorkflowProgramOptions,
 } from "#execution/dynamic-workflow/schema.js";
-import { executeWorkflowProgram } from "#execution/dynamic-workflow/tool.js";
+import { runWorkflowProgramTask } from "#execution/dynamic-workflow/tool.js";
 import type { JsonValue } from "#shared/json.js";
-import { defineWorkflowTool, type WorkflowToolDefinition } from "#tools/workflow-definition.js";
+import { defineWorkflowTool, type WorkflowTaskToolDefinition } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
@@ -17,7 +17,7 @@ export interface WorkflowToolInput {
   readonly js: string;
 }
 
-export type WorkflowTool = WorkflowToolDefinition<WorkflowToolInput, JsonValue>;
+export type WorkflowTool = WorkflowTaskToolDefinition<WorkflowToolInput, JsonValue>;
 
 const workflowProgramAgentContract =
   "Call ctx.agent(name, { message: string, outputSchema?: object }). Each call starts a new agent that does not see this conversation, so put everything it needs in message. It resolves directly to the agent's reply; when outputSchema is provided, the reply matches that schema. It does not return an agent metadata wrapper. The owning agent resolves the target and applies its existing availability and authorization checks.";
@@ -46,8 +46,8 @@ export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
   return attachWorkflowProgramOptions(
     defineWorkflowTool({
       description,
-      execute: executeWorkflowProgram,
       inputSchema: workflowInputSchema,
+      task: runWorkflowProgramTask,
     }),
     normalized,
   );

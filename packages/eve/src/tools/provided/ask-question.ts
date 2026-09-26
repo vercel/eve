@@ -1,4 +1,4 @@
-import { defineWorkflowTool, type WorkflowToolDefinition } from "#public/tools/index.js";
+import { defineWorkflowTool, type WorkflowExecuteToolDefinition } from "#public/tools/index.js";
 import { executeAskQuestionTool } from "#tools/provided/ask-question-workflow.js";
 import {
   INTERRUPTED_OUTPUT_SCHEMA,
@@ -116,7 +116,7 @@ const ASK_QUESTION_OUTPUT_SCHEMA = defineJsonSchema<AskQuestionOutput>({
  * turn waits for the answer without holding an application runtime open. A new
  * message that does not answer the question withdraws it.
  */
-export function askQuestion(): WorkflowToolDefinition<AskQuestionInput, AskQuestionOutput> {
+export function askQuestion(): WorkflowExecuteToolDefinition<AskQuestionInput, AskQuestionOutput> {
   return defineWorkflowTool({
     description: ASK_QUESTION_TOOL_DESCRIPTION,
     execute: executeAskQuestionTool,

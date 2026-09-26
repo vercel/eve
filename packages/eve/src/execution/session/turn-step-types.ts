@@ -1,5 +1,6 @@
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { TaskKernelCall } from "#execution/tasks/calls.js";
 import type { SettledTurn } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -46,12 +47,15 @@ export type DurableStepResult = (
       readonly usageDelta?: TokenUsage;
     }
   | { readonly action: "cancelled" | "steered" }
+  /** The model ended the turn while its principal's tasks work; the turn waits for them. */
+  | { readonly action: "held"; readonly taskIds: readonly string[] }
   | {
       readonly action: "park";
       readonly authorizationAttemptIds?: readonly string[];
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
+      readonly pendingKernelCalls?: readonly TaskKernelCall[];
       readonly settled?: SettledTurn;
     }
 ) &

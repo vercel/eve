@@ -234,6 +234,7 @@ describe("createCoordinationRequestFromToolCall", () => {
   it("lowers blocking workflow tools to workflow tasks", () => {
     expect(
       createCoordinationRequestFromToolCall({
+        entry: { entryPoint: "execute" },
         toolCall,
         tools: new Map([
           [
@@ -251,6 +252,7 @@ describe("createCoordinationRequestFromToolCall", () => {
       callId: "call-1",
       executeInput: undefined,
       input: { message: "research this" },
+      entry: { entryPoint: "execute" },
       kind: "workflow-task",
       toolName: "researcher",
       workflowId: "workflow://subagent-tool",
@@ -287,6 +289,7 @@ function createParkedSession(): HarnessSession {
         callId: "call-1",
         executeInput: { message: "go", target: "researcher" },
         input: { description: "Research the topic", message: "go" },
+        entry: { entryPoint: "execute" },
         kind: "workflow-task",
         toolName: "researcher",
         workflowId: "workflow://subagent-tool",
@@ -302,6 +305,7 @@ describe("coordination batch identity", () => {
   it("rejects duplicate call ids before persisting the batch", () => {
     const task = {
       callId: "duplicate-call",
+      entry: { entryPoint: "execute" as const },
       executeInput: { message: "go", target: "researcher" },
       input: { message: "go" },
       kind: "workflow-task" as const,
@@ -471,6 +475,7 @@ describe("resolvePendingCoordination", () => {
         {
           callId: "call-1",
           input: { service: "api" },
+          entry: { entryPoint: "execute" },
           kind: "workflow-task",
           toolName: "deploy",
           workflowId: "workflow//./agent/tools/deploy//execute",
@@ -528,6 +533,7 @@ describe("resolvePendingCoordination", () => {
         {
           callId: "call-1",
           input: { service: "api" },
+          entry: { entryPoint: "execute" },
           kind: "workflow-task",
           toolName: "deploy",
           workflowId: "workflow//./agent/tools/deploy//execute",
@@ -706,6 +712,7 @@ describe("resolvePendingCoordination", () => {
           callId: "call-2",
           executeInput: { agentId, message: "continue", target: "researcher" },
           input: { agentId, message: "continue" },
+          entry: { entryPoint: "execute" },
           kind: "workflow-task",
           toolName: "researcher",
           workflowId: "workflow://subagent-tool",
@@ -824,6 +831,7 @@ describe("resolvePendingCoordination", () => {
           callId: "call-2",
           executeInput: { agentId, message: "continue", target: "researcher" },
           input: { agentId, message: "continue" },
+          entry: { entryPoint: "execute" },
           kind: "workflow-task",
           toolName: "researcher",
           workflowId: "workflow://subagent-tool",

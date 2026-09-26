@@ -76,6 +76,7 @@ export function workflowToolRunRequestToInputRequestPayload(
       requests: workflowToolRunInputRequests(message),
       sequence: requestCoordinates?.sequence ?? from.sequence,
       stepIndex: requestCoordinates?.stepIndex ?? from.stepIndex,
+      taskId: from.taskId,
       turnId: requestCoordinates?.turnId ?? from.turnId,
     },
     kind: "subagent-input-request",

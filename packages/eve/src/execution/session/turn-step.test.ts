@@ -621,6 +621,7 @@ describe("dispatchCoordinationStep", () => {
           callId: "call-1",
           executeInput: {},
           input: {},
+          entry: { entryPoint: "execute" },
           kind: "workflow-task",
           toolName: "research",
           workflowId: "workflow//eve//research",

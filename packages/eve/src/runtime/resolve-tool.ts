@@ -66,10 +66,14 @@ export async function resolveToolDefinition(
     registerDefinitionSource(sourceKey, sourceEntry);
     registerDefinitionSource(`tool:${resolvedRecord.description}`, sourceEntry);
 
-    const execute = expectFunction(
-      resolvedRecord.execute,
-      describe(definition, "to provide an execute function"),
-    ) as NonNullable<ResolvedToolDefinition["execute"]>;
+    // A workflow tool's entry point runs from the workflow registry, never in process.
+    const execute =
+      definition.behavior?.handling?.kind === "workflow-tool"
+        ? undefined
+        : (expectFunction(
+            resolvedRecord.execute,
+            describe(definition, "to provide an execute function"),
+          ) as NonNullable<ResolvedToolDefinition["execute"]>);
     const inputSchema = isToolSchema(resolvedRecord.inputSchema)
       ? resolvedRecord.inputSchema
       : toInputSchema(definition.inputSchema);

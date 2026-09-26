@@ -77,6 +77,10 @@ import { mockModel } from "eve/evals";
 const model = mockModel((request) => {
   const message = request.lastUserMessage ?? "";
   if (message.includes("Use workflow exactly once")) {
+    // The workflow tool runs as a task: after its receipt, wait on it.
+    if (request.toolResults.some((entry) => entry.name === "workflow")) {
+      return { toolCalls: [{ name: "task_wait", input: {} }] };
+    }
     const localOnly = message.includes("local-sleeper only");
     return {
       toolCalls: [
@@ -289,11 +293,13 @@ describe("turn cancellation descendant cascade", () => {
           iterator: response[Symbol.asyncIterator](),
           label: "root session-limit prompt",
         });
-        const calls = events.filter((event) => event.type === "agent.started");
+        // The workflow program runs as a task, so the root reaches its limit
+        // prompt while the task keeps working.
+        const tasks = events.filter((event) => event.type === "task.started");
         const requests = events.flatMap((event) =>
           event.type === "input.requested" ? event.data.requests : [],
         );
-        expect(calls).toHaveLength(1);
+        expect(tasks).toHaveLength(1);
         expect(requests).toHaveLength(1);
         expect(requests[0]?.requestId.startsWith(`${response.sessionId}:limit:`)).toBe(true);
 
@@ -302,7 +308,13 @@ describe("turn cancellation descendant cascade", () => {
         const declined = await (await session.respond([{ optionId: "stop", requestId }])).result();
         expect(declined.status).toBe("waiting");
         expectCancellationBoundary(declined.events);
-        expect(declined.events.some((event) => event.type === "agent.started")).toBe(false);
+        expect(declined.events).toContainEqual(
+          expect.objectContaining({
+            data: expect.objectContaining({ status: "cancelled" }),
+            type: "task.settled",
+          }),
+        );
+        expect(declined.events.some((event) => event.type === "step.started")).toBe(false);
       } catch (error) {
         throw new Error(
           [

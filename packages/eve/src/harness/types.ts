@@ -217,6 +217,11 @@ export interface StepResult {
    * across the park boundary so a delegated parent can be notified.
    */
   readonly settledTurn?: SettledTurn;
+  /**
+   * Present when the model ended the turn while tasks its principal started
+   * are working. The turn stays open until one settles.
+   */
+  readonly held?: { readonly taskIds: readonly string[] };
 }
 
 /**

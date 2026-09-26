@@ -1,12 +1,12 @@
 import { evaluate } from "#ai/evaluate.js";
 import type { JsonValue } from "#shared/json.js";
-import type { WorkflowToolContext } from "#tools/workflow-definition.js";
+import type { WorkflowTaskContext } from "#tools/workflow-definition.js";
 import type { AgentRouterInput } from "#execution/tools/agent-router.js";
 
 /** Routes one task through the complete workflow agent metadata snapshot. */
-export async function executeAgentRouterTool(
+export async function runAgentRouterTask(
   input: AgentRouterInput,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowTaskContext,
 ): Promise<JsonValue> {
   "use workflow";
 
@@ -46,7 +46,7 @@ async function chooseTarget(
   return result.answers.route.choice;
 }
 
-function descriptions(ctx: WorkflowToolContext): Record<string, string> {
+function descriptions(ctx: WorkflowTaskContext): Record<string, string> {
   return Object.fromEntries(
     Object.entries(ctx.agents).flatMap(([name, metadata]) => {
       const description = metadata.description.trim();

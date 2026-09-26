@@ -1,6 +1,7 @@
 import type { MockLanguageModelV3 } from "ai/test";
 
 import { AGENTS_SNIPPET_LABEL } from "#subagents/handles/prompt.js";
+import { TASKS_NOTE_LABEL } from "#execution/tasks/render.js";
 
 export type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 export type BootstrapPrompt = BootstrapGenerateOptions["prompt"];
@@ -170,7 +171,7 @@ export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
 
     const text = getPromptContentText(message.content).trim();
 
-    if (isAgentsAnnouncementText(text)) {
+    if (isFrameworkAnnouncementText(text)) {
       continue;
     }
 
@@ -188,8 +189,9 @@ export function getLastUserPromptText(prompt: BootstrapPrompt): string | null {
  * heuristics must scan past them instead of treating them as the turn's
  * message or as a turn boundary.
  */
-export function isAgentsAnnouncementText(text: string): boolean {
-  return text.startsWith(AGENTS_SNIPPET_LABEL);
+/** Framework-injected `[Agents]` and `[Tasks]` listings: scaffolding, not authored input. */
+export function isFrameworkAnnouncementText(text: string): boolean {
+  return text.startsWith(AGENTS_SNIPPET_LABEL) || text.startsWith(TASKS_NOTE_LABEL);
 }
 
 /**

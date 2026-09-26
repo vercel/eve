@@ -225,7 +225,7 @@ eve add tool/agent
 export { default } from "eve/tools/agent";
 ```
 
-An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot:
+An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `task_wait` and `task_cancel`:
 
 ```ts title="agent/tools/agent.ts"
 import { disableTool } from "eve/tools";
@@ -270,6 +270,13 @@ export default disableTool();
 `connection_search` discovers tools across declared [connections](../connections) and makes matches directly callable by qualified name, such as `linear__list_issues`. eve adds it automatically when connections exist, even when `defaultTools` is `false`, so there is no add command.
 
 An authored `agent/tools/connection_search.ts` replaces the framework behavior. Import the framework definition from `eve/tools/connection_search` when you need to reference it directly. Exporting `disableTool()` from this slot is an error because agents with connections require connection discovery.
+
+### `task_wait` and `task_cancel`
+
+eve adds `task_wait` and `task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/workflows#run-calls-as-tasks-task), such as `agentRouter()`, the `workflow` tool, or an authored workflow tool that defines `task(input, ctx)`. There is no add command, and the tools are not workflow tools. Both names are reserved: the compiler rejects an authored `agent/tools/task_wait.ts` or `agent/tools/task_cancel.ts`.
+
+- `task_wait({ timeout? })` parks the turn until one of the caller's tasks has a result, a new message arrives, or `timeout` milliseconds pass, and returns at once when a result is already waiting. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
+- `task_cancel({ taskId })` stops a task's current work and returns `{ status: "cancelled" }`, or `{ status: "already_finished" }` when the task already finished. An id that names no task the caller started fails with `UNKNOWN_TASK`.
 
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 

@@ -46,11 +46,14 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
   }
   if (message.includes("call the sleeper subagent")) {
     const hitl = message.includes(HITL_REQUEST);
-    const hitlResult = request.toolResults.find((entry) => entry.id === "hitl-sleeper");
-    if (hitlResult !== undefined) {
-      return typeof hitlResult.output === "string"
-        ? hitlResult.output
-        : JSON.stringify(hitlResult.output);
+    // The workflow tool runs as a task: its call returns a receipt, and the
+    // program's result arrives in a <task_result> message after task_wait.
+    const taskResult = request.messages.find(
+      (entry) => entry.role === "user" && entry.text.startsWith("<task_result"),
+    );
+    if (taskResult !== undefined) return taskResult.text;
+    if (request.toolResults.some((entry) => entry.name === "workflow")) {
+      return { toolCalls: [{ id: "wait-for-sleeper", input: {}, name: "task_wait" }] };
     }
     return {
       toolCalls: [

@@ -19,9 +19,11 @@ export default defineEval({
     resumed.expectOk();
 
     t.succeeded();
-    t.calledTool("workflow", {
+    t.calledTool("workflow", { count: 1 });
+    // The workflow tool runs as a task: its result settles the task, not the call.
+    t.event("task.settled", {
       count: 1,
-      output: /CHILD_HITL_RESULT=.*GENERATED-HITL-MARKER/su,
+      data: { output: /CHILD_HITL_RESULT=.*GENERATED-HITL-MARKER/su, status: "completed" },
     });
     t.event("agent.started", { count: 1, data: { name: "sleeper" } });
     t.messageIncludes("CHILD_HITL_RESULT=");

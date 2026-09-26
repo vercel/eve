@@ -138,6 +138,11 @@ can wait durably while the call is pending:
 | `defineTool`         | No; the executor runs inside the initiating step.        | Executor output after it finishes. |
 | `defineWorkflowTool` | Yes; the tool call waits while the workflow can suspend. | Workflow output after it finishes. |
 
+A workflow tool that defines `task(input, ctx)` in place of `execute` runs each call as a
+[task](/docs/tools/workflows#run-calls-as-tasks-task):
+the call returns a receipt at once, and the workflow's output reaches the model later in a
+`task.result` message.
+
 The `TaskExec` argument and `task.postMessage` have been removed. Return the result. In a workflow
 body, keep values needed after a wait in local variables; workflow replay reconstructs them across
 durable waits. Use [`ctx.ask`](/docs/tools/workflows#ask-a-human-ctxask) when the body needs an

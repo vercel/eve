@@ -317,7 +317,6 @@ describe("createNodeHarnessTools", () => {
     });
     for (const name of ["research", "reviewer"]) {
       expect(tools.get(name)?.execute).toBeUndefined();
-      expect(tools.get(name)?.nodeId).toEqual(expect.any(String));
       expect(tools.get(name)?.workflowId).toBe("workflow//eve//subagentToolExecuteWorkflow");
     }
   });

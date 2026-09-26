@@ -3,7 +3,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { AgentSessions } from "#execution/agent-sessions/session.js";
-import type { WorkflowToolContext } from "#tools/workflow-definition.js";
+import type { WorkflowTaskContext, WorkflowToolContext } from "#tools/workflow-definition.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
   type WorkflowToolRunOutcome,
@@ -14,6 +14,7 @@ import {
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
+import type { WorkflowToolRunEntry } from "#shared/action-types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolContext } from "#tools/definition.js";
 
@@ -23,6 +24,8 @@ export interface WorkflowBodyDefinition {
   /** Snapshot added for new runs; absent only when resuming an older durable payload. */
   readonly agents?: WorkflowToolContext["agents"];
   readonly callId: string;
+  /** The entry point the run invokes, which decides the body's context. */
+  readonly entry: WorkflowToolRunEntry;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
 
@@ -53,9 +56,11 @@ export interface WorkflowBodyRun {
   readonly interruptSignal: AbortSignal;
 }
 
-type WorkflowToolExecute = (
+type WorkflowBodyContext = ToolContext & (WorkflowToolContext | WorkflowTaskContext);
+
+type WorkflowEntryPointFunction = (
   input: unknown,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowBodyContext,
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
 
 /** Executes one registered workflow body and reports progress to its owner. */
@@ -75,8 +80,8 @@ export async function executeWorkflowBody(
   let reportCount = 0;
 
   try {
-    const execute = resolveWorkflowToolExecute(input);
-    const result = execute(input.executeInput ?? input.input, ctx);
+    const entryPoint = resolveWorkflowEntryPoint(input);
+    const result = entryPoint(input.executeInput ?? input.input, ctx);
     let output: JsonValue;
     if (!isAsyncIterable(result)) {
       output = await result;
@@ -112,7 +117,7 @@ export async function executeWorkflowBody(
 export function createWorkflowBodyRef(
   input: WorkflowBodyDefinition & { readonly runId?: string },
 ): WorkflowToolRunRef {
-  return {
+  const ref: WorkflowToolRunRef = {
     callId: input.callId,
     input: input.input,
     runId: input.runId ?? getWorkflowMetadata().workflowRunId,
@@ -121,28 +126,33 @@ export function createWorkflowBodyRef(
     toolName: input.toolName,
     turnId: input.session.turn.id,
   };
+  return input.entry.entryPoint === "task" ? { ...ref, taskId: input.entry.taskId } : ref;
 }
 
-function resolveWorkflowToolExecute(input: WorkflowBodyInput): WorkflowToolExecute {
-  const execute = readRegisteredWorkflow(input.workflowId);
-  if (typeof execute !== "function") {
+function resolveWorkflowEntryPoint(input: WorkflowBodyInput): WorkflowEntryPointFunction {
+  const entryPoint = readRegisteredWorkflow(input.workflowId);
+  if (typeof entryPoint !== "function") {
     throw new Error(
       `Tool "${input.toolName}" is not registered as a workflow in this deployment (${input.workflowId}). The tool was renamed or removed after this run started.`,
     );
   }
-  return execute as WorkflowToolExecute;
+  return entryPoint as WorkflowEntryPointFunction;
 }
 
+/**
+ * The context the entry point gets: a task's, or, for an `execute` call the
+ * turn waits on, the same plus `interruptSignal`.
+ */
 function createWorkflowBodyContext(
   input: WorkflowBodyInput,
   run: WorkflowBodyRun,
-): ToolContext & WorkflowToolContext {
+): WorkflowBodyContext {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
       `ctx.${member} is not available inside a workflow tool; ${hint}. Tool "${input.toolName}" runs as a durable workflow body, which only replays deterministic code.`,
     );
   };
-  const ctx: ToolContext & WorkflowToolContext = {
+  const ctx: ToolContext & WorkflowTaskContext = {
     agent: (name) => run.agentSessions.open(name),
     agents: Object.freeze(
       Object.fromEntries(
@@ -155,7 +165,6 @@ function createWorkflowBodyContext(
     ask: (request, options) => ask(ctx, request, options),
     abortSignal: run.abortSignal,
     callId: input.callId,
-    interruptSignal: run.interruptSignal,
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),
@@ -167,7 +176,12 @@ function createWorkflowBodyContext(
     session: input.session,
     toolName: input.toolName,
   };
-  return ctx;
+  switch (input.entry.entryPoint) {
+    case "execute":
+      return Object.assign(ctx, { interruptSignal: run.interruptSignal });
+    case "task":
+      return ctx;
+  }
 }
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<JsonValue> {

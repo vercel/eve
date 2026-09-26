@@ -17,11 +17,9 @@ export interface HarnessToolDefinition {
   readonly execute?: (input: any, options: ToolExecuteOptions) => any;
   /** Optional JSON input substituted when this tool starts its workflow body. */
   readonly executeInput?: (input: unknown) => JsonValue;
-  readonly frameworkAction?: "load-skill";
+  readonly frameworkAction?: "load-skill" | "task-cancel" | "task-wait";
   readonly inputSchema: FlexibleSchema;
   readonly name: string;
-  /** Selected agent definition's runtime graph ID; absent for authored workflow tools. */
-  readonly nodeId?: string;
   readonly approval?: Approval;
   readonly outputSchema?: FlexibleSchema;
   /**

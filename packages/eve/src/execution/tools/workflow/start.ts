@@ -32,8 +32,8 @@ export async function startWorkflowToolRun(
   return { hookToken, runId: run.runId };
 }
 
-/** Starts one durable workflow task and records it on the owning session. */
-export async function startWorkflowTask(input: {
+/** Everything the session knows when it starts one workflow tool call's run. */
+export interface StartWorkflowTaskInput {
   readonly agentContext: AgentSessionContext;
   readonly agents: WorkflowToolRunInput["agents"];
   readonly auth: SessionAuth["current"];
@@ -47,26 +47,40 @@ export async function startWorkflowTask(input: {
   readonly parentSession: SessionParent | undefined;
   readonly session: RuntimeSession;
   readonly task: RuntimeWorkflowTaskRequest;
-}): Promise<{ readonly result?: RuntimeToolResultActionResult; readonly session: RuntimeSession }> {
+}
+
+/** Starts the run for one call, which invokes the entry point the request names. */
+export async function startWorkflowToolCallRun(
+  input: StartWorkflowTaskInput,
+): Promise<WorkflowToolRunAddress> {
+  const { task, batchEvent, session } = input;
+  return await startWorkflowToolRun({
+    agentContext: input.agentContext,
+    agents: input.agents,
+    callId: task.callId,
+    entry: task.entry,
+    executeInput: task.executeInput,
+    input: task.input,
+    owner: input.owner,
+    session: {
+      auth: { current: input.auth, initiator: input.initiatorAuth },
+      id: session.sessionId,
+      parent: input.parentSession,
+      turn: { id: batchEvent.turnId, sequence: batchEvent.sequence },
+    },
+    stepIndex: batchEvent.stepIndex,
+    toolName: task.toolName,
+    workflowId: task.workflowId,
+  });
+}
+
+/** Starts the run of a call the turn waits on and records it on the owning session. */
+export async function startWorkflowTask(
+  input: StartWorkflowTaskInput,
+): Promise<{ readonly result?: RuntimeToolResultActionResult; readonly session: RuntimeSession }> {
   const { task, batchEvent, session } = input;
   try {
-    const started = await startWorkflowToolRun({
-      agentContext: input.agentContext,
-      agents: input.agents,
-      callId: task.callId,
-      executeInput: task.executeInput,
-      input: task.input,
-      owner: input.owner,
-      session: {
-        auth: { current: input.auth, initiator: input.initiatorAuth },
-        id: session.sessionId,
-        parent: input.parentSession,
-        turn: { id: batchEvent.turnId, sequence: batchEvent.sequence },
-      },
-      stepIndex: batchEvent.stepIndex,
-      toolName: task.toolName,
-      workflowId: task.workflowId,
-    });
+    const started = await startWorkflowToolCallRun(input);
     return {
       session: registerWorkflowToolRun(session, {
         callId: task.callId,
@@ -80,14 +94,19 @@ export async function startWorkflowTask(input: {
       callId: task.callId,
       toolName: task.toolName,
     });
-    return {
-      result: createRuntimeToolResultFromValue({
-        callId: task.callId,
-        isError: true,
-        output: toError(error),
-        toolName: task.toolName,
-      }),
-      session,
-    };
+    return { result: startFailureResult(task, error), session };
   }
+}
+
+/** The call's tool result when its run could not start. */
+export function startFailureResult(
+  task: RuntimeWorkflowTaskRequest,
+  error: unknown,
+): RuntimeToolResultActionResult {
+  return createRuntimeToolResultFromValue({
+    callId: task.callId,
+    isError: true,
+    output: toError(error),
+    toolName: task.toolName,
+  });
 }

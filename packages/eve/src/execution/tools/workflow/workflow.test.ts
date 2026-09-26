@@ -52,6 +52,7 @@ const input = {
   hookToken: "control",
   owner: { inbox: "parent" },
   callId: "call-1",
+  entry: { entryPoint: "execute" as const },
   input: {},
   session: {
     auth: { current: null, initiator: null },

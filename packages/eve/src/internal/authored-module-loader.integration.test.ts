@@ -123,6 +123,7 @@ export default ${definer}({ description: "Probe", inputSchema: {}, execute: run 
     });
     const compiled = await compileAgentManifest(discovered.manifest);
     expect(compiled.tools.find((tool) => tool.name === "probe")?.behavior?.handling).toEqual({
+      entryPoint: "execute",
       kind: "workflow-tool",
       workflowId: "workflow//./agent/lib/run//run",
     });

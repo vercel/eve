@@ -1,4 +1,5 @@
 import type { WebSearchProvider } from "#shared/web-search.js";
+import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
 
 /** Session facts that can hide a selected tool without changing source composition. */
 export type ToolAvailabilityCondition = "root-session";
@@ -7,7 +8,11 @@ export type ToolAvailabilityCondition = "root-session";
 export type CompiledToolHandling =
   | { readonly kind: "dispatch"; readonly action: "self-agent" }
   | { readonly kind: "provider-tool"; readonly provider: WebSearchProvider }
-  | { readonly kind: "workflow-tool"; readonly workflowId: string };
+  | {
+      readonly kind: "workflow-tool";
+      readonly entryPoint: WorkflowToolEntryPoint;
+      readonly workflowId: string;
+    };
 
 /** Closed, serializable behavior carried by one selected compiled tool. */
 export interface ToolExecutionShape {
@@ -38,7 +43,11 @@ export type PreparedDispatchTarget =
       readonly nodeId: string;
       readonly subagentName: string;
     }
-  | { readonly kind: "workflow-tool-call"; readonly workflowId: string };
+  | {
+      readonly kind: "workflow-tool-call";
+      readonly entryPoint: WorkflowToolEntryPoint;
+      readonly workflowId: string;
+    };
 
 /** Runtime-prepared handling consumed by the harness and execution boundary. */
 export type PreparedToolHandling =

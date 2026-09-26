@@ -14,7 +14,7 @@ import {
 import { createWorkflowProgramContinuationSecurityStep } from "#execution/dynamic-workflow/security-step.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { JsonValue } from "#shared/json.js";
-import type { WorkflowToolContext } from "#tools/workflow-definition.js";
+import type { WorkflowTaskContext } from "#tools/workflow-definition.js";
 
 export interface JsProgramOptions {
   /** Maximum child-agent calls, from 1 to 128. Defaults to 100. */
@@ -24,7 +24,7 @@ export interface JsProgramOptions {
 /** Runs a model-generated JavaScript function body inside an isolated workflow sandbox. */
 export async function runJsProgram(
   js: string,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowTaskContext,
   options: JsProgramOptions,
 ): Promise<JsonValue> {
   if (typeof js !== "string") throw new TypeError('workflow requires a "js" string.');
@@ -71,7 +71,7 @@ export async function runJsProgram(
 
 /** Sends one program agent call to a new session and returns that turn's reply. */
 async function callProgramAgent(
-  ctx: WorkflowToolContext,
+  ctx: WorkflowTaskContext,
   call: WorkflowProgramAgentCall,
 ): Promise<JsonValue> {
   const { message, outputSchema } = call.input;

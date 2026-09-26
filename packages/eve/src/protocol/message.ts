@@ -202,6 +202,8 @@ export interface TurnStartedStreamEvent {
  */
 export interface MessageReceivedStreamEvent {
   data: {
+    /** `"task.result"` for the message eve appends with settled task results. */
+    kind?: "task.result";
     message: string;
     parts?: readonly MessageReceivedPart[];
     sequence: number;
@@ -289,6 +291,8 @@ export interface InputRequestedStreamEvent {
     requests: readonly InputRequest[];
     sequence: number;
     stepIndex: number;
+    /** The task that asks, when the request comes from a task's run. */
+    taskId?: string;
     turnId: string;
   };
   type: "input.requested";
@@ -414,6 +418,38 @@ export interface AgentStartedStreamEvent {
     };
   };
   type: "agent.started";
+}
+
+/**
+ * Stream event emitted when a call starts a task. `(taskId, callId)`
+ * identifies the call; `callId` is the tool call clients attach status to.
+ */
+export interface TaskStartedStreamEvent {
+  data: {
+    callId: string;
+    /** The tool whose call started the task. */
+    name: string;
+    taskId: string;
+    turnId: string;
+  };
+  type: "task.started";
+}
+
+/**
+ * Stream event emitted once when a task's call settles: by the run's return
+ * or failure, or by a cancel.
+ */
+export interface TaskSettledStreamEvent {
+  data: {
+    callId: string;
+    /** Why the call failed; present only when `status` is `"failed"`. */
+    error?: { message: string };
+    /** The call's result; present only when `status` is `"completed"`. */
+    output?: JsonValue;
+    status: "completed" | "failed" | "cancelled";
+    taskId: string;
+  };
+  type: "task.settled";
 }
 
 /**
@@ -690,6 +726,8 @@ export interface AuthorizationRequiredStreamEvent {
     name: string;
     sequence: number;
     stepIndex: number;
+    /** The task that needs the sign-in, when it comes from a task's run. */
+    taskId?: string;
     turnId: string;
     webhookUrl?: string;
   };
@@ -731,6 +769,8 @@ export interface AuthorizationCompletedStreamEvent {
     reason?: string;
     sequence: number;
     stepIndex: number;
+    /** The task that needed the sign-in, when it comes from a task's run. */
+    taskId?: string;
     turnId: string;
   };
   type: "authorization.completed";
@@ -798,6 +838,8 @@ export type UnstampedMessageStreamEvent =
   | SubagentChildEventStreamEvent
   | SubagentCompletedStreamEvent
   | SubagentStartedStreamEvent
+  | TaskSettledStreamEvent
+  | TaskStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
   | InputResolvedStreamEvent
@@ -923,19 +965,19 @@ export function createTurnStartedEvent(input: {
  * consumers while preserving the authored turn content upstream.
  */
 export function createMessageReceivedEvent(input: {
+  readonly kind?: "task.result";
   readonly message: string | UserContent;
   readonly sequence: number;
   readonly turnId: string;
 }): MessageReceivedStreamEvent {
-  return {
-    data: {
-      message: summarizeUserContent(input.message),
-      parts: projectUserContentParts(input.message),
-      sequence: input.sequence,
-      turnId: input.turnId,
-    },
-    type: "message.received",
+  const data: MessageReceivedStreamEvent["data"] = {
+    message: summarizeUserContent(input.message),
+    parts: projectUserContentParts(input.message),
+    sequence: input.sequence,
+    turnId: input.turnId,
   };
+  if (input.kind !== undefined) data.kind = input.kind;
+  return { data, type: "message.received" };
 }
 
 function summarizeUserContent(message: string | UserContent): string {
@@ -1190,6 +1232,7 @@ export function createAuthorizationRequiredEvent(input: {
   readonly name: string;
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly turnId: string;
   readonly webhookUrl?: string;
 }): AuthorizationRequiredStreamEvent {
@@ -1212,6 +1255,9 @@ export function createAuthorizationRequiredEvent(input: {
   if (input.webhookUrl !== undefined) {
     data.webhookUrl = input.webhookUrl;
   }
+  if (input.taskId !== undefined) {
+    data.taskId = input.taskId;
+  }
   return {
     data,
     type: "authorization.required",
@@ -1232,6 +1278,7 @@ export function createAuthorizationCompletedEvent(input: {
   readonly reason?: string;
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly turnId: string;
 }): AuthorizationCompletedStreamEvent {
   const data: AuthorizationCompletedStreamEvent["data"] = {
@@ -1252,6 +1299,9 @@ export function createAuthorizationCompletedEvent(input: {
   }
   if (input.reason !== undefined) {
     data.reason = input.reason;
+  }
+  if (input.taskId !== undefined) {
+    data.taskId = input.taskId;
   }
   return {
     data,
@@ -1280,17 +1330,17 @@ export function createInputRequestedEvent(input: {
   readonly requests: readonly InputRequest[];
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly turnId: string;
 }): InputRequestedStreamEvent {
-  return {
-    data: {
-      requests: input.requests,
-      sequence: input.sequence,
-      stepIndex: input.stepIndex,
-      turnId: input.turnId,
-    },
-    type: "input.requested",
+  const data: InputRequestedStreamEvent["data"] = {
+    requests: input.requests,
+    sequence: input.sequence,
+    stepIndex: input.stepIndex,
+    turnId: input.turnId,
   };
+  if (input.taskId !== undefined) data.taskId = input.taskId;
+  return { data, type: "input.requested" };
 }
 
 /** Creates the authoritative `input.resolved` event for one pending HITL batch. */
@@ -1406,6 +1456,35 @@ export function createSubagentCalledEvent(input: {
     },
     type: "subagent.called",
   };
+}
+
+/** Creates the `task.started` event for one call that starts a task. */
+export function createTaskStartedEvent(
+  input: TaskStartedStreamEvent["data"],
+): TaskStartedStreamEvent {
+  return {
+    data: {
+      callId: input.callId,
+      name: input.name,
+      taskId: input.taskId,
+      turnId: input.turnId,
+    },
+    type: "task.started",
+  };
+}
+
+/** Creates the `task.settled` event for one settled task call. */
+export function createTaskSettledEvent(
+  input: TaskSettledStreamEvent["data"],
+): TaskSettledStreamEvent {
+  const data: TaskSettledStreamEvent["data"] = {
+    callId: input.callId,
+    status: input.status,
+    taskId: input.taskId,
+  };
+  if (input.output !== undefined) data.output = input.output;
+  if (input.error !== undefined) data.error = input.error;
+  return { data, type: "task.settled" };
 }
 
 /**
