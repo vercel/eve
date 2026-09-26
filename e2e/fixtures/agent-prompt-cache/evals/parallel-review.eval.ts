@@ -124,6 +124,12 @@ The budget for the weekend was agreed at the last committee meeting. It covers m
 
 Accessibility is part of every room plan. The hall and the studio have step-free access from the side entrance, and the meeting rooms share a ramp from the garden path. Tutors keep one table in each room clear of stools for visitors who use wheelchairs, and printed instructions come in a larger type size on request. The front desk keeps a short list of quiet spaces for anyone who needs a break from the busier sessions.
 
+Supplies arrive in two deliveries. The first comes on Thursday afternoon with paper, paint, clay, and the printed signs, and the caretaker signs for it at the side entrance. The second comes on Friday morning with the hired easels, the portable kiln, and the extra folding tables. Bob checks each delivery against the order confirmation, notes any missing items on the budget sheet, and tells Alice before the end of the day so the tutors can adjust their plans if something is late.
+
+Each workshop has a named tutor and one volunteer helper. The tutor sets up the room before the first session, explains the safety notes for any tools or materials, and keeps an eye on the time so each group finishes promptly. The helper hands out materials, keeps the tables tidy between sessions, and fetches anything the tutor needs from the storeroom. At the end of each day the tutors leave a short note in the office about what went well, what ran short, and anything that should be ordered differently next time.
+
+Planning before the event happens through a shared noticeboard in the office and a weekly email from Alice. The email lists the confirmed workshops, the number of places booked so far, and any changes to rooms or times. Tutors reply with their final materials lists by the Monday before the event, which gives Bob enough time to place the last orders and confirm delivery slots with the suppliers.
+
 After the event, volunteers pack away the reusable materials, count what remains, and label the storeroom shelves so the next programme can start from an accurate inventory. The committee would like each review to be practical and brief, focused on whether the current plan works as written rather than on redesigning the weekend.`;
 
 function reviewPacket(): string {
