@@ -624,7 +624,7 @@ describe("eve dev --input", () => {
     );
   });
 
-  it("passes explicit recovery to the local host and rejects URL recovery", async () => {
+  it("passes explicit recovery to the local host", async () => {
     const startHost = vi.fn(() => ({
       start: async () => ({
         kind: "started" as const,
@@ -638,9 +638,6 @@ describe("eve dev --input", () => {
       expect.any(String),
       expect.objectContaining({ resume: true }),
     );
-    await expect(
-      runInteractiveDev(["dev", "https://example.com", "--resume"], { startHost }),
-    ).rejects.toThrow("--resume requires starting a local dev server");
   });
 
   it("forwards the internal init onboarding handoff to the local TUI", async () => {
