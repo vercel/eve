@@ -14,7 +14,8 @@ agent receives the workflow's output as the tool result. While the body waits du
 parks without holding compute. A `task(input, ctx)` tool runs each call as a
 [task](#run-calls-as-tasks-task) instead: the model gets a receipt at once and the result arrives
 later. A `serve(receive, ctx)` tool runs a [resumable task](#resumable-tasks-serve), which the
-model can send more calls by its `taskId`.
+model can send more calls by its `taskId`. See [Tasks](/docs/tools/tasks) for choosing
+between them and for what the model sees while tasks work.
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`, `createHook`,
 `createWebhook`, `sleep`, retries, and replay. eve provides `ctx.ask` for questions answered through
@@ -188,6 +189,9 @@ asking once a new message arrives, pass `ctx.interruptSignal`:
 +const answer = await ctx.ask({ prompt }, { signal: ctx.interruptSignal });
 ```
 
+See [Upgrade to Tasks](/docs/tools/tasks-upgrade) for `task` replacing `execution: "background"`
+and the other changes in this release.
+
 ## Wait for the result
 
 A call to an `execute` tool works like any other tool call from the model's point of view:
@@ -265,32 +269,12 @@ Each call is a task with its own id, `<tool>-<6 characters>`:
 - **Result:** the body's return value or its error arrives later as a `<task_result>` block in a
   `task.result` message, which eve appends at the next step boundary. `toModelOutput` projects the
   result, not the receipt.
-- **Waiting:** the model gets `task_wait`, which parks the turn until one of its tasks settles, a
-  new message arrives, or an optional timeout passes, and `task_cancel`, which stops a task. Both
-  are offered, with a short system prompt block that explains tasks, only when the agent has an
-  agent tool or a `task` or `serve` tool. See [`task_wait` and `task_cancel`](/docs/concepts/built-in-tools#task_wait-and-task_cancel).
-- **Turn end:** a turn can't end while tasks it started are working. When the model ends such a
-  turn, eve waits as `task_wait` would, appends the results, and calls the model again in the same
-  turn. A `final_output` call made while tasks work returns an error naming them. `turn.completed`
-  comes only when the turn really ends.
-- **Held turns:** in a root session, the model's text before the wait completes as an ordinary
-  message, and the stream emits `session.waiting` with the held `turnId`. The person can keep
-  writing; their messages steer the same turn. In a child session or a schedule's session, the
-  held text step reports `finishReason: "tool-calls"` on `message.completed`, so channels post
-  only the final reply.
-- **Steering:** a new message ends a `task_wait` but never interrupts a task. The model reads the
-  message and decides whether to keep or cancel each task.
-- **Cancellation:** `task_cancel`, `session.cancel()`, a failed turn, and the end of the session
-  stop a task. Its `abortSignal` aborts, cancelled work never reports back, and a run that hasn't
-  finished 30 seconds after the cancel is stopped. A [resumable task](#resumable-tasks-serve)
-  stays available instead.
-- **Callers:** only the caller that started a task can wait on or cancel it, and only that
-  caller's messages steer its turn. Anonymous callers share one identity.
-- **Limit:** at most 32 tasks work at once in a session. A call past the limit fails with
-  `TOO_MANY_TASKS`.
 
-The stream reports `task.started` when a call starts a task and `task.settled` when it settles,
-with the task's `output` or `error`. See [task events](/docs/concepts/sessions-runs-and-streaming#task-events).
+The model waits for results with `task_wait` and stops a task with `task_cancel`, and a turn can't
+end while tasks it started are working. `task_cancel`, `session.cancel()`, a failed turn, and the
+end of the session abort the call's `abortSignal`; a run that hasn't finished 30 seconds after the
+cancel is stopped. See [Tasks](/docs/tools/tasks) for what the model sees, how held turns look on
+the stream, steering, events, and limits.
 
 ## Resumable tasks: `serve`
 
@@ -322,8 +306,9 @@ export default defineWorkflowTool({
 });
 ```
 
-A `serve` tool's calls are tasks, with the receipts, results, waiting, turn rule, callers, and
-limit [described above](#run-calls-as-tasks-task). What differs:
+A `serve` tool's calls are tasks, with the receipts and results
+[described above](#run-calls-as-tasks-task) and the waiting, turn rule, callers, and limit
+described in [Tasks](/docs/tools/tasks). What differs:
 
 - **`receive()`:** resolves with the next call, `{ input, callId, abortSignal }`, with `input`
   validated by `inputSchema`. The first `receive()` resolves at once with the call that started

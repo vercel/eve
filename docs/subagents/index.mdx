@@ -9,12 +9,13 @@ Use a subagent to run independent work in parallel, narrow the available tools, 
 - Use a [declared local subagent](#declared-subagents) for a specialist with its own directory and authored capabilities, rather than inheriting the root's.
 - Use a [remote agent](./guides/remote-agents) to delegate to a separately deployed eve agent, with its own configuration and authentication.
 
-Every subagent call runs as a [task](./tools/workflows#run-calls-as-tasks-task). The call returns a
+Every subagent call runs as a [task](./tools/tasks). The call returns a
 receipt naming the task's `taskId` right away, the child works while the parent continues, and the
 child's final reply for that turn arrives as the task's result. The parent's turn does not end while
 the task is working. If the child's turn fails, the call fails and the task ends. This applies to
 root-agent copies, declared local subagents, and remote subagents. The subagent session remains
-available for later calls with the same `taskId`.
+available for later calls with the same `taskId`. When an action must wait for a subagent's result,
+such as publishing only after a review, [run both from one workflow tool](./tools/tasks#order-work-that-depends-on-a-result).
 
 ## The built-in `agent` tool
 
@@ -242,7 +243,7 @@ A child parks after answering instead of terminating, keeping its session and co
 
 A call with the `taskId` of a child that is still working joins the child's current turn, and that turn's final reply settles both calls. If the turn ends before the child reads the message, the message starts the child's next turn, and that turn's reply settles both calls. Use it to correct or add to work in progress. `task_cancel` with the task's `taskId` cancels the child's current turn and keeps its conversation, so a later call with the same `taskId` continues where it left off.
 
-eve adds a framework-injected `[Tasks]` note to the conversation that lists the caller's working and idle tasks by `taskId` and tool, so the model can find a child to continue.
+eve adds a framework-injected `[Tasks]` note to the conversation that lists the caller's working and idle tasks by `taskId` and tool, so the model can find a child to continue. See [Tasks](./tools/tasks) for how the model waits for, corrects, and cancels agent tasks.
 
 The parent holds each child for the life of the task's run, which lasts until the parent session ends. Then eve resets local children and sends authenticated reset requests for remote children. Remote reset is best-effort: an unreachable deployment may retain the parked child until its own session deadline. For [remote agents](./guides/remote-agents), upgrade both deployments before relying on continuation or reset behavior introduced by a newer eve version.
 

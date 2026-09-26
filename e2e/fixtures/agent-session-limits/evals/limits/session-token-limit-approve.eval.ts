@@ -13,7 +13,7 @@ export default defineEval({
   async test(t) {
     const conversation = await t.session();
     const active = await conversation.start(
-      'Call the `hold-open` tool exactly once with marker "limit-race". Wait for its result, then reply with exactly "approved".',
+      'Call the `hold-open` tool exactly once with marker "limit-race". When the tool returns, reply with exactly "approved".',
     );
     await active.waitForEvent("actions.requested");
 

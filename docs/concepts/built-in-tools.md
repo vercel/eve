@@ -215,7 +215,7 @@ export default disableTool();
 
 ### `agent`
 
-`agent` delegates a subtask to a fresh copy of the root agent. It is root-only and waits for the child's reply, which it returns as the tool result. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
+`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, and each call is a [task](/docs/tools/tasks): the call returns a receipt, and the child's reply arrives later as the task's result. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
 
 ```sh
 eve add tool/agent
@@ -273,7 +273,7 @@ An authored `agent/tools/connection_search.ts` replaces the framework behavior. 
 
 ### `task_wait` and `task_cancel`
 
-eve adds `task_wait` and `task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/workflows#run-calls-as-tasks-task): any agent tool, including the built-in `agent` tool, declared subagents, and remote agents, or a tool such as `agentRouter()`, the `workflow` tool, or an authored workflow tool that defines `task(input, ctx)` or `serve(receive, ctx)`. There is no add command, and the tools are not workflow tools. Both names are reserved: the compiler rejects an authored `agent/tools/task_wait.ts` or `agent/tools/task_cancel.ts`.
+eve adds `task_wait` and `task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks): any agent tool, including the built-in `agent` tool, declared subagents, and remote agents, or a tool such as `agentRouter()`, the `workflow` tool, or an authored workflow tool that defines `task(input, ctx)` or `serve(receive, ctx)`. There is no add command, and the tools are not workflow tools. Both names are reserved: the compiler rejects an authored `agent/tools/task_wait.ts` or `agent/tools/task_cancel.ts`.
 
 - `task_wait({ timeout? })` parks the turn until one of the caller's tasks has a result, a new message arrives, or `timeout` milliseconds pass, and returns at once when a result is already waiting. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
 - `task_cancel({ taskId })` stops a task's current work and returns `{ status: "cancelled" }`, or `{ status: "already_finished" }` when the task already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve). An id that names no task the caller started fails with `UNKNOWN_TASK`. A resumable task stays available after a cancel.
