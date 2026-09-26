@@ -11,7 +11,7 @@ import {
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import {
-  getBlockingWorkflowToolRuns,
+  getCancellableWorkflowToolRuns,
   type BlockingWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 
@@ -32,8 +32,9 @@ const log = createLogger("execution.cancel-descendant-turns");
 type RunningAgentHandle = Extract<AgentHandle, { phase: "claimed" | "running" }>;
 
 /**
- * Cancels every running delegated child recorded in the agent handle store
- * and every workflow tool run the turn is waiting on.
+ * Cancels every running delegated child recorded in the agent handle store,
+ * every workflow tool run the turn is waiting on, and every run still
+ * finishing after a reply.
  */
 export async function cancelDescendantTurnsStep(input: {
   readonly serializedContext: Record<string, unknown>;
@@ -45,7 +46,7 @@ export async function cancelDescendantTurnsStep(input: {
   let workflowToolRuns: readonly BlockingWorkflowToolRun[];
   try {
     const session = readDurableSession(input.sessionState);
-    workflowToolRuns = getBlockingWorkflowToolRuns(
+    workflowToolRuns = getCancellableWorkflowToolRuns(
       session.state,
       getPendingCoordinationBatch(session.state)?.event.turnId ??
         input.sessionState.emissionState.turnId,

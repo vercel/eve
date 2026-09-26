@@ -16,9 +16,10 @@ describe("defineWorkflowTool", () => {
     const definition = defineWorkflowTool({
       description: "Deploy",
       inputSchema: z.object({ service: z.string() }),
-      async execute(input, ctx) {
+      async execute(ctx) {
+        const { input } = await ctx.receive();
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
-        expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
+        expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext<{ service: string }>>();
         expectTypeOf(ctx.agents.researcher).toEqualTypeOf<WorkflowAgentMetadata | undefined>();
         const review = ctx.agent("researcher", {
           message: "Review the deployment.",
@@ -50,14 +51,15 @@ describe("defineWorkflowTool", () => {
       },
     });
     expect(isWorkflowToolDefinition(definition)).toBe(true);
-    expectTypeOf(definition.execute).parameter(0).toEqualTypeOf<{ service: string }>();
+    expectTypeOf(definition.execute)
+      .parameter(0)
+      .toEqualTypeOf<WorkflowToolContext<{ service: string }, { deployed: string }>>();
   });
 
   it("exposes only step-safe capabilities on WorkflowStepToolContext", () => {
     const useStepContext = (ctx: WorkflowStepToolContext) => {
       void ctx.getToken;
       void ctx.requireAuth;
-      void ctx.abortSignal;
       // @ts-expect-error Agent metadata is available only in the workflow body.
       void ctx.agents;
       // @ts-expect-error Agent invocation is available only in the workflow body.

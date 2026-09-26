@@ -1,7 +1,7 @@
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
-import type { ToolContext } from "#tools/definition.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import {
   findWorkflowToolRunContext,
   type WorkflowToolRunContext,
@@ -22,7 +22,7 @@ import type {
 type IdentifiedAuthorizationChallenge = AuthorizationChallenge & { readonly attemptId: string };
 
 interface WorkflowContextArgument {
-  readonly ctx: ToolContext;
+  readonly ctx: WorkflowToolContext;
   readonly run: WorkflowToolRunContext;
 }
 
@@ -50,7 +50,7 @@ function findWorkflowContextArgument(
   for (const arg of args) {
     const run = findWorkflowToolRunContext(arg);
     if (run !== undefined) {
-      return { ctx: arg as ToolContext, run };
+      return { ctx: arg as WorkflowToolContext, run };
     }
   }
   return undefined;
@@ -78,24 +78,25 @@ async function executeAuthorizedStep(
           ctx,
           execute,
           receiver,
+          run,
         });
       } catch (error) {
-        if (!ctx.abortSignal.aborted) {
-          await reportPendingAsFailed(run, ctx.abortSignal, pending);
+        if (!run.abortSignal.aborted) {
+          await reportPendingAsFailed(run, run.abortSignal, pending);
         }
         throw error;
       }
 
       await reconcileCompletedAuthorizations(
         run,
-        ctx.abortSignal,
+        run.abortSignal,
         pending,
         authorizationResults,
         result.authorized,
       );
 
       if (result.kind === "result") {
-        await reportPendingAsFailed(run, ctx.abortSignal, pending);
+        await reportPendingAsFailed(run, run.abortSignal, pending);
         return result.output;
       }
 
@@ -103,7 +104,6 @@ async function executeAuthorizedStep(
         authorizationResults,
         callback,
         challenges: result.signal.challenges,
-        ctx,
         pending,
         run,
       });
@@ -117,16 +117,17 @@ async function invokeAuthorizedStep(input: {
   readonly args: unknown[];
   readonly authorizationResults: readonly WorkflowStepAuthorizationResult[];
   readonly callbackToken: string;
-  readonly ctx: ToolContext;
+  readonly ctx: WorkflowToolContext;
   readonly execute: (invocation: WorkflowStepInvocation) => Promise<unknown>;
   readonly receiver: unknown;
+  readonly run: WorkflowToolRunContext;
 }): Promise<WorkflowStepResult> {
-  const { args, authorizationResults, callbackToken, ctx, execute, receiver } = input;
+  const { args, authorizationResults, callbackToken, ctx, execute, receiver, run } = input;
   const context: WorkflowStepContext = {
-    callId: ctx.callId,
+    callId: run.from.callId,
     toolName: ctx.toolName,
     session: ctx.session,
-    abortSignal: ctx.abortSignal,
+    abortSignal: run.abortSignal,
     baseUrl: getWorkflowMetadata().url,
     token: callbackToken,
     authorizationResults,
@@ -167,18 +168,17 @@ async function collectAuthorizationCallbacks(input: {
   readonly authorizationResults: WorkflowStepAuthorizationResult[];
   readonly callback: AsyncIterable<unknown>;
   readonly challenges: readonly AuthorizationChallenge[];
-  readonly ctx: ToolContext;
   readonly pending: Map<string, IdentifiedAuthorizationChallenge>;
   readonly run: WorkflowToolRunContext;
 }): Promise<void> {
-  const { authorizationResults, callback, challenges, ctx, pending, run } = input;
+  const { authorizationResults, callback, challenges, pending, run } = input;
   for (const challenge of challenges) {
     const identified = requireAttemptId(challenge);
     pending.set(identified.attemptId, identified);
-    await reportAuthorization(run, ctx.abortSignal, identified);
+    await reportAuthorization(run, run.abortSignal, identified);
 
     try {
-      const response = await waitForCallback(callback, identified, ctx.abortSignal);
+      const response = await waitForCallback(callback, identified, run.abortSignal);
       authorizationResults.push({
         name: identified.name,
         instanceId: identified.instanceId,
@@ -190,8 +190,8 @@ async function collectAuthorizationCallbacks(input: {
       });
     } catch (error) {
       // Cancelled turns close their inbox; cancelled tasks discard further deliveries.
-      if (!ctx.abortSignal.aborted) {
-        await reportAuthorization(run, ctx.abortSignal, identified, "failed");
+      if (!run.abortSignal.aborted) {
+        await reportAuthorization(run, run.abortSignal, identified, "failed");
       }
       throw error;
     }

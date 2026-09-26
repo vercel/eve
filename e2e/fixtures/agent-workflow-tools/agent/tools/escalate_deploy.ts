@@ -12,9 +12,10 @@ import { describePlan } from "../lib/plan.ts";
 export default defineWorkflowTool({
   description: "Ask for deploy approval, but give up if no one answers in time.",
   inputSchema: z.strictObject({ service: z.string() }),
-  async execute({ service }, ctx) {
+  async execute(ctx) {
     "use workflow";
 
+    const { service } = (await ctx.receive()).input;
     const pending = ctx.ask({
       display: "confirmation",
       options: [

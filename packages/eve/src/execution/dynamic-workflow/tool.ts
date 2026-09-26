@@ -9,12 +9,14 @@ export interface WorkflowProgramToolInput {
 
 /** Static workflow executor used by the provided `workflow` tool. */
 export async function executeWorkflowProgram(
-  input: WorkflowProgramToolInput,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowToolContext<WorkflowProgramToolInput>,
 ): Promise<JsonValue> {
   "use workflow";
 
-  return runJsProgram(input.js, ctx, {
-    maxSubagents: input.maxSubagents ?? 0,
-  });
+  const { abortSignal, callId, input } = await ctx.receive();
+  return runJsProgram(
+    input.js,
+    { abortSignal, agent: ctx.agent, callId },
+    { maxSubagents: input.maxSubagents ?? 0 },
+  );
 }

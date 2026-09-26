@@ -3,8 +3,13 @@ import { emitWorkflowToolRunReportStep } from "#execution/tools/workflow/emit-wo
 import type {
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
+  WorkflowToolRunReplyMessage,
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
+import {
+  forgetRepliedWorkflowToolRunStep,
+  markWorkflowToolRunRepliedStep,
+} from "#execution/tools/workflow/replied-run-steps.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
@@ -16,7 +21,7 @@ import {
   workflowToolRunRequestToInputRequestPayload,
 } from "#execution/tools/workflow/owner-inbox.js";
 import {
-  findBlockingWorkflowToolRun,
+  findSendingWorkflowToolRun,
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
@@ -36,6 +41,8 @@ export async function handleWorkflowToolRunMessage(
   switch (message.kind) {
     case "outcome":
       return await handleWorkflowToolRunOutcome({ ...input, message });
+    case "reply":
+      return await handleWorkflowToolRunReply({ ...input, message });
     case "request":
       await handleWorkflowToolRunRequest({ ...input, message });
       return undefined;
@@ -52,20 +59,18 @@ export async function handleWorkflowToolRunMessage(
 /**
  * Settles a workflow tool run outcome against the turn's recorded runs and
  * returns the runtime action result the turn should accept, or `undefined`
- * when the outcome does not bind to a run this turn owns.
+ * when the outcome does not bind to a run this turn owns. A run that replied
+ * already settled its call, so its outcome only ends the session's tracking.
  */
 async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
 ): Promise<RuntimeActionResult | undefined> {
   const { cursor, message } = input;
-  const recorded = findBlockingWorkflowToolRun(
+  const recorded = findSendingWorkflowToolRun(
     cursor.sessionState.snapshot.session.state,
-    message.from.callId,
-    message.from.turnId,
+    message.from,
   );
-  if (recorded?.address.runId !== message.from.runId) return undefined;
-
-  const result = workflowToolRunOutcomeToToolResult(message);
+  if (recorded === undefined) return undefined;
 
   // A failed or cancelled workflow may leave an agent invocation unfinished.
   await cancelAgentInvocationOwnerStep({
@@ -83,6 +88,17 @@ async function handleWorkflowToolRunOutcome(
     sessionState: released.sessionState,
   });
 
+  if (recorded.replied === true) {
+    await cursor.apply(
+      await forgetRepliedWorkflowToolRunStep({
+        record: recorded,
+        sessionState: cursor.sessionState,
+      }),
+    );
+    return undefined;
+  }
+
+  const result = workflowToolRunOutcomeToToolResult(message);
   return isInboxToolResultFromRecordedWorkflowToolRun(
     cursor.sessionState.snapshot.session.state,
     result,
@@ -91,17 +107,33 @@ async function handleWorkflowToolRunOutcome(
     : undefined;
 }
 
+/** Settles the call with `ctx.reply()`'s output; the session tracks the run until it finishes. */
+async function handleWorkflowToolRunReply(
+  input: HandlerInput<WorkflowToolRunReplyMessage>,
+): Promise<RuntimeActionResult | undefined> {
+  const { cursor, message } = input;
+  const recorded = findSendingWorkflowToolRun(
+    cursor.sessionState.snapshot.session.state,
+    message.from,
+  );
+  if (recorded === undefined || recorded.replied === true) return undefined;
+
+  await cursor.apply(
+    await markWorkflowToolRunRepliedStep({ record: recorded, sessionState: cursor.sessionState }),
+  );
+  return workflowToolRunOutcomeToToolResult({
+    from: message.from,
+    result: { output: message.output, status: "completed" },
+  });
+}
+
 async function handleWorkflowToolRunRequest(
   input: HandlerInput<WorkflowToolRunRequestMessage>,
 ): Promise<void> {
   const { cursor, message } = input;
   if (message.request.kind === "agent-invoke" || message.request.kind === "agent-settled") {
-    const recorded = findBlockingWorkflowToolRun(
-      cursor.sessionState.snapshot.session.state,
-      message.from.callId,
-      message.from.turnId,
-    );
-    if (recorded?.address.runId !== message.from.runId) {
+    const state = cursor.sessionState.snapshot.session.state;
+    if (findSendingWorkflowToolRun(state, message.from) === undefined) {
       if (message.request.kind === "agent-invoke") {
         await resumeHookStep(message.replyTo, {
           kind: "runtime-action-result",

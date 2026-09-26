@@ -1,7 +1,13 @@
 import { deserializeContext } from "#context/serialize.js";
 import type { ContextContainer } from "#context/container.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
-import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  readDurableSession,
+  type DurableSession,
+  type DurableSessionState,
+} from "#execution/durable-session-store.js";
+import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
+import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import {
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
@@ -16,7 +22,8 @@ const log = createLogger("execution.terminate-child-sessions");
 
 /**
  * Terminates children the parent holds handles to when the parent session
- * ends.
+ * ends, and stops every workflow tool run the session still tracks, such as
+ * one finishing after a reply.
  *
  * Every nonterminal `agent/local`/`agent/self` handle is covered: `running`
  * and `parked` handles carry a confirmed address; a `starting` handle has
@@ -39,6 +46,8 @@ export async function terminateChildSessionsStep(input: {
     });
     return;
   }
+
+  await stopWorkflowToolRuns(session);
 
   const handles = getAgentHandleStore(session.state)?.handles ?? [];
   const hasRemoteHandle = handles.some(
@@ -124,4 +133,17 @@ export async function terminateChildSessionsStep(input: {
       });
     }
   }
+}
+
+async function stopWorkflowToolRuns(session: DurableSession): Promise<void> {
+  let runs;
+  try {
+    runs = getBlockingWorkflowToolRuns(session.state);
+  } catch (error) {
+    logError(log, "failed to read workflow tool runs for termination", error, {
+      parentSessionId: session.sessionId,
+    });
+    return;
+  }
+  await Promise.all(runs.map((run) => cancelWorkflowToolRun(run.address, "The session ended.")));
 }

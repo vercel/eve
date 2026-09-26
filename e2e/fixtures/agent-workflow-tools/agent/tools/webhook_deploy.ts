@@ -7,9 +7,10 @@ import { postWorkflowCallback } from "../lib/webhook.ts";
 export default defineWorkflowTool({
   description: "Verify a deploy callback through the public workflow webhook route.",
   inputSchema: z.strictObject({ service: z.string() }),
-  async execute({ service }) {
+  async execute(ctx) {
     "use workflow";
 
+    const { service } = (await ctx.receive()).input;
     using callback = createWebhook({
       respondWith: new Response("callback accepted", { status: 202 }),
     });

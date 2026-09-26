@@ -15,6 +15,13 @@ import { toErrorMessage } from "#shared/errors.js";
 import type { JsonValue } from "#shared/json.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
+/** What a program needs from its workflow tool: the call it serves and agent invocation. */
+export interface JsProgramContext {
+  readonly abortSignal: AbortSignal;
+  readonly agent: WorkflowToolContext["agent"];
+  readonly callId: string;
+}
+
 export interface JsProgramOptions {
   /** Maximum child-agent calls, from 1 to 128. Defaults to 100. */
   readonly maxSubagents?: number;
@@ -23,7 +30,7 @@ export interface JsProgramOptions {
 /** Runs a model-generated JavaScript function body inside an isolated workflow sandbox. */
 export async function runJsProgram(
   js: string,
-  ctx: WorkflowToolContext,
+  ctx: JsProgramContext,
   options: JsProgramOptions,
 ): Promise<JsonValue> {
   if (typeof js !== "string") throw new TypeError('workflow requires a "js" string.');

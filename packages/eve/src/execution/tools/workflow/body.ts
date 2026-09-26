@@ -2,19 +2,26 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import { agent } from "#execution/tools/subagent/invoke-agent.js";
-import type { AgentInput, WorkflowToolContext } from "#tools/workflow-definition.js";
+import type {
+  AgentInput,
+  WorkflowToolCall,
+  WorkflowToolContext,
+} from "#tools/workflow-definition.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
+  type WorkflowToolRunMessage,
   type WorkflowToolRunOutcome,
   type WorkflowToolRunOwner,
   type WorkflowToolRunRef,
-  type WorkflowToolRunReport,
 } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolContext } from "#tools/definition.js";
+
+/** Thrown by a second `ctx.receive()`: the tool's only call arrives with the run. */
+const SECOND_RECEIVE_ERROR_MESSAGE = "This tool takes one call.";
 
 export interface WorkflowBodyDefinition {
   /** Snapshot added for new runs; absent only when resuming an older durable payload. */
@@ -40,13 +47,77 @@ export interface WorkflowBodyInput extends WorkflowBodyDefinition {
 
 export interface WorkflowBodyResult {
   readonly outcome: WorkflowToolRunOutcome;
-  readonly reportCount: number;
+  /** Reports and replies the body delivered; the run relays each before the outcome. */
+  readonly messageCount: number;
 }
 
+type WorkflowBodyContext = WorkflowToolContext<JsonValue, JsonValue>;
+
 type WorkflowToolExecute = (
-  input: unknown,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowBodyContext,
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
+
+/**
+ * The one call a body serves. It is received once, from the run's start
+ * input, and settled once: by `ctx.reply()`, or else by the body's outcome.
+ * Progress and questions belong to the call, so both stop once it settles.
+ */
+class WorkflowBodyCall {
+  private readonly call: WorkflowToolCall<JsonValue>;
+  private readonly from: WorkflowToolRunRef;
+  private readonly inbox: string;
+  private readonly toolName: string;
+  private received = false;
+  private settled = false;
+  private replyDelivery: Promise<void> = Promise.resolve();
+  private deliveredMessages = 0;
+
+  constructor(input: WorkflowBodyInput, from: WorkflowToolRunRef, abortSignal: AbortSignal) {
+    this.call = {
+      abortSignal,
+      callId: input.callId,
+      input: input.executeInput ?? input.input,
+    };
+    this.from = from;
+    this.inbox = input.owner.inbox;
+    this.toolName = input.toolName;
+  }
+
+  async receive(): Promise<WorkflowToolCall<JsonValue>> {
+    if (this.received) throw new Error(SECOND_RECEIVE_ERROR_MESSAGE);
+    this.received = true;
+    return this.call;
+  }
+
+  reply(output: JsonValue): void {
+    if (this.settled) return;
+    this.settled = true;
+    this.replyDelivery = this.deliver({ from: this.from, kind: "reply", output });
+  }
+
+  async report(update: JsonValue): Promise<void> {
+    if (this.settled) return;
+    await this.deliver({ from: this.from, kind: "report", update });
+  }
+
+  assertWaiting(): void {
+    if (!this.settled) return;
+    throw new Error(
+      `ctx.ask() needs a call waiting for a result, but tool "${this.toolName}" already replied to its call.`,
+    );
+  }
+
+  /** Waits for an in-flight reply, so the outcome can never overtake it. */
+  async flush(): Promise<number> {
+    await this.replyDelivery;
+    return this.deliveredMessages;
+  }
+
+  private async deliver(message: WorkflowToolRunMessage): Promise<void> {
+    await resumeHookStep(this.inbox, message);
+    this.deliveredMessages += 1;
+  }
+}
 
 /** Executes one registered workflow body and reports progress to its owner. */
 export async function executeWorkflowBody(
@@ -54,47 +125,52 @@ export async function executeWorkflowBody(
   signal: AbortSignal,
 ): Promise<WorkflowBodyResult> {
   const from = createWorkflowBodyRef(input);
-  const ctx = createWorkflowBodyContext(input, signal);
+  const call = new WorkflowBodyCall(input, from, signal);
+  const ctx = createWorkflowBodyContext(input, call);
   attachWorkflowToolRunContext(ctx, {
+    abortSignal: signal,
     canRequestInput: input.canRequestInput,
     from,
     owner: input.owner,
   });
-  let reportCount = 0;
 
+  let outcome: WorkflowToolRunOutcome;
   try {
     const execute = resolveWorkflowToolExecute(input);
-    const result = execute(input.executeInput ?? input.input, ctx);
-    let output: JsonValue;
-    if (!isAsyncIterable(result)) {
-      output = await result;
-    } else {
-      const iterator = result[Symbol.asyncIterator]();
-      let last: JsonValue | undefined;
-      let next = await iterator.next();
-      while (next.done !== true) {
-        last = next.value;
-        const report: WorkflowToolRunReport = { from, update: next.value };
-        await resumeHookStep(input.owner.inbox, { kind: "report", ...report });
-        reportCount += 1;
-        next = await iterator.next();
-      }
-      output = (next.value as JsonValue | undefined) ?? last ?? null;
-    }
-    return { outcome: { output, status: "completed" }, reportCount };
+    const output = await runWorkflowBody(execute(ctx), call);
+    outcome = { output, status: "completed" };
   } catch (error) {
-    if (signal.aborted) {
-      return {
-        outcome: {
-          reason:
-            signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
-          status: "cancelled",
-        },
-        reportCount,
-      };
-    }
-    return { outcome: { error: normalizeSerializableError(error), status: "failed" }, reportCount };
+    outcome = toFailedOutcome(error, signal);
   }
+  // Outside the try: a reply that never reached the run fails the run instead
+  // of letting the outcome settle the call in its place.
+  const messageCount = await call.flush();
+  return { messageCount, outcome };
+}
+
+async function runWorkflowBody(
+  result: Promise<JsonValue> | AsyncIterable<JsonValue>,
+  call: WorkflowBodyCall,
+): Promise<JsonValue> {
+  if (!isAsyncIterable(result)) return await result;
+  const iterator = result[Symbol.asyncIterator]();
+  let last: JsonValue | undefined;
+  let next = await iterator.next();
+  while (next.done !== true) {
+    last = next.value;
+    await call.report(next.value);
+    next = await iterator.next();
+  }
+  return (next.value as JsonValue | undefined) ?? last ?? null;
+}
+
+function toFailedOutcome(error: unknown, signal: AbortSignal): WorkflowToolRunOutcome {
+  if (!signal.aborted) {
+    return { error: normalizeSerializableError(error), status: "failed" };
+  }
+  const reason =
+    signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? "");
+  return { reason, status: "cancelled" };
 }
 
 export function createWorkflowBodyRef(
@@ -123,14 +199,14 @@ function resolveWorkflowToolExecute(input: WorkflowBodyInput): WorkflowToolExecu
 
 function createWorkflowBodyContext(
   input: WorkflowBodyInput,
-  signal: AbortSignal,
-): ToolContext & WorkflowToolContext {
+  call: WorkflowBodyCall,
+): WorkflowBodyContext & Pick<ToolContext, "getSandbox"> {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
       `ctx.${member} is not available inside a workflow tool; ${hint}. Tool "${input.toolName}" runs as a durable workflow body, which only replays deterministic code.`,
     );
   };
-  const ctx: ToolContext & WorkflowToolContext = {
+  const ctx: WorkflowBodyContext & Pick<ToolContext, "getSandbox"> = {
     agent: ((target: string, agentInput: AgentInput) =>
       agent(ctx, target, agentInput)) as WorkflowToolContext["agent"],
     agents: Object.freeze(
@@ -141,12 +217,15 @@ function createWorkflowBodyContext(
         ]),
       ),
     ),
-    ask: (request) => ask(ctx, request),
-    abortSignal: signal,
-    callId: input.callId,
+    ask: (request) => {
+      call.assertWaiting();
+      return ask(ctx, request);
+    },
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),
+    receive: () => call.receive(),
+    reply: (output) => call.reply(output),
     requireAuth: () =>
       unavailable(
         "requireAuth()",

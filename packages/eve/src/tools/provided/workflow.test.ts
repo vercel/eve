@@ -92,13 +92,21 @@ describe("workflow", () => {
 
   it("routes pinned executor input to the private JavaScript adapter", async () => {
     mocks.runJsProgram.mockResolvedValue({ ok: true });
-    const ctx = { callId: "call" } as never;
-
-    await expect(executeWorkflowProgram({ js: "return 1", maxSubagents: 3 }, ctx)).resolves.toEqual(
-      { ok: true },
-    );
-    expect(mocks.runJsProgram).toHaveBeenCalledWith("return 1", ctx, {
-      maxSubagents: 3,
+    const abortSignal = new AbortController().signal;
+    const agent = vi.fn();
+    const receive = async () => ({
+      abortSignal,
+      callId: "call",
+      input: { js: "return 1", maxSubagents: 3 },
     });
+
+    await expect(executeWorkflowProgram({ agent, receive } as never)).resolves.toEqual({
+      ok: true,
+    });
+    expect(mocks.runJsProgram).toHaveBeenCalledWith(
+      "return 1",
+      { abortSignal, agent, callId: "call" },
+      { maxSubagents: 3 },
+    );
   });
 });

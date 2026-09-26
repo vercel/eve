@@ -385,9 +385,10 @@ describe("applyWorkflowTransform for authored application modules", () => {
     "export default defineWorkflowTool({",
     '  description: "Deploy",',
     "  inputSchema: z.object({ service: z.string() }),",
-    "  async execute({ service }: { service: string }, ctx: WorkflowToolContext) {",
+    "  async execute(ctx: WorkflowToolContext<{ service: string }>) {",
     '    "use workflow";',
-    "    const plan = await planDeploy(service);",
+    "    const { input } = await ctx.receive();",
+    "    const plan = await planDeploy(input.service);",
     "    const answer = await ctx.ask({ prompt: plan, options: APPROVE });",
     '    await sleep("1s");',
     '    return { deployed: answer.optionId === "approve" };',
@@ -435,7 +436,7 @@ describe("applyWorkflowTransform for authored application modules", () => {
     expect(transformed.code).toContain(
       'globalThis.__private_workflows.set("workflow//./agent/tools/deploy//execute", execute);',
     );
-    expect(transformed.code).toContain("async function execute({ service }");
+    expect(transformed.code).toContain("async function execute(ctx");
     expect(transformed.code).toContain("const APPROVE = ");
     expect(transformed.code).toContain('import { sleep } from "workflow";');
     expect(transformed.code).not.toContain("export default");

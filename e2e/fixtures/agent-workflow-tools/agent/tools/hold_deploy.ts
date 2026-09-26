@@ -9,9 +9,10 @@ import { z } from "zod";
 export default defineWorkflowTool({
   description: "Hold a deploy open until cancelled.",
   inputSchema: z.strictObject({ service: z.string() }),
-  async execute({ service }) {
+  async execute(ctx) {
     "use workflow";
 
+    const { service } = (await ctx.receive()).input;
     await sleep("10m");
     return { held: service };
   },

@@ -7,7 +7,7 @@ import {
   type AgentInvocationReply,
   validateAgentInput,
 } from "#execution/tools/subagent/invoke-agent.js";
-import type { ToolContext } from "#tools/definition.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 const mocks = vi.hoisted(() => ({
   createHook: vi.fn(),
@@ -35,7 +35,7 @@ describe("workflow helper context errors", () => {
     ["missing context", undefined],
     ["null context", null],
   ])("rejects %s before creating hooks or dispatching work", async (_name, context) => {
-    const ctx = context as ToolContext;
+    const ctx = context as never;
     await expect(agent(ctx, "reviewer", { message: "Review" })).rejects.toThrow(
       "ctx.agent() requires a defineWorkflowTool() executor context.",
     );
@@ -72,8 +72,9 @@ describe("workflow agent invocation routing", () => {
       [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
       token: "agent-reply",
     });
-    const ctx = { abortSignal: controller.signal, callId: "call-1" } as ToolContext;
+    const ctx = {} as WorkflowToolContext;
     attachWorkflowToolRunContext(ctx, {
+      abortSignal: controller.signal,
       from: {
         callId: "call-1",
         input: { message: "Find it" },
@@ -137,8 +138,9 @@ describe("workflow agent invocation routing", () => {
       toolName: "research",
       turnId: "turn-1",
     };
-    const ctx = { callId: "call-1" } as ToolContext;
+    const ctx = {} as WorkflowToolContext;
     attachWorkflowToolRunContext(ctx, {
+      abortSignal: new AbortController().signal,
       from,
       owner: {
         inbox: "owner-inbox",
@@ -194,8 +196,9 @@ describe("workflow agent invocation routing", () => {
       });
     }
     mocks.resumeHook.mockImplementation(async () => undefined);
-    const ctx = { callId: "call-1" } as ToolContext;
+    const ctx = {} as WorkflowToolContext;
     attachWorkflowToolRunContext(ctx, {
+      abortSignal: new AbortController().signal,
       from: {
         callId: "call-1",
         input: {},
@@ -258,8 +261,9 @@ describe("workflow agent invocation routing", () => {
       }),
       token: "agent-reply",
     });
-    const ctx = { callId: "call-1" } as ToolContext;
+    const ctx = {} as WorkflowToolContext;
     attachWorkflowToolRunContext(ctx, {
+      abortSignal: new AbortController().signal,
       from: {
         callId: "call-1",
         input: { message: "Find it" },
@@ -311,8 +315,9 @@ describe("workflow agent invocation routing", () => {
         token: "agent-reply",
         [Symbol.asyncIterator]: () => ({ next }),
       });
-      const ctx = { callId: "call-1" } as ToolContext;
+      const ctx = {} as WorkflowToolContext;
       attachWorkflowToolRunContext(ctx, {
+        abortSignal: new AbortController().signal,
         from: {
           callId: "call-1",
           input: {},
@@ -375,8 +380,9 @@ describe("workflow agent invocation routing", () => {
       }),
       token: "agent-reply",
     });
-    const ctx = { callId: "call-1" } as ToolContext;
+    const ctx = {} as WorkflowToolContext;
     attachWorkflowToolRunContext(ctx, {
+      abortSignal: new AbortController().signal,
       from: {
         callId: "call-1",
         input: { message: "Find it" },
@@ -467,8 +473,9 @@ describe("workflow agent invocation routing", () => {
         toolName: "research",
         turnId: "turn-parent",
       };
-      const ctx = { callId: "call-1" } as ToolContext;
+      const ctx = {} as WorkflowToolContext;
       attachWorkflowToolRunContext(ctx, {
+        abortSignal: new AbortController().signal,
         from,
         owner: {
           inbox: "owner-inbox",
@@ -551,8 +558,9 @@ describe("workflow agent invocation routing", () => {
       toolName: "research",
       turnId: "turn-1",
     };
-    const ctx = { callId: "call-1" } as ToolContext;
+    const ctx = {} as WorkflowToolContext;
     attachWorkflowToolRunContext(ctx, {
+      abortSignal: new AbortController().signal,
       from,
       owner: {
         inbox: "owner-inbox",

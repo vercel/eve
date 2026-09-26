@@ -273,7 +273,8 @@ export async function resolvePendingCoordination(input: {
       result.callId,
       batch.event.turnId,
     );
-    if (record === undefined) continue;
+    // A run that replied is tracked until it finishes, not until its result lands.
+    if (record === undefined || record.replied === true) continue;
     nextSession = removeBlockingWorkflowToolRuns(
       clearProxyInputRequestsWhere(
         nextSession,

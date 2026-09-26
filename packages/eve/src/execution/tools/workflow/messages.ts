@@ -81,14 +81,22 @@ export interface WorkflowToolRunRequestMessage {
   };
 }
 
+/** The run finished. After a reply it only tells the session to stop tracking the run. */
 export interface WorkflowToolRunOutcomeMessage {
   readonly from: WorkflowToolRunRef;
   readonly result: WorkflowToolRunOutcome;
 }
 
+/** `ctx.reply()` settled the call while the run keeps going. */
+export interface WorkflowToolRunReplyMessage {
+  readonly from: WorkflowToolRunRef;
+  readonly output: JsonValue;
+}
+
 export type WorkflowToolRunMessage =
   | ({ readonly kind: "report" } & WorkflowToolRunReport)
   | ({ readonly kind: "request" } & WorkflowToolRunRequestMessage)
+  | ({ readonly kind: "reply" } & WorkflowToolRunReplyMessage)
   | ({ readonly kind: "outcome" } & WorkflowToolRunOutcomeMessage);
 
 export type WorkflowToolRunControlMessage = { readonly kind: "cancel"; readonly reason: string };

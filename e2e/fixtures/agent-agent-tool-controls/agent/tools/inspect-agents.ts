@@ -5,10 +5,7 @@ import {
   type WorkflowToolDefinition,
 } from "eve/tools";
 
-async function execute(
-  _input: Record<string, unknown>,
-  ctx: WorkflowToolContext,
-): Promise<Record<string, WorkflowAgentMetadata>> {
+async function execute(ctx: WorkflowToolContext): Promise<Record<string, WorkflowAgentMetadata>> {
   "use workflow";
 
   return ctx.agents;

@@ -5,12 +5,12 @@ import type { AgentRouterInput } from "#execution/tools/agent-router.js";
 
 /** Routes one task through the complete workflow agent metadata snapshot. */
 export async function executeAgentRouterTool(
-  input: AgentRouterInput,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowToolContext<AgentRouterInput, JsonValue>,
 ): Promise<JsonValue> {
   "use workflow";
 
-  const target = await chooseTarget(input.message, descriptions(ctx), ctx.abortSignal);
+  const { abortSignal, input } = await ctx.receive();
+  const target = await chooseTarget(input.message, descriptions(ctx), abortSignal);
   return ctx.agent(target, { message: input.message });
 }
 

@@ -4,11 +4,11 @@ import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 /** Asks the session's user one question in a workflow dedicated to this tool call. */
 export async function executeAskQuestionTool(
-  input: AskQuestionInput,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowToolContext<AskQuestionInput, AskQuestionOutput>,
 ): Promise<AskQuestionOutput> {
   "use workflow";
 
+  const { input } = await ctx.receive();
   const answer = await ctx.ask(toAskQuestionRequest(input));
   return toAskQuestionOutput(answer);
 }

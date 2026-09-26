@@ -7,8 +7,9 @@ import { createHook, FatalError, getWorkflowMetadata, sleep } from "workflow";
 import { z } from "zod";
 import { publishVerificationGate } from "../../../lib/verification-gate.js";
 
-async function execute({ key }: { key: string }, ctx: WorkflowToolContext) {
+async function execute(ctx: WorkflowToolContext<{ key: string }>) {
   "use workflow";
+  const { key } = (await ctx.receive()).input;
   const gate = createHook<string>({ metadata: { key, sessionId: ctx.session.id } });
   try {
     await publishVerificationGate(ctx.session.id, key, {

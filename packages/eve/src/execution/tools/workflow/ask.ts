@@ -5,7 +5,8 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+import type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
 // `Symbol.for`, not a module-local WeakMap: workflow helpers and body setup may
@@ -13,6 +14,8 @@ import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.j
 const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
 
 export interface WorkflowToolRunContext {
+  /** The call's signal, for framework waits the body starts on the call's behalf. */
+  readonly abortSignal: AbortSignal;
   readonly canRequestInput?: boolean;
   readonly from: WorkflowToolRunRef;
   readonly owner: WorkflowToolRunOwner;
@@ -23,7 +26,7 @@ type WorkflowToolRunContextCarrier = {
 };
 
 export function attachWorkflowToolRunContext(
-  ctx: ToolContext,
+  ctx: WorkflowToolContext,
   context: WorkflowToolRunContext,
 ): void {
   Object.defineProperty(ctx, WORKFLOW_TOOL_RUN_CONTEXT, {
@@ -33,7 +36,7 @@ export function attachWorkflowToolRunContext(
 }
 
 function readWorkflowToolRunContext(
-  ctx: ToolContext,
+  ctx: WorkflowToolContext,
   helper: "agent" | "ask",
 ): WorkflowToolRunContext {
   const context = (ctx as WorkflowToolRunContextCarrier | undefined)?.[WORKFLOW_TOOL_RUN_CONTEXT];
@@ -49,17 +52,21 @@ export function findWorkflowToolRunContext(value: unknown): WorkflowToolRunConte
     : undefined;
 }
 
-export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
+export function readWorkflowToolRunRef(ctx: WorkflowToolContext): WorkflowToolRunRef {
   return readWorkflowToolRunContext(ctx, "agent").from;
 }
 
-export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner {
+export function readWorkflowToolRunOwner(ctx: WorkflowToolContext): WorkflowToolRunOwner {
   return readWorkflowToolRunContext(ctx, "agent").owner;
+}
+
+export function readWorkflowToolRunSignal(ctx: WorkflowToolContext): AbortSignal {
+  return readWorkflowToolRunContext(ctx, "agent").abortSignal;
 }
 
 /** Returns an answer which may be awaited or raced with another workflow operation. */
 export function ask(
-  ctx: ToolContext,
+  ctx: WorkflowToolContext,
   request: ToolInputRequest,
 ): Hook<ToolInputResponse> | Promise<ToolInputResponse> {
   const context = readWorkflowToolRunContext(ctx, "ask");

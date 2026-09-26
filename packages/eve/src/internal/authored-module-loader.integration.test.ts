@@ -133,8 +133,9 @@ export default ${definer}({ description: "Probe", inputSchema: {}, execute: run 
         "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
         "agent/tools/probe.ts": `import { defineWorkflowTool } from "eve/tools";
 import { delegate } from "../lib/delegate";
-export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, async execute(input, ctx) {
+export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "object" }, async execute(ctx) {
   "use workflow";
+  const { input } = await ctx.receive();
   return delegate(ctx, input);
 } });`,
         "agent/lib/delegate.ts": `export async function delegate(ctx, input) { return ctx.agent("researcher", input); }`,

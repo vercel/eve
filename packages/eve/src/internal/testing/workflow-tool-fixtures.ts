@@ -24,23 +24,24 @@ export interface DeployInput {
 }
 
 export async function deployServiceWorkflow(
-  input: DeployInput,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowToolContext<DeployInput>,
 ): Promise<{ readonly callId: string; readonly plan: string; readonly sessionId: string }> {
   "use workflow";
 
+  const { callId, input } = await ctx.receive();
   const plan = await planDeployStep(input.service);
-  return { callId: ctx.callId, plan, sessionId: ctx.session.id };
+  return { callId, plan, sessionId: ctx.session.id };
 }
 
-export async function authorizedDeployWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
+export async function authorizedDeployWorkflow(ctx: WorkflowToolContext<DeployInput>) {
   "use workflow";
+  const { input } = await ctx.receive();
   const plan = await planDeployStep(input.service);
   const authenticatedAs = await authorizedDeployStep(input.service, ctx);
   return { plan, authenticatedAs };
 }
 
-export async function workflowContextMisuseWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
+export async function workflowContextMisuseWorkflow(ctx: WorkflowToolContext<DeployInput>) {
   "use workflow";
   return await readAgentsStep(ctx);
 }
@@ -57,8 +58,9 @@ async function readAgentsStep(ctx: WorkflowToolContext) {
   }
 }
 
-export async function stepReferenceWorkflow(input: DeployInput) {
+export async function stepReferenceWorkflow(ctx: WorkflowToolContext<DeployInput>) {
   "use workflow";
+  const { input } = await ctx.receive();
   const byArgument = await returnStepReference(planDeployStep);
   const byReceiver = await returnStepReference(readServiceStep);
   return {
@@ -123,11 +125,11 @@ async function authorizedDeployStep(service: string, ctx: WorkflowToolContext): 
 }
 
 export async function* confirmDeployWorkflow(
-  input: DeployInput,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowToolContext<DeployInput>,
 ): AsyncGenerator<string, { readonly approved: boolean; readonly service: string }> {
   "use workflow";
 
+  const { input } = await ctx.receive();
   const plan = await planDeployStep(input.service);
   yield "awaiting approval";
   const answer = await ctx.ask({
@@ -143,21 +145,34 @@ export async function* confirmDeployWorkflow(
   return { approved, service: input.service };
 }
 
-export async function failingDeployWorkflow(input: DeployInput): Promise<never> {
+export async function failingDeployWorkflow(ctx: WorkflowToolContext<DeployInput>): Promise<never> {
   "use workflow";
 
+  const { input } = await ctx.receive();
   await planDeployStep(input.service);
   throw new Error(`deploy of ${input.service} exploded`);
 }
 
 export async function* reportingDeployWorkflow(
-  input: DeployInput,
+  ctx: WorkflowToolContext<DeployInput>,
 ): AsyncGenerator<string, { readonly plan: string }> {
   "use workflow";
 
+  const { input } = await ctx.receive();
   const plan = await planDeployStep(input.service);
   yield `planned ${input.service}`;
   return { plan };
+}
+
+/** Replies with the plan, then keeps working; its return value must not replace the reply. */
+export async function replyThenCleanUpWorkflow(
+  ctx: WorkflowToolContext<DeployInput>,
+): Promise<{ readonly cleanedUp: string }> {
+  "use workflow";
+
+  const { input } = await ctx.receive();
+  ctx.reply({ replied: await planDeployStep(input.service) });
+  return { cleanedUp: await releaseStep(input.service) };
 }
 
 async function planDeployStep(service: string): Promise<string> {
@@ -166,14 +181,14 @@ async function planDeployStep(service: string): Promise<string> {
   return `plan:${service}`;
 }
 
-/** Holds in a step until `ctx.abortSignal` fires, then cleans up in `finally`. */
+/** Holds in a step until the call's `abortSignal` fires, then cleans up in `finally`. */
 export async function holdUntilAbortedWorkflow(
-  input: DeployInput,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowToolContext<DeployInput>,
 ): Promise<{ readonly held: boolean }> {
   "use workflow";
+  const { abortSignal, input } = await ctx.receive();
   try {
-    await holdStep(ctx.abortSignal);
+    await holdStep(abortSignal);
     return { held: true };
   } finally {
     await releaseStep(input.service);
@@ -207,10 +222,10 @@ async function releaseStep(service: string): Promise<string> {
 }
 
 export async function askThenRaceWorkflow(
-  input: DeployInput,
-  ctx: WorkflowToolContext,
+  ctx: WorkflowToolContext<DeployInput>,
 ): Promise<{ readonly decided: string; readonly service: string }> {
   "use workflow";
+  const { input } = await ctx.receive();
   const pending = ctx.ask({
     display: "confirmation",
     options: [

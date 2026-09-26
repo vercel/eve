@@ -12,9 +12,10 @@ import { type ReplicaResult, startReplica } from "../lib/fanout.ts";
 export default defineWorkflowTool({
   description: "Plan several deploy replicas in parallel and combine their digests.",
   inputSchema: z.strictObject({ service: z.string() }),
-  async execute({ service }) {
+  async execute(ctx) {
     "use workflow";
 
+    const { service } = (await ctx.receive()).input;
     const replies = [0, 1].map(() => createHook<ReplicaResult>());
     await Promise.all(
       replies.map((reply, replica) => startReplica({ replica, replyTo: reply.token, service })),

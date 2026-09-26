@@ -2,15 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createHook } from "#compiled/@workflow/core/index.js";
 import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
-import type { ToolContext } from "#tools/definition.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({ createHook: vi.fn() }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep: vi.fn() }));
 
 describe("ask", () => {
   it("resolves as unavailable without waiting when the session cannot request input", async () => {
-    const ctx = {} as ToolContext;
+    const ctx = {} as WorkflowToolContext;
     attachWorkflowToolRunContext(ctx, {
+      abortSignal: new AbortController().signal,
       canRequestInput: false,
       from: {
         callId: "call",

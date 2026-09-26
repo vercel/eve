@@ -208,7 +208,7 @@ async function runSessionLoop(
 
   const nextParkedActivity = async (
     expectedAttemptIds: ReadonlySet<string>,
-  ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" }>> => {
+  ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-replied-runs" }>> => {
     while (true) {
       const next = await nextTurnDelivery({
         cursor,
@@ -216,8 +216,18 @@ async function runSessionLoop(
         inbox,
         queue,
       });
-      if (next.kind !== "workflow") return next;
-      await execution.handleWorkflowMessage(next.message);
+      if (next.kind === "workflow") {
+        await execution.handleWorkflowMessage(next.message);
+        continue;
+      }
+      if (next.kind === "cancel-replied-runs") {
+        await cancelDescendantTurnsStep({
+          serializedContext: cursor.serializedContext,
+          sessionState: cursor.sessionState,
+        });
+        continue;
+      }
+      return next;
     }
   };
 

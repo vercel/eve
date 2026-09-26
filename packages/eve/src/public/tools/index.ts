@@ -37,6 +37,7 @@ export {
 export {
   defineWorkflowTool,
   type WorkflowStepToolContext,
+  type WorkflowToolCall,
   type WorkflowToolContext,
   type WorkflowToolDefinition,
   type AgentInput,

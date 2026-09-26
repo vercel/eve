@@ -65,7 +65,7 @@ beforeEach(() => {
   setControl(new AbortController());
   mocks.executeWorkflowBody.mockResolvedValue({
     outcome: { output: "done", status: "completed" },
-    reportCount: 1,
+    messageCount: 1,
   });
 });
 
@@ -136,7 +136,7 @@ it.each(["completed", "failed", "cancelled", "throw", "blocked"] as const)(
       await release.promise;
       if (status === "throw") throw new Error("cleanup failed");
       return {
-        reportCount: 0,
+        messageCount: 0,
         outcome:
           status === "failed"
             ? { status, error: "failed" }
@@ -295,7 +295,7 @@ it("keeps waiting for the body after the control hook closes", async () => {
     handleMessage: mocks.deliver,
   });
   mocks.executeWorkflowBody.mockResolvedValue({
-    reportCount: 0,
+    messageCount: 0,
     outcome: { status: "completed", output: "done" },
   });
   mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
@@ -317,7 +317,7 @@ it("keeps waiting for the body after the control hook closes", async () => {
 
 it("propagates terminal delivery failure instead of replacing the invocation outcome", async () => {
   mocks.executeWorkflowBody.mockResolvedValue({
-    reportCount: 0,
+    messageCount: 0,
     outcome: { status: "completed", output: "done" },
   });
   mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({

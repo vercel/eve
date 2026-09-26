@@ -11,9 +11,10 @@ type Output = {
   result: Awaited<ReturnType<WorkflowToolContext["agent"]>>;
 };
 
-async function execute({ target }: Input, ctx: WorkflowToolContext) {
+async function execute(ctx: WorkflowToolContext<Input>) {
   "use workflow";
 
+  const { target } = (await ctx.receive()).input;
   const description = ctx.agents[target]?.description;
   if (description === undefined) {
     throw new Error(`Missing workflow metadata for internal subagent ${target}.`);

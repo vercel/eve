@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { agentRouter } from "#tools/provided/agent-router.js";
-import { executeAgentRouterTool } from "#execution/tools/agent-router.js";
+import { executeAgentRouterTool, type AgentRouterInput } from "#execution/tools/agent-router.js";
 import { evaluate } from "#ai/evaluate.js";
+import type { JsonValue } from "#shared/json.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 vi.mock("#ai/evaluate.js", () => ({ evaluate: vi.fn() }));
@@ -25,6 +26,7 @@ describe("agentRouter", () => {
     const agent = vi.fn().mockResolvedValue("operated");
     const abortSignal = new AbortController().signal;
     const ctx = workflowContext({
+      message: "Deploy the service",
       abortSignal,
       agent,
       agents: {
@@ -33,9 +35,7 @@ describe("agentRouter", () => {
       },
     });
 
-    await expect(executeAgentRouterTool({ message: "Deploy the service" }, ctx)).resolves.toBe(
-      "operated",
-    );
+    await expect(executeAgentRouterTool(ctx)).resolves.toBe("operated");
     expect(evaluate).toHaveBeenCalledWith({
       abortSignal,
       state: { message: "Deploy the service" },
@@ -56,6 +56,7 @@ describe("agentRouter", () => {
   it("ignores agents without descriptions", async () => {
     const agent = vi.fn().mockResolvedValue("researched");
     const ctx = workflowContext({
+      message: "Investigate",
       agent,
       agents: {
         agent: { description: "" },
@@ -63,9 +64,7 @@ describe("agentRouter", () => {
       },
     });
 
-    await expect(executeAgentRouterTool({ message: "Investigate" }, ctx)).resolves.toBe(
-      "researched",
-    );
+    await expect(executeAgentRouterTool(ctx)).resolves.toBe("researched");
     expect(evaluate).not.toHaveBeenCalled();
     expect(agent).toHaveBeenCalledWith("researcher", { message: "Investigate" });
   });
@@ -73,24 +72,24 @@ describe("agentRouter", () => {
   it("invokes the only available described agent without evaluation", async () => {
     const agent = vi.fn().mockResolvedValue("researched");
     const ctx = workflowContext({
+      message: "Investigate",
       agent,
       agents: { researcher: { description: "Investigate and explain." } },
     });
 
-    await expect(executeAgentRouterTool({ message: "Investigate" }, ctx)).resolves.toBe(
-      "researched",
-    );
+    await expect(executeAgentRouterTool(ctx)).resolves.toBe("researched");
     expect(evaluate).not.toHaveBeenCalled();
     expect(agent).toHaveBeenCalledWith("researcher", { message: "Investigate" });
   });
 
   it("rejects an agent map without descriptions before evaluation", async () => {
     const ctx = workflowContext({
+      message: "Route me",
       agent: vi.fn(),
       agents: { agent: { description: "  " } },
     });
 
-    await expect(executeAgentRouterTool({ message: "Route me" }, ctx)).rejects.toThrow(
+    await expect(executeAgentRouterTool(ctx)).rejects.toThrow(
       "agentRouter requires at least one available agent with a description.",
     );
     expect(evaluate).not.toHaveBeenCalled();
@@ -98,12 +97,19 @@ describe("agentRouter", () => {
 });
 
 function workflowContext(
-  input: Pick<WorkflowToolContext, "agent" | "agents"> &
-    Partial<Pick<WorkflowToolContext, "abortSignal">>,
-): WorkflowToolContext {
-  return {
+  input: Pick<WorkflowToolContext, "agent" | "agents"> & {
+    readonly abortSignal?: AbortSignal;
+    readonly message: string;
+  },
+): WorkflowToolContext<AgentRouterInput, JsonValue> {
+  const call = {
     abortSignal: input.abortSignal ?? new AbortController().signal,
+    callId: "call",
+    input: { message: input.message },
+  };
+  return {
     agent: input.agent,
     agents: input.agents,
-  } as WorkflowToolContext;
+    receive: async () => call,
+  } as never;
 }

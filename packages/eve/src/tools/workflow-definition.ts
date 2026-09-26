@@ -69,7 +69,7 @@ export interface WorkflowAgentMetadata {
 /** Context capabilities available inside an authored `"use step"` helper. */
 export type WorkflowStepToolContext = Pick<
   ToolContext,
-  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
+  "session" | "toolName" | "getToken" | "requireAuth"
 >;
 
 interface WorkflowAgent {
@@ -80,20 +80,48 @@ interface WorkflowAgent {
   (target: string, input: AgentInput): Promise<JsonValue>;
 }
 
+/** One call to a workflow tool, as `ctx.receive()` resolves it. */
+export interface WorkflowToolCall<TInput = unknown> {
+  /** The call's input, validated by the tool's `inputSchema`. */
+  readonly input: TInput;
+  /** Id of the call: the same `callId` carried by the call's stream events. */
+  readonly callId: string;
+  /**
+   * Aborts when the call's work is cancelled. The signal is durable: it
+   * survives replay, steps that receive it observe the abort, and the run
+   * waits a grace period for the body to unwind through `finally`.
+   */
+  readonly abortSignal: AbortSignal;
+}
+
 /**
  * Context supplied to a workflow tool body. When passed directly to a step,
  * eve replaces it with {@link WorkflowStepToolContext}.
  */
-export type WorkflowToolContext = Pick<
+export type WorkflowToolContext<TInput = unknown, TOutput = unknown> = Pick<
   ToolContext,
-  "abortSignal" | "callId" | "session" | "toolName" | "getToken" | "requireAuth"
+  "session" | "toolName" | "getToken" | "requireAuth"
 > & {
   /** Invoke an agent by its invocation name. */
   agent: WorkflowAgent;
   /** Metadata for agents callable by this workflow, including hidden agents. */
   agents: Readonly<Record<string, WorkflowAgentMetadata>>;
-  /** Ask the human on the session's channel; awaiting the answer suspends the run. */
+  /**
+   * Ask the human on the session's channel; awaiting the answer suspends the
+   * run. Throws once the call has been settled with {@link reply}.
+   */
   ask(request: ToolInputRequest): PromiseLike<ToolInputResponse>;
+  /**
+   * Resolves with the tool's call. The call arrives with the run, so the
+   * first `receive()` resolves at once; a second `receive()` throws.
+   */
+  receive(): Promise<WorkflowToolCall<TInput>>;
+  /**
+   * Settles the call with `output` without finishing the run, so the body can
+   * clean up after replying. Returning settles the call only if it has no
+   * reply yet; a later reply or return value is dropped.
+   */
+  reply(output: TOutput): void;
 };
 
 const WORKFLOW_TOOL_BRAND = Symbol.for("eve:workflow-tool-brand");
@@ -104,18 +132,20 @@ export interface WorkflowToolDefinition<
   TOutput = unknown,
 > extends PublicToolDefinition<TInput, TOutput> {
   readonly [WORKFLOW_TOOL_BRAND]: true;
-  execute(input: TInput, ctx: WorkflowToolContext): Promise<TOutput> | AsyncIterable<TOutput>;
+  execute(ctx: WorkflowToolContext<TInput, TOutput>): Promise<TOutput> | AsyncIterable<TOutput>;
   approval?: Approval<unknown extends TInput ? Record<string, unknown> : TInput>;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
 
 type WorkflowReturn<T> = T extends AsyncIterable<infer Output> ? Output : Awaited<T>;
 type Schema = StandardSchemaV1<unknown, unknown> | StandardJSONSchemaV1<unknown, unknown>;
-type Definition<TInput, TReturn> = Omit<
+// `TOutput` types `ctx.reply()`. It can't be inferred from `TReturn`: `execute`'s
+// parameter would then depend on its own return type.
+type Definition<TInput, TReturn, TOutput = unknown> = Omit<
   WorkflowToolDefinition<TInput, WorkflowReturn<TReturn>>,
   typeof WORKFLOW_TOOL_BRAND | "execute"
 > & {
-  execute(input: TInput, ctx: WorkflowToolContext): TReturn;
+  execute(ctx: WorkflowToolContext<TInput, TOutput>): TReturn;
 };
 
 export function defineWorkflowTool<
@@ -126,7 +156,11 @@ export function defineWorkflowTool<
     | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>,
 >(
   definition: Omit<
-    Definition<StandardSchemaV1.InferOutput<TInputSchema>, TReturn>,
+    Definition<
+      StandardSchemaV1.InferOutput<TInputSchema>,
+      TReturn,
+      StandardJSONSchemaV1.InferOutput<TOutputSchema>
+    >,
     "inputSchema" | "outputSchema"
   > & {
     inputSchema: TInputSchema;

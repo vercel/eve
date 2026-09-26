@@ -1,5 +1,4 @@
 import { expect, it, vi } from "vitest";
-import type { ToolContext } from "#tools/definition.js";
 import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 import { executeWorkflowBody, type WorkflowBodyInput } from "#execution/tools/workflow/body.js";
 import { readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
@@ -13,7 +12,7 @@ vi.mock("#execution/tools/workflow/ask.js", async (importOriginal) => ({
 }));
 
 it("defaults agent metadata to an empty registry for older workflow payloads", async () => {
-  mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext) => {
+  mocks.execute.mockImplementation(async (ctx: WorkflowToolContext) => {
     expect(ctx.agents).toEqual({});
     return null;
   });
@@ -58,9 +57,9 @@ it("binds workflow-only methods to the run context", async () => {
   const invocation = { message: "Review" };
   mocks.ask.mockResolvedValue({ optionId: "yes" });
   mocks.agent.mockResolvedValue("reviewed");
-  mocks.execute.mockImplementation(async (_input, ctx: WorkflowToolContext & ToolContext) => {
+  mocks.execute.mockImplementation(async (ctx: WorkflowToolContext) => {
     expect(readWorkflowToolRunRef(ctx).runId).toBe("run");
-    expect(ctx.abortSignal).toBe(signal);
+    expect((await ctx.receive()).abortSignal).toBe(signal);
     expect(ctx.agents).toEqual({ reviewer: { description: "Review deployments." } });
     expect(Object.isFrozen(ctx.agents)).toBe(true);
     expect(Object.isFrozen(ctx.agents.reviewer)).toBe(true);
@@ -72,6 +71,6 @@ it("binds workflow-only methods to the run context", async () => {
   });
   await expect(executeWorkflowBody(input, signal)).resolves.toEqual({
     outcome: { status: "completed", output: { answer: { optionId: "yes" }, result: "reviewed" } },
-    reportCount: 0,
+    messageCount: 0,
   });
 });

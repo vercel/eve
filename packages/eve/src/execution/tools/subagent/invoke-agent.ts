@@ -5,7 +5,11 @@ import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import { readWorkflowToolRunOwner, readWorkflowToolRunRef } from "#execution/tools/workflow/ask.js";
+import {
+  readWorkflowToolRunOwner,
+  readWorkflowToolRunRef,
+  readWorkflowToolRunSignal,
+} from "#execution/tools/workflow/ask.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
@@ -15,8 +19,7 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import type { AgentInput } from "#tools/workflow-definition.js";
-import type { ToolContext } from "#tools/definition.js";
+import type { AgentInput, WorkflowToolContext } from "#tools/workflow-definition.js";
 
 export type InternalAgentInput = {
   readonly agentId?: string;
@@ -56,7 +59,7 @@ export type AgentInvocationReply =
 
 /** Invokes an agent from a workflow tool. */
 export async function agent(
-  ctx: ToolContext,
+  ctx: WorkflowToolContext,
   target: string,
   input: AgentInput,
 ): Promise<JsonValue> {
@@ -72,15 +75,16 @@ export async function agent(
 
 /** Invokes an agent with a framework-selected replay-stable invocation id. */
 export async function invokeAgent(
-  ctx: ToolContext,
+  ctx: WorkflowToolContext,
   input: InternalAgentInput,
   options: { readonly invocationId?: string } = {},
 ): Promise<JsonValue> {
   validateAgentInput(input);
   const run = readWorkflowToolRunRef(ctx);
   const owner = readWorkflowToolRunOwner(ctx);
+  const signal = readWorkflowToolRunSignal(ctx);
   const replies = createHook<AgentInvocationReply>();
-  const invocationId = options.invocationId ?? `${ctx.callId}:${replies.token}`;
+  const invocationId = options.invocationId ?? `${run.callId}:${replies.token}`;
   try {
     await resumeHookStep(owner.inbox, {
       kind: "request",
@@ -91,7 +95,7 @@ export async function invokeAgent(
 
     const iterator = replies[Symbol.asyncIterator]();
     while (true) {
-      const next = await nextAgentReply(iterator, ctx.abortSignal);
+      const next = await nextAgentReply(iterator, signal);
       if (next.done) break;
       const reply = next.value;
       if (reply.kind === "runtime-action-result") {
@@ -109,7 +113,7 @@ export async function invokeAgent(
             });
             // The enclosing workflow cannot finish before its owner applies settlement.
             for (;;) {
-              const acknowledgement = await nextAgentReply(iterator, ctx.abortSignal);
+              const acknowledgement = await nextAgentReply(iterator, signal);
               if (acknowledgement.done)
                 throw new Error(`Agent "${input.target}" closed before settlement.`);
               if (
@@ -166,9 +170,8 @@ export async function invokeAgent(
 
 async function nextAgentReply(
   iterator: AsyncIterator<AgentInvocationReply>,
-  signal: AbortSignal | undefined,
+  signal: AbortSignal,
 ): Promise<IteratorResult<AgentInvocationReply>> {
-  if (signal === undefined) return await iterator.next();
   if (signal.aborted) throw signal.reason;
   let rejectAbort: ((reason: unknown) => void) | undefined;
   const aborted = new Promise<never>((_resolve, reject) => {

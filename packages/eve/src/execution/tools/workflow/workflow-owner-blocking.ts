@@ -22,6 +22,7 @@ export interface BlockingWorkflowOwner {
 export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWorkflowOwner {
   const controller = new AbortController();
   const hook = createHook<WorkflowToolRunControlMessage>({ token: input.hookToken });
+  let replied = false;
   return {
     commands: createChannelReader("control", hook),
     signal: controller.signal,
@@ -30,9 +31,11 @@ export function createBlockingWorkflow(input: WorkflowToolRunInput): BlockingWor
         controller.abort(new WorkflowToolRunCancelledError(message.reason));
     },
     handleMessage(message: WorkflowToolRunMessage) {
-      return resumeHookStep(input.owner.inbox, message, {
-        ifPresent: message.kind === "outcome" && message.result.status === "cancelled",
-      });
+      // Once the call has its reply, the session may end before the run does.
+      const ifPresent =
+        replied || (message.kind === "outcome" && message.result.status === "cancelled");
+      if (message.kind === "reply") replied = true;
+      return resumeHookStep(input.owner.inbox, message, { ifPresent });
     },
   };
 }

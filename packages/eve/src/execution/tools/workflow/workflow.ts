@@ -28,7 +28,7 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
     awaitBodyResult(executeWorkflowBody({ ...input, owner: inbox.owner }, signal)),
   );
   let commandsOpen = true;
-  let consumedReports = 0;
+  let relayedMessages = 0;
   let bodyResult: WorkflowBodyResult | undefined;
   let cleanupDeadline: Promise<"cancel"> | undefined;
   let outcome: WorkflowToolRunOutcome | undefined;
@@ -40,8 +40,8 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
     if (
       // Wait for the body to produce its final outcome.
       bodyResult !== undefined &&
-      // Persisted reports must also finish delivery before settlement.
-      consumedReports >= bodyResult.reportCount &&
+      // Delivered reports and replies must also be relayed before settlement.
+      relayedMessages >= bodyResult.messageCount &&
       // Handle buffered commands, especially cancellation, before publishing the outcome.
       owner.commands.landed.length === 0 &&
       // Propagate a command-read failure instead of hiding it behind completion.
@@ -85,9 +85,10 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
       bodyResult = read.next.value;
       continue;
     }
-    if (read.next.value.kind === "outcome") continue;
-    if (read.next.value.kind === "report") consumedReports += 1;
-    await owner.handleMessage(read.next.value);
+    const message = read.next.value;
+    if (message.kind === "outcome") continue;
+    if (message.kind === "report" || message.kind === "reply") relayedMessages += 1;
+    await owner.handleMessage(message);
   }
   // Cleanup cannot undo cancellation, even when the body returns success.
   if (signal.aborted) {

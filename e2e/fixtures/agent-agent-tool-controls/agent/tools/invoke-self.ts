@@ -4,7 +4,7 @@ import {
   type WorkflowToolDefinition,
 } from "eve/tools";
 
-async function execute(_input: Record<string, unknown>, ctx: WorkflowToolContext) {
+async function execute(ctx: WorkflowToolContext) {
   "use workflow";
 
   return ctx.agent("agent", { message: "E2E_INTERNAL_ROOT_COPY" });

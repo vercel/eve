@@ -3,15 +3,21 @@ import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { SessionStateMap } from "#harness/types.js";
 
 export const WORKFLOW_TOOL_RUNS_STATE_KEY = "eve.workflowTool";
-// Version 4 records only runs a turn waits on; earlier versions also held session-owned runs.
+// Version 4 records calls a turn waits on and runs finishing after a reply; earlier
+// versions also held session-owned runs.
 const WORKFLOW_TOOL_RUNS_VERSION = 4;
 
-/** One workflow tool call the originating turn waits on. */
+/**
+ * One workflow tool run the session tracks: a call its originating turn waits
+ * on, or, once `replied`, a run still finishing after `ctx.reply()` settled
+ * its call. Cancellation and session end stop both.
+ */
 export interface BlockingWorkflowToolRun {
   readonly callId: string;
   readonly toolName: string;
   readonly origin: { readonly turnId: string; readonly stepIndex: number };
   readonly address: { readonly runId: string; readonly hookToken: string };
+  readonly replied?: true;
 }
 
 interface WorkflowToolRunRegistry {
@@ -34,7 +40,8 @@ function isWorkflowToolRun(value: unknown): value is BlockingWorkflowToolRun {
     value.origin.stepIndex >= 0 &&
     isObject(value.address) &&
     isNonEmptyString(value.address.runId) &&
-    isNonEmptyString(value.address.hookToken)
+    isNonEmptyString(value.address.hookToken) &&
+    (value.replied === undefined || value.replied === true)
   );
 }
 
@@ -133,7 +140,42 @@ export function registerWorkflowToolRun<T extends { readonly state?: SessionStat
   return { ...session, state: writeRegistry(session.state, { ...registry, runs }) };
 }
 
-/** Removes this turn's waiting calls, or only one of them when `callId` is given. */
+/** Runs a cancellation stops: the turn's calls and every run finishing after a reply. */
+export function getCancellableWorkflowToolRuns(
+  state: SessionStateMap | undefined,
+  turnId: string,
+): readonly BlockingWorkflowToolRun[] {
+  return readRegistry(state).runs.filter(
+    (entry) => entry.origin.turnId === turnId || entry.replied === true,
+  );
+}
+
+/** The tracked run that sent a message, or `undefined` once the session stopped tracking it. */
+export function findSendingWorkflowToolRun(
+  state: SessionStateMap | undefined,
+  from: { readonly callId: string; readonly runId: string; readonly turnId: string },
+): BlockingWorkflowToolRun | undefined {
+  const record = findBlockingWorkflowToolRun(state, from.callId, from.turnId);
+  return record?.address.runId === from.runId ? record : undefined;
+}
+
+export function hasRepliedWorkflowToolRuns(state: SessionStateMap | undefined): boolean {
+  return readRegistry(state).runs.some((entry) => entry.replied === true);
+}
+
+/** Keeps tracking a run whose call `ctx.reply()` settled until the run finishes. */
+export function markWorkflowToolRunReplied<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  record: BlockingWorkflowToolRun,
+): T {
+  const registry = readRegistry(session.state);
+  const runs = registry.runs.map((entry) =>
+    entry.address.runId === record.address.runId ? { ...entry, replied: true as const } : entry,
+  );
+  return { ...session, state: writeRegistry(session.state, { ...registry, runs }) };
+}
+
+/** Removes this turn's tracked runs, or only one of them when `callId` is given. */
 export function removeBlockingWorkflowToolRuns<T extends { readonly state?: SessionStateMap }>(
   session: T,
   turnId: string,

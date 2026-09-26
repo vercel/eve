@@ -2,6 +2,7 @@
 // the framework entry rather than the public `agent()` which derives ids from a
 // user-supplied key. This is the only internal import rule 42 permits here.
 import { invokeAgent } from "#execution/tools/subagent/invoke-agent.js";
+import type { WorkflowToolContext } from "#tools/workflow-definition.js";
 
 type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 interface JsonObject {
@@ -16,10 +17,10 @@ export interface SubagentWorkflowInput {
 
 /** Shared execute body for local, remote, dynamic, and self-agent tools. */
 export async function subagentToolExecuteWorkflow(
-  input: SubagentWorkflowInput,
-  ctx: Parameters<typeof invokeAgent>[0],
+  ctx: WorkflowToolContext<SubagentWorkflowInput>,
 ): Promise<unknown> {
   "use workflow";
+  const { callId, input } = await ctx.receive();
   const invocation = {
     ...(typeof input.agentId === "string" && input.agentId.trim() !== ""
       ? { agentId: input.agentId }
@@ -28,5 +29,5 @@ export async function subagentToolExecuteWorkflow(
     outputSchema: input.outputSchema as JsonObject | undefined,
     target: ctx.toolName,
   };
-  return await invokeAgent(ctx, invocation, { invocationId: ctx.callId });
+  return await invokeAgent(ctx, invocation, { invocationId: callId });
 }

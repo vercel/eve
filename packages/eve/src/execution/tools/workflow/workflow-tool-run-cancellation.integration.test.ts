@@ -44,7 +44,7 @@ describe("workflow tool cancellation", () => {
         const commandToken = sessionCommandHookToken(run.runId);
         await resumeSessionInbox(commandToken, { kind: "cancel", turnId: "turn_0" });
 
-        // The body is holding in a step that received ctx.abortSignal, so the
+        // The body is holding in a step that received the call's abortSignal, so the
         // run ends well inside its grace period once the step rejects and
         // `finally` runs; a run that ignored the signal would still be running.
         expect(await waitForWorkflowToolRunTerminal(workflowToolRunId)).toBe("completed");

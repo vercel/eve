@@ -8,9 +8,10 @@ import {
 export default defineWorkflowTool({
   description: "Run a blocking local or remote subagent HITL/authorization probe.",
   inputSchema: workflowAgentProbeInputSchema,
-  async execute(input, ctx) {
+  async execute(ctx) {
     "use workflow";
 
+    const { input } = await ctx.receive();
     return await executeWorkflowAgentProbe(input, ctx);
   },
 });

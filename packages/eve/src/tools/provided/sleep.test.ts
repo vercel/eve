@@ -30,7 +30,8 @@ describe("sleep", () => {
         }),
     );
     const definition = sleep();
-    const output = definition.execute({ seconds: 2.5001 }, {} as never);
+    const receive = async () => ({ input: { seconds: 2.5001 } });
+    const output = definition.execute({ receive } as never);
 
     await vi.waitFor(() => {
       expect(workflowSleep).toHaveBeenCalledExactlyOnceWith(2_501);

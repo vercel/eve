@@ -27,7 +27,10 @@ import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
-import { isInboxToolResultFromRecordedWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import {
+  findSendingWorkflowToolRun,
+  isInboxToolResultFromRecordedWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { isInboxSubagentResultFromRunningHandle } from "#subagents/handles/query.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
@@ -72,9 +75,24 @@ export class SessionExecution {
   async runTurn(delivery: TurnStepPayload | undefined): Promise<TurnOutcome> {
     const turn = new ActiveTurn(this.input, delivery?.delivery?.caller?.callId);
     try {
-      return await this.runTurnSteps(turn, delivery);
+      const outcome = await this.runTurnSteps(turn, delivery);
+      await this.handleRepliedRunMessages(turn);
+      return outcome;
     } finally {
       turn.dispose();
+    }
+  }
+
+  /**
+   * A run that replied keeps working after the turn stops waiting on it, so
+   * the turn can admit its messages, such as its final outcome, outside any
+   * wait. They still reach the session.
+   */
+  private async handleRepliedRunMessages(turn: ActiveTurn): Promise<void> {
+    for (const message of turn.takeWorkflowMessages()) {
+      const state = this.input.cursor.sessionState.snapshot.session.state;
+      const sender = findSendingWorkflowToolRun(state, message.from);
+      if (sender?.replied === true) await this.handleWorkflowMessage(message);
     }
   }
 
@@ -340,6 +358,15 @@ class ActiveTurn {
     }
     if (steering.length === 0) return undefined;
     return steering.length === 1 ? steering[0] : coalesceDeliveries(steering);
+  }
+
+  /** Removes the workflow messages admitted but not consumed by a runtime wait. */
+  takeWorkflowMessages(): WorkflowToolRunMessage[] {
+    const messages: WorkflowToolRunMessage[] = [];
+    for (const event of this.runtimeResults.splice(0)) {
+      if (event !== "cancelled" && event.kind === "workflow") messages.push(event.message);
+    }
+    return messages;
   }
 
   /** Next runtime result or workflow message, admitting inbox traffic while waiting. */

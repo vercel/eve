@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 59,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 59],
+    current: 60,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 60],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -40,7 +40,13 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       26: "Background tools now use task yield descriptors",
       27: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       28: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
+      29: "Workflow tool bodies are now execute(ctx) and read input, callId, and abortSignal from ctx.receive(); ctx.callId and ctx.abortSignal were removed.",
+      30: "Workflow tool bodies are now execute(ctx) and read input, callId, and abortSignal from ctx.receive(); ctx.callId and ctx.abortSignal were removed.",
+      31: "Workflow tool bodies are now execute(ctx) and read input, callId, and abortSignal from ctx.receive(); ctx.callId and ctx.abortSignal were removed.",
+      32: "Workflow tool bodies are now execute(ctx) and read input, callId, and abortSignal from ctx.receive(); ctx.callId and ctx.abortSignal were removed.",
       33: "ctx.agent now accepts the subagent name as its first argument, derives invocation identity internally, and infers structured output types",
+      34: "Workflow tool bodies are now execute(ctx) and read input, callId, and abortSignal from ctx.receive(); ctx.callId and ctx.abortSignal were removed.",
+      35: "Workflow tool bodies are now execute(ctx) and read input, callId, and abortSignal from ctx.receive(); ctx.callId and ctx.abortSignal were removed.",
       36: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
       37: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
       38: "experimental_workflow and eve/tools/workflow were removed; migrate to the workflow factory from eve/tools/workflow",
@@ -59,9 +65,12 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       51: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       52: "Background defineTool and TaskExec were removed; use defineWorkflowTool for durable background work.",
       53: "Sandbox sessions no longer expose core identity and mutable networking is provider-specific.",
+      54: "Workflow tool bodies are now execute(ctx) and read input, callId, and abortSignal from ctx.receive(); ctx.callId and ctx.abortSignal were removed.",
+      55: "Workflow tool bodies are now execute(ctx) and read input, callId, and abortSignal from ctx.receive(); ctx.callId and ctx.abortSignal were removed.",
       56: "SandboxSession no longer exposes setNetworkPolicy; pass the configured environment to ctx.getSandbox(environment) to access network policy capabilities",
       57: "agentRouter() no longer accepts a model-facing outputSchema; structured subagent output is requested only through ctx.agent().",
       58: "Workflow tools no longer accept execution or return background task receipts; every call blocks until it settles.",
+      59: "Workflow tool bodies are now execute(ctx) and read input, callId, and abortSignal from ctx.receive(); ctx.callId and ctx.abortSignal were removed.",
     },
   },
   dynamicTool: {

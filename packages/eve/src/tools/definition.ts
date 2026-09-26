@@ -161,13 +161,7 @@ export type ToolInputResponse =
  * `defineWorkflowTool`.
  */
 export type ToolContext = SessionContext & {
-  /**
-   * Aborts when the work this tool is doing is cancelled: the active turn
-   * for an ordinary tool, the durable run for a workflow tool. In a workflow
-   * body the signal is durable — it survives replay and steps that receive it
-   * observe the abort — and the run waits a grace period for the body to
-   * unwind through `finally` before it ends.
-   */
+  /** Aborts when the active turn cancels the work this tool is doing. */
   readonly abortSignal: AbortSignal;
   /**
    * Id of the current tool call — the same `callId` carried by the call's

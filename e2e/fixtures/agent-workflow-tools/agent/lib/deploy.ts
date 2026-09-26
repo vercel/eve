@@ -3,10 +3,11 @@ import { sleep } from "workflow";
 
 import { describePlan, hashPlan } from "@/agent/lib/plan.ts";
 
-export async function deployService({ service }: { service: string }, ctx: WorkflowToolContext) {
+export async function deployService(ctx: WorkflowToolContext<{ service: string }>) {
   "use workflow";
 
-  const plan = describePlan(service);
+  const { input } = await ctx.receive();
+  const plan = describePlan(input.service);
   const digest = await hashPlan(plan);
   await sleep("50ms");
   return { digest, plan, tool: ctx.toolName };

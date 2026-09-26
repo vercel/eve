@@ -14,6 +14,7 @@ import {
   confirmDeployWorkflow,
   deployServiceWorkflow,
   failingDeployWorkflow,
+  replyThenCleanUpWorkflow,
   reportingDeployWorkflow,
   stepReferenceWorkflow,
   workflowContextMisuseWorkflow,
@@ -96,6 +97,31 @@ describe("workflow tools", () => {
 
     expect(output).toContain('"plan":"plan:api"');
     expect(output).toContain('"callId":"call_deploy_service');
+  });
+
+  it("settles the call with ctx.reply() and drops the later return value", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-reply",
+      execute: replyThenCleanUpWorkflow,
+      toolName: "deploy_service",
+    });
+
+    const output = await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "schedule:workflow-tool-reply",
+          }),
+        },
+      ]);
+      return String(await readFirstTurnReply(run));
+    });
+
+    expect(output).toContain('"replied":"plan:api"');
+    expect(output).not.toContain("cleanedUp");
   });
 
   it("fails workflow-context misuse in a step with actionable guidance", async () => {

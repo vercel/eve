@@ -9,6 +9,7 @@ import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import { hasRepliedWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
@@ -16,6 +17,7 @@ export type NextTurnInstruction =
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
+  | { readonly kind: "cancel-replied-runs" }
   | TurnSelection;
 
 /**
@@ -61,5 +63,12 @@ export async function nextTurnDelivery(input: {
     freshSequence =
       wasIdle && admitted.kind === "delivery" ? admitted.admission.sequence : undefined;
     if (admitted.kind === "workflow") return { kind: "workflow", message: admitted.message };
+    // No turn is running, but a workflow tool run that replied may still be working.
+    if (
+      admitted.kind === "cancel" &&
+      hasRepliedWorkflowToolRuns(cursor.sessionState.snapshot.session.state)
+    ) {
+      return { kind: "cancel-replied-runs" };
+    }
   }
 }
