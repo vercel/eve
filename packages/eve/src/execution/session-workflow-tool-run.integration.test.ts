@@ -18,7 +18,7 @@ const CANCEL_STEP =
 const RELEASE_STEP =
   "step//./src/execution/tools/subagent/invoke-step//releaseAgentInvocationOwnerStep";
 
-it("does not persist session state in cleanup steps for a workflow tool with no agent handles", async () => {
+it("skips cleanup steps for a workflow tool with no agent handles", async () => {
   const runtime = await createWorkflowToolRuntime({
     agentName: "workflow-tool-without-agent-handles",
     execute: deployServiceWorkflow,
@@ -47,6 +47,11 @@ it("does not persist session state in cleanup steps for a workflow tool with no 
     const cancelCreated = findStepEvent(events, "step_created", CANCEL_STEP);
     const releaseCreated = findStepEvent(events, "step_created", RELEASE_STEP);
     const releaseCompleted = findStepEvent(events, "step_completed", RELEASE_STEP);
+    expect([cancelCreated, releaseCreated, releaseCompleted]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
 
     const hasSessionState = [
       await stepArgumentsIncludeSessionState(cancelCreated, run.runId),

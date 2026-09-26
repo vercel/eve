@@ -9,7 +9,8 @@ import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/task-cancel.js";
-import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";
+import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/state-key.js";
+import { releaseAgentInvocationOwnerHandles } from "#subagents/handles/query.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import {
   workflowToolRunOutcomeToToolResult,
@@ -67,21 +68,40 @@ async function handleWorkflowToolRunOutcome(
 
   const result = workflowToolRunOutcomeToToolResult(message);
 
-  // A failed or cancelled workflow may leave an agent invocation unfinished.
-  await cancelAgentInvocationOwnerStep({
-    ownerId: message.from.runId,
-    serializedContext: cursor.serializedContext,
-    sessionState: cursor.sessionState,
-  });
-  const released = await releaseAgentInvocationOwnerStep({
+  // Keep durable cleanup steps limited to the handles being cancelled.
+  const cleanup = releaseAgentInvocationOwnerHandles(cursor.sessionState.snapshot.session.state, {
     cancelled: message.result.status === "cancelled",
     ownerId: message.from.runId,
-    sessionState: cursor.sessionState,
   });
-  await cursor.apply({
-    serializedContext: cursor.serializedContext,
-    sessionState: released.sessionState,
-  });
+  if (cleanup.claimedHandles.length > 0) {
+    await cancelAgentInvocationOwnerStep({
+      ownerId: message.from.runId,
+      handles: cleanup.claimedHandles,
+      ...(cleanup.claimedHandles.some((handle) => handle.address.kind === "agent/remote")
+        ? { serializedContext: cursor.serializedContext }
+        : {}),
+    });
+  }
+  if (cleanup.handles !== undefined) {
+    const sessionState = cursor.sessionState;
+    const session = sessionState.snapshot.session;
+    await cursor.apply({
+      serializedContext: cursor.serializedContext,
+      sessionState: {
+        ...sessionState,
+        snapshot: {
+          ...sessionState.snapshot,
+          session: {
+            ...session,
+            state: {
+              ...session.state,
+              [AGENT_HANDLES_STATE_KEY]: { handles: cleanup.handles },
+            },
+          },
+        },
+      },
+    });
+  }
 
   return isInboxToolResultFromRecordedWorkflowToolRun(
     cursor.sessionState.snapshot.session.state,

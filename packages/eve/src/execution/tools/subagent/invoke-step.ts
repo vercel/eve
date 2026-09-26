@@ -35,7 +35,6 @@ import {
   type TaskOwnedAgentHandle,
 } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
-import { abandonAgentInvocationOwners } from "#subagents/handles/transitions.js";
 import {
   AGENT_BUSY,
   AGENT_MISMATCH,
@@ -491,29 +490,6 @@ export async function settleTaskAgentInvocationStep(input: {
     completion,
     serializedContext,
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
-  };
-}
-
-/** Releases any child leases still owned by a completed workflow-tool run. */
-export async function releaseAgentInvocationOwnerStep(input: {
-  readonly cancelled?: boolean;
-  readonly ownerId: string;
-  readonly sessionState: DurableSessionState;
-}): Promise<{ readonly sessionState: DurableSessionState }> {
-  "use step";
-
-  const durable = readDurableSession(input.sessionState);
-  const session = input.cancelled
-    ? abandonAgentInvocationOwners(durable, new Set([input.ownerId]))
-    : applyTaskAgentHandleCommand(durable, {
-        kind: "release-owner",
-        ownerId: input.ownerId,
-      }).session;
-  return {
-    sessionState:
-      session === durable
-        ? input.sessionState
-        : replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };
 }
 

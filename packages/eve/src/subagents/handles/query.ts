@@ -22,6 +22,47 @@ function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHan
   return Array.isArray(handles) ? (handles as readonly AgentHandle[]) : [];
 }
 
+type WorkflowToolRunClaimedHandle = Pick<
+  Extract<AgentHandle, { phase: "claimed" }>,
+  "address" | "identity"
+>;
+
+/** Releases a workflow-tool run's handles without importing the Zod-backed store transitions. */
+export function releaseAgentInvocationOwnerHandles(
+  state: SessionStateMap | undefined,
+  input: { readonly cancelled: boolean; readonly ownerId: string },
+): {
+  readonly claimedHandles: readonly WorkflowToolRunClaimedHandle[];
+  readonly handles?: readonly AgentHandle[];
+} {
+  const handles = readAgentHandles(state);
+  const ownedHandles = handles.filter(
+    (handle) =>
+      (handle.phase === "reserved" || handle.phase === "claimed") &&
+      handle.ownerId === input.ownerId,
+  );
+  const claimedHandles = ownedHandles.flatMap((handle) =>
+    handle.phase === "claimed" ? [{ address: handle.address, identity: handle.identity }] : [],
+  );
+  if (ownedHandles.length === 0) return { claimedHandles };
+
+  const updatedHandles = handles.flatMap((handle): readonly AgentHandle[] => {
+    if (handle.phase === "reserved" && handle.ownerId === input.ownerId) return [];
+    if (handle.phase !== "claimed" || handle.ownerId !== input.ownerId) return [handle];
+    return [
+      input.cancelled
+        ? {
+            address: handle.address,
+            identity: handle.identity,
+            lastStatus: "(cancelled)",
+            phase: "parked",
+          }
+        : { address: handle.address, identity: handle.identity, phase: "available" },
+    ];
+  });
+  return { claimedHandles, handles: updatedHandles };
+}
+
 /**
  * Finds the running agent handle a child-produced result must settle: the
  * handle whose recorded operation carries the result's callId.
