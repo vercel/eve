@@ -52,10 +52,12 @@ interface MessageStreamAppendEventsByVersion {
     | MessageAppendedStreamEventV24
     | ReasoningAppendedStreamEventV24;
   "25": ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent;
+  "26": ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent;
 }
 
 export type MessageStreamVersion = keyof MessageStreamAppendEventsByVersion;
-type LegacyMessageStreamVersion = Exclude<MessageStreamVersion, "25">;
+type DeltaMessageStreamVersion = "25" | "26";
+type LegacyMessageStreamVersion = Exclude<MessageStreamVersion, DeltaMessageStreamVersion>;
 
 type VersionIndependentMessageStreamEvent = Exclude<
   UnstampedMessageStreamEvent,
@@ -94,7 +96,11 @@ export function normalizeMessageStreamEvent(
         event as MessageStreamEventForVersion<LegacyMessageStreamVersion>,
       );
     case "25":
-      return validateCurrentMessageStreamEvent(event as MessageStreamEventForVersion<"25">);
+    case "26":
+      return validateDeltaMessageStreamEvent(
+        version,
+        event as MessageStreamEventForVersion<DeltaMessageStreamVersion>,
+      );
     default:
       return assertNever(version);
   }
@@ -184,30 +190,32 @@ function normalizeLegacyMessageStreamEvent(
   return event;
 }
 
-function validateCurrentMessageStreamEvent(
-  event: MessageStreamEventForVersion<"25">,
+function validateDeltaMessageStreamEvent(
+  version: DeltaMessageStreamVersion,
+  event: MessageStreamEventForVersion<DeltaMessageStreamVersion>,
 ): MessageStreamEvent {
   if (event.type === "message.appended") {
-    assertCurrentAppendDelta(event.data.messageDelta, "message");
-    assertUnsupportedAppendField(event.data, "messageOffset", "message");
-    assertUnsupportedAppendField(event.data, "messageSoFar", "message");
+    assertAppendDelta(event.data.messageDelta, "message", version);
+    assertUnsupportedAppendField(event.data, "messageOffset", "message", version);
+    assertUnsupportedAppendField(event.data, "messageSoFar", "message", version);
   } else if (event.type === "reasoning.appended") {
-    assertCurrentAppendDelta(event.data.reasoningDelta, "reasoning");
-    assertUnsupportedAppendField(event.data, "reasoningOffset", "reasoning");
-    assertUnsupportedAppendField(event.data, "reasoningSoFar", "reasoning");
+    assertAppendDelta(event.data.reasoningDelta, "reasoning", version);
+    assertUnsupportedAppendField(event.data, "reasoningOffset", "reasoning", version);
+    assertUnsupportedAppendField(event.data, "reasoningSoFar", "reasoning", version);
   } else if (event.type === "action.input.appended") {
-    assertCurrentAppendDelta(event.data.inputTextDelta, "action input");
-    assertUnsupportedAppendField(event.data, "inputTextOffset", "action input");
+    assertAppendDelta(event.data.inputTextDelta, "action input", version);
+    assertUnsupportedAppendField(event.data, "inputTextOffset", "action input", version);
   }
   return event;
 }
 
-function assertCurrentAppendDelta(
+function assertAppendDelta(
   delta: unknown,
   stream: "action input" | "message" | "reasoning",
+  version: DeltaMessageStreamVersion,
 ): void {
   if (typeof delta !== "string") {
-    throw new TypeError(`Invalid ${stream} append delta for stream version 25.`);
+    throw new TypeError(`Invalid ${stream} append delta for stream version ${version}.`);
   }
 }
 
@@ -215,9 +223,10 @@ function assertUnsupportedAppendField(
   data: object,
   field: string,
   stream: "action input" | "message" | "reasoning",
+  version: DeltaMessageStreamVersion,
 ): void {
   if (field in data) {
-    throw new TypeError(`Invalid ${stream} append shape for stream version 25.`);
+    throw new TypeError(`Invalid ${stream} append shape for stream version ${version}.`);
   }
 }
 

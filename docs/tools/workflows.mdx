@@ -267,9 +267,13 @@ Each call is a task with its own id, `<tool>-<6 characters>`:
   `task` tool. See [`task_wait` and `task_cancel`](/docs/concepts/built-in-tools#task_wait-and-task_cancel).
 - **Turn end:** a turn can't end while tasks it started are working. When the model ends such a
   turn, eve waits as `task_wait` would, appends the results, and calls the model again in the same
-  turn. A `final_output` call made while tasks work returns an error naming them. The held text
-  step reports `finishReason: "tool-calls"` on `message.completed`, so channels don't post it as
-  the reply.
+  turn. A `final_output` call made while tasks work returns an error naming them. `turn.completed`
+  comes only when the turn really ends.
+- **Held turns:** in a root session, the model's text before the wait completes as an ordinary
+  message, and the stream emits `session.waiting` with the held `turnId`. The person can keep
+  writing; their messages steer the same turn. In a child session or a schedule's session, the
+  held text step reports `finishReason: "tool-calls"` on `message.completed`, so channels post
+  only the final reply.
 - **Steering:** a new message ends a `task_wait` but never interrupts a task. The model reads the
   message and decides whether to keep or cancel each task.
 - **Cancellation:** `task_cancel`, `session.cancel()`, a failed turn, and the end of the session

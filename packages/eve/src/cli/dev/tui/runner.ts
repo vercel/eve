@@ -2499,6 +2499,8 @@ async function* eveEventsToTUIStream(
 
       case "session.waiting":
       case "session.completed":
+        // A held turn's waiting boundary leaves the turn open; keep rendering it.
+        if (!isCurrentTurnBoundaryEvent(event)) break;
         turnState.boundaryEvent = event.type;
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
         yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);

@@ -27,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "25";
+export const EVE_MESSAGE_STREAM_VERSION = "26";
 
 /** Version of transport control records understood by this eve release. */
 export const EVE_STREAM_CONTROL_VERSION = "1";
@@ -784,6 +784,13 @@ export interface SessionWaitingStreamEvent {
   data: {
     /** Channel-local continuation token, or the immutable session ID for an ID-only session. */
     continuationToken: string;
+    /**
+     * The held turn, when a root session's turn waits on its working tasks.
+     * The turn stays open and resumes under this ID when a task settles or
+     * its principal writes; `turn.completed` follows only at its real end.
+     * Absent between turns.
+     */
+    turnId?: string;
     wait: "next-user-message";
   };
   type: "session.waiting";
@@ -880,14 +887,12 @@ const textEncoder = new TextEncoder();
 
 /**
  * Returns true when the current stream has reached a turn boundary or terminal
- * session outcome.
+ * session outcome. A held turn's `session.waiting` names the turn, which is
+ * still open, so it is not a boundary.
  */
 export function isCurrentTurnBoundaryEvent(event: UnstampedMessageStreamEvent): boolean {
-  return (
-    event.type === "session.completed" ||
-    event.type === "session.failed" ||
-    event.type === "session.waiting"
-  );
+  if (event.type === "session.waiting") return event.data.turnId === undefined;
+  return event.type === "session.completed" || event.type === "session.failed";
 }
 
 /**
@@ -1828,6 +1833,15 @@ export function createSessionWaitingEvent(
     },
     type: "session.waiting",
   };
+}
+
+/**
+ * Creates the `session.waiting` event for a root session's held turn: the
+ * model's interim message is complete and the turn waits on its tasks.
+ */
+export function createHeldTurnWaitingEvent(turnId: string): SessionWaitingStreamEvent {
+  const waiting = createSessionWaitingEvent();
+  return { ...waiting, data: { ...waiting.data, turnId } };
 }
 
 /**

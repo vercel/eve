@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ClientSession } from "#client/session.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import {
+  createSessionWaitingEvent,
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/message.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -11,7 +15,7 @@ function turn(sequence: number, message: string, deliveryId: string) {
     { type: "turn.started", data },
     { type: "message.completed", data: { ...data, message, finishReason: "stop" } },
     { type: "turn.completed", data },
-    { type: "session.waiting" },
+    createSessionWaitingEvent(),
   ].map((event, index) => ({
     ...event,
     meta: {

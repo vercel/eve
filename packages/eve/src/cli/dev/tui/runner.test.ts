@@ -15,6 +15,7 @@ import { stampTestEvent } from "#internal/testing/events.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import {
+  createSessionWaitingEvent,
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_VERSION_HEADER,
   type UnstampedMessageStreamEvent,
@@ -208,7 +209,7 @@ describe("registryHandoffAddress", () => {
             ],
           },
         },
-        { type: "session.waiting" },
+        createSessionWaitingEvent(),
       ]),
     );
     vi.spyOn(session, "respond").mockImplementationOnce(async () => {
@@ -707,7 +708,7 @@ describe("EveTUIRunner agent header", () => {
         }
       }),
     };
-    const session = sessionYielding([{ type: "session.waiting" }]);
+    const session = sessionYielding([createSessionWaitingEvent()]);
 
     const runner = new EveTUIRunner({
       session,
@@ -756,7 +757,7 @@ describe("EveTUIRunner agent header", () => {
       renderAgentHeader: (header) => headers.push(header),
       renderStream: vi.fn(async () => {}),
     };
-    const session = sessionYielding([{ type: "session.waiting" }]);
+    const session = sessionYielding([createSessionWaitingEvent()]);
 
     const runner = new EveTUIRunner({
       session,
@@ -796,7 +797,7 @@ describe("EveTUIRunner agent header", () => {
       "fetch",
       vi.fn(async () => await revisionResponse.promise),
     );
-    const session = sessionYielding([{ type: "session.waiting" }]);
+    const session = sessionYielding([createSessionWaitingEvent()]);
     const prompts: Array<Promise<string | undefined> | string | undefined> = [
       prompt.promise,
       undefined,
@@ -1409,7 +1410,7 @@ describe("EveTUIRunner idle session follow", () => {
         } as UnstampedMessageStreamEvent);
       })(),
     );
-    const replacement = sessionYielding([{ type: "session.waiting" }]);
+    const replacement = sessionYielding([createSessionWaitingEvent()]);
     const createSession = mockSessionCreation(client, replacement);
     const prompt = createDeferred<string | undefined>();
     const prompts: Array<Promise<string | undefined> | string | undefined> = [
@@ -1453,7 +1454,7 @@ describe("EveTUIRunner idle session follow", () => {
       previousSessionId: "session-a",
       status: "reset",
     });
-    const sessionB = sessionYielding([{ type: "session.waiting" }]);
+    const sessionB = sessionYielding([createSessionWaitingEvent()]);
     const createSession = mockSessionCreation(client, sessionB);
     const firstPrompt = createDeferred<string | undefined>();
     const prompts: Array<Promise<string | undefined> | string | undefined> = [
@@ -1577,11 +1578,11 @@ describe("EveTUIRunner development session continuity", () => {
   });
 
   it("starts a fresh session only after an explicit /reset command", async () => {
-    const initialSession = sessionYielding([{ type: "session.waiting" }]);
+    const initialSession = sessionYielding([createSessionWaitingEvent()]);
     const reset = vi
       .spyOn(initialSession, "reset")
       .mockResolvedValue({ previousSessionId: "session_1", status: "reset" });
-    const newSession = sessionYielding([{ type: "session.waiting" }]);
+    const newSession = sessionYielding([createSessionWaitingEvent()]);
     const client = stubClient();
     const createSession = mockSessionCreation(client, newSession);
     const prompts: Array<string | undefined> = ["first", "/reset", "second", undefined];
@@ -1804,7 +1805,7 @@ describe("EveTUIRunner development session continuity", () => {
   });
 
   it("resets rather than sending a queued /reset after a turn boundary", async () => {
-    const initialSession = sessionYielding([{ type: "session.waiting" }]);
+    const initialSession = sessionYielding([createSessionWaitingEvent()]);
     const reset = vi
       .spyOn(initialSession, "reset")
       .mockResolvedValue({ previousSessionId: "session_1", status: "reset" });
@@ -1955,7 +1956,7 @@ describe("EveTUIRunner delayed dev build errors", () => {
     const session = stubSession();
     vi.spyOn(session, "send").mockImplementation(async () => {
       calls.push("send");
-      return messageResponseOf([{ type: "session.waiting" }]);
+      return messageResponseOf([createSessionWaitingEvent()]);
     });
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async () => prompts.shift()),
@@ -1983,7 +1984,7 @@ describe("EveTUIRunner delayed dev build errors", () => {
     };
 
     const runner = new EveTUIRunner({
-      session: sessionYielding([{ type: "session.waiting" }]),
+      session: sessionYielding([createSessionWaitingEvent()]),
       renderer,
       name: "Weather Agent",
     });
@@ -2005,7 +2006,7 @@ describe("EveTUIRunner /traces", () => {
     };
 
     const runner = new EveTUIRunner({
-      session: sessionYielding([{ type: "session.waiting" }]),
+      session: sessionYielding([createSessionWaitingEvent()]),
       renderer,
       name: "Weather Agent",
       appRoot: "/tmp/weather-agent",
@@ -2038,7 +2039,7 @@ describe("EveTUIRunner /traces", () => {
     };
 
     const runner = new EveTUIRunner({
-      session: sessionYielding([{ type: "session.waiting" }]),
+      session: sessionYielding([createSessionWaitingEvent()]),
       renderer,
       name: "Weather Agent",
     });
@@ -2132,7 +2133,7 @@ describe("EveTUIRunner initial input", () => {
   it("sends startup messages queued while the agent builds", async () => {
     const client = stubClient();
     vi.spyOn(client, "info").mockResolvedValue(AGENT_INFO);
-    const session = sessionYielding([{ type: "session.waiting" }]);
+    const session = sessionYielding([createSessionWaitingEvent()]);
     const startup = {
       finish: vi.fn(() => ({
         draft: "still editing",
@@ -2162,7 +2163,7 @@ describe("EveTUIRunner initial input", () => {
   it("seeds only the first prompt's editable buffer with --input text", async () => {
     const seenOptions: Array<AgentTUISessionOptions | undefined> = [];
     const prompts: Array<string | undefined> = ["edited and sent", undefined];
-    const session = sessionYielding([{ type: "session.waiting" }]);
+    const session = sessionYielding([createSessionWaitingEvent()]);
 
     const renderer: AgentTUIRenderer = {
       readPrompt: vi.fn(async (options?: AgentTUISessionOptions) => {
@@ -2221,11 +2222,11 @@ describe("EveTUIRunner native continuation state", () => {
               ],
             },
           },
-          { type: "session.waiting" },
+          createSessionWaitingEvent(),
         ],
         [
           { type: "approval.candidate", data: { requestId: "request-1", outcome } },
-          { type: "session.waiting" },
+          createSessionWaitingEvent(),
         ],
         [
           { type: "approval.settled", data: { requestId: "request-1", outcome: "cancelled" } },
@@ -2233,7 +2234,7 @@ describe("EveTUIRunner native continuation state", () => {
             type: "input.resolved",
             data: { resolutions: [{ requestId: "request-1", outcome: "cancelled" }] },
           },
-          { type: "session.waiting" },
+          createSessionWaitingEvent(),
         ],
       ]);
       const readToolApproval = vi
@@ -3316,7 +3317,7 @@ describe("EveTUIRunner remote authentication", () => {
         order.push("verified");
         return AGENT_INFO;
       });
-    const session = sessionYielding([{ type: "session.waiting" }]);
+    const session = sessionYielding([createSessionWaitingEvent()]);
     const renderer = fakeRenderer({
       setupFlow: idleSetupFlow(),
       readPrompt: vi
@@ -4504,7 +4505,7 @@ describe("EveTUIRunner command outcome rendering", () => {
 
 describe("EveTUIRunner mid-turn message queue", () => {
   it("submits the queued prompt as the next turn without reading the prompt", async () => {
-    const session = sessionYielding([{ type: "session.waiting" }]);
+    const session = sessionYielding([createSessionWaitingEvent()]);
     const queued: Array<string | undefined> = ["queued follow-up", undefined];
     const prompts: Array<string | undefined> = ["hello", undefined];
     const renderer = fakeRenderer({
@@ -4578,7 +4579,7 @@ describe("EveTUIRunner mid-turn message queue", () => {
               } as UnstampedMessageStreamEvent,
               1,
             );
-            yield stampTestEvent({ type: "session.waiting" } as UnstampedMessageStreamEvent, 2);
+            yield stampTestEvent(createSessionWaitingEvent(), 2);
           },
           sessionId: "session_test",
         }),
@@ -4621,7 +4622,7 @@ describe("EveTUIRunner mid-turn message queue", () => {
   it("drops a cancel request that arrives after the turn boundary", async () => {
     const session = sessionYielding([
       { type: "turn.started", data: { turnId: "turn-1", sequence: 1 } },
-      { type: "session.waiting" },
+      createSessionWaitingEvent(),
     ]);
     const cancel = vi
       .spyOn(session, "cancel")
@@ -4648,7 +4649,7 @@ describe("EveTUIRunner mid-turn message queue", () => {
 
 describe("EveTUIRunner session id reporting", () => {
   it("pushes the accepted session id and keeps it sticky across /reset", async () => {
-    const session = sessionYielding([{ type: "session.waiting" }]);
+    const session = sessionYielding([createSessionWaitingEvent()]);
     vi.spyOn(session, "state", "get").mockReturnValue({
       sessionId: "session_test",
       streamIndex: 0,
@@ -4770,7 +4771,7 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
         },
       },
       { type: "turn.cancelled", data: { turnId: "turn-1", sequence: 2 } },
-      { type: "session.waiting" },
+      createSessionWaitingEvent(),
     ]);
     const view = {
       begin: vi.fn(),

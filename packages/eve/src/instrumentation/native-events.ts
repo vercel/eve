@@ -1,4 +1,4 @@
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { isCurrentTurnBoundaryEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { contextStorage } from "#context/container.js";
 import { instrumentChannelDelivery } from "#instrumentation/channel-delivery.js";
 import type {
@@ -320,6 +320,8 @@ function toLifecycleEvent(
       };
     case "session.completed":
     case "session.waiting":
+      // A held turn's waiting boundary leaves the turn open, so the session hasn't settled.
+      if (!isCurrentTurnBoundaryEvent(event)) return undefined;
       return {
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
         sessionId: input.sessionId,

@@ -259,10 +259,11 @@ interface EmittedStreamContent {
 interface StreamActionEmissionOptions {
   readonly excludedActionToolNames: ReadonlySet<string>;
   /**
-   * The turn's tasks are working, so a text step can't end the turn: it
-   * reports `"tool-calls"` and channels don't post it as the reply.
+   * A child's or schedule's turn is held while its tasks work, so a text step
+   * can't end it: the step reports `"tool-calls"` and channels don't post it
+   * as the reply.
    */
-  readonly holdsTurn?: boolean;
+  readonly hidesHeldText?: boolean;
   readonly tools: HarnessToolMap;
 }
 
@@ -302,12 +303,12 @@ export async function emitStreamContent(
   }
 }
 
-/** A held turn's text step isn't the turn's reply, so it reports `"tool-calls"` as channels expect. */
+/** A hidden held turn's text step isn't its reply, so it reports `"tool-calls"` as channels expect. */
 function reportedFinishReason(
   finishReason: AssistantStepFinishReason,
-  holdsTurn: boolean,
+  hidesHeldText: boolean,
 ): AssistantStepFinishReason {
-  if (holdsTurn && finishReason === "stop") return "tool-calls";
+  if (hidesHeldText && finishReason === "stop") return "tool-calls";
   return finishReason;
 }
 
@@ -679,7 +680,7 @@ async function consumeStreamContent(
   if (finishReason !== "content-filter" && currentMessage.trim().length > 0) {
     await emitFn(
       createMessageCompletedEvent({
-        finishReason: reportedFinishReason(finishReason, options?.holdsTurn === true),
+        finishReason: reportedFinishReason(finishReason, options?.hidesHeldText === true),
         message: currentMessage,
         sequence: state.sequence,
         stepIndex: state.stepIndex,
