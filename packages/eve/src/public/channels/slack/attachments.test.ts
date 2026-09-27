@@ -349,6 +349,19 @@ describe("createSlackFetchFile", () => {
     });
     expect(globalSpy).not.toHaveBeenCalled();
   });
+
+  it("rejects the HTML login page Slack serves without the files:read scope", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<!DOCTYPE html><html><body>Sign in to Slack</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      }),
+    );
+
+    const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
+
+    await expect(fetchFile("https://files.slack.com/private.csv")).rejects.toThrow(/files:read/);
+  });
 });
 
 describe("collectInboundFileParts", () => {
