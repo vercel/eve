@@ -1,6 +1,6 @@
 # @eve/code Extension Package
 
-This private package is the source of the `eve/extensions/code` extension for CLI-based coding work. It contributes one patch editing primitive, computer use, an authenticated `gh` tool, sandbox `grep`, shared PR-watch primitives, investigation and PR skills, instruction fragments, a read-only worker subagent, Connect-backed authentication hooks, and consumer sandbox helpers. Durable `prwatch` / `prwatch_delete` wrappers currently live beside e0's consumer mount because eve workflow directives are application-only.
+This private package is the source of the `eve/extensions/code` extension for CLI-based coding work. It contributes one patch editing primitive, an authenticated `gh` tool, sandbox `grep`, shared PR-watch primitives, investigation and PR skills, instruction fragments, a read-only worker subagent, Connect-backed authentication hooks, and consumer sandbox helpers. Durable `prwatch` / `prwatch_delete` wrappers currently live beside e0's consumer mount because eve workflow directives are application-only.
 
 Before writing code, read the installed eve package docs for extensions, hooks, tools, skills, subagents, and sandboxes as applicable.
 
@@ -12,7 +12,7 @@ Before writing code, read the installed eve package docs for extensions, hooks, 
 - Use real `git`, `gh`, and `vc` CLIs rather than bespoke repository lifecycle tools.
 - Keep `apply_patch` as the only extension-owned file editing primitive.
 - Keep shared implementation under `extension/lib/`; filesystem paths define contribution names.
-- Preserve the computer-use sandbox exports in `extension/lib/sandbox.ts`.
+- Computer use lives in `@eve/cua` (`eve/extensions/cua`). Keep the deprecated computer-use re-exports in `extension/lib/sandbox.ts` until they are removed; do not add computer-use code here.
 
 ## Build and publish
 

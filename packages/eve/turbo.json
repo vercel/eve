@@ -3,13 +3,25 @@
   "tasks": {
     "build": {
       "dependsOn": ["$TURBO_EXTENDS$"],
-      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/packages/eve-code/extension/**"]
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-cua/extension/**"
+      ]
     },
     "build:types": {
-      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/packages/eve-code/extension/**"]
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-cua/extension/**"
+      ]
     },
     "typecheck": {
-      "inputs": ["$TURBO_EXTENDS$", "$TURBO_ROOT$/packages/eve-code/extension/**"]
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-cua/extension/**"
+      ]
     }
   }
 }

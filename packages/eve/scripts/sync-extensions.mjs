@@ -1,9 +1,10 @@
 /**
- * Copies the private `@eve/code` extension tree into `src/extensions/code/extension`
- * so eve compiles and ships it as the `eve/extensions/code` built-in extension.
- * `@eve/code` stays the source of truth; the copy is gitignored. eve cannot
- * depend on `@eve/code` (which depends on eve), so the sibling workspace path is
- * read directly and declared as a turbo input in `turbo.json`.
+ * Copies the private extension packages into `src/extensions/<name>/extension`
+ * so eve compiles and ships them as built-in extensions: `@eve/code` becomes
+ * `eve/extensions/code` and `@eve/cua` becomes `eve/extensions/cua`. The
+ * packages stay the source of truth; the copies are gitignored. eve cannot
+ * depend on them (they depend on eve), so the sibling workspace paths are read
+ * directly and declared as turbo inputs in `turbo.json`.
  */
 import { cp, mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
@@ -12,21 +13,30 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { acquireLock, releaseLock } from "./vendor-compiled/_shared.mjs";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
-const source = join(packageRoot, "..", "eve-code", "extension");
 
-export const codeExtensionTarget = join(packageRoot, "src", "extensions", "code", "extension");
+export const builtInExtensions = [
+  { name: "code", source: join(packageRoot, "..", "eve-code", "extension") },
+  { name: "cua", source: join(packageRoot, "..", "eve-cua", "extension") },
+].map((extension) => ({
+  ...extension,
+  target: join(packageRoot, "src", "extensions", extension.name, "extension"),
+}));
 
 // Turbo runs several eve tasks at once and each one syncs; rewriting an
 // identical tree would delete files a peer task is already compiling or testing.
-export async function syncCodeExtension() {
-  const lockPath = join(packageRoot, ".generated", "code-extension.lock");
+export async function syncExtensions() {
+  for (const extension of builtInExtensions) await syncExtension(extension);
+}
+
+async function syncExtension({ name, source, target }) {
+  const lockPath = join(packageRoot, ".generated", `${name}-extension.lock`);
   await mkdir(dirname(lockPath), { recursive: true });
   await acquireLock(lockPath);
   try {
-    if (await sameTree(source, codeExtensionTarget)) return;
-    await rm(codeExtensionTarget, { recursive: true, force: true });
-    await mkdir(dirname(codeExtensionTarget), { recursive: true });
-    await cp(source, codeExtensionTarget, { recursive: true });
+    if (await sameTree(source, target)) return;
+    await rm(target, { recursive: true, force: true });
+    await mkdir(dirname(target), { recursive: true });
+    await cp(source, target, { recursive: true });
   } finally {
     await releaseLock(lockPath);
   }
@@ -53,5 +63,5 @@ async function listFiles(root) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await syncCodeExtension();
+  await syncExtensions();
 }

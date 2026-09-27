@@ -1,12 +1,12 @@
 # eve/extensions/code
 
-`eve/extensions/code` is an eve extension for coding work. It contributes `apply_patch`, computer use, `gh`, `grep`, investigation and PR skills, a read-only worker subagent, sandbox tooling, and shared PR-watch primitives. Vercel credentials are brokered before each turn; GitHub credentials are scoped to one repository and leased for each `gh` tool invocation. Because eve workflow directives are application-only, consumers own their `prwatch` / `prwatch_delete` workflow tools.
+`eve/extensions/code` is an eve extension for coding work. It contributes `apply_patch`, `gh`, `grep`, investigation and PR skills, a read-only worker subagent, sandbox tooling, and shared PR-watch primitives. Vercel credentials are brokered before each turn; GitHub credentials are scoped to one repository and leased for each `gh` tool invocation. Because eve workflow directives are application-only, consumers own their `prwatch` / `prwatch_delete` workflow tools.
 
 It ships inside the `eve` package. This private `@eve/code` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/extensions/code/extension` and publishes it with these entry points:
 
 - `eve/extensions/code`: the extension
 - `eve/extensions/code/sandbox`: sandbox bootstrap and credential helpers
-- `eve/extensions/code/tools`: `apply_patch`, `computer_use`, `gh`, and `grep`
+- `eve/extensions/code/tools`: `apply_patch`, `gh`, and `grep`
 - `eve/extensions/code/prwatch`: PR-watch primitives for consumer-owned workflow tools
 
 ## Mount
@@ -29,35 +29,26 @@ The read-only worker subagent defaults to `openai/gpt-5.6-terra-fast` with `xhig
 
 ## Sandbox bootstrap
 
-Install CLI tooling and computer-use assets in the environment's `prepare` callback, then start the desktop and driver after `open()` in `defineSandbox()`. Computer use requires an apt-based Linux image with root or passwordless sudo; it cannot run on the `just-bash` provider.
+Install CLI tooling in the environment's `prepare` callback:
 
 ```ts
 // agent/sandbox.ts
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
-import {
-  installCodeTooling,
-  installComputerUse,
-  startComputerUse,
-} from "eve/extensions/code/sandbox";
+import { installCodeTooling } from "eve/extensions/code/sandbox";
 
 export const environment = VercelSandbox.environment({
   prepare: async (sandbox) => {
     await installCodeTooling(sandbox, { vercel: true });
-    await installComputerUse(sandbox);
   },
 });
 
-export default defineSandbox(async () => {
-  const sandbox = await environment.open();
-  await startComputerUse(sandbox);
-  return sandbox;
-});
+export default defineSandbox(() => environment.open());
 ```
 
 eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers, so upgrading eve alone does not rebuild an existing prepared artifact.
 
-Mounting the extension exposes `computer_use` but does not install or start its driver. The prepared artifact captures files, not running processes; the `defineSandbox()` selector starts the driver once for each new durable sandbox. If the driver exits or the provider resumes only filesystem state, call `startComputerUse` again before using the tool; resuming a sandbox does not rerun the selector. Stop recordings with `record_stop` to finalize the MP4 at the returned sandbox path. A five-minute watchdog also finalizes forgotten recordings, and the driver attempts finalization on `SIGINT` or `SIGTERM`; abrupt VM termination cannot guarantee a finalized MP4.
+Computer use lives in `eve/extensions/cua`. Mount it next to this extension when the sandbox has a desktop. `installComputerUse`, `startComputerUse`, and `COMPUTER_USE_REVALIDATION_KEY` are still re-exported from `eve/extensions/code/sandbox`, and `computer_use` from `eve/extensions/code/tools`, but both are deprecated.
 
 Preparation ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commit`, and installs TypeScript diagnostics. For repositories requiring verified signatures, stage the intended changes and use `gh-signed-commit`.
 

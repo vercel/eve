@@ -87,11 +87,12 @@ export {
   type BrokeredCredentialOptions,
 } from "./credentials.ts";
 
+/** @deprecated Import from `eve/extensions/cua/sandbox` and mount `eve/extensions/cua`. */
 export {
   COMPUTER_USE_REVALIDATION_KEY,
   installComputerUse,
   startComputerUse,
-} from "./computer-use-sandbox.ts";
+} from "eve/extensions/cua/sandbox";
 
 export {
   executeGitHubShell,

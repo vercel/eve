@@ -1905,6 +1905,25 @@ importers:
         specifier: npm:typescript@6.0.3
         version: typescript@6.0.3
 
+  packages/eve-cua:
+    dependencies:
+      eve:
+        specifier: workspace:*
+        version: link:../eve
+      zod:
+        specifier: 'catalog:'
+        version: 4.5.4
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.3
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      typescript-compiler:
+        specifier: npm:typescript@6.0.3
+        version: typescript@6.0.3
+
   packages/eve-self-modification:
     dependencies:
       eve:

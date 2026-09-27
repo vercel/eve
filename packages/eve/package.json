@@ -368,6 +368,24 @@
       "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
       "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
     },
+    "./extensions/cua": {
+      "eve-source": "./dist/src/extensions/cua/extension/extension.js",
+      "types": "./dist/src/extensions/cua/extension/extension.d.ts",
+      "import": "./dist/src/extensions/cua/extension/extension.js",
+      "default": "./dist/src/extensions/cua/extension/extension.js"
+    },
+    "./extensions/cua/tools": {
+      "eve-source": "./dist/src/extensions/cua/tools.js",
+      "types": "./dist/src/extensions/cua/tools.d.ts",
+      "import": "./dist/src/extensions/cua/tools.js",
+      "default": "./dist/src/extensions/cua/tools.js"
+    },
+    "./extensions/cua/sandbox": {
+      "eve-source": "./dist/src/extensions/cua/extension/lib/sandbox.js",
+      "types": "./dist/src/extensions/cua/extension/lib/sandbox.d.ts",
+      "import": "./dist/src/extensions/cua/extension/lib/sandbox.js",
+      "default": "./dist/src/extensions/cua/extension/lib/sandbox.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
@@ -618,6 +636,9 @@
       },
       "./extensions/code": {
         "dist": "./dist/src/extensions/code/extension"
+      },
+      "./extensions/cua": {
+        "dist": "./dist/src/extensions/cua/extension"
       }
     }
   }
