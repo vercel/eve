@@ -201,10 +201,12 @@ interface PendingInputBatch {
   readonly id: string;
   readonly rawRequestIds: Readonly<Record<string, string>>;
   readonly requests: Readonly<Record<string, InputRequest>>;
+  readonly rootOwned: boolean;
 }
 
 function pendingInputBatch(
   event: Extract<HandleMessageStreamEvent, { type: "input.requested" }>,
+  rootTurnId: string | undefined,
 ): PendingInputBatch {
   const rawRequestIds: Record<string, string> = {};
   const requests: Record<string, InputRequest> = {};
@@ -213,7 +215,12 @@ function pendingInputBatch(
     rawRequestIds[requestId] = request.requestId;
     requests[requestId] = { ...request, requestId };
   }
-  return { id: event.meta.id, rawRequestIds, requests };
+  return {
+    id: event.meta.id,
+    rawRequestIds,
+    requests,
+    rootOwned: rootTurnId === undefined || event.data.turnId === rootTurnId,
+  };
 }
 
 /**
@@ -236,7 +243,7 @@ function withoutResolved(
   }
   return Object.keys(rawRequestIds).length === 0
     ? undefined
-    : { id: batch.id, rawRequestIds, requests };
+    : { id: batch.id, rawRequestIds, requests, rootOwned: batch.rootOwned };
 }
 
 interface ResolvedInputBatch {
@@ -256,9 +263,10 @@ function foldInputBatches(events: readonly HandleMessageStreamEvent[]): {
   let pending: PendingInputBatch | undefined;
   let requested: PendingInputBatch | undefined;
   let resolved: ResolvedInputBatch | undefined;
+  let rootTurnId: string | undefined;
   for (const event of events) {
     if (event.type === "input.requested") {
-      requested = pendingInputBatch(event);
+      requested = pendingInputBatch(event, rootTurnId);
       pending = requested;
     } else if (event.type === "input.resolved") {
       if (requested === undefined) continue;
@@ -269,7 +277,8 @@ function foldInputBatches(events: readonly HandleMessageStreamEvent[]): {
       resolved = { batch: requested, responses };
       if (pending !== undefined) pending = withoutResolved(pending, event.data.resolutions);
     } else if (event.type === "turn.started") {
-      pending = undefined;
+      if (pending?.rootOwned === true) pending = undefined;
+      rootTurnId = event.data.turnId;
     }
   }
   return { pending, resolved };
@@ -319,19 +328,23 @@ function projectInvocation(
   events: readonly HandleMessageStreamEvent[],
 ): AgentInvocation {
   const authorizations = new Map<string, AgentInvocationAuthorizationRequest>();
+  const rootAuthorizations = new Set<string>();
+  let rootTurnId: string | undefined;
   let inputBatch: PendingInputBatch | undefined;
   let result: JsonValue | undefined;
   let settled: "completed" | "cancelled" | InvocationFailureEvent | undefined;
   for (const event of events) {
     switch (event.type) {
       case "turn.started":
-        authorizations.clear();
-        inputBatch = undefined;
+        for (const name of rootAuthorizations) authorizations.delete(name);
+        rootAuthorizations.clear();
+        rootTurnId = event.data.turnId;
+        if (inputBatch?.rootOwned === true) inputBatch = undefined;
         result = undefined;
         settled = undefined;
         break;
       case "input.requested":
-        inputBatch = pendingInputBatch(event);
+        inputBatch = pendingInputBatch(event, rootTurnId);
         break;
       case "input.resolved":
         if (inputBatch !== undefined) {
@@ -356,10 +369,16 @@ function projectInvocation(
           authorization.webhookUrl = event.data.webhookUrl;
         }
         authorizations.set(event.data.name, authorization);
+        if (rootTurnId === undefined || event.data.turnId === rootTurnId) {
+          rootAuthorizations.add(event.data.name);
+        } else {
+          rootAuthorizations.delete(event.data.name);
+        }
         break;
       }
       case "authorization.completed":
         authorizations.delete(event.data.name);
+        rootAuthorizations.delete(event.data.name);
         settled = undefined;
         break;
       case "message.completed":

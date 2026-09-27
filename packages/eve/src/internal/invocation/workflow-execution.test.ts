@@ -470,6 +470,103 @@ describe("WorkflowAgentInvocationExecution", () => {
     });
   });
 
+  it("clears a root authorization when the parent starts another turn", async () => {
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        {
+          type: "turn.started",
+          data: { sequence: 0, turnId: "root_1" },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_root_1" },
+        } as HandleMessageStreamEvent,
+        {
+          type: "authorization.required",
+          data: {
+            description: "Sign in to GitHub",
+            name: "github",
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "root_1",
+          },
+          meta: { at: "2026-07-20T00:00:01.000Z", id: "event_root_auth" },
+        } as HandleMessageStreamEvent,
+        {
+          type: "turn.started",
+          data: { sequence: 1, turnId: "root_2" },
+          meta: { at: "2026-07-20T00:00:02.000Z", id: "event_root_2" },
+        } as HandleMessageStreamEvent,
+        ...turnSettledEvents("root_2"),
+      ]),
+    );
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({ status: "completed" });
+  });
+
+  it("preserves and accepts background task input after the parent starts another turn", async () => {
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    const events: HandleMessageStreamEvent[] = [
+      {
+        type: "turn.started",
+        data: { sequence: 0, turnId: "root_1" },
+        meta: { at: "2026-07-20T00:00:00.000Z", id: "event_root_1" },
+      } as HandleMessageStreamEvent,
+      inputRequestedEvent("event_task_input", ["question"], "task_turn"),
+      {
+        type: "turn.started",
+        data: { sequence: 1, turnId: "root_2" },
+        meta: { at: "2026-07-20T00:00:02.000Z", id: "event_root_2" },
+      } as HandleMessageStreamEvent,
+      ...turnSettledEvents("root_2"),
+    ];
+    getReadable.mockImplementation(() => eventStream(events));
+    deliver.mockResolvedValue({ sessionId: "wrun_invocation" });
+    const requestId = invocationInputRequestId("event_task_input", "question");
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({
+      inputRequests: { [requestId]: { prompt: "Answer question", requestId } },
+      status: "input_required",
+    });
+    await expect(
+      execution().update({
+        auth,
+        invocationId: "wrun_invocation",
+        responses: [{ requestId, text: "yes" }],
+      }),
+    ).resolves.toMatchObject({ type: "success" });
+    expect(deliver).toHaveBeenCalledWith(
+      { inputResponses: [{ requestId: "question", text: "yes" }] },
+      { auth },
+    );
+  });
+
+  it("clears root input when the parent starts another turn", async () => {
+    runsGet.mockResolvedValue(run({ status: "running" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        {
+          type: "turn.started",
+          data: { sequence: 0, turnId: "root_1" },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_root_1" },
+        } as HandleMessageStreamEvent,
+        inputRequestedEvent("event_root_input", ["question"], "root_1"),
+        {
+          type: "turn.started",
+          data: { sequence: 1, turnId: "root_2" },
+          meta: { at: "2026-07-20T00:00:02.000Z", id: "event_root_2" },
+        } as HandleMessageStreamEvent,
+        ...turnSettledEvents("root_2"),
+      ]),
+    );
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({ status: "completed" });
+  });
+
   it.each([
     {
       events: [inputRequestedEvent("event_1", ["question"])],
@@ -732,7 +829,11 @@ function run(input: { error?: unknown; ownerKey?: string; status: string }) {
   };
 }
 
-function inputRequestedEvent(id: string, requestIds: readonly string[]): HandleMessageStreamEvent {
+function inputRequestedEvent(
+  id: string,
+  requestIds: readonly string[],
+  turnId = "turn_1",
+): HandleMessageStreamEvent {
   return {
     data: {
       requests: requestIds.map((requestId) => ({
@@ -748,7 +849,7 @@ function inputRequestedEvent(id: string, requestIds: readonly string[]): HandleM
       })),
       sequence: 0,
       stepIndex: 0,
-      turnId: "turn_1",
+      turnId,
     },
     meta: { at: "2026-07-20T00:00:00.000Z", id },
     type: "input.requested",
