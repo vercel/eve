@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 
@@ -251,6 +252,98 @@ describe("session callback route", () => {
       ],
     });
   });
+
+  it.each([
+    {
+      label: "live cancellation reply hook",
+      error: undefined,
+      lifecycle: "parked",
+      result: { kind: "cancelled" },
+      status: 202,
+    },
+    {
+      label: "cancellation without a callback token",
+      error: new HookNotFoundError("tok123"),
+      lifecycle: "parked",
+      result: { kind: "cancelled" },
+      status: 400,
+      token: "",
+    },
+    {
+      label: "disposed cancellation reply hook",
+      error: new HookNotFoundError("tok123"),
+      lifecycle: "parked",
+      result: { kind: "cancelled" },
+      status: 202,
+    },
+    {
+      label: "unrelated hook failure during cancellation",
+      error: new Error("storage unavailable"),
+      lifecycle: "parked",
+      result: { kind: "cancelled" },
+      status: 404,
+    },
+    {
+      label: "missing hook for a successful turn",
+      error: new HookNotFoundError("tok123"),
+      lifecycle: "parked",
+      result: { kind: "succeeded", output: "done" },
+      status: 404,
+    },
+    {
+      label: "missing hook for a failed turn",
+      error: new HookNotFoundError("tok123"),
+      lifecycle: "parked",
+      result: { kind: "failed", error: "failed" },
+      status: 404,
+    },
+    {
+      label: "missing hook for a terminal cancellation",
+      error: new HookNotFoundError("tok123"),
+      lifecycle: "terminal",
+      result: { kind: "cancelled" },
+      status: 404,
+    },
+    {
+      label: "malformed cancellation outcome",
+      error: new HookNotFoundError("tok123"),
+      lifecycle: "parked",
+      result: { kind: "cancelled", unexpected: true },
+      status: 400,
+    },
+  ])(
+    "handles $label without hiding other callback failures",
+    async ({ error, lifecycle, result, status, token = "tok123" }) => {
+      if (error === undefined) resumeHookMock.mockResolvedValue(undefined);
+      else resumeHookMock.mockRejectedValue(error);
+      const response = await handleSessionCallbackRequest(
+        new Request("https://app.example.com/eve/v1/callback/tok123", {
+          body: JSON.stringify({
+            callId: "cancelled-call",
+            error: "The agent invocation was cancelled.",
+            kind: "turn.failed",
+            outcome: {
+              kind: lifecycle,
+              result,
+              usageDelta: {
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+                inputTokens: 0,
+                outputTokens: 0,
+              },
+            },
+            subagentName: "research",
+          }),
+          method: "POST",
+        }),
+        createRouteContext({ token }),
+      );
+
+      expect(response.status).toBe(status);
+      expect(resumeHookMock).toHaveBeenCalledTimes(status === 400 ? 0 : 1);
+      await expect(response.json()).resolves.toMatchObject({ ok: status === 202 });
+    },
+  );
 
   it("rejects a turn callback without an outcome envelope", async () => {
     const response = await handleSessionCallbackRequest(
