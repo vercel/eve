@@ -58,7 +58,9 @@ export function agentActivationAttributes(input: {
     "agent.turn.id": input.turnId,
     "agent.turn.sequence": input.turn.sequence,
     "gen_ai.agent.name": input.agentName,
+    "gen_ai.input.messages": input.turn.inputMessagesAttribute,
     "gen_ai.operation.name": "invoke_agent",
+    "gen_ai.output.messages": input.turn.outputMessagesAttribute,
     ...agentSpanNamingAttributes(agentInvocationSpanName(input.agentName), "invoke_agent"),
     ...agentTraceIdentityAttributes({
       rootSessionId: input.turn.rootSessionId,

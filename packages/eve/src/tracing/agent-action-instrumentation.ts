@@ -121,6 +121,11 @@ export function createAgentActionInstrumentation(input: {
       workflowName === undefined
         ? AGENT_SPAN_NAMES.action
         : workflowInvocationSpanName(workflowName);
+    const genAiOperation = invocation
+      ? "invoke_agent"
+      : workflowName === undefined
+        ? "workflow"
+        : "invoke_workflow";
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
         AGENT_SPAN_NAMES.action,
@@ -134,20 +139,13 @@ export function createAgentActionInstrumentation(input: {
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
-            ...agentSpanNamingAttributes(
-              spanName,
-              workflowName === undefined ? undefined : "invoke_workflow",
-            ),
+            "gen_ai.operation.name": genAiOperation,
+            ...agentSpanNamingAttributes(spanName, genAiOperation),
             ...agentTraceIdentityAttributes({
               rootSessionId: state.rootSessionId,
               sessionId: state.sessionId,
             }),
-            ...(workflowName === undefined
-              ? undefined
-              : {
-                  "gen_ai.operation.name": "invoke_workflow",
-                  "gen_ai.workflow.name": workflowName,
-                }),
+            ...(workflowName === undefined ? undefined : { "gen_ai.workflow.name": workflowName }),
             ...(invocation
               ? {
                   "gen_ai.agent.name": state.name,
