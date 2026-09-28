@@ -86,6 +86,45 @@ describe("estimateTokens", () => {
     expect(estimateTokens(large)).toBeGreaterThan(estimateTokens(small));
   });
 
+  it("does not estimate projected image data as text before provider usage is available", () => {
+    const imageResult = (callId: string, bytes: number): ModelMessage => ({
+      content: [
+        {
+          output: {
+            type: "content",
+            value: [
+              {
+                data: { data: Buffer.alloc(bytes).toString("base64"), type: "data" },
+                mediaType: "image/jpeg",
+                type: "file",
+              },
+            ],
+          },
+          toolCallId: callId,
+          toolName: "readPage",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    });
+    const messages: ModelMessage[] = [
+      { content: "Read two scanned pages.", role: "user" },
+      { content: "Reading page one.", role: "assistant" },
+      imageResult("call-1", 214_964),
+      { content: "Reading page two.", role: "assistant" },
+      imageResult("call-2", 265_418),
+    ];
+    const compaction: CompactionConfig = {
+      lastKnownInputTokens: 43_895,
+      lastKnownPromptMessageCount: 1,
+      recentWindowSize: 2,
+      threshold: 200_000,
+    };
+
+    expect(getInputTokenCount(messages, compaction)).toBeLessThan(200_000);
+    expect(shouldCompact(messages, compaction)).toBe(false);
+  });
+
   it("counts all content parts including reasoning", () => {
     // The simplified estimator uses JSON.stringify(messages).length / 4 with
     // no type-specific skipping. Reasoning contributes to the estimate like
