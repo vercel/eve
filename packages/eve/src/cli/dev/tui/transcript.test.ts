@@ -242,7 +242,7 @@ describe("ConversationTranscript", () => {
     expect(byId(blocks, "tool:call_2")).toMatchObject({ status: "running", live: true });
   });
 
-  it("keeps a task's tool row running past its receipt and names what a waiting turn holds on", () => {
+  it("keeps a task's tool row running past its receipt and its turn, and names what a waiting turn holds on", () => {
     const state = conversation([
       turn,
       toolCall("call_1", "summarize"),
@@ -265,6 +265,10 @@ describe("ConversationTranscript", () => {
       live: true,
     });
     expect(turnActivity(working)).toBe("Waiting on summarize");
+    // A root approval in the same step ends the turn while the task keeps working.
+    expect(
+      byId(new ConversationTranscript().project(view(state, false), options), "tool:call_1"),
+    ).toMatchObject({ status: "running" });
   });
 
   it("renders each agent call over its own turns, live while its reply can still arrive", () => {
