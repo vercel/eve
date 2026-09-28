@@ -200,6 +200,56 @@ describe("connection dynamic tools", () => {
     expect(Object.values(tools).every(isBrandedToolEntry)).toBe(true);
   });
 
+  it("omits tool schemas from search results and registers them on the discovered tool", async () => {
+    const inputSchema = {
+      type: "object",
+      properties: { team: { type: "string" } },
+      required: ["team"],
+      additionalProperties: false,
+    };
+    const connectionRegistry = registry({
+      connections: [connection("linear")],
+      loadTools: {
+        linear: async () => [
+          {
+            description: "List issues",
+            inputSchema,
+            outputSchema: { type: "object" },
+            name: "list_issues",
+          },
+        ],
+      },
+    });
+    const ctx = new ContextContainer();
+    ctx.set(ConnectionRegistryKey, connectionRegistry);
+    const resolve = getConnectionSearchResolver().events["step.started"]!;
+    const resolveContext = {
+      model: { id: "openai/gpt-5.5" },
+      channel: {},
+      messages: [],
+      session: { auth: { current: null, initiator: null }, id: "test-session" },
+    } satisfies DynamicResolveContext;
+
+    const { result, tools } = await contextStorage.run(ctx, async () => {
+      const initial = (await resolve({}, resolveContext)) as DynamicToolSet;
+      const result = await initial["connection_search"]!.execute(
+        { keywords: "list issues" },
+        {} as ToolContext,
+      );
+      return { result, tools: (await resolve({}, resolveContext)) as DynamicToolSet };
+    });
+
+    expect(result).toEqual([
+      {
+        connection: "linear",
+        description: "List issues",
+        qualifiedName: "linear__list_issues",
+        tool: "list_issues",
+      },
+    ]);
+    expect(tools["linear__list_issues"]!.inputSchema).toEqual(inputSchema);
+  });
+
   it("keeps the connection identity in durable callback closures without separate call state", async () => {
     let instanceId = "account-a";
     const executeTool = vi.fn(async () => ({ ok: true }));
@@ -426,8 +476,6 @@ describe("connection_search", () => {
       {
         connection: "linear",
         description: "List issues",
-        inputSchema: { type: "object" },
-        outputSchema: undefined,
         qualifiedName: "linear__list_issues",
         tool: "list_issues",
       },

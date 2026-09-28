@@ -64,9 +64,7 @@ const CONNECTION_SEARCH_OUTPUT_SCHEMA = defineJsonSchema<ConnectionSearchResultI
       connection: { type: "string" },
       description: { type: "string" },
       error: { type: "string" },
-      inputSchema: { type: "object" },
       needsAuthorization: { type: "boolean" },
-      outputSchema: { type: "object" },
       qualifiedName: { type: "string" },
       tool: { type: "string" },
     },
@@ -80,7 +78,7 @@ const CONNECTION_SEARCH_OUTPUT_SCHEMA = defineJsonSchema<ConnectionSearchResultI
  * `executeConnectionSearch` so the resolver can find discovered tools without
  * relying on model-facing tool result history.
  */
-const ConnectionSearchResultsKey = new ContextKey<readonly ConnectionSearchResultItem[]>(
+const ConnectionSearchResultsKey = new ContextKey<readonly DiscoveredConnectionTool[]>(
   "eve.connectionSearchResults",
 );
 
@@ -97,15 +95,28 @@ interface ConnectionSearchInput {
   readonly limit?: number;
 }
 
+/**
+ * Model-facing search result. Carries no schemas: discovered tools are
+ * registered with their full schemas on the next step, so repeating them here
+ * would charge for them twice on every later request.
+ */
 interface ConnectionSearchResultItem {
   readonly connection: string;
   readonly description: string;
   readonly error?: string;
-  readonly inputSchema?: Record<string, unknown>;
   readonly needsAuthorization?: boolean;
-  readonly outputSchema?: Record<string, unknown>;
   readonly tool?: string;
   readonly qualifiedName?: string;
+}
+
+/** A discovered tool as stored for registration, the only place its schemas live. */
+interface DiscoveredConnectionTool {
+  readonly connection: string;
+  readonly description: string;
+  readonly inputSchema?: Record<string, unknown>;
+  readonly outputSchema?: Record<string, unknown>;
+  readonly qualifiedName: string;
+  readonly tool: string;
 }
 
 function tokenize(text: string): string[] {
@@ -179,7 +190,8 @@ async function executeConnectionSearch(
 
   const limit = input.limit ?? 10;
   const queryTokens = tokenize(input.keywords);
-  const results: Array<{ item: ConnectionSearchResultItem; score: number }> = [];
+  const results: Array<{ readonly discovered: DiscoveredConnectionTool; readonly score: number }> =
+    [];
   const failedConnections: ConnectionSearchResultItem[] = [];
 
   const targetConnections =
@@ -266,7 +278,7 @@ async function executeConnectionSearch(
       const score = scoreMatch(queryTokens, tool);
       if (score > 0) {
         results.push({
-          item: {
+          discovered: {
             connection: conn.connectionName,
             description: tool.description,
             inputSchema: tool.inputSchema,
@@ -293,17 +305,22 @@ async function executeConnectionSearch(
   }
 
   results.sort((a, b) => b.score - a.score);
-  const matched = results.slice(0, limit).map((r) => r.item);
+  const matched = results.slice(0, limit).map((r) => r.discovered);
 
   if (matched.length > 0) {
-    const allResults = [...matched, ...failedConnections];
     const existing = ctx.get(ConnectionSearchResultsKey) ?? [];
     const merged = new Map(existing.map((r) => [r.qualifiedName, r]));
-    for (const r of matched) {
-      if (r.qualifiedName) merged.set(r.qualifiedName, r);
-    }
+    for (const r of matched) merged.set(r.qualifiedName, r);
     ctx.set(ConnectionSearchResultsKey, [...merged.values()]);
-    return allResults;
+    return [
+      ...matched.map(({ connection, description, qualifiedName, tool }) => ({
+        connection,
+        description,
+        qualifiedName,
+        tool,
+      })),
+      ...failedConnections,
+    ];
   }
 
   const summaries: ConnectionSearchResultItem[] = targetConnections.map((c) => {
@@ -456,7 +473,7 @@ export async function resolveConnectionSearchDynamicTools() {
 
   for (const result of discovered) {
     const connectionName = result.connection;
-    const toolName = result.tool!;
+    const toolName = result.tool;
     const approval = registry.getConnectionApproval(connectionName);
 
     const instanceId = connections.find(
