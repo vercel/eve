@@ -2,12 +2,18 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { type ScenarioAppDescriptor, useScenarioApp } from "#internal/testing/scenario-app.js";
 import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import {
+  isAgentTurnSpan,
+  listLocalTraces,
+  type LocalTrace,
+  type LocalTraceSpan,
+} from "#tracing/local-trace-reader.js";
 
 const scenarioApp = useScenarioApp();
 const SCENARIO_TIMEOUT_MS = 360_000;
@@ -191,7 +197,7 @@ describe("agent messaging", () => {
       const server = await startScriptedEveDev(app.appRoot);
 
       try {
-        const childSessionId = await runScriptedParentSession({
+        const { childSessionId, parentSessionId } = await runScriptedParentSession({
           serverUrl: server.url,
           subagentName: "memory-child",
         });
@@ -200,6 +206,7 @@ describe("agent messaging", () => {
           client: new Client({ host: server.url }),
           expectedCompletionCount: 0,
         });
+        await expectLocalTraceLineage(app.appRoot, { childSessionId, parentSessionId });
       } catch (error) {
         throw new Error(
           [`stdout:\n${server.stdout()}`, `stderr:\n${server.stderr()}`].join("\n\n"),
@@ -223,7 +230,7 @@ describe("agent messaging", () => {
         const parentServer = await startScriptedEveDev(parentApp.appRoot);
 
         try {
-          const childSessionId = await runScriptedParentSession({
+          const { childSessionId } = await runScriptedParentSession({
             expectedRemoteUrl: remoteServer.url,
             serverUrl: parentServer.url,
             subagentName: "remote-memory-child",
@@ -261,7 +268,7 @@ async function runScriptedParentSession(input: {
   readonly expectedRemoteUrl?: string;
   readonly serverUrl: string;
   readonly subagentName: string;
-}): Promise<string> {
+}): Promise<{ readonly childSessionId: string; readonly parentSessionId: string }> {
   const client = new Client({ host: input.serverUrl });
   const { session: parentSession, response: firstResponse } = await client.sessions.create({
     message: `Run both scripted ${input.subagentName} exchanges.`,
@@ -295,7 +302,118 @@ async function runScriptedParentSession(input: {
   if (childSessionId === undefined) {
     throw new Error("First subagent.called event did not include a child session id.");
   }
-  return childSessionId;
+  return { childSessionId, parentSessionId: parentSession.state.sessionId };
+}
+
+async function expectLocalTraceLineage(
+  appRoot: string,
+  input: { readonly childSessionId: string; readonly parentSessionId: string },
+): Promise<void> {
+  let traces: LocalTrace[] = [];
+  await vi.waitFor(
+    async () => {
+      traces = (await listLocalTraces(appRoot)).filter((trace) =>
+        trace.conversationIds.includes(input.parentSessionId),
+      );
+      expect(traces).toHaveLength(4);
+      for (const runId of [input.parentSessionId, input.childSessionId]) {
+        expect(
+          traces.filter((trace) =>
+            trace.spans.some(
+              (span) => isAgentTurnSpan(span) && span.attributes["agent.run.id"] === runId,
+            ),
+          ),
+        ).toHaveLength(2);
+      }
+    },
+    { interval: 100, timeout: EVENT_TIMEOUT_MS },
+  );
+
+  const byRun = (runId: string) =>
+    traces
+      .filter((trace) =>
+        trace.spans.some(
+          (span) => isAgentTurnSpan(span) && span.attributes["agent.run.id"] === runId,
+        ),
+      )
+      .toSorted(
+        (left, right) =>
+          Number(root(left).attributes["agent.turn.sequence"]) -
+          Number(root(right).attributes["agent.turn.sequence"]),
+      );
+  const parents = byRun(input.parentSessionId);
+  const children = byRun(input.childSessionId);
+
+  expect(new Set(traces.map((trace) => trace.traceId)).size).toBe(4);
+  for (const [runId, runTraces] of [
+    [input.parentSessionId, parents],
+    [input.childSessionId, children],
+  ] as const) {
+    expect(runTraces.map((trace) => root(trace).attributes["agent.turn.sequence"])).toEqual([0, 1]);
+    for (const trace of runTraces) {
+      const activation = root(trace);
+      expect(activation.parentSpanId).toBeUndefined();
+      expect(activation.attributes).toMatchObject({
+        "agent.run.id": runId,
+        "agent.turn.outcome": "completed",
+        "gen_ai.conversation.id": input.parentSessionId,
+        "gen_ai.operation.name": "invoke_agent",
+      });
+      expect(trace.spans.filter(isAgentTurnSpan)).toHaveLength(1);
+      const reached = new Set<string>();
+      const pending = [activation.spanId];
+      while (pending.length > 0) {
+        const parentId = pending.pop()!;
+        if (reached.has(parentId)) continue;
+        reached.add(parentId);
+        pending.push(
+          ...trace.spans
+            .filter((span) => span.parentSpanId === parentId)
+            .map((span) => span.spanId),
+        );
+      }
+      expect(reached.size, `detached spans in ${runId} trace ${trace.traceId}`).toBe(
+        trace.spans.length,
+      );
+      const steps = trace.spans.filter((span) => span.name === "agent.step");
+      const models = trace.spans.filter((span) => span.name.startsWith("chat "));
+      expect(steps.length).toBeGreaterThan(0);
+      expect(models.length).toBeGreaterThan(0);
+      expect(steps.every((span) => span.parentSpanId === activation.spanId)).toBe(true);
+      expect(models.every((span) => steps.some((step) => step.spanId === span.parentSpanId))).toBe(
+        true,
+      );
+    }
+  }
+
+  const caller = parents[0]!.spans.find(
+    (span) =>
+      span.attributes["agent.invocation.role"] === "caller" &&
+      span.attributes["agent.action.name"] === "memory-child",
+  );
+  expect(caller).toBeDefined();
+  expect(
+    children[0]!.spans.filter((span) => span.attributes["agent.invocation.role"] === "caller"),
+  ).toHaveLength(0);
+  expect(root(children[0]!).attributes).toMatchObject({
+    "agent.parent_call.id": caller!.attributes["agent.action.call_id"],
+    "agent.parent_run.id": input.parentSessionId,
+    "agent.run.type": "subagent",
+  });
+  expect(root(children[0]!).links).toEqual([
+    {
+      attributes: { "eve.link.type": "agent.dispatch" },
+      spanId: caller!.spanId,
+      traceId: caller!.traceId,
+    },
+  ]);
+  expect(root(children[1]!).links).toEqual([]);
+}
+
+function root(trace: LocalTrace): LocalTraceSpan {
+  const [activation] = trace.spans.filter(isAgentTurnSpan);
+  if (activation === undefined) throw new Error(`No activation in trace ${trace.traceId}`);
+  return activation;
 }
 
 async function expectRetainedChildConversation(input: {
@@ -377,6 +495,7 @@ async function startScriptedEveDev(appRoot: string): Promise<RunningScriptedEveD
       env: {
         ...process.env,
         EVE_MOCK_AUTHORED_MODELS: "",
+        EVE_TRACES: "on",
         NODE_ENV: "production",
       },
       stdio: ["ignore", "pipe", "pipe"],

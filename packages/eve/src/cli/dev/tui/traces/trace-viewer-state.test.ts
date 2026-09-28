@@ -20,6 +20,7 @@ function span(overrides: Partial<LocalTraceSpan> = {}): LocalTraceSpan {
     attributes: {},
     endTimeNs: startTimeNs + 500_000n,
     events: [],
+    links: [],
     name: `span-${spanSequence}`,
     spanId: String(spanSequence).padStart(16, "0"),
     startTimeNs,

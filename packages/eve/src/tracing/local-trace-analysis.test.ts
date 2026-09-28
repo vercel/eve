@@ -20,6 +20,7 @@ function span(input: {
     attributes: input.attributes ?? {},
     endTimeNs: BigInt(input.endMs) * 1_000_000n,
     events: [],
+    links: [],
     name: input.name,
     parentSpanId: input.parentSpanId,
     spanId: input.spanId,

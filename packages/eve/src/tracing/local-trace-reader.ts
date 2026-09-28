@@ -18,6 +18,7 @@ import {
 import { isAgentActivationSpan } from "#tracing/agent-span-contract.js";
 
 const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/u;
+const SPAN_ID_PATTERN = /^[0-9a-f]{16}$/u;
 const SPAN_FILE_PATTERN = /^[0-9a-f]{16}\.otlp\.json$/u;
 const MAX_SEGMENT_BYTES = 8 * 1024 * 1024;
 const MAX_UINT64 = 18_446_744_073_709_551_615n;
@@ -28,12 +29,19 @@ export interface LocalTraceSpanEvent {
   readonly timeNs: bigint;
 }
 
+export interface LocalTraceSpanLink {
+  readonly attributes: Readonly<Record<string, unknown>>;
+  readonly spanId: string;
+  readonly traceId: string;
+}
+
 export interface LocalTraceSpan {
   readonly attributes: Readonly<Record<string, unknown>>;
   readonly endTimeNs: bigint;
   readonly events: readonly LocalTraceSpanEvent[];
   /** OTLP span kind (1 internal … 5 consumer); undefined when absent. */
   readonly kind?: number;
+  readonly links: readonly LocalTraceSpanLink[];
   readonly name: string;
   readonly parentSpanId?: string;
   readonly scope?: string;
@@ -273,7 +281,7 @@ function parseLocalTraceSpan(
   if (
     raw.traceId !== expectedTraceId ||
     typeof raw.spanId !== "string" ||
-    !/^[0-9a-f]{16}$/u.test(raw.spanId) ||
+    !SPAN_ID_PATTERN.test(raw.spanId) ||
     typeof raw.name !== "string"
   ) {
     return undefined;
@@ -287,9 +295,10 @@ function parseLocalTraceSpan(
     endTimeNs,
     events: parseEvents(raw.events),
     kind: typeof raw.kind === "number" ? raw.kind : undefined,
+    links: parseLinks(raw.links),
     name: raw.name,
     parentSpanId:
-      typeof raw.parentSpanId === "string" && /^[0-9a-f]{16}$/u.test(raw.parentSpanId)
+      typeof raw.parentSpanId === "string" && SPAN_ID_PATTERN.test(raw.parentSpanId)
         ? raw.parentSpanId
         : undefined,
     scope,
@@ -299,6 +308,28 @@ function parseLocalTraceSpan(
     statusMessage: parseStatusMessage(raw.status),
     traceId: expectedTraceId,
   };
+}
+
+function parseLinks(value: unknown): LocalTraceSpanLink[] {
+  if (!Array.isArray(value)) return [];
+  const links: LocalTraceSpanLink[] = [];
+  for (const entry of value) {
+    if (
+      !isRecord(entry) ||
+      typeof entry.traceId !== "string" ||
+      !TRACE_ID_PATTERN.test(entry.traceId) ||
+      typeof entry.spanId !== "string" ||
+      !SPAN_ID_PATTERN.test(entry.spanId)
+    ) {
+      continue;
+    }
+    links.push({
+      attributes: parseAttributes(entry.attributes),
+      spanId: entry.spanId,
+      traceId: entry.traceId,
+    });
+  }
+  return links;
 }
 
 function parseEvents(value: unknown): LocalTraceSpanEvent[] {

@@ -31,6 +31,7 @@ function span(
     attributes,
     endTimeNs: BASE + BigInt(endMs) * 1_000_000n,
     events: [],
+    links: [],
     name,
     parentSpanId,
     spanId,
