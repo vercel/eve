@@ -25,11 +25,11 @@ interface CurlBarrierResult {
 }
 
 export default defineEval({
-  tags: ["real-model"],
   description: "Sandbox Bash: at least ten curls reach a concurrency barrier.",
   async test(t) {
     const turn = await t.send(
       [
+        "EVE_SANDBOX_CURL_FANOUT",
         `Call the \`${BASH_TOOL}\` tool at least ${MINIMUM_CURL_CALLS} separate times in one tool-use step.`,
         "Run every command below at least once. If you make extra calls, repeat a command below.",
         "Do not combine commands, use a loop, or background a process.",
