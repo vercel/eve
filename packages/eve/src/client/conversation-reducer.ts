@@ -8,6 +8,23 @@ import type {
 } from "#client/conversation-state.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+
+/**
+ * Transport facts about followed agent sessions. Only the canonical conversation receives them;
+ * custom reducers see their results in `conversation.agents`.
+ */
+export type ClientAgentEvent =
+  | {
+      readonly data: { readonly sessionId: string };
+      readonly type: "client.agent.following" | "client.agent.idle" | "client.agent.unavailable";
+    }
+  | {
+      readonly data: { readonly event: MessageStreamEvent; readonly sessionId: string };
+      readonly type: "client.agent.observed";
+    };
+
+export type ConversationEvent = EveAgentReducerEvent | ClientAgentEvent;
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -221,7 +238,7 @@ const messageReducer = defaultMessageReducer();
 /** Pure reduction of accepted root and agent-session observations; followers own transport. */
 export function reduceConversation(
   state: ConversationState,
-  event: EveAgentReducerEvent,
+  event: ConversationEvent,
 ): ConversationState {
   switch (event.type) {
     case "client.agent.following":
@@ -262,7 +279,10 @@ export function reduceConversation(
   }
 }
 
-export const conversationReducer: EveAgentReducer<ConversationState> = {
+/** The canonical conversation's reducer, which also folds in followed agent sessions. */
+export const canonicalConversationReducer = {
   initial: initialConversationState,
   reduce: reduceConversation,
 };
+
+export const conversationReducer: EveAgentReducer<ConversationState> = canonicalConversationReducer;

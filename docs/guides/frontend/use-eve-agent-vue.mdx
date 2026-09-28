@@ -61,23 +61,17 @@ Call `send(text)` for text or pass content parts for attachments. The API and tr
 
 ## Human-in-the-loop prompts
 
-Pending requests appear in `data.value.messages`. Use the Vue exports when narrowing message parts, then answer through `respond()`:
+Open requests appear in the `data.value.inputs` ledger. Read them with `openConversationInputs()`, then answer through `respond()`. An answered request leaves the list right away, so its buttons can't be pressed twice:
 
 ```vue
 <script setup lang="ts">
 import { computed } from "vue";
-import { useEveAgent } from "eve/vue";
+import { openConversationInputs, useEveAgent } from "eve/vue";
 
 const { data, respond } = useEveAgent();
 
 const pendingRequests = computed(() =>
-  data.value.messages.flatMap((message) =>
-    message.parts.flatMap((part) => {
-      if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
-      const request = part.toolMetadata?.eve?.inputRequest;
-      return request ? [request] : [];
-    }),
-  ),
+  openConversationInputs(data.value).map((input) => input.request),
 );
 </script>
 

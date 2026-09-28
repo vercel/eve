@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client, type MessageStreamEvent } from "#client/index.js";
 import { AgentStreamFollower } from "#client/agent-stream-follower.js";
-import { conversationReducer } from "#client/conversation-reducer.js";
+import {
+  conversationReducer,
+  reduceConversation,
+  type ConversationEvent,
+} from "#client/conversation-reducer.js";
 import type { ConversationState } from "#client/conversation-state.js";
-import type { EveAgentReducerEvent } from "#client/reducer.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import {
   createAgentStartedEvent,
@@ -85,8 +88,8 @@ function serveChild(events: MessageStreamEvent[]) {
 
 function setup() {
   let state: ConversationState = conversationReducer.initial();
-  const apply = (event: EveAgentReducerEvent) => {
-    state = conversationReducer.reduce(state, event);
+  const apply = (event: ConversationEvent) => {
+    state = reduceConversation(state, event);
   };
   const follower = new AgentStreamFollower({
     session: new Client({ host: "http://localhost:3000" }).sessions.attach("root"),

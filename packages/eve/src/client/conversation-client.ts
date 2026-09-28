@@ -1,7 +1,14 @@
 import type { ConversationState } from "#client/conversation-state.js";
 import { AgentStreamFollower } from "#client/agent-stream-follower.js";
-import { conversationReducer } from "#client/conversation-reducer.js";
-import { EveAgentProjection } from "#client/eve-agent-projection.js";
+import {
+  canonicalConversationReducer,
+  conversationReducer,
+  type ClientAgentEvent,
+  type ConversationEvent,
+} from "#client/conversation-reducer.js";
+import { EveAgentProjection, type EveAgentEventLog } from "#client/eve-agent-projection.js";
+import { assertAnswerable } from "#client/eve-agent-store-helpers.js";
+import type { SendTurnPayload } from "#client/types.js";
 import type { EveAgentReducerEvent } from "#client/reducer.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
@@ -15,7 +22,7 @@ import type { ClientSession } from "#client/session.js";
 /** Owns the canonical conversation and its root and agent-session transports for one client session. */
 export class ConversationClient<TData = ConversationState> {
   readonly projection: EveAgentProjection<TData>;
-  readonly #conversation: EveAgentProjection<ConversationState>;
+  readonly #conversation: EveAgentProjection<ConversationState, ConversationEvent>;
   readonly #cursors = new Map<string, number>();
   #seenEvents = createEventDeduper();
   #follower?: AgentStreamFollower;
@@ -29,10 +36,11 @@ export class ConversationClient<TData = ConversationState> {
     onConversationChange?: (state: ConversationState, previous: ConversationState) => void,
   ) {
     this.projection = projection;
+    // The default reducer is the canonical one, so `data` and `conversation` share one projection.
     this.#conversation =
       projection.reducer === conversationReducer
-        ? (projection as EveAgentProjection<ConversationState>)
-        : new EveAgentProjection(conversationReducer, []);
+        ? (projection as EveAgentProjection<ConversationState, ConversationEvent>)
+        : new EveAgentProjection(canonicalConversationReducer, []);
     this.#onChange = onChange;
     this.#onConversationChange = onConversationChange;
   }
@@ -45,7 +53,7 @@ export class ConversationClient<TData = ConversationState> {
     return this.#conversation.data;
   }
 
-  get projections(): readonly EveAgentProjection<unknown>[] {
+  get projections(): readonly EveAgentEventLog[] {
     return this.#conversation === this.projection
       ? [this.projection]
       : [this.#conversation, this.projection];
@@ -74,6 +82,16 @@ export class ConversationClient<TData = ConversationState> {
     };
     this.append(event);
     return () => this.#retract(event);
+  }
+
+  /** Swaps projected answers for a prepared payload's, which must still be answerable. */
+  replaceResponses(
+    retract: (() => void) | undefined,
+    input: SendTurnPayload,
+  ): (() => void) | undefined {
+    retract?.();
+    assertAnswerable(input, this.conversation);
+    return this.projectResponses(input.inputResponses);
   }
 
   #retract(event: EveAgentReducerEvent): void {
@@ -144,14 +162,13 @@ export class ConversationClient<TData = ConversationState> {
     follower.reconcile();
   }
 
-  #appendChild(event: EveAgentReducerEvent): void {
-    if (this.#conversation === this.projection) {
-      this.append(event);
-    } else {
-      const previous = this.conversation;
-      this.#conversation.append(event);
-      if (previous !== this.conversation) this.#onConversationChange?.(this.conversation, previous);
-    }
+  #appendChild(event: ClientAgentEvent): void {
+    const previous = this.data;
+    const previousConversation = this.conversation;
+    this.#conversation.append(event);
+    if (previous !== this.data) this.#onChange(this.data, previous);
+    else if (previousConversation !== this.conversation)
+      this.#onConversationChange?.(this.conversation, previousConversation);
   }
 
   /** Follows the root session continuously; operation readers subscribe to this one stream. */

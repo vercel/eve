@@ -1,12 +1,31 @@
-import type { EveAgentReducer, EveAgentReducerEvent } from "#client/reducer.js";
+import type { ConversationEvent } from "#client/conversation-reducer.js";
+import type { EveAgentReducerEvent } from "#client/reducer.js";
+
+interface ProjectionReducer<TData, TEvent> {
+  initial(): TData;
+  reduce(data: TData, event: TEvent): TData;
+}
+
+/**
+ * The part of a projection that root-stream bookkeeping writes. Its entries can include the
+ * canonical conversation's agent-session events, so predicates see the wider event type.
+ */
+export interface EveAgentEventLog {
+  append(event: EveAgentReducerEvent): void;
+  remove(predicate: (event: ConversationEvent) => boolean): void;
+  replace(
+    predicate: (event: ConversationEvent) => boolean,
+    replacement: EveAgentReducerEvent,
+  ): void;
+}
 
 /** Owns chronological reducer replay when optimistic events are replaced by server events. */
-export class EveAgentProjection<TData> {
-  readonly #reducer: EveAgentReducer<TData>;
-  #events: EveAgentReducerEvent[];
+export class EveAgentProjection<TData, TEvent = EveAgentReducerEvent> {
+  readonly #reducer: ProjectionReducer<TData, TEvent>;
+  #events: TEvent[];
   #data: TData;
 
-  constructor(reducer: EveAgentReducer<TData>, events: readonly EveAgentReducerEvent[]) {
+  constructor(reducer: ProjectionReducer<TData, TEvent>, events: readonly TEvent[]) {
     this.#reducer = reducer;
     this.#events = [...events];
     this.#data = this.#reduce();
@@ -16,7 +35,7 @@ export class EveAgentProjection<TData> {
     return this.#data;
   }
 
-  get reducer(): EveAgentReducer<TData> {
+  get reducer(): ProjectionReducer<TData, TEvent> {
     return this.#reducer;
   }
 
@@ -25,20 +44,17 @@ export class EveAgentProjection<TData> {
     this.#data = this.#reducer.initial();
   }
 
-  append(event: EveAgentReducerEvent): void {
+  append(event: TEvent): void {
     this.#events.push(event);
     this.#data = this.#reducer.reduce(this.#data, event);
   }
 
-  remove(predicate: (event: EveAgentReducerEvent) => boolean): void {
+  remove(predicate: (event: TEvent) => boolean): void {
     this.#events = this.#events.filter((event) => !predicate(event));
     this.#data = this.#reduce();
   }
 
-  replace(
-    predicate: (event: EveAgentReducerEvent) => boolean,
-    replacement: EveAgentReducerEvent,
-  ): void {
+  replace(predicate: (event: TEvent) => boolean, replacement: TEvent): void {
     const index = this.#events.findIndex(predicate);
     if (index === -1) this.#events.push(replacement);
     else this.#events[index] = replacement;

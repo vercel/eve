@@ -47,21 +47,6 @@ export interface ClientInputRespondedEvent {
 }
 
 /**
- * Client-side reducer event emitted as the client starts, pauses, or loses its
- * subscription to a session a run opened with `ctx.agent`.
- */
-export interface ClientAgentSessionEvent {
-  readonly data: { readonly sessionId: string };
-  readonly type: "client.agent.following" | "client.agent.idle" | "client.agent.unavailable";
-}
-
-/** Client-side reducer event carrying one event from a followed agent session's stream. */
-export interface ClientAgentObservedEvent {
-  readonly data: { readonly event: MessageStreamEvent; readonly sessionId: string };
-  readonly type: "client.agent.observed";
-}
-
-/**
  * Event consumed by eve agent reducers.
  *
  * Server events are authoritative eve stream events. They include text,
@@ -71,8 +56,6 @@ export interface ClientAgentObservedEvent {
  * UI state such as optimistic user messages and submitted HITL responses.
  */
 export type EveAgentReducerEvent =
-  | ClientAgentSessionEvent
-  | ClientAgentObservedEvent
   | ClientInputRespondedEvent
   | ClientMessageFailedEvent
   | ClientMessageSubmittedEvent

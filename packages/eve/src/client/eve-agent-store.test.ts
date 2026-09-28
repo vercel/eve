@@ -2475,6 +2475,68 @@ describe("EveAgentStore session controls", () => {
     await send;
   });
 
+  it("re-echoes a payload that preparation replaced, for both kinds of turn", async () => {
+    const approval = (requestId: string) => ({
+      action: {
+        callId: `call_${requestId}`,
+        input: {},
+        kind: "tool-call" as const,
+        toolName: "save",
+      },
+      kind: "tool-approval" as const,
+      prompt: "Save Alice's notes?",
+      requestId,
+    });
+    const initialEvents = stampTestEvents([
+      createInputRequestedEvent({
+        requests: [approval("req_1"), approval("req_2")],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) =>
+      init?.method === "POST"
+        ? new Promise<Response>((_resolve, reject) =>
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+              once: true,
+            }),
+          )
+        : controlledStreamResponse().response,
+    );
+    const store = createStore({
+      reducer: conversationReducer,
+      host: "http://localhost:3000",
+      initialEvents,
+      initialSession: { sessionId: "session_1", streamIndex: initialEvents.length },
+    });
+    const optimisticText = () =>
+      store.snapshot.conversation.messages.flatMap((message) =>
+        message.metadata?.optimistic === true
+          ? message.parts.flatMap((part) => (part.type === "text" ? [part.text] : []))
+          : [],
+      );
+    store.setCallbacks({
+      prepareSend: (input) =>
+        input.message === undefined
+          ? { message: "Bob will decide instead.", turnPolicy: "steer" }
+          : { inputResponses: [{ optionId: "approve", requestId: "req_1" }] },
+    });
+
+    const first = store.send({ message: "Approve the first save." });
+    await vi.waitFor(() =>
+      expect(store.snapshot.conversation.inputs.req_1?.status).toBe("responded"),
+    );
+    expect(optimisticText()).toEqual([]);
+
+    const second = store.send({ inputResponses: [{ optionId: "approve", requestId: "req_2" }] });
+    await vi.waitFor(() => expect(optimisticText()).toEqual(["Bob will decide instead."]));
+    expect(store.snapshot.conversation.inputs.req_2?.status).toBe("open");
+    detachEveAgentStore(store);
+    await Promise.allSettled([first, second]);
+  });
+
   it("reports compaction and clearing without a session instead of sending requests", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const store = createStore({ reducer: conversationReducer, host: "http://localhost:3000" });
@@ -2530,6 +2592,19 @@ describe("EveAgentStore session controls", () => {
 
     await expect(store.retire()).rejects.toThrow();
     expect(store.snapshot.session?.sessionId).toBe("session_1");
+    expect(store.snapshot.conversation.messages).not.toEqual([]);
+  });
+
+  it("leaves a caller-supplied session to its owner instead of retiring it", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const store = createStore({
+      reducer: conversationReducer,
+      session: new Client({ host: "http://localhost:3000" }).sessions.attach("session_1"),
+      initialEvents: turnEvents(),
+    });
+
+    await expect(store.retire()).rejects.toThrow("retire() needs a store-owned session");
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(store.snapshot.conversation.messages).not.toEqual([]);
   });
 });

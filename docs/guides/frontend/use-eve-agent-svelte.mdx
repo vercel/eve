@@ -62,21 +62,15 @@ Call `agent.send(text)` for text or pass content parts for attachments. The API 
 
 ## Human-in-the-loop prompts
 
-Pending requests appear in `agent.data.messages`. Use the Svelte exports when narrowing message parts, then answer through `agent.respond()`:
+Open requests appear in the `agent.data.inputs` ledger. Read them with `openConversationInputs()`, then answer through `agent.respond()`. An answered request leaves the list right away, so its buttons can't be pressed twice:
 
 ```svelte
 <script lang="ts">
-  import { useEveAgent } from "eve/svelte";
+  import { openConversationInputs, useEveAgent } from "eve/svelte";
 
   const agent = useEveAgent();
   const pendingRequests = $derived(
-    agent.data.messages.flatMap((message) =>
-      message.parts.flatMap((part) => {
-        if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
-        const request = part.toolMetadata?.eve?.inputRequest;
-        return request ? [request] : [];
-      }),
-    ),
+    openConversationInputs(agent.data).map((input) => input.request),
   );
 </script>
 

@@ -131,9 +131,7 @@ export class EveAgentStore<TData> {
 
   subscribe(callback: () => void): () => void {
     this.#subscribers.add(callback);
-    return () => {
-      this.#subscribers.delete(callback);
-    };
+    return () => void this.#subscribers.delete(callback);
   }
 
   /** Creates this store's owned session without starting a turn. */
@@ -228,8 +226,15 @@ export class EveAgentStore<TData> {
             createAbortSignal(input.signal, turn.abortController.signal),
           ));
       assertExclusiveTurnInput(preparedInput);
-
       if (!this.#isActiveTurn(turn)) return;
+      if (preparedInput !== input) {
+        submissionId = this.#messageSubmissions.resubmit(submissionId, preparedInput);
+        retractResponses = this.#conversationClient.replaceResponses(
+          retractResponses,
+          preparedInput,
+        );
+        this.#publish();
+      }
 
       const turnInput = {
         ...preparedInput,
@@ -243,17 +248,7 @@ export class EveAgentStore<TData> {
       if (!this.#isActiveTurn(turn)) return;
       turn.resolveResponse(response);
 
-      if (
-        this.#handleReconciliation(
-          this.#messageSubmissions.correlate(
-            submissionId,
-            getMessageResponseDeliveryId(response),
-            this.#events,
-          ),
-        )
-      ) {
-        this.#publish();
-      }
+      this.#correlate(submissionId, response);
       for await (const event of consumeMessageResponse(response, reader)) {
         if (!this.#isActiveTurn(turn)) return;
         turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
@@ -299,11 +294,7 @@ export class EveAgentStore<TData> {
   }
 
   async #resume(): Promise<void> {
-    if (
-      this.#status === "resuming" ||
-      this.#status === "streaming" ||
-      this.#status === "submitted"
-    ) {
+    if (this.#status !== "ready" && this.#status !== "error") {
       throw new Error("eve session is already processing a turn.");
     }
     if (this.#session === undefined) {
@@ -390,10 +381,15 @@ export class EveAgentStore<TData> {
   }
 
   /**
-   * Terminally retires the current server session, then resets local state so
-   * the next send starts a fresh session. A failed request leaves both intact.
+   * Terminally retires the store-owned server session, then resets local state so the next
+   * send starts a fresh session. A failed request leaves both intact.
    */
   async retire(): Promise<ResetResult> {
+    if (this.#externalSession) {
+      throw new Error(
+        "retire() needs a store-owned session. Call reset() on the session you supplied, then create a new store for the next session.",
+      );
+    }
     const result = (await this.#session?.reset()) ?? { status: "no_active_session" };
     this.reset();
     return result;
@@ -445,7 +441,12 @@ export class EveAgentStore<TData> {
     // Answers close their requests before preparation so no one answers them twice.
     let retractResponses = this.#conversationClient.projectResponses(input.inputResponses);
     const preparedInput = await waitWithSignal(Promise.resolve(prepareSend?.(input)), signal)
-      .then((prepared) => validateFollowUp(prepared ?? input))
+      .then((prepared) => {
+        const next = validateFollowUp(prepared ?? input);
+        if (next === input) return next;
+        retractResponses = this.#conversationClient.replaceResponses(retractResponses, next);
+        return next;
+      })
       .catch((error: unknown) => {
         retractResponses?.();
         throw error;
@@ -487,17 +488,7 @@ export class EveAgentStore<TData> {
         // Answers settle through the active turn's stream; only steered messages extend it.
         if (preparedInput.message === undefined) return;
         turn.acceptedFollowUps += 1;
-        if (
-          this.#handleReconciliation(
-            this.#messageSubmissions.correlate(
-              submissionId,
-              getMessageResponseDeliveryId(response),
-              this.#events,
-            ),
-          )
-        ) {
-          this.#publish();
-        }
+        this.#correlate(submissionId, response);
       } catch (error) {
         if (this.#isActiveTurn(turn)) {
           this.#messageSubmissions.fail(toError(error), submissionId);
@@ -649,6 +640,13 @@ export class EveAgentStore<TData> {
     return true;
   }
 
+  /** Pairs a submission's echo with the server's copy once its delivery ID is known. */
+  #correlate(submissionId: string | undefined, response: MessageResponse<unknown>): void {
+    const deliveryId = getMessageResponseDeliveryId(response);
+    const reconciled = this.#messageSubmissions.correlate(submissionId, deliveryId, this.#events);
+    if (this.#handleReconciliation(reconciled)) this.#publish();
+  }
+
   #handleReconciliation(
     reconciliation: ReturnType<OptimisticMessageSubmissions["apply"]>,
   ): boolean {
@@ -682,9 +680,7 @@ export class EveAgentStore<TData> {
 
   #publish(): void {
     this.#snapshot = this.#createSnapshot();
-    for (const subscriber of this.#subscribers) {
-      subscriber();
-    }
+    for (const subscriber of this.#subscribers) subscriber();
   }
 }
 

@@ -72,12 +72,6 @@ export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
 
 function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): EveMessageData {
   switch (event.type) {
-    case "client.agent.following":
-    case "client.agent.idle":
-    case "client.agent.observed":
-    case "client.agent.unavailable":
-      return data;
-
     case "client.message.submitted":
     case "client.message.failed":
       return upsertMessage(

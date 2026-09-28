@@ -88,6 +88,13 @@ export function conversationAuthorizations(
   );
 }
 
+/** A sign-in the session still waits on, which resumes its work when the callback arrives. */
+export function hasPendingAuthorizations(state: ConversationState): boolean {
+  return conversationAuthorizations(state).some(
+    (part) => part.state === "required" && part.awaitsCallback === true,
+  );
+}
+
 /**
  * The session an agent tool forwards its task's calls to. eve's agent tools send each call as one
  * message, in call order, which is what lets a client attribute the session's turns to calls.
@@ -111,7 +118,7 @@ export function isAgentToolSession(
 
 /**
  * Whether a followed agent tool session has shown everything its task's calls produced so far:
- * no call is working, the session has no open turn or question, and every completed call's
+ * no call is working, the session has no open turn, question, or sign-in, and every completed call's
  * message has arrived. The last check covers a child stream that lags the root stream.
  */
 export function isAgentSessionCaughtUp(
@@ -128,6 +135,7 @@ export function isAgentSessionCaughtUp(
   const child = agent.observation.conversation;
   if (child.activeTurnId !== undefined) return false;
   if (Object.values(child.inputs).some((input) => input.status !== "settled")) return false;
+  if (hasPendingAuthorizations(child)) return false;
   const received = child.messages.filter((message) => message.role === "user").length;
   return received >= calls.filter((call) => call.status === "completed").length;
 }

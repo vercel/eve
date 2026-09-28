@@ -1,4 +1,4 @@
-import { conversationAuthorizations, type ConversationState } from "#client/conversation-state.js";
+import { hasPendingAuthorizations, type ConversationState } from "#client/conversation-state.js";
 import type { ActiveTurn } from "#client/eve-agent-store-state.js";
 import type { MessageResponse } from "#client/message-response.js";
 import { isTurnSegmentBoundary, updatePendingInputRequests } from "#client/session-utils.js";
@@ -52,12 +52,6 @@ export function isSettledSessionTail(
 ): boolean {
   const tail = events.at(-1);
   return tail !== undefined && isResponseBoundary(tail, conversation);
-}
-
-export function hasPendingAuthorizations(conversation: ConversationState): boolean {
-  return conversationAuthorizations(conversation).some(
-    (part) => part.state === "required" && part.awaitsCallback === true,
-  );
 }
 
 /** A server ignores answers to requests it already settled, so the store never sends them. */

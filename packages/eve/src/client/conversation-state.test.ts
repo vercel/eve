@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { conversationReducer, reduceConversation } from "#client/conversation-reducer.js";
+import {
+  conversationReducer,
+  reduceConversation,
+  type ConversationEvent,
+} from "#client/conversation-reducer.js";
 import {
   agentCallTurns,
   isAgentSessionCaughtUp,
   type ConversationState,
 } from "#client/conversation-state.js";
-import type { EveAgentReducerEvent } from "#client/reducer.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import {
   createAgentStartedEvent,
+  createAuthorizationCompletedEvent,
+  createAuthorizationRequiredEvent,
   createInputRequestedEvent,
   createMessageReceivedEvent,
+  createSessionWaitingEvent,
   createTaskSettledEvent,
   createTaskStartedEvent,
   createTurnCompletedEvent,
@@ -23,14 +29,14 @@ const stamp = (event: UnstampedMessageStreamEvent) => stampTestEvent(event, stam
 
 function reduce(
   state: ConversationState,
-  events: readonly (UnstampedMessageStreamEvent | EveAgentReducerEvent)[],
+  events: readonly (UnstampedMessageStreamEvent | ConversationEvent)[],
 ): ConversationState {
   let current = state;
   for (const event of events) {
     current = reduceConversation(
       current,
       event.type.startsWith("client.")
-        ? (event as EveAgentReducerEvent)
+        ? (event as ConversationEvent)
         : stamp(event as UnstampedMessageStreamEvent),
     );
   }
@@ -142,6 +148,27 @@ describe("agent tool sessions", () => {
           turnId: "t1",
         },
       },
+    ]);
+    expect(caughtUp()).toBe(true);
+    // A sign-in parked after the reply resumes the agent's work once its callback arrives.
+    const signIn = {
+      attemptId: "attempt_1",
+      name: "notes",
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "t1",
+    };
+    state = observe(state, [
+      createAuthorizationRequiredEvent({
+        ...signIn,
+        description: "Connect Alice's notes",
+        webhookUrl: "https://example.com/callback",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    expect(caughtUp()).toBe(false);
+    state = observe(state, [
+      createAuthorizationCompletedEvent({ ...signIn, outcome: "authorized" }),
     ]);
     expect(caughtUp()).toBe(true);
     state = reduce(state, [call("b")]);

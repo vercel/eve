@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { conversationReducer, reduceConversation } from "#client/conversation-reducer.js";
+import {
+  conversationReducer,
+  reduceConversation,
+  type ConversationEvent,
+} from "#client/conversation-reducer.js";
 import { openConversationInputs, type ConversationState } from "#client/conversation-state.js";
-import type { EveAgentReducerEvent } from "#client/reducer.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import {
   createAgentStartedEvent,
@@ -18,7 +21,7 @@ import {
 let stamped = 0;
 
 function reduce(
-  events: readonly (UnstampedMessageStreamEvent | EveAgentReducerEvent)[],
+  events: readonly (UnstampedMessageStreamEvent | ConversationEvent)[],
   state: ConversationState = conversationReducer.initial(),
 ): ConversationState {
   let current = state;
@@ -26,7 +29,7 @@ function reduce(
     current = reduceConversation(
       current,
       event.type.startsWith("client.")
-        ? (event as EveAgentReducerEvent)
+        ? (event as ConversationEvent)
         : stampTestEvent(event as UnstampedMessageStreamEvent, stamped++),
     );
   }
