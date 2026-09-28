@@ -1905,7 +1905,7 @@ importers:
         specifier: npm:typescript@6.0.3
         version: typescript@6.0.3
 
-  packages/eve-cua:
+  packages/eve-computer-use:
     dependencies:
       eve:
         specifier: workspace:*

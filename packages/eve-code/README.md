@@ -48,7 +48,7 @@ export default defineSandbox(() => environment.open());
 
 eve derives the prepared environment generation from the sandbox file and environment options, not from imported helpers, so upgrading eve alone does not rebuild an existing prepared artifact.
 
-Computer use lives in `eve/extensions/cua`. Mount it next to this extension when the sandbox has a desktop. `installComputerUse`, `startComputerUse`, and `COMPUTER_USE_REVALIDATION_KEY` are still re-exported from `eve/extensions/code/sandbox`, and `computer_use` from `eve/extensions/code/tools`, but both are deprecated.
+Computer use lives in `eve/computer-use`. Mount it next to this extension when the sandbox has a desktop. `installComputerUse`, `startComputerUse`, and `COMPUTER_USE_REVALIDATION_KEY` are still re-exported from `eve/extensions/code/sandbox`, and `computer_use` from `eve/extensions/code/tools`, but both are deprecated.
 
 Preparation ensures `gh`, installs wrappers for `gh`, `vc`, and `gh-signed-commit`, and installs TypeScript diagnostics. For repositories requiring verified signatures, stage the intended changes and use `gh-signed-commit`.
 

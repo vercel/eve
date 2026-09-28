@@ -1,20 +1,20 @@
-# eve/extensions/cua
+# eve/computer-use
 
-`eve/extensions/cua` is an eve extension for computer use. It contributes the `computer_use` tool, which drives a Linux desktop inside the sandbox, plus the helpers that install and start that desktop.
+`eve/computer-use` is an eve extension for computer use. It contributes the `computer_use` tool, which drives a Linux desktop inside the sandbox, plus the helpers that install and start that desktop.
 
-It ships inside the `eve` package. This private `@eve/cua` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/extensions/cua/extension` and publishes it with these entry points:
+It ships inside the `eve` package. This private `@eve/computer-use` workspace package is its source of truth: eve's build copies `extension/` into `packages/eve/src/computer-use/extension` and publishes it with these entry points:
 
-- `eve/extensions/cua`: the extension
-- `eve/extensions/cua/sandbox`: `installComputerUse`, `startComputerUse`, and `COMPUTER_USE_REVALIDATION_KEY`
-- `eve/extensions/cua/tools`: `computer_use`
+- `eve/computer-use`: the extension
+- `eve/computer-use/sandbox`: `installComputerUse`, `startComputerUse`, and `COMPUTER_USE_REVALIDATION_KEY`
+- `eve/computer-use/tools`: `computer_use`
 
 ## Mount
 
 The extension has no config:
 
 ```ts
-// agent/extensions/cua.ts
-export { default } from "eve/extensions/cua";
+// agent/extensions/computer-use.ts
+export { default } from "eve/computer-use";
 ```
 
 Mount it only for agents whose sandbox runs the desktop. The tool schema is large, so agents that never use a desktop should leave it out.
@@ -27,7 +27,7 @@ Install the desktop and driver in the environment's `prepare` callback, then sta
 // agent/sandbox.ts
 import { defineSandbox } from "eve/sandbox";
 import { VercelSandbox } from "eve/sandbox/vercel";
-import { installComputerUse, startComputerUse } from "eve/extensions/cua/sandbox";
+import { installComputerUse, startComputerUse } from "eve/computer-use/sandbox";
 
 export const environment = VercelSandbox.environment({
   prepare: async (sandbox) => {
@@ -50,8 +50,8 @@ Rebuild eve after editing `extension/`:
 
 ```sh
 pnpm --filter eve build
-pnpm --filter @eve/cua typecheck
-pnpm --filter @eve/cua test:scenario
-pnpm exec oxlint packages/eve-cua
-pnpm exec oxfmt --check packages/eve-cua
+pnpm --filter @eve/computer-use typecheck
+pnpm --filter @eve/computer-use test:scenario
+pnpm exec oxlint packages/eve-computer-use
+pnpm exec oxfmt --check packages/eve-computer-use
 ```

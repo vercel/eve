@@ -8,7 +8,7 @@ import { z } from "zod";
 const toolsDir = new URL("../../extension/tools/", import.meta.url);
 
 // Claude rejects the whole model request when any advertised tool's input schema has a root
-// union, even if that tool is never called. Every eve-cua tool must serialize to an object root.
+// union, even if that tool is never called. Every computer-use tool must serialize to an object root.
 test("every extension tool advertises an object-root input schema without root unions", async () => {
   const files = (await readdir(toolsDir)).filter(
     (file) => file.endsWith(".ts") && !file.endsWith(".test.ts"),

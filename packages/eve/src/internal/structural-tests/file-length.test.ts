@@ -27,8 +27,8 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
-// Generated copies of `@eve/code` and `@eve/cua` (see scripts/sync-extensions.mjs); their source lives outside eve.
-const GENERATED_SOURCE_PREFIXES = ["extensions/code/extension/", "extensions/cua/extension/"];
+// Generated copies of `@eve/code` and `@eve/computer-use` (see scripts/sync-extensions.mjs); their source lives outside eve.
+const GENERATED_SOURCE_PREFIXES = ["extensions/code/extension/", "computer-use/extension/"];
 
 describe("source file structure", () => {
   it("keeps production source files below the line-count cap", async () => {

@@ -1,7 +1,7 @@
 /**
- * Copies the private extension packages into `src/extensions/<name>/extension`
+ * Copies the private extension packages into eve's `src/`
  * so eve compiles and ships them as built-in extensions: `@eve/code` becomes
- * `eve/extensions/code` and `@eve/cua` becomes `eve/extensions/cua`. The
+ * `eve/extensions/code` and `@eve/computer-use` becomes `eve/computer-use`. The
  * packages stay the source of truth; the copies are gitignored. eve cannot
  * depend on them (they depend on eve), so the sibling workspace paths are read
  * directly and declared as turbo inputs in `turbo.json`.
@@ -15,12 +15,17 @@ import { acquireLock, releaseLock } from "./vendor-compiled/_shared.mjs";
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 
 export const builtInExtensions = [
-  { name: "code", source: join(packageRoot, "..", "eve-code", "extension") },
-  { name: "cua", source: join(packageRoot, "..", "eve-cua", "extension") },
-].map((extension) => ({
-  ...extension,
-  target: join(packageRoot, "src", "extensions", extension.name, "extension"),
-}));
+  {
+    name: "code",
+    source: join(packageRoot, "..", "eve-code", "extension"),
+    target: join(packageRoot, "src", "extensions", "code", "extension"),
+  },
+  {
+    name: "computer-use",
+    source: join(packageRoot, "..", "eve-computer-use", "extension"),
+    target: join(packageRoot, "src", "computer-use", "extension"),
+  },
+];
 
 // Turbo runs several eve tasks at once and each one syncs; rewriting an
 // identical tree would delete files a peer task is already compiling or testing.

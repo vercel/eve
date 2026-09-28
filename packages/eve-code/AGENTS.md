@@ -12,7 +12,7 @@ Before writing code, read the installed eve package docs for extensions, hooks, 
 - Use real `git`, `gh`, and `vc` CLIs rather than bespoke repository lifecycle tools.
 - Keep `apply_patch` as the only extension-owned file editing primitive.
 - Keep shared implementation under `extension/lib/`; filesystem paths define contribution names.
-- Computer use lives in `@eve/cua` (`eve/extensions/cua`). Keep the deprecated computer-use re-exports in `extension/lib/sandbox.ts` until they are removed; do not add computer-use code here.
+- Computer use lives in `@eve/computer-use` (`eve/computer-use`). Keep the deprecated computer-use re-exports in `extension/lib/sandbox.ts` until they are removed; do not add computer-use code here.
 
 ## Build and publish
 

@@ -368,23 +368,23 @@
       "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
       "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
     },
-    "./extensions/cua": {
-      "eve-source": "./dist/src/extensions/cua/extension/extension.js",
-      "types": "./dist/src/extensions/cua/extension/extension.d.ts",
-      "import": "./dist/src/extensions/cua/extension/extension.js",
-      "default": "./dist/src/extensions/cua/extension/extension.js"
+    "./computer-use": {
+      "eve-source": "./dist/src/computer-use/extension/extension.js",
+      "types": "./dist/src/computer-use/extension/extension.d.ts",
+      "import": "./dist/src/computer-use/extension/extension.js",
+      "default": "./dist/src/computer-use/extension/extension.js"
     },
-    "./extensions/cua/tools": {
-      "eve-source": "./dist/src/extensions/cua/tools.js",
-      "types": "./dist/src/extensions/cua/tools.d.ts",
-      "import": "./dist/src/extensions/cua/tools.js",
-      "default": "./dist/src/extensions/cua/tools.js"
+    "./computer-use/tools": {
+      "eve-source": "./dist/src/computer-use/tools.js",
+      "types": "./dist/src/computer-use/tools.d.ts",
+      "import": "./dist/src/computer-use/tools.js",
+      "default": "./dist/src/computer-use/tools.js"
     },
-    "./extensions/cua/sandbox": {
-      "eve-source": "./dist/src/extensions/cua/extension/lib/sandbox.js",
-      "types": "./dist/src/extensions/cua/extension/lib/sandbox.d.ts",
-      "import": "./dist/src/extensions/cua/extension/lib/sandbox.js",
-      "default": "./dist/src/extensions/cua/extension/lib/sandbox.js"
+    "./computer-use/sandbox": {
+      "eve-source": "./dist/src/computer-use/extension/lib/sandbox.js",
+      "types": "./dist/src/computer-use/extension/lib/sandbox.d.ts",
+      "import": "./dist/src/computer-use/extension/lib/sandbox.js",
+      "default": "./dist/src/computer-use/extension/lib/sandbox.js"
     },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
@@ -637,8 +637,8 @@
       "./extensions/code": {
         "dist": "./dist/src/extensions/code/extension"
       },
-      "./extensions/cua": {
-        "dist": "./dist/src/extensions/cua/extension"
+      "./computer-use": {
+        "dist": "./dist/src/computer-use/extension"
       }
     }
   }

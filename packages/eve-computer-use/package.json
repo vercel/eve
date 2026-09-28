@@ -1,8 +1,8 @@
 {
-  "name": "@eve/cua",
+  "name": "@eve/computer-use",
   "version": "0.0.0",
   "private": true,
-  "description": "Source of the eve/extensions/cua extension: computer use in a Linux sandbox desktop, with the driver install and start helpers.",
+  "description": "Source of the eve/computer-use extension: computer use in a Linux sandbox desktop, with the driver install and start helpers.",
   "type": "module",
   "exports": {
     "./package.json": "./package.json"
