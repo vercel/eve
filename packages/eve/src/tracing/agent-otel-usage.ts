@@ -6,6 +6,9 @@ import { AGENT_USAGE_ATTRIBUTES } from "#tracing/agent-span-contract.js";
 
 /** Applies eve's structural token usage attributes to an agent span. */
 export function setAgentUsage(span: Span, usage: InstrumentationUsage): void {
+  if (usage.costUsd !== undefined) {
+    span.setAttribute(AGENT_USAGE_ATTRIBUTES.costUsd, usage.costUsd);
+  }
   if (usage.inputTokens !== undefined) {
     span.setAttribute(AGENT_USAGE_ATTRIBUTES.inputTokens, usage.inputTokens);
   }

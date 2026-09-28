@@ -270,6 +270,7 @@ async function publishActionTerminal(
       outcome: event.data.status,
       scope,
       type: "action.failed",
+      usage: actionUsage(event.data.result),
     } satisfies InstrumentationActionFailedEvent),
   );
 }
@@ -282,7 +283,9 @@ function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefi
   ) {
     return undefined;
   }
-  return {
+  const usage: {
+    -readonly [K in keyof InstrumentationUsage]: InstrumentationUsage[K];
+  } = {
     inputTokenDetails: {
       cacheReadTokens: result.usage.cacheReadTokens,
       cacheWriteTokens: result.usage.cacheWriteTokens,
@@ -290,6 +293,8 @@ function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefi
     inputTokens: result.usage.inputTokens,
     outputTokens: result.usage.outputTokens,
   };
+  if (result.usage.costUsd !== undefined) usage.costUsd = result.usage.costUsd;
+  return usage;
 }
 
 function actionName(action: RuntimeActionRequest): string {
