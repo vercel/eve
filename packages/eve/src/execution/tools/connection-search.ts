@@ -12,6 +12,7 @@ import {
 } from "#connections/errors.js";
 import { defineTool } from "#tools/definition.js";
 import type { ToolContext } from "#tools/definition.js";
+import type { ToolModelOutput } from "#tools/model-output.js";
 import {
   resolveApprovalPolicy,
   type ApprovalContext,
@@ -19,10 +20,6 @@ import {
 } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
 import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
-import {
-  mcpToolResultToModelOutput,
-  mcpToolResultToModelOutputCallback,
-} from "#execution/tools/mcp-model-output.js";
 import { defineJsonSchema } from "#tools/schema.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import {
@@ -386,6 +383,18 @@ async function executeDiscoveredConnectionTool(
   }
 }
 
+/** Delegates to the connection client's projection, falling back to the raw result as JSON. */
+async function discoveredConnectionToolModelOutput(
+  closure: JsonObject,
+  output: unknown,
+): Promise<ToolModelOutput> {
+  const { connectionName, toolName } = readDiscoveredToolClosure(closure);
+  const client = loadContext().get(ConnectionRegistryKey)?.getClient(connectionName);
+  const modelOutput = await client?.toModelOutput?.(toolName, output);
+  // The harness validates the shape in `normalizeToolModelOutput`.
+  return (modelOutput ?? { type: "json", value: output ?? null }) as ToolModelOutput;
+}
+
 function assertPendingConnectionAuthorizationInstances(registry: ConnectionRegistry): void {
   const connections = new Map(
     registry.getConnections().map((connection) => [connection.connectionName, connection]),
@@ -483,13 +492,15 @@ export async function resolveConnectionSearchDynamicTools() {
       async execute(input: Record<string, unknown>, executeCtx) {
         return await executeDiscoveredConnectionTool(closure, input, executeCtx);
       },
-      ...(projectsMcpResult ? { toModelOutput: mcpToolResultToModelOutput } : {}),
+      toModelOutput: projectsMcpResult
+        ? (output: unknown) => discoveredConnectionToolModelOutput(closure, output)
+        : undefined,
     });
     stampDurableDynamicToolCallbacks(discoveredTool, {
       execute: { callback: executeDiscoveredConnectionTool, closure },
-      ...(projectsMcpResult
-        ? { toModelOutput: { callback: mcpToolResultToModelOutputCallback, closure } }
-        : {}),
+      toModelOutput: projectsMcpResult
+        ? { callback: discoveredConnectionToolModelOutput, closure }
+        : undefined,
       ...(approval === undefined
         ? {}
         : {
