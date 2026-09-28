@@ -10,6 +10,8 @@ export interface ClientMessageSubmittedEvent {
     readonly createdAt: number;
     readonly message: string;
     readonly submissionId: string;
+    /** Active turn receiving a steered follow-up, when known. */
+    readonly turnId?: string;
   };
   readonly type: "client.message.submitted";
 }
@@ -26,6 +28,8 @@ export interface ClientMessageFailedEvent {
     };
     readonly message: string;
     readonly submissionId: string;
+    /** Active turn receiving a steered follow-up, when known. */
+    readonly turnId?: string;
   };
   readonly type: "client.message.failed";
 }
@@ -43,15 +47,32 @@ export interface ClientInputRespondedEvent {
 }
 
 /**
+ * Client-side reducer event emitted as the client starts, pauses, or loses its
+ * subscription to a session a run opened with `ctx.agent`.
+ */
+export interface ClientAgentSessionEvent {
+  readonly data: { readonly sessionId: string };
+  readonly type: "client.agent.following" | "client.agent.idle" | "client.agent.unavailable";
+}
+
+/** Client-side reducer event carrying one event from a followed agent session's stream. */
+export interface ClientAgentObservedEvent {
+  readonly data: { readonly event: MessageStreamEvent; readonly sessionId: string };
+  readonly type: "client.agent.observed";
+}
+
+/**
  * Event consumed by eve agent reducers.
  *
  * Server events are authoritative eve stream events. They include text,
  * reasoning, tool/action requests and results, HITL input requests, connection
- * authorization events, subagent events, and session lifecycle events. Client
+ * authorization events, task and agent-session events, and session lifecycle events. Client
  * events are projection-only events created by client state machines for local
  * UI state such as optimistic user messages and submitted HITL responses.
  */
 export type EveAgentReducerEvent =
+  | ClientAgentSessionEvent
+  | ClientAgentObservedEvent
   | ClientInputRespondedEvent
   | ClientMessageFailedEvent
   | ClientMessageSubmittedEvent

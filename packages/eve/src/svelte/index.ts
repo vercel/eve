@@ -10,10 +10,23 @@ export {
 export {
   type EveAgentReducer,
   type EveAgentReducerEvent,
+  type ClientAgentObservedEvent,
+  type ClientAgentSessionEvent,
   type ClientInputRespondedEvent,
   type ClientMessageFailedEvent,
   type ClientMessageSubmittedEvent,
 } from "#client/reducer.js";
+export { conversationReducer, reduceConversation } from "#client/conversation-reducer.js";
+export { openConversationInputs } from "#client/conversation-state.js";
+export type {
+  AgentObservation,
+  ConversationAgentSession,
+  ConversationInput,
+  ConversationState,
+  ConversationTask,
+  ConversationTaskCall,
+  ConversationTurn,
+} from "#client/conversation-state.js";
 export {
   defaultMessageReducer,
   type EveAuthorizationChallenge,

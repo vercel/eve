@@ -56,6 +56,10 @@ function reduceTraceProjection(
       };
 
     case "client.input.responded":
+    case "client.agent.following":
+    case "client.agent.idle":
+    case "client.agent.observed":
+    case "client.agent.unavailable":
       return data;
 
     default: {

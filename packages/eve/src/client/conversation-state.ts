@@ -1,0 +1,163 @@
+import type { EveAuthorizationPart, EveMessageData } from "#client/message-reducer-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { JsonValue } from "#shared/json.js";
+
+export interface ConversationTurn {
+  readonly turnId: string;
+  readonly status: "active" | "completed" | "cancelled" | "failed";
+  /** The open turn is parked, holding on its tasks or on a question one of its calls asked. */
+  readonly waiting?: boolean;
+}
+
+export interface ConversationInput {
+  readonly request: InputRequest;
+  readonly turnId: string;
+  readonly stepIndex: number;
+  /** The task whose run asks, when a task asks. */
+  readonly taskId?: string;
+  readonly status: "open" | "responded" | "settled";
+  readonly response?: InputResponse;
+  readonly outcome?: string;
+}
+
+/** One call that started or reached a task, settled by its `task.settled`. */
+export interface ConversationTaskCall {
+  readonly callId: string;
+  readonly turnId: string;
+  readonly status: "working" | "completed" | "failed" | "cancelled";
+  /** The call's result; present only when `status` is `"completed"`. */
+  readonly output?: JsonValue;
+  /** Why the call failed; present only when `status` is `"failed"`. */
+  readonly error?: { readonly message: string };
+}
+
+export interface ConversationTask {
+  readonly taskId: string;
+  /** The tool whose call started the task. */
+  readonly name: string;
+  /** Calls in the order they started or reached the task. */
+  readonly calls: Readonly<Record<string, ConversationTaskCall>>;
+}
+
+export type AgentObservation =
+  | { readonly status: "not-followed" }
+  | { readonly status: "following"; readonly conversation: ConversationState }
+  /** Every call so far has shown its content; a later call to the task resumes following. */
+  | { readonly status: "idle"; readonly conversation: ConversationState }
+  | {
+      /** The stream failed; this does not mean the agent failed. */
+      readonly status: "unavailable";
+      readonly conversation?: ConversationState;
+    };
+
+/** A session a run opened with `ctx.agent`, as its `agent.started` announced it. */
+export interface ConversationAgentSession {
+  readonly sessionId: string;
+  readonly name: string;
+  /** The call whose invocation opened the session. */
+  readonly callId: string;
+  readonly turnId: string;
+  /** The task whose run opened the session; absent when an `execute` call opened it. */
+  readonly taskId?: string;
+  readonly observation: AgentObservation;
+}
+
+/** Renderable conversation state. Root and agent-session input IDs occupy separate scopes. */
+export interface ConversationState extends EveMessageData {
+  readonly activeTurnId?: string;
+  readonly turns: Readonly<Record<string, ConversationTurn>>;
+  readonly inputs: Readonly<Record<string, ConversationInput>>;
+  readonly tasks: Readonly<Record<string, ConversationTask>>;
+  /** Sessions opened by this session's runs, by session ID. */
+  readonly agents: Readonly<Record<string, ConversationAgentSession>>;
+}
+
+/** Inputs awaiting an answer, including requests introduced in earlier turns. */
+export function openConversationInputs(state: ConversationState): readonly ConversationInput[] {
+  return Object.values(state.inputs).filter((input) => input.status === "open");
+}
+
+/** Authorization attempts remain visible across turns, including parked callbacks. */
+export function conversationAuthorizations(
+  state: ConversationState,
+): readonly EveAuthorizationPart[] {
+  return state.messages.flatMap((message) =>
+    message.role === "assistant"
+      ? message.parts.filter((part): part is EveAuthorizationPart => part.type === "authorization")
+      : [],
+  );
+}
+
+/**
+ * The session an agent tool forwards its task's calls to. eve's agent tools send each call as one
+ * message, in call order, which is what lets a client attribute the session's turns to calls.
+ */
+export function agentToolSession(
+  state: ConversationState,
+  task: ConversationTask,
+): ConversationAgentSession | undefined {
+  return Object.values(state.agents).find(
+    (agent) => agent.taskId === task.taskId && agent.name === task.name,
+  );
+}
+
+export function isAgentToolSession(
+  state: ConversationState,
+  agent: ConversationAgentSession,
+): boolean {
+  const task = agent.taskId === undefined ? undefined : state.tasks[agent.taskId];
+  return task !== undefined && task.name === agent.name;
+}
+
+/**
+ * Whether a followed agent tool session has shown everything its task's calls produced so far:
+ * no call is working, the session has no open turn or question, and every completed call's
+ * message has arrived. The last check covers a child stream that lags the root stream.
+ */
+export function isAgentSessionCaughtUp(
+  state: ConversationState,
+  agent: ConversationAgentSession,
+): boolean {
+  if (agent.observation.status !== "following" && agent.observation.status !== "idle") {
+    return false;
+  }
+  const task = agent.taskId === undefined ? undefined : state.tasks[agent.taskId];
+  if (task === undefined) return false;
+  const calls = Object.values(task.calls);
+  if (calls.some((call) => call.status === "working")) return false;
+  const child = agent.observation.conversation;
+  if (child.activeTurnId !== undefined) return false;
+  if (Object.values(child.inputs).some((input) => input.status !== "settled")) return false;
+  const received = child.messages.filter((message) => message.role === "user").length;
+  return received >= calls.filter((call) => call.status === "completed").length;
+}
+
+/**
+ * Attributes an agent tool session's turns to the calls that produced them. The k-th message the
+ * session received came from the task's k-th call; a turn without a message of its own, such as
+ * one resumed after an approval, continues the previous call. A call whose message joined a
+ * running turn owns no turn.
+ */
+export function agentCallTurns(
+  task: ConversationTask,
+  conversation: ConversationState,
+): ReadonlyMap<string, readonly string[]> {
+  const callIds = Object.keys(task.calls);
+  const owners = new Map<string, string>();
+  let index = 0;
+  for (const message of conversation.messages) {
+    if (message.role !== "user") continue;
+    const callId = callIds[index++];
+    const turnId = message.metadata?.turnId;
+    if (callId !== undefined && turnId !== undefined && !owners.has(turnId)) {
+      owners.set(turnId, callId);
+    }
+  }
+  const turns = new Map<string, string[]>(callIds.map((callId) => [callId, []]));
+  let owner: string | undefined;
+  for (const turnId of Object.keys(conversation.turns)) {
+    owner = owners.get(turnId) ?? owner;
+    if (owner !== undefined) turns.get(owner)?.push(turnId);
+  }
+  return turns;
+}
