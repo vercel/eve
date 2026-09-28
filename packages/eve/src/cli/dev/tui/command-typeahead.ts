@@ -101,9 +101,9 @@ export function typeaheadCompletion(spec: PromptCommandSpec): string {
 }
 
 /**
- * When the draft is a complete command name or alias with exactly one match,
- * return its argument shape to paint dim after the input. The suggestion stays
- * visible beneath the prompt; an empty string means there is no argument hint.
+ * When the draft is a complete command name or alias with exactly one match and
+ * the list is not dismissed, return its argument shape to paint dim after the
+ * input (an empty string when there is none). Returns `undefined` otherwise.
  */
 export function inlineCommandHint(state: CommandTypeaheadState): string | undefined {
   if (state.dismissed || state.matches.length !== 1) return undefined;
