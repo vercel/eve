@@ -547,7 +547,7 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
   input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
 }
 
-/** Re-registers callbacks for compiled resolvers that explicitly support cold replay. */
+/** Re-registers turn-scoped callbacks that are missing in the current process. */
 export async function rebindMissingCompiledDynamicToolCallbacks(input: {
   readonly ctx: AlsContext;
   readonly event: UnstampedMessageStreamEvent;
@@ -566,16 +566,7 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
   );
   if (needsResolution.length === 0) return;
   const resolverSlugs = new Set(needsResolution.map((entry) => entry.resolverSlug));
-  const oldResolverSlugs = new Set(
-    persisted
-      .filter((entry) => !isCurrentDynamicToolMetadata(entry))
-      .map((entry) => entry.resolverSlug),
-  );
-  const matching = input.resolvers.filter(
-    (resolver) =>
-      resolverSlugs.has(resolver.slug) &&
-      (oldResolverSlugs.has(resolver.slug) || resolver.rebindMissingCallbacks === true),
-  );
+  const matching = input.resolvers.filter((resolver) => resolverSlugs.has(resolver.slug));
   if (matching.length === 0) {
     input.ctx.set(TurnDynamicToolMetadataKey, toCurrentDynamicToolMetadataList(persisted));
     return;

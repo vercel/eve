@@ -759,6 +759,45 @@ describe("dispatchDynamicToolEvent", () => {
     }
   });
 
+  it("rebinds an authored turn resolver after a cold start", async () => {
+    const ctx = createCtx();
+    const captured = "turn-start-capture";
+    const handler = vi.fn(() => ({
+      tool: createReplayableTool("turn tool", () => ({ captured })),
+    }));
+    const resolver = createResolver("authored", ["turn.started"], handler);
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+    simulateColdStart(ctx);
+
+    await rebindMissingCompiledDynamicToolCallbacks({
+      ctx,
+      event: makeEvent("turn.started"),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(
+      lookupDurableDynamicCallback(
+        callbackOwner("tool", {
+          entryKey: "tool",
+          resolverSlug: "authored",
+          scope: "turn",
+          sessionId: ctx.require(SessionIdKey),
+        }),
+        "execute",
+      ),
+    ).toBeDefined();
+    const [tool] = buildDynamicTools(ctx);
+    await expect(tool!.execute!({}, executeOptions)).resolves.toEqual({ captured });
+  });
+
   it("replaces old step-function turn metadata without requiring cold-rebind opt-in", async () => {
     let ctx = createCtx();
     const serialized = serializeContext(ctx);
