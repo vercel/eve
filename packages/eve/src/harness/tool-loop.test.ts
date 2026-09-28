@@ -2869,6 +2869,55 @@ describe("createToolLoopHarness", () => {
     expect(result.session.outputSchema).toBeUndefined();
   });
 
+  it("defers a requested schema when the delegated child yielded to background work", async () => {
+    const schema = {
+      properties: { facts: { items: { type: "string" }, type: "array" } },
+      required: ["facts"],
+      type: "object",
+    } as const;
+    setupMockAgent({
+      finishReason: "stop",
+      response: {
+        messages: [
+          {
+            content:
+              "I've sent the request to the researcher subagent. I'll let you know when it responds.",
+            role: "assistant",
+          },
+        ],
+      },
+      text: "I've sent the request to the researcher subagent. I'll let you know when it responds.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const ctx = new ContextContainer();
+    ctx.set(BackgroundToolExecutorKey, {
+      async execute() {
+        return { status: "working" };
+      },
+      hasPendingTasks() {
+        return true;
+      },
+    });
+
+    const result = await contextStorage.run(ctx, () =>
+      runStep(createTestSession({ outputSchema: schema }), {
+        message: "Delegate to the researcher.",
+      }),
+    );
+
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({
+      output:
+        "I've sent the request to the researcher subagent. I'll let you know when it responds.",
+    });
+    expect(result.session.outputSchema).toEqual(schema);
+    expect(events.map((event) => event.type)).not.toContain("turn.failed");
+  });
+
   it("returns next: runStep (continue) when model makes tool calls", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
