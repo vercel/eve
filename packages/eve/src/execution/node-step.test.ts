@@ -1,8 +1,19 @@
 import { ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Runtime } from "#channel/types.js";
+import { compileAgentManifest } from "#compiler/normalize-manifest.js";
+import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
+import {
+  createAgentSourceRegistry,
+  defineProgrammaticAgentSource,
+} from "#compiler/source-graph.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
+import { createAgentSourceManifest } from "#discover/manifest.js";
+import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
+import { defineAgent } from "#public/definitions/agent.js";
+import taskCancel from "#public/tools/task-cancel.js";
+import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import {
   AuthKey,
   InitiatorAuthKey,
@@ -297,6 +308,49 @@ describe("createNodeHarnessTools", () => {
     expect(tools.get("task_cancel")?.execute).toBeUndefined();
     expect(tools.has("task_sleep")).toBe(false);
   });
+
+  it.each([false, true])(
+    "lowers a restored task_cancel re-export from its framework definition (defaultTools: %s)",
+    async (defaultTools) => {
+      const sourceRegistry = createAgentSourceRegistry([
+        {
+          applyTo: "root",
+          source: defineProgrammaticAgentSource({
+            id: "test:application",
+            modules: [
+              {
+                logicalPath: "agent.ts",
+                loadNamespace: async () => ({
+                  default: defineAgent({ defaultTools, model: "openai/gpt-5.4" }),
+                }),
+              },
+              {
+                logicalPath: "tools/task_cancel.ts",
+                loadNamespace: async () => ({ default: taskCancel }),
+              },
+            ],
+            revision: "test:application:v1",
+          }),
+        },
+      ]);
+      const manifest = await compileAgentManifest(
+        createAgentSourceManifest({
+          agentId: "task-cancel-reexport",
+          agentRoot: "/virtual/task-cancel-reexport/agent",
+          appRoot: "/virtual/task-cancel-reexport",
+        }),
+        { sourceRegistries: [sourceRegistry] },
+      );
+      const moduleMap = await createProgrammaticCompiledModuleMap(manifest, [
+        frameworkAgentSourceRegistry,
+        sourceRegistry,
+      ]);
+      const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
+      const tool = createNodeHarnessTools({ node: graph.root }).get("task_cancel");
+
+      expect(tool).toMatchObject({ runtimeAction: { kind: "task-control" } });
+    },
+  );
 
   it("executes compiled local and remote delegation tools as background tasks", async () => {
     const delegationTools: StaticRuntimeTurnAgent["tools"] = [
