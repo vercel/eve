@@ -13,7 +13,7 @@ The footer shows the active model and connection separated by dots. Vercel accou
 
 The transcript remains in your terminal scrollback after you exit. Run `/help` in the UI to see the commands available in the current session.
 
-Before your first message, the empty composer may suggest instructions, tools, or a channel to ask your local agent to add. The suggestion depends on the agent's current capabilities; typing replaces it without sending a message or changing files.
+Before your first message, the empty composer may suggest asking your local agent to edit its instructions or add a tool or channel. The suggestion depends on the agent's current capabilities; typing replaces it without sending a message or changing files.
 
 ## Commands
 

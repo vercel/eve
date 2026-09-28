@@ -3728,6 +3728,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #addSubmittedPrompt(prompt: string | undefined) {
     if (prompt == null) return;
+    this.#hasUserMessage = true;
     const origin = this.#nextSubmittedPromptOrigin;
     this.#nextSubmittedPromptOrigin = undefined;
     if (this.#pendingEchoedPrompt === prompt) {

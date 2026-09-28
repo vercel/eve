@@ -2123,6 +2123,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.type("hello");
     input.enter();
     expect(await first).toBe("hello");
+    await renderer.renderStream(streamOf([]), { continueSession: true, submittedPrompt: "hello" });
 
     renderer.renderAgentHeader(header);
     const second = renderer.readPrompt();
@@ -2135,6 +2136,24 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
+
+    const queued = makeRenderer();
+    queued.renderer.beginStartupDraft({ title: "Orders" });
+    queued.input.type("hello from startup");
+    queued.input.enter();
+    const startup = queued.renderer.finishStartupDraft();
+    expect(startup.queuedPrompt).toBe("hello from startup");
+    queued.renderer.renderAgentHeader(header);
+    await queued.renderer.renderStream(streamOf([]), {
+      continueSession: true,
+      submittedPrompt: startup.queuedPrompt,
+    });
+    const afterQueuedMessage = queued.renderer.readPrompt();
+    expect(queued.screen.snapshot()).not.toContain("ask me to add a channel");
+    queued.input.ctrlC();
+    queued.input.ctrlC();
+    await expect(afterQueuedMessage).rejects.toThrow();
+    queued.renderer.shutdown();
   });
 
   it("keeps collapsed reasoning out of the transcript behind the turn bar", async () => {
