@@ -21,7 +21,7 @@ For a single-agent project, install the generated Next.js Web Chat app:
 eve add channel/web
 ```
 
-The installer adds a Next.js application and wraps `next.config.ts` with `withEve()`. The generated config enables `experimental.useTypeScriptCli` so Next.js can run with the TypeScript 7 toolchain used by eve agent projects. The generated chat calls the unnamed agent through same-origin `/eve/v1/*` routes.
+The installer adds a Next.js application and wraps `next.config.ts` with `withEve()`. The generated chat calls the unnamed agent through same-origin `/eve/v1/*` routes. The generated app uses a Next.js release that supports the TypeScript 7 toolchain of eve agent projects without extra configuration.
 
 Before accepting production browser traffic, replace the generated placeholder authorization policy. See [Authenticate browser requests](./overview#authenticate-browser-requests).
 

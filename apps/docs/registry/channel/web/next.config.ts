@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 import { withEve } from "eve/next";
 
-const nextConfig: NextConfig = { experimental: { useTypeScriptCli: true } };
+const nextConfig: NextConfig = {};
 
 export default withEve(nextConfig);
