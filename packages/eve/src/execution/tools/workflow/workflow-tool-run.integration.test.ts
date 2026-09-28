@@ -11,6 +11,7 @@ import { SLEEP_INPUT_SCHEMA, executeSleepTool } from "#execution/tools/sleep.js"
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   askThenRaceWorkflow,
+  answerWithResponderWorkflow,
   confirmDeployWorkflow,
   deployServiceWorkflow,
   failingDeployWorkflow,
@@ -226,6 +227,69 @@ describe("workflow tools", () => {
       }
     });
     expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
+  }, 60_000);
+
+  it("exposes the principal that answered ctx.ask", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const bob = { ...alice, principalId: "bob" };
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-ask-responder",
+      execute: answerWithResponderWorkflow,
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: {
+            ...buildWorkflowToolSerializedContext({
+              continuationToken: "http:workflow-tool-ask-responder",
+              requestInput: true,
+            }),
+            "eve.auth": alice,
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const requested = await stream.nextTurn();
+        const request = (filterEventsByType(requested, "input.requested")[0] as InputRequestedStreamEvent)
+          .data.requests[0]!;
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          auth: bob,
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request.requestId }] },
+        });
+
+        const answered = await stream.nextTurn();
+        const result = filterEventsByType(answered, "action.result").find(
+          (event) => event.data.result.kind === "tool-result" && event.data.result.toolName === "confirm_deploy",
+        );
+        expect(JSON.parse(String(result?.data.result.output))).toEqual({
+          answer: {
+            optionId: "approve",
+            responder: {
+              authenticator: "test",
+              principalId: "bob",
+              principalType: "user",
+            },
+            status: "answered",
+          },
+          runStartPrincipal: "alice",
+        });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
   }, 60_000);
 
   it("lets a deadline win a race against an unanswered ask", async () => {
