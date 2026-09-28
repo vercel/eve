@@ -98,6 +98,7 @@ export async function dispatchToClaimedAgentAddress(input: {
     address: handle.address,
     auth: input.auth,
     bundle: input.bundle,
+    currentSession: input.currentSession,
     identity: handle.identity,
     reply: input.reply,
   });
@@ -151,6 +152,7 @@ async function deliverToAgentAddress(input: {
   readonly address: AgentAddress;
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
+  readonly currentSession: RuntimeSession;
   readonly identity: AgentIdentity;
   readonly reply: AgentReplyTarget;
 }): Promise<
@@ -224,6 +226,9 @@ async function deliverToAgentAddress(input: {
             : {
                 activityObserver: input.activityObserver,
                 callId: action.callId,
+                ...(input.currentSession.sandboxState === undefined
+                  ? {}
+                  : { parentSandboxState: input.currentSession.sandboxState }),
                 replyTo: { kind: "hook", token: reply.parentToken },
                 subagentName: identity.name,
                 taskId,
