@@ -86,6 +86,7 @@ import type {
   TerminalPartDisplayMode,
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
+import { initialPromptPlaceholder } from "./prompt-placeholder.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { inspectError, type LogRecord } from "#internal/logging.js";
 import {
@@ -303,6 +304,7 @@ type AgentHeaderOptions = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
+  localDevelopment?: boolean;
 };
 
 type DisplayModes = {
@@ -441,6 +443,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
   #agentHeader?: AgentHeaderOptions;
+  #initialPromptPlaceholder = "Send a message…";
   #startupPhase?: "starting" | "connecting" | "updating";
   #startupEditor?: LineState;
   #startupConsumer?: (key: TerminalKey) => void;
@@ -780,6 +783,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#resolvedModelId = undefined;
     }
     this.#agentHeader = options;
+    this.#initialPromptPlaceholder = initialPromptPlaceholder(
+      options.info,
+      options.localDevelopment === true,
+    );
     this.#start();
     const body = this.#renderAgentHeaderRows().join("\n");
     if (this.#agentHeaderRendered) {
@@ -4640,7 +4647,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             ? "Message · Enter to queue"
             : this.#hasUserMessage
               ? ""
-              : "Send a message…";
+              : this.#initialPromptPlaceholder;
       }
       const renderedPromptRows = promptInputRows(promptRows);
       // The prompt helper ends with a footer spacer; a drawer owns that gap.

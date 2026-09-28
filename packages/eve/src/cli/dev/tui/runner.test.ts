@@ -615,6 +615,7 @@ describe("EveTUIRunner agent header", () => {
     expect(headers[0]).toEqual({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
+      localDevelopment: false,
       info: AGENT_INFO,
     });
     expect(renderer.readPrompt).toHaveBeenCalled();
@@ -671,6 +672,7 @@ describe("EveTUIRunner agent header", () => {
       {
         name: "Weather Agent",
         serverUrl: "http://localhost:3000",
+        localDevelopment: false,
         info: AGENT_INFO,
       },
     ]);

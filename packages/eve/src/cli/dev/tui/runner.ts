@@ -252,6 +252,7 @@ export type AgentTUIAgentHeader = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
+  localDevelopment?: boolean;
 };
 
 export type AgentTUIRenderer = {
@@ -754,6 +755,7 @@ export class EveTUIRunner {
     const header: AgentTUIAgentHeader = {
       name: this.#name,
       serverUrl,
+      localDevelopment: this.#appRoot !== undefined,
     };
     if (headerInfo !== undefined) header.info = headerInfo;
     this.#renderer.renderAgentHeader?.(header);

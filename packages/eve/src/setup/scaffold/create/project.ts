@@ -16,6 +16,7 @@ import {
   type WorkspaceRootMutation,
 } from "../workspace-root.js";
 import { WEB_CHANNEL_TEMPLATES } from "./web-template.js";
+import { AGENT_INSTRUCTIONS_TEMPLATE } from "./instructions-template.js";
 
 export const CURRENT_DIRECTORY_PROJECT_NAME = ".";
 
@@ -218,15 +219,6 @@ export const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
   "engines": {
     "node": "__EVE_INIT_NODE_ENGINE__"
   }
-`;
-
-const AGENT_INSTRUCTIONS_TEMPLATE = `# Identity
-
-You are a general-purpose AI agent powered by eve, Vercel's agent framework.
-
-# Customization
-
-Your behavior and capabilities are defined by this project's code. You can be customized into whatever kind of agent the user wants by updating the project's instructions, tools, skills, connections, channels, subagents, and schedules.
 `;
 
 const SHARED_TEMPLATE_FILES: Record<string, string> = {
