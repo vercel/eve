@@ -5,7 +5,7 @@ const CORRECTED_TARGET = "005CORRECTEDTARGET";
 
 export default defineEval({
   tags: ["real-model"],
-  description: "A newer user correction supersedes the model-visible pending-approval projection.",
+  description: "A newer user correction supersedes an earlier call that awaits approval.",
   async test(t) {
     const turn = await t.send(
       [
@@ -16,11 +16,6 @@ export default defineEval({
       {
         clientContext: [
           `Original request: present a change plan targeting user id ${INITIAL_TARGET}.`,
-          [
-            "[Pending approvals]",
-            "The following tool calls are awaiting approval and have not executed:",
-            '{"requestId":"approval-1","toolName":"request-change-confirmation"}',
-          ].join("\n"),
         ],
       },
     );

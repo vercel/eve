@@ -7264,7 +7264,7 @@ describe("createToolLoopHarness", () => {
     ).toEqual([["call-1"], ["call-2"]]);
   });
 
-  it("parks tool approval with one durable model-visible projection", async () => {
+  it("parks a tool approval without writing its pending state into history", async () => {
     setupMockAgent(pendingBashApprovalResult());
 
     const { emit, events } = createEventCollector();
@@ -7296,18 +7296,9 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Delete the temp directory." });
 
     expect(result.next).toBeNull();
-    expect(result.session.history).toHaveLength(2);
-    expect(result.session.history[0]).toEqual({
-      content: "Delete the temp directory.",
-      kind: "user" as const,
-      role: "user",
-    });
-    const projection = result.session.history[1];
-    expect(projection?.role).toBe("user");
-    const serializedProjection = JSON.stringify(projection?.content);
-    expect(serializedProjection).toMatch(/pending/iu);
-    expect(serializedProjection).toContain("approval-1");
-    expect(serializedProjection).toContain("bash");
+    expect(result.session.history).toEqual([
+      { content: "Delete the temp directory.", kind: "user" as const, role: "user" },
+    ]);
     expect(hasPendingInputBatch(result.session.state)).toBe(true);
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
@@ -7558,7 +7549,6 @@ describe("createToolLoopHarness", () => {
 
     expect(parked.next).toBeNull();
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].toolChoice).not.toBe("none");
-    expect(parked.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
     expect(hasPendingInputBatch(parked.session.state)).toBe(true);
 
     // Every follow-up runs as an ordinary turn with tools available while the
@@ -7578,13 +7568,10 @@ describe("createToolLoopHarness", () => {
       expect(settings?.tools).toHaveProperty("bash");
       expect(messages.at(-1)).toEqual({ content: question, kind: "user" as const, role: "user" });
       expect(messages.every((message) => message.role !== "tool")).toBe(true);
-      expect(messages.filter(isPendingApprovalProjection)).toHaveLength(1);
-      expect(messages.findIndex(isPendingApprovalProjection)).toBe(1);
       expect(pendingApprovalInstructions(callIndex)).toContain("Trusted eve runtime state");
       expect(pendingApprovalInstructions(callIndex)).toContain("approval-1");
       expect(pendingApprovalInstructions(callIndex)).toContain("bash");
       expect(pendingApprovalInstructions(callIndex)).not.toContain("rm -rf /tmp/demo");
-      expect(followup.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
       expect(getDeferredStepInput(followup.session)).toBeUndefined();
       expect(hasPendingInputBatch(followup.session.state)).toBe(true);
       pendingSession = followup.session;
@@ -7646,6 +7633,9 @@ describe("createToolLoopHarness", () => {
       kind: "user" as const,
       role: "user",
     });
+    // Once answered, nothing still tells the model the approval is pending.
+    expect(denialMessages.some(isPendingApprovalProjection)).toBe(false);
+    expect(pendingApprovalInstructions(denialIndex)).not.toContain("approval-1");
     expect(hasPendingInputBatch(deniedResult.session.state)).toBe(false);
     expect(deniedResult.session.history.at(-1)).toEqual({
       content: "Okay, I will not run that command.",

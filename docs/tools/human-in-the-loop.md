@@ -189,7 +189,7 @@ The run picks back up exactly where it parked. Because the pause is durable, not
 
 When a subagent requests input, eve emits the same `input.requested` event on its parent session. Answering through that parent session routes the response directly to the blocked child without invoking the parent model.
 
-For approval requests, unrelated follow-up text does not deny the tool call. eve keeps the approval pending and records that pending state in model-visible session history. Follow-up turns run normally and may call other tools while the approval remains unresolved. Once it is answered, eve settles the original tool call exactly once.
+For approval requests, unrelated follow-up text does not deny the tool call. eve keeps the approval pending and tells the model on each call which tool calls are still awaiting approval, until they're answered. Follow-up turns run normally and may call other tools while the approval remains unresolved. Once it is answered, eve settles the original tool call exactly once.
 
 See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for the full event and resume contract that this builds on.
 

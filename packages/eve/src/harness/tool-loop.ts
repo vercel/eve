@@ -108,10 +108,7 @@ import {
   setHarnessEmissionState,
 } from "#harness/emission.js";
 import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
-import {
-  renderPendingApprovalsInstruction,
-  renderPendingApprovalsSnippet,
-} from "#harness/hitl/approval-prompt.js";
+import { renderPendingApprovalsInstruction } from "#harness/hitl/approval-prompt.js";
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
@@ -2578,9 +2575,10 @@ async function handleStepResult(input: {
     excludedCallIds: invalidInputToolCallIds,
   });
   const inputRequests: InputRequest[] = approvalRequests;
-  const pendingApprovals = renderPendingApprovalsSnippet(approvalRequests);
-  // Keep outcomes from resumed work ahead of the framework pending-approval
-  // message; only the unresolved assistant response belongs to the parked batch.
+  // Keep outcomes from resumed work in history; only the unresolved assistant
+  // response belongs to the parked batch. Pending approvals reach the model
+  // through the live instruction each request rebuilds, so nothing here goes
+  // stale once they are answered.
   const pendingResponseStart = responseMessages.findIndex((message) => message.role !== "tool");
   const committedResponseMessages =
     pendingResponseStart === -1
@@ -2590,9 +2588,6 @@ async function handleStepResult(input: {
   const parkedInputHistory: HarnessModelMessage[] = validateHarnessModelMessages([
     ...promptMessages,
     ...committedResponseMessages,
-    ...(pendingApprovals === undefined
-      ? []
-      : [createFrameworkUserMessage("context.state", pendingApprovals)]),
   ]);
   const advertisedCoordinationTools = getAdvertisedTools({
     session: baseSession,
