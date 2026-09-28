@@ -553,7 +553,8 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                   schemaSession = {
                     ...schemaSession,
                     history: validateHarnessModelMessages([
-                      ...(memoryCommit?.history ?? schemaSession.history),
+                      ...schemaSession.history,
+                      ...(memoryCommit?.recalledMessages ?? []),
                       ...instructionMessages,
                     ]),
                     state: memoryCommit?.state ?? schemaSession.state,
