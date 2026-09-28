@@ -262,13 +262,13 @@ function createRegisteredHarnessToolDefinition(input: {
   readonly rootOnly?: boolean;
 }): HarnessToolDefinition {
   const def = input.definition;
-  if (def.owner.kind === "framework") {
-    const taskDefinition = createTaskToolHarnessDefinitions().find(
-      (definition) => definition.name === def.name,
-    );
-    if (taskDefinition !== undefined) {
-      return { ...taskDefinition, behavior: input.behavior };
-    }
+  // The compiler rejects anything but the framework definition in a task tool slot,
+  // so a restored re-export lowers exactly like the framework default.
+  const taskDefinition = createTaskToolHarnessDefinitions().find(
+    (definition) => definition.name === def.name,
+  );
+  if (taskDefinition !== undefined) {
+    return { ...taskDefinition, behavior: input.behavior };
   }
   const rawExecute = def.execute;
 
