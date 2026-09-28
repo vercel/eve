@@ -9,6 +9,9 @@ import type { ModelMessage, ToolModelMessage } from "ai";
  * call lacks the matching marker or shares an assistant message with a local
  * tool call. Native provider-only call/result pairs remain untouched. Text
  * before a result remains before it; text after a result remains after it.
+ * Local tool calls in a split message, with their approval requests, move to
+ * its last assistant message, so the local results that follow the response
+ * directly follow their calls.
  */
 export function normalizeProviderToolHistory(input: {
   readonly messages: readonly ModelMessage[];
@@ -40,6 +43,11 @@ export function normalizeProviderToolHistory(input: {
 
     let assistantContent: typeof message.content = [];
     let toolContent: ToolModelMessage["content"] = [];
+    const localCallParts: typeof message.content = [];
+    const localCallIds = new Set<string>();
+    const splits = message.content.some(
+      (part) => part.type === "tool-result" && toolCallIdsToNormalize.has(part.toolCallId),
+    );
 
     const flushAssistant = (): void => {
       if (assistantContent.length === 0) return;
@@ -56,6 +64,19 @@ export function normalizeProviderToolHistory(input: {
       if (part.type === "tool-result" && toolCallIdsToNormalize.has(part.toolCallId)) {
         flushAssistant();
         toolContent.push(part);
+      } else if (
+        splits &&
+        part.type === "tool-call" &&
+        part.providerExecuted !== true &&
+        !toolCallIdsToNormalize.has(part.toolCallId)
+      ) {
+        // Local results arrive after the whole response. Keeping their calls
+        // in an earlier split would put a later provider result between a
+        // call and its result, which providers reject.
+        localCallIds.add(part.toolCallId);
+        localCallParts.push(part);
+      } else if (part.type === "tool-approval-request" && localCallIds.has(part.toolCallId)) {
+        localCallParts.push(part);
       } else {
         flushTool();
         assistantContent.push(
@@ -73,8 +94,9 @@ export function normalizeProviderToolHistory(input: {
       position += 1;
     }
 
-    flushAssistant();
     flushTool();
+    assistantContent.push(...localCallParts);
+    flushAssistant();
   }
 
   return {
