@@ -1876,7 +1876,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
 
     expect(screen.snapshot()).toMatch(
-      /2 of 10 · from subagent\(number_picker:13\)\n\s+Approve random_number\?/,
+      /─ subagent\(number_picker:13\) · 2 of 10 ──\n\n\s+Approve random_number\?/,
     );
     input.enter();
     await expect(approval).resolves.toEqual({ approved: true });

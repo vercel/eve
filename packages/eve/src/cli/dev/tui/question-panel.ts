@@ -62,20 +62,17 @@ export function renderQuestionPanel(
   return rows.map((row) => clipVisible(row, width));
 }
 
-/** A dim line that places a prompt among the requests being answered and names who asked. */
-export function renderInputContext(
+/** Who asked for a prompt and where it sits among the open requests, for the drawer's corner. */
+export function inputContextLabel(
   context: AgentTUIInputContext | undefined,
   theme: Theme,
-  width: number,
-): string[] {
+): string | undefined {
   const parts: string[] = [];
+  if (context?.requester !== undefined) parts.push(stripTerminalControls(context.requester));
   if (context?.position !== undefined) {
     parts.push(`${context.position.index} of ${context.position.total}`);
   }
-  if (context?.requester !== undefined) {
-    parts.push(`from ${stripTerminalControls(context.requester)}`);
-  }
-  return parts.length === 0 ? [] : [clipVisible(`  ${theme.colors.dim(parts.join(" · "))}`, width)];
+  return parts.length === 0 ? undefined : parts.join(` ${theme.glyph.dot} `);
 }
 
 export function renderQuestionChoices(
