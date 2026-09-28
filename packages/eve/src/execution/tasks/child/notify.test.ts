@@ -19,6 +19,23 @@ vi.mock("#execution/submit-activity.js", () => ({ submitActivity: vi.fn() }));
 vi.mock("#execution/session-inbox/resume.js", () => ({ resumeSessionInbox: vi.fn() }));
 vi.mock("#execution/tools/workflow/answer.js", () => ({
   resumeWorkflowToolRunAnswers: vi.fn(),
+  toToolInputResponseResponder: (
+    auth:
+      | {
+          readonly authenticator: string;
+          readonly principalId: string;
+          readonly principalType: string;
+        }
+      | null
+      | undefined,
+  ) =>
+    auth === null || auth === undefined
+      ? undefined
+      : {
+          authenticator: auth.authenticator,
+          principalId: auth.principalId,
+          principalType: auth.principalType,
+        },
 }));
 
 afterEach(() => {
@@ -272,7 +289,7 @@ describe("deliverTaskInputResponsesStep", () => {
     expect(resumeWorkflowToolRunAnswers).toHaveBeenCalledWith(
       "eve:workflow-tool-run-answer:run-1:0",
       [{ optionId: "approve", requestId: "req-1" }],
-      workflowToolRunAnswer.auth,
+      { authenticator: "test", principalId: "bob", principalType: "user" },
     );
   });
 });

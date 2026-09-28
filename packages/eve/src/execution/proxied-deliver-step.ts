@@ -13,6 +13,7 @@ import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   resumeWorkflowToolRunAnswers,
   resumeWorkflowToolRunDismissal,
+  toToolInputResponseResponder,
 } from "#execution/tools/workflow/answer.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
@@ -141,6 +142,7 @@ export async function routeProxiedDeliverStep(input: {
         mergeStrandedResponses(parentPayloads, child, taskId);
         continue;
       }
+      const payload = coalesceDeliverPayloads(child.payloads);
       const delivery = await sendTaskInboundPayload({
         taskInboxToken: entry.address.hookToken,
         payload: {
@@ -148,8 +150,9 @@ export async function routeProxiedDeliverStep(input: {
           childContinuationToken: child.childContinuationToken,
           childSessionInbox: child.childSessionInbox,
           childResponseUrl: child.childResponseUrl,
-          inputResponses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
+          inputResponses: payload.inputResponses ?? [],
           kind: "input-response",
+          responder: payload.responder ?? toToolInputResponseResponder(sourceDelivery.auth),
           taskId,
         },
       });
@@ -163,11 +166,12 @@ export async function routeProxiedDeliverStep(input: {
     }
 
     if (child.answerHook !== undefined) {
-      const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
+      const payload = coalesceDeliverPayloads(child.payloads);
+      const responses = payload.inputResponses ?? [];
       await resumeWorkflowToolRunAnswers(
         child.childContinuationToken,
         responses,
-        sourceDelivery.auth,
+        payload.responder ?? toToolInputResponseResponder(sourceDelivery.auth),
       );
       if (child.dismissedRequestIds.length > 0) {
         await resumeWorkflowToolRunDismissal(child.childContinuationToken);

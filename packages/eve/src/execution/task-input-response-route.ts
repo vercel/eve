@@ -37,9 +37,8 @@ export async function handleTaskInputResponseRequest(
   // delivery envelope like every other session-inbox producer.
   try {
     await resumeSessionInbox(targetToken, {
-      ...(responder !== undefined && { auth: { attributes: {}, ...responder } }),
       kind: "send",
-      payload: { inputResponses },
+      payload: { inputResponses, responder },
     });
   } catch {
     return Response.json(

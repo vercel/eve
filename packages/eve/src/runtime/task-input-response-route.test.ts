@@ -53,14 +53,15 @@ describe("task input response capability", () => {
 
     expect(response.status).toBe(202);
     expect(resumeHookMock).toHaveBeenCalledWith(`eve:inbox:v1:${TARGET_TOKEN}`, {
-      auth: {
-        attributes: {},
-        authenticator: "test",
-        principalId: "bob",
-        principalType: "user",
-      },
       kind: "send",
-      payload: { inputResponses: [{ requestId: "req-1", text: "approved" }] },
+      payload: {
+        inputResponses: [{ requestId: "req-1", text: "approved" }],
+        responder: {
+          authenticator: "test",
+          principalId: "bob",
+          principalType: "user",
+        },
+      },
     });
   });
 

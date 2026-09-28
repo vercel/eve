@@ -2,7 +2,10 @@ import type { ActivityObserverConfig, SessionAuthContext, SessionCommand } from 
 import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
-import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
+import {
+  resumeWorkflowToolRunAnswers,
+  toToolInputResponseResponder,
+} from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
 import type { ActivityEventV1 } from "#protocol/activity.js";
@@ -202,14 +205,7 @@ export async function deliverTaskInputResponsesStep(input: {
   };
   try {
     if (input.answer.childResponseUrl !== undefined) {
-      const responder =
-        command.auth === null || command.auth === undefined
-          ? undefined
-          : {
-              authenticator: command.auth.authenticator,
-              principalId: command.auth.principalId,
-              principalType: command.auth.principalType,
-            };
+      const responder = input.answer.responder ?? toToolInputResponseResponder(command.auth);
       const response = await fetch(input.answer.childResponseUrl, {
         body: JSON.stringify({ inputResponses: command.payload.inputResponses, responder }),
         headers: { "content-type": "application/json" },
@@ -223,7 +219,7 @@ export async function deliverTaskInputResponsesStep(input: {
       await resumeWorkflowToolRunAnswers(
         input.answer.childContinuationToken,
         command.payload.inputResponses,
-        command.auth,
+        input.answer.responder ?? toToolInputResponseResponder(command.auth),
       );
     } else {
       await resumeSessionInbox(
