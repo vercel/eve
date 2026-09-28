@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { AgentInfoResult } from "#client/index.js";
 import { hasEnvValue, resolveGatewayCredential } from "#internal/resolve-model-endpoint-status.js";
 import { pathExists } from "#setup/path-exists.js";
+import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 /** One boot-time setup problem the TUI can point at a fixing command. */
 export interface SetupIssue {
@@ -35,6 +36,7 @@ export interface BootDetection {
 }
 
 type ModelProviderAccess =
+  | { kind: "harness" }
   | { kind: "unknown" }
   | { kind: "dynamic" }
   | { kind: "external" }
@@ -45,6 +47,22 @@ type ModelProviderAccess =
         | { status: "disconnected" }
         | { status: "unknown" };
     };
+
+/**
+ * Resolves ambient AI Gateway credentials for a local harness-backed agent.
+ * Missing credentials remain unknown because a harness may authenticate
+ * directly instead of using AI Gateway.
+ */
+export function resolveLocalHarnessEndpoint(
+  env: Record<string, string | undefined>,
+): ModelEndpointStatus | undefined {
+  const resolution = resolveGatewayCredential({
+    apiKeyInEnv: hasEnvValue(env.AI_GATEWAY_API_KEY),
+    oidcAvailable: hasEnvValue(env.VERCEL_OIDC_TOKEN),
+  });
+  if (resolution === undefined) return undefined;
+  return { kind: "gateway", connected: true, credential: resolution.credential };
+}
 
 /**
  * Resolves the local TUI's current model-provider state into the agent-info
@@ -63,6 +81,7 @@ export function normalizeLocalModelEndpoint(
   const { credential } = access.runtime;
 
   const model = info.agent.model;
+  if (model === undefined) return info;
   if (model.id === undefined || model.routing.kind !== "gateway") return info;
   const endpoint = model.endpoint;
   if (endpoint?.kind === "gateway" && endpoint.connected && endpoint.credential === credential) {
@@ -95,6 +114,7 @@ export function normalizeLocalModelEndpoint(
 function modelProviderAccess(
   context: Pick<BootDetectionContext, "env" | "info">,
 ): ModelProviderAccess {
+  if (context.info?.agent.harness !== undefined) return { kind: "harness" };
   const model = context.info?.agent.model;
   if (model?.routing?.kind === "dynamic") return { kind: "dynamic" };
   if (model?.routing?.kind === "external") return { kind: "external" };
@@ -148,7 +168,9 @@ const modelProvider: BootDetection = {
 
     // Dynamic selectors can return any provider; their credentials cannot be
     // diagnosed until a model is selected at runtime.
-    if (access.kind === "external" || access.kind === "dynamic") return [];
+    if (access.kind === "harness" || access.kind === "external" || access.kind === "dynamic") {
+      return [];
+    }
     if (access.kind !== "gateway" || access.runtime.status === "unknown") return [];
     if (access.runtime.status === "connected") return [];
 

@@ -152,7 +152,7 @@ describe("compiler artifacts", () => {
 
     await writeFile(join(agentRoot, "agent.mjs"), "export default {};\n");
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
-      'The "model" field is required.',
+      'Either the "model" or "harness" field is required.',
     );
   });
 

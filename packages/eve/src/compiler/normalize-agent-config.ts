@@ -59,7 +59,7 @@ export async function compileAgentConfig(
     ? definition.model
     : undefined;
   const model =
-    dynamicModelDefinition === undefined
+    dynamicModelDefinition === undefined && definition.harness === undefined
       ? await normalizeAuthoredModelReference({
           modelCatalog: context.modelCatalog,
           purpose: "the primary compaction trigger model",
@@ -70,6 +70,13 @@ export async function compileAgentConfig(
           value: definition.model as PublicAgentStaticModelDefinition,
         })
       : undefined;
+  const harness =
+    definition.harness === undefined
+      ? undefined
+      : {
+          harnessId: definition.harness.harnessId,
+          source: { ...configModule },
+        };
   const compaction: {
     model?: CompiledRuntimeModelReference;
     thresholdPercent?: number;
@@ -163,6 +170,10 @@ export async function compileAgentConfig(
 
   if (dynamicModel !== undefined) {
     return { ...compiledConfig, dynamicModel };
+  }
+
+  if (harness !== undefined) {
+    return { ...compiledConfig, harness };
   }
 
   if (model === undefined) {

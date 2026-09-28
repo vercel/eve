@@ -5,12 +5,16 @@ import type {
 } from "#compiler/manifest.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
 import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
 import { resolveDynamicConnectionDefinition } from "#runtime/resolve-dynamic-connection.js";
 import { resolveHookDefinition } from "#runtime/resolve-hook.js";
-import { createResolvedModuleSourceRef } from "#runtime/resolve-helpers.js";
+import {
+  createResolvedModuleSourceRef,
+  loadResolvedModuleExport,
+} from "#runtime/resolve-helpers.js";
 import { resolveSandboxDefinition } from "#runtime/resolve-sandbox.js";
 import { resolveDynamicInstructionsDefinition } from "#runtime/resolve-dynamic-instructions.js";
 import { resolveDynamicSkillDefinition } from "#runtime/resolve-dynamic-skill.js";
@@ -132,7 +136,14 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   };
 
   return "config" in input.manifest
-    ? { ...resolvedAgent, config: createResolvedAgentConfig(input.manifest) }
+    ? {
+        ...resolvedAgent,
+        config: await createResolvedAgentConfig({
+          manifest: input.manifest,
+          moduleMap: input.moduleMap,
+          nodeId: input.nodeId,
+        }),
+      }
     : resolvedAgent;
 }
 
@@ -174,9 +185,12 @@ function requireCompiledSourceOwner(
   return owner;
 }
 
-function createResolvedAgentConfig(
-  manifest: CompiledAgentNodeManifest,
-): NonNullable<ResolvedAgent["config"]> {
+async function createResolvedAgentConfig(input: {
+  readonly manifest: CompiledAgentNodeManifest;
+  readonly moduleMap: CompiledModuleMap;
+  readonly nodeId?: string;
+}): Promise<NonNullable<ResolvedAgent["config"]>> {
+  const { manifest } = input;
   const config: {
     compaction?: NonNullable<ResolvedAgent["config"]>["compaction"];
     defaultTools?: boolean;
@@ -276,6 +290,31 @@ function createResolvedAgentConfig(
         eventNames: [...manifest.config.dynamicModel.eventNames],
       },
     };
+  }
+
+  if (manifest.config.harness !== undefined) {
+    const authoredDefinition = await loadResolvedModuleExport({
+      definition: manifest.config.harness.source,
+      kindLabel: `runtime harness "${manifest.config.harness.harnessId}"`,
+      moduleMap: input.moduleMap,
+      nodeId: input.nodeId,
+    });
+    const normalizedDefinition = normalizeAgentDefinition(
+      authoredDefinition,
+      `Expected the authored agent config export "${manifest.config.harness.source.exportName ?? "default"}" from "${manifest.config.harness.source.logicalPath}" to match the public eve shape.`,
+    );
+    const harness = normalizedDefinition.harness;
+    if (harness === undefined) {
+      throw new Error(
+        `Expected the authored agent config export "${manifest.config.harness.source.exportName ?? "default"}" from "${manifest.config.harness.source.logicalPath}" to provide runtime harness "${manifest.config.harness.harnessId}".`,
+      );
+    }
+    if (harness.harnessId !== manifest.config.harness.harnessId) {
+      throw new Error(
+        `Expected the authored runtime harness id to remain "${manifest.config.harness.harnessId}", received "${harness.harnessId}".`,
+      );
+    }
+    return { ...config, harness };
   }
 
   const model = manifest.config.model;

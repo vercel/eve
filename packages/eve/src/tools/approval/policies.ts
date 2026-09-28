@@ -1,6 +1,11 @@
 import type { Experimental_EvaluationModel as EvaluationModel } from "ai";
 
-import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
+import {
+  resolveApprovalPolicy,
+  type Approval,
+  type ApprovalContext,
+  type ApprovalPolicy,
+} from "#approval/definition.js";
 import { evaluate } from "#ai/evaluate.js";
 import { parseJsonValue, type JsonObject } from "#shared/json.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
@@ -10,6 +15,13 @@ const MAX_ACTION_BYTES = 64 * 1024;
 const DEFAULT_INSTRUCTIONS = `Review the exact tool action for dangerous effects. Return caution when it could cause meaningful harm, including destructive data loss, credential exposure, financial transactions, deployments or public changes, external communication, privilege or system changes, or concealed execution. Return clear for routine, low-impact actions. Judge the action's actual effects from its name and input. If important effects are unclear, return caution.`;
 const DEFAULT_CLEAR_DESCRIPTION = "The action is routine and low impact.";
 const DEFAULT_CAUTION_DESCRIPTION = "The action is dangerous or its important effects are unclear.";
+
+/*
+ * HarnessAgent cannot yet delegate tool approval decisions to eve. This temporary
+ * marker lets harness setup recognize never() without executing arbitrary authored
+ * approval policies during configuration. Remove it when that approval flow exists.
+ */
+const NEVER_APPROVAL_POLICY = Symbol.for("eve:never-approval-policy");
 
 export interface AutoApprovalOptions {
   /** Evaluation model instance or ID. Defaults to TypeSafe Jev. */
@@ -109,10 +121,16 @@ export function always<TInput = unknown>(): ApprovalPolicy<TInput> {
  * the tool executes.
  */
 export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
-  return stampDurableDynamicCallback(() => "not-applicable", {
+  const policy = stampDurableDynamicCallback(() => "not-applicable" as const, {
     callback: neverApproval,
     closure: {},
   });
+  Object.defineProperty(policy, NEVER_APPROVAL_POLICY, { value: true });
+  return policy;
+}
+
+export function isNeverApprovalPolicy(approval: Approval): boolean {
+  return Reflect.get(resolveApprovalPolicy(approval), NEVER_APPROVAL_POLICY) === true;
 }
 
 /**

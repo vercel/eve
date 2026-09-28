@@ -8,6 +8,7 @@ import {
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
   normalizeLocalModelEndpoint,
+  resolveLocalHarnessEndpoint,
   type BootDetectionContext,
 } from "./setup-issues.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
@@ -17,13 +18,14 @@ function context(overrides: Partial<BootDetectionContext> = {}): BootDetectionCo
 }
 
 type AgentInfo = NonNullable<BootDetectionContext["info"]>;
+type AgentModel = NonNullable<AgentInfo["agent"]["model"]>;
 
 /** A minimal but fully-typed `/eve/v1/info` payload carrying a routing decision. */
 function infoWithRouting(
-  routing: AgentInfo["agent"]["model"]["routing"],
-  endpoint?: AgentInfo["agent"]["model"]["endpoint"],
+  routing: AgentModel["routing"],
+  endpoint?: AgentModel["endpoint"],
 ): AgentInfo {
-  const model: AgentInfo["agent"]["model"] =
+  const model: AgentModel =
     routing.kind === "dynamic"
       ? { routing }
       : endpoint === undefined
@@ -35,6 +37,38 @@ function infoWithRouting(
 }
 
 describe("BOOT_DETECTIONS", () => {
+  it("resolves local AI Gateway credentials for harness status", () => {
+    expect(
+      resolveLocalHarnessEndpoint({
+        AI_GATEWAY_API_KEY: "key",
+        VERCEL_OIDC_TOKEN: "token",
+      }),
+    ).toEqual({ kind: "gateway", connected: true, credential: "api-key" });
+    expect(resolveLocalHarnessEndpoint({ VERCEL_OIDC_TOKEN: "token" })).toEqual({
+      kind: "gateway",
+      connected: true,
+      credential: "oidc",
+    });
+    expect(resolveLocalHarnessEndpoint({})).toBeUndefined();
+  });
+
+  it("skips model-provider setup for harness-backed agents", async () => {
+    const info = createTestAgentInfoResult();
+    const harnessInfo: AgentInfo = {
+      ...info,
+      agent: {
+        ...info.agent,
+        harness: {
+          id: "test-harness",
+          source: info.agent.config,
+        },
+        model: undefined,
+      },
+    };
+
+    await expect(detectSetupIssues(context({ info: harnessInfo }))).resolves.toEqual([]);
+  });
+
   it("defers model diagnosis while runtime info is unavailable", async () => {
     expect(await detectSetupIssues(context())).toEqual([]);
   });

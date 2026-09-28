@@ -43,6 +43,7 @@ import {
   type CreateVercelSandbox,
   type VercelSandboxCreateParams,
 } from "#execution/sandbox/bindings/vercel-create-sdk.js";
+import { registerVercelSandboxForSandboxSession } from "#execution/sandbox/bindings/vercel-session-registry.js";
 import {
   errorMessage,
   ensureVercelSandboxTags,
@@ -541,11 +542,14 @@ function createHandle(input: {
   readonly sandbox: VercelSandbox;
 }): SandboxProviderHandle<NetworkPolicySandboxSession> {
   const { sandbox } = input;
+  const session = buildSandboxSession(
+    createVercelInternalSandboxSession(sandbox),
+    createVercelNetworkPolicySetter(sandbox),
+  );
+  registerVercelSandboxForSandboxSession({ sandbox, session });
+
   return {
-    sandbox: buildSandboxSession(
-      createVercelInternalSandboxSession(sandbox),
-      createVercelNetworkPolicySetter(sandbox),
-    ),
+    sandbox: session,
     async onSessionDelete(options) {
       await deleteVercelSandbox({
         createOptions: input.createOptions,

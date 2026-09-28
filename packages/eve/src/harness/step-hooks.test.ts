@@ -16,15 +16,11 @@ const emissionState: HarnessEmissionState = {
 
 function createSession(): HarnessSession {
   return {
-    agent: {
-      modelReference: { id: "test-model" },
-      system: "test",
-      tools: [],
-    },
+    agent: { modelReference: { id: "test-model" }, system: "test", tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "http:test",
     history: [],
-    sessionId: "session-test",
+    sessionId: "sess-test",
   };
 }
 
@@ -32,11 +28,15 @@ describe("buildStepHooks", () => {
   it("emits step.started from onStepStart, not prepareStep", async () => {
     const emit = vi.fn(async () => {});
     const hooks = buildStepHooks({
-      cachePath: { kind: "none" },
       emit,
       emissionState,
-      marker: undefined,
       session: createSession(),
+      execution: {
+        cachePath: { kind: "none" },
+        kind: "model",
+        marker: undefined,
+        modelReference: { id: "test-model" },
+      },
     });
     const messages: ModelMessage[] = [{ content: "hello", role: "user" }];
 
@@ -71,7 +71,8 @@ describe("buildStepHooks", () => {
       ...createSession(),
       rootSessionId: "root-session",
       agent: {
-        ...createSession().agent,
+        system: "test",
+        tools: [],
         modelReference: {
           id: "anthropic/claude-sonnet-4-5",
           providerOptions: { gateway: { order: ["bedrock"] }, openai: { store: false } },
@@ -82,9 +83,21 @@ describe("buildStepHooks", () => {
     context.set(ConversationIdKey, "forwarded-conversation");
     const prepare = (
       model: LanguageModel,
-      cachePath: Parameters<typeof buildStepHooks>[0]["cachePath"],
+      cachePath: Extract<
+        Parameters<typeof buildStepHooks>[0]["execution"],
+        { kind: "model" }
+      >["cachePath"],
     ) =>
-      buildStepHooks({ emissionState, marker: undefined, cachePath, session }).prepareStep({
+      buildStepHooks({
+        emissionState,
+        execution: {
+          cachePath,
+          kind: "model",
+          marker: undefined,
+          modelReference: session.agent.modelReference!,
+        },
+        session,
+      }).prepareStep({
         messages: [],
         model,
         instructions: undefined,
@@ -138,13 +151,21 @@ describe("buildStepHooks", () => {
 
   it("preserves an authored Gateway session ID", async () => {
     const hooks = buildStepHooks({
-      cachePath: { kind: "none" },
       emissionState,
-      marker: undefined,
+      execution: {
+        cachePath: { kind: "none" },
+        kind: "model",
+        marker: undefined,
+        modelReference: {
+          id: "anthropic/claude-sonnet-4-5",
+          providerOptions: { gateway: { sessionId: "authored-session" } },
+        },
+      },
       session: {
         ...createSession(),
         agent: {
-          ...createSession().agent,
+          system: "test",
+          tools: [],
           modelReference: {
             id: "anthropic/claude-sonnet-4-5",
             providerOptions: { gateway: { sessionId: "authored-session" } },

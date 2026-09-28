@@ -75,6 +75,60 @@ describe("createGenerationPackageBoundaryPlugin", () => {
       id: join(PACKAGE_ROOT, "dist/src/shared/git.js"),
     });
   });
+
+  it.each(["@ai-sdk/harness-codex", "@ai-sdk/harness-codex/internal"])(
+    "keeps AI SDK harness adapter import %s external",
+    async (source) => {
+      const plugin = createGenerationPackageBoundaryPlugin({
+        externalDependencies: [],
+        packageRoot: PACKAGE_ROOT,
+      });
+      const resolveId = plugin.resolveId as (
+        this: RolldownResolveContext,
+        source: string,
+        importer: string | undefined,
+        options: { kind: string },
+      ) => Promise<unknown>;
+      const context: RolldownResolveContext = {
+        async resolve() {
+          return { id: join(PACKAGE_ROOT, "node_modules", source) };
+        },
+      };
+
+      await expect(
+        resolveId.call(context, source, join(PACKAGE_ROOT, "agent/agent.ts"), {
+          kind: "import-statement",
+        }),
+      ).resolves.toEqual({ external: true, id: source });
+    },
+  );
+
+  it.each(["@ai-sdk/harness", "@ai-sdk/provider-utils", "@acme/harness-codex"])(
+    "does not automatically externalize %s",
+    async (source) => {
+      const plugin = createGenerationPackageBoundaryPlugin({
+        externalDependencies: [],
+        packageRoot: PACKAGE_ROOT,
+      });
+      const resolveId = plugin.resolveId as (
+        this: RolldownResolveContext,
+        source: string,
+        importer: string | undefined,
+        options: { kind: string },
+      ) => Promise<unknown>;
+      const context: RolldownResolveContext = {
+        async resolve() {
+          throw new Error("unmatched package imports should remain bundled");
+        },
+      };
+
+      await expect(
+        resolveId.call(context, source, join(PACKAGE_ROOT, "agent/agent.ts"), {
+          kind: "import-statement",
+        }),
+      ).resolves.toBeUndefined();
+    },
+  );
 });
 
 describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
@@ -138,6 +192,34 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
     ).resolves.toEqual({
       id: join(PACKAGE_ROOT, "dist/src/shared/git.js"),
     });
+  });
+
+  it("resolves AI SDK harness adapters without explicit configuration", async () => {
+    const plugin = createRuntimeLoaderPackageBoundaryPlugin({
+      externalDependencies: [],
+      packageRoot: "/workspace/app",
+    });
+    const resolveId = plugin.resolveId as (
+      this: RolldownResolveContext,
+      source: string,
+      importer: string | undefined,
+      options: { kind: string },
+    ) => Promise<unknown>;
+    const resolvedId = "/workspace/app/node_modules/@ai-sdk/harness-codex/dist/index.js";
+    const context: RolldownResolveContext = {
+      async resolve() {
+        return { id: resolvedId };
+      },
+    };
+
+    await expect(
+      resolveId.call(
+        context,
+        "@ai-sdk/harness-codex",
+        "/workspace/packages/agent-config/index.ts",
+        { kind: "import-statement" },
+      ),
+    ).resolves.toEqual({ external: true, id: resolvedId });
   });
 
   it.each([

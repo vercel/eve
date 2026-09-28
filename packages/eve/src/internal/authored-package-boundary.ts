@@ -7,6 +7,7 @@ import {
   resolvePackageDependencyPath,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
+import { isAiSdkHarnessAdapterPackageName } from "#internal/ai-sdk-harness-adapter-package.js";
 
 export const RESOLVE_EXTENSIONS = [
   ".ts",
@@ -66,7 +67,7 @@ export function createGenerationPackageBoundaryPlugin(input: {
         }
       }
 
-      const externalModule = await resolveConfiguredExternalModule.call(this, {
+      const externalModule = await resolveExternalModule.call(this, {
         externalDependencies: input.externalDependencies,
         importer,
         kind: options.kind,
@@ -118,7 +119,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         }
       }
 
-      const externalModule = await resolveConfiguredExternalModule.call(this, {
+      const externalModule = await resolveExternalModule.call(this, {
         externalDependencies: input.externalDependencies,
         importer,
         kind: options.kind,
@@ -255,7 +256,7 @@ export function createDistributionPackageBoundaryPlugin(input: {
   };
 }
 
-async function resolveConfiguredExternalModule(
+async function resolveExternalModule(
   this: RolldownResolveContext,
   input: {
     readonly externalDependencies: readonly string[];
@@ -265,7 +266,7 @@ async function resolveConfiguredExternalModule(
     readonly source: string;
   },
 ): Promise<ResolvedAuthoredExternalModule | undefined> {
-  const packageName = resolveConfiguredExternalDependency(input.source, input.externalDependencies);
+  const packageName = resolveExternalDependency(input.source, input.externalDependencies);
   if (packageName === undefined) {
     return undefined;
   }
@@ -303,6 +304,16 @@ function resolveConfiguredExternalDependency(
   return externalDependencies.find(
     (dependencyName) => source === dependencyName || source.startsWith(`${dependencyName}/`),
   );
+}
+
+function resolveExternalDependency(
+  source: string,
+  externalDependencies: readonly string[],
+): string | undefined {
+  const packageName = packageImportName(source);
+  return isAiSdkHarnessAdapterPackageName(packageName)
+    ? packageName
+    : resolveConfiguredExternalDependency(source, externalDependencies);
 }
 
 function packageImportName(source: string): string {

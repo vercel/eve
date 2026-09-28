@@ -91,12 +91,12 @@ describe("eve dev server rebuild transactions", () => {
       try {
         const revision = await readDevelopmentRevision(server.url);
         const worker = await fetchText(server.url, "/worker-id");
-        expect((await fetchAgentInfo(server.url)).agent.model.endpoint).toMatchObject({
+        expect((await fetchAgentInfo(server.url)).agent.model?.endpoint).toMatchObject({
           connected: true,
           credential: "api-key",
         });
         await writeProviderSelection(app.appRoot, "ai-gateway-project");
-        expect((await fetchAgentInfo(server.url)).agent.model.endpoint).toMatchObject({
+        expect((await fetchAgentInfo(server.url)).agent.model?.endpoint).toMatchObject({
           connected: true,
           credential: "oidc",
         });

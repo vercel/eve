@@ -351,6 +351,25 @@ describe("message stream protocol", () => {
     });
   });
 
+  it("creates harness-backed step identities without a model id", () => {
+    expect(
+      createStepStartedEvent({
+        harnessId: "claude-code",
+        sequence: 1,
+        stepIndex: 2,
+        turnId: "turn_1",
+      }),
+    ).toEqual({
+      data: {
+        harnessId: "claude-code",
+        sequence: 1,
+        stepIndex: 2,
+        turnId: "turn_1",
+      },
+      type: "step.started",
+    });
+  });
+
   it("stamps durable envelope metadata and preserves it through encoding", () => {
     const stamped = stampMessageStreamEvent(
       createStepStartedEvent({

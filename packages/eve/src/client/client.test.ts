@@ -244,7 +244,7 @@ describe("Client request policy", () => {
     expect(info.tools.static[0]).not.toHaveProperty("outputSchema");
   });
 
-  it("accepts the legacy optional instrumentation field in v4 agent info", async () => {
+  it("accepts the legacy optional instrumentation field in v5 agent info", async () => {
     const owner = { kind: "application" as const };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
