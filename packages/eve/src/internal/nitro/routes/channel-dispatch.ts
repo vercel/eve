@@ -190,7 +190,7 @@ export async function dispatchChannelWebSocketRequest(
         ),
     );
     flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
-    return hooks;
+    return withScopedWebSocketHooks(hooks, bundle.extensionConfigs ?? new Map());
   } catch (error) {
     const errorId = logError(log, "channel websocket handler threw", error, {
       routeKey,
@@ -202,6 +202,30 @@ export async function dispatchChannelWebSocketRequest(
       500,
     );
   }
+}
+
+function withScopedWebSocketHooks(
+  hooks: WebSocketRouteHooks,
+  extensionConfigs: ReadonlyMap<string, Record<string, unknown>>,
+): WebSocketRouteHooks {
+  const scoped = <Args extends unknown[], Result>(
+    callback: (...args: Args) => Result | Promise<Result>,
+  ) =>
+    async function (this: unknown, ...args: Args): Promise<Awaited<Result>> {
+      return await withExtensionConfigs(
+        extensionConfigs,
+        async () => await callback.apply(this, args),
+      );
+    };
+
+  return {
+    ...hooks,
+    ...(hooks.close === undefined ? {} : { close: scoped(hooks.close) }),
+    ...(hooks.error === undefined ? {} : { error: scoped(hooks.error) }),
+    ...(hooks.message === undefined ? {} : { message: scoped(hooks.message) }),
+    ...(hooks.open === undefined ? {} : { open: scoped(hooks.open) }),
+    ...(hooks.upgrade === undefined ? {} : { upgrade: scoped(hooks.upgrade) }),
+  };
 }
 
 async function withDevelopmentVercelOidcContext<T>(
