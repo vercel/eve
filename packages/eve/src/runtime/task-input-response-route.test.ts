@@ -36,6 +36,34 @@ describe("task input response capability", () => {
     });
   });
 
+  it("forwards only public responder fields", async () => {
+    resumeHookMock.mockResolvedValue(TARGET_HOOK);
+    const response = await handleTaskInputResponseRequest(
+      request({
+        inputResponses: [{ requestId: "req-1", text: "approved" }],
+        responder: {
+          attributes: { private: "channel-only" },
+          authenticator: "test",
+          principalId: "bob",
+          principalType: "user",
+        },
+      }),
+      context(CAPABILITY_TOKEN),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith(`eve:inbox:v1:${TARGET_TOKEN}`, {
+      auth: {
+        attributes: {},
+        authenticator: "test",
+        principalId: "bob",
+        principalType: "user",
+      },
+      kind: "send",
+      payload: { inputResponses: [{ requestId: "req-1", text: "approved" }] },
+    });
+  });
+
   it("rejects messages and empty response batches", async () => {
     for (const body of [{ message: "not allowed" }, { inputResponses: [] }]) {
       const response = await handleTaskInputResponseRequest(
@@ -44,6 +72,19 @@ describe("task input response capability", () => {
       );
       expect(response.status).toBe(400);
     }
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects incomplete responder identities", async () => {
+    const response = await handleTaskInputResponseRequest(
+      request({
+        inputResponses: [{ requestId: "req-1", text: "approved" }],
+        responder: { authenticator: "test", principalId: "bob" },
+      }),
+      context(CAPABILITY_TOKEN),
+    );
+
+    expect(response.status).toBe(400);
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 

@@ -202,8 +202,16 @@ export async function deliverTaskInputResponsesStep(input: {
   };
   try {
     if (input.answer.childResponseUrl !== undefined) {
+      const responder =
+        command.auth === null || command.auth === undefined
+          ? undefined
+          : {
+              authenticator: command.auth.authenticator,
+              principalId: command.auth.principalId,
+              principalType: command.auth.principalType,
+            };
       const response = await fetch(input.answer.childResponseUrl, {
-        body: JSON.stringify({ inputResponses: command.payload.inputResponses }),
+        body: JSON.stringify({ inputResponses: command.payload.inputResponses, responder }),
         headers: { "content-type": "application/json" },
         method: "POST",
         redirect: "error",
@@ -215,6 +223,7 @@ export async function deliverTaskInputResponsesStep(input: {
       await resumeWorkflowToolRunAnswers(
         input.answer.childContinuationToken,
         command.payload.inputResponses,
+        command.auth,
       );
     } else {
       await resumeSessionInbox(

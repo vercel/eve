@@ -127,6 +127,13 @@ export interface ToolInputRequest {
   readonly prompt: string;
 }
 
+/** Public identity fields for the authenticated person who answered a question. */
+export interface ToolInputResponseResponder {
+  readonly authenticator: string;
+  readonly principalId: string;
+  readonly principalType: string;
+}
+
 /**
  * The outcome of a {@link ToolInputRequest}.
  *
@@ -140,6 +147,8 @@ export type ToolInputResponse =
       readonly status: "answered";
       /** The selected option's `id`, when the user picked one. */
       readonly optionId?: string;
+      /** Authenticated identity of the responder, without channel attributes. */
+      readonly responder?: ToolInputResponseResponder;
       /** Free text, when the user typed an answer. */
       readonly text?: string;
     }

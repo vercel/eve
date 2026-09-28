@@ -213,6 +213,12 @@ describe("deliverTaskInputResponsesStep", () => {
     vi.stubGlobal("fetch", fetchMock);
     const remoteAnswer = {
       ...answer,
+      auth: {
+        attributes: { private: "channel-only" },
+        authenticator: "test",
+        principalId: "bob",
+        principalType: "user",
+      },
       childResponseUrl: "https://remote.example/eve/v1/task-input/eve%3Atask-input%3Atoken",
     };
 
@@ -221,7 +227,10 @@ describe("deliverTaskInputResponsesStep", () => {
     ).resolves.toBe("delivered");
 
     expect(fetchMock).toHaveBeenCalledWith(remoteAnswer.childResponseUrl, {
-      body: JSON.stringify({ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }),
+      body: JSON.stringify({
+        inputResponses: [{ optionId: "approve", requestId: "req-1" }],
+        responder: { authenticator: "test", principalId: "bob", principalType: "user" },
+      }),
       headers: { "content-type": "application/json" },
       method: "POST",
       redirect: "error",
@@ -243,6 +252,12 @@ describe("deliverTaskInputResponsesStep", () => {
   it("resumes a workflow tool's private answer hook directly", async () => {
     const workflowToolRunAnswer = {
       ...answer,
+      auth: {
+        attributes: { private: "channel-only" },
+        authenticator: "test",
+        principalId: "bob",
+        principalType: "user",
+      },
       childContinuationToken: "eve:workflow-tool-run-answer:run-1:0",
     };
 
@@ -257,6 +272,7 @@ describe("deliverTaskInputResponsesStep", () => {
     expect(resumeWorkflowToolRunAnswers).toHaveBeenCalledWith(
       "eve:workflow-tool-run-answer:run-1:0",
       [{ optionId: "approve", requestId: "req-1" }],
+      workflowToolRunAnswer.auth,
     );
   });
 });

@@ -2,6 +2,7 @@ import { readTaskInputTargetToken } from "#execution/task-input-capability.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { InputResponse } from "#shared/input.js";
+import type { ToolInputResponseResponder } from "#tools/definition.js";
 
 export async function handleTaskInputResponseRequest(
   request: Request,
@@ -28,10 +29,18 @@ export async function handleTaskInputResponseRequest(
       { status: 400 },
     );
   }
+  const responder = readResponder(body);
+  if (responder === null) {
+    return Response.json({ error: "Invalid responder identity.", ok: false }, { status: 400 });
+  }
   // Child inboxes outlive deployments; cross the hook in the durable
   // delivery envelope like every other session-inbox producer.
   try {
-    await resumeSessionInbox(targetToken, { kind: "send", payload: { inputResponses } });
+    await resumeSessionInbox(targetToken, {
+      ...(responder !== undefined && { auth: { attributes: {}, ...responder } }),
+      kind: "send",
+      payload: { inputResponses },
+    });
   } catch {
     return Response.json(
       { error: "Task input target is not pending.", ok: false },
@@ -65,4 +74,22 @@ function readInputResponses(value: unknown): readonly InputResponse[] | undefine
     parsed.push(item);
   }
   return parsed;
+}
+
+function readResponder(value: unknown): ToolInputResponseResponder | undefined | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const responder = Reflect.get(value, "responder");
+  if (responder === undefined) return undefined;
+  if (responder === null || typeof responder !== "object" || Array.isArray(responder)) return null;
+  const authenticator = Reflect.get(responder, "authenticator");
+  const principalId = Reflect.get(responder, "principalId");
+  const principalType = Reflect.get(responder, "principalType");
+  if (
+    typeof authenticator !== "string" ||
+    typeof principalId !== "string" ||
+    typeof principalType !== "string"
+  ) {
+    return null;
+  }
+  return { authenticator, principalId, principalType };
 }

@@ -169,6 +169,8 @@ export default askQuestion();
 
 `ask_question` is an ordinary [workflow tool](/docs/tools/workflows) built on `ctx.ask()`. Write your own workflow tool with `ctx.ask()` when you need a different schema or want to act on the answer in the same call. Without any asking tool, the model asks in its reply text and the user's next message carries the answer.
 
+In a custom workflow tool, an answered `ctx.ask()` returns the authenticated responder's `authenticator`, `principalId`, and `principalType` when that identity is available. It does not include channel attributes. `ctx.session.auth.current` remains the run's auth snapshot; use the response's `responder` to identify who answered.
+
 ## How pause and resume works
 
 Approvals and questions share one protocol:

@@ -164,7 +164,11 @@ export async function routeProxiedDeliverStep(input: {
 
     if (child.answerHook !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
-      await resumeWorkflowToolRunAnswers(child.childContinuationToken, responses);
+      await resumeWorkflowToolRunAnswers(
+        child.childContinuationToken,
+        responses,
+        sourceDelivery.auth,
+      );
       if (child.dismissedRequestIds.length > 0) {
         await resumeWorkflowToolRunDismissal(child.childContinuationToken);
       }
