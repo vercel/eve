@@ -27,6 +27,7 @@ interface AttemptState {
   readonly capturesInputs: boolean;
   readonly capturesOutputs: boolean;
   readonly modelCallIndexes: Map<number, number>;
+  readonly modelCallStartEvents: Map<string, ModelCallStartState>;
   readonly modelKeys: Map<string, string>;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
@@ -34,6 +35,11 @@ interface AttemptState {
   operation?: InstrumentationOperationRef;
   // Only the number is kept: it disambiguates call identities within an attempt.
   stepNumber?: number;
+}
+
+interface ModelCallStartState {
+  readonly event: InstrumentationModelCallStartedEvent;
+  readonly stepNumber: number;
 }
 
 /** Creates one provider-neutral AI SDK bridge for one actual model attempt. */
@@ -47,6 +53,7 @@ export function createAiSdkHookBridge(
     capturesInputs: hooks.capturesInputs ?? hooks.capturesContent,
     capturesOutputs: hooks.capturesOutputs ?? hooks.capturesContent,
     modelCallIndexes: new Map(),
+    modelCallStartEvents: new Map(),
     modelKeys: new Map(),
     runtimeContext:
       runtimeContext !== undefined && Object.keys(runtimeContext).length > 0
@@ -54,6 +61,11 @@ export function createAiSdkHookBridge(
         : undefined,
     scope,
     toolKeys: new Map(),
+  };
+  const nextModelCallKey = (stepNumber: number): string => {
+    const callIndex = state.modelCallIndexes.get(stepNumber) ?? 0;
+    state.modelCallIndexes.set(stepNumber, callIndex + 1);
+    return modelCallIdempotencyKey(state.scope, stepNumber, callIndex);
   };
 
   return {
@@ -71,16 +83,21 @@ export function createAiSdkHookBridge(
     },
     async onLanguageModelCallStart(event) {
       const stepNumber = state.stepNumber ?? 0;
-      const callIndex = state.modelCallIndexes.get(stepNumber) ?? 0;
-      state.modelCallIndexes.set(stepNumber, callIndex + 1);
-      const key = modelCallIdempotencyKey(state.scope, stepNumber, callIndex);
+      const key = nextModelCallKey(stepNumber);
       state.modelKeys.set(event.callId, key);
       const started = toModelCallStarted(state, key, event);
+      state.modelCallStartEvents.set(event.callId, { event: started, stepNumber });
       await hooks.publish(started);
     },
     async executeLanguageModelCall({ callId, execute }) {
-      const key = state.modelKeys.get(callId);
-      if (key === undefined) return execute();
+      let key = state.modelKeys.get(callId);
+      if (key === undefined) {
+        const previousStart = state.modelCallStartEvents.get(callId);
+        if (previousStart === undefined) return execute();
+        key = nextModelCallKey(previousStart.stepNumber);
+        state.modelKeys.set(callId, key);
+        await hooks.publish(Object.freeze({ ...previousStart.event, idempotencyKey: key }));
+      }
       try {
         return await runInContext({ idempotencyKey: key, scope, type: "model.call" }, execute);
       } catch (error) {
@@ -95,6 +112,7 @@ export function createAiSdkHookBridge(
       const key = state.modelKeys.get(event.callId);
       if (key === undefined) return;
       state.modelKeys.delete(event.callId);
+      state.modelCallStartEvents.delete(event.callId);
       const completed = toModelCallCompleted(state, key, event);
       await hooks.publish(completed);
     },
@@ -160,6 +178,7 @@ export function createAiSdkHookBridge(
       );
     }
     state.modelKeys.clear();
+    state.modelCallStartEvents.clear();
     state.toolKeys.clear();
     await Promise.all(pending);
   }
