@@ -220,11 +220,11 @@ function withScopedWebSocketHooks(
 
   return {
     ...hooks,
-    ...(hooks.close === undefined ? {} : { close: scoped(hooks.close) }),
-    ...(hooks.error === undefined ? {} : { error: scoped(hooks.error) }),
-    ...(hooks.message === undefined ? {} : { message: scoped(hooks.message) }),
-    ...(hooks.open === undefined ? {} : { open: scoped(hooks.open) }),
-    ...(hooks.upgrade === undefined ? {} : { upgrade: scoped(hooks.upgrade) }),
+    close: hooks.close === undefined ? undefined : scoped(hooks.close),
+    error: hooks.error === undefined ? undefined : scoped(hooks.error),
+    message: hooks.message === undefined ? undefined : scoped(hooks.message),
+    open: hooks.open === undefined ? undefined : scoped(hooks.open),
+    upgrade: hooks.upgrade === undefined ? undefined : scoped(hooks.upgrade),
   };
 }
 
