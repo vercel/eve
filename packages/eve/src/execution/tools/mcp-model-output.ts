@@ -17,8 +17,12 @@ export function mcpToolResultToModelOutput(output: unknown): ToolModelOutput {
 
   const parts = output.content.map(contentBlockToPart);
   if (parts.length === 0) {
-    return output.structuredContent === undefined
-      ? { type: "text", value: output.isError === true ? "Tool call failed." : "" }
+    if (output.structuredContent === undefined) {
+      return { type: "text", value: output.isError === true ? "Tool call failed." : "" };
+    }
+    // A `json` output cannot carry the failure marker, so errors become text.
+    return output.isError === true
+      ? { type: "text", value: `Tool call failed:\n${JSON.stringify(output.structuredContent)}` }
       : { type: "json", value: output.structuredContent };
   }
   if (output.isError === true) parts.unshift({ type: "text", text: "Tool call failed:" });

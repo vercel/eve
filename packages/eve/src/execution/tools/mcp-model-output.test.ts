@@ -38,6 +38,13 @@ describe("mcpToolResultToModelOutput", () => {
       type: "text",
       value: "Tool call failed.",
     });
+    expect(
+      mcpToolResultToModelOutput({
+        content: [],
+        isError: true,
+        structuredContent: { code: "NOT_FOUND" },
+      }),
+    ).toEqual({ type: "text", value: 'Tool call failed:\n{"code":"NOT_FOUND"}' });
   });
 
   it("falls back to structuredContent when content is empty", () => {
