@@ -19,6 +19,10 @@ import {
 } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
 import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import {
+  mcpToolResultToModelOutput,
+  mcpToolResultToModelOutputCallback,
+} from "#execution/tools/mcp-model-output.js";
 import { defineJsonSchema } from "#tools/schema.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import {
@@ -459,9 +463,11 @@ export async function resolveConnectionSearchDynamicTools() {
     const toolName = result.tool!;
     const approval = registry.getConnectionApproval(connectionName);
 
-    const instanceId = connections.find(
+    const resolvedConnection = connections.find(
       (connection) => connection.connectionName === connectionName,
-    )?.instanceId;
+    );
+    const instanceId = resolvedConnection?.instanceId;
+    const projectsMcpResult = resolvedConnection?.protocol === "mcp";
     const closure: { connectionName: string; toolName: string; instanceId?: string } = {
       connectionName,
       toolName,
@@ -477,9 +483,13 @@ export async function resolveConnectionSearchDynamicTools() {
       async execute(input: Record<string, unknown>, executeCtx) {
         return await executeDiscoveredConnectionTool(closure, input, executeCtx);
       },
+      ...(projectsMcpResult ? { toModelOutput: mcpToolResultToModelOutput } : {}),
     });
     stampDurableDynamicToolCallbacks(discoveredTool, {
       execute: { callback: executeDiscoveredConnectionTool, closure },
+      ...(projectsMcpResult
+        ? { toModelOutput: { callback: mcpToolResultToModelOutputCallback, closure } }
+        : {}),
       ...(approval === undefined
         ? {}
         : {

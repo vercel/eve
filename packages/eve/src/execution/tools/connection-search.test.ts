@@ -241,6 +241,58 @@ describe("connection dynamic tools", () => {
     });
   });
 
+  it("projects MCP results to their content and leaves OpenAPI results whole", async () => {
+    const mcpResult = {
+      _meta: { "io.modelcontextprotocol/serverInfo": { name: "linear", version: "1" } },
+      content: [{ text: '{"count":2}', type: "text" }],
+      isError: false,
+      structuredContent: { count: 2 },
+    };
+    const connectionRegistry = registry({
+      connections: [
+        connection("linear"),
+        { ...connection("billing"), protocol: "openapi", url: "https://billing.example.com" },
+      ],
+      loadTools: {
+        billing: async () => [
+          { description: "List invoices", inputSchema: { type: "object" }, name: "list_invoices" },
+        ],
+        linear: async () => [
+          { description: "List issues", inputSchema: { type: "object" }, name: "list_issues" },
+        ],
+      },
+    });
+    const ctx = new ContextContainer();
+    ctx.set(ConnectionRegistryKey, connectionRegistry);
+
+    const tools = await contextStorage.run(ctx, async () => {
+      const resolve = getConnectionSearchResolver().events["step.started"]!;
+      const context = {
+        channel: {},
+        model: null,
+        messages: [],
+        session: { auth: { current: null, initiator: null }, id: "projection-test" },
+      } satisfies DynamicResolveContext;
+      const initial = (await resolve({}, context)) as DynamicToolSet;
+      await initial["connection_search"]!.execute({ keywords: "list" }, {} as ToolContext);
+      return (await resolve({}, context)) as DynamicToolSet;
+    });
+
+    const linear = tools["linear__list_issues"] as { toModelOutput?: (output: unknown) => unknown };
+    expect(linear.toModelOutput?.(mcpResult)).toEqual({ type: "text", value: '{"count":2}' });
+    const durable = readDurableDynamicToolCallbacks(tools["linear__list_issues"]!)!.toModelOutput!;
+    expect(durable.callback(durable.closure, mcpResult as never)).toEqual({
+      type: "text",
+      value: '{"count":2}',
+    });
+
+    const billing = tools["billing__list_invoices"] as { toModelOutput?: unknown };
+    expect(billing.toModelOutput).toBeUndefined();
+    expect(
+      readDurableDynamicToolCallbacks(tools["billing__list_invoices"]!)?.toModelOutput,
+    ).toBeUndefined();
+  });
+
   it("forwards the authored tool call ID to connection execution", async () => {
     const linear = connection("linear");
     const executeTool = vi.fn(
