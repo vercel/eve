@@ -1,5 +1,29 @@
 # eve
 
+## 0.68.0
+
+### Minor Changes
+
+- 52a18ac: Computer use moves out of `eve/extensions/code` into its own built-in extension, `eve/computer-use`. Mounting the code extension no longer adds `computer_use`, so agents without a desktop stop sending its schema on every request. Agents that use computer use should mount `eve/computer-use` next to the code extension; mounted as `agent/extensions/computer-use.ts`, the tool is named `computer-use__computer_use`.
+  
+  The sandbox helpers are now exported from `eve/computer-use/sandbox` and the tool from `eve/computer-use/tools`. The old `eve/extensions/code/sandbox` and `eve/extensions/code/tools` exports still work but are deprecated.
+- 2cfcecc: A stream-event hook that throws no longer fails the turn or session. eve logs the failure with the hook and event identifiers, runs the remaining subscribers, and continues execution, including for `turn.started` and `step.started` hooks, which previously ended the turn with `EVENT_HANDLER_FAILED`.
+
+### Patch Changes
+
+- 2998dc1: Turn-scoped dynamic tools now restore their durable callbacks when a turn resumes in a different process, so tools resolved at `turn.started` remain callable throughout the turn.
+- 1cfe7e7: Include the authenticated responder identity in answered workflow-tool `ctx.ask()` responses.
+- 0ac01f6: Local development leaves previous invocations' workflows dormant by default. `eve dev --resume` attempts to recover runs with valid retained snapshots even when framework or authored workflow sources changed; replay can fail after executing work. Missing snapshots are cancelled, while runs with malformed generation metadata remain stored and dormant. Requests addressed to dormant conversations fail instead of appearing accepted without a response.
+- cb5478f: Tools resolved through `defineDynamic` now emit their `label.start`, `label.delta`, and `label.complete` presentation on `actions.requested` and `action.result`, matching static tools.
+- c94736a: Filter `/model` reasoning choices to the selected model's supported effort levels from the AI Gateway catalog.
+- e590bd7: Record provider-call retries as distinct model-call spans and terminalize failed provider attempts.
+- 2cfcecc: Hooks can call `ctx.cancel()` to cancel the running turn after the remaining subscribers for the event run. The turn then settles like `session.cancel()`, with `turn.cancelled` followed by `session.waiting`.
+- e574dd3: MCP tools found through `connection_search` now pass the model only their result's `content`, not the full MCP result with its duplicated `structuredContent`, so history grows about half as fast on MCP-heavy sessions.
+- c004ac8: `eve dev` now cancels unfinished local Workflow runs whose development snapshots are gone, instead of repeatedly reporting them as startup errors. Runs with retained snapshots still recover across restarts, and cancelled runs record why they can no longer resume.
+- dabb8bd: Web Chat's Vercel services setup no longer requires linking a Vercel project. Use `pnpm dev:all` to run the service graph locally; it uses linked project settings when available.
+- 7ed1d70: `gh-signed-commit` in `eve/extensions/code` now commits staged files larger than 1 MiB, such as monorepo lockfiles, instead of failing with `spawnSync git ENOBUFS`.
+- d6f5f04: Update the generated Web Chat app from Next.js 16.3.0-preview.6 to 16.3.6.
+
 ## 0.67.2
 
 ### Patch Changes
