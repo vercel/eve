@@ -66,8 +66,7 @@ export class ConversationClient<TData = ConversationState> {
   append(event: EveAgentReducerEvent): void {
     const previous = this.data;
     const previousConversation = this.conversation;
-    if (this.#conversation !== this.projection) this.#conversation.append(event);
-    this.projection.append(event);
+    this.#appendRoot(event);
     if (previous !== this.data) this.#onChange(this.data, previous);
     else if (previousConversation !== this.conversation)
       this.#onConversationChange?.(this.conversation, previousConversation);
@@ -120,10 +119,7 @@ export class ConversationClient<TData = ConversationState> {
     const previous = this.data;
     const previousConversation = this.conversation;
     if (options.project) options.project(event);
-    else {
-      if (this.#conversation !== this.projection) this.#conversation.append(event);
-      this.projection.append(event);
-    }
+    else this.#appendRoot(event);
     if (options.notify !== false) {
       if (previous !== this.data) this.#onChange(this.data, previous);
       else if (previousConversation !== this.conversation)
@@ -137,8 +133,7 @@ export class ConversationClient<TData = ConversationState> {
   /** Admit and project a hydrated root event without notifying subscribers. */
   hydrate(event: MessageStreamEvent): boolean {
     if (!this.#seenEvents.admit(event)) return false;
-    if (this.#conversation !== this.projection) this.#conversation.append(event);
-    this.projection.append(event);
+    this.#appendRoot(event);
     return true;
   }
 
@@ -160,6 +155,10 @@ export class ConversationClient<TData = ConversationState> {
     this.#follower = follower;
     for (const event of events) follower.acceptParentEvent(event);
     follower.reconcile();
+  }
+
+  #appendRoot(event: EveAgentReducerEvent): void {
+    for (const projection of this.projections) projection.append(event);
   }
 
   #appendChild(event: ClientAgentEvent): void {
@@ -192,7 +191,6 @@ export class ConversationClient<TData = ConversationState> {
     this.stop();
     this.#cursors.clear();
     this.#seenEvents = createEventDeduper();
-    if (this.#conversation !== this.projection) this.#conversation.reset();
-    this.projection.reset();
+    for (const projection of this.projections) projection.reset();
   }
 }

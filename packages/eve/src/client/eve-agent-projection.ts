@@ -17,6 +17,7 @@ export interface EveAgentEventLog {
     predicate: (event: ConversationEvent) => boolean,
     replacement: EveAgentReducerEvent,
   ): void;
+  reset(): void;
 }
 
 /** Owns chronological reducer replay when optimistic events are replaced by server events. */
