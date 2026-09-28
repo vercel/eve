@@ -9,6 +9,7 @@ import type {
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
+import type { ToolInputResponseResponder } from "#tools/definition.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
@@ -169,6 +170,8 @@ export interface TurnCaller {
  */
 export interface DeliverPayload {
   readonly inputResponses?: readonly InputResponse[];
+  /** Authenticated identity associated with an internal forwarded input response. */
+  readonly responder?: ToolInputResponseResponder;
   readonly message?: string | UserContent;
   readonly context?: readonly string[];
   readonly outputSchema?: JsonObject;

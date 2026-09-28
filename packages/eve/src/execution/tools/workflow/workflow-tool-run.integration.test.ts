@@ -236,7 +236,11 @@ describe("workflow tools", () => {
       principalId: "alice",
       principalType: "user",
     };
-    const bob = { ...alice, principalId: "bob" };
+    const bob = {
+      ...alice,
+      attributes: { private: "channel-only" },
+      principalId: "bob",
+    };
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-ask-responder",
       execute: answerWithResponderWorkflow,
@@ -261,8 +265,9 @@ describe("workflow tools", () => {
       const stream = captureTurnEvents(run);
       try {
         const requested = await stream.nextTurn();
-        const request = (filterEventsByType(requested, "input.requested")[0] as InputRequestedStreamEvent)
-          .data.requests[0]!;
+        const request = (
+          filterEventsByType(requested, "input.requested")[0] as InputRequestedStreamEvent
+        ).data.requests[0]!;
         await resumeSessionInbox(sessionCommandHookToken(run.runId), {
           auth: bob,
           kind: "send",
@@ -271,7 +276,9 @@ describe("workflow tools", () => {
 
         const answered = await stream.nextTurn();
         const result = filterEventsByType(answered, "action.result").find(
-          (event) => event.data.result.kind === "tool-result" && event.data.result.toolName === "confirm_deploy",
+          (event) =>
+            event.data.result.kind === "tool-result" &&
+            event.data.result.toolName === "confirm_deploy",
         );
         expect(JSON.parse(String(result?.data.result.output))).toEqual({
           answer: {
