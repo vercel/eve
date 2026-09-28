@@ -271,6 +271,258 @@ describe("turn cancellation descendant cascade", () => {
   );
 
   it(
+    "task_cancel preserves a remote child and its history after stopping nested work",
+    async () => {
+      const remoteApp = await scenarioApp({
+        ...REMOTE_DESCRIPTOR,
+        files: {
+          ...REMOTE_DESCRIPTOR.files,
+          "agent/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+export default defineAgent({
+  model: mockModel(({ lastUserMessage, userMessages }) => {
+    if (lastUserMessage?.includes("recall-history")) {
+      return userMessages.some((message) => message.includes("history-marker-391"))
+        ? "HISTORY_RETAINED history-marker-391" : "HISTORY_LOST";
+    }
+    return { toolCalls: [{ name: "workflow", input: {
+      js: 'return await ctx.agent("nested-sleeper", { message: "Use wait-for-cancel." });',
+    } }] };
+  }),
+  modelContextWindowTokens: 32_000,
+});
+`,
+          "agent/channels/eve.ts": `import { eveChannel } from "eve/channels/eve";
+
+export default eveChannel({
+  async auth(request) {
+    if (request.headers.get("authorization") !== "Bearer ${REMOTE_TOKEN}") return null;
+    if (request.method === "POST" && request.headers.get("content-type")?.includes("application/json")) {
+      const body = await request.clone().json();
+      if (body.callback) console.log("CANCELLATION_CALLBACK " + JSON.stringify(body.callback));
+    }
+    return {
+      attributes: {}, authenticator: "scenario-bearer",
+      principalId: "cancellation-parent", principalType: "service",
+    };
+  },
+});
+`,
+          "agent/tools/workflow.ts": createParentDescriptor("").files["agent/tools/workflow.ts"]!,
+          "agent/subagents/nested-sleeper/agent.ts":
+            createParentDescriptor("").files["agent/subagents/local-sleeper/agent.ts"]!,
+          "agent/subagents/nested-sleeper/tools/wait-for-cancel.ts": `import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Wait until the current turn is cancelled.",
+  inputSchema: z.object({}),
+  execute(_input, ctx) {
+    console.log("NESTED_WORK_STARTED");
+    return new Promise((_resolve, reject) => {
+      const abort = () => {
+        console.log("NESTED_WORK_ABORTED");
+        reject(ctx.abortSignal.reason);
+      };
+      if (ctx.abortSignal.aborted) return abort();
+      ctx.abortSignal.addEventListener("abort", abort, { once: true });
+    });
+  },
+});
+`,
+        },
+      });
+      const remoteServer = await startEveDev(remoteApp.appRoot, {
+        env: { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" },
+      });
+      try {
+        const parentDescriptor = createParentDescriptor(remoteServer.url);
+        const parentApp = await scenarioApp({
+          ...parentDescriptor,
+          files: {
+            ...parentDescriptor.files,
+            "agent/agent.ts": `import { defineAgent } from "eve";
+import { mockModel } from "eve/evals";
+
+export default defineAgent({
+  model: mockModel(({ lastUserMessage, toolResults }) => {
+    const command = lastUserMessage ?? "";
+    const last = toolResults.at(-1);
+    if (command === "start-remote") {
+      return toolResults.some((result) => result.name === "remote-sleeper")
+        ? "started"
+        : { toolCalls: [{ name: "remote-sleeper", input: { message: "history-marker-391" } }] };
+    }
+    if (command.startsWith("cancel-task ")) {
+      return last?.name === "task_cancel" ? "cancelled"
+        : { toolCalls: [{ name: "task_cancel", input: { taskIds: [command.slice(12)] } }] };
+    }
+    if (command.startsWith("continue-agent ")) {
+      return last?.name === "workflow" ? JSON.stringify(last.output)
+        : { toolCalls: [{ name: "workflow", input: {
+            js: 'return await ctx.agent("remote-sleeper", { agentId: '
+              + JSON.stringify(command.slice(15)) + ', message: "recall-history" });',
+          } }] };
+    }
+    return "still-alive";
+  }),
+  modelContextWindowTokens: 32_000,
+});
+`,
+          },
+        });
+        const parentServer = await startEveDev(parentApp.appRoot, {
+          env: { EVE_MOCK_AUTHORED_MODELS: "", NODE_ENV: "production" },
+        });
+        try {
+          const parentClient = new Client({ host: parentServer.url });
+          const { session, response } = await parentClient.sessions.create({
+            message: "start-remote",
+          });
+          const started = await response.result();
+          const receiptEvent = started.events.find(
+            (event) =>
+              event.type === "action.result" &&
+              event.data.result.kind === "tool-result" &&
+              event.data.result.toolName === "remote-sleeper",
+          );
+          if (receiptEvent?.type !== "action.result")
+            throw new Error("Missing remote task receipt.");
+          const receipt = receiptEvent.data.result.output as { agentId: string; taskId: string };
+          expect(receipt).toMatchObject({
+            agentId: expect.any(String),
+            taskId: expect.any(String),
+          });
+          const parentIterator = session.stream({ startIndex: 0 })[Symbol.asyncIterator]();
+          const [called] = await readSubagentCalls({
+            count: 1,
+            iterator: parentIterator,
+            label: "remote dispatch",
+          });
+          await parentIterator.return?.();
+          if (called === undefined) throw new Error("Missing remote child.");
+          const remoteClient = new Client({
+            auth: { bearer: REMOTE_TOKEN },
+            host: remoteServer.url,
+          });
+          const child = remoteClient.sessions.attach(called.data.childSessionId);
+          const childIterator = child.stream()[Symbol.asyncIterator]();
+          const [nestedCalled] = await readSubagentCalls({
+            count: 1,
+            iterator: childIterator,
+            label: "nested child dispatch",
+          });
+          if (nestedCalled === undefined) throw new Error("Missing nested child.");
+          const nested = remoteClient.sessions.attach(nestedCalled.data.childSessionId);
+          const nestedIterator = nested.stream()[Symbol.asyncIterator]();
+          await readUntil({
+            iterator: nestedIterator,
+            label: "nested active work",
+            matches: isWaitForCancelToolCall,
+          });
+
+          await expect
+            .poll(remoteServer.stdout, { timeout: EVENT_TIMEOUT_MS })
+            .toContain("NESTED_WORK_STARTED");
+
+          const cancelled = await (await session.send(`cancel-task ${receipt.taskId}`)).result();
+          expect(cancelled.message).toBe("cancelled");
+          const [childEvents, nestedEvents] = await Promise.all([
+            readThroughBoundary({ iterator: childIterator, label: "remote cancellation" }),
+            readThroughBoundary({ iterator: nestedIterator, label: "nested cancellation" }),
+          ]);
+          expectCancellationBoundary(childEvents);
+          expectCancellationBoundary(nestedEvents);
+
+          await expect
+            .poll(remoteServer.stdout, { timeout: EVENT_TIMEOUT_MS })
+            .toContain("NESTED_WORK_ABORTED");
+
+          const continued = await withinEventDeadline(
+            (await session.send(`continue-agent ${receipt.agentId}`)).result(),
+            "same remote child continuation after callback settlement",
+          );
+          expect(continued.message, JSON.stringify(continued.events)).toContain(
+            "HISTORY_RETAINED history-marker-391",
+          );
+          const captured = remoteServer.stdout().match(/CANCELLATION_CALLBACK (\{[^\n]+\})/);
+          if (captured?.[1] === undefined) throw new Error("Missing original callback metadata.");
+          const callback = JSON.parse(captured[1]) as {
+            url: string;
+            callId: string;
+            subagentName: string;
+          };
+          const acknowledgement = {
+            callId: callback.callId,
+            subagentName: callback.subagentName,
+            kind: "turn.failed",
+            error: {
+              code: "SUBAGENT_EXECUTION_FAILED",
+              message: "The agent invocation was cancelled.",
+            },
+            outcome: {
+              kind: "parked",
+              result: { kind: "cancelled" },
+              usageDelta: {
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheReadTokens: 0,
+                cacheWriteTokens: 0,
+              },
+            },
+          };
+          for (let repetition = 0; repetition < 2; repetition += 1) {
+            const late = await fetch(callback.url, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(acknowledgement),
+            });
+            expect(late.status).toBe(202);
+          }
+          const unrelatedFailure = await fetch(callback.url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              ...acknowledgement,
+              outcome: {
+                ...acknowledgement.outcome,
+                result: { kind: "failed", error: "Unrelated failure" },
+              },
+            }),
+          });
+          expect(unrelatedFailure.status).toBe(404);
+          const alive = await (await session.send("check-parent")).result();
+          expect(alive.message).toBe("still-alive");
+          const finalChild = await child.snapshot();
+          expect(finalChild.events.some((event) => event.type === "session.failed")).toBe(false);
+          expect(JSON.stringify(finalChild.events)).toContain(
+            "HISTORY_RETAINED history-marker-391",
+          );
+          expect(
+            (await nested.snapshot()).events.filter((event) => event.type === "turn.started"),
+          ).toHaveLength(1);
+        } catch (error) {
+          throw new Error(
+            [
+              `parent stdout:\n${parentServer.stdout()}`,
+              `parent stderr:\n${parentServer.stderr()}`,
+              `remote stdout:\n${remoteServer.stdout()}`,
+              `remote stderr:\n${remoteServer.stderr()}`,
+            ].join("\n\n"),
+            { cause: error },
+          );
+        } finally {
+          await parentServer.stop();
+        }
+      } finally {
+        await remoteServer.stop();
+      }
+    },
+    SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
     "declines the root continuation after a generated child inherits zero input quota",
     async () => {
       const parentApp = await scenarioApp(

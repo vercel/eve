@@ -1,3 +1,4 @@
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
@@ -171,8 +172,16 @@ export async function handleSessionCallbackRequest(
       kind: "runtime-action-result",
       results: [result],
     });
-  } catch {
-    return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+  } catch (error) {
+    // Cancelling the owning task disposes its reply hook before the child acknowledges.
+    // The cancelled child must still be able to park and accept another invocation.
+    if (
+      !HookNotFoundError.is(error) ||
+      result.outcome.kind !== "parked" ||
+      result.outcome.result.kind !== "cancelled"
+    ) {
+      return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
+    }
   }
 
   return Response.json({ ok: true }, { status: 202 });
