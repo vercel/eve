@@ -25,7 +25,7 @@ A typical eve agent has this structure:
 my-agent/
 └── agent/
     ├── agent.ts            # Optional: model and runtime config
-    ├── instructions.md     # Required: the always-on system prompt
+    ├── instructions.md     # System prompt; instructions.ts or instructions/ also supported
     ├── tools/              # Optional: typed functions the model can call
     │   └── get_weather.ts
     ├── skills/             # Optional: procedures loaded on demand
