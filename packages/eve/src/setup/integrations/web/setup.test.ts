@@ -226,7 +226,7 @@ describe("Web setup", () => {
     expect(effects.writeTextFile).toHaveBeenNthCalledWith(
       3,
       "/project/apps/web/next.config.ts",
-      expect.stringContaining("export default nextConfig"),
+      expect.stringContaining("useTypeScriptCli: true"),
       { force: true },
     );
     expect(fake.prompter.note).not.toHaveBeenCalled();
@@ -250,6 +250,11 @@ describe("Web setup", () => {
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/apps/web/next.config.ts",
       expect.stringContaining('fileURLToPath(new URL("../..", import.meta.url))'),
+      { force: true },
+    );
+    expect(effects.writeTextFile).toHaveBeenCalledWith(
+      "/project/apps/web/next.config.ts",
+      expect.stringContaining("useTypeScriptCli: true"),
       { force: true },
     );
     expect(effects.writeTextFile).not.toHaveBeenCalledWith(

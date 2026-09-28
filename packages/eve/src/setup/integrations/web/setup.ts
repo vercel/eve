@@ -16,14 +16,14 @@ const NEXT_HOSTED_CONFIG = `import type { NextConfig } from "next";
 import { withEve } from "eve/next";
 import { fileURLToPath } from "node:url";
 
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = { experimental: { useTypeScriptCli: true } };
 const eveRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 export default withEve(nextConfig, { eveRoot });
 `;
 const PEER_SERVICE_NEXT_CONFIG = `import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = { experimental: { useTypeScriptCli: true } };
 
 export default nextConfig;
 `;
@@ -165,14 +165,19 @@ export async function applyWebSetup(
   const registryNextConfig = `import type { NextConfig } from "next";
 import { withEve } from "eve/next";
 
-const nextConfig: NextConfig = {};
+const nextConfig: NextConfig = { experimental: { useTypeScriptCli: true } };
 
 export default withEve(nextConfig);
 `;
+  const legacyConfig = (config: string) =>
+    config.replace("{ experimental: { useTypeScriptCli: true } }", "{}");
   await assertInstallerOwned(nextConfigPath, [
     registryNextConfig,
+    legacyConfig(registryNextConfig),
     NEXT_HOSTED_CONFIG,
+    legacyConfig(NEXT_HOSTED_CONFIG),
     PEER_SERVICE_NEXT_CONFIG,
+    legacyConfig(PEER_SERVICE_NEXT_CONFIG),
   ]);
   let startScript: string;
   if (plan.hosting === "vercel") {
