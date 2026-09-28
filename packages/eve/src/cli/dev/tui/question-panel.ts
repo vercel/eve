@@ -8,13 +8,14 @@
  * hosts lifecycle and keys; this module only paints rows.
  */
 
-import type { AgentTUIInputOption } from "./runner.js";
+import type { AgentTUIInputContext, AgentTUIInputOption } from "./runner.js";
 import { visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
 import {
   clipVisible,
   renderInputText,
   renderInputWithBlockCursor,
+  stripTerminalControls,
   wrapVisibleLine,
 } from "#cli/ui/terminal-text.js";
 import { renderOptionRow } from "#setup/cli/option-row.js";
@@ -59,6 +60,22 @@ export function renderQuestionPanel(
   }
 
   return rows.map((row) => clipVisible(row, width));
+}
+
+/** A dim line that places a prompt among the requests being answered and names who asked. */
+export function renderInputContext(
+  context: AgentTUIInputContext | undefined,
+  theme: Theme,
+  width: number,
+): string[] {
+  const parts: string[] = [];
+  if (context?.position !== undefined) {
+    parts.push(`${context.position.index} of ${context.position.total}`);
+  }
+  if (context?.requester !== undefined) {
+    parts.push(`from ${stripTerminalControls(context.requester)}`);
+  }
+  return parts.length === 0 ? [] : [clipVisible(`  ${theme.colors.dim(parts.join(" · "))}`, width)];
 }
 
 export function renderQuestionChoices(

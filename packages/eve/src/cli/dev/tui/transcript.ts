@@ -581,6 +581,25 @@ function agentCallSections(conversation: ConversationState): Map<string, AgentCa
   return sections;
 }
 
+/**
+ * How the transcript names the task that asked for input: an agent call as its section header
+ * does (`subagent(number_picker:13)`), any other task by its tool name.
+ */
+export function agentCallLabel(
+  conversation: ConversationState,
+  taskId: string,
+): string | undefined {
+  const task = conversation.tasks[taskId];
+  if (task === undefined) return undefined;
+  const calls = Object.values(task.calls);
+  const call = calls.findLast((candidate) => candidate.status === "working") ?? calls.at(-1);
+  const section = call === undefined ? undefined : agentCallSections(conversation).get(call.callId);
+  if (section === undefined) return stripTerminalControls(task.name);
+  const name = section.agent.name === "agent" ? "self" : stripTerminalControls(section.agent.name);
+  const ordinal = section.subtitle.startsWith("#") ? `:${section.subtitle.slice(1)}` : "";
+  return `subagent(${name}${ordinal})`;
+}
+
 /** A settled call's content may still be in flight on the agent's own stream. */
 function isCallContentPending(
   section: AgentCallSection,

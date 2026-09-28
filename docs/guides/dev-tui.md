@@ -94,7 +94,7 @@ Required authorization or deployment setup still runs for the selected item. Pre
 
 ## Work with the agent
 
-Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
+Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Each answer is sent as soon as you give it. When several requests are open, the prompt shows its place among them, such as `2 of 5`, and names the subagent or task that asked. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
 
 The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, **Running** while tools execute, and **Waiting on** the working tasks' names while the turn waits for them. A blinking dot and elapsed time indicate progress, with token counts shown when available. The activity line disappears when the turn finishes or needs your input.
 

@@ -15,9 +15,13 @@ import { initialConversationState, reduceConversation } from "#client/conversati
 import type { EveAgentReducerEvent } from "#client/reducer.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import {
+  createActionResultEvent,
+  createActionsRequestedEvent,
+  createAgentStartedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createMessageReceivedEvent,
+  createTaskStartedEvent,
   createTurnStartedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
@@ -1857,6 +1861,24 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.up();
     input.enter();
 
+    await expect(approval).resolves.toEqual({ approved: true });
+    renderer.shutdown();
+  });
+
+  it("shows where an approval sits among the open ones and who asked for it", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const approval = renderer.readToolApproval({
+      approvalId: "a2",
+      toolCallId: "c2",
+      toolName: "random_number",
+      input: {},
+      context: { position: { index: 2, total: 10 }, requester: "subagent(number_picker:13)" },
+    });
+
+    expect(screen.snapshot()).toMatch(
+      /2 of 10 · from subagent\(number_picker:13\)\n\s+Approve random_number\?/,
+    );
+    input.enter();
     await expect(approval).resolves.toEqual({ approved: true });
     renderer.shutdown();
   });
@@ -3777,6 +3799,92 @@ describe("setup interaction transitions", () => {
 describe("TerminalRenderer conversation", () => {
   let sequence = 0;
   const stamped = (event: UnstampedMessageStreamEvent) => stampTestEvent(event, ++sequence);
+
+  it("places an agent call's section above tool rows that arrived before its agent started", async () => {
+    const { screen, renderer } = makeRenderer(100, 30);
+    const prompt = readPrompt(renderer);
+    const call = { callId: "pick_1", name: "number_picker", taskId: "task_1", turnId: "turn_1" };
+    const beforeAgent = [
+      stamped(createTurnStartedEvent({ sequence: 0, turnId: "turn_1" })),
+      stamped(
+        createActionsRequestedEvent({
+          actions: [
+            {
+              callId: "pick_1",
+              input: { message: "Pick a number." },
+              kind: "tool-call",
+              toolName: "number_picker",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      ),
+      stamped(createTaskStartedEvent(call)),
+      stamped(
+        createActionsRequestedEvent({
+          actions: [{ callId: "wait_1", input: {}, kind: "tool-call", toolName: "task_wait" }],
+          sequence: 2,
+          stepIndex: 1,
+          turnId: "turn_1",
+        }),
+      ),
+      stamped(
+        createActionResultEvent({
+          result: {
+            callId: "wait_1",
+            kind: "tool-result",
+            output: "1 task is working.",
+            toolName: "task_wait",
+          },
+          sequence: 3,
+          stepIndex: 1,
+          turnId: "turn_1",
+        }),
+      ),
+    ];
+    renderer.renderConversation(conversationOf(beforeAgent, { working: true }));
+    renderer.renderConversation(
+      conversationOf(
+        [
+          ...beforeAgent,
+          stamped(
+            createAgentStartedEvent({
+              ...call,
+              parentSessionId: "session_1",
+              sessionId: "child_1",
+            }),
+          ),
+        ],
+        { working: true },
+      ),
+    );
+
+    expect(screen.snapshot()).toMatch(/subagent\(number_picker\)[^\n]*\n\n[^\n]*task_wait/);
+    renderer.requestInterrupt();
+    await prompt.catch(() => {});
+  });
+
+  it("keeps a command's details under it while the agent streams", () => {
+    const { screen, renderer } = makeRenderer(100, 30);
+    renderer.renderCommandInvocation("/add channel/web");
+    renderer.renderConversation(
+      conversationOf([turn("turn_1"), appended("turn_1", "Reading Alice's notes")], {
+        working: true,
+      }),
+    );
+    renderer.finishCommand({
+      kind: "result",
+      message: "Start locally with `pnpm dev:services`.",
+      summary: "Added channel/web",
+    });
+    renderer.shutdown();
+
+    expect(screen.snapshot()).toMatch(
+      /^\* Added channel\/web\n {3}⎿ {2}Start locally with `pnpm dev:services`\.$/m,
+    );
+  });
   const turn = (turnId: string) => stamped(createTurnStartedEvent({ sequence: 0, turnId }));
   const appended = (turnId: string, messageDelta: string) =>
     stamped(createMessageAppendedEvent({ messageDelta, sequence: 1, stepIndex: 0, turnId }));

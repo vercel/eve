@@ -11,6 +11,7 @@ import {
 import { isAbortError } from "#client/eve-agent-store-helpers.js";
 import { normalizeActionRequest, normalizeActionResult } from "#client/message-action-parts.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
+import { agentCallLabel } from "./transcript.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
 import type {
@@ -128,12 +129,21 @@ export type AgentTUIInput =
   /** `Ctrl+C` again while cancellation is pending: stop following the turn. */
   | { type: "interrupt" };
 
+/** Where a prompt sits among the requests being answered, and who asked, when that helps. */
+export type AgentTUIInputContext = {
+  /** 1-based position among the requests answered in a row; the total grows as more arrive. */
+  position?: { index: number; total: number };
+  /** The agent call or task that asked, named as its transcript section is. */
+  requester?: string;
+};
+
 export type AgentTUIToolApprovalRequest = {
   approvalId: string;
   toolCallId: string;
   toolName: string;
   title?: string;
   input: unknown;
+  context?: AgentTUIInputContext;
 };
 
 export type AgentTUIToolApprovalResponse = {
@@ -154,6 +164,7 @@ export type AgentTUIInputQuestion = {
   display: "select" | "text";
   options?: ReadonlyArray<AgentTUIInputOption>;
   allowFreeform?: boolean;
+  context?: AgentTUIInputContext;
 };
 
 export type AgentTUIInputQuestionResponse = {
@@ -692,9 +703,8 @@ export class EveTUIRunner {
         continue;
       }
       // Answering first lets the agent continue while setup owns the terminal.
-      const inputs = this.#answerableInputs();
-      if (inputs.length > 0) {
-        await this.#answerInputs(inputs, title);
+      if (this.#answerableInputs().length > 0) {
+        await this.#answerInputs(title);
         continue;
       }
       // Setup takes the terminal, so it waits for the session to settle.
@@ -894,49 +904,66 @@ export class EveTUIRunner {
     );
   }
 
-  async #answerInputs(inputs: readonly ConversationInput[], title: string): Promise<void> {
-    const responses: InputResponse[] = [];
-    for (const { request } of inputs) {
-      if (request.kind === "tool-approval") {
-        if (!this.#renderer.readToolApproval) {
-          throw new Error(
-            "Tool approval was requested, but the renderer does not support tool approval input.",
-          );
-        }
-        const response = await this.#renderer.readToolApproval(
-          toAgentTUIToolApprovalRequest(request),
-          { title },
-        );
-        responses.push({
-          requestId: request.requestId,
-          optionId: response.approved ? "approve" : "cancel",
-        });
-        continue;
-      }
-      if (!this.#renderer.readInputQuestion) {
-        throw new Error(
-          "An interactive question was requested, but the renderer does not support input questions.",
-        );
-      }
-      const response = await this.#renderer.readInputQuestion(toAgentTUIInputQuestion(request), {
-        title,
-      });
+  /**
+   * Prompts for open requests one at a time and sends each answer as it is given, so an agent
+   * waiting on one answer resumes without waiting for the rest.
+   */
+  async #answerInputs(title: string): Promise<void> {
+    for (let answered = 0; ; answered += 1) {
+      const inputs = this.#answerableInputs();
+      const input = inputs[0];
+      if (input === undefined) return;
+      const context = inputContext(
+        this.#store.snapshot.conversation,
+        input,
+        answered + 1,
+        answered + inputs.length,
+      );
+      const response = await this.#readInputResponse(input.request, context, title);
       if (response === undefined) {
         // A skipped question stays open; the server decides whether the
         // user's next message answers, dismisses, or leaves it.
-        this.#dismissedInputs.add(request.requestId);
+        this.#dismissedInputs.add(input.request.requestId);
         continue;
       }
-      const inputResponse: InputResponse = { requestId: request.requestId };
-      if (response.optionId !== undefined) inputResponse.optionId = response.optionId;
-      if (response.text !== undefined) inputResponse.text = response.text;
-      responses.push(inputResponse);
+      void this.#store.send({ inputResponses: [response] }).catch((error: unknown) => {
+        if (this.#disposed || isAbortError(error)) return;
+        this.#renderer.renderError?.("Error", this.#formatTransportError(error));
+      });
     }
-    if (responses.length === 0) return;
-    void this.#store.send({ inputResponses: responses }).catch((error: unknown) => {
-      if (this.#disposed || isAbortError(error)) return;
-      this.#renderer.renderError?.("Error", this.#formatTransportError(error));
-    });
+  }
+
+  async #readInputResponse(
+    request: InputRequest,
+    context: AgentTUIInputContext | undefined,
+    title: string,
+  ): Promise<InputResponse | undefined> {
+    if (request.kind === "tool-approval") {
+      if (!this.#renderer.readToolApproval) {
+        throw new Error(
+          "Tool approval was requested, but the renderer does not support tool approval input.",
+        );
+      }
+      const response = await this.#renderer.readToolApproval(
+        toAgentTUIToolApprovalRequest(request, context),
+        { title },
+      );
+      return { requestId: request.requestId, optionId: response.approved ? "approve" : "cancel" };
+    }
+    if (!this.#renderer.readInputQuestion) {
+      throw new Error(
+        "An interactive question was requested, but the renderer does not support input questions.",
+      );
+    }
+    const response = await this.#renderer.readInputQuestion(
+      toAgentTUIInputQuestion(request, context),
+      { title },
+    );
+    if (response === undefined) return undefined;
+    const inputResponse: InputResponse = { requestId: request.requestId };
+    if (response.optionId !== undefined) inputResponse.optionId = response.optionId;
+    if (response.text !== undefined) inputResponse.text = response.text;
+    return inputResponse;
   }
 
   /**
@@ -1603,16 +1630,38 @@ export function registryHandoffAddress(
     : undefined;
 }
 
-function toAgentTUIToolApprovalRequest(request: InputRequest): AgentTUIToolApprovalRequest {
-  return {
+function inputContext(
+  conversation: ConversationState,
+  input: ConversationInput,
+  index: number,
+  total: number,
+): AgentTUIInputContext | undefined {
+  const context: AgentTUIInputContext = {};
+  if (total > 1) context.position = { index, total };
+  const requester =
+    input.taskId === undefined ? undefined : agentCallLabel(conversation, input.taskId);
+  if (requester !== undefined) context.requester = requester;
+  return context.position === undefined && context.requester === undefined ? undefined : context;
+}
+
+function toAgentTUIToolApprovalRequest(
+  request: InputRequest,
+  context: AgentTUIInputContext | undefined,
+): AgentTUIToolApprovalRequest {
+  const approval: AgentTUIToolApprovalRequest = {
     approvalId: request.requestId,
     toolCallId: request.action.callId,
     toolName: request.action.toolName,
     input: request.action.input,
   };
+  if (context !== undefined) approval.context = context;
+  return approval;
 }
 
-function toAgentTUIInputQuestion(request: InputRequest): AgentTUIInputQuestion {
+function toAgentTUIInputQuestion(
+  request: InputRequest,
+  context: AgentTUIInputContext | undefined,
+): AgentTUIInputQuestion {
   const display: "select" | "text" =
     request.display === "text"
       ? "text"
@@ -1640,6 +1689,7 @@ function toAgentTUIInputQuestion(request: InputRequest): AgentTUIInputQuestion {
   if (request.allowFreeform !== undefined) {
     question.allowFreeform = request.allowFreeform;
   }
+  if (context !== undefined) question.context = context;
 
   return question;
 }

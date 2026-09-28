@@ -135,7 +135,11 @@ import {
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
-import { renderQuestionChoices, renderQuestionPanel } from "./question-panel.js";
+import {
+  renderInputContext,
+  renderQuestionChoices,
+  renderQuestionPanel,
+} from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
 import {
@@ -1011,7 +1015,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       diagnosticsPath: this.#diagnostics?.displayPath,
     });
     const ids = new Set<string>();
-    for (const block of projected) {
+    for (const [index, block] of projected.entries()) {
       const id = block.id!;
       if (this.#committedIds.has(id)) continue;
       ids.add(id);
@@ -1030,7 +1034,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           block.promptOrigin = "steer";
         }
       }
-      this.#insertConversationBlock(block);
+      this.#insertConversationBlock(block, projected.slice(index + 1));
     }
     for (const id of this.#conversationBlockIds) {
       if (!ids.has(id)) this.#removeBlock(id);
@@ -1046,20 +1050,32 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  /** New conversation blocks join their subagent cohort, or the live edge. */
-  #insertConversationBlock(block: Block): void {
-    const callId = block.subagentCallId;
-    const anchor =
-      callId === undefined || block.kind === "subagent"
-        ? -1
-        : this.#blocks.findLastIndex((candidate) => candidate.subagentCallId === callId);
-    if (anchor === -1) {
+  /**
+   * New conversation blocks go before the next transcript block still on screen: a section whose
+   * agent started after later tool rows appeared still renders above them. Without one, a
+   * section's rows join their section and anything else joins the live edge.
+   */
+  #insertConversationBlock(block: Block, following: readonly Block[]): void {
+    const next = following.find((candidate) => this.#blockById.has(candidate.id!));
+    const index =
+      next === undefined
+        ? this.#sectionEnd(block)
+        : this.#blocks.indexOf(this.#blockById.get(next.id!)!);
+    if (index === -1) {
       this.#pushBlock(block);
       return;
     }
     if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
-    this.#blocks.splice(anchor + 1, 0, block);
+    this.#blocks.splice(index, 0, block);
     this.#blockById.set(block.id!, block);
+  }
+
+  /** Where a section's new row joins the rows already on screen, or -1. */
+  #sectionEnd(block: Block): number {
+    const callId = block.subagentCallId;
+    if (callId === undefined || block.kind === "subagent") return -1;
+    const last = this.#blocks.findLastIndex((candidate) => candidate.subagentCallId === callId);
+    return last === -1 ? -1 : last + 1;
   }
 
   #syncInput(state: LineState): void {
@@ -1077,6 +1093,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#hitlDrawer = (width) =>
       renderTransientDrawer(
         [
+          ...renderInputContext(request.context, this.#theme, width),
           `  ${this.#theme.colors.bold(`Approve ${formatToolApprovalTitle(request)}?`)}`,
           "",
           ...renderQuestionChoices(
@@ -1179,18 +1196,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // so key handlers only update it and repaint.
     const selectDrawer = (width: number) =>
       renderTransientDrawer(
-        renderQuestionPanel(
-          {
-            prompt: stripTerminalControls(question.prompt),
-            options: optionList,
-            cursor: cursorIndex,
-            allowFreeform: hasFreeformRow,
-            editor,
-            caretVisible: this.#caretVisible,
-          },
-          this.#theme,
-          width,
-        ),
+        [
+          ...renderInputContext(question.context, this.#theme, width),
+          ...renderQuestionPanel(
+            {
+              prompt: stripTerminalControls(question.prompt),
+              options: optionList,
+              cursor: cursorIndex,
+              allowFreeform: hasFreeformRow,
+              editor,
+              caretVisible: this.#caretVisible,
+            },
+            this.#theme,
+            width,
+          ),
+        ],
         ["↑/↓ move · enter to select · esc to dismiss"],
         this.#theme,
         width,
@@ -1209,6 +1229,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (inputRows.at(-1) === "") inputRows.pop();
       return renderTransientDrawer(
         [
+          ...renderInputContext(question.context, this.#theme, width),
           `  ${this.#theme.colors.bold(stripTerminalControls(question.prompt))}`,
           "",
           ...inputRows.map((row) => `  ${row}`),
@@ -1667,7 +1688,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
     this.#start();
-    this.#pushBlock({ kind: "result", body: content, live: false });
+    const result: Block = { kind: "result", body: content, live: false };
+    this.#pushBlock(result);
+    // Work that streamed in while the command ran must not come between it and its result.
+    const echoIndex = echo === undefined ? -1 : this.#blocks.indexOf(echo);
+    if (echoIndex !== -1) {
+      this.#blocks.pop();
+      this.#blocks.splice(echoIndex + 1, 0, result);
+    }
     this.#paint();
   }
 
@@ -4239,11 +4267,12 @@ function promptInputRows({
 }
 
 /** Kind + title of the previously rendered block, for gap / run decisions. */
-type PreviousBlock = { kind: BlockKind; title?: string };
+type PreviousBlock = { kind: BlockKind; title?: string; inSection?: boolean };
 
 function previousBlockOf(block: Block): PreviousBlock {
   const previous: PreviousBlock = { kind: block.kind };
   if (block.title !== undefined) previous.title = block.title;
+  if (block.subagentCallId !== undefined) previous.inSection = true;
   return previous;
 }
 
@@ -4260,7 +4289,10 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
   // own prose, or an answered question — and stays tight within the run.
   if (
     block.kind === "tool" &&
-    (previous?.kind === "user" || previous?.kind === "assistant" || previous?.kind === "question")
+    (previous?.kind === "user" ||
+      previous?.kind === "assistant" ||
+      previous?.kind === "question" ||
+      (previous?.inSection === true && block.subagentCallId === undefined))
   ) {
     return true;
   }

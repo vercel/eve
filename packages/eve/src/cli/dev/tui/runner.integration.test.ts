@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "#client/client.js";
 import {
+  createActionsRequestedEvent,
   createAgentStartedEvent,
   createInputRequestedEvent,
   createMessageAppendedEvent,
@@ -17,7 +18,12 @@ import {
 } from "#protocol/message.js";
 import type { AgentTUIConversationView } from "./conversation-view.js";
 import { interruptedError } from "./errors.js";
-import { EveTUIRunner, type AgentTUIInput, type AgentTUIRenderer } from "./runner.js";
+import {
+  EveTUIRunner,
+  type AgentTUIInput,
+  type AgentTUIRenderer,
+  type AgentTUIToolApprovalRequest,
+} from "./runner.js";
 import { FakeEveServer, reply, silent } from "./test/fake-eve-server.js";
 
 afterEach(() => {
@@ -280,6 +286,96 @@ describe("eve dev conversation", () => {
     await vi.waitFor(() =>
       expect(tui.latest().conversation.agents.child_1?.observation.status).toBe("idle"),
     );
+    await tui.input(undefined);
+    await run;
+  });
+
+  it("sends each approval as it is answered and counts the ones that arrive meanwhile", async () => {
+    const server = new FakeEveServer(silent());
+    const firstAnswer = Promise.withResolvers<{ approved: boolean }>();
+    const readToolApproval = vi.fn((request: AgentTUIToolApprovalRequest) =>
+      request.approvalId === "approval_task_1"
+        ? firstAnswer.promise
+        : Promise.resolve({ approved: true }),
+    );
+    const tui = scriptedRenderer({ readToolApproval });
+    const run = startRunner(server, tui.renderer);
+
+    await tui.input({ type: "submit", text: "Pick two numbers." });
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
+    const calls = ["task_1", "task_2"].map((taskId) => ({
+      callId: `pick_${taskId}`,
+      name: "number_picker",
+      taskId,
+      turnId: "turn_1",
+    }));
+    const approval = (taskId: string) =>
+      createInputRequestedEvent({
+        requests: [
+          {
+            action: {
+              callId: `random_${taskId}`,
+              input: {},
+              kind: "tool-call",
+              toolName: "random_number",
+            },
+            kind: "tool-approval",
+            prompt: "Approve random_number?",
+            requestId: `approval_${taskId}`,
+          },
+        ],
+        sequence: 2,
+        stepIndex: 0,
+        taskId,
+        turnId: "turn_1",
+      });
+    server.emit(
+      [
+        createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+        createActionsRequestedEvent({
+          actions: calls.map(({ callId }) => ({
+            callId,
+            input: { message: "Pick a number." },
+            kind: "tool-call" as const,
+            toolName: "number_picker",
+          })),
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        ...calls.flatMap((call, index) => [
+          createTaskStartedEvent(call),
+          createAgentStartedEvent({
+            ...call,
+            parentSessionId: "session_1",
+            sessionId: `child_${String(index + 1)}`,
+          }),
+        ]),
+        approval("task_1"),
+        createTurnWaitingEvent({ sequence: 2, turnId: "turn_1" }),
+      ],
+      "delivery_1",
+    );
+    await vi.waitFor(() => expect(readToolApproval).toHaveBeenCalledOnce());
+    // Bob's approval arrives while Alice is still deciding on the first one.
+    server.emit(
+      [approval("task_2"), createTurnWaitingEvent({ sequence: 2, turnId: "turn_1" })],
+      "delivery_1",
+    );
+    await vi.waitFor(() => expect(tui.latest().conversation.inputs.approval_task_2).toBeDefined());
+    firstAnswer.resolve({ approved: true });
+
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/session_1")).toHaveLength(2));
+    expect(readToolApproval.mock.calls.map(([request]) => request.context)).toEqual([
+      { requester: "subagent(number_picker:1)" },
+      { position: { index: 2, total: 2 }, requester: "subagent(number_picker:2)" },
+    ]);
+    expect(
+      server.requestsTo("POST", "/session_1").map((request) => request.body?.inputResponses),
+    ).toEqual([
+      [{ optionId: "approve", requestId: "approval_task_1" }],
+      [{ optionId: "approve", requestId: "approval_task_2" }],
+    ]);
     await tui.input(undefined);
     await run;
   });
