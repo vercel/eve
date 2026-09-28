@@ -3652,7 +3652,7 @@ describe("createToolLoopHarness", () => {
     ]);
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
     await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Look it up" }));
 
     expect(events.find((e) => e.type === "actions.requested")?.data.presentation).toEqual({
@@ -3735,7 +3735,7 @@ describe("createToolLoopHarness", () => {
     ctx.set(SessionDynamicToolMetadataKey, [metadata]);
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
     await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Look it up" }));
 
     expect(events.find((e) => e.type === "actions.requested")?.data.presentation).toEqual({
