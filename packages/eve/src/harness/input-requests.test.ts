@@ -898,6 +898,31 @@ describe("pending input batch collection", () => {
     expect(hasPendingInputBatch(result.session.state)).toBe(false);
   });
 
+  it("resolves an approval text match against the first pending batch", () => {
+    let session = appendPendingInputBatch({
+      requests: [approvalRequest("approval-1", "call-1")],
+      responseMessages: [batchOutput("call-1", "bash")],
+      session: createHarnessSession(),
+    });
+    session = appendPendingInputBatch({
+      requests: [approvalRequest("approval-2", "call-2")],
+      responseMessages: [batchOutput("call-2", "bash")],
+      session,
+    });
+
+    const result = resolvePendingInput({
+      deferMessagesWhileApprovalsPending: true,
+      session,
+      stepInput: { message: "approve" },
+    });
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.deferredMessage).toBeUndefined();
+    expect(result.consumedMessage).toBe(true);
+    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-2"]));
+    expect(hasDeferredStepInput(result.session)).toBe(false);
+  });
+
   it("resolves only the first approval-bearing batch and defers later responses", () => {
     let session = appendPendingInputBatch({
       requests: [approvalRequest("approval-1", "call-1")],
