@@ -1,7 +1,7 @@
 ---
 issue: "TBD (Datadog Experiments reporter partner request)"
 status: proposed
-last_updated: "2026-09-28"
+last_updated: "2026-09-01"
 ---
 
 # Datadog Experiments reporter for eve evals
@@ -61,27 +61,21 @@ project from explicit reporter config, `DD_LLMOBS_PROJECT_NAME`, ml_app config,
 ## Row mapping
 
 - `name`: the path-derived eve eval id.
-- `input`, `output`, and expected output: recorded by default, matching the
-  Braintrust reporter; each can be disabled when the destination is not approved
-  for that content. When input recording is enabled, completed evals are buffered until run
-  completion and synced into one shared dataset (`datasetName`, default
-  `<projectName> evals`) so experiments stay comparable. Records are keyed by
-  eval description, with `#2`, `#3` suffixes for duplicates in discovery order
-  and the eval id as the fallback, because index-based ids of array-exported
-  evals shift. New keys add records, changed inputs update records in place, and
-  records missing from a filtered run are kept. Each experiment span carries its
-  dataset record id. Expected output is included in the dataset record only when
-  present and explicitly enabled.
+- `input`, `output`, and expected output: recorded by default, with opt-outs.
+  When input recording is enabled, completed evals are buffered until run
+  completion, their inputs are synced into one reused dataset keyed by eval
+  description, and each
+  experiment span carries its generated dataset record id. Expected output is
+  included in the dataset record only when present and enabled.
 - `metadata`: verdict, status, session id, tool/subagent names, authored eval
   metadata, sanitized target origin, and local git metadata when available.
 - `tags`: eval id, verdict, status, and authored eval tags.
 - metrics: assertion scores under normalized descriptive assertion names plus
   tool, subagent, message, and reasoning counts. Gate labels receive a `gate_`
   prefix, and authors can set stable names with `.label(...)`. Raw assertion-name
-  tags and failure messages are controlled by `recordAssertionDetails`, which
-  is on by default.
+  tags and failure messages can be omitted with `recordAssertionDetails`.
 - timestamps: the values already captured by the eval runner.
-- error: recorded by default; `recordErrors: false` omits exception messages.
+- error: recorded by default; `recordErrors: false` omits it.
 
 All metadata, config, inputs, and outputs are normalized to the JSON value shape
 accepted by `dd-trace` before submission.

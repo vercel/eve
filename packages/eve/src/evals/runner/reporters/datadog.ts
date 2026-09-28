@@ -11,11 +11,7 @@ import { parseJsonValue, type JsonValue } from "#shared/json.js";
 export interface DatadogReporterConfig {
   /** Datadog LLM Observability project name. Defaults to `DD_LLMOBS_PROJECT_NAME`, the configured ml_app, `DD_SERVICE`, or the first eval id. */
   readonly projectName?: string;
-  /**
-   * Name for the dataset used by the experiment. With `recordInputs`, every run reuses this
-   * dataset so experiments stay comparable; defaults to `<projectName> evals`. Otherwise it names
-   * the per-experiment placeholder dataset; defaults to `<experimentName> dataset`.
-   */
+  /** Dataset reused across runs. Defaults to `<projectName> evals`, or `<experimentName> dataset` without `recordInputs`. */
   readonly datasetName?: string;
   /** Name for the created experiment. Defaults to a timestamped eve eval run name. */
   readonly experimentName?: string;
@@ -179,9 +175,7 @@ type DatadogRecordingOptions = Required<
 
 /**
  * Creates an {@link EvalReporter} that uploads eval results to a Datadog LLM
- * Observability Experiment. Prompts, outputs, expected outputs, assertion
- * details, and errors are recorded by default; each `record*` option opts out
- * of one kind of content. Requires the optional `dd-trace`
+ * Observability Experiment. Requires the optional `dd-trace`
  * package and `DD_API_KEY`/`DD_APP_KEY` credentials unless `config.client` is
  * provided.
  */
@@ -221,8 +215,7 @@ class DatadogReporter implements EvalReporter {
     }
     this.#recordKeys = composeDatasetRecordKeys(evaluations);
 
-    // Without credentials dd-trace returns no-op experiments whose datasets never receive ids, so
-    // skip reporting instead of failing credential-free local runs.
+    // Without credentials, dd-trace datasets never receive ids.
     if (!this.#config.client && (!process.env.DD_API_KEY || !process.env.DD_APP_KEY)) {
       (this.#config.log ?? console.log)(
         "Datadog reporting skipped: set DD_API_KEY and DD_APP_KEY to upload eval results.\n",
@@ -360,7 +353,7 @@ class DatadogReporter implements EvalReporter {
       id: datasetId,
       name: dataset.name(),
     };
-    // An unchanged pulled dataset has no pinned version; its latest version is the one in use.
+    // An unchanged pulled dataset has no pinned version.
     const datasetVersion = dataset.version() ?? dataset.latestVersion();
     if (datasetVersion !== null) {
       datasetOptions.version = datasetVersion;
@@ -459,11 +452,7 @@ const MISSING_DATASET_API_MESSAGE = [
   "Update to a release compatible with dd-trace@6.13.0.",
 ].join("\n");
 
-/**
- * Keys dataset records by eval description so records survive reordering and removal of sibling
- * cases, which shift index-based eval ids. Duplicate descriptions receive `#2`, `#3` suffixes in
- * discovery order; evals without a description fall back to their id.
- */
+// Index-based eval ids shift when cases move, so records are keyed by description.
 function composeDatasetRecordKeys(evaluations: readonly EveEval[]): Map<string, string> {
   const keys = new Map<string, string>();
   const counts = new Map<string, number>();
