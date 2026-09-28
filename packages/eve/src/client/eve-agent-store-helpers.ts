@@ -1,7 +1,7 @@
 import { hasPendingAuthorizations, type ConversationState } from "#client/conversation-state.js";
 import type { ActiveTurn } from "#client/eve-agent-store-state.js";
 import type { MessageResponse } from "#client/message-response.js";
-import { isTurnSegmentBoundary, updatePendingInputRequests } from "#client/session-utils.js";
+import { endsTurnSegment, TurnSegment } from "#client/session-utils.js";
 import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
@@ -21,20 +21,17 @@ export function activeTurnForOptimisticFollowUp(
 }
 
 /**
- * Where a store operation stops reading, as `session.send().result()` does: a turn boundary
- * once no sign-in awaits its callback, or `turn.waiting` while a question awaits an answer.
+ * Where catch-up stops following and when an idle session counts as settled. These reads have no
+ * response to scope them, so the {@link endsTurnSegment} rule reads the whole conversation.
  */
 export function isResponseBoundary(
   event: MessageStreamEvent,
   conversation: ConversationState,
 ): boolean {
-  if (event.type === "turn.waiting") {
-    return Object.values(conversation.inputs).some((input) => input.status !== "settled");
-  }
-  return (
-    isCurrentTurnBoundaryEvent(event) &&
-    (event.type !== "session.waiting" || !hasPendingAuthorizations(conversation))
-  );
+  return endsTurnSegment(event, {
+    callbacks: hasPendingAuthorizations(conversation),
+    requests: Object.values(conversation.inputs).some((input) => input.status !== "settled"),
+  });
 }
 
 /** A turn parked on a question stays open, so its session is still streaming. */
@@ -184,13 +181,12 @@ export async function followSteeredTurns(
     await Promise.allSettled(turn.followUpDispatches);
   }
   if (turn.receivedFollowUps >= turn.acceptedFollowUps) return;
-  const pendingInputRequests = new Set<string>();
+  const segment = new TurnSegment({ followCallbacks: true });
   for await (const event of events) {
     if (!isActive()) return;
     turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
     turn.receivedFollowUpEvents.delete(event);
-    updatePendingInputRequests(pendingInputRequests, event);
-    if (isTurnSegmentBoundary(event, pendingInputRequests)) {
+    if (segment.observe(event)) {
       while (turn.followUpDispatches.size > 0) {
         await Promise.allSettled(turn.followUpDispatches);
       }

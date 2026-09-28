@@ -2239,6 +2239,63 @@ describe("EveAgentStore steering", () => {
     );
   });
 
+  it("follows a late steering delivery across its sign-in callback", async () => {
+    const activeStream = controlledStreamResponse();
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+      createMessageReceivedEvent({ message: "Use Linear", sequence: 0, turnId: "turn_2" }),
+      createTurnStartedEvent({ sequence: 1, turnId: "turn_2" }),
+      createAuthorizationRequiredEvent({
+        attemptId: "attempt_1",
+        description: "Linear",
+        name: "linear",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn_2",
+        webhookUrl: "https://agent.example.com/callback",
+      }),
+      createSessionWaitingEvent(),
+      createAuthorizationCompletedEvent({
+        attemptId: "attempt_1",
+        name: "linear",
+        outcome: "authorized",
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn_2",
+      }),
+      createSessionWaitingEvent(),
+    ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
+      ...event,
+      meta: { ...event.meta, deliveryIds: [index < 3 ? "first-delivery" : "delivery_1"] },
+    }));
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse("first-delivery"))
+      .mockResolvedValueOnce(activeStream.response)
+      .mockResolvedValueOnce(startedResponse());
+    const store = createStore({ reducer: defaultMessageReducer() });
+
+    const firstSend = store.send({ message: "First" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    activeStream.emit(events[0]!);
+    activeStream.emit(events[1]!);
+    const steering = store.send({ message: "Use Linear", turnPolicy: "steer" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    let settled = false;
+    const finished = Promise.all([firstSend, steering]).then(() => {
+      settled = true;
+    });
+    for (const event of events.slice(2, 7)) activeStream.emit(event);
+    await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(7));
+    expect(settled).toBe(false);
+
+    for (const event of events.slice(7)) activeStream.emit(event);
+    await finished;
+    expect(store.snapshot.status).toBe("ready");
+  });
+
   it("follows a late steering delivery after the active turn settles", async () => {
     const activeStream = controlledStreamResponse();
     const [

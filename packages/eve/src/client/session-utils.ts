@@ -1,7 +1,6 @@
 import type {
   AuthorizationRequiredStreamEvent,
   MessageCompletedStreamEvent,
-  MessageStreamEvent,
   TurnFailureStreamEvent,
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
@@ -31,41 +30,25 @@ interface TurnEventSummary {
 export function summarizeTurnEvents(
   events: readonly UnstampedMessageStreamEvent[],
 ): TurnEventSummary {
+  const segment = new TurnSegment();
   let boundary: UnstampedMessageStreamEvent | undefined;
   let failure: TurnFailureStreamEvent | undefined;
   let message: string | undefined;
-  const inputRequests = new Map<string, InputRequest>();
-  const pendingInputRequests = new Set<string>();
-  const pendingAuthorizations = new Map<string, PendingAuthorization>();
 
   for (const event of events) {
-    updatePendingInputRequests(pendingInputRequests, event);
-    if (isTurnSegmentBoundary(event, pendingInputRequests)) boundary = event;
+    if (segment.observe(event)) boundary = event;
     if (isTurnFailureEvent(event)) failure = event;
     if (isFinalMessageCompleted(event)) message = event.data.message ?? undefined;
     // Text completed before the turn parked was interim; the reply comes after it resumes.
     if (event.type === "turn.waiting") message = undefined;
-    if (event.type === "input.requested") {
-      for (const request of event.data.requests) inputRequests.set(request.requestId, request);
-    }
-    if (event.type === "approval.settled") inputRequests.delete(event.data.requestId);
-    if (event.type === "input.resolved") {
-      for (const resolution of event.data.resolutions) inputRequests.delete(resolution.requestId);
-    }
-    if (event.type === "authorization.required") {
-      pendingAuthorizations.set(authorizationKey(event.data), event.data);
-    }
-    if (event.type === "authorization.completed") {
-      pendingAuthorizations.delete(authorizationKey(event.data));
-    }
   }
 
   return {
     boundary,
     failure,
-    inputRequests: [...inputRequests.values()],
+    inputRequests: segment.inputRequests,
     message,
-    pendingAuthorizations: [...pendingAuthorizations.values()],
+    pendingAuthorizations: segment.pendingAuthorizations,
     status: summarizeBoundaryStatus(boundary),
   };
 }
@@ -83,39 +66,76 @@ export async function collectTurnEvents(
   stream: AsyncIterable<UnstampedMessageStreamEvent>,
 ): Promise<readonly UnstampedMessageStreamEvent[]> {
   const events: UnstampedMessageStreamEvent[] = [];
-  const pendingInputRequests = new Set<string>();
+  const segment = new TurnSegment();
   for await (const event of stream) {
     events.push(event);
-    updatePendingInputRequests(pendingInputRequests, event);
-    if (isTurnSegmentBoundary(event, pendingInputRequests)) break;
+    if (segment.observe(event)) break;
   }
   return events;
 }
 
 /**
- * Returns true when one segment of a turn's events ends at `event`: at a
- * current-turn boundary, or at `turn.waiting` while an input request read in
- * the segment is unanswered. The turn stays open there until a person answers;
- * without a pending request, `turn.waiting` is informational and reading goes
- * on to the turn's real end.
+ * Returns true when a read of a session's events ends at `event`: at a current-turn boundary, or
+ * at `turn.waiting` while a request is unanswered. The turn stays open there until a person
+ * answers; otherwise `turn.waiting` is informational and reading goes on to the turn's real end.
+ * A reader that follows sign-in callbacks also reads past `session.waiting` while one is
+ * outstanding, because the callback resumes the same turn.
  */
-export function isTurnSegmentBoundary(
+export function endsTurnSegment(
   event: UnstampedMessageStreamEvent,
-  pendingInputRequests: ReadonlySet<string>,
+  open: { readonly callbacks: boolean; readonly requests: boolean },
 ): boolean {
-  if (event.type === "turn.waiting") return pendingInputRequests.size > 0;
-  return isCurrentTurnBoundaryEvent(event);
+  if (event.type === "turn.waiting") return open.requests;
+  return isCurrentTurnBoundaryEvent(event) && (event.type !== "session.waiting" || !open.callbacks);
 }
 
-/** Tracks the input requests read in a segment that no `input.resolved` has answered yet. */
-export function updatePendingInputRequests(
-  pending: Set<string>,
-  event: UnstampedMessageStreamEvent,
-): void {
-  if (event.type === "input.requested") {
-    for (const request of event.data.requests) pending.add(request.requestId);
-  } else if (event.type === "input.resolved") {
-    for (const resolution of event.data.resolutions) pending.delete(resolution.requestId);
+/** The requests and sign-ins one segment of a session's events leaves open. */
+export class TurnSegment {
+  readonly #authorizations = new Map<string, PendingAuthorization>();
+  readonly #followCallbacks: boolean;
+  readonly #requests = new Map<string, InputRequest>();
+
+  constructor(options: { readonly followCallbacks?: boolean } = {}) {
+    this.#followCallbacks = options.followCallbacks === true;
+  }
+
+  get inputRequests(): readonly InputRequest[] {
+    return [...this.#requests.values()];
+  }
+
+  get pendingAuthorizations(): readonly PendingAuthorization[] {
+    return [...this.#authorizations.values()];
+  }
+
+  /** Records `event` and returns true when it ends the segment. */
+  observe(event: UnstampedMessageStreamEvent): boolean {
+    switch (event.type) {
+      case "input.requested":
+        for (const request of event.data.requests) this.#requests.set(request.requestId, request);
+        break;
+      case "approval.settled":
+        this.#requests.delete(event.data.requestId);
+        break;
+      case "input.resolved":
+        for (const resolution of event.data.resolutions) {
+          this.#requests.delete(resolution.requestId);
+        }
+        break;
+      case "authorization.required":
+        this.#authorizations.set(authorizationKey(event.data), event.data);
+        break;
+      case "authorization.completed":
+        this.#authorizations.delete(authorizationKey(event.data));
+        break;
+    }
+    return endsTurnSegment(event, {
+      callbacks:
+        this.#followCallbacks &&
+        [...this.#authorizations.values()].some(
+          (authorization) => authorization.webhookUrl !== undefined,
+        ),
+      requests: this.#requests.size > 0,
+    });
   }
 }
 
@@ -130,12 +150,4 @@ export function authorizationKey(data: {
   readonly attemptId?: string;
 }): string {
   return data.attemptId === undefined ? `name:${data.name}` : `attempt:${data.attemptId}`;
-}
-
-export function updatePendingAuthorizations(pending: Set<string>, event: MessageStreamEvent): void {
-  if (event.type === "authorization.required" && event.data.webhookUrl !== undefined) {
-    pending.add(authorizationKey(event.data));
-  } else if (event.type === "authorization.completed") {
-    pending.delete(authorizationKey(event.data));
-  }
 }
