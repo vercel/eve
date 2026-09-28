@@ -43,12 +43,16 @@ export interface AgentSendOptions<TOutput = unknown> {
  * How one agent turn ended, as the client's `MessageResult` reports it:
  * `"waiting"` when the session waits for its next message, including after a
  * cancelled turn, which carries neither `data` nor `message`; `"completed"`
- * when the session ended with the turn; and `"failed"` when the turn failed.
+ * when the session ended with the turn; and `"failed"` when the turn failed,
+ * with the reason in `error`.
  */
 export type AgentMessageResult<TOutput = unknown> = Pick<
   MessageResult<TOutput>,
   "data" | "message" | "status"
->;
+> & {
+  /** Why the turn failed, present only when `status` is `"failed"`. */
+  readonly error?: { readonly message: string };
+};
 
 /** The response to one message sent to a `ctx.agent` session. */
 export interface AgentResponse<TOutput = unknown> {

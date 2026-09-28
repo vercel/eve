@@ -50,7 +50,11 @@ export async function agentToolServeWorkflow(
     }
     // A cancel already settled the turn's calls, and the task stays available.
     if (!turn.signal.aborted) {
-      if (event.result.status === "failed") throw new Error("The agent's session ended.");
+      if (event.result.status === "failed") {
+        throw new Error(
+          `The agent's turn failed: ${event.result.error?.message ?? "no reason given"}`,
+        );
+      }
       // `next` can take a call after the result wins the race, and the reply
       // would settle that call unread. `receive()` returns `next` only while
       // it's pending, so another promise means the agent reads that call

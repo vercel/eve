@@ -16,6 +16,7 @@ import {
 import { disposeHook } from "#execution/hook-ownership.js";
 import type { WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
+import { toErrorMessage } from "#shared/errors.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import { serializeOutputSchema } from "#tools/schema-emission.js";
 import type {
@@ -239,15 +240,19 @@ function unwrapTurnEnd(end: AgentTurnEnd): AgentMessageResult<unknown> {
 
 const NO_REPLY = { data: undefined, message: undefined } as const;
 
+function failedTurn(error: unknown): AgentMessageResult<unknown> {
+  return { ...NO_REPLY, error: { message: toErrorMessage(error) }, status: "failed" };
+}
+
 function toAgentMessageResult(
   result: RuntimeSubagentResult,
   expectsData: boolean,
 ): AgentMessageResult<unknown> {
-  if (result.origin !== "child") return { ...NO_REPLY, status: "failed" };
+  if (result.origin !== "child") return failedTurn(result.output);
   const { outcome } = result;
   switch (outcome.result.kind) {
     case "failed":
-      return { ...NO_REPLY, status: "failed" };
+      return failedTurn(outcome.result.error);
     case "cancelled":
       return { ...NO_REPLY, status: "waiting" };
     case "succeeded": {

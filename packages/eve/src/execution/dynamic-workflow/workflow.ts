@@ -80,7 +80,9 @@ async function callProgramAgent(
     .send<JsonValue>(message, { outputSchema, signal: ctx.abortSignal });
   const result = await response.result();
   if (result.status === "failed") {
-    throw new Error(`Agent "${call.target}" failed to handle the message.`);
+    throw new Error(
+      `Agent "${call.target}" failed to handle the message: ${result.error?.message ?? "no reason given"}`,
+    );
   }
   if (outputSchema !== undefined) return result.data ?? null;
   return result.message ?? null;

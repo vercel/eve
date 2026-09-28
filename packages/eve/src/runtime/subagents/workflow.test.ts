@@ -113,17 +113,23 @@ function replies(): Array<{ readonly callId: string; readonly output: unknown }>
   );
 }
 
+/** Alice asks the reviewer for a review; the reviewer has read her message. */
+async function startReview(): Promise<ReturnType<typeof startServeBody>> {
+  agent.delivered.length = 0;
+  agent.read.length = 0;
+  agent.turns.length = 0;
+  const started = startServeBody(input);
+  await settle();
+  return started;
+}
+
 /**
  * Alice asks the reviewer for a review, and her next message reaches the task
  * `offset` microtasks after the reviewer's first turn ends. If `cancelled`,
  * she cancelled the review first, so the turn ends cancelled.
  */
 async function sendAsTheTurnEnds(offset: number, { cancelled }: { readonly cancelled: boolean }) {
-  agent.delivered.length = 0;
-  agent.read.length = 0;
-  agent.turns.length = 0;
-  const started = startServeBody(input);
-  await settle();
+  const started = await startReview();
   if (cancelled) started.control.apply({ kind: "cancel", reason: "Alice cancelled the review." });
   agent.turns[0]?.(
     turnEnded(
@@ -186,4 +192,22 @@ it("forwards a message that reaches the task at any point as the agent's turn en
     if (answered.repliedFirst) break;
     expect(offset, "the first reply never came before the message").toBeLessThan(100);
   }
+});
+
+it("fails the task with the reason the agent's turn failed", async () => {
+  const started = await startReview();
+  agent.turns[0]?.(
+    turnEnded({
+      error: {
+        code: "SUBAGENT_EXECUTION_FAILED",
+        message: "The model provider rejected the request.",
+      },
+      kind: "failed",
+    }),
+  );
+
+  await expect(started.outcome).resolves.toMatchObject({
+    error: { message: "The agent's turn failed: The model provider rejected the request." },
+    status: "failed",
+  });
 });

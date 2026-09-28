@@ -517,13 +517,14 @@ that turn's result. If the turn ends before the agent reads the message, the mes
 turn instead, and its response resolves with that turn's result. The responses of earlier messages
 that are still waiting resolve with the same result. A message sent while the session is idle starts
 the next turn, and the session keeps its conversation between turns. `result()` returns the
-client's `MessageResult` fields:
+client's `MessageResult` fields, plus `error` when the turn failed:
 
 | Field     | Description                                                                                                                                                                                                         |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `data`    | The structured value, when the turn requested `outputSchema`.                                                                                                                                                       |
 | `message` | The agent's final reply text, when the turn did not request `outputSchema`.                                                                                                                                         |
 | `status`  | `"waiting"` when the session waits for its next message, `"completed"` when the session ended with the turn, or `"failed"` when the turn failed. A cancelled turn is `"waiting"` with neither `data` nor `message`. |
+| `error`   | `{ message }` with the reason the turn failed, present only when `status` is `"failed"`.                                                                                                                            |
 
 Every `ctx.agent(name)` call returns a new session that only the workflow run can address. The model
 does not see it; it sees what the tool returns. The session runs as the caller's principal with the
@@ -617,8 +618,8 @@ export default defineWorkflowTool({
     );
 
     const response = await ctx.agent(target).send(task, { signal: ctx.abortSignal });
-    const { message, status } = await response.result();
-    if (status === "failed") throw new Error(`${target} could not complete the task.`);
+    const { error, message, status } = await response.result();
+    if (status === "failed") throw new Error(`${target} failed: ${error?.message}`);
     return message ?? null;
   },
 });
