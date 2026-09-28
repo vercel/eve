@@ -640,6 +640,53 @@ describe("resolvePendingCoordination", () => {
     expect(JSON.stringify(toolMessage?.content)).not.toContain('"deployed":true');
   });
 
+  it("omits undefined properties from workflow tool results", async () => {
+    const parked = setPendingCoordinationBatch({
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      runtimeActions: [],
+      session: createParkedSession(),
+      tasks: [
+        {
+          callId: "call-1",
+          input: {},
+          kind: "workflow-task",
+          toolName: "ask",
+          workflowId: "workflow//./agent/tools/ask//execute",
+        },
+      ],
+    });
+
+    const resolved = await resolvePendingCoordination({
+      session: parked,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            kind: "tool-result",
+            output: { optionId: "yes", status: "answered", text: undefined } as never,
+            toolName: "ask",
+          },
+        ],
+      },
+    });
+
+    expect(resolved.messages.at(-1)).toEqual({
+      content: [
+        {
+          output: {
+            type: "json",
+            value: { optionId: "yes", status: "answered" },
+          },
+          toolCallId: "call-1",
+          toolName: "ask",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    });
+  });
+
   it("accepts a dispatch-origin failure result by callId", async () => {
     const resolved = await resolvePendingCoordination({
       session: createParkedSession(),
