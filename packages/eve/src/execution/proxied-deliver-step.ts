@@ -8,6 +8,12 @@ import {
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import { relaySessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
+import { deserializeContext } from "#context/serialize.js";
+import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import {
+  resolveRemoteAgentStreamHeaders,
+  respondToRemoteAgentSession,
+} from "#execution/agent-sessions/remote.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
@@ -38,6 +44,9 @@ export type RoutedDeliverResult =
 
 interface ChildBucket {
   readonly workflowAsk?: WorkflowAskRoute;
+  readonly remote?: NonNullable<
+    import("#harness/proxy-input-requests.js").ProxyInputRequest["remote"]
+  >;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   readonly event: PendingInputBatchEvent;
@@ -86,9 +95,11 @@ export async function routeProxiedDeliverStep(
       const key = [
         forChild.childContinuationToken,
         forChild.childSessionInbox?.sessionId ?? "",
+        forChild.remote?.sessionId ?? "",
       ].join("\0");
       const child: ChildBucket = children.get(key) ?? {
         workflowAsk: forChild.workflowAsk,
+        remote: forChild.remote,
         childContinuationToken: forChild.childContinuationToken,
         childSessionInbox: forChild.childSessionInbox,
         event: forChild.resolved.event,
@@ -130,10 +141,26 @@ export async function routeProxiedDeliverStep(
         deliveryMetadata: child.metadata.length === 0 ? undefined : child.metadata,
         payloads: child.payloads,
       };
-      await resumeSessionInbox(
-        child.childSessionInbox ?? child.childContinuationToken,
-        childDelivery,
-      );
+      const remote = child.remote;
+      if (remote !== undefined) {
+        const ctx = await deserializeContext(input.serializedContext);
+        const headers = await resolveRemoteAgentStreamHeaders({
+          bundle: ctx.require(BundleKey),
+          name: remote.name,
+          resolverId: remote.resolverId,
+          url: remote.url,
+        });
+        await respondToRemoteAgentSession({
+          remote,
+          headers,
+          responses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
+        });
+      } else {
+        await resumeSessionInbox(
+          child.childSessionInbox ?? child.childContinuationToken,
+          childDelivery,
+        );
+      }
     }
     if (child.resolutions.size > 0) {
       resolvedEvents.push(

@@ -79,6 +79,7 @@ async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSession): Pr
 /** One proxied-child bucket of a routed deliver payload. */
 export interface RoutedChildDelivery {
   readonly workflowAsk?: WorkflowAskRoute;
+  readonly remote?: ProxyInputRequest["remote"];
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
@@ -111,6 +112,7 @@ export interface RoutedDeliverPayload {
 /** In-progress accumulation for one `forChildren` bucket. */
 interface ChildResponseBucket {
   readonly workflowAsk?: WorkflowAskRoute;
+  readonly remote?: ProxyInputRequest["remote"];
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   /** A child's routes all come from its latest batch, so they share coordinates. */
@@ -151,13 +153,16 @@ export function routeDeliverPayload(input: {
   let parentAction: RoutedDeliverPayload["parentAction"];
 
   const bucketFor = (route: ProxyInputRequest): ChildResponseBucket => {
-    const bucketKey = [route.childContinuationToken, route.childSessionInbox?.sessionId ?? ""].join(
-      "\0",
-    );
+    const bucketKey = [
+      route.childContinuationToken,
+      route.childSessionInbox?.sessionId ?? "",
+      route.remote?.sessionId ?? "",
+    ].join("\0");
     const existing = responsesByChild.get(bucketKey);
     if (existing !== undefined) return existing;
     const bucket: ChildResponseBucket = {
       childContinuationToken: route.childContinuationToken,
+      remote: route.remote,
       event: route.event,
       parentRequestIds: [],
       responses: [],
@@ -196,6 +201,7 @@ export function routeDeliverPayload(input: {
   const forChildren = [...responsesByChild.values()].map(
     ({
       workflowAsk,
+      remote,
       childContinuationToken,
       childSessionInbox,
       event,
@@ -227,6 +233,7 @@ export function routeDeliverPayload(input: {
         },
         ...(childSessionInbox !== undefined && { childSessionInbox }),
         ...(workflowAsk !== undefined && { workflowAsk }),
+        ...(remote !== undefined && { remote }),
       };
     },
   );

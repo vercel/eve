@@ -143,6 +143,19 @@ class RunAgentSession implements AgentSession {
             owner: this.#run.owner,
             replyTo: hook.token,
             request: reply,
+            remote:
+              this.#opened === undefined
+                ? undefined
+                : await this.#opened.then(({ address }) =>
+                    address.kind === "remote"
+                      ? {
+                          name: address.name,
+                          resolverId: address.resolverId,
+                          url: address.url,
+                          sessionId: address.sessionId,
+                        }
+                      : undefined,
+                  ),
           });
           continue;
         }

@@ -59,6 +59,10 @@ export async function emitProxiedSubagentEvent(input: {
       durableSession: input.durableSession,
       origin: "relayed",
       sessionWritable: input.sessionWritable,
+      inputSource:
+        hookPayload.kind === "subagent-input-request"
+          ? JSON.stringify([hookPayload.childContinuationToken, hookPayload.inputSource ?? null])
+          : undefined,
     },
     async (emit, session) => {
       if (hookPayload.kind === "subagent-authorization-event") {
@@ -80,6 +84,7 @@ export async function emitProxiedSubagentEvent(input: {
           ? relayed.result
           : relayed.result.map(([requestId, route]) => [requestId, { ...route, workflowAsk }]),
       forChildContinuationToken: hookPayload.childContinuationToken,
+      inputSource: hookPayload.inputSource,
       session: scopedSession,
     });
   }

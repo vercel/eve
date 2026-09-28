@@ -2,12 +2,9 @@ import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import {
-  sessionCommandHookToken,
-  sessionInboxHookToken,
-} from "#execution/session-inbox/address.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
+import type { RemoteAgentBinding } from "#eve-channel/support.js";
 
 /** A child's question or sign-in, which only a person at the root can answer. */
 export type AgentSessionRequest =
@@ -24,6 +21,7 @@ export async function forwardAgentSessionRequest(input: {
   readonly owner: WorkflowToolRunInbox;
   readonly replyTo: string;
   readonly request: AgentSessionRequest;
+  readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
 }): Promise<void> {
   const { from, request } = input;
   if (request.kind === "subagent-authorization-event") {
@@ -37,8 +35,14 @@ export async function forwardAgentSessionRequest(input: {
   }
   await input.owner.send({
     from,
+    inputSource: request.inputSource,
+    remote: input.remote,
     kind: "request",
-    replyTo: childAnswerToken(request),
+    replyTo: request.childContinuationToken,
+    childSessionInbox:
+      request.childSessionInbox?.sessionId === request.childSessionId
+        ? request.childSessionInbox
+        : undefined,
     request: { kind: "input-batch", requests: request.event.requests },
     requestCoordinates: {
       sequence: request.event.sequence,
@@ -46,16 +50,4 @@ export async function forwardAgentSessionRequest(input: {
       turnId: request.event.turnId,
     },
   });
-}
-
-/**
- * Current session inboxes take answers on their physical token. A remote
- * child's create-once operation hook is already a narrowed reply capability.
- */
-function childAnswerToken(request: SubagentInputRequestHookPayload): string {
-  const inbox = request.childSessionInbox;
-  if (inbox?.sessionId === request.childSessionId) {
-    return sessionInboxHookToken(sessionCommandHookToken(inbox.sessionId));
-  }
-  return request.childContinuationToken;
 }

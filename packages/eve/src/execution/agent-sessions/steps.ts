@@ -286,6 +286,7 @@ async function startRemoteSession(
     }),
     auth: auth.current,
     callbackBaseUrl,
+    capabilities: context.capabilities,
     initiatorAuth: auth.initiator,
     operationId: `agent-session:${input.key}`,
     originAudience: context.trace.originAudience,

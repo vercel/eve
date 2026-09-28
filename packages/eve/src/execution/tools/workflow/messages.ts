@@ -1,4 +1,6 @@
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
+import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
+import type { RemoteAgentBinding } from "#eve-channel/support.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { AgentSessionAddress } from "#execution/agent-sessions/steps.js";
@@ -71,7 +73,10 @@ export interface WorkflowToolRunReport {
 }
 
 export interface WorkflowToolRunRequestMessage {
+  readonly childSessionInbox?: SessionInboxAddress;
+  readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
   readonly from: WorkflowToolRunRef;
+  readonly inputSource?: string;
   readonly replyTo: string;
   readonly request: WorkflowToolRequest;
   readonly requestCoordinates?: {

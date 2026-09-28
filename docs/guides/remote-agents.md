@@ -187,7 +187,9 @@ A remote subagent call runs a child session in the remote deployment as a task:
 
 1. The parent starts a persistent conversation session on the remote's `POST /eve/v1/session`, passing a framework callback URL.
 2. The remote accepts the child and runs its turn while the task works.
-3. The callback delivers the child's reply, which becomes the task's result.
+3. If the child asks a question or needs authorization, the callback forwards the request to the parent's channel. The parent's answer routes back to the child session. The same callback delivers the child's reply, which becomes the task's result.
+
+A remote child inherits the parent's human-input capability. If the parent cannot request input (for example, a scheduled session), the remote child cannot ask or wait for an approval either.
 
 The parent stream carries the same `task.started`, `agent.started`, and `task.settled` events as local delegation. For a remote child, `agent.started.data.remote.url` records the target.
 

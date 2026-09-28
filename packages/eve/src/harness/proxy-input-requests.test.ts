@@ -82,6 +82,72 @@ describe("upsertProxyInputRequests", () => {
     });
   });
 
+  it("keeps independent questions at the same answer destination", () => {
+    let session = upsertProxyInputRequests({
+      entries: [
+        [
+          "alice",
+          {
+            childContinuationToken: "shared-inbox",
+            inputSource: "workflow-alice",
+            event: REQUEST_EVENT,
+            kind: "question",
+          },
+        ],
+      ],
+      forChildContinuationToken: "shared-inbox",
+      inputSource: "workflow-alice",
+      session: createSession(),
+    });
+    session = upsertProxyInputRequests({
+      entries: [
+        [
+          "bob",
+          {
+            childContinuationToken: "shared-inbox",
+            inputSource: "workflow-bob",
+            event: REQUEST_EVENT,
+            kind: "question",
+          },
+        ],
+      ],
+      forChildContinuationToken: "shared-inbox",
+      inputSource: "workflow-bob",
+      session,
+    });
+
+    expect([...getProxyInputRequests(session.state).keys()]).toEqual(["alice", "bob"]);
+  });
+
+  it("preserves remote response coordinates through a durable proxy snapshot", () => {
+    const remote = {
+      name: "research",
+      resolverId: "subagents/research.ts",
+      sessionId: "remote-child-session",
+      url: "https://remote.example.com",
+    };
+    const payload: SubagentInputRequestHookPayload = {
+      callId: "call-1",
+      childContinuationToken: "remote-reply",
+      childSessionId: "remote-child-session",
+      event: { requests: [createRequest("req-remote", "question")], ...REQUEST_EVENT },
+      kind: "subagent-input-request",
+      remote,
+      subagentName: "research",
+    };
+    const session = upsertProxyInputRequests({
+      entries: toProxyInputRequestEntries(payload),
+      forChildContinuationToken: payload.childContinuationToken,
+      session: createSession(),
+    });
+    expect(
+      getProxyInputRequests(JSON.parse(JSON.stringify(session.state))).get("req-remote"),
+    ).toMatchObject({
+      remote,
+      childContinuationToken: "remote-reply",
+    });
+  });
+
   it("drops a prior child's batch when its request ID is claimed by another child", () => {
     let session = upsertProxyInputRequests({
       entries: [

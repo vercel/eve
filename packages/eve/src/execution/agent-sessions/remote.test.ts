@@ -8,6 +8,7 @@ import {
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
   resolveRemoteAgentStreamHeaders,
+  respondToRemoteAgentSession,
   startRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
@@ -427,6 +428,63 @@ describe("startRemoteAgentSession", () => {
     expect(body.capabilities).toEqual({});
   });
 
+  it("passes an input-capable parent's capability to a remote child", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          protocolVersion: 2,
+          sessionId: "remote-session",
+          status: "accepted",
+        }),
+        { status: 202 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      capabilities: { requestInput: true },
+      remote: createRemoteAgent(),
+      session: { continuationToken: "eve:parent-token" },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body.capabilities).toEqual({ requestInput: true });
+  });
+
+  it("ignores an empty requested outputSchema instead of forwarding it", async () => {
+    // An empty schema constrains nothing, but forwarding it flips the remote
+    // child into structured-output mode and discards its text reply; local
+    // subagent dispatch already drops it, and remote must match.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          protocolVersion: 2,
+          sessionId: "remote-session",
+          status: "accepted",
+        }),
+        {
+          status: 202,
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const action = createAction();
+    await startRemoteAgentSession({
+      action: { ...action, input: { ...action.input, outputSchema: {} } },
+      callbackBaseUrl: "https://caller.example.com",
+      remote: createRemoteAgent(),
+      session: { continuationToken: "eve:parent-token" },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body).not.toHaveProperty("outputSchema");
+  });
+
   it("targets an active turn inbox when a callback token is supplied", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -770,6 +828,32 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       "forwardedPrincipal",
     );
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ baggage: "vendor=value" });
+  });
+});
+
+describe("respondToRemoteAgentSession", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sends an answer to the child's authenticated session route, not a parent-local hook", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await respondToRemoteAgentSession({
+      headers: { authorization: "Bearer remote-token" },
+      remote: {
+        name: "research",
+        sessionId: "remote-session",
+        url: "https://remote.example.com/prefix",
+      },
+      responses: [{ requestId: "ask-1", text: "approved" }],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example.com/prefix/eve/v1/session/remote-session",
+      expect.objectContaining({
+        body: JSON.stringify({ inputResponses: [{ requestId: "ask-1", text: "approved" }] }),
+        headers: { authorization: "Bearer remote-token", "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
   });
 });
 

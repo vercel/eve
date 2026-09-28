@@ -2,21 +2,88 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import { inputRequestSchema } from "#shared/input.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 
-// Wire schemas of the child→parent callback route. Possession of the
-// callback token is the authorization to settle; results bind to the
-// pending call by callId. `sessionId` is informational (tracing and
-// diagnostics) and never verified — new senders emit it, older eve
-// deployments may omit it.
+// The callback token grants access to the pending turn. Validate remote input
+// before handing it to the parent; the child session ID is not authority.
+const sessionInputCallbackSchema = z.object({
+  callId: z.string().min(1),
+  childContinuationToken: z.string().min(1),
+  childSessionId: z.string().min(1),
+  childSessionInbox: z
+    .object({ sessionId: z.string().min(1) })
+    .strict()
+    .optional(),
+  inputSource: z.string().min(1).optional(),
+  remote: z
+    .object({
+      name: z.string().min(1),
+      url: z.string().url(),
+      sessionId: z.string().min(1),
+      resolverId: z.string().min(1).optional(),
+    })
+    .strict()
+    .optional(),
+  kind: z.literal("subagent-input-request"),
+  subagentName: z.string().min(1),
+  event: z.object({
+    requests: z.array(inputRequestSchema).min(1),
+    sequence: z.number(),
+    stepIndex: z.number(),
+    taskId: z.string().optional(),
+    turnId: z.string(),
+  }),
+});
 
-/**
- * Turn callbacks must carry the explicit `AgentTurnOutcome` envelope:
- * the receiving parent settles the child's handle from `outcome.kind`, so
- * a turn callback that cannot state its lifecycle is rejected rather than
- * guessed at (pre-1.0: no wire compatibility shims).
- */
+const sessionAuthorizationCallbackSchema = z.object({
+  callId: z.string().min(1),
+  childSessionId: z.string().min(1),
+  kind: z.literal("subagent-authorization-event"),
+  subagentName: z.string().min(1),
+  event: z.discriminatedUnion("type", [
+    z.object({
+      type: z.literal("approval.candidate"),
+      data: z.object({}).passthrough(),
+    }),
+    z.object({
+      type: z.literal("approval.settled"),
+      data: z.object({}).passthrough(),
+    }),
+    z.object({
+      type: z.literal("authorization.required"),
+      data: z
+        .object({
+          description: z.string(),
+          name: z.string(),
+          sequence: z.number(),
+          stepIndex: z.number(),
+          turnId: z.string(),
+          webhookUrl: z.string().optional(),
+          attemptId: z.string().optional(),
+          taskId: z.string().optional(),
+        })
+        .passthrough(),
+    }),
+    z.object({
+      type: z.literal("authorization.completed"),
+      data: z
+        .object({
+          name: z.string(),
+          outcome: z.enum(["authorized", "declined", "failed", "timed-out"]),
+          sequence: z.number(),
+          stepIndex: z.number(),
+          turnId: z.string(),
+          attemptId: z.string().optional(),
+          taskId: z.string().optional(),
+        })
+        .passthrough(),
+    }),
+  ]),
+});
+
+/** A settled remote turn must state its outcome; callers do not infer its lifecycle. */
 const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
   z.object({
     callId: z.string().min(1),
@@ -50,16 +117,24 @@ export async function handleSessionCallbackRequest(
     return Response.json({ error: "Invalid JSON body.", ok: false }, { status: 400 });
   }
 
-  const result = projectSessionCallbackResult(body);
-  if (result instanceof Response) {
-    return result;
+  const kind = callbackKind(body);
+  const forwarded =
+    kind === "subagent-input-request"
+      ? sessionInputCallbackSchema.safeParse(body)
+      : kind === "subagent-authorization-event"
+        ? sessionAuthorizationCallbackSchema.safeParse(body)
+        : undefined;
+  if (forwarded !== undefined && !forwarded.success) {
+    return Response.json({ error: "Invalid session input callback.", ok: false }, { status: 400 });
   }
+  const result = forwarded === undefined ? projectSessionCallbackResult(body) : undefined;
+  if (result instanceof Response) return result;
 
   try {
-    await resumeHook(token, {
-      kind: "runtime-action-result",
-      results: [result],
-    });
+    await resumeHook(
+      token,
+      forwarded?.success ? forwarded.data : { kind: "runtime-action-result", results: [result] },
+    );
   } catch {
     return Response.json({ error: "Session callback not pending.", ok: false }, { status: 404 });
   }

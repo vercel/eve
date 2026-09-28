@@ -9,6 +9,7 @@ import type {
 import { ContinuationTokenKey, SessionIdKey, SessionInboxKey } from "#context/keys.js";
 import { SUBAGENT_ADAPTER_KIND, isSubagentAdapterState } from "#subagents/adapter-state.js";
 import { createErrorId, createLogger } from "#internal/logging.js";
+import { readInputSource } from "#subagents/input-source.js";
 
 const log = createLogger("execution.subagent-adapter");
 
@@ -45,6 +46,7 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
       childContinuationToken: ctx.ctx.require(ContinuationTokenKey),
       childSessionId: ctx.ctx.require(SessionIdKey),
       childSessionInbox: ctx.ctx.get(SessionInboxKey),
+      inputSource: readInputSource(ctx),
       event: {
         requests: data.requests,
         sequence: data.sequence,
