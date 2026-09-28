@@ -1,7 +1,11 @@
 import type { AgentInfoResult, AgentInfoSource } from "#client/agent-info-schema.js";
 import { AGENT_INSTRUCTIONS_TEMPLATE } from "#setup/scaffold/create/instructions-template.js";
+import { SCAFFOLDED_AGENT_PATHS } from "#setup/scaffold/create/agent-paths.js";
 
 const MESSAGE = "Send a message…";
+const scaffoldedSourcePaths = new Set(
+  Object.values(SCAFFOLDED_AGENT_PATHS).map((path) => path.slice("agent/".length)),
+);
 
 function isSelfModification(source: AgentInfoSource): boolean {
   return (
@@ -13,6 +17,13 @@ function isSelfModification(source: AgentInfoSource): boolean {
 
 function isApplicationCapability(source: AgentInfoSource): boolean {
   return source.owner.kind !== "framework" && !isSelfModification(source);
+}
+
+function isAddedCapability(source: AgentInfoSource): boolean {
+  return (
+    isApplicationCapability(source) &&
+    !(source.owner.kind === "application" && scaffoldedSourcePaths.has(source.logicalPath))
+  );
 }
 
 export function initialPromptPlaceholder(
@@ -31,16 +42,7 @@ export function initialPromptPlaceholder(
     return MESSAGE;
   }
 
-  // The scaffold's eve channel is the TUI/web transport, not an added integration.
-  if (
-    info.channels.routes.some(
-      (entry) =>
-        isApplicationCapability(entry) &&
-        !(entry.name === "eve" && entry.urlPath.startsWith("/eve/")),
-    )
-  ) {
-    return MESSAGE;
-  }
+  if (info.channels.routes.some(isAddedCapability)) return MESSAGE;
 
   const instructions = info.instructions.static.filter(isApplicationCapability);
   if (info.instructions.dynamic.some(isApplicationCapability) || instructions.length === 0) {
@@ -58,12 +60,12 @@ export function initialPromptPlaceholder(
     ...info.memories,
     ...info.subagents.local,
     ...info.remoteAgents.entries,
-  ].some(isApplicationCapability);
+  ].some(isAddedCapability);
   const [instructionsFile] = instructions;
   const isScaffold =
     instructions.length === 1 &&
     instructionsFile?.owner.kind === "application" &&
-    instructionsFile.logicalPath === "instructions.md" &&
+    instructionsFile.logicalPath === SCAFFOLDED_AGENT_PATHS.instructions.slice("agent/".length) &&
     instructionsFile.content.trim() === AGENT_INSTRUCTIONS_TEMPLATE.trim();
 
   return isScaffold && !hasCapabilities

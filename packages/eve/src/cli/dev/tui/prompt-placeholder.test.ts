@@ -23,7 +23,22 @@ function scaffold(): AgentInfoResult {
     },
     channels: {
       shadowed: [],
-      routes: [{ ...info.agent.config, name: "eve", method: "POST", urlPath: "/eve/v1/session" }],
+      routes: [
+        {
+          ...info.agent.config,
+          logicalPath: "channels/eve.ts",
+          name: "eve",
+          method: "POST",
+          urlPath: "/eve/v1/session",
+        },
+        {
+          ...info.agent.config,
+          logicalPath: "channels/eve.ts",
+          name: "eve",
+          method: "POST",
+          urlPath: "/.well-known/workflow/v1/webhook/:token",
+        },
+      ],
     },
     subagents: {
       total: 1,
@@ -82,6 +97,7 @@ describe("initialPromptPlaceholder", () => {
       const info = scaffold();
       const tool = {
         ...info.agent.config,
+        logicalPath: "tools/quote.ts",
         name: "quote",
         description: "Quote an order",
         hasAuth: false,
@@ -107,7 +123,14 @@ describe("initialPromptPlaceholder", () => {
                 ...info,
                 tools: {
                   static: [],
-                  dynamic: [{ ...info.agent.config, slug: "quote", eventNames: ["turn.started"] }],
+                  dynamic: [
+                    {
+                      ...info.agent.config,
+                      logicalPath: "tools/quote.ts",
+                      slug: "quote",
+                      eventNames: ["turn.started"],
+                    },
+                  ],
                 },
               }
             : {
@@ -146,7 +169,13 @@ describe("initialPromptPlaceholder", () => {
             ...info.channels,
             routes: [
               ...info.channels.routes,
-              { ...info.agent.config, name: "slack", method: "POST", urlPath: "/slack" },
+              {
+                ...info.agent.config,
+                logicalPath: "channels/slack.ts",
+                name: "slack",
+                method: "POST",
+                urlPath: "/slack",
+              },
             ],
           },
         },
