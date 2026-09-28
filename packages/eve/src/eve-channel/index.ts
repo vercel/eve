@@ -3,7 +3,10 @@ import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { SessionAuthContext, SessionParent, SessionTraceContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
-import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
+import {
+  handleAuthorizationCompleteRequest,
+  handleConnectionCallbackRequest,
+} from "#execution/connections/callback-route.js";
 import { handleActivityRequest } from "#execution/activity-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
@@ -27,6 +30,7 @@ import {
 } from "#protocol/message.js";
 import {
   EVE_ACTIVITY_ROUTE_PATTERN,
+  EVE_AUTHORIZATION_COMPLETE_ROUTE_PATH,
   EVE_CALLBACK_ROUTE_PATTERN,
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_HEALTH_ROUTE_PATH,
@@ -136,6 +140,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         `${EVE_ROUTE_PREFIX}/connections/:name/callback/:token`,
         handleExpiredLegacyAuthorization,
       ),
+      GET(EVE_AUTHORIZATION_COMPLETE_ROUTE_PATH, handleAuthorizationCompleteRequest),
       GET(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_ACTIVITY_ROUTE_PATTERN, handleActivityRequest),

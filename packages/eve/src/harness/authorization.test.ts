@@ -19,14 +19,24 @@ afterEach(() => {
 });
 
 describe("authorization callback URLs", () => {
-  it("includes the Vercel automation bypass query when configured", () => {
+  it("does not disclose the Vercel automation bypass secret", () => {
     vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret value");
     const ctx = new ContextContainer();
     ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
     ctx.set(SessionIdKey, "session-1");
 
     expect(contextStorage.run(ctx, () => getHookUrl("linear", "attempt-1"))).toBe(
-      "https://agent.example.com/eve/v1/connections/linear/callback/attempt-1/eve%3Ainbox%3Av1%3Aeve%3Asession%3Asession-1%3Ainbox?x-vercel-protection-bypass=secret+value",
+      "https://agent.example.com/eve/v1/connections/linear/callback/attempt-1/eve%3Ainbox%3Av1%3Aeve%3Asession%3Asession-1%3Ainbox",
+    );
+  });
+
+  it("preserves a public route prefix", () => {
+    const ctx = new ContextContainer();
+    ctx.set(CallbackBaseUrlKey, "https://agent.example.com/eve/agents/support");
+    ctx.set(SessionIdKey, "session-1");
+
+    expect(contextStorage.run(ctx, () => getHookUrl("linear", "attempt-1"))).toBe(
+      "https://agent.example.com/eve/agents/support/eve/v1/connections/linear/callback/attempt-1/eve%3Ainbox%3Av1%3Aeve%3Asession%3Asession-1%3Ainbox",
     );
   });
 });
