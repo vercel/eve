@@ -48,6 +48,7 @@ export interface InstrumentationUsage {
 export interface InstrumentationModelInput {
   readonly instructions?: unknown;
   readonly messages: readonly unknown[];
+  readonly tools?: readonly unknown[];
 }
 
 /**
