@@ -798,6 +798,62 @@ describe("dispatchDynamicToolEvent", () => {
     await expect(tool!.execute!({}, executeOptions)).resolves.toEqual({ captured });
   });
 
+  it("leaves an authored turn tool to fail when best-effort rebind cannot restore it", async () => {
+    const ctx = createCtx();
+    const handler = vi.fn(() => ({ tool: createReplayableTool() }));
+    const resolver = createResolver("authored", ["turn.started"], handler);
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+    simulateColdStart(ctx);
+    handler.mockReturnValue(null as never);
+
+    await expect(
+      rebindMissingCompiledDynamicToolCallbacks({
+        ctx,
+        event: makeEvent("turn.started"),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).resolves.toBeUndefined();
+
+    const [tool] = buildDynamicTools(ctx);
+    await expect(tool!.execute!({}, executeOptions)).rejects.toThrow(
+      'Dynamic tool "tool" cannot replay its execute callback',
+    );
+  });
+
+  it("requires an opted-in turn resolver to restore its callback", async () => {
+    const ctx = createCtx();
+    const handler = vi.fn(() => ({ tool: createReplayableTool() }));
+    const resolver = {
+      ...createResolver("framework", ["turn.started"], handler),
+      rebindMissingCallbacks: true,
+    };
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("turn.started"),
+    });
+    simulateColdStart(ctx);
+    handler.mockReturnValue(null as never);
+
+    await expect(
+      rebindMissingCompiledDynamicToolCallbacks({
+        ctx,
+        event: makeEvent("turn.started"),
+        messages: [],
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow("Dynamic tool callback rebind did not restore: tool");
+  });
+
   it("replaces old step-function turn metadata without requiring cold-rebind opt-in", async () => {
     let ctx = createCtx();
     const serialized = serializeContext(ctx);

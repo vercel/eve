@@ -433,15 +433,17 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
               }),
           ),
         ]);
-        await rebindMissingCompiledDynamicToolCallbacks({
-          ctx,
-          event: createTurnStartedEvent({
-            sequence: initialEmissionState.sequence,
-            turnId: activeTurnId(initialEmissionState),
-          }),
-          messages: history.initial.messages,
-          resolvers: dynamicToolResolvers,
-        });
+        if (!isHarnessBetweenTurns(initialSession)) {
+          await rebindMissingCompiledDynamicToolCallbacks({
+            ctx,
+            event: createTurnStartedEvent({
+              sequence: initialEmissionState.sequence,
+              turnId: activeTurnId(initialEmissionState),
+            }),
+            messages: history.initial.messages,
+            resolvers: dynamicToolResolvers,
+          });
+        }
       }
     } catch (error) {
       await failChannelDeliveries(error);

@@ -25,6 +25,7 @@ import {
   SessionDynamicToolRuntimeRevisionKey,
   SessionIdKey,
   SessionTraceSeedKey,
+  TurnDynamicToolMetadataKey,
   TurnDeliveryIdsKey,
   TurnTaskDeliveryKey,
   HistoryStateKey,
@@ -46,6 +47,7 @@ import {
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createResultCompletedEvent,
+  createTurnStartedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -1635,6 +1637,88 @@ describe("turnStep", () => {
         }),
       ]);
     }
+  });
+
+  it("does not rebind the previous turn before the next turn starts", async () => {
+    const execute = stampDurableDynamicCallback(async () => ({ ok: true }), {
+      callback: async () => ({ ok: true }),
+      closure: {},
+    });
+    const handler = vi.fn(() => ({
+      tool: defineTool({
+        description: "Turn tool",
+        inputSchema: { type: "object" },
+        execute,
+      }),
+    }));
+    const dynamicToolResolver = {
+      eventNames: ["turn.started"],
+      events: { "turn.started": handler },
+      logicalPath: "agent/tools/turn.ts",
+      slug: "turn",
+      sourceId: "test:turn",
+      sourceKind: "module",
+    } as never;
+    const compiledBundle = {
+      ...createStubBundle(),
+      resolvedAgent: { config: {}, dynamicToolResolvers: [dynamicToolResolver] },
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const session = createStubSession({
+      state: {
+        "eve.harness.emission": {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "http:thread-context");
+    ctx.set(SessionIdKey, "session-1");
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
+    ctx.set(TurnDynamicToolMetadataKey, [
+      {
+        callbacks: { execute: { closure: {} } },
+        description: "Previous turn tool",
+        entryKey: "tool",
+        inputSchema: { type: "object" },
+        name: "tool",
+        resolverSlug: "turn",
+      },
+    ]);
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
+      return async (stepSession): Promise<StepResult> => {
+        await input.handleEvent?.(
+          createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+          stepSession.history,
+        );
+        return { next: { done: true, output: "ok" }, session: stepSession };
+      };
+    });
+
+    await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "next turn" }] },
+      sessionWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState({
+        emissionState: {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        },
+      }),
+    });
+
+    expect(handler).toHaveBeenCalledOnce();
   });
 
   it("prepares resumed-session history before dynamic runtime refresh", async () => {
