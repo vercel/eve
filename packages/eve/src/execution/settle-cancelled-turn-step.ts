@@ -1,30 +1,16 @@
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
-import { buildAdapterContext } from "#channel/adapter-context.js";
-import { TurnDeliveryIdsKey } from "#context/keys.js";
-import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { publishChannelEvent } from "#execution/publish-channel-event.js";
-import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
   readDurableSession,
 } from "#execution/durable-session-store.js";
-import { hydrateDurableSession } from "#execution/session.js";
+import { withSessionEventEmitter } from "#execution/publish-session-events.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
-import {
-  getHarnessEmissionState,
-  isHarnessBetweenTurns,
-  setHarnessEmissionState,
-} from "#harness/emission.js";
-import {
-  clearAllProxyInputRequests,
-  getProxyInputRequests,
-  hasProxyInputRequests,
-} from "#harness/proxy-input-requests.js";
+import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
+import { clearAllProxyInputRequests } from "#harness/proxy-input-requests.js";
 import {
   abandonAgentInvocationOwners,
   abandonRunningAgentTurns,
@@ -34,11 +20,7 @@ import {
   removeBlockingWorkflowToolRuns,
   getBlockingWorkflowToolRuns,
 } from "#harness/workflow-tool-runs.js";
-import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 export interface CancelledTurnSettleResult {
@@ -62,70 +44,15 @@ export async function settleCancelledTurnStep(input: {
 
   const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
-  const adapter = ctx.require(ChannelKey);
-  const adapterCtx = buildAdapterContext(adapter, ctx);
-  const bundle = ctx.require(BundleKey);
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-
-  let session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: effectiveAgent.turnAgent,
-  });
-  const instrumentation = bindSessionInstrumentation({
-    agentName: effectiveAgent.turnAgent.id,
-    ctx,
-    rootSessionId: session.rootSessionId ?? session.sessionId,
-    sessionId: session.sessionId,
-  });
-
-  let emissionState = getHarnessEmissionState(durableSession.state);
-  // A descendant HITL wait already streamed this turn's waiting boundary
-  // (the proxy epilogue clears the turn id); re-emitting would fabricate
-  // a turn id and duplicate the boundary.
-  const proxyRequests = getProxyInputRequests(durableSession.state);
-  const stoppedAtDescendantLimit = [...proxyRequests.values()].some(
-    (request) => request.kind === "session-limit",
+  const emitted = await withSessionEventEmitter(
+    { ctx, durableSession, origin: "own", sessionWritable: input.sessionWritable },
+    async (emit, scopedSession) => ({
+      result: await emitCancelledTurn(emit, getHarnessEmissionState(durableSession.state)),
+      session: scopedSession,
+    }),
   );
-  const alreadyEpilogued =
-    isHarnessBetweenTurns(session) &&
-    hasProxyInputRequests(durableSession.state) &&
-    !stoppedAtDescendantLimit;
-
-  if (!alreadyEpilogued) {
-    const writer = input.sessionWritable.getWriter();
-    try {
-      const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
-        const baseEmit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-          const stamped = await publishChannelEvent({
-            adapter,
-            adapterCtx,
-            ctx,
-            writer,
-            event,
-            deliveryIds: ctx.get(TurnDeliveryIdsKey),
-          });
-          void observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
-        };
-        const emit =
-          instrumentation?.createHandleEvent({
-            handleEvent: baseEmit,
-            turnId: activeTurnId(emissionState),
-          }) ?? baseEmit;
-        return {
-          result: await emitCancelledTurn(emit, emissionState),
-          session: enrichedSession,
-        };
-      });
-      emissionState = scoped.result;
-      session = scoped.session;
-    } finally {
-      await instrumentation?.flush();
-      writer.releaseLock();
-    }
-  }
+  const emissionState = emitted.result;
+  let session = emitted.session;
 
   // `clearPendingSessionLimitPrompt`: cancellation settles with the step's
   // input snapshot, which can resurrect an already-answered session-limit

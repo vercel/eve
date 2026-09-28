@@ -16,7 +16,6 @@ import type {
   SessionCallback,
   SessionSendCommandResult,
   TurnPolicy,
-  TaskDeliveryPolicy,
   TurnCaller,
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
@@ -51,12 +50,8 @@ export interface Session {
     inputResponses: StrictInputResponses<TResponses>,
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
-  /** Requests cancellation of this exact session's active turn and optionally its owned tasks. */
-  cancel(options?: {
-    taskId?: string;
-    tasks?: boolean;
-    turnId?: string;
-  }): Promise<CancelTurnResult>;
+  /** Requests cancellation of this exact session's active turn. */
+  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
   compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
@@ -81,8 +76,6 @@ export type SessionSendOptions = SessionDeliveryOptions & {
   /** Initial workflow title for a prewarmed session. */
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
-  /** Updates the session policy; omission preserves it. New sessions default to auto, schedules to cohort. */
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 };
 
 /** Options for answering pending input requests through a fixed session handle. */
@@ -129,7 +122,6 @@ export function createSession(
         payload,
         requestId: metadata.requestId,
         turnPolicy: options.turnPolicy ?? metadata.turnPolicy ?? DEFAULT_TURN_POLICY,
-        taskDeliveryPolicy: options.taskDeliveryPolicy,
         title: options.title,
       };
       return await runtime.dispatchSession({
@@ -163,12 +155,8 @@ export function createSession(
         sessionId: id,
       });
     },
-    async cancel(options?: { taskId?: string; tasks?: boolean; turnId?: string }) {
-      const command: { kind: "cancel"; taskId?: string; tasks?: boolean; turnId?: string } = {
-        kind: "cancel",
-      };
-      if (options?.taskId !== undefined) command.taskId = options.taskId;
-      if (options?.tasks !== undefined) command.tasks = options.tasks;
+    async cancel(options?: { turnId?: string }) {
+      const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
       if (options?.turnId !== undefined) command.turnId = options.turnId;
       return await runtime.dispatchSession({ command, sessionId: id });
     },
@@ -273,6 +261,5 @@ export function sessionCallbackToTurnCaller(
         callId: callback.callId,
         replyTo: { kind: "callback", token: callback.token, url: callback.url },
         subagentName: callback.subagentName,
-        taskId: callback.taskId,
       };
 }

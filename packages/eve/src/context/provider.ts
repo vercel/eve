@@ -1,4 +1,4 @@
-import type { HarnessSession, StepResult } from "#harness/types.js";
+import type { HarnessSession } from "#harness/types.js";
 import type { ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 
@@ -35,7 +35,4 @@ export interface FrameworkContextProvider<T> {
 
   /** Rolls back provider-owned effects when the callback or a later commit fails. */
   rollback?(value: T, cause: unknown): void | Promise<void>;
-
-  /** Adds provider-owned durable effects to a successfully committed harness step. */
-  decorateStepResult?(value: T, result: StepResult): StepResult | Promise<StepResult>;
 }

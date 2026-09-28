@@ -49,13 +49,8 @@ export async function startSubagent(input: {
   readonly activityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
   };
-  /** The backing agent reports as this task, rather than as a separate child work item. */
-  readonly taskActivityObserver?: ActivityObserverConfig & {
-    readonly workIdentity: ActivityWorkIdentityV1;
-  };
   readonly sandboxSessionId: string;
   readonly session: RuntimeSession;
-  readonly taskId?: string;
   readonly target: SubagentStartTarget;
   readonly trace: AgentChildTraceDispatch;
 }): Promise<DispatchOutcome> {
@@ -90,11 +85,10 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         localDevRequest: input.localDevRequest,
         parent,
-        activityObserver: input.taskActivityObserver ?? input.activityObserver,
+        activityObserver: input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
-        taskId: input.taskId,
       });
     case "remote":
       return startRemoteSubagent({
@@ -107,9 +101,7 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parent,
         activityObserver: input.activityObserver,
-        taskActivityObserver: input.taskActivityObserver,
         session: input.session,
-        taskId: input.taskId,
       });
     default: {
       const _exhaustive: never = input.target;

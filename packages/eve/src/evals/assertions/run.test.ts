@@ -224,20 +224,13 @@ describe("run assertions", () => {
           subagentCall("child", "completed"),
           subagentCall("child", "failed"),
           subagentCall("child", "cancelled"),
-          subagentCall("child", "input_required"),
         ],
-        subagentCallCount: 5,
+        subagentCallCount: 4,
       },
     });
 
     expect((await Run.calledSubagent("child").evaluate(result)).score).toBe(1);
-    for (const status of [
-      "working",
-      "input_required",
-      "completed",
-      "failed",
-      "cancelled",
-    ] as const) {
+    for (const status of ["working", "completed", "failed", "cancelled"] as const) {
       expect((await Run.calledSubagent("child", { status, count: 1 }).evaluate(result)).score).toBe(
         1,
       );

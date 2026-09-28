@@ -100,6 +100,7 @@ export type {
   ActionPartialStreamEvent,
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
+  AgentStartedStreamEvent,
   AssistantStepFinishReason,
   AuthorizationOutcome,
   CompactionCompletedStreamEvent,
@@ -138,6 +139,7 @@ export type {
   TurnFailedStreamEvent,
   TurnStartedStreamEvent,
   TurnFailureStreamEvent,
+  TurnWaitingStreamEvent,
 } from "#protocol/message.js";
 
 export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";

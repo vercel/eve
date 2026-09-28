@@ -10,13 +10,9 @@ const call = (id: string, name: string): MockModelToolCall => ({ id, name, input
 // Each sentence is a user instruction in an eval. Results, rather than a mutable
 // call counter, select the next response so durable replay uses the same script.
 export function respond(request: MockModelRequest): MockModelResponse {
-  const isRuntimeContext = (text: string) =>
-    text.startsWith("[Task state]") || text.startsWith("Background task ");
-  const instructions = request.userMessages.filter((text) => !isRuntimeContext(text));
+  const instructions = request.userMessages;
   let message = instructions.at(-1) ?? "";
-  const roles = request.messages
-    .filter((entry) => entry.role !== "user" || !isRuntimeContext(entry.text))
-    .map((entry) => entry.role);
+  const roles = request.messages.map((entry) => entry.role);
   const lastResult = request.toolResults.at(-1);
   if (lastResult && roles.lastIndexOf("tool") > roles.lastIndexOf("user")) {
     // Responding to an older request resumes its instruction. A newer user
@@ -135,28 +131,6 @@ export function respond(request: MockModelRequest): MockModelResponse {
         () => `Workflow draft status: ${status("workflow")}. Change A resolved.`,
       );
       break;
-    case "Start the background draft and acknowledge its receipt.":
-      response = run(
-        [call("background", "background-draft")],
-        () => `Background receipt: ${JSON.stringify(result("background")!.output)}`,
-      );
-      break;
-    case "Cancel the background draft task and confirm cancellation.": {
-      const receipt = result("background")?.output;
-      if (
-        receipt === null ||
-        typeof receipt !== "object" ||
-        !("taskId" in receipt) ||
-        typeof receipt.taskId !== "string"
-      ) {
-        throw new Error("The background tool must return a real task ID before cancellation.");
-      }
-      response = run(
-        [{ id: "cancel", name: "task_cancel", input: { taskIds: [receipt.taskId] } }],
-        () => `Cancellation result: ${JSON.stringify(result("cancel")!.output)}`,
-      );
-      break;
-    }
     case "Look up the draft with the provider and report its status.":
       response = run(
         [read("provider-lookup")],

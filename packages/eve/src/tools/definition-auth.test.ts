@@ -34,14 +34,4 @@ describe("defineTool approvalKey", () => {
     });
     expect(definition.approvalKey?.({ scope: "repo" })).toBe("write:repo");
   });
-
-  it("rejects background execution", () => {
-    const definition = {
-      description: "Scoped background write",
-      execution: "background",
-      inputSchema: z.object({ scope: z.string() }),
-      execute: async () => null,
-    };
-    expect(() => defineTool(definition)).toThrow("Use defineWorkflowTool for background work");
-  });
 });

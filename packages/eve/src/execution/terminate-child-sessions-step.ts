@@ -1,7 +1,6 @@
 import { deserializeContext } from "#context/serialize.js";
 import type { ContextContainer } from "#context/container.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
-import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import {
   resetRemoteAgentSession,
@@ -51,11 +50,6 @@ export async function terminateChildSessionsStep(input: {
         readonly ctx: ContextContainer;
       }
     | undefined;
-  // Record cancellation in the parent before terminating its child sessions.
-  await cancelAllIndexedSessionTasksStep({
-    serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
-  });
   if (hasRemoteHandle) {
     if (input.serializedContext === undefined) {
       throw new Error("Child finalization requires serialized runtime context.");

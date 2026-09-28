@@ -14,7 +14,7 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
     agentId: {
       type: ["string", "null"],
       description:
-        "The id of an existing agent from the <agents> list or a task receipt. A message to a busy agent steers it: its previous task is cancelled and the updated work runs in the same child session. Omit this field (or pass null or an empty string) to start a new agent.",
+        "The id of an existing agent from the <agents> list. Omit this field (or pass null or an empty string) to start a new agent.",
     },
     message: {
       type: "string",
@@ -58,9 +58,7 @@ describe("createRuntimeSubagentRegistry", () => {
 
     expect(registry.preparedTools).toMatchObject([
       {
-        description:
-          "Investigate one task in depth.\n\nThis call starts a background task and returns a task receipt immediately.",
-        execution: "background",
+        description: "Investigate one task in depth.",
         inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
         kind: "subagent",
         logicalPath: "subagents/researcher",
@@ -69,9 +67,7 @@ describe("createRuntimeSubagentRegistry", () => {
         sourceId: "subagents/researcher",
       },
       {
-        description:
-          "Review one draft for clarity.\n\nThis call starts a background task and returns a task receipt immediately.",
-        execution: "background",
+        description: "Review one draft for clarity.",
         inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
         kind: "subagent",
         logicalPath: "subagents/reviewer",
@@ -99,7 +95,7 @@ describe("createRuntimeSubagentRegistry", () => {
     ).toThrowError(RuntimeRegistryError);
   });
 
-  it("always prepares subagent tools for background execution", () => {
+  it("prepares subagent tools as workflow tools", () => {
     const definition = createResolvedRuntimeSubagentNode({
       description: "Investigate one task in depth.",
       logicalPath: "subagents/researcher",
@@ -110,7 +106,6 @@ describe("createRuntimeSubagentRegistry", () => {
 
     const prepared = createPreparedRuntimeSubagentTool(definition);
 
-    expect(prepared.execution).toBe("background");
     expect(prepared.task).toEqual({
       nodeId: definition.nodeId,
       workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),

@@ -22,7 +22,6 @@ function createFrameworkAgentTool(): PreparedRuntimeTool {
       },
     },
     description: "Message a persistent agent.",
-    execution: "background",
     inputSchema: null,
     kind: "authored-tool",
     logicalPath: `tools/${AGENT_TOOL_NAME}.ts`,
@@ -90,26 +89,15 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     );
   });
 
-  it("includes background messaging instructions for the root framework agent tool", () => {
+  it("includes messaging instructions for the root framework agent tool", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest(),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [createFrameworkAgentTool()],
     });
 
-    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("task receipt"));
+    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("Agent messaging"));
     expect(turnAgent.instructions).toContainEqual(expect.stringContaining("Tool execution"));
-  });
-
-  it("explains task-derived busy agents in task mode", () => {
-    const turnAgent = createResolvedRuntimeTurnAgent({
-      agent: createResolvedAgentForTest(),
-      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-      tools: [createFrameworkAgentTool()],
-    });
-
-    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("availability=busy"));
-    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("taskId"));
   });
 
   it("omits the messaging instruction when an authored tool named agent shadows the framework tool", () => {
@@ -131,7 +119,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
       ],
     });
 
-    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
+    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Agent messaging"));
   });
 
   it("omits the messaging instruction when no agent tool was compiled", () => {
@@ -143,7 +131,7 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
       tools: [],
     });
 
-    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
+    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Agent messaging"));
   });
 
   it("omits the messaging instruction for a non-root node without declared subagents", () => {
@@ -155,6 +143,6 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
       tools: [],
     });
 
-    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Pass `agentId`"));
+    expect(turnAgent.instructions).not.toContainEqual(expect.stringContaining("Agent messaging"));
   });
 });

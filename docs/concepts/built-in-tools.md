@@ -215,7 +215,7 @@ export default disableTool();
 
 ### `agent`
 
-`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, always runs in the background, and returns a task receipt immediately. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
+`agent` delegates a subtask to a fresh copy of the root agent. It is root-only and waits for the child's reply, which it returns as the tool result. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
 
 ```sh
 eve add tool/agent
@@ -228,26 +228,6 @@ export { default } from "eve/tools/agent";
 An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot:
 
 ```ts title="agent/tools/agent.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
-### `task_cancel`
-
-`task_cancel` lets the root session cancel background tasks.
-
-```sh
-eve add tool/task_cancel
-```
-
-```ts title="agent/tools/task_cancel.ts"
-export { default } from "eve/tools/task_cancel";
-```
-
-The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it:
-
-```ts title="agent/tools/task_cancel.ts"
 import { disableTool } from "eve/tools";
 
 export default disableTool();
@@ -313,7 +293,7 @@ import { askQuestion } from "eve/tools/ask_question";
 export default askQuestion();
 ```
 
-`ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the only pending question. When other questions are also pending, a message does not answer any of them: `ask_question` resolves as `{ status: "dismissed" }` and the message reaches the model normally. In a session that cannot request input, such as a scheduled run, the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
+`ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the only pending question. When other questions are also pending, a message does not answer any of them: `ask_question` withdraws its question, resolves as `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, and the model reads the message next. In a session that cannot request input, such as a scheduled run, the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
 
 ### `glob`
 
@@ -369,7 +349,7 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `grep
 
 ### `sleep`
 
-`sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. Add it:
+`sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. A steering message, the default for a new message, ends the wait early: `sleep` returns `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, followed by the message. Add it:
 
 ```sh
 eve add tool/sleep
@@ -400,4 +380,4 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `slee
 - [Tools](../tools): define your own tools, gate them on approval, and shape their output with `toModelOutput`
 - [Dynamic capabilities](../guides/dynamic-capabilities): generate the tool set per session with `defineDynamic`
 - [Sandbox](../sandbox): configure the sandbox used by shell and file tools
-- [Subagents](../subagents): declare specialists that the model can call as background tasks
+- [Subagents](../subagents): declare specialists that the model can delegate to

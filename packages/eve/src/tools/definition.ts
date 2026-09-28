@@ -30,13 +30,10 @@ export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   options: ToolExecuteOptions,
 ) => Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
 
-export type ToolExecution = "background";
-
 interface ToolDefinitionBase {
   /** Whether delegated agent sessions receive this tool. Defaults to `true`. */
   readonly availableInSubagents?: boolean;
   readonly description: string;
-  readonly execution?: ToolExecution;
 }
 
 export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
@@ -114,12 +111,6 @@ export interface ToolInputRequest {
    * {@link options}.
    */
   readonly allowFreeform?: boolean;
-  /**
-   * Whether the user's next message may skip the question. When `true`, a
-   * message that does not answer it resolves the request as `dismissed`, and
-   * the message reaches the agent as usual.
-   */
-  readonly dismissible?: boolean;
   /** Rendering hint: confirmation buttons, a selection list, or a text field. */
   readonly display?: "confirmation" | "select" | "text";
   /** Selectable answers. */
@@ -137,8 +128,10 @@ export interface ToolInputResponseResponder {
 /**
  * The outcome of a {@link ToolInputRequest}.
  *
- * - `answered`: the user picked an option or typed an answer.
- * - `dismissed`: the user moved on without answering a `dismissible` request.
+ * - `answered`: the user picked an option or typed an answer. An answer the
+ *   session accepted before a withdrawal wins, even after a signal aborted.
+ * - `cancelled`: the request was withdrawn before anyone answered it, because
+ *   the ask's `signal` or the call's `abortSignal` aborted.
  * - `unavailable`: the session cannot reach a human, such as a scheduled run,
  *   so the request resolved immediately without being shown.
  */
@@ -152,8 +145,19 @@ export type ToolInputResponse =
       /** Free text, when the user typed an answer. */
       readonly text?: string;
     }
-  | { readonly status: "dismissed" }
+  | { readonly status: "cancelled" }
   | { readonly status: "unavailable" };
+
+/** Options for `ctx.ask` in a `defineWorkflowTool` executor. */
+export interface ToolInputRequestOptions {
+  /**
+   * Withdraws the request when it aborts: the channel stops offering the
+   * question and the ask resolves as `cancelled`, unless the session accepted
+   * an answer first, which the ask then resolves with. Pass
+   * `ctx.interruptSignal` to stop asking once a new message arrives.
+   */
+  readonly signal?: AbortSignal;
+}
 
 /**
  * Authored tool context. Passed as the last argument to
@@ -210,7 +214,6 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
   TInput,
   TOutput
 > {
-  readonly execution?: never;
   execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   /**
    * Optional per-tool approval gate. The return value determines whether
@@ -346,11 +349,6 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput> {
-  if ("execution" in definition && definition.execution !== undefined) {
-    throw new Error(
-      'defineTool: "execution" is not supported. Use defineWorkflowTool for background work.',
-    );
-  }
   return stampToolDefinition(definition, "defineTool");
 }
 

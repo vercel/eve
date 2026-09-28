@@ -179,7 +179,7 @@ describe("compiler artifacts", () => {
             kind: "workflow-tool",
             workflowId: `workflow//${packageInfo.name}@${packageInfo.version}//executeSleepTool`,
           },
-          shape: { lifetime: "step", suspend: "workflow" },
+          shape: { suspend: "workflow" },
         },
         logicalPath: "tools/sleep.mjs",
         name: "sleep",

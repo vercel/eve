@@ -5,13 +5,13 @@ import {
   settleTaskAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import type { TaskAgentRequestDelivery } from "#tasks/types.js";
+import type { WorkflowToolAgentRequest } from "#execution/tools/workflow/messages.js";
 
 interface AgentRequestDelivery {
   readonly ownerId: string;
-  readonly replyTo: TaskAgentRequestDelivery["replyTo"];
-  readonly request: TaskAgentRequestDelivery["request"];
-  readonly taskId?: string;
+  /** The requesting run's reply hook. */
+  readonly replyTo: string;
+  readonly request: WorkflowToolAgentRequest;
 }
 
 interface TaskAgentRequestContext {
@@ -28,7 +28,7 @@ interface AppliedTaskAgentRequest {
 /**
  * Applies one workflow-owned agent request to the parent session: `agent-invoke`
  * spawns the child with parent-owned material and `agent-settled` releases the
- * handle. Child authorization and HITL ride their own task envelope arms.
+ * handle.
  */
 export async function applyTaskAgentRequest(
   delivery: AgentRequestDelivery,
@@ -42,7 +42,6 @@ export async function applyTaskAgentRequest(
         result: request.result,
         serializedContext: ctx.serializedContext,
         sessionState: ctx.sessionState,
-        taskId: delivery.taskId,
       });
       let serializedContext = settled.serializedContext;
       let sessionState = settled.sessionState;
@@ -73,7 +72,6 @@ export async function applyTaskAgentRequest(
         request,
         serializedContext: ctx.serializedContext,
         sessionState: ctx.sessionState,
-        taskId: delivery.taskId,
       });
       switch (dispatched.kind) {
         case "dispatched": {
@@ -91,11 +89,6 @@ export async function applyTaskAgentRequest(
           });
           return {
             serializedContext: dispatched.serializedContext ?? ctx.serializedContext,
-            sessionState: dispatched.sessionState,
-          };
-        case "not-admitted":
-          return {
-            serializedContext: ctx.serializedContext,
             sessionState: dispatched.sessionState,
           };
       }

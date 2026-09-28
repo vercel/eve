@@ -1,4 +1,4 @@
-/** Starts workflow-tool runs and framework controls for pending coordination. */
+/** Starts workflow-tool runs for pending coordination. */
 
 import {
   prepareCoordinationDispatch,
@@ -6,9 +6,8 @@ import {
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
-import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
+import { captureAgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 type CoordinationDispatchStepInput = CoordinationDispatchInput & {
@@ -35,33 +34,20 @@ export async function dispatchCoordinationStep(
   let nextSession = session;
   const results: RuntimeActionResult[] = [];
 
-  for (const entry of prepared.plan) {
-    if (entry.kind === "workflow-task") {
-      const started = await startWorkflowTask({
-        agents: prepared.workflowAgents,
-        auth: prepared.auth,
-        batchEvent: batch.event,
-        canRequestInput: prepared.capabilities?.requestInput === true,
-        initiatorAuth: prepared.initiatorAuth,
-        owner: input.workflowToolRunOwner,
-        parentSession: prepared.parentSession,
-        session: nextSession,
-        task: entry.task,
-      });
-      nextSession = started.session;
-      if (started.result !== undefined) results.push(started.result);
-      continue;
-    }
-    if (entry.kind === "task-control") {
-      const control = await executeTaskControlAction({
-        action: entry.action,
-        cancelOwnedWork: cancelBackgroundAgentTask,
-        serializedContext: prepared.serializedContext,
-        session: nextSession,
-      });
-      nextSession = control.session;
-      results.push(control.result);
-    }
+  for (const task of prepared.plan) {
+    const started = await startWorkflowTask({
+      agentContext: captureAgentSessionContext(prepared, task.callId),
+      agents: prepared.workflowAgents,
+      auth: prepared.auth,
+      batchEvent: batch.event,
+      initiatorAuth: prepared.initiatorAuth,
+      owner: input.workflowToolRunOwner,
+      parentSession: prepared.parentSession,
+      session: nextSession,
+      task,
+    });
+    nextSession = started.session;
+    if (started.result !== undefined) results.push(started.result);
   }
 
   return {

@@ -32,7 +32,7 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("25");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("26");
   });
 
   it.each(["21", "22", "23", "24"] as const)(

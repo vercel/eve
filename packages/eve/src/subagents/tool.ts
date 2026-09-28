@@ -15,7 +15,6 @@ import type {
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
-import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
 export type SubagentInputSource =
@@ -69,15 +68,10 @@ export function buildSubagentRunInput(input: {
    */
   readonly capabilities?: SessionCapabilities;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /** Replay-stable key the child's continuation token derives from. */
+  readonly continuationKey: string;
   /** Parent's immutable conversation classification. */
   readonly inheritedConversation?: ConversationContext;
-  /**
-   * Number of local subagent calls dispatched in this batch. The parent's
-   * remaining token quota is split evenly across them so parallel children
-   * are collectively, not individually, bounded by it. Remote agents run
-   * under their own deployment's limits and are not counted.
-   */
-  readonly fanoutSize?: number;
   readonly initiatorAuth: SessionAuthContext | null;
   /**
    * Runtime graph used to detect whether this declared child selected the
@@ -87,12 +81,12 @@ export function buildSubagentRunInput(input: {
   /** Durable session identity of the sandbox currently used by the parent. */
   readonly sandboxSessionId?: string;
   readonly selfAgent: boolean;
+  /** Session token limits the child inherits. */
+  readonly limits: RunSessionLimits;
   readonly parent: SubagentParentContext;
   readonly activityObserver?: ActivityObserverConfig;
-  readonly session: HarnessSession;
+  readonly session: Pick<HarnessSession, "continuationToken" | "sandboxState" | "sessionId">;
   readonly source: SubagentInputSource;
-  /** Owning task when this child starts from a background workflow tool. */
-  readonly taskId?: string;
 }): SubagentRunInputBuild {
   const {
     action,
@@ -105,13 +99,7 @@ export function buildSubagentRunInput(input: {
     source,
   } = input;
 
-  const childContinuationToken = mintSubagentContinuationToken(
-    `${session.sessionId}:${action.callId}`,
-  );
-
-  const inheritedLimits: {
-    -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
-  } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
+  const childContinuationToken = mintSubagentContinuationToken(input.continuationKey);
   const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
   const adapterState: Record<string, unknown> = {
     callId: action.callId,
@@ -119,7 +107,6 @@ export function buildSubagentRunInput(input: {
     parentSessionId: session.sessionId,
     subagentName: action.subagentName,
   };
-  if (input.taskId !== undefined) adapterState.taskId = input.taskId;
   const reusesOwnerSandbox =
     input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition.kind ===
       "parent" || input.selfAgent;
@@ -150,14 +137,12 @@ export function buildSubagentRunInput(input: {
       }),
       outputSchema: requestedOutputSchema,
     },
-    limits: inheritedLimits,
+    limits: input.limits,
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,
     activityObserver: input.activityObserver,
   };
-  if (input.taskId !== undefined) runInput.taskId = input.taskId;
-
   return { childContinuationToken, runInput };
 }
 

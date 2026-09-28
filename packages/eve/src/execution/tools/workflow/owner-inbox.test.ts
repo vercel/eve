@@ -7,7 +7,6 @@ import {
 
 const from = {
   callId: "call-1",
-  execution: "background" as const,
   input: { message: "Find it" },
   runId: "run-1",
   sequence: 0,

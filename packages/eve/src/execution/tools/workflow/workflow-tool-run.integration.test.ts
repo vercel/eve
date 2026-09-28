@@ -7,7 +7,8 @@ import {
 } from "#internal/testing/events.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import { SLEEP_INPUT_SCHEMA, executeSleepTool } from "#execution/tools/sleep.js";
+import { SLEEP_INPUT_SCHEMA } from "#tools/provided/sleep.js";
+import { executeSleepTool } from "#tools/provided/sleep-workflow.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   askThenRaceWorkflow,
@@ -196,6 +197,10 @@ describe("workflow tools", () => {
           prompt: "Apply plan:api?",
         });
         expect(request.options?.map((option) => option.id)).toEqual(["approve", "cancel"]);
+        // The call is still running, so the question parks the open turn.
+        const [parked] = filterEventsByType(asked, "turn.waiting");
+        expect(asked.at(-1)).toBe(parked);
+        expect(filterEventsByType(asked, "turn.completed")).toHaveLength(0);
 
         const commandToken = sessionCommandHookToken(run.runId);
         await resumeSessionInbox(commandToken, {
@@ -204,6 +209,9 @@ describe("workflow tools", () => {
         });
 
         const answered = await stream.nextTurn();
+        expect(filterEventsByType(answered, "input.resolved")).toMatchObject([
+          { data: { resolutions: [{ outcome: "answered", requestId: request.requestId }] } },
+        ]);
         const progress = answered.findIndex(
           (event) =>
             event.type === "action.partial" && event.data.result.output === "approval received",
@@ -221,6 +229,15 @@ describe("workflow tools", () => {
           JSON.stringify({ approved: true, service: "api" }),
         );
         expect(filterEventsByType(answered, "turn.failed")).toHaveLength(0);
+        // The answer resumes the same turn, which completes once.
+        const turnIds = new Set(
+          answered.flatMap((event) =>
+            "data" in event && "turnId" in event.data ? [event.data.turnId] : [],
+          ),
+        );
+        expect([...turnIds]).toEqual([parked!.data.turnId]);
+        expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
+        expect(filterEventsByType(answered, "turn.completed")).toHaveLength(1);
       } finally {
         stream.dispose();
         await run.cancel();

@@ -5,9 +5,9 @@ import { defineTool } from "#tools/definition.js";
 import {
   defineWorkflowTool,
   isWorkflowToolDefinition,
+  type AgentMessageResult,
   type WorkflowAgentMetadata,
   type WorkflowStepToolContext,
-  type TaskReceipt,
   type WorkflowToolContext,
 } from "#tools/workflow-definition.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -21,20 +21,14 @@ describe("defineWorkflowTool", () => {
         expectTypeOf(input).toEqualTypeOf<{ service: string }>();
         expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
         expectTypeOf(ctx.agents.researcher).toEqualTypeOf<WorkflowAgentMetadata | undefined>();
-        const review = ctx.agent("researcher", {
-          message: "Review the deployment.",
-          outputSchema: {
-            properties: {
-              findings: { items: { type: "string" }, type: "array" },
-              score: { type: "number" },
-            },
-            required: ["findings"],
-            type: "object",
-          },
+        const review = await ctx.agent("researcher").send("Review the deployment.", {
+          outputSchema: z.object({ findings: z.array(z.string()), score: z.number().optional() }),
         });
-        expectTypeOf(review).toEqualTypeOf<Promise<{ findings: string[]; score?: number }>>();
-        // @ts-expect-error The subagent name is the first argument, not part of the input.
-        void ctx.agent({ message: "Review the deployment.", target: "researcher" });
+        expectTypeOf(await review.result()).toEqualTypeOf<
+          AgentMessageResult<{ findings: string[]; score?: number | undefined }>
+        >();
+        // @ts-expect-error The message is sent with send(), not passed to ctx.agent().
+        void ctx.agent("researcher", { message: "Review the deployment." });
         // Token capabilities are available when this context is passed into a step.
         void ctx.getToken;
         // @ts-expect-error Workflow bodies do not have a session sandbox.
@@ -70,23 +64,18 @@ describe("defineWorkflowTool", () => {
     expectTypeOf(useStepContext).parameter(0).toEqualTypeOf<WorkflowStepToolContext>();
   });
 
-  it("provides progress yields and receipt projections for background workflows", () => {
-    const definition = defineWorkflowTool({
+  it("rejects the removed execution option", () => {
+    const definition = {
       description: "Report a deployment",
       execution: "background",
       inputSchema: z.object({ service: z.string() }),
-      async *execute(input, ctx) {
-        expectTypeOf(input).toEqualTypeOf<{ service: string }>();
-        expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
-        yield { status: "planning" };
-        return { deployed: input.service };
+      async execute() {
+        return null;
       },
-      toModelOutput(receipt) {
-        expectTypeOf(receipt).toEqualTypeOf<TaskReceipt>();
-        return { type: "text", value: receipt.taskId };
-      },
-    });
-    expect(isWorkflowToolDefinition(definition)).toBe(true);
+    };
+    expect(() => defineWorkflowTool(definition)).toThrow(
+      '"execution" was removed; workflow tool calls now block until they settle.',
+    );
   });
 
   it("keeps workflow capabilities off ordinary tools and top-level exports", () => {

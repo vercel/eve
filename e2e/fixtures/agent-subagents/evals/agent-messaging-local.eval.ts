@@ -17,33 +17,21 @@ export default defineEval({
       [
         "Call the built-in agent subagent with this message:",
         `"Remember this exact fact: ${MEMORABLE_FACT} Reply only with READY."`,
-        "Acknowledge the task receipt without stating the fact. When the task completes, reply with the single word: delegated.",
+        "Do not state the fact yourself. When the agent replies, reply with the single word: delegated.",
       ].join(" "),
     );
     started.expectOk();
+    started.messageIncludes("delegated");
 
-    const firstCompletion = t.target.watchTurn(started.sessionId, {
-      startIndex: requireStreamIndex(started.session),
-    });
-    const firstCompletedTurn = await firstCompletion.result();
-    firstCompletedTurn.expectOk();
-    firstCompletedTurn.messageIncludes("delegated");
-
-    const continued = await firstCompletion.session.send(
+    const continued = await started.session.send(
       [
         "Message that same agent again: call the agent subagent with the agentId shown in the latest <agents> block",
         'and the message: "What exact fact did I ask you to remember? Reply with only the fact."',
-        "Do not state the fact yourself.",
-        "Acknowledge the task receipt without stating the fact. When the task completes, reply with the agent's exact output and no other text.",
+        "Do not state the fact yourself. When the agent replies, reply with its exact output and no other text.",
       ].join(" "),
     );
     continued.expectOk();
-
-    const secondCompletedTurn = await t.target
-      .watchTurn(started.sessionId, { startIndex: requireStreamIndex(firstCompletion.session) })
-      .result();
-    secondCompletedTurn.expectOk();
-    secondCompletedTurn.messageIncludes(MEMORABLE_FACT);
+    continued.messageIncludes(MEMORABLE_FACT);
 
     t.succeeded();
     t.eventsSatisfy("both turns continue one child session", (events) => {
@@ -59,11 +47,3 @@ export default defineEval({
     t.noFailedActions();
   },
 });
-
-function requireStreamIndex(session: {
-  readonly state?: { readonly streamIndex?: number };
-}): number {
-  const streamIndex = session.state?.streamIndex;
-  if (streamIndex === undefined) throw new Error("Parent session has no stream index.");
-  return streamIndex;
-}

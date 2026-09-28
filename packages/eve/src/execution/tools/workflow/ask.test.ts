@@ -1,20 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createHook } from "#compiled/@workflow/core/index.js";
-import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
+import {
+  ask,
+  attachWorkflowToolRunContext,
+  WorkflowToolRunAsks,
+} from "#execution/tools/workflow/ask.js";
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { ToolContext } from "#tools/definition.js";
-
-vi.mock("#compiled/@workflow/core/index.js", () => ({ createHook: vi.fn() }));
-vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({ resumeHookStep: vi.fn() }));
 
 describe("ask", () => {
   it("resolves as unavailable without waiting when the session cannot request input", async () => {
     const ctx = {} as ToolContext;
+    const send = vi.fn();
     attachWorkflowToolRunContext(ctx, {
-      canRequestInput: false,
+      agentContext: { capabilities: { requestInput: false } } as AgentSessionContext,
+      asks: new WorkflowToolRunAsks("run"),
+      control: "control",
       from: {
         callId: "call",
-        execution: "blocking",
         input: {},
         runId: "run",
         sequence: 1,
@@ -22,12 +25,12 @@ describe("ask", () => {
         toolName: "ask_question",
         turnId: "turn",
       },
-      owner: { inbox: "inbox" },
+      owner: { send, sent: 0 },
     });
 
     await expect(ask(ctx, { prompt: "Which region?" })).resolves.toEqual({
       status: "unavailable",
     });
-    expect(createHook).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 });

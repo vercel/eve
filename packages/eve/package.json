@@ -187,11 +187,6 @@
       "import": "./dist/src/public/tools/connection-search.js",
       "default": "./dist/src/public/tools/connection-search.js"
     },
-    "./tools/task_cancel": {
-      "types": "./dist/src/public/tools/task-cancel.d.ts",
-      "import": "./dist/src/public/tools/task-cancel.js",
-      "default": "./dist/src/public/tools/task-cancel.js"
-    },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",
       "import": "./dist/src/public/tools/glob.js",

@@ -17,7 +17,6 @@ import {
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { createTaskToolHarnessDefinitions } from "#execution/tools/tasks.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 import type { PreparedRuntimeTool, PreparedRuntimeWorkflowTask } from "#runtime/sessions/turn.js";
@@ -28,7 +27,7 @@ import { connectionToolReplayIdentity } from "#execution/tools/connection-search
 import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
-} from "#execution/tools/workflow/background.js";
+} from "#execution/tools/workflow/harness-definition.js";
 import {
   resolveWebSearchActivityLabel,
   WEB_SEARCH_TOOL_NAME,
@@ -262,14 +261,6 @@ function createRegisteredHarnessToolDefinition(input: {
   readonly rootOnly?: boolean;
 }): HarnessToolDefinition {
   const def = input.definition;
-  if (def.owner.kind === "framework") {
-    const taskDefinition = createTaskToolHarnessDefinitions().find(
-      (definition) => definition.name === def.name,
-    );
-    if (taskDefinition !== undefined) {
-      return { ...taskDefinition, behavior: input.behavior };
-    }
-  }
   const rawExecute = def.execute;
 
   const definition: HarnessToolDefinition = {
@@ -282,7 +273,6 @@ function createRegisteredHarnessToolDefinition(input: {
     approvalKey: def.approvalKey,
     behavior: input.behavior,
     description: def.description,
-    execution: def.execution,
     executeInput: def.executeInput,
     execute: resolveAuthoredExecute({
       rawExecute,

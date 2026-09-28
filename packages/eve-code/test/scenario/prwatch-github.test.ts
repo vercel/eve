@@ -41,7 +41,6 @@ test("frames watcher wakes as internal work rather than progress reports", () =>
   assert.match(framed, /internal watch wake/u);
   assert.match(framed, /original request is complete/u);
   assert.match(framed, /new blocker requires human input/u);
-  assert.match(framed, /exactly <eve-empty-delivery\/>/u);
   assert.match(framed, /Do not report that nothing changed/u);
 });
 

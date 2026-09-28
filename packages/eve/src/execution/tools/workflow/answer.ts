@@ -1,7 +1,11 @@
 import type { SessionAuthContext } from "#channel/types.js";
+import type {
+  WorkflowToolRunAnswer,
+  WorkflowToolRunControlMessage,
+} from "#execution/tools/workflow/messages.js";
+import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import type { InputResponse } from "#shared/input.js";
-import type { ToolInputResponse } from "#tools/definition.js";
 import type { ToolInputResponseResponder } from "#tools/definition.js";
 
 export function toToolInputResponseResponder(
@@ -16,29 +20,27 @@ export function toToolInputResponseResponder(
       };
 }
 
-/** Resumed with the bare response, not a session-inbox delivery, so the body can race the hook. */
-export async function resumeWorkflowToolRunAnswers(
-  answerToken: string,
+/**
+ * Sends the answers the session accepted to the asking run's control hook,
+ * the same ordered inbox its commands use, so an answer the session accepted
+ * before an interrupt or cancel reaches the body before them.
+ */
+export async function sendWorkflowAskAnswers(
+  route: WorkflowAskRoute,
   responses: readonly InputResponse[] | undefined,
   responder?: ToolInputResponseResponder,
 ): Promise<void> {
   for (const response of responses ?? []) {
-    const answer: ToolInputResponse = {
-      optionId: response.optionId,
-      status: "answered",
-      text: response.text,
-      ...(responder === undefined
-        ? {}
-        : {
-            responder,
-          }),
+    const { optionId, text } = response;
+    const answered: WorkflowToolRunAnswer =
+      responder === undefined
+        ? { optionId, status: "answered", text }
+        : { optionId, responder, status: "answered", text };
+    const answer: WorkflowToolRunControlMessage = {
+      kind: "answer",
+      requestId: response.requestId,
+      response: answered,
     };
-    await resumeHook(answerToken, answer);
+    await resumeHook(route.control, answer);
   }
-}
-
-/** Resolves a dismissible `ctx.ask()` request the user moved past without answering. */
-export async function resumeWorkflowToolRunDismissal(answerToken: string): Promise<void> {
-  const answer: ToolInputResponse = { status: "dismissed" };
-  await resumeHook(answerToken, answer);
 }

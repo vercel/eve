@@ -4,6 +4,7 @@ import {
   parseWorkflowProgramOptions,
   readWorkflowProgramAgentCall,
   readWorkflowProgramCallInterrupt,
+  type WorkflowProgramAgentCall,
   type WorkflowProgramInput,
 } from "#execution/dynamic-workflow/schema.js";
 import {
@@ -52,7 +53,7 @@ export async function runJsProgram(
           };
         }
         try {
-          const output = await ctx.agent(call.target, call.input);
+          const output = await callProgramAgent(ctx, call);
           return { status: "completed" as const, output };
         } catch (error) {
           ctx.abortSignal.throwIfAborted();
@@ -66,6 +67,23 @@ export async function runJsProgram(
     });
   }
   return outcome.output;
+}
+
+/** Sends one program agent call to a new session and returns that turn's reply. */
+async function callProgramAgent(
+  ctx: WorkflowToolContext,
+  call: WorkflowProgramAgentCall,
+): Promise<JsonValue> {
+  const { message, outputSchema } = call.input;
+  const response = await ctx
+    .agent(call.target)
+    .send<JsonValue>(message, { outputSchema, signal: ctx.abortSignal });
+  const result = await response.result();
+  if (result.status === "failed") {
+    throw new Error(`Agent "${call.target}" failed to handle the message.`);
+  }
+  if (outputSchema !== undefined) return result.data ?? null;
+  return result.message ?? null;
 }
 
 export { MAX_WORKFLOW_PROGRAM_MAX_SUBAGENTS };

@@ -1,23 +1,27 @@
-import { updatePendingAuthorizations } from "#client/session-utils.js";
+import {
+  isTurnSegmentBoundary,
+  updatePendingAuthorizations,
+  updatePendingInputRequests,
+} from "#client/session-utils.js";
 import type { ActiveTurn } from "#client/eve-agent-store-state.js";
 import type { MessageResponse } from "#client/message-response.js";
 import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
-import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 
 export function isSettledSessionTail(events: readonly MessageStreamEvent[]): boolean {
   const tail = events.at(-1);
+  if (tail === undefined) return false;
+  const pendingAuthorizations = new Set<string>();
+  const pendingInputRequests = new Set<string>();
+  for (const event of events) {
+    updatePendingAuthorizations(pendingAuthorizations, event);
+    updatePendingInputRequests(pendingInputRequests, event);
+  }
   return (
-    tail !== undefined &&
-    isCurrentTurnBoundaryEvent(tail) &&
-    (tail.type !== "session.waiting" || collectPendingAuthorizations(events).size === 0)
+    isTurnSegmentBoundary(tail, pendingInputRequests) &&
+    (tail.type !== "session.waiting" || pendingAuthorizations.size === 0)
   );
-}
-
-function collectPendingAuthorizations(events: readonly MessageStreamEvent[]): Set<string> {
-  const pending = new Set<string>();
-  for (const event of events) updatePendingAuthorizations(pending, event);
-  return pending;
 }
 
 export function assertExclusiveTurnInput(input: SendTurnPayload): void {
@@ -103,11 +107,13 @@ export async function followSteeredTurns(
     await Promise.allSettled(turn.followUpDispatches);
   }
   if (turn.receivedFollowUps >= turn.acceptedFollowUps) return;
+  const pendingInputRequests = new Set<string>();
   for await (const event of events) {
     if (!isActive()) return;
     turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
     turn.receivedFollowUpEvents.delete(event);
-    if (isCurrentTurnBoundaryEvent(event)) {
+    updatePendingInputRequests(pendingInputRequests, event);
+    if (isTurnSegmentBoundary(event, pendingInputRequests)) {
       while (turn.followUpDispatches.size > 0) {
         await Promise.allSettled(turn.followUpDispatches);
       }

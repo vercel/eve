@@ -44,7 +44,6 @@
       {
         "name": "create",
         "evals": [
-          "self-modification/create-background-replication-check",
           "self-modification/create-shipping-quote",
           "self-modification/create-incident-triage"
         ]

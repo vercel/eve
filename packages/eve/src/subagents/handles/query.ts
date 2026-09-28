@@ -62,7 +62,7 @@ export function isResultBoundToRunningHandle(
   if (result.kind !== "subagent-result") {
     return true;
   }
-  if (result.origin === "dispatch" || result.backgroundTask !== undefined) {
+  if (result.origin === "dispatch") {
     return true;
   }
   return findRunningAgentHandle(state, { callId: result.callId }) !== undefined;

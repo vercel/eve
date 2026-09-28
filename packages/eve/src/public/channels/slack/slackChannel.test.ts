@@ -2805,7 +2805,7 @@ describe("slackChannel() generic Events API pipeline", () => {
     expect(compact).toHaveBeenCalledWith("C01:1700000000.000001");
   });
 
-  it("binds Slack state, title, and task policy on a generic event send", async () => {
+  it("binds Slack state and title on a generic event send", async () => {
     const send = vi.fn().mockResolvedValue({ id: "s1" });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
@@ -2814,7 +2814,6 @@ describe("slackChannel() generic Events API pipeline", () => {
           auth: null,
           target: { channelId: "C01", threadTs: "1700000000.000001" },
           title: "Reaction follow-up",
-          taskDeliveryPolicy: "cohort",
         });
       },
     });
@@ -2833,7 +2832,6 @@ describe("slackChannel() generic Events API pipeline", () => {
         triggeringUserId: "U01",
       },
       title: "Reaction follow-up",
-      taskDeliveryPolicy: "cohort",
     });
   });
 

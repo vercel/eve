@@ -6,7 +6,6 @@ import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { handleActivityRequest } from "#execution/activity-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
-import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
 import {
   handleWorkflowWebhookRequest,
   WORKFLOW_WEBHOOK_ROUTE_PATTERN,
@@ -23,8 +22,8 @@ import {
   EVE_STREAM_FORMAT_HEADER,
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
-  type SubagentCalledStreamEvent,
 } from "#protocol/message.js";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 import {
   EVE_ACTIVITY_ROUTE_PATTERN,
   EVE_CALLBACK_ROUTE_PATTERN,
@@ -39,7 +38,6 @@ import {
   EVE_SESSION_RESET_ROUTE_PATTERN,
   EVE_SESSION_STREAM_ROUTE_PATTERN,
   EVE_SUBAGENT_STREAM_ROUTE_PATTERN,
-  EVE_TASK_INPUT_ROUTE_PATTERN,
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
@@ -78,9 +76,11 @@ import {
   requireSessionId,
 } from "#eve-channel/request.js";
 import { attachClientContext } from "#internal/client-context.js";
+import type { ParsedCreateBody } from "#eve-channel/create-request.js";
 import {
-  findRemoteSubagentBinding,
+  findRemoteAgentBinding,
   healthResponse,
+  type RemoteAgentBinding,
   normalizeEveCors,
   resolveOnMessage,
 } from "#eve-channel/support.js";
@@ -99,6 +99,18 @@ const log = createLogger("eve.channel");
  * Default-export the result as your `agent/channels/eve.ts` channel; reach for
  * {@link defineChannel} directly only for a custom transport.
  */
+/** A delegating caller checks that this deployment speaks its remote agent protocol. */
+function createdSessionBody(sessionId: string, body: ParsedCreateBody) {
+  const created: {
+    ok: true;
+    protocolVersion?: number;
+    sessionId: string;
+    status: "accepted";
+  } = { ok: true, sessionId, status: "accepted" };
+  if (body.callback !== undefined) created.protocolVersion = REMOTE_AGENT_PROTOCOL_VERSION;
+  return created;
+}
+
 export function eveChannel(input: EveChannelInput): EveChannel {
   const uploadPolicy = mergeUploadPolicy(input.uploadPolicy);
 
@@ -140,7 +152,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_ACTIVITY_ROUTE_PATTERN, handleActivityRequest),
       POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
-      POST(EVE_TASK_INPUT_ROUTE_PATTERN, handleTaskInputResponseRequest),
       GET(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       POST(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       PUT(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
@@ -234,16 +245,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (operationToken !== undefined) {
           const owner = await args.resolveSession(operationToken);
           if (owner !== undefined) {
-            return Response.json(
-              { ok: true, sessionId: owner.id, status: "accepted" },
-              {
-                headers: {
-                  "cache-control": "no-store",
-                  [EVE_SESSION_ID_HEADER]: owner.id,
-                },
-                status: 202,
+            return Response.json(createdSessionBody(owner.id, body), {
+              headers: {
+                "cache-control": "no-store",
+                [EVE_SESSION_ID_HEADER]: owner.id,
               },
-            );
+              status: 202,
+            });
           }
         }
 
@@ -308,7 +316,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await createSession({
-            taskDeliveryPolicy: body.taskDeliveryPolicy,
             activityObserver: body.activityObserver,
             audienceAuth: authResult,
             auth: messageResult.auth,
@@ -340,16 +347,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
-        return Response.json(
-          { ok: true, sessionId: handle.sessionId, status: "accepted" },
-          {
-            headers: {
-              "cache-control": "no-store",
-              [EVE_SESSION_ID_HEADER]: handle.sessionId,
-            },
-            status: 202,
+        return Response.json(createdSessionBody(handle.sessionId, body), {
+          headers: {
+            "cache-control": "no-store",
+            [EVE_SESSION_ID_HEADER]: handle.sessionId,
           },
-        );
+          status: 202,
+        });
       }),
 
       POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {
@@ -394,7 +398,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           const session = attachSession(sessionId);
           const options = attachClientContext(
             {
-              taskDeliveryPolicy: body.taskDeliveryPolicy,
               activityObserver: body.activityObserver,
               auth: dispatchAuth,
               callback: body.callback,
@@ -456,11 +459,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         let result: Awaited<ReturnType<Session["cancel"]>>;
         try {
-          result = await attachSession(sessionId).cancel({
-            taskId: body.taskId,
-            tasks: body.tasks,
-            turnId: body.turnId,
-          });
+          result = await attachSession(sessionId).cancel({ turnId: body.turnId });
         } catch (error) {
           const errorId = logError(log, "cancel-turn request failed", error, { sessionId });
           return Response.json(
@@ -607,10 +606,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           childSessionId,
           parentSessionId,
         });
-        let binding: SubagentCalledStreamEvent;
+        let binding: RemoteAgentBinding;
         try {
           const parent = args.attachSession(parentSessionId);
-          const found = await findRemoteSubagentBinding({
+          const found = await findRemoteAgentBinding({
             callId,
             childSessionId,
             childStreamPath,
@@ -638,18 +637,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         let headers: Record<string, string>;
         try {
-          headers = await resolveHeaders({
-            name: binding.data.toolName,
-            resolverId: binding.data.remote!.resolverId,
-            url: binding.data.remote!.url,
-          });
+          headers = await resolveHeaders(binding);
         } catch {
           return Response.json({ error: "Subagent stream not found.", ok: false }, { status: 404 });
         }
 
         const upstreamUrl = new URL(
           createEveSessionStreamRoutePath(childSessionId).replace(/^\/+/, ""),
-          `${binding.data.remote!.url.replace(/\/+$/, "")}/`,
+          `${binding.url.replace(/\/+$/, "")}/`,
         );
         if (startIndex !== undefined) {
           upstreamUrl.searchParams.set("startIndex", String(startIndex));

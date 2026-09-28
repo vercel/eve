@@ -1,30 +1,30 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
-import { agent } from "#execution/tools/subagent/invoke-agent.js";
-import type { AgentInput, WorkflowToolContext } from "#tools/workflow-definition.js";
-import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
+import { createAgentSessions } from "#execution/agent-sessions/session.js";
+import type { AgentSession, WorkflowToolContext } from "#tools/workflow-definition.js";
 import {
-  type WorkflowToolRunOutcome,
-  type WorkflowToolRunOwner,
-  type WorkflowToolRunRef,
-  type WorkflowToolRunReport,
+  ask,
+  attachWorkflowToolRunContext,
+  type WorkflowToolRunAsks,
+} from "#execution/tools/workflow/ask.js";
+import type {
+  WorkflowToolRunOutcome,
+  WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolContext } from "#tools/definition.js";
 
 export interface WorkflowBodyDefinition {
+  /** Everything the run needs to open `ctx.agent` sessions for its caller. */
+  readonly agentContext: AgentSessionContext;
   /** Snapshot added for new runs; absent only when resuming an older durable payload. */
   readonly agents?: WorkflowToolContext["agents"];
   readonly callId: string;
-  /**
-   * Whether the owning session can reach a human. `false` makes `ctx.ask()`
-   * resolve as `unavailable` instead of waiting for an answer no one can give.
-   */
-  readonly canRequestInput?: boolean;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
 
@@ -35,12 +35,22 @@ export interface WorkflowBodyDefinition {
 }
 
 export interface WorkflowBodyInput extends WorkflowBodyDefinition {
-  readonly owner: WorkflowToolRunOwner;
+  /** The run's control hook, which the session answers the body's questions on. */
+  readonly hookToken: string;
+  readonly owner: WorkflowToolRunInbox;
 }
 
-export interface WorkflowBodyResult {
-  readonly outcome: WorkflowToolRunOutcome;
-  readonly reportCount: number;
+/** The call's signals, which commands on the run's control hook abort. */
+export interface WorkflowBodyRun {
+  readonly abortSignal: AbortSignal;
+  readonly interruptSignal: AbortSignal;
+}
+
+/** A body the run started. */
+export interface StartedWorkflowBody {
+  /** Releases what the body opened, such as its `ctx.agent` sessions, once the run ends. */
+  close(): Promise<void>;
+  readonly outcome: Promise<WorkflowToolRunOutcome>;
 }
 
 type WorkflowToolExecute = (
@@ -48,23 +58,34 @@ type WorkflowToolExecute = (
   ctx: WorkflowToolContext,
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
 
-/** Executes one registered workflow body and reports progress to its owner. */
-export async function executeWorkflowBody(
-  input: WorkflowBodyInput & {
-    readonly execution: "background" | "blocking";
-    readonly runId?: string;
-  },
-  signal: AbortSignal,
-): Promise<WorkflowBodyResult> {
-  const from = createWorkflowBodyRef(input);
-  const ctx = createWorkflowBodyContext(input, signal);
-  attachWorkflowToolRunContext(ctx, {
-    canRequestInput: input.canRequestInput,
-    from,
+/** Starts one registered workflow body, which reports progress to its owner. */
+export function startWorkflowBody(
+  input: WorkflowBodyInput & { readonly runId?: string },
+  run: WorkflowBodyRun,
+  asks: WorkflowToolRunAsks,
+): StartedWorkflowBody {
+  const runContext = {
+    agentContext: input.agentContext,
+    asks,
+    control: input.hookToken,
+    from: createWorkflowBodyRef(input),
     owner: input.owner,
-  });
-  let reportCount = 0;
+  };
+  const agentSessions = createAgentSessions(runContext);
+  const ctx = createWorkflowBodyContext(input, run, agentSessions.open);
+  attachWorkflowToolRunContext(ctx, runContext);
+  return {
+    close: agentSessions.close,
+    outcome: executeWorkflowBody(input, ctx, runContext.from),
+  };
+}
 
+async function executeWorkflowBody(
+  input: WorkflowBodyInput,
+  ctx: ToolContext & WorkflowToolContext,
+  from: WorkflowToolRunRef,
+): Promise<WorkflowToolRunOutcome> {
+  const signal = ctx.abortSignal;
   try {
     const execute = resolveWorkflowToolExecute(input);
     const result = execute(input.executeInput ?? input.input, ctx);
@@ -77,41 +98,29 @@ export async function executeWorkflowBody(
       let next = await iterator.next();
       while (next.done !== true) {
         last = next.value;
-        const report: WorkflowToolRunReport = { from, update: next.value };
-        await resumeHookStep(input.owner.inbox, { kind: "report", ...report });
-        reportCount += 1;
+        await input.owner.send({ from, kind: "report", update: next.value });
         next = await iterator.next();
       }
-      output =
-        (next.value as JsonValue | undefined) ??
-        (input.execution === "blocking" ? last : undefined) ??
-        null;
+      output = (next.value as JsonValue | undefined) ?? last ?? null;
     }
-    return { outcome: { output, status: "completed" }, reportCount };
+    return { output, status: "completed" };
   } catch (error) {
     if (signal.aborted) {
       return {
-        outcome: {
-          reason:
-            signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
-          status: "cancelled",
-        },
-        reportCount,
+        reason:
+          signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
+        status: "cancelled",
       };
     }
-    return { outcome: { error: normalizeSerializableError(error), status: "failed" }, reportCount };
+    return { error: normalizeSerializableError(error), status: "failed" };
   }
 }
 
 export function createWorkflowBodyRef(
-  input: WorkflowBodyDefinition & {
-    readonly execution: "background" | "blocking";
-    readonly runId?: string;
-  },
+  input: WorkflowBodyDefinition & { readonly runId?: string },
 ): WorkflowToolRunRef {
   return {
     callId: input.callId,
-    execution: input.execution,
     input: input.input,
     runId: input.runId ?? getWorkflowMetadata().workflowRunId,
     sequence: input.session.turn.sequence,
@@ -133,7 +142,8 @@ function resolveWorkflowToolExecute(input: WorkflowBodyInput): WorkflowToolExecu
 
 function createWorkflowBodyContext(
   input: WorkflowBodyInput,
-  signal: AbortSignal,
+  run: WorkflowBodyRun,
+  agent: (name: string) => AgentSession,
 ): ToolContext & WorkflowToolContext {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
@@ -141,8 +151,7 @@ function createWorkflowBodyContext(
     );
   };
   const ctx: ToolContext & WorkflowToolContext = {
-    agent: ((target: string, agentInput: AgentInput) =>
-      agent(ctx, target, agentInput)) as WorkflowToolContext["agent"],
+    agent,
     agents: Object.freeze(
       Object.fromEntries(
         Object.entries(input.agents ?? {}).map(([name, metadata]) => [
@@ -151,9 +160,10 @@ function createWorkflowBodyContext(
         ]),
       ),
     ),
-    ask: (request) => ask(ctx, request),
-    abortSignal: signal,
+    ask: (request, options) => ask(ctx, request, options),
+    abortSignal: run.abortSignal,
     callId: input.callId,
+    interruptSignal: run.interruptSignal,
     getSandbox: () => unavailable("getSandbox()", "the session sandbox belongs to the turn"),
     getToken: () =>
       unavailable("getToken()", 'pass ctx directly to a "use step" helper to resolve credentials'),

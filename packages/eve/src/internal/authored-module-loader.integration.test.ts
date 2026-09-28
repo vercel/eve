@@ -138,7 +138,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   "use workflow";
   return delegate(ctx, input);
 } });`,
-        "agent/lib/delegate.ts": `export async function delegate(ctx, input) { return ctx.agent("researcher", input); }`,
+        "agent/lib/delegate.ts": `export async function delegate(ctx, input) {\n  const response = await ctx.agent("researcher").send(input.message);\n  return (await response.result()).message;\n}`,
       },
       name: "valid-workflow-helper",
     });

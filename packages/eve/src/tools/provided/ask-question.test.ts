@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ASK_QUESTION_INPUT_SCHEMA,
   ASK_QUESTION_TOOL_DESCRIPTION,
-} from "#execution/tools/ask-question.js";
+  askQuestion,
+} from "#tools/provided/ask-question.js";
 import {
   toAskQuestionOutput,
   toAskQuestionRequest,
-} from "#execution/tools/ask-question-workflow.js";
-import { askQuestion } from "#tools/provided/ask-question.js";
+} from "#tools/provided/ask-question-workflow.js";
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 
 function accepts(value: unknown): boolean {
@@ -32,11 +32,16 @@ describe("askQuestion", () => {
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expect(definition.description).toBe(ASK_QUESTION_TOOL_DESCRIPTION);
-    await expect(definition.execute(colorQuestion, { ask } as never)).resolves.toEqual({
+    const interruptSignal = new AbortController().signal;
+    await expect(
+      definition.execute(colorQuestion, { ask, interruptSignal } as never),
+    ).resolves.toEqual({
       answer: "Blue",
       status: "answered",
     });
-    expect(ask).toHaveBeenCalledExactlyOnceWith(toAskQuestionRequest(colorQuestion));
+    expect(ask).toHaveBeenCalledExactlyOnceWith(toAskQuestionRequest(colorQuestion), {
+      signal: interruptSignal,
+    });
   });
 
   it("accepts one question with at most three label and description options", () => {
@@ -71,10 +76,9 @@ describe("askQuestion", () => {
 });
 
 describe("toAskQuestionRequest", () => {
-  it("always allows free text and lets the user move on", () => {
+  it("always allows free text", () => {
     expect(toAskQuestionRequest(colorQuestion)).toEqual({
       allowFreeform: true,
-      dismissible: true,
       display: "select",
       options: [
         { description: "Warm and bold.", id: "Red (Recommended)", label: "Red (Recommended)" },
@@ -84,7 +88,6 @@ describe("toAskQuestionRequest", () => {
     });
     expect(toAskQuestionRequest({ question: "What should we call it?" })).toEqual({
       allowFreeform: true,
-      dismissible: true,
       display: "text",
       prompt: "What should we call it?",
     });
@@ -103,10 +106,8 @@ describe("toAskQuestionOutput", () => {
     });
   });
 
-  it("passes through dismissed and unavailable answers", () => {
-    expect(toAskQuestionOutput({ status: "dismissed" })).toEqual({
-      status: "dismissed",
-    });
+  it("reports a withdrawn question as interrupted and passes through unavailable", () => {
+    expect(toAskQuestionOutput({ status: "cancelled" })).toEqual({ interrupted: true });
     expect(toAskQuestionOutput({ status: "unavailable" })).toEqual({
       status: "unavailable",
     });

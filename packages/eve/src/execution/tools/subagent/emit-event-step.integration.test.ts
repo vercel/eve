@@ -13,7 +13,7 @@ import {
 } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { emitSubagentEventStep } from "#execution/tools/subagent/emit-event-step.js";
-import { createSessionEventSink } from "#execution/session/event-sink.js";
+import { createSessionEventSink } from "#execution/publish-session-events.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -98,7 +98,6 @@ it.each(
       expect(received.type).toBe(event.type);
       if (received.type === "subagent.completed") expect(received.data.output).toBe("done");
       expect(loadContext()).toBe(ctx);
-      expect(stream.locked).toBe(false);
       expect(received).toEqual(JSON.parse(new TextDecoder().decode(chunks[0])));
       expect(ctx.has(SandboxKey)).toBe(true);
       calls.push(kind);
@@ -224,9 +223,7 @@ it.each(events)(
       },
     });
     const sink = createSessionEventSink({
-      adapter: ctx.require(ChannelKey),
       ctx,
-      isFirstTurn: false,
       sessionWritable: stream,
       sessionId: "parent",
     });
@@ -282,32 +279,4 @@ it("fails hook context setup before publishing so a retry cannot duplicate the e
   expect(chunks).toHaveLength(0);
   expect(hook).not.toHaveBeenCalled();
   expect(stream.locked).toBe(false);
-});
-
-it("does not prepare context when no hook subscribes to the published event", async () => {
-  const ctx = new ContextContainer();
-  ctx.set(SessionIdKey, "parent");
-  ctx.set(AuthKey, null);
-  ctx.set(ChannelKey, { kind: "test" });
-  const bundle: Partial<CompiledBundle> = {
-    hookRegistry: createRuntimeHookRegistry([]),
-    get turnAgent(): never {
-      throw new Error("unsubscribed event prepared runtime context");
-    },
-  };
-  ctx.set(BundleKey, bundle as CompiledBundle);
-  vi.mocked(deserializeContext).mockResolvedValue(ctx);
-  vi.mocked(serializeContext).mockReturnValue({ channel: true });
-  const input = {
-    event: events[0]!,
-    sessionWritable: new WritableStream<Uint8Array>(),
-    serializedContext: { channel: true },
-    sessionState: createTestSessionState({ sessionId: "parent" }),
-  };
-  expect(await emitSubagentEventStep(input)).toEqual({
-    serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
-  });
-  expect(ctx.has(SessionKey)).toBe(false);
-  expect(ctx.has(SandboxKey)).toBe(false);
 });

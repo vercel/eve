@@ -3,10 +3,7 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { serializeInputSchema, toInputSchema } from "#tools/schema.js";
 import { getRun } from "#internal/workflow/runtime.js";
-import {
-  type BlockingWorkflowToolDefinition,
-  defineWorkflowTool,
-} from "#tools/workflow-definition.js";
+import { type WorkflowToolDefinition, defineWorkflowTool } from "#tools/workflow-definition.js";
 
 const DEPLOY_INPUT_SCHEMA = toInputSchema({
   additionalProperties: false,
@@ -46,7 +43,6 @@ export function buildWorkflowToolSerializedContext(input: {
  */
 export async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
-  readonly background?: boolean;
   readonly execute: (...args: never[]) => unknown;
   readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
   readonly toolName: string;
@@ -58,9 +54,8 @@ export async function createWorkflowToolRuntime(input: {
         logicalPath: `tools/${input.toolName}.ts`,
         loadNamespace: async () => ({
           default: defineWorkflowTool({
-            execution: input.background === true ? "background" : undefined,
             description: `Deploys a service (${input.toolName}).`,
-            execute: input.execute as BlockingWorkflowToolDefinition["execute"],
+            execute: input.execute as WorkflowToolDefinition["execute"],
             inputSchema: serializeInputSchema(input.inputSchema ?? DEPLOY_INPUT_SCHEMA) ?? {},
           }),
         }),

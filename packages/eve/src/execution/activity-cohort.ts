@@ -19,17 +19,12 @@ export function updateActivityRootForDelivery(input: {
   readonly ctx: ContextContainer;
   readonly delivery?: DeliverHookPayload;
   readonly sessionState: SessionStateMap | undefined;
-  readonly taskRootTurnId?: string;
 }): void {
   if (!input.ctx.has(ActivityObserverKey)) return;
-  if (input.taskRootTurnId !== undefined) {
-    input.ctx.set(ActivityRootTurnIdKey, input.taskRootTurnId);
-    return;
-  }
   const delivery = input.delivery;
   if (delivery === undefined) return;
   const hasMessage = delivery.payloads.some((payload) => payload.message !== undefined);
-  if (hasMessage && delivery.taskDeliveryId === undefined) {
+  if (hasMessage) {
     input.ctx.set(ActivityRootTurnIdKey, input.activeTurnId);
     input.ctx.delete(ActivityPendingBlockersKey);
     return;

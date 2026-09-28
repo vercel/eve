@@ -1,12 +1,9 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-const RECOVERY_REQUEST = "RESUME-CANCELLED-SLEEPER";
-const RECOVERY_RESULT = "CANCELLED-SUBAGENT-RECOVERED";
-
 export default defineEval({
   description:
-    "Cancel a parent turn, cascade cancellation to its local sleeper subagent, then resume that child.",
+    "Cancel a parent turn and cascade cancellation to the local sleeper session its workflow run opened.",
   timeoutMs: 240_000,
 
   async test(t) {
@@ -16,13 +13,11 @@ export default defineEval({
     const parent = await session.start(
       "Use the workflow tool exactly once to call the sleeper subagent with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.' Return the sleeper result.",
     );
-    const called = await parent.waitForEvent("subagent.called", {
+    const started = await parent.waitForEvent("agent.started", {
       data: { name: "sleeper" },
     });
-    const agentId = called.data.agentId;
-    if (agentId === undefined) throw new Error("Cancelled sleeper call has no agent id.");
 
-    const child = t.target.watchTurn(called.data.childSessionId);
+    const child = t.target.watchTurn(started.data.sessionId);
     await child.waitForEvent("actions.requested", {
       data: {
         actions: (actions) =>
@@ -49,7 +44,6 @@ export default defineEval({
 
     parentTurn.event("turn.cancelled", { count: 1 });
     parentTurn.eventOrder([{ type: "turn.cancelled" }, { type: "session.waiting" }]);
-    parentTurn.notEvent("subagent.completed");
     parentTurn.notEvent("turn.failed");
     parentTurn.notEvent("session.failed");
 
@@ -58,37 +52,8 @@ export default defineEval({
     followUp.notEvent("turn.cancelled");
     followUp.messageIncludes(/CANCELLATION-SUBAGENT-FOLLOW-UP-OK/i);
 
-    // The cancelled child must survive in the parent's model-visible
-    // [Agents] listing as a parked "(cancelled)" handle. A handle leaked as
-    // `running` never re-enters the listing, so this catches the abandoned
-    // cancelled batch regressing to a permanent leak.
-    const listing = await session.send(
-      "Look at the [Agents] listing in your context and reply with the sleeper agent's entry verbatim, including its status.",
-    );
-    listing.expectOk();
-    listing.notEvent("turn.cancelled");
-    listing.messageIncludes(/sleeper/i);
-    listing.messageIncludes(/\(cancelled\)/);
-
-    const resumed = await session.send(
-      [
-        "Use the workflow tool exactly once.",
-        `In its JavaScript, call ctx.agent for sleeper with agentId ${JSON.stringify(agentId)} and message ${JSON.stringify(RECOVERY_REQUEST)}.`,
-        "Return the inline result and reply with it verbatim. Do not call sleeper outside workflow.",
-      ].join(" "),
-    );
-    resumed.expectOk();
-    resumed.messageIncludes(RECOVERY_RESULT);
-    resumed.event("subagent.called", {
-      count: 1,
-      data: {
-        agentId,
-        childSessionId: called.data.childSessionId,
-        name: "sleeper",
-      },
-    });
-
+    // The eval watches both the parent and the sleeper session; each one's turn is cancelled once.
     t.event("turn.cancelled", { count: 2 });
-    t.event("subagent.called", { count: 2, data: { name: "sleeper" } });
+    t.event("agent.started", { count: 1, data: { name: "sleeper" } });
   },
 });

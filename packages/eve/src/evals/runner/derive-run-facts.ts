@@ -1,4 +1,3 @@
-import { isJsonObjectValue } from "#shared/json.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { InputRequest } from "#shared/input.js";
@@ -34,11 +33,12 @@ export interface DeriveRunFactsOptions {
 }
 
 /**
- * Event types that only close out a turn. When the last meaningful event
- * before this epilogue is `input.requested`, the run ended parked on
- * unanswered HITL input.
+ * Event types that only park or close out a turn. When the last meaningful
+ * event before them is `input.requested`, the run ended parked on unanswered
+ * HITL input.
  */
-const TURN_EPILOGUE_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
+const PARKING_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
+  "turn.waiting",
   "turn.completed",
   "session.waiting",
   "session.completed",
@@ -124,20 +124,14 @@ export function deriveRunFacts(
           const call = ensureToolCall(result.callId, result.toolName, {});
           call.output = result.output;
           call.status = status;
-          const output = result.output;
-          if (
-            status === "completed" &&
-            isJsonObjectValue(output) &&
-            output.status === "working" &&
-            typeof output.taskId === "string" &&
-            typeof output.agentId === "string"
-          ) {
-            ensureSubagentCall(result.callId, result.toolName);
+          // An agent tool runs as a workflow tool; its tool result settles the delegation.
+          const subagentCall = subagentCallsByCallId.get(result.callId);
+          if (subagentCall?.status === "working") {
+            subagentCall.output ??= result.output;
+            subagentCall.status = status === "rejected" ? "failed" : status;
           }
         } else if (result.kind === "subagent-result") {
           const call = ensureSubagentCall(result.callId, result.subagentName);
-          // A working receipt settles dispatch, not the delegated work.
-          if (result.origin === "child" && result.backgroundTask !== undefined) break;
           call.output = call.output ?? result.output;
           if (result.origin === "child" && result.outcome.result.kind === "cancelled") {
             call.status = "cancelled";
@@ -164,7 +158,7 @@ export function deriveRunFacts(
 
       case "subagent.completed": {
         const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
-        if (event.data.backgroundTask !== undefined || call.status !== "working") break;
+        if (call.status !== "working") break;
         call.output = event.data.output;
         call.status = "completed";
         break;
@@ -228,14 +222,15 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
 }
 
 /**
- * A run ended parked when the last event before the turn epilogue
- * (`turn.completed` → `session.waiting`) is `input.requested`: the harness
- * surfaced HITL requests and stopped without resolving them.
+ * A run ended parked when the last event before its parking events is
+ * `input.requested`: either the turn ended on the request (`turn.completed` →
+ * `session.waiting`), or a call the turn runs asked and the open turn parked
+ * (`turn.waiting`).
  */
 function endedParkedOnInput(events: readonly MessageStreamEvent[]): boolean {
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
-    if (event === undefined || TURN_EPILOGUE_EVENT_TYPES.has(event.type)) continue;
+    if (event === undefined || PARKING_EVENT_TYPES.has(event.type)) continue;
     return event.type === "input.requested";
   }
   return false;

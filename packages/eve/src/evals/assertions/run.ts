@@ -367,7 +367,7 @@ export function outputMatches(schema: StandardSchemaV1): RunAssertion {
 function joinCompletedMessages(events: readonly MessageStreamEvent[]): string {
   const parts: string[] = [];
   for (const evt of events) {
-    if (evt.type === "message.completed" && evt.data.message !== null) {
+    if (evt.type === "message.completed") {
       parts.push(evt.data.message);
     }
   }

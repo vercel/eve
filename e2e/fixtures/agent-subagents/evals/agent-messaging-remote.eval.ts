@@ -4,7 +4,7 @@ const MEMORABLE_FACT = "Alice named the tide station notebook Harbor Lumen 4482.
 
 /**
  * Cross-turn continuation of a remote child over a real HTTP hop: turn one
- * delegates a fact to `remote-loopback` and lets it park; turn two
+ * delegates a fact to `remote-loopback`, which parks once it replies; turn two
  * re-messages the same remote child via its agentId. The fact can only come
  * back if the continuation reached the same remote session.
  */
@@ -13,21 +13,16 @@ export default defineEval({
     "A parked remote child re-messaged in a later parent turn still recalls a fact from its first turn.",
   tags: ["real-model"],
   async test(t) {
-    const started = await t.send(
+    const first = await t.send(
       [
         "Use the remote-loopback agent with this message:",
         `"Remember this exact fact: ${MEMORABLE_FACT} Reply only with READY."`,
         "When it returns, reply with the single word: delegated.",
       ].join(" "),
     );
-    started.expectOk();
-    const firstCompletion = t.target.watchTurn(started.sessionId, {
-      startIndex: requireStreamIndex(started.session),
-    });
-    const firstCompletedTurn = await firstCompletion.result();
-    firstCompletedTurn.expectOk();
+    first.expectOk();
 
-    const continued = await firstCompletion.session.send(
+    const second = await first.session.send(
       [
         "Message that same remote-loopback agent again: call it with the agentId shown in the latest <agents> block",
         'and the message: "What exact fact did I ask you to remember? Reply with only the fact."',
@@ -35,12 +30,8 @@ export default defineEval({
         "When it returns, reply with the agent's exact output and no other text.",
       ].join(" "),
     );
-    continued.expectOk();
-    const secondCompletedTurn = await t.target
-      .watchTurn(started.sessionId, { startIndex: requireStreamIndex(firstCompletion.session) })
-      .result();
-    secondCompletedTurn.expectOk();
-    secondCompletedTurn.messageIncludes(MEMORABLE_FACT);
+    second.expectOk();
+    second.messageIncludes(MEMORABLE_FACT);
 
     t.succeeded();
     t.eventsSatisfy("both turns continue one remote child session", (events) => {
@@ -58,11 +49,3 @@ export default defineEval({
     t.noFailedActions();
   },
 });
-
-function requireStreamIndex(session: {
-  readonly state?: { readonly streamIndex?: number };
-}): number {
-  const streamIndex = session.state?.streamIndex;
-  if (streamIndex === undefined) throw new Error("Parent session has no stream index.");
-  return streamIndex;
-}

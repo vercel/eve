@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ask, attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
-import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import {
-  agent,
+  ask,
+  attachWorkflowToolRunContext,
+  WorkflowToolRunAsks,
+} from "#execution/tools/workflow/ask.js";
+import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
+import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
+import {
+  invokeAgent,
   type AgentInvocationReply,
+  type InternalAgentInput,
   validateAgentInput,
 } from "#execution/tools/subagent/invoke-agent.js";
 import type { ToolContext } from "#tools/definition.js";
@@ -27,6 +34,24 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
 }));
 beforeEach(() => vi.resetAllMocks());
 
+const agentContext = {} as AgentSessionContext;
+
+function runOwner(inbox: string): WorkflowToolRunInbox {
+  return {
+    sent: 0,
+    send: async (message) => {
+      await mocks.resumeHook(inbox, message);
+    },
+  };
+}
+
+function invokeResearch(
+  ctx: ToolContext,
+  input: Pick<InternalAgentInput, "message" | "outputSchema">,
+) {
+  return invokeAgent(ctx, { ...input, target: "research" }, { invocationId: "call-1:agent-reply" });
+}
+
 describe("workflow helper context errors", () => {
   it.each([
     ["ordinary tool", { callId: "call-1", session: {} }],
@@ -35,10 +60,7 @@ describe("workflow helper context errors", () => {
     ["missing context", undefined],
     ["null context", null],
   ])("rejects %s before creating hooks or dispatching work", async (_name, context) => {
-    const ctx = context as ToolContext;
-    await expect(agent(ctx, "reviewer", { message: "Review" })).rejects.toThrow(
-      "ctx.agent() requires a defineWorkflowTool() executor context.",
-    );
+    const ctx = context as never;
     expect(() => ask(ctx, { prompt: "Continue?" })).toThrow(
       "ctx.ask() requires a defineWorkflowTool() executor context.",
     );
@@ -48,12 +70,6 @@ describe("workflow helper context errors", () => {
 });
 
 describe("agent invocation input", () => {
-  it("requires a non-empty positional agent name", () => {
-    expect(() => validateAgentInput({ message: "Review", target: "" })).toThrow(
-      "agent() requires a non-empty agent name as its first argument.",
-    );
-  });
-
   it.each([null, [], "object"])("rejects a non-object output schema (%j)", (outputSchema) => {
     expect(() =>
       validateAgentInput({
@@ -61,11 +77,11 @@ describe("agent invocation input", () => {
         outputSchema: outputSchema as never,
         target: "reviewer",
       }),
-    ).toThrow("agent() `outputSchema` must be a JSON Schema object.");
+    ).toThrow('Agent tool "reviewer" `outputSchema` must be a JSON Schema object.');
   });
 });
 
-describe("background agent invocation routing", () => {
+describe("workflow agent invocation routing", () => {
   it("stops waiting when the workflow body is cancelled", async () => {
     const controller = new AbortController();
     mocks.createHook.mockReturnValue({
@@ -74,9 +90,10 @@ describe("background agent invocation routing", () => {
     });
     const ctx = { abortSignal: controller.signal, callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
+      asks: new WorkflowToolRunAsks("run-1"),
+      control: "control",
       from: {
         callId: "call-1",
-        execution: "background",
         input: { message: "Find it" },
         runId: "run-1",
         sequence: 0,
@@ -84,12 +101,11 @@ describe("background agent invocation routing", () => {
         toolName: "research",
         turnId: "turn-1",
       },
-      owner: {
-        inbox: "owner-inbox",
-      },
+      agentContext,
+      owner: runOwner("owner-inbox"),
     });
 
-    const result = agent(ctx, "research", { message: "Find it" });
+    const result = invokeResearch(ctx, { message: "Find it" });
     await vi.waitFor(() => expect(mocks.resumeHook).toHaveBeenCalledOnce());
     controller.abort(new Error("task cancelled"));
 
@@ -131,7 +147,6 @@ describe("background agent invocation routing", () => {
     mocks.resumeHook.mockImplementation(async () => undefined);
     const from: WorkflowToolRunRef = {
       callId: "call-1",
-      execution: "background",
       input: { message: "Find it" },
       runId: "run-1",
       sequence: 0,
@@ -141,10 +156,11 @@ describe("background agent invocation routing", () => {
     };
     const ctx = { callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
+      asks: new WorkflowToolRunAsks("run-1"),
+      control: "control",
       from,
-      owner: {
-        inbox: "owner-inbox",
-      },
+      agentContext,
+      owner: runOwner("owner-inbox"),
     });
 
     const outputSchema = {
@@ -152,7 +168,7 @@ describe("background agent invocation routing", () => {
       required: ["findings"],
       type: "object",
     };
-    await expect(agent(ctx, "research", { message: "Find it", outputSchema })).resolves.toEqual({
+    await expect(invokeResearch(ctx, { message: "Find it", outputSchema })).resolves.toEqual({
       findings: ["available"],
     });
 
@@ -166,65 +182,6 @@ describe("background agent invocation routing", () => {
         kind: "agent-invoke",
       },
     });
-  });
-
-  it("derives unique invocation ids for repeated parallel calls", async () => {
-    for (const token of ["reply-1", "reply-2"]) {
-      const replies: AgentInvocationReply[] = [
-        {
-          kind: "runtime-action-result",
-          results: [
-            {
-              callId: `call-1:${token}`,
-              kind: "subagent-result",
-              origin: "child",
-              output: token,
-              subagentName: "research",
-            } as never,
-          ],
-        },
-        { kind: "agent-settled", callId: `call-1:${token}` },
-      ];
-      mocks.createHook.mockReturnValueOnce({
-        [Symbol.asyncIterator]: () => ({
-          next: async () =>
-            replies.length > 0
-              ? { done: false as const, value: replies.shift()! }
-              : { done: true as const, value: undefined },
-        }),
-        token,
-      });
-    }
-    mocks.resumeHook.mockImplementation(async () => undefined);
-    const ctx = { callId: "call-1" } as ToolContext;
-    attachWorkflowToolRunContext(ctx, {
-      from: {
-        callId: "call-1",
-        execution: "blocking",
-        input: {},
-        runId: "run-1",
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "research",
-        turnId: "turn-1",
-      },
-      owner: { inbox: "owner-inbox" },
-    });
-
-    await expect(
-      Promise.all([
-        agent(ctx, "research", { message: "First" }),
-        agent(ctx, "research", { message: "Second" }),
-      ]),
-    ).resolves.toEqual(["reply-1", "reply-2"]);
-
-    const requests = mocks.resumeHook.mock.calls
-      .map(([, message]) => message.request)
-      .filter((request) => request.kind === "agent-invoke");
-    expect(requests.map((request) => request.invocationId)).toEqual([
-      "call-1:reply-1",
-      "call-1:reply-2",
-    ]);
   });
 
   it("waits for agent calls inside a blocking workflow tool", async () => {
@@ -263,9 +220,10 @@ describe("background agent invocation routing", () => {
     });
     const ctx = { callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
+      asks: new WorkflowToolRunAsks("run-1"),
+      control: "control",
       from: {
         callId: "call-1",
-        execution: "blocking",
         input: { message: "Find it" },
         runId: "run-1",
         sequence: 0,
@@ -273,16 +231,15 @@ describe("background agent invocation routing", () => {
         toolName: "research",
         turnId: "turn-1",
       },
-      owner: {
-        inbox: "owner-inbox",
-      },
+      agentContext,
+      owner: runOwner("owner-inbox"),
     });
 
-    await expect(agent(ctx, "research", { message: "Find it" })).resolves.toBe("inline");
+    await expect(invokeResearch(ctx, { message: "Find it" })).resolves.toBe("inline");
     expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
     expect(mocks.resumeHook).toHaveBeenNthCalledWith(1, "owner-inbox", {
       kind: "request",
-      from: expect.objectContaining({ execution: "blocking", runId: "run-1" }),
+      from: expect.objectContaining({ runId: "run-1" }),
       replyTo: "agent-reply",
       request: {
         input: { message: "Find it", target: "research" },
@@ -317,9 +274,10 @@ describe("background agent invocation routing", () => {
       });
       const ctx = { callId: "call-1" } as ToolContext;
       attachWorkflowToolRunContext(ctx, {
+        asks: new WorkflowToolRunAsks("run-1"),
+        control: "control",
         from: {
           callId: "call-1",
-          execution: "blocking",
           input: {},
           runId: "run-1",
           sequence: 0,
@@ -327,10 +285,11 @@ describe("background agent invocation routing", () => {
           toolName: "research",
           turnId: "turn-1",
         },
-        owner: { inbox: "owner" },
+        agentContext,
+        owner: runOwner("owner"),
       });
       const returned = vi.fn();
-      const output = agent(ctx, "research", { message: "Find it" }).then(
+      const output = invokeResearch(ctx, { message: "Find it" }).then(
         (value) => {
           returned();
           return value;
@@ -382,9 +341,10 @@ describe("background agent invocation routing", () => {
     });
     const ctx = { callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
+      asks: new WorkflowToolRunAsks("run-1"),
+      control: "control",
       from: {
         callId: "call-1",
-        execution: "blocking",
         input: { message: "Find it" },
         runId: "run-1",
         sequence: 0,
@@ -392,12 +352,11 @@ describe("background agent invocation routing", () => {
         toolName: "research",
         turnId: "turn-1",
       },
-      owner: {
-        inbox: "owner-inbox",
-      },
+      agentContext,
+      owner: runOwner("owner-inbox"),
     });
 
-    await expect(agent(ctx, "research", { message: "Find it" })).rejects.toEqual(failure.output);
+    await expect(invokeResearch(ctx, { message: "Find it" })).rejects.toEqual(failure.output);
     expect(mocks.resumeHook).toHaveBeenCalledTimes(1);
     expect(mocks.resumeHook).not.toHaveBeenCalledWith(
       "owner-inbox",
@@ -466,7 +425,6 @@ describe("background agent invocation routing", () => {
       mocks.resumeHook.mockImplementation(async () => undefined);
       const from: WorkflowToolRunRef = {
         callId: "call-1",
-        execution: "background",
         input: { message: "Find it" },
         runId: "run-1",
         sequence: 0,
@@ -476,13 +434,14 @@ describe("background agent invocation routing", () => {
       };
       const ctx = { callId: "call-1" } as ToolContext;
       attachWorkflowToolRunContext(ctx, {
+        asks: new WorkflowToolRunAsks("run-1"),
+        control: "control",
         from,
-        owner: {
-          inbox: "owner-inbox",
-        },
+        agentContext,
+        owner: runOwner("owner-inbox"),
       });
 
-      await expect(agent(ctx, "research", { message: "Find it" })).resolves.toBe("done");
+      await expect(invokeResearch(ctx, { message: "Find it" })).resolves.toBe("done");
 
       expect(mocks.resumeHook).toHaveBeenNthCalledWith(2, "owner-inbox", {
         kind: "request",
@@ -507,7 +466,7 @@ describe("background agent invocation routing", () => {
     },
   );
 
-  it("forwards background authorization as an owner authorization request", async () => {
+  it("forwards child authorization as an owner authorization request", async () => {
     const replies: AgentInvocationReply[] = [
       {
         callId: "call-1",
@@ -551,7 +510,6 @@ describe("background agent invocation routing", () => {
     mocks.resumeHook.mockImplementation(async () => undefined);
     const from: WorkflowToolRunRef = {
       callId: "call-1",
-      execution: "background",
       input: { message: "Find it", target: "research" },
       runId: "run-1",
       sequence: 0,
@@ -561,13 +519,14 @@ describe("background agent invocation routing", () => {
     };
     const ctx = { callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
+      asks: new WorkflowToolRunAsks("run-1"),
+      control: "control",
       from,
-      owner: {
-        inbox: "owner-inbox",
-      },
+      agentContext,
+      owner: runOwner("owner-inbox"),
     });
 
-    await expect(agent(ctx, "research", { message: "Find it" })).resolves.toBe("done");
+    await expect(invokeResearch(ctx, { message: "Find it" })).resolves.toBe("done");
 
     expect(mocks.resumeHook).toHaveBeenCalledWith("owner-inbox", {
       kind: "request",

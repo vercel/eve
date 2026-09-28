@@ -69,57 +69,23 @@ export default defineSchedule({
   cron: "* * * * *",
   async run({ to, waitUntil, appAuth }) {
     waitUntil(
-      to(slack, { channelId: "C0123ABC" }).send(
-        "Check for new critical alerts. Report only when there are any.",
-        { auth: appAuth },
-      ),
-    );
-  },
-});
-```
-
-The agent does not have to deliver a message on every run. When a prompt makes delivery conditional, as in the alert check above, eve tells the agent how to finish successfully without sending anything to the channel. Frequent polling schedules do not need a separate filter or delivery setting.
-
-- `to(channel, target).send(message, { auth })`: starts a session on another channel. It has the same contract as a route handler's `ctx.to(...)` handle.
-- `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `send` call in it.
-- `appAuth`: the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Pass it as `to(...).send(..., { auth: appAuth })` for work the agent does on its own behalf.
-
-The `auth` option controls which principal the session runs as. A handler may instead supply a user principal when scheduled work needs that user's grants; a session created by that dispatch still retains schedule provenance and conditional delivery behavior.
-
-A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Markdown-form sessions park too, but no channel is attached, so they cannot receive follow-up messages.
-
-## Background task results
-
-New sessions started by schedules default to `"cohort"`: background
-outcomes wait for overlapping tasks to settle before waking the parent. To report
-independently useful results as they arrive, pass `taskDeliveryPolicy: "auto"` to
-`send(...)` inside a schedule handler:
-
-```ts title="agent/schedules/digest.ts"
-import { defineSchedule } from "eve/schedules";
-import slack from "../channels/slack";
-
-export default defineSchedule({
-  cron: "0 9 * * *",
-  run({ to, waitUntil, appAuth }) {
-    waitUntil(
-      to(slack, { channelId: "C0123ABC" }).send("Prepare the daily reports.", {
+      to(slack, { channelId: "C0123ABC" }).send("Summarize the new critical alerts.", {
         auth: appAuth,
-        taskDeliveryPolicy: "auto",
       }),
     );
   },
 });
 ```
 
-The option belongs to `send(...)`. Markdown schedules use the `"cohort"` default;
-use a handler when you need to override it. Sending to an existing session preserves
-its policy unless the send supplies an explicit value.
+Every run delivers the agent's reply to the channel. To skip a run when there is nothing to report, check that condition in the handler before calling `send`.
 
-Under `"auto"`, a model call may finish silently while related work is pending.
-Available results remain in the next reporting context so the parent can combine
-previously withheld outputs later. See
-[Background task results](./channels/overview#background-task-results).
+- `to(channel, target).send(message, { auth })`: starts a session on another channel. It has the same contract as a route handler's `ctx.to(...)` handle.
+- `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `send` call in it.
+- `appAuth`: the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Pass it as `to(...).send(..., { auth: appAuth })` for work the agent does on its own behalf.
+
+The `auth` option controls which principal the session runs as. A handler may instead supply a user principal when scheduled work needs that user's grants; a session created by that dispatch still retains schedule provenance.
+
+A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Markdown-form sessions park too, but no channel is attached, so they cannot receive follow-up messages.
 
 ## Session continuity
 

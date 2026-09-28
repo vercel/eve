@@ -99,7 +99,6 @@ async function createPreparedRuntimeTool(
       isSelfAgent ? subagentToolExecuteWorkflowReference.workflowId : undefined,
     ),
     description: definition.description,
-    execution: definition.execution,
     inputSchema: serializeInputSchema(definition.inputSchema),
     kind: "authored-tool",
     logicalPath: definition.logicalPath,
@@ -135,18 +134,13 @@ function prepareToolBehavior(
       target: { kind: "self-agent-call", nodeId, subagentName: AGENT_TOOL_NAME },
     };
   } else if (behavior.handling?.kind === "dispatch") {
-    if (behavior.handling.action === "self-agent" && nodeId === undefined) {
+    if (nodeId === undefined) {
       throw new Error("The self-agent tool requires a concrete runtime node id.");
     }
-    const target =
-      behavior.handling.action === "self-agent"
-        ? {
-            kind: "self-agent-call" as const,
-            nodeId: nodeId!,
-            subagentName: AGENT_TOOL_NAME,
-          }
-        : { kind: behavior.handling.action };
-    handling = { kind: "dispatch", target };
+    handling = {
+      kind: "dispatch",
+      target: { kind: "self-agent-call", nodeId, subagentName: AGENT_TOOL_NAME },
+    };
   } else if (behavior.handling?.kind === "workflow-tool") {
     handling = {
       kind: "dispatch",

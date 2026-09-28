@@ -5,7 +5,6 @@ import type {
   DeliverPayload,
   SessionAuthContext,
   TurnCaller,
-  TaskDeliveryPolicy,
 } from "#channel/types.js";
 import type { InputResponse } from "#shared/input.js";
 import type { StepInput } from "#harness/types.js";
@@ -17,7 +16,6 @@ export type FrameworkMessageKind =
   | "context.state"
   | "context.compaction"
   | "memory.load"
-  | "execution.background_task"
   | "execution.continuation"
   | "execution.retry";
 
@@ -109,7 +107,6 @@ export function isFrameworkMessageKind(value: unknown): value is FrameworkMessag
     value === "context.state" ||
     value === "context.compaction" ||
     value === "memory.load" ||
-    value === "execution.background_task" ||
     value === "execution.continuation" ||
     value === "execution.retry"
   );
@@ -399,7 +396,6 @@ interface DeliverLike {
   readonly auth?: SessionAuthContext | null;
   readonly caller?: TurnCaller;
   readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
 }
@@ -422,14 +418,12 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
   }
 
   let auth = first.auth;
-  let taskDeliveryPolicy = first.taskDeliveryPolicy;
   let caller = first.caller;
   const payloads = [...first.payloads];
   const deliveryMetadata = [...(first.deliveryMetadata ?? [])];
 
   for (const item of rest) {
     const payloadOffset = payloads.length;
-    taskDeliveryPolicy = item.taskDeliveryPolicy ?? taskDeliveryPolicy;
     if (item.auth !== undefined) {
       auth = item.auth;
     }
@@ -450,7 +444,6 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
 
   return {
     ...first,
-    taskDeliveryPolicy,
     auth,
     caller,
     deliveryMetadata: deliveryMetadata.length === 0 ? undefined : deliveryMetadata,

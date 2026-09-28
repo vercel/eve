@@ -80,8 +80,7 @@ export function framePullRequestWatchWake(instruction: string): string {
     `${instruction}\n\n` +
     "This is an internal watch wake, not a request for a progress report. Continue any necessary " +
     "work. Send a user-facing response only when the original request is complete or a new blocker " +
-    "requires human input. Otherwise, finish by replying with exactly <eve-empty-delivery/> and no " +
-    "other text. Do not report that nothing changed or that work is still in progress."
+    "requires human input. Do not report that nothing changed or that work is still in progress."
   );
 }
 

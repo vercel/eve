@@ -49,10 +49,6 @@ export class OptimisticMessageSubmissions<TData> {
       this.#projection.append(event);
       return undefined;
     }
-    if (event.data.kind === "execution.background_task") {
-      this.#projection.append(event);
-      return undefined;
-    }
     const matching = this.#matching(event);
     if (matching.length === 0) {
       this.#projection.append(event);
@@ -75,9 +71,7 @@ export class OptimisticMessageSubmissions<TData> {
     const pending = this.#pending.find((candidate) => candidate.id === submissionId);
     if (pending === undefined) return undefined;
     for (const event of events.slice(pending.eventStartIndex)) {
-      if (event.type !== "message.received" || event.data.kind === "execution.background_task") {
-        continue;
-      }
+      if (event.type !== "message.received") continue;
       const matching = this.#matching(event);
       if (matching.some((candidate) => candidate.id === submissionId)) {
         return this.#reconcile(matching, event, true);

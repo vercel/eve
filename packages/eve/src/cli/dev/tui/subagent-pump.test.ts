@@ -19,7 +19,6 @@ afterEach(() => {
 function fakeView(): SubagentView {
   return {
     begin: vi.fn(),
-    background: vi.fn(),
     upsertStep: vi.fn(),
     upsertTool: vi.fn(),
     removeTool: vi.fn(),
@@ -179,14 +178,12 @@ function completedEvent(index: number): MessageStreamEvent {
 }
 
 describe("SubagentPump.settleCancelledTurn", () => {
-  it("cancels only foreground descendants of the exact turn", async () => {
-    const backgroundA = pushableChildStream();
-    const backgroundB = pushableChildStream();
-    const foregroundB = pushableChildStream();
+  it("cancels only descendants of the exact turn", async () => {
+    const childA = pushableChildStream();
+    const childB = pushableChildStream();
     const streams = new Map([
-      ["/eve/v1/children/background-a/stream", backgroundA],
-      ["/eve/v1/children/background-b/stream", backgroundB],
-      ["/eve/v1/children/foreground-b/stream", foregroundB],
+      ["/eve/v1/children/child-a/stream", childA],
+      ["/eve/v1/children/child-b/stream", childB],
     ]);
     const requests = serveChildStreams(({ path, signal }) => {
       const child = streams.get(path);
@@ -195,23 +192,19 @@ describe("SubagentPump.settleCancelledTurn", () => {
     });
     const { pump, view } = createPump();
 
-    pump.begin(subagentCalled("background-a", "turn-a"));
-    pump.background("background-a");
-    pump.begin(subagentCalled("background-b", "turn-b"));
-    pump.background("background-b");
-    pump.begin(subagentCalled("foreground-b", "turn-b"));
-    await vi.waitFor(() => expect(requests).toHaveLength(3));
+    pump.begin(subagentCalled("child-a", "turn-a"));
+    pump.begin(subagentCalled("child-b", "turn-b"));
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
 
     pump.settleCancelledTurn("turn-b");
 
     expect(view.complete).toHaveBeenCalledTimes(1);
     expect(view.complete).toHaveBeenCalledWith({
       authoritative: true,
-      callId: "foreground-b",
+      callId: "child-b",
     });
-    expect(foregroundB.aborted).toBe(true);
-    expect(backgroundA.aborted).toBe(false);
-    expect(backgroundB.aborted).toBe(false);
+    expect(childB.aborted).toBe(true);
+    expect(childA.aborted).toBe(false);
     pump.abortAll();
   });
 
@@ -249,52 +242,7 @@ describe("SubagentPump.settleCancelledTurn", () => {
   });
 });
 
-describe("SubagentPump background receipts", () => {
-  it("retains a receipt that arrives before child dispatch", () => {
-    const view = fakeView();
-    const pump = new SubagentPump({ view, formatActionResultError: () => "failed" });
-    pump.background("call-1");
-    pump.begin(subagentCalled("call-1"));
-    pump.settleCancelledTurn("turn-1");
-    expect(view.background).toHaveBeenCalledWith({ callId: "call-1" });
-    expect(view.complete).not.toHaveBeenCalled();
-  });
-
-  it("keeps the section open until the child stream reaches its own boundary", async () => {
-    const child = pushableChildStream();
-    const requests = serveChildStreams(({ signal }) => child.response(signal));
-    const { pump, view } = createPump();
-
-    pump.begin(subagentCalled("call-1"));
-    pump.background("call-1");
-
-    expect(view.background).toHaveBeenCalledWith({ callId: "call-1" });
-    expect(view.complete).not.toHaveBeenCalled();
-
-    await vi.waitFor(() => expect(requests).toHaveLength(1));
-    child.push(reasoningEvent("still working", 0));
-    child.push(boundaryEvent(1));
-    await vi.waitFor(() =>
-      expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
-    );
-
-    expect(view.upsertStep).toHaveBeenCalledWith(
-      expect.objectContaining({ callId: "call-1", reasoning: "still working" }),
-    );
-  });
-
-  it("treats a child failure boundary as authoritative completion", async () => {
-    serveChildStreams(durableChild([failedBoundaryEvent(0)]));
-    const { pump, view } = createPump();
-
-    pump.begin(subagentCalled("call-1"));
-    pump.background("call-1");
-
-    await vi.waitFor(() =>
-      expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
-    );
-  });
-
+describe("SubagentPump completion", () => {
   it("reopens after parent completion and upgrades at the child boundary", async () => {
     const child = pushableChildStream();
     const requests = serveChildStreams(({ signal }) => child.response(signal));

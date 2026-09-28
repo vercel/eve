@@ -73,7 +73,7 @@ describe("startLocalSubagent", () => {
       sink: { url: "https://parent.example/activity", version: 1 as const },
       workIdentity: {
         id: "work:task",
-        kind: "task" as const,
+        kind: "subagent" as const,
         name: "slack",
         parentId: "work:root",
         rootSessionId: "root-session",

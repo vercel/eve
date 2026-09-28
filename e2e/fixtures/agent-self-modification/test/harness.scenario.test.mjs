@@ -46,14 +46,22 @@ function context(target, signal = new AbortController().signal) {
   };
 }
 
-function completedTurn(sessionId, events = []) {
+/**
+ * Mirrors a recorded eval turn: idle turns end on session.waiting, and a blocking delegation is
+ * still pending only when its child's input request was proxied into the turn.
+ */
+function completedTurn(sessionId, events = [], { input = {}, inputRequests = [] } = {}) {
+  const call = { input, status: inputRequests.length > 0 ? "pending" : "completed" };
   return {
     sessionId,
     events,
+    inputRequests,
+    status: "waiting",
     expectOk() {},
     calledSubagent() {},
-    requireToolCall() {
-      return { input: {} };
+    requireToolCall(name, { status = "completed" } = {}) {
+      if (call.status !== status) throw new Error(`${name} is ${call.status}, not ${status}.`);
+      return call;
     },
   };
 }
@@ -389,44 +397,19 @@ test("apply rejects a rebuild response without a runtime revision", async () => 
   });
 });
 
-test("request falls back to a parent-boundary watch when the initial event is missed", async () => {
-  const root = await sourceTree();
-  const calls = [];
-  const continuation = {
-    sessionId: "parent",
-    events: [],
-    async waitForEvent() {
-      return { data: { name: "self-modification__agent", childSessionId: "child" } };
-    },
-    async result() {
-      return completedTurn("parent");
-    },
+test("request accepts a pending delegation while the parent turn waits on a proxied approval", async () => {
+  const called = {
+    type: "subagent.called",
+    data: { name: "self-modification__agent", childSessionId: "child" },
   };
-  const child = {
-    sessionId: "child",
-    events: [],
-    async result() {
-      return completedTurn("child");
-    },
-  };
-  const target = targetFor({ calls, turns: { parent: continuation, child } });
-  const parent = {
-    sessionId: "parent",
-    events: [],
-    session: { state: { streamIndex: 10 } },
-    async waitForEvent() {
-      throw new Error("stream boundary");
-    },
-    async result() {
-      return completedTurn("parent");
-    },
-  };
-  const t = context(target);
-  t.session = async () => ({ start: async () => parent });
-  const harness = await SelfModificationHarness.create(t, root);
-  await harness.request("make a change");
-  await harness.close();
-  await rm(root, { recursive: true, force: true });
+  const parent = liveTurn("parent", [called]);
+  parent.result = async () =>
+    completedTurn("parent", [called], { inputRequests: [{ requestId: "registry-approval" }] });
+  await withHarness(async ({ harness, target }) => {
+    target.watchTurn = () => liveTurn("child");
+    const run = await harness.request("Add browser automation.", { start: async () => parent });
+    assert.equal(run.child.sessionId, "child");
+  });
 });
 
 for (const emitsCalled of [false, true]) {
@@ -444,10 +427,8 @@ for (const emitsCalled of [false, true]) {
     repairParent.waitForEvent = async () => {
       throw new Error("Session reached session.waiting before the expected event.");
     };
-    repairParent.result = async () => ({
-      ...completedTurn("parent"),
-      requireToolCall: () => ({ input: { agentId: "agent-1", message } }),
-    });
+    repairParent.result = async () =>
+      completedTurn("parent", [], { input: { agentId: "agent-1", message } });
     const diagnostic = liveTurn("child", [
       { type: "message.received", data: { message: "Diagnose only." } },
     ]);

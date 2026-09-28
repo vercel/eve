@@ -14,11 +14,16 @@ import type {
 import type {
   MessageStreamEvent,
   RuntimeTraceContext,
+  AgentStartedStreamEvent,
   SubagentCalledStreamEvent,
   TurnFailureStreamEvent,
 } from "#protocol/message.js";
-import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
-import { summarizeTurnEvents } from "#client/session-utils.js";
+import { isTurnFailureEvent } from "#protocol/message.js";
+import {
+  isTurnSegmentBoundary,
+  summarizeTurnEvents,
+  updatePendingInputRequests,
+} from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
@@ -147,10 +152,10 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   streamSubagent(
-    called: SubagentCalledStreamEvent,
+    started: AgentStartedStreamEvent | SubagentCalledStreamEvent,
     options: StreamOptions = {},
   ): AsyncIterable<MessageStreamEvent> {
-    return this.#session.streamSubagent(called, {
+    return this.#session.streamSubagent(started, {
       ...options,
       signal: options.signal ?? this.#signal,
     });
@@ -444,8 +449,10 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
+      const pendingInputRequests = new Set<string>();
       for await (const event of source) {
         this.#events.push(event);
+        updatePendingInputRequests(pendingInputRequests, event);
         observe(event);
         this.#resolveWaiters(event);
 
@@ -457,7 +464,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
           );
         }
 
-        if (isCurrentTurnBoundaryEvent(event)) {
+        if (isTurnSegmentBoundary(event, pendingInputRequests)) {
           sawBoundary = true;
           this.#closeWaiters(
             new Error(`Session ${this.sessionId} reached ${event.type} before the expected event.`),

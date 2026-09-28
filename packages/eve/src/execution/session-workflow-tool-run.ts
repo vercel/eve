@@ -1,10 +1,17 @@
 import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
-import { emitWorkflowToolRunReportStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import {
+  emitAgentStartedStep,
+  emitWorkflowToolRunReportStep,
+} from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import type {
+  WorkflowToolAskRequest,
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
+  WorkflowToolRunRef,
   WorkflowToolRunRequestMessage,
+  WorkflowToolRunWithdrawMessage,
 } from "#execution/tools/workflow/messages.js";
+import { withdrawWorkflowToolRunQuestionStep } from "#execution/tools/workflow/withdraw-step.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
@@ -20,7 +27,7 @@ import {
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
+import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 interface HandlerInput<T> {
@@ -39,12 +46,22 @@ export async function handleWorkflowToolRunMessage(
     case "request":
       await handleWorkflowToolRunRequest({ ...input, message });
       return undefined;
+    case "withdraw":
+      await handleWorkflowToolRunWithdraw({ ...input, message });
+      return undefined;
     case "report":
-      await emitWorkflowToolRunReportStep({
-        from: message.from,
-        sessionWritable: input.cursor.sessionWritable,
-        update: message.update,
-      });
+      await input.cursor.apply(
+        await emitWorkflowToolRunReportStep({
+          ...input.cursor.stepState(),
+          from: message.from,
+          update: message.update,
+        }),
+      );
+      return undefined;
+    case "agent-started":
+      await input.cursor.apply(
+        await emitAgentStartedStep({ ...input.cursor.stepState(), message }),
+      );
       return undefined;
   }
 }
@@ -140,9 +157,7 @@ async function handleWorkflowToolRunRequest(
       await cursor.apply(
         await runProxySubagentEventStep({
           hookPayload: request.event,
-          sessionWritable: cursor.sessionWritable,
-          serializedContext: cursor.serializedContext,
-          sessionState: cursor.sessionState,
+          ...cursor.stepState(),
         }),
       );
     });
@@ -150,35 +165,52 @@ async function handleWorkflowToolRunRequest(
   }
   await cursor.apply(
     await runProxySubagentEventStep({
-      ...(message.requestCoordinates === undefined
-        ? { answerHook: createAnswerHookRoute(message) }
-        : {}),
+      ...(message.request.kind === "ask" && {
+        workflowAsk: createWorkflowAskRoute(message.from, message.request),
+      }),
       hookPayload: workflowToolRunRequestToInputRequestPayload(message),
-      sessionWritable: cursor.sessionWritable,
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
+      ...cursor.stepState(),
     }),
   );
 }
 
-function createAnswerHookRoute(message: WorkflowToolRunRequestMessage): AnswerHookRoute {
-  if (message.request.kind !== "ask") return { runId: message.from.runId };
-  const { allowFreeform, dismissible, options } = message.request.request;
+/**
+ * A run asks to withdraw a `ctx.ask()` question. The session decides: it
+ * withdraws the question unless it already accepted an answer or stopped
+ * offering it, and tells the run either way.
+ */
+async function handleWorkflowToolRunWithdraw(
+  input: HandlerInput<WorkflowToolRunWithdrawMessage>,
+): Promise<void> {
+  const { cursor, message } = input;
+  await cursor.apply(
+    await withdrawWorkflowToolRunQuestionStep({
+      ...cursor.stepState(),
+      control: message.control,
+      requestId: message.replyTo,
+      runId: message.from.runId,
+    }),
+  );
+}
+
+function createWorkflowAskRoute(
+  from: WorkflowToolRunRef,
+  ask: WorkflowToolAskRequest,
+): WorkflowAskRoute {
+  const { allowFreeform, options } = ask.request;
   return {
+    control: ask.control,
     question: {
       ...(allowFreeform !== undefined && { allowFreeform }),
-      ...(dismissible !== undefined && { dismissible }),
       ...(options !== undefined && { options: [...options] }),
     },
-    runId: message.from.runId,
+    runId: from.runId,
   };
 }
 
 function requestContext(input: HandlerInput<unknown>) {
   return {
     callbackBaseUrl: resolveWorkflowCallbackBaseUrl(input.callbackMetadataUrl),
-    sessionWritable: input.cursor.sessionWritable,
-    serializedContext: input.cursor.serializedContext,
-    sessionState: input.cursor.sessionState,
+    ...input.cursor.stepState(),
   };
 }

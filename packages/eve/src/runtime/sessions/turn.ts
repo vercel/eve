@@ -32,11 +32,10 @@ export type PreparedRuntimeAuthoredTool = Readonly<
 >;
 
 type PreparedRuntimeDelegationToolBase<TKind extends "remote" | "subagent"> = Readonly<
-  Omit<InternalToolDefinition, "execution"> &
+  InternalToolDefinition &
     SourceRef &
     Node & {
       behavior: PreparedToolBehavior;
-      execution: "background";
       kind: TKind;
       rootOnly?: boolean;
       task: PreparedRuntimeWorkflowTask;

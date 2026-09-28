@@ -215,13 +215,13 @@ The remaining subscribers for the event still run. Then eve cancels the turn the
 
 `ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: eve ignores a call from work the handler does not await and logs a warning.
 
-`ctx.cancel()` only stops a running turn. eve logs a warning and ignores the call on `step.failed`, `turn.completed`, `turn.failed`, `turn.cancelled`, `session.waiting`, `session.completed`, `session.failed`, `context.cleared`, and `subagent.*` events, and during clear or compact requests.
+`ctx.cancel()` only stops a running turn. eve logs a warning and ignores the call on `step.failed`, `turn.completed`, `turn.failed`, `turn.cancelled`, `turn.waiting`, `session.waiting`, `session.completed`, `session.failed`, `context.cleared`, `agent.started`, and `subagent.*` events, and during clear or compact requests.
 
 ## Subagent isolation
 
 Subagents may carry their own `agent/hooks/` directory. Subagent hooks fire only inside the subagent scope. Parent-agent hooks do not fire for subagent turns, and subagent hooks see only the subagent's own context.
 
-Interactive events such as `input.requested` and `authorization.required` are also published on the parent stream. Parent hooks observe these events after the parent channel handler and stream write, with the parent's session, agent, and channel context. The event retains the child's turn coordinates, so `event.data.turnId` can differ from `ctx.session.turn.id`. The accompanying parent `turn.completed` and `session.waiting` events also invoke parent hooks; they do not resolve pending input requests.
+Interactive events such as `input.requested` and `authorization.required` are also published on the parent stream. Parent hooks observe these events after the parent channel handler and stream write, with the parent's session, agent, and channel context. The event retains the child's turn coordinates, so `event.data.turnId` can differ from `ctx.session.turn.id`. The parent follows a proxied `input.requested` or `authorization.required` with `turn.waiting` for its own open turn, which stays open until the running call finishes. A proxied `authorization.completed` is not followed by a parent turn event. These parent events also invoke parent hooks; they do not resolve pending input requests.
 
 ## Hook vs tool vs provider
 

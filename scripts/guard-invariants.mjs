@@ -109,6 +109,13 @@
  *             `defineSandboxProvider()` and does not import sandbox runtime
  *             orchestration, registries, key derivation, or session state.
  *             Built-ins and authored providers must share one contract.
+ *   rule 45 — Provided tools under `packages/eve/src/tools/provided/**` import
+ *             only public eve entry points (the `#` specifiers of the
+ *             package's `exports`), the vendored Workflow SDK that authored
+ *             bodies import as `workflow`, and each other. eve is built on
+ *             eve: a provided tool that needs a private hook means authors
+ *             cannot build the same tool. Files that predate the rule are
+ *             baselined and may only leave the baseline.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -206,6 +213,7 @@ function isTsLike(relPath) {
  *   rule42: Violation[];
  *   rule43: Violation[];
  *   rule44: Violation[];
+ *   rule45: { allowlist: Set<string>; violations: Violation[] };
  *   symlinks: string[];
  * }} state
  */
@@ -237,6 +245,7 @@ async function scanRepo(state) {
     checkRule42(posix, lines, state.rule42);
     checkRule43(posix, lines, state.rule43);
     checkRule44(posix, lines, state.rule44);
+    checkRule45(posix, lines, state.rule45);
   }
 }
 
@@ -330,6 +339,75 @@ function checkRule44(posix, lines, violations) {
         message:
           "Legacy session import belongs at ingress; current execution must consume only normalized session state.",
       });
+  });
+}
+
+// ---------- Rule 45: provided tools use only public entry points ----------
+
+const PROVIDED_TOOLS_DIR = "packages/eve/src/tools/provided/";
+
+const EVE_PACKAGE_EXPORTS = require(join(REPO_ROOT, "packages/eve/package.json")).exports;
+const EXPORTED_TYPES_PATH_RE = /^\.\/dist\/src\/(.+)\.d\.ts$/;
+
+/**
+ * The `#` specifier eve's own source uses for one exported module, such as
+ * `#public/tools/index.js` for `eve/tools`.
+ *
+ * @param {unknown} target
+ */
+function toSourceSpecifier(target) {
+  if (typeof target !== "object" || target === null) return undefined;
+  const types = Reflect.get(target, "types");
+  if (typeof types !== "string") return undefined;
+  const match = EXPORTED_TYPES_PATH_RE.exec(types);
+  return match === null ? undefined : `#${match[1]}.js`;
+}
+
+const EVE_PUBLIC_ENTRY_SPECIFIERS = new Set(
+  Object.values(EVE_PACKAGE_EXPORTS)
+    .map(toSourceSpecifier)
+    .filter((specifier) => specifier !== undefined),
+);
+
+const PROVIDED_TOOL_EXTRA_IMPORTS = new Set([
+  // What an authored body imports as `workflow`: eve vendors the Workflow SDK.
+  "#compiled/@workflow/core/index.js",
+  // `defineJsonSchema` is not public yet, and provided tools declare schemas without zod.
+  "#tools/schema.js",
+]);
+
+// The task kernel's `task_wait` and `task_cancel` read the session's task table
+// directly. When they land, list their files here rather than in the baseline.
+const PROVIDED_KERNEL_TOOL_FILES = new Set();
+
+const IMPORT_SPECIFIER_RE = /(?:\bfrom\s+|\bimport\s*\(\s*|^\s*import\s+)["']([^"']+)["']/;
+
+/** @param {string} specifier */
+function isProvidedToolImportAllowed(specifier) {
+  if (EVE_PUBLIC_ENTRY_SPECIFIERS.has(specifier)) return true;
+  if (PROVIDED_TOOL_EXTRA_IMPORTS.has(specifier)) return true;
+  return specifier.startsWith("#tools/provided/") || specifier.startsWith("./");
+}
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {{ allowlist: Set<string>; violations: Violation[] }} state
+ */
+function checkRule45(posix, lines, state) {
+  if (!posix.startsWith(PROVIDED_TOOLS_DIR) || posix.endsWith(".test.ts")) return;
+  if (state.allowlist.has(posix) || PROVIDED_KERNEL_TOOL_FILES.has(posix)) return;
+  lines.forEach((line, idx) => {
+    // Doc comments show authors how to import the tool from its public entry.
+    if (/^\s*(?:\*|\/\/)/.test(line)) return;
+    const specifier = IMPORT_SPECIFIER_RE.exec(line)?.[1];
+    if (specifier === undefined || isProvidedToolImportAllowed(specifier)) return;
+    state.violations.push({
+      rule: 45,
+      file: posix,
+      line: idx + 1,
+      message: `imports "${specifier}", which is not a public eve entry point. Provided tools use only the API authors have: import from the matching entry in packages/eve/package.json "exports" (for example "#public/tools/index.js" for eve/tools), or make the capability public first.`,
+    });
   });
 }
 
@@ -1384,6 +1462,10 @@ async function main() {
     rule42: /** @type {Violation[]} */ ([]),
     rule43: /** @type {Violation[]} */ ([]),
     rule44: /** @type {Violation[]} */ ([]),
+    rule45: {
+      allowlist: new Set(baseline.rule45_providedToolPrivateImportAllowlist),
+      violations: /** @type {Violation[]} */ ([]),
+    },
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1494,6 +1576,9 @@ async function main() {
   for (const issue of await checkRule44SandboxProviders()) {
     violations.push({ rule: 44, ...issue });
   }
+
+  // Rule 45
+  violations.push(...state.rule45.violations);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

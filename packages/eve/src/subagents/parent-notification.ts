@@ -20,7 +20,6 @@ import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 const log = createLogger("execution.delegated-parent-notification");
 
@@ -186,7 +185,6 @@ export async function resolveInitialTurnCallerStep(input: {
         url: parsed.callback.url,
       },
       subagentName: parsed.callback.subagentName,
-      taskId: parsed.callback.taskId ?? readTaskIdFromInboxToken(parsed.callback.token),
     };
   }
 
@@ -200,7 +198,6 @@ export async function resolveInitialTurnCallerStep(input: {
     callId: adapter.state.callId,
     replyTo: { kind: "hook", token: adapter.state.parentContinuationToken },
     subagentName: adapter.state.subagentName,
-    taskId: adapter.state.taskId ?? readTaskIdFromInboxToken(adapter.state.parentContinuationToken),
   };
 }
 
@@ -224,11 +221,7 @@ export async function bindTurnCallerContextStep(input: {
       token: caller.replyTo.token,
       url: caller.replyTo.url,
     };
-    return {
-      ...withActivity,
-      [SessionCallbackKey.name]:
-        caller.taskId === undefined ? callback : { ...callback, taskId: caller.taskId },
-    };
+    return { ...withActivity, [SessionCallbackKey.name]: callback };
   }
 
   const adapter = withActivity[ChannelKey.name];
@@ -241,14 +234,12 @@ export async function bindTurnCallerContextStep(input: {
     throw new Error("Delegated local turn is missing its subagent adapter binding.");
   }
   const state = Reflect.get(adapter, "state") as SubagentAdapterState;
-  const { taskId: _priorTaskId, ...stateWithoutTaskId } = state;
-  const nextState: Record<string, unknown> = {
-    ...stateWithoutTaskId,
+  const nextState: SubagentAdapterState = {
+    ...state,
     callId: caller.callId,
     parentContinuationToken: caller.replyTo.token,
     subagentName: caller.subagentName,
   };
-  if (caller.taskId !== undefined) nextState.taskId = caller.taskId;
   return {
     ...withActivity,
     [ChannelKey.name]: {

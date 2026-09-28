@@ -9,9 +9,8 @@ import {
   SCHEDULE_APP_AUTH,
   ScheduleDispatcher,
 } from "#channel/schedule.js";
-import { buildRunContext } from "#execution/runtime-context.js";
 import { contextStorage } from "#context/container.js";
-import { ScheduleIdKey, TaskDeliveryPolicyKey } from "#context/keys.js";
+import { ScheduleIdKey } from "#context/keys.js";
 import type { RunHandle, Runtime } from "#channel/types.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
@@ -60,40 +59,6 @@ function makeSlackChannelEntry(): {
 }
 
 describe("ScheduleDispatcher", () => {
-  it.each([undefined, "auto", "cohort"] as const)(
-    "uses the schedule default unless send supplies %s",
-    async (taskDeliveryPolicy) => {
-      vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test");
-      vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
-      try {
-        const runtime = createMockRuntime();
-        const policies: unknown[] = [];
-        runtime.createSession = vi.fn(async (run) => {
-          policies.push(buildRunContext({ bundle: {} as never, run }).get(TaskDeliveryPolicyKey));
-          return createMockRunHandle();
-        });
-        const { definition, resolved } = makeSlackChannelEntry();
-        const result = await new ScheduleDispatcher({ runtime, channels: [resolved] }).trigger({
-          scheduleId: "daily-report",
-          run({ to, waitUntil, appAuth }) {
-            waitUntil(
-              Promise.resolve().then(() =>
-                to(definition, { channelId: "C0123ABC" }).send("Report", {
-                  auth: appAuth,
-                  taskDeliveryPolicy,
-                }),
-              ),
-            );
-          },
-        });
-        await Promise.all(result.waitUntilTasks);
-        expect(policies).toEqual([taskDeliveryPolicy ?? "cohort"]);
-      } finally {
-        vi.unstubAllEnvs();
-      }
-    },
-  );
-
   describe("markdown form", () => {
     it("starts a Session via runtime.createSession with the SCHEDULE_ADAPTER", async () => {
       const runtime = createMockRuntime();

@@ -1,5 +1,4 @@
 import type { RuntimeSession } from "#subagents/handle-dispatch.js";
-import type { TaskExecutorCancel } from "#execution/tasks/parent/task-cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -10,16 +9,6 @@ import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle
 import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.agent-invocation-cancel");
-
-/** Cancels child turns and their nested tasks still owned by a background task. */
-export const cancelBackgroundAgentTask: TaskExecutorCancel = async (input) => {
-  if (input.session === undefined || input.serializedContext === undefined) return;
-  await cancelAgentInvocationOwner({
-    ownerId: input.entry.task.taskId,
-    serializedContext: input.serializedContext,
-    session: input.session,
-  });
-};
 
 /** Cancels a child turn still claimed by a completed workflow-tool run. */
 export async function cancelAgentInvocationOwnerStep(input: {
@@ -54,7 +43,7 @@ async function cancelAgentInvocationOwner(input: {
   const results = await Promise.allSettled(
     handles.map(async (handle) => {
       if (handle.address.kind !== "agent/remote") {
-        await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId, tasks: true });
+        await requestWorkflowTurnCancellation({ sessionId: handle.address.sessionId });
         return;
       }
       remoteContext ??= deserializeContext(input.serializedContext);
@@ -70,7 +59,6 @@ async function cancelAgentInvocationOwner(input: {
       await cancelRemoteAgentTurn({
         remote: { ...remote, url: handle.address.url },
         sessionId: handle.address.sessionId,
-        tasks: true,
       });
     }),
   );

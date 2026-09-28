@@ -135,10 +135,9 @@ describe("cancelDescendantTurnsStep", () => {
             sessionStarted: true,
           },
           "eve.workflowTool": {
-            version: 3,
+            version: 4,
             runs: [
               {
-                lifetime: "turn",
                 callId: "call",
                 toolName: "research",
                 origin: { turnId: "turn_0", stepIndex: 0 },

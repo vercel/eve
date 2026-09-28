@@ -46,22 +46,22 @@ describe("createRuntimeToolRegistry", () => {
     });
   });
 
-  it("carries delegated-task-child availability into the prepared tool descriptor", async () => {
+  it("carries root-session availability into the prepared tool descriptor", async () => {
     const registry = await createRuntimeToolRegistry({
       tools: [
         createResolvedToolDefinition({
           behavior: {
-            availability: ["delegated-task-child"],
+            availability: ["root-session"],
           },
-          logicalPath: "tools/child_only.ts",
-          name: "child_only",
-          sourceId: "tools/child_only.ts",
+          logicalPath: "tools/root_only.ts",
+          name: "root_only",
+          sourceId: "tools/root_only.ts",
         }),
       ],
     });
 
     expect(registry.preparedTools[0]?.behavior).toEqual({
-      availability: ["delegated-task-child"],
+      availability: ["root-session"],
       handling: undefined,
       presentation: undefined,
     });

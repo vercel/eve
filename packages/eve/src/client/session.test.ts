@@ -144,7 +144,7 @@ describe("ClientSession", () => {
     expect(requests[1]!.headers.get("authorization")).toBe("Bearer token-2");
   });
 
-  it("sends tasks in the cancel body and uses signal only for fetch", async () => {
+  it("sends the turn id in the cancel body and uses signal only for fetch", async () => {
     const controller = new AbortController();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -153,14 +153,15 @@ describe("ClientSession", () => {
       );
     const session = createSession();
 
-    await expect(
-      session.cancel({ signal: controller.signal, tasks: true, turnId: "turn_1" }),
-    ).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+    await expect(session.cancel({ signal: controller.signal, turnId: "turn_1" })).resolves.toEqual({
+      sessionId: "session_1",
+      status: "accepted",
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const init = fetchMock.mock.calls[0]?.[1];
     expect(init?.signal).toBe(controller.signal);
-    expect(JSON.parse(String(init?.body))).toEqual({ tasks: true, turnId: "turn_1" });
+    expect(JSON.parse(String(init?.body))).toEqual({ turnId: "turn_1" });
   });
 
   it("snapshots the session from the start through one pinned durable tail", async () => {
@@ -580,19 +581,6 @@ describe("ClientSession", () => {
     });
   });
 
-  it("serializes taskDeliveryPolicy with a fixed-session message", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
-    const session = createSession();
-
-    await session.send("Wait your turn", { taskDeliveryPolicy: "cohort" });
-
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({
-      message: "Wait your turn",
-      taskDeliveryPolicy: "cohort",
-    });
-  });
-
   it("serializes clientContext when continuing a session", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession({
@@ -947,7 +935,7 @@ describe("ClientSession", () => {
       for await (const _event of session.stream()) {
         // Invalid events fail before delivery.
       }
-    }).rejects.toThrow("Invalid message append delta for stream version 25.");
+    }).rejects.toThrow("Invalid message append delta for stream version 26.");
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -1179,6 +1167,41 @@ describe("ClientSession", () => {
     expect(eventTypes).toEqual(["authorization.required", "session.waiting"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(session.state.streamIndex).toBe(2);
+  });
+
+  it("stops at turn.waiting only while a question it read is unanswered", async () => {
+    const turn = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
+    const question = (requestId: string) => ({
+      action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
+      kind: "question",
+      prompt: "Deploy now?",
+      requestId,
+    });
+    const answered = { kind: "question", outcome: "answered", requestId: "request_1" };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) =>
+      (init?.method ?? "GET") === "POST"
+        ? createAcceptedResponse()
+        : createStreamResponse([
+            { type: "input.requested", data: { ...turn, requests: [question("request_1")] } },
+            { type: "input.resolved", data: { ...turn, resolutions: [answered] } },
+            { type: "turn.waiting", data: { sequence: 0, turnId: "turn_0" } },
+            { type: "input.requested", data: { ...turn, requests: [question("request_2")] } },
+            { type: "turn.waiting", data: { sequence: 0, turnId: "turn_0" } },
+            { type: "turn.completed", data: { sequence: 0, turnId: "turn_0" } },
+          ]),
+    );
+
+    const result = await (await createSession().send("first")).result();
+
+    expect(result.events.map((event) => event.type)).toEqual([
+      "input.requested",
+      "input.resolved",
+      "turn.waiting",
+      "input.requested",
+      "turn.waiting",
+    ]);
+    expect(result.status).toBe("waiting");
+    expect(result.inputRequests.at(-1)?.requestId).toBe("request_2");
   });
 
   it("honors an explicit idle reconnect limit for an active turn", async () => {
@@ -1428,16 +1451,6 @@ describe("ClientSession.streamSubagent", () => {
     }
 
     expect(urls[0]!.pathname).toBe("/eve/v1/session/child_1/stream");
-  });
-
-  it("rejects a subagent event from a different parent session", () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch");
-    const session = createSession();
-
-    expect(() => session.streamSubagent(calledEvent({ sessionId: "session_2" }))).toThrow(
-      "streamSubagent() requires a subagent.called event from session session_1, but it came from session session_2.",
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects a subagent event recorded before childStreamPath existed", () => {

@@ -1,11 +1,15 @@
-import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
-
+import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type {
-  WorkflowToolRunOwner,
+  WorkflowToolRunAskDecision,
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+import type { WorkflowToolRunInbox } from "#execution/tools/workflow/owner.js";
+import type {
+  ToolContext,
+  ToolInputRequest,
+  ToolInputRequestOptions,
+  ToolInputResponse,
+} from "#tools/definition.js";
 import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
 // `Symbol.for`, not a module-local WeakMap: workflow helpers and body setup may
@@ -13,9 +17,16 @@ import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.j
 const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
 
 export interface WorkflowToolRunContext {
-  readonly canRequestInput?: boolean;
+  /**
+   * What the run's caller lends it: the lineage and principal `ctx.agent`
+   * sessions run with, and whether `ctx.ask()` can reach a person.
+   */
+  readonly agentContext: AgentSessionContext;
+  readonly asks: WorkflowToolRunAsks;
+  /** The run's control hook, where the session sends its decisions on the run's questions. */
+  readonly control: string;
   readonly from: WorkflowToolRunRef;
-  readonly owner: WorkflowToolRunOwner;
+  readonly owner: WorkflowToolRunInbox;
 }
 
 type WorkflowToolRunContextCarrier = {
@@ -53,23 +64,113 @@ export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
   return readWorkflowToolRunContext(ctx, "agent").from;
 }
 
-export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner {
+export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunInbox {
   return readWorkflowToolRunContext(ctx, "agent").owner;
 }
 
-/** Returns an answer which may be awaited or raced with another workflow operation. */
+const CANCELLED: ToolInputResponse = { status: "cancelled" };
+const UNAVAILABLE: ToolInputResponse = { status: "unavailable" };
+
+interface PendingAsk {
+  readonly resolve: (response: ToolInputResponse) => void;
+  readonly reject: (error: unknown) => void;
+}
+
+/**
+ * The run's pending `ctx.ask()` questions. The run names each one, and each
+ * resolves only from what the session decided about it, delivered in order on
+ * the run's control hook, or as `cancelled` once the session stops the work.
+ */
+export class WorkflowToolRunAsks {
+  private opened = 0;
+  private readonly pending = new Map<string, PendingAsk>();
+  private readonly runId: string;
+
+  constructor(runId: string) {
+    this.runId = runId;
+  }
+
+  /** Opens a question under a request ID that replays deterministically with the run. */
+  open(): { readonly answer: Promise<ToolInputResponse>; readonly requestId: string } {
+    this.opened += 1;
+    const requestId = `${this.runId}-ask-${String(this.opened)}`;
+    const answer = new Promise<ToolInputResponse>((resolve, reject) => {
+      this.pending.set(requestId, { reject, resolve });
+    });
+    return { answer, requestId };
+  }
+
+  isPending(requestId: string): boolean {
+    return this.pending.has(requestId);
+  }
+
+  /** Applies the session's decision. The first one wins; a repeated one is dropped. */
+  settle(decision: WorkflowToolRunAskDecision): void {
+    const response = decision.kind === "answer" ? decision.response : CANCELLED;
+    this.take(decision.requestId)?.resolve(response);
+  }
+
+  fail(requestId: string, error: unknown): void {
+    this.take(requestId)?.reject(error);
+  }
+
+  /** The session stopped the work, so it answers none of its questions anymore. */
+  cancelAll(): void {
+    for (const requestId of this.pending.keys()) {
+      this.take(requestId)?.resolve(CANCELLED);
+    }
+  }
+
+  private take(requestId: string): PendingAsk | undefined {
+    const pending = this.pending.get(requestId);
+    this.pending.delete(requestId);
+    return pending;
+  }
+}
+
+/**
+ * Returns an answer which may be awaited or raced with another workflow
+ * operation. When the call's `abortSignal` or `options.signal` aborts, the run
+ * asks the session to withdraw the question. The answer is `cancelled` only if
+ * the session withdrew it before it accepted a person's answer.
+ */
 export function ask(
   ctx: ToolContext,
   request: ToolInputRequest,
-): Hook<ToolInputResponse> | Promise<ToolInputResponse> {
+  options: ToolInputRequestOptions = {},
+): Promise<ToolInputResponse> {
   const context = readWorkflowToolRunContext(ctx, "ask");
-  if (context.canRequestInput === false) return Promise.resolve({ status: "unavailable" });
-  const answer = createHook<ToolInputResponse>();
-  void resumeHookStep(context.owner.inbox, {
+  // A caller that can't reach a person resolves `ctx.ask()` as `unavailable`.
+  if (context.agentContext.capabilities?.requestInput !== true) {
+    return Promise.resolve(UNAVAILABLE);
+  }
+  const signals = [ctx.abortSignal];
+  if (options.signal !== undefined) signals.push(options.signal);
+  if (signals.some((signal) => signal.aborted)) return Promise.resolve(CANCELLED);
+
+  const { asks, control, owner } = context;
+  const { answer, requestId } = asks.open();
+  const from = context.from;
+  const sent = owner.send({
     kind: "request",
-    from: context.from,
-    replyTo: answer.token,
-    request: { kind: "ask", request },
+    from,
+    replyTo: requestId,
+    request: { control, kind: "ask", request },
   });
-  return answer;
+  sent.catch((error: unknown) => asks.fail(requestId, error));
+
+  const requestWithdrawal = (): void => {
+    if (!asks.isPending(requestId)) return;
+    // The withdrawal must not overtake the request it withdraws.
+    const withdrawal = sent.then(() =>
+      owner.send({ control, from, kind: "withdraw", replyTo: requestId }),
+    );
+    withdrawal.catch((error: unknown) => asks.fail(requestId, error));
+  };
+  for (const signal of signals) {
+    signal.addEventListener("abort", requestWithdrawal, { once: true });
+  }
+  return answer.finally(() => {
+    for (const signal of signals) signal.removeEventListener("abort", requestWithdrawal);
+  });
 }

@@ -30,7 +30,8 @@ describe("sleep", () => {
         }),
     );
     const definition = sleep();
-    const output = definition.execute({ seconds: 2.5001 }, {} as never);
+    const interruptSignal = new AbortController().signal;
+    const output = definition.execute({ seconds: 2.5001 }, { interruptSignal } as never);
 
     await vi.waitFor(() => {
       expect(workflowSleep).toHaveBeenCalledExactlyOnceWith(2_501);

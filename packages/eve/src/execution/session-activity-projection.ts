@@ -3,7 +3,6 @@ import {
   ActivityObserverKey,
   ActivityPendingBlockersKey,
   ActivityRootTurnIdKey,
-  TurnTaskDeliveryKey,
 } from "#context/keys.js";
 import { projectActivityEvents } from "#execution/activity-events.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
@@ -19,22 +18,12 @@ export async function observeSessionActivity(input: {
 }): Promise<void> {
   const observer = input.ctx.get(ActivityObserverKey);
   if (observer === undefined) return;
-  const taskDelivery = input.ctx.get(TurnTaskDeliveryKey);
-  if (
-    observer.workIdentity === undefined &&
-    input.ctx.get(ActivityRootTurnIdKey) === undefined &&
-    (taskDelivery === "pending" || taskDelivery === "settled")
-  )
-    return;
   await submitActivity({
     events: projectSessionActivity({
       event: input.event,
       rootTurnId: input.ctx.get(ActivityRootTurnIdKey),
       sessionId: input.sessionId,
-      suppressRootSettlement:
-        taskDelivery === "initiating" ||
-        taskDelivery === "pending" ||
-        (input.ctx.get(ActivityPendingBlockersKey)?.length ?? 0) > 0,
+      suppressRootSettlement: (input.ctx.get(ActivityPendingBlockersKey)?.length ?? 0) > 0,
       workIdentity: observer.workIdentity,
     }),
     sink: observer.sink,

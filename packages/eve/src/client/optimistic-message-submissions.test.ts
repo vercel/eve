@@ -43,20 +43,6 @@ describe("OptimisticMessageSubmissions", () => {
     expect(projection.data.messages.some((message) => message.metadata?.optimistic)).toBe(false);
   });
 
-  it("does not reconcile framework-authored task input", () => {
-    const { projection, submissions } = setup();
-    const id = submissions.submit({ message: "Hello" }, 0)!;
-    submissions.correlate(id, "mine", []);
-    const taskWake = received("Task completed", ["mine"]);
-    submissions.apply({
-      ...taskWake,
-      data: { ...taskWake.data, kind: "execution.background_task" },
-    });
-
-    expect(projection.data.messages).toHaveLength(1);
-    expect(projection.data.messages[0]?.metadata?.optimistic).toBe(true);
-  });
-
   it("reconciles events that arrive before the POST response", () => {
     const { projection, submissions } = setup();
     const id = submissions.submit({ message: "Hello" }, 0)!;

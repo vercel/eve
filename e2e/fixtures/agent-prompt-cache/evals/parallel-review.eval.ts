@@ -1,4 +1,3 @@
-import { taskReceipts } from "@eve-e2e/config/task-receipts";
 import assert from "node:assert/strict";
 import { defineEval, type EveEvalContext, type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
@@ -32,17 +31,17 @@ export default ["first", "later"].map((launchTurn) =>
           ? `Bob has the purchasing sheets ready for the event we just discussed.\n\n${reviewPacket()}`
           : reviewPacket(),
       );
-      const taskIds = expectFiveReviewers(started);
-      const turns = await waitForReviews(t, started, taskIds);
-      await expectParallelReviews(t, turns);
-      expectCacheReuse(t, turns);
+      expectFiveReviewers(started);
+      expectReviewSummary(started);
+      await expectParallelReviews(t, started);
+      expectCacheReuse(t, started);
     },
   }),
 );
 
 function expectFiveReviewers(started: EveEvalTurn) {
   expectHealthyTurn(started);
-  started.calledSubagent("reviewer", { status: "working", count: 5 });
+  started.calledSubagent("reviewer", { status: "completed", count: 5 });
   const launchSteps = started.events
     .filter((event) => event.type === "actions.requested")
     .flatMap(({ data }) =>
@@ -52,49 +51,16 @@ function expectFiveReviewers(started: EveEvalTurn) {
     );
   assert.equal(launchSteps.length, 5, "five reviewer requests");
   assert.equal(new Set(launchSteps).size, 1, "all five reviewers launch in one model step");
-
-  const taskIds = taskReceipts(started.events).map(({ taskId }) => taskId);
-  assert.equal(taskIds.length, 5, "five background task receipts");
-  assert.equal(new Set(taskIds).size, 5, "five distinct background tasks");
-  return taskIds;
 }
 
-async function waitForReviews(t: EveEvalContext, started: EveEvalTurn, taskIds: string[]) {
-  const turns = [started];
-  let cursor = started.session.state.streamIndex;
-  for (let attempt = 0; attempt < 10 && !allCompleted(turns, taskIds); attempt += 1) {
-    assert(cursor !== undefined, "parent stream cursor is present");
-    const live = t.target.watchTurn(started.sessionId, { startIndex: cursor });
-    const turn = await live.result();
-    expectHealthyTurn(turn);
-    turns.push(turn);
-    cursor = live.session.state?.streamIndex;
-  }
-  assert(allCompleted(turns, taskIds), "all five completion notifications reach the parent");
-  assert(turns.length > 1, "background completion wakes the parent");
-  const final = turns.at(-1)!;
-  assert(final.message?.trim(), "parent reports the completed reviews");
-  final.event("step.completed", { data: { finishReason: "stop" }, count: 1 });
-  for (const turn of turns) turn.notEvent("compaction.completed");
-  return turns;
+function expectReviewSummary(turn: EveEvalTurn) {
+  assert(turn.message?.trim(), "parent reports the completed reviews");
+  turn.event("step.completed", { data: { finishReason: "stop" }, count: 1 });
+  turn.notEvent("compaction.completed");
 }
 
-function allCompleted(turns: EveEvalTurn[], taskIds: string[]) {
-  const messages = turns
-    .flatMap((turn) => turn.events)
-    .filter((event) => event.type === "message.received")
-    .map(({ data }) => data.message);
-  return taskIds.every((id) =>
-    messages.some(
-      (message) =>
-        message.includes(`Background task ${id} (`) && message.includes(" is completed."),
-    ),
-  );
-}
-
-async function expectParallelReviews(t: EveEvalContext, turns: EveEvalTurn[]) {
-  const calls = turns
-    .flatMap((turn) => turn.events)
+async function expectParallelReviews(t: EveEvalContext, turn: EveEvalTurn) {
+  const calls = turn.events
     .filter((event) => event.type === "subagent.called")
     .filter(({ data }) => data.name === "reviewer");
   const childIds = calls.map(({ data }) => data.childSessionId);
@@ -124,11 +90,9 @@ function expectHealthyTurn(turn: EveEvalTurn) {
   );
 }
 
-function expectCacheReuse(t: EveEvalContext, turns: EveEvalTurn[]) {
-  const steps = turns
-    .flatMap((turn) => turn.events)
-    .filter((event) => event.type === "step.completed");
-  assert(steps.length >= 3, "multiple parent requests exercise cache reuse");
+function expectCacheReuse(t: EveEvalContext, turn: EveEvalTurn) {
+  const steps = turn.events.filter((event) => event.type === "step.completed");
+  assert(steps.length >= 2, "multiple parent requests exercise cache reuse");
   assert(
     (steps[0]?.data.usage?.inputTokens ?? 0) >= 4_096,
     "review packet is large enough for conversation caching",
@@ -160,6 +124,12 @@ The budget for the weekend was agreed at the last committee meeting. It covers m
 
 Accessibility is part of every room plan. The hall and the studio have step-free access from the side entrance, and the meeting rooms share a ramp from the garden path. Tutors keep one table in each room clear of stools for visitors who use wheelchairs, and printed instructions come in a larger type size on request. The front desk keeps a short list of quiet spaces for anyone who needs a break from the busier sessions.
 
+Supplies arrive in two deliveries. The first comes on Thursday afternoon with paper, paint, clay, and the printed signs, and the caretaker signs for it at the side entrance. The second comes on Friday morning with the hired easels, the portable kiln, and the extra folding tables. Bob checks each delivery against the order confirmation, notes any missing items on the budget sheet, and tells Alice before the end of the day so the tutors can adjust their plans if something is late.
+
+Each workshop has a named tutor and one volunteer helper. The tutor sets up the room before the first session, explains the safety notes for any tools or materials, and keeps an eye on the time so each group finishes promptly. The helper hands out materials, keeps the tables tidy between sessions, and fetches anything the tutor needs from the storeroom. At the end of each day the tutors leave a short note in the office about what went well, what ran short, and anything that should be ordered differently next time.
+
+Planning before the event happens through a shared noticeboard in the office and a weekly email from Alice. The email lists the confirmed workshops, the number of places booked so far, and any changes to rooms or times. Tutors reply with their final materials lists by the Monday before the event, which gives Bob enough time to place the last orders and confirm delivery slots with the suppliers.
+
 After the event, volunteers pack away the reusable materials, count what remains, and label the storeroom shelves so the next programme can start from an accurate inventory. The committee would like each review to be practical and brief, focused on whether the current plan works as written rather than on redesigning the weekend.`;
 
 function reviewPacket(): string {
@@ -168,5 +138,5 @@ function reviewPacket(): string {
       (sheet, index) => `Sheet ${index + 1}: ${sheet.title}\n${sheet.question}\n\n${sheet.notes}`,
     )
     .join("\n\n");
-  return `Alice and Bob are preparing a community centre event. Please assign these five sheets to five reviewers so they can work in parallel. Each reviewer has access to the stored sheets and their review questions, so the sheet number is enough for its assignment. Let Alice know when the reviews are underway, then give Bob a brief summary once their findings are available.\n\n${EVENT_OVERVIEW}\n\n${sheets}`;
+  return `Alice and Bob are preparing a community centre event. Please assign these five sheets to five reviewers so they can work in parallel. Each reviewer has access to the stored sheets and their review questions, so the sheet number is enough for its assignment. Once their findings are available, give Bob a brief summary.\n\n${EVENT_OVERVIEW}\n\n${sheets}`;
 }

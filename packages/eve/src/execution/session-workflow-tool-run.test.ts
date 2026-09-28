@@ -25,7 +25,6 @@ it("settles the agent request once and treats workflow completion as an ordinary
   const session = registerWorkflowToolRun(sessionState.snapshot.session, {
     callId: "call",
     toolName: "agent",
-    lifetime: "turn",
     origin: { turnId: "turn", stepIndex: 0 },
     address: { runId: "run", hookToken: "control" },
   });

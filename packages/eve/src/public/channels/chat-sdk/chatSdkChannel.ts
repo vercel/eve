@@ -8,7 +8,7 @@ import {
 } from "#channel/channel-operations.js";
 import { normalizeSendInput } from "#channel/send-input.js";
 import type { SendPayload } from "#channel/routes.js";
-import type { SessionAuthContext, TurnPolicy, TaskDeliveryPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
@@ -140,8 +140,6 @@ export type ChatSdkChannelEvents<TAdapters extends ChatSdkAdapters = ChatSdkAdap
 export interface ChatSdkSendOptions {
   readonly auth?: SessionAuthContext | null;
   readonly callback?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["callback"];
-  /** Updates the session policy; omission preserves it. */
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly thread: SerializedThread | Thread | string;
   readonly title?: string;
   /**
@@ -579,8 +577,6 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   if (options.callback !== undefined) deliveryOptions.callback = options.callback;
   if (options.title !== undefined) deliveryOptions.title = options.title;
   if (options.turnPolicy !== undefined) deliveryOptions.turnPolicy = options.turnPolicy;
-  if (options.taskDeliveryPolicy !== undefined)
-    deliveryOptions.taskDeliveryPolicy = options.taskDeliveryPolicy;
   const source = active.from(thread.id) as InternalChannelSource<ChatSdkChannelState>;
   return source[INTERNAL_CHANNEL_DELIVER](payload, deliveryOptions);
 }

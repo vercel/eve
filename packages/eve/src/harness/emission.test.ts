@@ -14,9 +14,7 @@ import {
   getTurnClientContextState,
   setTurnClientContextState,
 } from "#harness/turn-client-context.js";
-import { markFrameworkStepInput } from "#harness/messages.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
-import { EMPTY_DELIVERY_SENTINEL } from "#shared/empty-delivery.js";
 
 async function* streamOf(parts: TextStreamPart<ToolSet>[]): AsyncIterable<TextStreamPart<ToolSet>> {
   for (const part of parts) {
@@ -152,30 +150,6 @@ describe("setHarnessEmissionState", () => {
 });
 
 describe("emitTurnPreamble", () => {
-  it("marks framework-authored task input as non-participant stream activity", async () => {
-    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
-
-    await emitTurnPreamble(
-      async (event) => {
-        events.push(event);
-      },
-      markFrameworkStepInput(
-        { message: "Framework-authored task state" },
-        "execution.background_task",
-      ),
-      { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
-      [],
-    );
-
-    expect(events).toEqual([
-      expect.objectContaining({ type: "turn.started" }),
-      expect.objectContaining({
-        data: expect.objectContaining({ kind: "execution.background_task" }),
-        type: "message.received",
-      }),
-    ]);
-  });
-
   it("keeps participant messages visible", async () => {
     const events: Array<Parameters<HarnessEmitFn>[0]> = [];
 
@@ -183,7 +157,7 @@ describe("emitTurnPreamble", () => {
       async (event) => {
         events.push(event);
       },
-      { message: "Start background work" },
+      { message: "Start the work" },
       { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
       [],
     );
@@ -260,87 +234,6 @@ describe("emitStreamContent empty delivery", () => {
     );
     expect(events.at(-1)?.type).toBe("message.completed");
   });
-
-  it("streams a split sentinel immediately and completes with a null message", async () => {
-    const emit = createEmitStub();
-
-    await emitStreamContent(
-      emit,
-      EMISSION_STATE,
-      streamOf([
-        { id: "text-1", text: "  <eve-empty", type: "text-delta" },
-        { id: "text-1", text: "-delivery/>  ", type: "text-delta" },
-        { finishReason: "stop", type: "finish-step" },
-      ] as TextStreamPart<ToolSet>[]),
-    );
-
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.map((event) => event.type)).toEqual([
-      "message.appended",
-      "message.appended",
-      "message.completed",
-    ]);
-    expect(events[0]).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({ messageDelta: "  <eve-empty" }),
-      }),
-    );
-    expect(events.at(-1)).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({ finishReason: "stop", message: null }),
-      }),
-    );
-  });
-
-  it("preserves normal text that initially resembles the sentinel", async () => {
-    const emit = createEmitStub();
-    const message = "<eve-empty-delivery is not a marker";
-
-    await emitStreamContent(
-      emit,
-      EMISSION_STATE,
-      streamOf([
-        { id: "text-1", text: "<eve-empty", type: "text-delta" },
-        { id: "text-1", text: "-delivery is not a marker", type: "text-delta" },
-        { finishReason: "stop", type: "finish-step" },
-      ] as TextStreamPart<ToolSet>[]),
-    );
-
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.filter((event) => event.type === "message.appended")).toHaveLength(2);
-    expect(events.at(-1)).toEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({ message }),
-        type: "message.completed",
-      }),
-    );
-  });
-
-  it.each([EMPTY_DELIVERY_SENTINEL, "&lt;eve-empty-delivery/&gt;"])(
-    "delivers explanations that quote %s across streamed deltas",
-    async (sentinel) => {
-      const emit = createEmitStub();
-      const deltas = ["The pending-task instruction requires `", sentinel, "` and no other text."];
-      const message = deltas.join("");
-
-      await emitStreamContent(
-        emit,
-        EMISSION_STATE,
-        streamOf([
-          ...deltas.map((text) => ({ id: "text-1", text, type: "text-delta" })),
-          { finishReason: "stop", type: "finish-step" },
-        ] as TextStreamPart<ToolSet>[]),
-      );
-
-      const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-      expect(events.at(-1)).toEqual(
-        expect.objectContaining({
-          data: expect.objectContaining({ message }),
-          type: "message.completed",
-        }),
-      );
-    },
-  );
 });
 
 describe("emitStreamContent action requests", () => {
@@ -716,53 +609,6 @@ describe("emitStreamContent action requests", () => {
       "message.appended",
       "message.completed",
     ]);
-  });
-
-  it("returns a background receipt without announcing subagent completion", async () => {
-    const emit = createEmitStub();
-    const tools = new Map<string, HarnessToolDefinition>([
-      [
-        "delegate",
-        {
-          description: "Delegate work to a subagent.",
-          execution: "background",
-          inputSchema: jsonSchema({ type: "object" }),
-          name: "delegate",
-          nodeId: "subagents/researcher",
-          workflowId: "workflow//./agent/subagents/researcher//execute",
-        },
-      ],
-    ]);
-
-    await emitStreamContent(
-      emit,
-      EMISSION_STATE,
-      streamOf([
-        {
-          input: { message: "research the release" },
-          toolCallId: "call-delegate",
-          toolName: "delegate",
-          type: "tool-call",
-        },
-        {
-          output: { status: "working", taskId: "task-1" },
-          toolCallId: "call-delegate",
-          toolName: "delegate",
-          type: "tool-result",
-        },
-        { finishReason: "tool-calls", type: "finish-step" },
-      ] as TextStreamPart<ToolSet>[]),
-      { excludedActionToolNames: new Set(), tools },
-    );
-
-    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.map((event) => event.type)).toEqual(["actions.requested", "action.result"]);
-    expect(events[1]).toMatchObject({
-      data: {
-        result: { callId: "call-delegate", output: { status: "working", taskId: "task-1" } },
-      },
-      type: "action.result",
-    });
   });
 
   it("does not fail tool streaming when label projections throw", async () => {

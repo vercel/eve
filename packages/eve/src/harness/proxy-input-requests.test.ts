@@ -11,6 +11,8 @@ import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { InputRequest, InputRequestKind } from "#shared/input.js";
 import type { HarnessSession } from "#harness/types.js";
 
+const REQUEST_EVENT = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
+
 function createSession(state?: Record<string, unknown>): HarnessSession {
   return {
     agent: {
@@ -39,7 +41,9 @@ describe("upsertProxyInputRequests", () => {
   it("records a fresh batch of proxy entries", () => {
     const session = createSession();
     const next = upsertProxyInputRequests({
-      entries: [["req-1", { childContinuationToken: "child-a", kind: "question" }]],
+      entries: [
+        ["req-1", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
+      ],
       forChildContinuationToken: "child-a",
       session,
     });
@@ -47,50 +51,24 @@ describe("upsertProxyInputRequests", () => {
     expect(hasProxyInputRequests(next.state)).toBe(true);
     expect(getProxyInputRequests(next.state).get("req-1")).toEqual({
       childContinuationToken: "child-a",
+      event: REQUEST_EVENT,
       kind: "question",
     });
-  });
-
-  it("round-trips task ownership without exposing malformed ownership as an unscoped route", () => {
-    const next = upsertProxyInputRequests({
-      entries: [
-        [
-          "task-1:req-1",
-          {
-            childContinuationToken: "child-a",
-            childRequestId: "req-1",
-            kind: "question",
-            taskId: "task-1",
-          },
-        ],
-      ],
-      forChildContinuationToken: "child-a",
-      session: createSession(),
-    });
-    expect(getProxyInputRequests(next.state).get("task-1:req-1")).toEqual({
-      childContinuationToken: "child-a",
-      childRequestId: "req-1",
-      kind: "question",
-      taskId: "task-1",
-    });
-    expect(
-      getProxyInputRequests({
-        "eve.runtime.proxyInputRequests": {
-          "req-1": { childContinuationToken: "child-a", kind: "question", taskId: 42 },
-        },
-      }).size,
-    ).toBe(0);
   });
 
   it("replaces prior entries for the same child continuation token", () => {
     let session = upsertProxyInputRequests({
-      entries: [["req-1", { childContinuationToken: "child-a", kind: "question" }]],
+      entries: [
+        ["req-1", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
+      ],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
     session = upsertProxyInputRequests({
-      entries: [["req-2", { childContinuationToken: "child-a", kind: "question" }]],
+      entries: [
+        ["req-2", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
+      ],
       forChildContinuationToken: "child-a",
       session,
     });
@@ -100,6 +78,7 @@ describe("upsertProxyInputRequests", () => {
     expect(entries.get("req-1")).toBeUndefined();
     expect(entries.get("req-2")).toEqual({
       childContinuationToken: "child-a",
+      event: REQUEST_EVENT,
       kind: "question",
     });
   });
@@ -107,34 +86,46 @@ describe("upsertProxyInputRequests", () => {
   it("drops a prior child's batch when its request ID is claimed by another child", () => {
     let session = upsertProxyInputRequests({
       entries: [
-        ["req-1", { childContinuationToken: "child-a", kind: "question" }],
-        ["req-2", { childContinuationToken: "child-a", kind: "question" }],
+        ["req-1", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
+        ["req-2", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
       ],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
     session = upsertProxyInputRequests({
-      entries: [["req-1", { childContinuationToken: "child-b", kind: "tool-approval" }]],
+      entries: [
+        [
+          "req-1",
+          { childContinuationToken: "child-b", event: REQUEST_EVENT, kind: "tool-approval" },
+        ],
+      ],
       forChildContinuationToken: "child-b",
       session,
     });
 
     expect(Object.fromEntries(getProxyInputRequests(session.state))).toEqual({
-      "req-1": { childContinuationToken: "child-b", kind: "tool-approval" },
-      "req-2": { childContinuationToken: "child-a", kind: "question" },
+      "req-1": { childContinuationToken: "child-b", event: REQUEST_EVENT, kind: "tool-approval" },
+      "req-2": { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" },
     });
   });
 
   it("keeps entries from other children when upserting", () => {
     let session = upsertProxyInputRequests({
-      entries: [["req-a", { childContinuationToken: "child-a", kind: "question" }]],
+      entries: [
+        ["req-a", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
+      ],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
     session = upsertProxyInputRequests({
-      entries: [["req-b", { childContinuationToken: "child-b", kind: "tool-approval" }]],
+      entries: [
+        [
+          "req-b",
+          { childContinuationToken: "child-b", event: REQUEST_EVENT, kind: "tool-approval" },
+        ],
+      ],
       forChildContinuationToken: "child-b",
       session,
     });
@@ -143,10 +134,12 @@ describe("upsertProxyInputRequests", () => {
     expect(entries.size).toBe(2);
     expect(entries.get("req-a")).toEqual({
       childContinuationToken: "child-a",
+      event: REQUEST_EVENT,
       kind: "question",
     });
     expect(entries.get("req-b")).toEqual({
       childContinuationToken: "child-b",
+      event: REQUEST_EVENT,
       kind: "tool-approval",
     });
   });
@@ -203,6 +196,7 @@ describe("toProxyInputRequestEntries", () => {
             requestIds: ["question-1", "approval-1"],
           },
           childContinuationToken: "child-a",
+          event: { sequence: 3, stepIndex: 2, turnId: "turn-1" },
           kind: "question",
           question: {},
         },
@@ -215,6 +209,7 @@ describe("toProxyInputRequestEntries", () => {
             requestIds: ["question-1", "approval-1"],
           },
           childContinuationToken: "child-a",
+          event: { sequence: 3, stepIndex: 2, turnId: "turn-1" },
           kind: "tool-approval",
         },
       ],
@@ -225,13 +220,20 @@ describe("toProxyInputRequestEntries", () => {
 describe("clearProxyInputRequestsForChild", () => {
   it("removes only the target child's entries", () => {
     let session = upsertProxyInputRequests({
-      entries: [["req-a", { childContinuationToken: "child-a", kind: "question" }]],
+      entries: [
+        ["req-a", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
+      ],
       forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
     session = upsertProxyInputRequests({
-      entries: [["req-b", { childContinuationToken: "child-b", kind: "tool-approval" }]],
+      entries: [
+        [
+          "req-b",
+          { childContinuationToken: "child-b", event: REQUEST_EVENT, kind: "tool-approval" },
+        ],
+      ],
       forChildContinuationToken: "child-b",
       session,
     });
@@ -242,6 +244,7 @@ describe("clearProxyInputRequestsForChild", () => {
     expect(entries.size).toBe(1);
     expect(entries.get("req-b")).toEqual({
       childContinuationToken: "child-b",
+      event: REQUEST_EVENT,
       kind: "tool-approval",
     });
   });
@@ -263,15 +266,16 @@ describe("getProxyInputRequests type safety", () => {
     const session = createSession({
       "eve.runtime.proxyInputRequests": {
         "req-1": 42,
-        "req-2": { childContinuationToken: 42, kind: "question" },
+        "req-2": { childContinuationToken: 42, event: REQUEST_EVENT, kind: "question" },
         "req-3": { childContinuationToken: "child-c", kind: "other" },
-        "req-4": { childContinuationToken: "child-d", kind: "question" },
+        "req-4": { childContinuationToken: "child-d", event: REQUEST_EVENT, kind: "question" },
       },
     });
     const entries = getProxyInputRequests(session.state);
     expect(entries.size).toBe(1);
     expect(entries.get("req-4")).toEqual({
       childContinuationToken: "child-d",
+      event: REQUEST_EVENT,
       kind: "question",
     });
   });
@@ -286,59 +290,22 @@ describe("getProxyInputRequests type safety", () => {
   it("keeps legacy routes and ignores malformed optional batch metadata", () => {
     const session = createSession({
       "eve.runtime.proxyInputRequests": {
-        legacy: { childContinuationToken: "child-a", kind: "question" },
+        legacy: { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" },
         malformed: {
           batch: { approvalRequestIds: ["other"], requestIds: ["malformed"] },
           childContinuationToken: "child-a",
+          event: REQUEST_EVENT,
           kind: "tool-approval",
         },
       },
     });
 
     expect([...getProxyInputRequests(session.state)]).toEqual([
-      ["legacy", { childContinuationToken: "child-a", kind: "question" }],
-      ["malformed", { childContinuationToken: "child-a", kind: "tool-approval" }],
+      ["legacy", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
+      [
+        "malformed",
+        { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "tool-approval" },
+      ],
     ]);
   });
-
-  it("accepts HTTPS child response URLs", () => {
-    expect(readChildResponseUrl("https://remote.example/eve/v1/task-input/token")).toBe(
-      "https://remote.example/eve/v1/task-input/token",
-    );
-  });
-
-  it.each([
-    "http://localhost:3000/eve/v1/task-input/token",
-    "http://worker.localhost:3000/eve/v1/task-input/token",
-    "http://127.0.0.1:3000/eve/v1/task-input/token",
-    "http://127.0.0.2:3000/eve/v1/task-input/token",
-    "http://[::1]:3000/eve/v1/task-input/token",
-    "http://[::ffff:7f00:1]:3000/eve/v1/task-input/token",
-  ])("accepts an HTTP loopback child response URL: %s", (url) => {
-    expect(readChildResponseUrl(url)).toBe(url);
-  });
-
-  it.each([
-    "http://remote.example/eve/v1/task-input/token",
-    "http://10.0.0.1/eve/v1/task-input/token",
-    "http://localhost.example/eve/v1/task-input/token",
-    "ftp://localhost/eve/v1/task-input/token",
-    "not a URL",
-  ])("rejects a non-HTTPS, non-loopback, or malformed child response URL: %s", (url) => {
-    expect(readChildResponseUrl(url)).toBeUndefined();
-  });
 });
-
-function readChildResponseUrl(childResponseUrl: string): string | undefined {
-  return getProxyInputRequests({
-    "eve.runtime.proxyInputRequests": {
-      "task-1:req-1": {
-        childContinuationToken: "child-a",
-        childRequestId: "req-1",
-        childResponseUrl,
-        kind: "question",
-        taskId: "task-1",
-      },
-    },
-  }).get("task-1:req-1")?.childResponseUrl;
-}

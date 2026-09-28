@@ -8,7 +8,7 @@ import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
 import type { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import type { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
-import type { SessionEventSink } from "#execution/session/event-sink.js";
+import type { SessionEventSink } from "#execution/publish-session-events.js";
 import { throwIfTurnAborted, TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { HookEventType } from "#public/definitions/hook.js";
@@ -25,6 +25,7 @@ const HOOK_CANCELLABLE_EVENTS = {
   "action.partial": true,
   "action.result": true,
   "actions.requested": true,
+  "agent.started": false,
   "approval.candidate": true,
   "approval.settled": true,
   "authorization.completed": true,
@@ -55,6 +56,7 @@ const HOOK_CANCELLABLE_EVENTS = {
   "turn.completed": false,
   "turn.failed": false,
   "turn.started": true,
+  "turn.waiting": false,
 } as const satisfies Record<HookEventType, boolean>;
 
 /** True when a hook on this event type may cancel the running turn. */
@@ -94,50 +96,48 @@ export function createTurnEventHandler(input: {
       nodeId: bundle.nodeId ?? "__root__",
     });
     const cancelTurn =
-      input.canCancelTurn && isHookCancellableEvent(emitted.event.type)
+      input.canCancelTurn && isHookCancellableEvent(emitted.type)
         ? () => input.hookCancellation.abort(new TurnCancelledError())
         : undefined;
-    if (!emitted.suppressed) {
-      await dispatchStreamEventHooks({
-        cancelTurn,
-        ctx,
-        registry: bundle.hookRegistry,
-        event: emitted.event,
-      });
-    }
-    if (emitted.event.type !== "step.started") {
+    await dispatchStreamEventHooks({
+      cancelTurn,
+      ctx,
+      registry: bundle.hookRegistry,
+      event: emitted,
+    });
+    if (emitted.type !== "step.started") {
       await dispatchDynamicModelEvent({
         abortSignal,
         ctx,
         dynamicModel: effectiveAgent.turnAgent.dynamicModel,
-        event: emitted.event,
+        event: emitted,
         messages: lifecycleMessages,
         scope: { moduleMap: bundle.moduleMap, nodeId: bundle.nodeId },
       });
     }
-    await input.dynamicConnections.dispatch(emitted.event);
+    await input.dynamicConnections.dispatch(emitted);
     await dispatchDynamicSubagentEvent({
       ctx,
       resolvers: bundle.subagentRegistry.dynamicResolvers ?? [],
-      event: emitted.event,
+      event: emitted,
       messages: lifecycleMessages,
     });
     await dispatchDynamicToolEvent({
       ctx,
       resolvers: bundle.resolvedAgent.dynamicToolResolvers ?? [],
-      event: emitted.event,
+      event: emitted,
       messages: lifecycleMessages,
     });
     await dispatchDynamicSkillEvent({
       ctx,
       resolvers: bundle.resolvedAgent.dynamicSkillResolvers ?? [],
-      event: emitted.event,
+      event: emitted,
       messages: lifecycleMessages,
     });
     await dispatchDynamicInstructionEvent({
       ctx,
       resolvers: bundle.resolvedAgent.dynamicInstructionsResolvers ?? [],
-      event: emitted.event,
+      event: emitted,
       messages: lifecycleMessages,
     });
     if (cancelTurn !== undefined) throwIfTurnAborted(input.hookCancellation.signal);
