@@ -12,6 +12,8 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
+import { workingTasks } from "#execution/tasks/table.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
@@ -208,16 +210,24 @@ async function runSessionLoop(
 
   const nextParkedActivity = async (
     expectedAttemptIds: ReadonlySet<string>,
-  ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" }>> => {
+  ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>> => {
     while (true) {
       const next = await nextTurnDelivery({
         cursor,
         expectedAttemptIds,
+        hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
         inbox,
         queue,
       });
-      if (next.kind !== "workflow") return next;
-      await execution.handleWorkflowMessage(next.message);
+      if (next.kind === "workflow") {
+        await execution.handleWorkflowMessage(next.message);
+        continue;
+      }
+      if (next.kind === "cancel-working-tasks") {
+        await cancelWorkingTasks(cursor);
+        continue;
+      }
+      return next;
     }
   };
 
@@ -233,7 +243,9 @@ async function runSessionLoop(
       });
     }
     progress.turnId = `turn_${String(turnIndex++)}`;
-    return await execution.runTurn(payload);
+    const outcome = await execution.runTurn(payload, { caller });
+    if (outcome.caller !== undefined) progress.caller = outcome.caller;
+    return outcome;
   };
   const runDeliveredTurn = async (
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
@@ -338,9 +350,9 @@ async function runSessionLoop(
           continue;
         case "cancel-turn":
           await cancelDescendantTurnsStep({
-            serializedContext: cursor.serializedContext,
             sessionState: cursor.sessionState,
           });
+          await cancelWorkingTasks(cursor);
           await settleCancelledTurn();
           // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };

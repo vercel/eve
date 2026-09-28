@@ -28,15 +28,15 @@ function expectedAuth(actor: "alice" | "bob") {
   };
 }
 
-/** The child's reply: a `subagent.completed` event for the model's agent tool, the tool result for `ctx.agent`. */
+/** The child's reply: the agent tool's task result, or the waiting tool's result for `ctx.agent`. */
 function readChildOutput(turn: EveEvalTurn, mode: "direct" | "waiting"): string {
   if (mode === "waiting") {
     const output = turn.toolCalls.find((call) => call.name === "blocking_agent")?.output;
     if (typeof output !== "string") throw new Error("The waiting tool's child reply is missing.");
     return output;
   }
-  const completion = turn.events.find((event) => event.type === "subagent.completed");
-  if (completion?.type !== "subagent.completed")
+  const completion = turn.events.find((event) => event.type === "task.settled");
+  if (completion?.type !== "task.settled" || typeof completion.data.output !== "string")
     throw new Error("The delegated child's completion event is missing.");
   return completion.data.output;
 }

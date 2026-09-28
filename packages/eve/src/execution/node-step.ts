@@ -19,7 +19,8 @@ import {
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
-import type { PreparedRuntimeTool, PreparedRuntimeWorkflowTask } from "#runtime/sessions/turn.js";
+import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
+import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
@@ -185,7 +186,7 @@ function createRuntimeDynamicModelEventDispatcher(
  * Resolves unified {@link HarnessToolDefinition}s from the node's registries.
  *
  * For authored tools: copies all lifecycle fields from the resolved definition.
- * Prepared workflow-task tools share the workflow-tool harness path.
+ * Prepared workflow-backed tools share the workflow-tool harness path.
  * Tools without `execute` (provider-managed) get entries with schema but no execute.
  */
 export function createNodeHarnessTools(input: {
@@ -212,8 +213,9 @@ function resolveHarnessToolDefinition(input: {
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
   const registeredTool = findRegisteredRuntimeTool(input.node.toolRegistry, input.tool.name);
+  const workflowId = workflowIdForHandling(input.tool.behavior?.handling);
 
-  if (isPreparedRuntimeWorkflowTool(input.tool)) {
+  if (workflowId !== undefined) {
     if (registeredTool === null) {
       return createPreparedWorkflowToolHarnessDefinition(input.tool);
     }
@@ -224,8 +226,7 @@ function resolveHarnessToolDefinition(input: {
         definition: registeredTool.definition,
         rootOnly: input.tool.rootOnly,
       }),
-      nodeId: input.tool.task.nodeId,
-      workflowId: input.tool.task.workflowId,
+      workflowId,
     });
   }
 
@@ -243,16 +244,6 @@ function resolveHarnessToolDefinition(input: {
     definition: registeredTool.definition,
     rootOnly: input.tool.rootOnly,
   });
-}
-
-type PreparedRuntimeWorkflowTool = PreparedRuntimeTool & {
-  readonly task: PreparedRuntimeWorkflowTask;
-};
-
-function isPreparedRuntimeWorkflowTool(
-  tool: PreparedRuntimeTool,
-): tool is PreparedRuntimeWorkflowTool {
-  return tool.task !== undefined;
 }
 
 function createRegisteredHarnessToolDefinition(input: {

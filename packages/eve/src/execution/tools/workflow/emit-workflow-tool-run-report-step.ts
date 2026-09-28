@@ -54,6 +54,7 @@ export async function emitAgentStartedStep(
           }
         : undefined,
     sessionId: session.sessionId,
+    ...(from.taskId !== undefined && { taskId: from.taskId }),
     turnId: from.turnId,
   });
   return await publishSessionEvents(input, [event]);

@@ -335,22 +335,6 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.input.outputSchema).toBeUndefined();
   });
 
-  it("treats an empty outputSchema as absent", () => {
-    const action: RuntimeSubagentDispatchRequest = {
-      ...makeAction(),
-      input: { message: "do something", outputSchema: {} },
-    };
-    const { runInput } = buildRuntimeSubagentRunInput({
-      action,
-      auth: null,
-      initiatorAuth: null,
-      session: makeSession(),
-      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
-    });
-
-    expect(runInput.input.outputSchema).toBeUndefined();
-  });
-
   it("includes parentSandboxState and sandboxSessionId for self-delegation", () => {
     const sandboxState = { initialized: true, session: null };
     const session = { ...makeSession(), sandboxState };

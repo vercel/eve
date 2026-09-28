@@ -32,16 +32,11 @@ describe("askQuestion", () => {
 
     expect(isWorkflowToolDefinition(definition)).toBe(true);
     expect(definition.description).toBe(ASK_QUESTION_TOOL_DESCRIPTION);
-    const interruptSignal = new AbortController().signal;
-    await expect(
-      definition.execute(colorQuestion, { ask, interruptSignal } as never),
-    ).resolves.toEqual({
+    await expect(definition.execute(colorQuestion, { ask } as never)).resolves.toEqual({
       answer: "Blue",
       status: "answered",
     });
-    expect(ask).toHaveBeenCalledExactlyOnceWith(toAskQuestionRequest(colorQuestion), {
-      signal: interruptSignal,
-    });
+    expect(ask).toHaveBeenCalledExactlyOnceWith(toAskQuestionRequest(colorQuestion));
   });
 
   it("accepts one question with at most three label and description options", () => {

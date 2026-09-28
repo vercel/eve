@@ -67,6 +67,11 @@ runs asks a question, such as a workflow tool's `ctx.ask()`, `result()` returns
 its `input.resolved`, which the session you answer on also emits for a
 subagent's or workflow tool's question.
 
+A turn that waits on its [tasks](/docs/tools/workflows#run-calls-as-tasks-task)
+also emits `turn.waiting` without a pending request. The text the model wrote
+before the wait is not the reply: `result()` resolves with the final reply
+after the tasks finish.
+
 `result()` closes that HTTP stream, including when fetch instrumentation clones
 the response for tracing. The durable session remains available for follow-up
 turns after `session.waiting`.
@@ -84,7 +89,7 @@ for await (const event of response) {
   }
 
   if (event.type === "message.completed" && event.data.finishReason !== "tool-calls") {
-    console.log("\nfinal:", event.data.message);
+    console.log("\nmessage:", event.data.message);
   }
 }
 ```
@@ -137,6 +142,8 @@ The most common UI events are:
 | `actions.requested`     | Show tool calls as the model requests them, before execution.                  |
 | `action.partial`        | Update a generator tool's provisional output snapshot.                         |
 | `action.result`         | Show tool call results.                                                        |
+| `task.started`          | Show a task call; `action.result` is a receipt. `kind: "agent"` marks agents.  |
+| `task.settled`          | Show the task's result, error, or cancellation for the call's `callId`.        |
 | `input.requested`       | Pause the UI for approval or a question answer.                                |
 | `input.resolved`        | Record the server-accepted outcome and response for each human-input request.  |
 | `result.completed`      | Read structured output from an [output schema](./output-schema).               |
@@ -147,6 +154,8 @@ The most common UI events are:
 For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
 
 For `action.input.appended`, the default message reducer accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. The matching `actions.requested` event upgrades the same `toolCallId` to `state: "input-available"` and puts the validated value in `input`.
+
+A call to a tool that runs as a [task](/docs/tools/workflows#run-calls-as-tasks-task) returns a receipt as its `action.result` and settles later with `task.settled`, matched by `callId`. The model receives the result as a message in its history, but the stream reports it only as `task.settled`, so render the result from that event.
 
 When a submitted message includes attachments, `message.received.data.message` stays the
 flattened compatibility summary, while `message.received.data.parts` carries renderable text and
@@ -253,24 +262,25 @@ stream index after the captured prefix.
 
 ## Follow a subagent
 
-A delegated subagent reports its progress on its own child session. The parent stream announces each child: `subagent.called` when the model calls a subagent tool, and `agent.started` when a [workflow tool](/docs/tools/workflows#delegate-work-ctxagent) opens a session with `ctx.agent`. Pass either event to `streamSubagent()` on the parent's session handle to follow the child:
+A delegated subagent reports its progress on its own child session. The parent stream announces each child session with `agent.started`, whether the model called a subagent tool or a [workflow tool](/docs/tools/workflows#delegate-work-ctxagent) opened the session with `ctx.agent`. Pass the event to `agent()` on the parent's session handle to get the child's handle, then follow it with `stream()`:
 
 ```ts
 import { isCurrentTurnBoundaryEvent } from "eve/client";
 
 const session = client.sessions.attach(parentSessionId);
 const { events } = await session.snapshot();
-const called = events.find((event) => event.type === "subagent.called");
+const started = events.find((event) => event.type === "agent.started");
 
-if (called?.type === "subagent.called") {
-  for await (const event of session.streamSubagent(called)) {
-    console.log(called.data.name, event.type);
+if (started?.type === "agent.started") {
+  const child = session.agent(started);
+  for await (const event of child.stream()) {
+    console.log(child.name, event.type);
     if (isCurrentTurnBoundaryEvent(event)) break;
   }
 }
 ```
 
-`streamSubagent()` reads the event's stream path, `childStreamPath` on `subagent.called` or `streamPath` on `agent.started`, with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents) children:
+`stream()` reads the event's `streamPath` with the parent session's host and credentials, so the same client works for local and [remote](../remote-agents) children:
 
 - A local child's path is its own session stream route on the same deployment. The channel's usual session authorization applies.
 - A remote child's path is a proxy route on the parent deployment. The parent checks that its session recorded the child for that tool call, then relays the remote child's stream with the remote agent's authored `auth` and `headers`. The client never needs the remote URL or its credentials.

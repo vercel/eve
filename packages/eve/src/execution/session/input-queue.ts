@@ -1,6 +1,6 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliveries } from "#harness/messages.js";
-import { jsonValuesEqual } from "#shared/json.js";
+import { ANONYMOUS_PRINCIPAL, principalOf } from "#execution/session/principal.js";
 
 export type SessionControl = "clear" | "compact" | "expired" | "reset";
 
@@ -109,15 +109,12 @@ export class SessionInputQueue {
     this.entries[index] = { delivery, kind: "delivery", sequence };
   }
 
-  takeSteering(
-    admitted: ReadonlySet<number>,
-    callerCallId: string | undefined,
-  ): TurnSelection | undefined {
+  takeSteering(admitted: ReadonlySet<number>, turn: SteeringTurn): TurnSelection | undefined {
     const steering = this.entries.filter(
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, callerCallId),
+        isSteeringDelivery(entry.delivery, turn),
     );
     if (steering.length === 0) return undefined;
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
@@ -183,24 +180,29 @@ export class SessionInputQueue {
     };
   }
 
-  /** One authenticated principal's consecutive deliveries share a turn, with at most one caller. */
+  /**
+   * Consecutive deliveries of one authenticated principal and one delegated
+   * call share a turn, as they would steer it. Claims may change between
+   * them; the turn runs with the latest.
+   */
   private takeFollowingDeliveriesFrom(first: QueuedDelivery, index: number): QueuedDelivery[] {
-    const authenticated =
-      first.delivery.auth != null && first.delivery.auth.principalType !== "anonymous";
+    const principal = principalOf(first.delivery.auth);
     const following: QueuedDelivery[] = [];
-    let caller = first.delivery.caller;
+    let callId = first.delivery.caller?.callId;
     while (this.entries.length > index) {
       const next = this.entries[index];
       if (
         next?.kind !== "delivery" ||
-        !authenticated ||
-        !jsonValuesEqual(first.delivery.auth, next.delivery.auth) ||
-        (caller !== undefined && next.delivery.caller !== undefined)
+        principal === ANONYMOUS_PRINCIPAL ||
+        principalOf(next.delivery.auth) !== principal ||
+        (callId !== undefined &&
+          next.delivery.caller !== undefined &&
+          next.delivery.caller.callId !== callId)
       ) {
         break;
       }
       following.push(this.entries.splice(index, 1)[0] as QueuedDelivery);
-      caller ??= next.delivery.caller;
+      callId ??= next.delivery.caller?.callId;
     }
     return following;
   }
@@ -211,23 +213,30 @@ export class SessionInputQueue {
   }
 }
 
-export function isSteeringDelivery(
-  delivery: DeliverHookPayload,
-  callerCallId: string | undefined,
-): boolean {
+/** The running turn a delivery may steer. */
+export interface SteeringTurn {
+  /** The call id of the delegated caller the turn answers, if any. */
+  readonly callerCallId: string | undefined;
+  readonly principal: string;
+}
+
+/**
+ * Only the turn's own principal steers it; another principal's message waits
+ * for the turn to end. A delivery without auth acts as the session's current
+ * identity, which is the turn's.
+ */
+export function isSteeringDelivery(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {
   return (
     (delivery.turnPolicy ?? "steer") === "steer" &&
-    (delivery.caller === undefined || delivery.caller.callId === callerCallId)
+    (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
+    (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
   );
 }
 
 /** A steering delivery with a message for the model, not only answers to requests. */
-export function isSteeringMessage(
-  delivery: DeliverHookPayload,
-  callerCallId: string | undefined,
-): boolean {
+export function isSteeringMessage(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {
   return (
-    isSteeringDelivery(delivery, callerCallId) &&
+    isSteeringDelivery(delivery, turn) &&
     delivery.payloads.some(
       (payload) => payload.message !== undefined && payload.inputResponses === undefined,
     )

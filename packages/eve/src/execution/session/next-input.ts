@@ -16,6 +16,8 @@ export type NextTurnInstruction =
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
+  /** `session.cancel()` while no turn runs, but tasks are working. */
+  | { readonly kind: "cancel-working-tasks" }
   | TurnSelection;
 
 /**
@@ -29,6 +31,7 @@ export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
   readonly cursor: SessionStateCursor;
   readonly expectedAttemptIds?: ReadonlySet<string>;
+  readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
 }): Promise<NextTurnInstruction> {
   const { inbox, cursor, queue } = input;
@@ -61,5 +64,8 @@ export async function nextTurnDelivery(input: {
     freshSequence =
       wasIdle && admitted.kind === "delivery" ? admitted.admission.sequence : undefined;
     if (admitted.kind === "workflow") return { kind: "workflow", message: admitted.message };
+    if (admitted.kind === "cancel" && input.hasWorkingTasks()) {
+      return { kind: "cancel-working-tasks" };
+    }
   }
 }

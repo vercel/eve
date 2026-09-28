@@ -1,9 +1,6 @@
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
-import {
-  formatSubagentInput,
-  normalizeRequestedOutputSchema,
-  type SubagentParentContext,
-} from "#subagents/invocation.js";
+import { formatSubagentInput, type SubagentParentContext } from "#subagents/invocation.js";
+import type { JsonObject } from "#shared/json.js";
 import type {
   ActivityObserverConfig,
   ChannelInstrumentationProjection,
@@ -100,7 +97,6 @@ export function buildSubagentRunInput(input: {
   } = input;
 
   const childContinuationToken = mintSubagentContinuationToken(input.continuationKey);
-  const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
   const adapterState: Record<string, unknown> = {
     callId: action.callId,
     parentContinuationToken: input.parent.continuationToken ?? session.continuationToken,
@@ -135,7 +131,8 @@ export function buildSubagentRunInput(input: {
         action,
         source,
       }),
-      outputSchema: requestedOutputSchema,
+      // `ctx.agent` already dropped an empty schema, so what arrives is one to honor.
+      outputSchema: action.input.outputSchema as JsonObject | undefined,
     },
     limits: input.limits,
     conversationId: input.parent.conversationId,

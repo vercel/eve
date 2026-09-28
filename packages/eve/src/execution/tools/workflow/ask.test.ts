@@ -15,6 +15,7 @@ describe("ask", () => {
     attachWorkflowToolRunContext(ctx, {
       agentContext: { capabilities: { requestInput: false } } as AgentSessionContext,
       asks: new WorkflowToolRunAsks("run"),
+      auth: { current: null, initiator: null },
       control: "control",
       from: {
         callId: "call",

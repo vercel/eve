@@ -1,12 +1,12 @@
 import type { Experimental_EvaluationModel as EvaluationModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type { ClientAgentSession } from "#client/agent-session.js";
 import type {
   RuntimeIdentity,
   RuntimeTraceContext,
   MessageStreamEvent,
   AgentStartedStreamEvent,
-  SubagentCalledStreamEvent,
 } from "#protocol/message.js";
 import type {
   CancelSessionResult,
@@ -14,7 +14,6 @@ import type {
   CreateSessionOptions,
   SendTurnInput,
   SendTurnOptions,
-  StreamOptions,
 } from "#client/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -51,21 +50,22 @@ export interface EveEvalToolCall {
 }
 
 /**
- * One subagent delegation extracted from the captured stream
- * (`subagent.called` / `subagent.started`, joined with `subagent.completed`).
+ * One call to an agent task extracted from the captured stream: its
+ * `task.started`, joined with its `task.settled` and the task's
+ * `agent.started`.
  */
 export interface EveEvalSubagentCall {
-  /** Runtime-action call id joining this delegation's lifecycle events, when observed. */
+  /** The agent tool call's id, as on its task events. */
   readonly callId?: string;
-  /** Durable child session id for local and remote workflow delegations. */
+  /** The agent's session id, shared by every call to one task; absent if it never opened. */
   readonly childSessionId?: string;
   /** Subagent name. */
   readonly name: string;
-  /** Remote agent URL for remote delegations (`subagent.called` remote metadata). */
+  /** Remote agent URL for remote delegations (`agent.started` remote metadata). */
   readonly remoteUrl?: string;
-  /** Output from the matching `subagent.completed` event; `undefined` when the call never completed. */
+  /** Output from the call's `task.settled`; `undefined` until the call completes. */
   readonly output?: JsonValue;
-  /** Delegation status inferred from the captured delegation events. */
+  /** The call's task status: `working` until its `task.settled` arrives. */
   readonly status: "working" | "completed" | "failed" | "cancelled";
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
@@ -328,15 +328,18 @@ interface EveEvalSessionDriver {
   /** Send one text turn with a local file attached as a data URL. */
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
   /**
-   * Follow one delegated child's stream through this parent session, with the
-   * eval client's credentials. Local children use their own stream route; remote
-   * children use the parent-origin proxy.
+   * The session an agent run opened, as this session's stream announced it with
+   * `agent.started`. Its `stream()` follows the child through this parent session
+   * with the eval client's credentials, and stops with the eval unless given a `signal`.
    */
-  streamSubagent(
-    started: AgentStartedStreamEvent | SubagentCalledStreamEvent,
-    options?: StreamOptions,
-  ): AsyncIterable<MessageStreamEvent>;
+  agent(started: AgentStartedStreamEvent): EveEvalAgentSession;
 }
+
+/** A session an agent run opened, reached through the parent eval session. */
+export type EveEvalAgentSession = Pick<
+  ClientAgentSession,
+  "name" | "sessionId" | "stream" | "taskId"
+>;
 
 /** One accepted session, exposed by `t.session()`, turns, and target attachment helpers. */
 export interface EveEvalSession

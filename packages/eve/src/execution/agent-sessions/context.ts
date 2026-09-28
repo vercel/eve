@@ -2,7 +2,6 @@ import type {
   ActivityObserverConfig,
   ChannelInstrumentationProjection,
   RunSessionLimits,
-  SessionAuthContext,
   SessionCapabilities,
   SessionParent,
 } from "#channel/types.js";
@@ -17,6 +16,7 @@ import {
 import type { SandboxState } from "#sandbox/state.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
+import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
 import {
   resolveToolCallAgentTrace,
   type AgentChildTraceDispatch,
@@ -24,16 +24,20 @@ import {
 
 /**
  * What a workflow run needs to open `ctx.agent` sessions for its caller,
- * captured from the calling session in the run's start input. The run never
- * reads the session again: opening, sending to, and ending its sessions never
- * pass through the caller.
+ * captured from the calling session for one call: the run's start input
+ * carries it for the call that started the run, and each later call to a
+ * `serve` task carries its own. The run never reads the session again:
+ * opening, sending to, and ending its sessions never pass through the caller.
+ *
+ * It is a session's lineage, bound when the session opens. Auth is not part
+ * of it: each message carries the auth of the call that sends it.
  */
 export interface AgentSessionContext {
   readonly activityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
   };
-  /** The caller's principal, which every session runs as. */
-  readonly auth: SessionAuthContext | null;
+  /** The agents the call may open, by name, which `ctx.agents` lists. */
+  readonly agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   readonly bundle: AgentSessionBundle;
   /** Forwarded unchanged, so a session asks a person only when its caller can. */
   readonly capabilities?: SessionCapabilities;
@@ -41,7 +45,6 @@ export interface AgentSessionContext {
   readonly conversation?: ConversationContext;
   /** Dynamic agents the calling turn selected, by node id. */
   readonly dynamicSelections: DynamicSubagentSelections;
-  readonly initiatorAuth: SessionAuthContext | null;
   /** The token budget each session inherits: the caller's remaining quota. */
   readonly limits: RunSessionLimits;
   readonly localDevRequest?: LocalDevRequestProvenance;
@@ -66,21 +69,20 @@ export interface AgentSessionSandbox {
 type CallerDispatch = Pick<
   PreparedCoordinationDispatch<unknown>,
   | "activityObserver"
-  | "auth"
   | "batch"
   | "bundle"
   | "capabilities"
   | "channelMetadata"
   | "dynamicSubagentSelections"
   | "inheritedConversation"
-  | "initiatorAuth"
   | "localDevRequest"
   | "sandboxSessionId"
   | "serializedContext"
   | "session"
+  | "workflowAgents"
 >;
 
-/** Captures the agent session context for one workflow tool call's run. */
+/** Captures the agent session context for one workflow tool call, in the step that admits it. */
 export function captureAgentSessionContext(
   caller: CallerDispatch,
   callId: string,
@@ -88,7 +90,7 @@ export function captureAgentSessionContext(
   const { batch, session } = caller;
   return {
     activityObserver: caller.activityObserver,
-    auth: caller.auth,
+    agents: caller.workflowAgents,
     bundle: {
       nodeId: caller.bundle.nodeId,
       source: serializeDurableCompiledArtifactsSource(caller.bundle.compiledArtifactsSource),
@@ -97,7 +99,6 @@ export function captureAgentSessionContext(
     channelMetadata: caller.channelMetadata,
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,
-    initiatorAuth: caller.initiatorAuth,
     limits: resolveRemainingSessionTokenLimits(session),
     localDevRequest: caller.localDevRequest,
     parent: {

@@ -1,3 +1,4 @@
+import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type {
   WorkflowToolRunAskDecision,
@@ -16,15 +17,26 @@ import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.j
 // be different bundled copies of this module.
 const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
 
+/**
+ * The run a workflow body belongs to. Members that describe a call describe
+ * the one the run serves now, which a `serve` task changes with each call, so
+ * read them when they are used.
+ */
 export interface WorkflowToolRunContext {
   /**
-   * What the run's caller lends it: the lineage and principal `ctx.agent`
-   * sessions run with, and whether `ctx.ask()` can reach a person.
+   * What the call's caller lends it: the lineage a `ctx.agent` session opened
+   * now binds, and whether `ctx.ask()` can reach a person.
    */
   readonly agentContext: AgentSessionContext;
   readonly asks: WorkflowToolRunAsks;
+  /** The auth of the call, which a message sent to a `ctx.agent` session now carries. */
+  readonly auth: SessionAuth;
   /** The run's control hook, where the session sends its decisions on the run's questions. */
   readonly control: string;
+  /**
+   * The ref of the call the run serves now, which questions and sign-ins come
+   * from. A `serve` task's changes with each call, so read it when sending.
+   */
   readonly from: WorkflowToolRunRef;
   readonly owner: WorkflowToolRunInbox;
 }
@@ -58,14 +70,6 @@ export function findWorkflowToolRunContext(value: unknown): WorkflowToolRunConte
   return typeof value === "object" && value !== null
     ? (value as WorkflowToolRunContextCarrier)[WORKFLOW_TOOL_RUN_CONTEXT]
     : undefined;
-}
-
-export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
-  return readWorkflowToolRunContext(ctx, "agent").from;
-}
-
-export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunInbox {
-  return readWorkflowToolRunContext(ctx, "agent").owner;
 }
 
 const CANCELLED: ToolInputResponse = { status: "cancelled" };
@@ -150,6 +154,7 @@ export function ask(
 
   const { asks, control, owner } = context;
   const { answer, requestId } = asks.open();
+  // A `serve` task's current call changes; the question stays the call's that asked it.
   const from = context.from;
   const sent = owner.send({
     kind: "request",

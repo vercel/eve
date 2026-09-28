@@ -44,6 +44,7 @@ const initialMembers = (): Record<MemberId, MemberState> => ({
 export function CouncilApp() {
   const [client] = useState(() => new Client({ host: "" }));
   const completedMembersRef = useRef(new Set<MemberId>());
+  const memberCallsRef = useRef(new Map<string, MemberId>());
   const runIdRef = useRef(0);
   const synthesisStartedRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -119,24 +120,34 @@ export function CouncilApp() {
 
   const handleEvent = useCallback(
     (event: MessageStreamEvent) => {
-      if (event.type === "subagent.called" && isMemberId(event.data.name)) {
+      if (event.type === "task.started" && isMemberId(event.data.name)) {
+        memberCallsRef.current.set(event.data.callId, event.data.name);
+      }
+
+      if (event.type === "agent.started" && isMemberId(event.data.name)) {
         const memberId = event.data.name;
         setMemberState((current) => ({
           ...current,
           [memberId]: { ...current[memberId], status: "running" },
         }));
-        void streamMember(memberId, event.data.childSessionId, runIdRef.current);
+        void streamMember(memberId, event.data.sessionId, runIdRef.current);
       }
 
-      if (event.type === "subagent.completed" && isMemberId(event.data.subagentName)) {
-        const memberId = event.data.subagentName;
+      // A member's task.settled carries the call id its task.started named.
+      const settledMember =
+        event.type === "task.settled" && event.data.status === "completed"
+          ? { id: memberCallsRef.current.get(event.data.callId), output: event.data.output }
+          : undefined;
+      if (settledMember?.id !== undefined) {
+        const memberId = settledMember.id;
+        const output = typeof settledMember.output === "string" ? settledMember.output : "";
         completedMembersRef.current.add(memberId);
         synthesisStartedRef.current = completedMembersRef.current.size === members.length;
         setMemberState((current) => ({
           ...current,
           [memberId]: {
             ...current[memberId],
-            response: event.data.output || current[memberId].response,
+            response: output || current[memberId].response,
             status: "complete",
           },
         }));
@@ -178,6 +189,7 @@ export function CouncilApp() {
 
     runIdRef.current += 1;
     completedMembersRef.current.clear();
+    memberCallsRef.current.clear();
     synthesisStartedRef.current = false;
     setMemberState(initialMembers());
     setResult(undefined);

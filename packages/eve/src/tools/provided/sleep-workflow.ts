@@ -11,7 +11,7 @@ export async function executeSleepTool(
   "use workflow";
 
   const interrupted = new Promise<"interrupted">((resolve) =>
-    ctx.interruptSignal.addEventListener("abort", () => resolve("interrupted"), { once: true }),
+    ctx.abortSignal.addEventListener("abort", () => resolve("interrupted"), { once: true }),
   );
   const elapsed = sleep(Math.ceil(input.seconds * 1_000)).then(() => "elapsed" as const);
   const woke = await Promise.race([elapsed, interrupted]);

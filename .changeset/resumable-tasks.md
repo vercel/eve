@@ -1,0 +1,5 @@
+---
+"eve": minor
+---
+
+Workflow tools can define `serve(receive, ctx)` to run a resumable task: `receive()` resolves the call that started the task, then each later call the model makes with the task's `taskId`, and `ctx.reply(output)` delivers a result while the task stays available. eve adds an optional `taskId` to a `serve` tool's model input (the build fails if `inputSchema` declares its own), idle tasks don't hold the turn and are listed in the `[Tasks]` note, and `task_cancel` aborts the current work's `abortSignal` while the task stays available for its next call, as long as the body returns to `receive()` within 30 seconds. While the task serves a later call, `ctx.session` describes that call, with its turn and the auth it was admitted with, and `ctx.agents` lists the agents that call may open. A session opened with `ctx.agent` is the child in lineage and trace of the call served when it opens, and each message sent to it carries the auth of the call served when it's sent. The events a call causes, including `task.settled`, `agent.started`, and questions, carry its `callId` and `turnId`.

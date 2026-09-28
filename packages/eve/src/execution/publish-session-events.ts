@@ -221,7 +221,7 @@ function openSessionEventStream(input: {
   return {
     adapterCtx,
     async emit(event) {
-      if (origin === "own") activityCohort.updateActivityBlockers(ctx, event);
+      if (origin === "own") activityCohort.updateActivityState(ctx, event);
       const routed = await callAdapterEventHandler(adapter, event, adapterCtx);
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
       const stamped = stampMessageStreamEvent(

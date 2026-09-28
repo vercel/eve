@@ -153,6 +153,12 @@ checks generated tools through real calls in fresh sessions and restores source
 after retiring the parent and child sessions. Routing-only self-modification
 coverage stays in `agent-subagents`.
 
+`agent-tasks` is the real-model gate for how models plan around tasks: waiting
+for a needed result, fanning out, keeping or correcting tasks after a new
+message, and ordering a side effect after the result it depends on. Every eval
+in it is tagged `real-model`. Deterministic task coverage lives with the
+surfaces it exercises, in `agent-workflow-tools` and `agent-subagents`.
+
 E2E fixtures live under `e2e/fixtures/*`. Fixture discovery also accepts
 `apps/fixtures/*` apps with an `evals/` directory, but shared development apps
 should stay out of the e2e matrix unless they intentionally own evals.

@@ -8,14 +8,14 @@ export default defineEval({
       "Ask the `deny-all` subagent with message: Verify the configured environment sandbox capability.",
     );
     turn.expectOk();
-    const called = turn.events.find(
-      (event) => event.type === "subagent.called" && event.data.name === "deny-all",
+    const started = turn.events.find(
+      (event) => event.type === "agent.started" && event.data.name === "deny-all",
     );
-    if (called?.type !== "subagent.called") {
+    if (started?.type !== "agent.started") {
       throw new Error("Typed sandbox turn did not call the deny-all subagent.");
     }
 
-    const childTurn = await t.target.watchTurn(called.data.childSessionId).result();
+    const childTurn = await t.target.watchTurn(started.data.sessionId).result();
     childTurn.expectOk();
 
     t.succeeded();

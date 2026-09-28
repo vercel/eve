@@ -76,20 +76,6 @@ describe("workflow-tool task input", () => {
       },
     });
   });
-
-  it("does not normalize workflow agent requests as human input", () => {
-    expect(() =>
-      workflowToolRunRequestToInputRequestPayload({
-        from,
-        replyTo: "subagent:parent:call-1",
-        request: {
-          input: { message: "Find it", target: "research" },
-          invocationId: "call-1",
-          kind: "agent-invoke",
-        },
-      }),
-    ).toThrow("A workflow agent request cannot be normalized as human input.");
-  });
 });
 
 describe("workflow-tool task outcomes", () => {

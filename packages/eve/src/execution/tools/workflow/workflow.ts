@@ -1,8 +1,12 @@
 import { WORKFLOW_CANCELLATION_CLEANUP_MS } from "#execution/tools/workflow/cancellation-policy.js";
 import { sleep } from "#compiled/@workflow/core/index.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
-import { createWorkflowBodyRef, startWorkflowBody } from "#execution/tools/workflow/body.js";
-import { WorkflowToolRunAsks } from "#execution/tools/workflow/ask.js";
+import {
+  createWorkflowBodyRef,
+  startCallBody,
+  type StartedWorkflowBody,
+  type WorkflowBodyInput,
+} from "#execution/tools/workflow/body.js";
 import {
   isWorkflowToolRunAskDecision,
   isWorkflowToolRunControlMessage,
@@ -14,25 +18,23 @@ import {
   type ChannelReader,
 } from "#execution/tools/workflow/owner-channels.js";
 import { openWorkflowToolRunOwnerInbox } from "#execution/tools/workflow/owner.js";
-import {
-  createBlockingWorkflow,
-  type BlockingWorkflowOwner,
-} from "#execution/tools/workflow/workflow-owner-blocking.js";
+import { createBlockingWorkflow } from "#execution/tools/workflow/workflow-owner-blocking.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import { startServeBody } from "#execution/tools/workflow/serve.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
+
+const SERVE_CLEANUP_EXPIRED =
+  "The task was cancelled and its serve body didn't return to receive() within 30 seconds.";
 
 /** Owns command intake, body execution, and settlement for one workflow tool call. */
 export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Promise<void> {
   "use workflow";
 
-  const asks = new WorkflowToolRunAsks(createWorkflowBodyRef(input).runId);
-  const owner = createBlockingWorkflow(input, asks);
-  const { signal } = owner;
+  const owner = createBlockingWorkflow(input);
   const inbox = openWorkflowToolRunOwnerInbox();
-  const started = startWorkflowBody(
-    { ...input, owner: inbox.owner },
-    { abortSignal: signal, interruptSignal: owner.interruptSignal },
-    asks,
-  );
+  if (input.entry.entryPoint !== "execute") await reportTaskStarted(input);
+  const started = startWorkflowBody({ ...input, owner: inbox.owner });
+  const signal = started.control.runSignal;
   const body: ChannelReader<"body", WorkflowToolRunOutcome> = createChannelReader(
     "body",
     awaitBodyOutcome(started.outcome),
@@ -47,7 +49,7 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
   // inbox is gone, which is exactly when what the body opened must stop.
   try {
     while (true) {
-      if (signal.aborted) {
+      if (started.control.unwinding) {
         cleanupDeadline ??= sleep(WORKFLOW_CANCELLATION_CLEANUP_MS).then(() => "cancel");
       }
       if (
@@ -79,7 +81,16 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
         outcome = { status: "failed", error: normalizeSerializableError(error) };
         break;
       }
-      if (read === "cancel") break;
+      if (read === "cancel") {
+        // A serve body can return to receive() before its deadline.
+        if (!started.control.unwinding) {
+          cleanupDeadline = undefined;
+          continue;
+        }
+        // One that doesn't ends with its task.
+        if (!signal.aborted) started.control.apply({ kind: "end", reason: SERVE_CLEANUP_EXPIRED });
+        break;
+      }
       if (read.next.done) {
         if (read.channel === "control") {
           commandsOpen = false;
@@ -93,7 +104,9 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
         return;
       }
       if (read.channel === "control") {
-        applyControlMessage(owner, asks, read.next.value);
+        // The deadline counts from the cancel the body is unwinding now.
+        if (!started.control.unwinding) cleanupDeadline = undefined;
+        applyControlMessage(started, read.next.value);
         continue;
       }
       if (read.channel === "body") {
@@ -125,21 +138,41 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
 }
 
 /**
+ * Tells the session a task's run can take commands. Sending suspends the run,
+ * which registers its control hook before the session hears of it, so a cancel
+ * the session held until now reaches the body.
+ */
+async function reportTaskStarted(input: WorkflowToolRunInput): Promise<void> {
+  await resumeHookStep(
+    input.owner.inbox,
+    { from: createWorkflowBodyRef(input), kind: "started" },
+    { ifPresent: true },
+  );
+}
+
+/**
  * Applies one message from the run's control hook. Decisions on questions and
  * commands share the hook, so the body sees them in the order the session
  * made them.
  */
-function applyControlMessage(
-  owner: BlockingWorkflowOwner,
-  asks: WorkflowToolRunAsks,
-  message: unknown,
-): void {
+function applyControlMessage(started: StartedWorkflowBody, message: unknown): void {
   if (!isWorkflowToolRunControlMessage(message)) return;
   if (isWorkflowToolRunAskDecision(message)) {
-    asks.settle(message);
+    started.asks.settle(message);
     return;
   }
-  owner.handleCommand(message);
+  started.control.apply(message);
+}
+
+/** Starts the body the run's entry point names. */
+function startWorkflowBody(input: WorkflowBodyInput): StartedWorkflowBody {
+  switch (input.entry.entryPoint) {
+    case "execute":
+    case "task":
+      return startCallBody(input);
+    case "serve":
+      return startServeBody(input);
+  }
 }
 
 async function* awaitBodyOutcome(

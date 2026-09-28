@@ -10,6 +10,7 @@ export { ClientError } from "#client/client-error.js";
 export { defaultMessageReducer } from "#client/message-reducer.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
+export { ClientAgentSession } from "#client/agent-session.js";
 export { ClientSession } from "#client/session.js";
 export {
   ClientSessions,
@@ -130,10 +131,8 @@ export type {
   StepCompletedStreamEvent,
   StepFailedStreamEvent,
   StepStartedStreamEvent,
-  SubagentCalledStreamEvent,
-  SubagentChildEventStreamEvent,
-  SubagentCompletedStreamEvent,
-  SubagentStartedStreamEvent,
+  TaskSettledStreamEvent,
+  TaskStartedStreamEvent,
   TurnCancelledStreamEvent,
   TurnCompletedStreamEvent,
   TurnFailedStreamEvent,

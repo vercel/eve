@@ -37,6 +37,7 @@ function createMockInbox(reads: readonly ScriptedRead[]): SessionInbox {
     hasPending() {
       return remaining.length > 0;
     },
+    whenPending: () => new Promise<void>(() => {}),
     async next() {
       const read = remaining.shift();
       if (read === undefined) throw new Error("Mock inbox exhausted.");
@@ -46,6 +47,7 @@ function createMockInbox(reads: readonly ScriptedRead[]): SessionInbox {
     onDelivery() {
       return () => {};
     },
+    onAgentStarted: () => () => {},
     onInterrupt() {
       return () => {};
     },
@@ -94,6 +96,7 @@ function waitInput(inbox: SessionInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
     expectedAttemptIds: new Set(["attempt-1"]),
+    hasWorkingTasks: () => false,
     inbox: inbox,
     cursor,
     queue: new SessionInputQueue(),
@@ -119,20 +122,18 @@ function queueOf(...deliveries: DeliverHookPayload[]): SessionInputQueue {
 }
 
 describe("nextTurnDelivery", () => {
-  it("batches adjacent queued deliveries with equivalent auth", async () => {
+  it("batches one principal's adjacent queued deliveries with their latest claims", async () => {
     const auth: SessionAuthContext = {
-      attributes: { scopes: ["read", "write"], team: "support" },
+      attributes: { scopes: ["read"], team: "support" },
       authenticator: "slack",
       issuer: "workspace",
       principalId: "bob",
       principalType: "user",
       subject: "bob-subject",
     };
+    const refreshed = { ...auth, attributes: { scopes: ["read", "write"], team: "support" } };
     const first = authenticatedDelivery("first", auth);
-    const second = authenticatedDelivery("second", {
-      ...auth,
-      attributes: { team: "support", scopes: ["read", "write"] },
-    });
+    const second = authenticatedDelivery("second", refreshed);
     const input = batchingInputFor([first, second]);
 
     const next = await nextTurnDelivery(input);
@@ -140,7 +141,7 @@ describe("nextTurnDelivery", () => {
     expect(next).toMatchObject({
       kind: "turn",
       delivery: {
-        auth,
+        auth: refreshed,
         payloads: [...first.payloads, ...second.payloads],
         deliveryMetadata: [
           first.deliveryMetadata![0],
@@ -213,21 +214,51 @@ describe("nextTurnDelivery", () => {
     expect(input.queue.pendingCount).toBe(0);
   });
 
-  it.each([
-    { authenticator: "other" },
-    { issuer: "other" },
-    { principalType: "service" },
-    { subject: "other" },
-    { attributes: { scopes: ["write"] } },
-  ])("does not batch when auth context changes: %j", async (change) => {
+  it("batches one delegated call's queued messages and stops at another call", async () => {
     const auth = slackAuth("alice");
-    const first = authenticatedDelivery("first", auth);
-    const second = authenticatedDelivery("second", { ...auth, ...change });
-    const input = batchingInputFor([first, second]);
+    const fromCall = (message: string, callId: string): DeliverHookPayload => ({
+      ...authenticatedDelivery(message, auth),
+      caller: {
+        callId,
+        replyTo: { kind: "hook", token: `${message}-reply` },
+        subagentName: "keeper",
+      },
+    });
+    const input = batchingInputFor([
+      fromCall("first", "call-1"),
+      fromCall("correction", "call-1"),
+      fromCall("other", "call-2"),
+    ]);
 
-    await expect(nextTurnDelivery(input)).resolves.toMatchObject({ delivery: first, kind: "turn" });
-    expect(input.queue.pendingCount).toBe(1);
+    // The turn answers the latest message's reply address.
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      delivery: {
+        caller: { callId: "call-1", replyTo: { token: "correction-reply" } },
+        payloads: [{ message: "first" }, { message: "correction" }],
+      },
+      kind: "turn",
+    });
+    await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+      delivery: { caller: { callId: "call-2" }, payloads: [{ message: "other" }] },
+      kind: "turn",
+    });
   });
+
+  it.each([{ authenticator: "other" }, { issuer: "other" }, { principalType: "service" }])(
+    "does not batch when the principal changes: %j",
+    async (change) => {
+      const auth = slackAuth("alice");
+      const first = authenticatedDelivery("first", auth);
+      const second = authenticatedDelivery("second", { ...auth, ...change });
+      const input = batchingInputFor([first, second]);
+
+      await expect(nextTurnDelivery(input)).resolves.toMatchObject({
+        delivery: first,
+        kind: "turn",
+      });
+      expect(input.queue.pendingCount).toBe(1);
+    },
+  );
 
   it.each([null, undefined])("does not batch deliveries with auth %j", async (auth) => {
     const first: DeliverHookPayload = { auth, kind: "deliver", payloads: [{ message: "first" }] };

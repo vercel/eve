@@ -180,7 +180,7 @@ Approvals and questions share one protocol:
 3. The turn parks at `session.waiting`, durably, for as long as it takes.
 4. The client answers with `inputResponses` (structured, keyed by `requestId`) or a normal follow-up `message`. A follow-up whose text matches an option ID, option label, or numeric option index resolves automatically, including approval options such as `approve` and `cancel`.
 
-For `ctx.ask()` questions from tools, a follow-up message answers the question only when exactly one question is pending. The message must match an option, or the question must allow free text. Otherwise the message follows the session's `turnPolicy`. A steering message, the default, fires `ctx.interruptSignal` for each workflow tool call the turn waits on, so a question asked with that signal, such as `ask_question`'s, is withdrawn and resolves as `cancelled`. The model reads the message once those calls settle. Questions from subagents need a structured response.
+For `ctx.ask()` questions from tools, a follow-up message answers the question only when exactly one question is pending. The message must match an option, or the question must allow free text. Otherwise the message follows the session's `turnPolicy`. A steering message, the default, aborts the `ctx.abortSignal` of each `execute` workflow tool call the turn waits on, so a question such a call asked, such as `ask_question`'s, is withdrawn and resolves as `cancelled`. The model reads the message once those calls settle. Questions from subagents need a structured response.
 
 Each request includes a `kind` discriminator: `tool-approval`, `question`, or
 `session-limit`. Clients should use `kind` to choose behavior and presentation.

@@ -1,6 +1,9 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { latestTaskResult } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
+
+import { respondToTaskScenario } from "./lib/task-scenarios.ts";
 
 /**
  * Deterministic script: each directive names the workflow tool to call with
@@ -38,6 +41,10 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         ],
       };
     }
+    // The agent call returned a receipt; its result arrives in a <task_result> message.
+    if (mode === "direct") {
+      return latestTaskResult(request, tool) ?? { toolCalls: [{ name: "task_wait", input: {} }] };
+    }
     const result = request.toolResults.find((entry) => entry.name === tool);
     return typeof result?.output === "string" ? result.output : JSON.stringify(result?.output);
   }
@@ -46,6 +53,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     [...request.userMessages]
       .reverse()
       .find((entry) => entry.startsWith("WORKFLOW-") || entry.includes("private-catalog")) ?? "";
+  const scenario = respondToTaskScenario(request, directiveOf(message));
+  if (scenario !== undefined) return scenario;
   if (message.includes("private-catalog")) {
     const result = request.toolResults.find((entry) => entry.name === "connection_search");
     if (result === undefined) {
@@ -99,6 +108,11 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   return "WORKFLOW-IDLE";
+}
+
+/** A directive is the first word of its message; any text after it is for people reading it. */
+function directiveOf(message: string): string {
+  return message.trim().split(/\s+/u)[0] ?? "";
 }
 
 const base = e2eAgentConfig({ mock: respond });

@@ -3,6 +3,12 @@ import { defineAgent, defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
 
 import { WORKSPACE_FORWARDING_MARKER, WORKSPACE_LOOKUP_MESSAGE } from "../constants";
+import {
+  isNotebookDirective,
+  isNotebookEntry,
+  respondAsNotebookKeeper,
+  respondAsNotebookParent,
+} from "./lib/notebook.js";
 
 if (process.env.EVE_E2E_MODEL === "mock") {
   process.env.EVE_MOCK_AUTHORED_MODELS = "1";
@@ -60,34 +66,40 @@ const workspaceDispatcher = mockModel({
     ) {
       return "The workspace lookup was submitted.";
     }
-    const agentId = findAnnouncedAgentId(request.messages, "remote-loopback");
-    const requestCount = request.messages.filter(
+    const requests = request.messages.filter(
       (message) => message.role === "user" && message.text.includes(WORKSPACE_FORWARDING_MARKER),
-    ).length;
-    if (requestCount > 1 && agentId === undefined) {
-      throw new Error("Workspace continuation has no remote agent in the <agents> note.");
+    );
+    const requestCount = requests.length;
+    // Only a continuation names the task, which the [Tasks] note lists.
+    const continuing = requests.at(-1)?.text.includes("taskId") === true;
+    const taskId = continuing ? findListedTaskId(request.messages, "remote-loopback") : undefined;
+    if (continuing && taskId === undefined) {
+      throw new Error("Workspace continuation has no remote-loopback task in the [Tasks] note.");
     }
     return {
       toolCalls: [
         {
           id: `workspace-lookup-${requestCount}`,
           name: "remote-loopback",
-          input: { agentId, message: WORKSPACE_LOOKUP_MESSAGE },
+          input: { message: WORKSPACE_LOOKUP_MESSAGE, taskId },
         },
       ],
     };
   },
 });
-/** Reads the id the framework-injected `[Agents]` note lists for a parked child. */
-function findAnnouncedAgentId(
+const notebookParent = mockModel({ modelId: "notebook-parent", respond: respondAsNotebookParent });
+// The remote keeper is a root session of this deployment, reached through remote-loopback.
+const notebookKeeper = mockModel({ modelId: "notebook-keeper", respond: respondAsNotebookKeeper });
+/** Reads the id of a tool's task from the latest framework-injected `[Tasks]` note. */
+function findListedTaskId(
   messages: readonly { readonly role: string; readonly text: string }[],
-  name: string,
+  tool: string,
 ): string | undefined {
-  const announcement = [...messages]
+  const note = [...messages]
     .reverse()
-    .find((message) => message.role === "user" && message.text.startsWith("[Agents]"));
-  const pattern = new RegExp(`<agent id="([^"]+)" name="${name}">`);
-  return announcement?.text.match(pattern)?.[1];
+    .find((message) => message.role === "user" && message.text.startsWith("[Tasks]"));
+  const pattern = new RegExp(`<task id="([^"]+)" tool="${tool}"`);
+  return note?.text.match(pattern)?.[1];
 }
 
 export default defineAgent({
@@ -117,6 +129,12 @@ export default defineAgent({
         }
         if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
           return { model: workspaceDispatcher, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isNotebookEntry)) {
+          return { model: notebookKeeper, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isNotebookDirective)) {
+          return { model: notebookParent, modelContextWindowTokens: 1_000_000 };
         }
         return { model: defaultModel, modelContextWindowTokens };
       },

@@ -1,6 +1,6 @@
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { SessionStepState } from "#execution/publish-session-events.js";
+import type { TaskToolCall } from "#execution/tasks/calls.js";
 import type { SettledTurn } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -23,10 +23,13 @@ export interface TurnStepPayload {
 }
 
 /** Input for one atomic, session-owner-executed turn step. */
-export interface TurnStepInput extends SessionStepState {
+export interface TurnStepInput {
   readonly abortSignal?: AbortSignal;
   readonly steeringSignal?: AbortSignal;
   readonly input: TurnStepPayload | undefined;
+  readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
 }
 
 interface DurableStepResultFields {
@@ -44,19 +47,28 @@ export type DurableStepResult = (
       readonly usageDelta?: TokenUsage;
     }
   | { readonly action: "cancelled" | "steered" }
+  /** The model ended the turn while tasks work; the turn waits for them. */
+  | { readonly action: "held"; readonly taskIds: readonly string[] }
   | {
       readonly action: "park";
       readonly authorizationAttemptIds?: readonly string[];
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
+      readonly pendingTaskToolCalls?: readonly TaskToolCall[];
       readonly settled?: SettledTurn;
     }
 ) &
   DurableStepResultFields;
 
 /** The only two ways a locally executed conversational turn can settle. */
-export type TurnOutcome =
+export type TurnOutcome = {
+  /**
+   * The delegated caller of the latest message the turn read. A caller's
+   * later message awaits its reply at its own address, so the turn reports there.
+   */
+  readonly caller?: TurnCaller;
+} & (
   | {
       readonly kind: "done";
       readonly output: unknown;
@@ -69,4 +81,5 @@ export type TurnOutcome =
       readonly cancelled?: true;
       readonly kind: "park";
       readonly settled?: SettledTurn;
-    };
+    }
+);

@@ -114,8 +114,33 @@ export const runtimeRemoteAgentDispatchRequestSchema = z
   .strict();
 
 /**
+ * The entry point a new run invokes: `execute`, which the turn waits on, or
+ * `task` or `serve`, with the id of the task the call's model step committed.
+ */
+export type WorkflowToolRunEntry = Exclude<
+  WorkflowToolCallEntry,
+  { readonly entryPoint: "receive" }
+>;
+
+/**
+ * How a deferred call enters its tool's workflow: through the entry point of
+ * a new run, or, for a call with `taskId` to a `serve` tool, through the
+ * `receive()` of the running task that id names.
+ */
+export type WorkflowToolCallEntry = z.infer<typeof workflowToolCallEntrySchema>;
+
+const workflowToolCallEntrySchema = z.discriminatedUnion("entryPoint", [
+  z.object({ entryPoint: z.literal("execute") }).strict(),
+  z.object({ entryPoint: z.literal("task"), taskId: z.string() }).strict(),
+  z.object({ entryPoint: z.literal("serve"), taskId: z.string() }).strict(),
+  z.object({ entryPoint: z.literal("receive"), taskId: z.string() }).strict(),
+]);
+
+/**
  * One workflow task requested by the harness. The turn owner starts the
- * durable run named by `workflowId` and waits for its result.
+ * durable run named by `workflowId`, or sends the call to the running task it
+ * names; the turn waits for an `execute` call's result, while a call to a task
+ * is answered with its receipt.
  *
  * Tasks are the coordination contract for authored workflow tools and
  * subagents. They are intentionally separate from `RuntimeActionRequest`.
@@ -125,10 +150,10 @@ export type RuntimeWorkflowTaskRequest = z.infer<typeof runtimeWorkflowTaskReque
 export const runtimeWorkflowTaskRequestSchema = z
   .object({
     callId: z.string(),
+    entry: workflowToolCallEntrySchema,
     executeInput: jsonValueSchema.optional(),
     input: jsonObjectSchema,
     kind: z.literal("workflow-task"),
-    nodeId: z.string().optional(),
     toolName: z.string(),
     workflowId: z.string(),
   })
@@ -239,9 +264,8 @@ export interface RuntimeSubagentChildResult {
 
 /**
  * Subagent failure synthesized on the parent side when no child produced a
- * result: dispatch rejections, start failures, and agentId-continuation
- * delivery errors. Always an error. Enters the harness only through the
- * trusted step-result path, never through the shared callback inbox.
+ * result. Always an error. Enters the harness only through the trusted
+ * step-result path, never through the shared callback inbox.
  */
 export type RuntimeSubagentDispatchFailure = z.infer<typeof runtimeSubagentDispatchFailureSchema>;
 

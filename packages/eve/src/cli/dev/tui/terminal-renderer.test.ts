@@ -1181,8 +1181,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     await screen.waitForText("Delegate");
 
-    // Subagent dispatches never upgrade the placeholder (their actions are
-    // not tool-call kind) — subagent.called supersedes it with the section.
+    // The agent's section supersedes the tool-call placeholder once agent.started arrives.
     renderer.markChildToolCallId("sub1");
     renderer.beginSubagent({ callId: "sub1", name: "agent" });
     await screen.waitForText("※ subagent(self)");

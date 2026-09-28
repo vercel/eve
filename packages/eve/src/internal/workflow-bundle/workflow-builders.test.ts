@@ -96,7 +96,7 @@ describe("applyWorkflowTransform", () => {
     const transformed = await applyWorkflowTransform(
       filename,
       [
-        "export async function subagentToolExecuteWorkflow(): Promise<void> {",
+        "export async function agentToolServeWorkflow(): Promise<void> {",
         '  "use workflow";',
         "}",
         "",
@@ -106,13 +106,11 @@ describe("applyWorkflowTransform", () => {
       resolvePackageRoot(),
     );
 
-    expect(transformed.workflowManifest.workflows?.[filename]?.subagentToolExecuteWorkflow).toEqual(
-      {
-        workflowId: "workflow//eve//subagentToolExecuteWorkflow",
-      },
-    );
+    expect(transformed.workflowManifest.workflows?.[filename]?.agentToolServeWorkflow).toEqual({
+      workflowId: "workflow//eve//agentToolServeWorkflow",
+    });
     expect(transformed.code).toContain(
-      'globalThis.__private_workflows.set("workflow//eve//subagentToolExecuteWorkflow", subagentToolExecuteWorkflow);',
+      'globalThis.__private_workflows.set("workflow//eve//agentToolServeWorkflow", agentToolServeWorkflow);',
     );
   });
 

@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-09-26"
+last_updated: "2026-09-28"
 ---
 
 # eve tasks
@@ -20,8 +20,8 @@ stack of pull requests that lands it in pieces. Paths are relative to `packages/
 3. **`serve(receive, ctx)` runs a resumable task.** It gets each call from `receive()`,
    including later calls the model sends by `taskId`, and settles them with `ctx.reply()`. Every
    agent tool is a `serve` tool built on `ctx.agent`.
-4. **Steering never cancels a task.** A new message ends the model's waits, and an `execute` call
-   the turn is waiting on learns about it through `ctx.interruptSignal`. Tasks stop only for
+4. **Steering never cancels a task.** A new message ends the model's waits and aborts the
+   `abortSignal` of each `execute` call the turn is waiting on. Tasks stop only for
    `task_cancel`, `session.cancel()`, or session end.
 5. **Results arrive one way:** a `task.result` message at a step boundary. The model gets
    `task_wait`, which parks the turn until a task settles, and `task_cancel`.
@@ -73,14 +73,13 @@ defineWorkflowTool({
 
 - **`execute(input, ctx)`** is an ordinary tool call, exactly as on `main` and like
   `defineTool`'s `execute`: the turn parks durably until the call settles, and its result is the
-  tool result. Its context, `WorkflowToolContext`, has `callId`, `abortSignal`, and
-  `interruptSignal` (§2).
+  tool result. Its context, `WorkflowToolContext`, has `callId` and `abortSignal`, which a
+  steering message also aborts (§2).
 - **`task(input, ctx)`** runs the call as a task: a receipt now, the result later as a
-  `task.result` message. Its context, `WorkflowTaskContext`, has `callId` and `abortSignal`, and
-  no `interruptSignal`, because tasks are never interrupted.
+  `task.result` message. Its context is the same `WorkflowToolContext`, and steering never aborts
+  its `abortSignal`.
 - **`serve(receive, ctx)`** runs a resumable task (§3). `receive()` resolves each call with its
-  own `callId` and `abortSignal`, and the context, `WorkflowServeContext`, has `reply(output)`
-  and no `interruptSignal`.
+  own `callId` and `abortSignal`, and the context, `WorkflowServeContext`, has `reply(output)`.
 - All three contexts share `ask`, `agent`, `agents`, `getToken`, `requireAuth`, and `session`.
 - In `execute` and `task`, `return output` settles the call and a throw fails it. `async *execute`
   and `async *task` still yield progress as `action.partial`.
@@ -95,17 +94,18 @@ defines {found}.
 
 **Tool calls and tasks.** The entry point answers whether the conversation should continue while
 the call runs. Parking alone doesn't need a task: a question, a sleep, or an approval parks
-durably inside an `execute` call and holds no compute. A twenty-minute deploy, or research the
-model may not need right away, is a task. A long `execute` tool holds the conversation until it
+durably inside an `execute` call and holds no compute, until a new message stops it. A
+twenty-minute deploy, research the model may not need right away, or a question that should
+outlast new messages is a task. A long `execute` tool holds the conversation until it
 settles; the docs say so where `task()` is introduced.
 
-| Call                                                                     | Runs as                   | Result                                            | Steering during the call                      |
-| ------------------------------------------------------------------------ | ------------------------- | ------------------------------------------------- | --------------------------------------------- |
-| `execute()` tool, including `sleep` and `ask_question`                   | Tool call; the turn parks | The tool result                                   | Its `interruptSignal` fires; the call decides |
-| `task()` tool, including `agentRouter()` and the `workflow` program tool | Task                      | A receipt, then a `task.result` message           | Nothing                                       |
-| `serve()` tool, including every agent tool                               | Resumable task            | A receipt, then a `task.result` message per reply | Nothing                                       |
-| `task_wait`                                                              | Kernel wait               | Which tasks settled                               | Returns `interrupt`                           |
-| Plain and MCP tools                                                      | Inside the model step     | The tool result                                   | Applied at the next step boundary             |
+| Call                                                                     | Runs as                   | Result                                            | Steering during the call                    |
+| ------------------------------------------------------------------------ | ------------------------- | ------------------------------------------------- | ------------------------------------------- |
+| `execute()` tool, including `sleep` and `ask_question`                   | Tool call; the turn parks | The tool result                                   | Its `abortSignal` aborts; the body's result |
+| `task()` tool, including `agentRouter()` and the `workflow` program tool | Task                      | A receipt, then a `task.result` message           | Nothing                                     |
+| `serve()` tool, including every agent tool                               | Resumable task            | A receipt, then a `task.result` message per reply | Nothing                                     |
+| `task_wait`                                                              | Session wait              | Which tasks settled                               | Returns `interrupt`                         |
+| Plain and MCP tools                                                      | Inside the model step     | The tool result                                   | Applied at the next step boundary           |
 
 **Agents are always `serve` tasks.** Whether an agent's result is needed now depends on the
 conversation, which only the model sees, and the turn rule (§6) guarantees the result reaches it.
@@ -120,29 +120,31 @@ Steering is applied in this order:
 1. If the message answers a pending request, it answers it and doesn't steer. Only a person's
    message to the session they're talking to can answer, as on `main` after #3700; a caller's
    message, such as an agent tool's message to its child, never does.
-2. Otherwise, the `interruptSignal` of every `execute` call the turn is waiting on fires, and
+2. Otherwise, the `abortSignal` of every `execute` call the turn is waiting on aborts, and
    `task_wait` returns `interrupt`. Tasks are untouched. The model sees the message once the
    step's `execute` calls settle, and decides whether to keep, correct, or cancel each task.
 
 Steering never ends the turn. A `"queue"` message waits for the turn to end.
 
-**`ctx.interruptSignal`** fires once, on the first steering message while the turn waits on the
-call; later messages are applied after the call settles anyway. What it means is the author's
-choice. A body that ignores it keeps going: a deploy waiting on an approval survives unrelated
-messages. A body that wants to stop races or passes the signal. Tasks are never interrupted, so
-`task` and `serve` have no `interruptSignal`.
+**One signal, two triggers.** A call's `abortSignal` aborts when its work should stop: a cancel
+stops any call, and a steering message stops the `execute` calls the turn waits on. The body
+doesn't tell them apart; it stops and returns what it has. The run does. After a steering message
+the call settles with the body's result, or `{ interrupted: true }` if the body rejects, with no
+cleanup deadline. After a cancel the result is discarded and the run ends 30 s later. Work that
+should outlast new messages, such as an approval that must stay open, is a task.
 
 **Anything that waits takes a `signal`.** `ctx.ask(request, { signal })` withdraws the request
 when the signal aborts: it resolves `{ status: "cancelled" }`, and `input.resolved` reports
 `outcome: "cancelled"` so channels update the question. Cancellation withdraws a pending ask the
-same way. An ask that should end when the conversation moves on passes `ctx.interruptSignal`,
-which replaces `dismissible`. The built-in tools do exactly this:
+same way. The session decides between an answer and a withdrawal (§7), so an answer it accepted
+first still resolves the ask as `answered` after the signal aborts. Steering aborts a waited `execute` call's `abortSignal`, so its asks end when the conversation
+moves on, which replaces `dismissible`. The built-in tools rely on that:
 
 ```ts
 // ask_question, as eve ships it
 async execute(input, ctx) {
   "use workflow";
-  const answer = await ctx.ask(toQuestion(input), { signal: ctx.interruptSignal });
+  const answer = await ctx.ask(toQuestion(input));
   return answer.status === "cancelled" ? { interrupted: true } : answer;
 }
 
@@ -150,7 +152,7 @@ async execute(input, ctx) {
 async execute(input, ctx) {
   "use workflow";
   const interrupted = new Promise<"interrupted">((resolve) =>
-    ctx.interruptSignal.addEventListener("abort", () => resolve("interrupted"), { once: true }),
+    ctx.abortSignal.addEventListener("abort", () => resolve("interrupted"), { once: true }),
   );
   const elapsed = sleep(input.seconds * 1_000).then(() => "elapsed" as const);
   const woke = await Promise.race([elapsed, interrupted]);
@@ -201,31 +203,33 @@ A `serve` body runs once per task and gets its calls from `receive()` instead of
   validated by `inputSchema`. The first `receive()` resolves in memory from the call that started
   the task, with no step or hook. After that, it resolves with each call made with the task's
   `taskId`, in arrival order. Calls that arrive while the body isn't waiting are kept. A pending
-  `receive()` is shared: calling it again returns the same promise, so a `Promise.race` it loses
-  never drops a call.
+  `receive()` is shared: calling it again returns the same promise. A call counts as received once
+  its promise resolves, even if that promise lost a `Promise.race`, and the next `ctx.reply()`
+  settles it, so a body that races `receive()` keeps the promise until it reads the call.
 - **`ctx.reply(output)`** settles the calls received so far with `output`, and the task goes idle
   until the next call. A reply with no call left to settle is dropped, and `ctx.ask` throws while
   no call is waiting for a result.
 - **`return output`** settles the calls still waiting and ends the task; throwing fails them.
   `serve` is not a generator, so it can't yield progress for now.
-- **`taskId` on the model input.** eve adds an optional `taskId` to the tool's model input.
-  Without it, a call starts a new task; with it, the call goes to that task. The build fails if
-  `inputSchema` declares its own `taskId`. The ID must name an unfinished task this tool started
-  for the caller's principal, or the call fails `UNKNOWN_TASK`.
+- **`taskId` on the model input.** eve adds an optional `taskId` to the tool's model input. Without
+  it, a call starts a new task; with it, the call goes to that task. The build fails if
+  `inputSchema` declares its own `taskId`. The ID must name an unfinished task this tool started, or
+  the call fails `UNKNOWN_TASK`.
 - **One `abortSignal` per stretch of work.** A stretch starts when a call reaches an idle task and
   ends when a reply or a cancel settles its calls; calls that arrive during it carry the same
   signal. Each signal aborts at most once and the next stretch gets a new one, so a task can be
   cancelled any number of times. A body stays available only if it catches its stretch's abort
-  and returns to `receive()`; an abort that escapes the body finishes the task. A body that ignores
-  the signal keeps working, and its reply is dropped.
+  and returns to `receive()`; an abort that escapes the body finishes the task, and so does a body
+  that hasn't returned to `receive()` 30 s after the cancel.
 - **The context follows the call.** `ctx.session` (its turn and auth) and `ctx.agents` describe
   the call being served, from the moment `receive()` resolves it. An agent session the body opens
   belongs to the call that opened it: its parent, turn, and trace come from that call. Each
   message the body sends it carries the auth of the call being served when it is sent.
 - **Working and idle.** A resumable task is working while one of its calls has no result, and
   idle otherwise. An idle task holds no turn and doesn't count toward the cap.
-- **Finishing.** The task finishes when its body returns or throws, or when the session ends,
-  which aborts the current stretch's signal and rejects a pending `receive()`.
+- **Finishing.** The task finishes when its body returns or throws, when it hasn't returned to
+  `receive()` 30 s after a cancel, or when the session ends, which aborts the current stretch's
+  signal and rejects a pending `receive()`.
 - eve appends this sentence to the tool's description:
 
 ```text
@@ -265,23 +269,36 @@ async serve(receive, ctx) {
   "use workflow";
   const agent = ctx.agent(name);
   // A cancel aborts the call's abortSignal, which ends the agent's turn.
-  const send = ({ input, abortSignal }: Awaited<ReturnType<typeof receive>>) =>
-    agent
-      .send(input.message, { signal: abortSignal })
-      .then((response) => response.result());
-  let latest = send(await receive());
+  const send = ({ input, abortSignal }: Awaited<ReturnType<typeof receive>>) => ({
+    result: agent.send(input.message, { signal: abortSignal }).then((r) => r.result()),
+    signal: abortSignal,
+  });
+  let turn = send(await receive());
+  let next = receive(); // kept until its call is read, even after it loses the race
   for (;;) {
     const event = await Promise.race([
-      latest.then((result) => ({ result })),
-      receive().then((next) => ({ next })),
+      turn.result.then((result) => ({ result })),
+      next.then((call) => ({ call })),
     ]);
-    if ("next" in event) {
-      latest = send(event.next); // joins the running turn, or starts the next if it just ended
+    if ("call" in event) {
+      if (turn.signal.aborted) await turn.result.catch(() => {}); // a cancelled turn ends first
+      turn = send(event.call); // joins the running turn, or starts the next if it just ended
+      next = receive();
       continue;
     }
-    if (event.result.status === "failed") throw new Error("The agent's session ended.");
-    ctx.reply(toOutput(event.result)); // settles the calls received so far; dropped after a cancel
-    latest = send(await receive());
+    // After a cancel, the turn's calls are already settled.
+    if (!turn.signal.aborted) {
+      if (event.result.status === "failed") throw new Error("The agent's session ended.");
+      const following = receive();
+      if (following !== next) {
+        turn = send(await next); // `next` took a call as the turn ended: the agent reads it first
+        next = following;
+        continue;
+      }
+      ctx.reply(toOutput(event.result)); // settles the calls received so far
+    }
+    turn = send(await next);
+    next = receive();
   }
 }
 ```
@@ -309,10 +326,10 @@ Both are offered, with the system block below, when the agent has an agent or a 
 `serve()` tool.
 All model text is a draft, tuned with real-model evals.
 
-**`task_wait`** returns when any task the turn's principal started settles, when `timeout`
-passes, or when steering arrives, and at once if a result is already waiting. It never returns
-content; the settled results follow as the `task.result` message in the same step. Waiting never
-stops a task, and a task waiting on a person keeps the wait going.
+**`task_wait`** returns when any task in the turn settles, when `timeout` passes, or when steering
+arrives, and at once if a result is already waiting. It never returns content; the settled results
+follow as the `task.result` message in the same step. Waiting never stops a task, and a task waiting
+on a person keeps the wait going.
 
 ```text
 Wait until one of your tasks has a result, a new message arrives, or timeout (in milliseconds)
@@ -375,8 +392,8 @@ Sent to task researcher-7k2m9q.
 
 **`[Tasks]` note.** A `context.state` message appended at a model-step boundary when the listing
 changes, and after compaction, so task IDs survive it. It is derived only from the session's task
-table in process, never from child streams: the turn principal's working tasks with tool and
-status, then its 10 most recent idle resumable tasks.
+table in process, never from child streams: the working tasks with tool and status, then the 10 most
+recent idle resumable tasks.
 
 ```text
 [Tasks]
@@ -404,18 +421,18 @@ task_cancel. Never use sleep to wait for a task.
 
 **Errors.** These are the only task error codes.
 
-| Code             | Where                                 | Message                                                                                                                                           |
-| ---------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `UNKNOWN_TASK`   | Call with `taskId`, `task_cancel`     | `No task "{id}" is available to {tool}: it may have ended or belong to another tool or caller. Start a new one by calling {tool} without taskId.` |
-| `TOO_MANY_TASKS` | Start, call to an idle resumable task | `32 tasks are already working ({ids}). Wait with task_wait or stop one with task_cancel, then try again.`                                         |
+| Code             | Where                                 | Message                                                                                                                                 |
+| ---------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `UNKNOWN_TASK`   | Call with `taskId`, `task_cancel`     | `No task "{id}" is available to {tool}: it may have ended or belong to another tool. Start a new one by calling {tool} without taskId.` |
+| `TOO_MANY_TASKS` | Start, call to an idle resumable task | `32 tasks are already working ({ids}). Wait with task_wait or stop one with task_cancel, then try again.`                               |
 
 ## 6. Turns, principals, and limits
 
-**The turn rule.** No turn ends while tasks its principal started are working, in any session.
-When the model ends such a turn, eve does what `task_wait` does: it parks until one of those tasks
-settles or the same principal steers, appends the settled results, and calls the model again. A
-`final_output` call while tasks work returns an error naming them. No result ever starts a turn.
-Session expiry and turn failures cancel the turn's tasks, as `session.cancel()` does.
+**The turn rule.** No turn ends while any task is working, in any session. When the model ends such
+a turn, eve does what `task_wait` does: it parks until one of those tasks settles or the turn's
+principal steers, appends the settled results, and calls the model again. A `final_output` call
+while tasks work returns an error naming them. No result ever starts a turn. Session expiry and turn
+failures cancel the turn's tasks, as `session.cancel()` does.
 
 **Presentation of a held turn.** A held turn stays open. Each time an open turn parks, the stream
 emits `turn.waiting` with the turn's ID: when eve holds a turn the model tried to end, in every
@@ -452,11 +469,11 @@ call's receipt doesn't show as finished: Slack's activity keeps the call running
 until `task.settled` for that `callId`, then settles it with the real status. There is no option
 yet, and other channels are unchanged.
 
-**Principals.** Only the turn's own principal steers it; another principal's message waits for
-the turn to end, then starts that principal's turn. Calls with `taskId` and `task_cancel` accept
-only the task's creator principal, and `task_wait` and `[Tasks]` cover only the turn principal's
-tasks. Anonymous callers share one principal. Queued messages from one principal share a turn
-even when their claims differ, and the turn runs with the latest claims.
+**Principals.** Only the turn's own principal steers it; another principal's message waits for the
+turn to end, then starts that principal's turn. Tasks belong to the session's open turn, and any
+turn can continue an idle task by `taskId` with its own caller's auth. Anonymous callers share one
+principal. Queued messages from one principal share a turn even when their claims differ, and the
+turn runs with the latest claims.
 
 **No task time limits.** `defineAgent`'s `limits.sessionTimeoutMs` keeps its meaning, the
 session lifetime (default 30 days), and bounds all work in the session; with `false`, tasks are
@@ -470,7 +487,7 @@ shouldn't reach. Idle resumable tasks don't count.
 
 ```ts
 { type: "turn.waiting"; data: { turnId, sequence } }
-{ type: "task.started"; data: { taskId, callId, turnId, name } }
+{ type: "task.started"; data: { taskId, callId, turnId, name, kind: "agent" | "tool" } }
 { type: "task.settled"; data: { taskId, callId, turnId,
                                 status: "completed" | "failed" | "cancelled",
                                 output?: JsonValue, error?: { message: string } } }
@@ -483,7 +500,9 @@ shouldn't reach. Idle resumable tasks don't count.
   a task or reaches one by `taskId`, and when a reply, return, failure, or cancel settles it.
   `(taskId, callId)` identifies the call; `callId` is the tool call clients attach status to, and
   both events carry that call's `turnId`. For each invocation, `task.started` comes before the
-  sessions it announces and the calls it settles.
+  sessions it announces and the calls it settles. `kind` is `"agent"` for an agent tool's call and
+  `"tool"` for any authored tool, so clients tell agent calls apart without `agent.started`, which
+  only adds the child session.
 - **`agent.started`** comes once per session a workflow run opens with `ctx.agent`, including an
   agent tool's, with the `callId` and `turnId` of the call whose invocation opened it; for a
   `serve` task that is the current call, not the first. `taskId` is present when that invocation
@@ -492,8 +511,9 @@ shouldn't reach. Idle resumable tasks don't count.
 - **`output`** is a completed call's typed result; **`error.message`** explains a failed one.
   There are no error codes and no usage; either can be added later without breaking anyone.
 
-`session.streamSubagent(started)` takes an `agent.started` event and no longer checks the parent
-session ID; the proxy validates the parent and call. Hooks subscribe to the new events in place
+`session.agent(started)` takes an `agent.started` event and returns the child's handle, whose
+`stream()` follows it; the proxy validates the parent and call. It replaces
+`session.streamSubagent()`, and the handle leaves room for more child operations. Hooks subscribe to the new events in place
 of `subagent.*`. `input.requested` and `authorization.*` gain `taskId` when a task asks. A
 `task.result` message is not published as `message.received`: it stays a user-role message in
 the model's history, and clients see outcomes through `task.settled`. The eval assertion
@@ -502,12 +522,11 @@ the model's history, and clients see outcomes through `task.settled`. The eval a
 ## 7. Runtime invariants
 
 - **One owner per task.** The session owns every task; a workflow run owns only the sessions it
-  opens with `ctx.agent`, which are not tasks. One small versioned record per task, written only
-  by applying the session's inbox messages (`execution/tasks/table.ts`): `id`, `name`,
-  `resumable`, `status` (`working`, `idle`, or finished), the calls without a result, each with
-  its `turnId`, `delivered`, `creator` (auth captured at start), and the cancel timestamp. A
-  record that fails to decode fails its task ("its state could not be read"), never the session.
-  Sessions aren't migrated.
+  opens with `ctx.agent`, which are not tasks. One small versioned record per task, written only by
+  applying the session's inbox messages (`execution/tasks/table.ts`): `id`, `name`, `resumable`,
+  `status` (`working`, `idle`, or finished), the calls without a result, each with its `turnId`,
+  `delivered`, and the cancel timestamp. A record that fails to decode fails its task ("its state
+  could not be read"), never the session. Sessions aren't migrated.
 - **Every wait suspends.** The session is a durable workflow (`execution/session/entry.ts`) whose
   inbox is built on Workflow SDK hooks. `execute` calls keep today's path: the call defers out
   of the model step and the turn loop parks until it settles (`execution/session/turn.ts`,
@@ -519,28 +538,40 @@ the model's history, and clients see outcomes through `task.settled`. The eval a
   Only later calls to a `serve` task use the run's private hook, created with a token derived
   from `taskId` before the body starts, because a Workflow SDK hook registers only when the run
   suspends.
-- **One inbox per run.** A run's signals and ask results are views over one ordered inbox, so
-  when an answer and an interrupt race, they resolve in inbox order: `ask_question` gets the
-  answer or `cancelled`, whichever its run's inbox received first.
+- **One inbox per run.** Everything the run receives (calls, answers, interrupt, cancel) is
+  delivered through one ordered inbox in the order the session accepted it. The inbox is the run's
+  control hook; only the session writes to it, and ask results and signals are views over it.
+  The session is the one authority on a question: it accepts an answer or a withdrawal at the
+  step that retires the question's route, emits `input.resolved` from that step, and sends its
+  decision (`answer` or `withdrawn`) on the control hook. An aborted signal only asks the session
+  to withdraw. `cancel` of an `execute` or `task()` call and `end` settle its pending asks as
+  `cancelled`, because the session retires their routes when it sends them.
 - **Start once.** The model step commits the task record, with an ID assigned by the session,
   alongside the tool call; the session then starts the task's run in one step keyed on `taskId`.
   Commands issued before the run reports started are held on the record.
 - **Settle once.** Runs send the session `task.input` and `task.settled`, keyed
-  `(taskId, callId, kind)`; a reply sends one `task.settled` per call it settles. The first
-  outcome per call wins, owner-cancelled results are dropped, and every other result is appended
-  once to the next `task.result` message and marked `delivered`.
-- **Calls with `taskId`.** The session checks the task is resumable, unfinished, this tool's, and
-  the caller's principal's (else `UNKNOWN_TASK`), records the call, marks the task `working`,
-  emits `task.started`, and resumes the task's hook with the validated input.
+  `(taskId, callId, kind)`. A reply settles every call it answers in one step, with one
+  `task.settled` per call, so no wait wakes while some of them look unanswered. The first outcome
+  per call wins, owner-cancelled results are dropped, and every other result is appended once to
+  the next `task.result` message and marked `delivered`; calls one reply or return settles share
+  one result.
+- **Calls with `taskId`.** The session checks the task is resumable, unfinished, and this tool's
+  (else `UNKNOWN_TASK`), records the call, marks the task `working`, emits `task.started`, and
+  resumes the task's hook with the validated input.
 - **Cancel.** The session settles the waiting calls as `cancelled`, sends the run `cancel`, and
-  returns at once. A `task()` run aborts its call's `abortSignal`, and one sleeper run per
-  session, armed only for the earliest pending confirmation, hard-stops it after 30 s. A `serve()`
-  run aborts the current stretch's signal and stays parked on its hook, so it needs no hard stop.
-- **Agent sessions.** A workflow run's start input carries the caller's principal, capabilities,
-  dynamic agent selections, and sandbox reference. `ctx.agent` opens its child, local or remote,
-  in a step keyed on the run and the handle's position; `send` uses the child's existing deliver
-  path with the run's `callId` as `caller.callId`; `result()` waits through a hook. The run
-  publishes `agent.started` on the session's stream, as it publishes `action.partial`.
+  returns at once. A `task()` run aborts its call's `abortSignal`; a `serve()` run aborts the
+  current stretch's signal. The run bounds its own cleanup: a `task()` body still running, or a
+  `serve()` body not back at `receive()`, 30 s after the cancel ends the run as `cancelled`. The
+  session never waits on it, so it keeps no timer.
+- **Agent sessions.** A workflow run's start input carries the caller's capabilities, dynamic agent
+  selections, and sandbox reference, and each message to a session carries the auth of the call that
+  sends it. `ctx.agent` opens its child, local or remote, in a step keyed on the run and the
+  handle's position; `send` uses the child's existing deliver path with the run's `callId` as
+  `caller.callId`; `result()` waits through a hook. The run sends `agent.started` to the session,
+  which publishes it as it arrives, even while a model step runs, so clients follow a child while it
+  works. Publishing it changes no session state, so the step's result, which replaces that state at
+  the boundary, loses nothing. `action.partial` reaches channel handlers, which can change state, so
+  it waits for the step boundary.
 - **Questions go up, answers come down.** A child's `input.requested` and `authorization.*` travel
   up the owner chain to the root, where a person answers, and answers route down by request ID.
   The root emits `input.resolved` for each answer it routes, during a hold too. This is the only
@@ -548,13 +579,13 @@ the model's history, and clients see outcomes through `task.settled`. The eval a
   with idempotent callbacks and a version check that fails the call at start with a message
   naming both versions.
 - **Turn end.** The harness's terminate branch (`harness/tool-loop.ts`) returns `held` with the
-  working task IDs, the turn loop waits, and the program (`execution/session/program.ts`) sends
-  the caller's reply from one guarded site. The hold is keyed by principal, so a turn resumed
-  after an approval or sign-in still holds on the parked turn's work.
+  working task IDs, the turn loop waits, and the program (`execution/session/program.ts`) sends the
+  caller's reply from one guarded site. The open turn holds on every working task, so a turn resumed
+  after an approval or sign-in still holds on the earlier turn's work.
 - **A turn completes once.** `turn.completed` comes only at a turn's real end. A question or
   sign-in inside a running call parks the turn with `turn.waiting` and never ends it.
 - **Guards** (`pnpm guard:invariants`): `tools/provided/**` and generated agent tools import only
-  public entry points, except the kernel's `task_wait` and `task_cancel`; only
+  public entry points, except the session's own `task_wait` and `task_cancel`; only
   `execution/tasks/table*.ts` writes records; model text lives only in
   `execution/tasks/render.ts`; one caller-reply site.
 
@@ -572,7 +603,8 @@ These are the upgrade notes; everything is breaking and allowed pre-1.0.
 
 - **`ctx.agent`:** `ctx.agent(name, { message, agentId })` returning output becomes
   `ctx.agent(name)` returning a session handle. `agentId` is removed; each handle is a new child.
-- **`ctx.ask`:** `dismissible` is removed; pass `ctx.interruptSignal` as `signal`. The
+- **`ctx.ask`:** `dismissible` is removed; a steering message withdraws a waited `execute` call's
+  questions, and a task's stay open. The
   `input.resolved` outcome `"dismissed"` becomes `"cancelled"`.
 - **Agent tools:** `agentId` becomes `taskId`, and every agent call is a task.
 - **`agentRouter()` and the `workflow` program tool** become `task()` tools instead of blocking
@@ -621,23 +653,23 @@ replacement.
   - Extract a helper function wherever a step has a name, and define explicit interfaces and
     types at module boundaries: task records, inbox commands, the received call, and agent
     session handles.
-  - Keep related code together: the task kernel under `execution/tasks/`, its model text in one
+  - Keep related code together: tasks under `execution/tasks/`, their model text in one
     renderer, and public types beside the definitions they describe.
   - Follow `AGENTS.md`: keep it simple, comment why rather than what, add no legacy fallbacks,
     and wrap third-party APIs.
 
-| #   | PR                            | Main after it lands                                             |
-| --- | ----------------------------- | --------------------------------------------------------------- |
-| 1   | Remove background tasks       | Every workflow tool and agent call blocks                       |
-| 2   | Workflow tool body (dropped)  | Nothing: `execute(input, ctx)` keeps its signature              |
-| 3   | Steering signals              | `ctx.interruptSignal`; `sleep` and `ask_question` on public API |
-| 4   | Agent sessions                | `ctx.agent(name)` handles; `agent.started`; `turn.waiting`      |
-| 5   | Task kernel and the turn rule | `task(input, ctx)`, `task_wait`, `task_cancel`, held turns      |
-| 6   | Held-turn presentation        | `turn.waiting` for every held turn; root text steps as `"stop"` |
-| 7   | Resumable tasks               | `serve(receive, ctx)`, `ctx.reply()`, `taskId`                  |
-| 8   | Agents as tasks               | Agent tools as `serve` tools; `subagent.*` removed              |
-| 9   | Slack post before a wait      | The text of a `task_wait` step is posted; receipts stay running |
-| 10  | Tests and release readiness   | E2E suites, real-model evals, Tasks and upgrade guides          |
+| #   | PR                           | Main after it lands                                             |
+| --- | ---------------------------- | --------------------------------------------------------------- |
+| 1   | Remove background tasks      | Every workflow tool and agent call blocks                       |
+| 2   | Workflow tool body (dropped) | Nothing: `execute(input, ctx)` keeps its signature              |
+| 3   | Steering signals             | `ctx.interruptSignal`; `sleep` and `ask_question` on public API |
+| 4   | Agent sessions               | `ctx.agent(name)` handles; `agent.started`; `turn.waiting`      |
+| 5   | Tasks and the turn rule      | `task(input, ctx)`, `task_wait`, `task_cancel`, held turns      |
+| 6   | Held-turn presentation       | `turn.waiting` for every held turn; root text steps as `"stop"` |
+| 7   | Resumable tasks              | `serve(receive, ctx)`, `ctx.reply()`, `taskId`                  |
+| 8   | Agents as tasks              | Agent tools as `serve` tools; `subagent.*` removed              |
+| 9   | Slack post before a wait     | The text of a `task_wait` step is posted; receipts stay running |
+| 10  | Tests and release readiness  | E2E suites, real-model evals, guides; one `abortSignal`         |
 
 **1. Remove background tasks.** Delete `execution: "background"` (rejected at definition),
 `taskDeliveryPolicy`, cohorts, the `[Task state]` and `[Agents]` notes, prose notifications,
@@ -659,7 +691,7 @@ calls, `ctx.ask(..., { signal })` withdrawal with `outcome: "cancelled"`, removi
 `sleep` and `ask_question` rebuilt as `execute(input, ctx)` on public API, and the
 `tools/provided/**` guard.
 
-**4. Agent sessions.** `ctx.agent(name)` handles opened from the run with the caller's principal,
+**4. Agent sessions.** `ctx.agent(name)` handles opened from the run with the caller's auth,
 capabilities, dynamic selections, and sandbox reference in the start input; `agent.started` with
 the opening call's `turnId`; `streamSubagent()` accepting `agent.started`; questions and sign-ins
 up the owner chain from run-owned sessions; the remote protocol change and version check.
@@ -675,17 +707,15 @@ scanning for `subagent.called` (`eve-channel/support.ts`); resolve it from the a
 `agent.started.name`, and if dynamic remote agents can't be resolved that way, record the binding
 on the run's `agent.started` step instead.
 
-**5. Task kernel and the turn rule.** Task records, `task(input, ctx)` with
-`WorkflowTaskContext` and the one-entry-point definition error, receipts, `task.started` and
-`task.settled` with each call's `turnId`, `task_wait` with `turn.waiting` when it parks,
-`task_cancel`, the `task.result` message (not published as `message.received`), `[Tasks]`, the
-system block, `UNKNOWN_TASK`, `TOO_MANY_TASKS`, principals, `session.cancel()` cancelling working
-tasks, the hard-stop timer, and the turn rule with `final_output`'s error. `agent.started` gains
-`taskId` for `task()` runs, and proxied answers emit `input.resolved` during a hold. A held turn
-emits no `turn.waiting` yet: every held text step reports `"tool-calls"`, as child turns do.
-`agentRouter()` and
-the `workflow` program tool become `task()` tools; the `execution` error gains its final
-wording.
+**5. Tasks and the turn rule.** Task records, `task(input, ctx)` with `WorkflowTaskContext` and the
+one-entry-point definition error, receipts, `task.started` and `task.settled` with each call's
+`turnId`, `task_wait` with `turn.waiting` when it parks, `task_cancel`, the `task.result` message
+(not published as `message.received`), `[Tasks]`, the system block, `UNKNOWN_TASK`,
+`TOO_MANY_TASKS`, principal steering and queuing, `session.cancel()` cancelling working tasks, and
+the turn rule with `final_output`'s error. `agent.started` gains `taskId` for `task()` runs, and
+proxied answers emit `input.resolved` during a hold. A held turn emits no `turn.waiting` yet: every
+held text step reports `"tool-calls"`, as child turns do. `agentRouter()` and the `workflow` program
+tool become `task()` tools; the `execution` error gains its final wording.
 
 **6. Held-turn presentation.** `turn.waiting` whenever eve holds a turn, in every session kind; a
 root turn's held text step completes as `"stop"`, and `"tool-calls"` remains only for child and
@@ -695,7 +725,7 @@ schedule turns.
 first call from the start input and later calls through the run's hook, `ctx.reply()`, return
 and throw settlement, `ctx.ask` throwing while no call waits, `taskId` on the model input and its
 build check, per-stretch `abortSignal`, idle tasks in the turn rule and `[Tasks]`, and cancel
-keeping the task. Each call carries its own turn, auth, and agent context, so `ctx.session`,
+keeping the task when the body returns to `receive()` within 30 s. Each call carries its own turn, auth, and agent context, so `ctx.session`,
 `ctx.agents`, `agent.started`, and `task.settled` describe the current call, and a session the
 body opens belongs to the call that opened it.
 
@@ -710,7 +740,9 @@ and hook event map to task events. #3700's delegated-session regressions and its
 Task receipts stay running in Slack's activity until their `task.settled`.
 
 **10. Tests and release readiness.** The test pass in §10, a Tasks guide in `docs/` (choosing
-`execute`, `task()`, or `serve()`, the ordering pattern, signals), and the upgrade guide from §8. Then release, and migrate
+`execute`, `task()`, or `serve()`, the ordering pattern, signals), and the upgrade guide from §8.
+It folds `ctx.interruptSignal` into `abortSignal` and `WorkflowTaskContext` into
+`WorkflowToolContext` (§2). Then release, and migrate
 internal-agents.
 
 ## 10. Tests after the stack
@@ -721,8 +753,8 @@ suites under the fixtures they exercise.
 **E2E (mock model):**
 
 - An `execute` tool's result arrives as its tool result.
-- Steering ends `sleep` but not an approval-gated tool, and a withdrawn ask reports
-  `outcome: "cancelled"`.
+- Steering ends `sleep` and a waited body that rejects on abort, which settles as
+  `{ interrupted: true }`, and a withdrawn ask reports `outcome: "cancelled"`.
 - A `task()` tool starts, is waited on, and delivers its result; `task_cancel` stops one.
 - The turn rule in each session kind: `turn.waiting` in a root session, a child turn, and a
   schedule's turn; a held root turn's `send().result()` and MCP `agent_start` with a delegating
@@ -730,6 +762,8 @@ suites under the fixtures they exercise.
 - A task's question during a hold emits `input.requested`, then `turn.waiting`, and the answered
   turn completes once.
 - A user-defined `serve()` tool is continued by `taskId`, cancelled, and continued again.
+- Cancelling a `serve()` task withdraws its pending question as `cancelled`, and the task serves
+  its next call.
 - An agent, local and remote, is continued by `taskId` across turns and after `task_cancel` with
   its conversation intact; a child's question is answered at the root.
 - Slack posts the text of a step whose only tool call is `task_wait`.
@@ -741,21 +775,23 @@ told there's no rush; doesn't use a side-effect tool before the result it depend
 
 **Candidates beyond e2e,** decided in this pass because e2e can't hit them deterministically:
 duplicate settlement; a result before the run reports started; a cancel before it starts; a crash
-between the record and the start; a hard stop racing a result; a result settling as `task_wait`
+between the record and the start; a cancel's cleanup deadline racing a result; a result settling as `task_wait`
 starts or ends; an agent message racing the end of its turn; a call arriving before a `serve`
-body's first `receive()`.
+body's first `receive()`; a person's answer the session accepts after the run asked to withdraw
+the question but before the session handled the request.
 
 ## 11. Risks and accepted costs
 
 1. **One more model step per needed result** (start, then wait), and one wake per result when the
    model needs several.
 2. **Long `execute` tools** hold the conversation until they settle.
-3. **`interruptSignal` is unproven** until PR 3's spike.
+3. **A body that ignores `abortSignal` holds the turn after a steering message.** The call isn't
+   cancelled, so there is no cleanup deadline.
 4. **Shared-thread wait.** Another person's message waits for a held turn, tasks included. One
    open turn per principal is the first follow-up.
 5. **`serve` bodies own their correctness.** A body must catch its stretch's abort to stay
    available, one that never replies holds the turn until its call is cancelled, and one that
-   ignores `abortSignal` keeps working after a cancel.
+   ignores `abortSignal` ends 30 s after a cancel instead of staying available.
 6. **Every agent task costs a workflow run** around its child session.
 7. **A lost remote completion** leaves its task working until the session ends; remote callback
    retries and an `agent_state` tool are follow-ups.

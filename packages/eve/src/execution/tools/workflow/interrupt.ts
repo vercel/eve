@@ -5,7 +5,7 @@ import type { WorkflowToolRunAddress } from "#execution/tools/workflow/types.js"
 const INTERRUPT: WorkflowToolRunControlMessage = { kind: "interrupt" };
 
 /**
- * Fires the call's `interruptSignal`. A run that already finished has nothing
+ * Aborts the `execute` call's `abortSignal`. A run that already finished has nothing
  * left to interrupt, so a missing hook is not an error.
  */
 export async function interruptWorkflowToolRun(run: WorkflowToolRunAddress): Promise<void> {

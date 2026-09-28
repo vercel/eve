@@ -1,4 +1,4 @@
-import { defineWorkflowTool, type WorkflowToolDefinition } from "#public/tools/index.js";
+import { defineWorkflowTool, type WorkflowExecuteToolDefinition } from "#public/tools/index.js";
 import {
   INTERRUPTED_OUTPUT_SCHEMA,
   toInterruptibleModelOutput,
@@ -58,7 +58,7 @@ const SLEEP_OUTPUT_SCHEMA = defineJsonSchema<SleepToolOutput>({
  * Each call runs as a durable workflow, so the wait does not hold an
  * application runtime open. A new message ends the wait early.
  */
-export function sleep(): WorkflowToolDefinition<SleepToolInput, SleepToolOutput> {
+export function sleep(): WorkflowExecuteToolDefinition<SleepToolInput, SleepToolOutput> {
   return defineWorkflowTool({
     description: SLEEP_TOOL_DESCRIPTION,
     execute: executeSleepTool,

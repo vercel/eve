@@ -7,6 +7,8 @@ import {
   isWorkflowToolDefinition,
   type AgentMessageResult,
   type WorkflowAgentMetadata,
+  type WorkflowServeCall,
+  type WorkflowServeContext,
   type WorkflowStepToolContext,
   type WorkflowToolContext,
 } from "#tools/workflow-definition.js";
@@ -48,6 +50,51 @@ describe("defineWorkflowTool", () => {
     expectTypeOf(definition.execute).parameter(0).toEqualTypeOf<{ service: string }>();
   });
 
+  it("infers a task's input and gives it the context of an execute call", () => {
+    const definition = defineWorkflowTool({
+      description: "Deploy",
+      inputSchema: z.object({ service: z.string() }),
+      async task(input, ctx) {
+        expectTypeOf(input).toEqualTypeOf<{ service: string }>();
+        expectTypeOf(ctx).toEqualTypeOf<WorkflowToolContext>();
+        return { deployed: input.service };
+      },
+    });
+    expectTypeOf(definition.task).parameter(0).toEqualTypeOf<{ service: string }>();
+  });
+
+  it("types a serve body's calls by inputSchema and its replies by outputSchema", () => {
+    const definition = defineWorkflowTool({
+      description: "Draft a release plan and revise it on request.",
+      inputSchema: z.object({ request: z.string() }),
+      outputSchema: z.object({ steps: z.array(z.string()) }),
+      async serve(receive, ctx) {
+        const call = await receive();
+        expectTypeOf(call).toEqualTypeOf<WorkflowServeCall<{ request: string }>>();
+        expectTypeOf(ctx).toEqualTypeOf<WorkflowServeContext<{ steps: string[] }>>();
+        // @ts-expect-error Each call carries its own abortSignal.
+        void ctx.abortSignal;
+        ctx.reply({ steps: [call.input.request] });
+        // @ts-expect-error A reply matches outputSchema.
+        ctx.reply({ steps: "freeze" });
+        return { steps: [] };
+      },
+    });
+    expectTypeOf(definition.serve)
+      .parameter(0)
+      .returns.resolves.toEqualTypeOf<WorkflowServeCall<{ request: string }>>();
+  });
+
+  it.each([
+    ["none", {}],
+    ["execute and task", { execute: async () => null, task: async () => null }],
+  ])("requires exactly one entry point (%s)", (found, entryPoints) => {
+    const definition = { description: "Deploy", inputSchema: {}, ...entryPoints };
+    expect(() => defineWorkflowTool(definition as never)).toThrow(
+      `Define exactly one of execute(input, ctx), task(input, ctx), or serve(receive, ctx); this tool defines ${found}.`,
+    );
+  });
+
   it("exposes only step-safe capabilities on WorkflowStepToolContext", () => {
     const useStepContext = (ctx: WorkflowStepToolContext) => {
       void ctx.getToken;
@@ -64,7 +111,7 @@ describe("defineWorkflowTool", () => {
     expectTypeOf(useStepContext).parameter(0).toEqualTypeOf<WorkflowStepToolContext>();
   });
 
-  it("rejects the removed execution option", () => {
+  it("rejects the replaced execution option", () => {
     const definition = {
       description: "Report a deployment",
       execution: "background",
@@ -74,7 +121,7 @@ describe("defineWorkflowTool", () => {
       },
     };
     expect(() => defineWorkflowTool(definition)).toThrow(
-      '"execution" was removed; workflow tool calls now block until they settle.',
+      '"execution" was replaced by task(). Define task(input, ctx) to run each call as a task.',
     );
   });
 

@@ -125,8 +125,9 @@ export function prepareAgentInvocationTrace(input: {
 }
 
 /**
- * The trace dispatch for sessions a workflow tool call's run opens with
- * `ctx.agent`, read from the calling session when the run starts.
+ * The trace dispatch for sessions opened with `ctx.agent` while a run serves
+ * one workflow tool call: the call's tool span in the calling turn, read from
+ * the calling session when it admits the call.
  */
 export function resolveToolCallAgentTrace(input: {
   readonly callId: string;

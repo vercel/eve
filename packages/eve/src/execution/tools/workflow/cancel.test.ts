@@ -20,6 +20,7 @@ vi.mock("#internal/logging.js", () => ({
 const world = {} as Awaited<ReturnType<typeof getWorld>>;
 const address = { hookToken: "generated-control-token", runId: "tool-run" };
 const reason = "The calling turn was cancelled.";
+const cancel = { kind: "cancel" as const, reason };
 
 describe("cancelWorkflowToolRun", () => {
   beforeEach(() => {
@@ -34,7 +35,7 @@ describe("cancelWorkflowToolRun", () => {
   afterEach(() => vi.useRealTimers());
 
   it("lets a registered workflow cancel cooperatively", async () => {
-    await cancelWorkflowToolRun(address, reason);
+    await cancelWorkflowToolRun(address, cancel);
 
     expect(resumeHook).toHaveBeenCalledWith(address.hookToken, { kind: "cancel", reason });
     expect(cancelRun).not.toHaveBeenCalled();
@@ -44,7 +45,7 @@ describe("cancelWorkflowToolRun", () => {
     vi.mocked(getRun).mockReturnValue({ status: Promise.resolve("running") } as ReturnType<
       typeof getRun
     >);
-    const cancelled = cancelWorkflowToolRun(address, reason);
+    const cancelled = cancelWorkflowToolRun(address, cancel);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(cancelRun).not.toHaveBeenCalled();
     await vi.runAllTimersAsync();
@@ -67,7 +68,7 @@ describe("cancelWorkflowToolRun", () => {
   it("cancels by run ID before the control hook is registered", async () => {
     vi.mocked(resumeHook).mockRejectedValue(new HookNotFoundError(address.hookToken));
 
-    await cancelWorkflowToolRun(address, reason);
+    await cancelWorkflowToolRun(address, cancel);
 
     expect(cancelRun).toHaveBeenCalledWith(world, address.runId, { cancelReason: reason });
     expect(logError).not.toHaveBeenCalled();
@@ -77,7 +78,7 @@ describe("cancelWorkflowToolRun", () => {
     vi.mocked(resumeHook).mockRejectedValue(new HookNotFoundError(address.hookToken));
     vi.mocked(cancelRun).mockRejectedValue(new EntityConflictError("Run already completed"));
 
-    await expect(cancelWorkflowToolRun(address, reason)).resolves.toBeUndefined();
+    await expect(cancelWorkflowToolRun(address, cancel)).resolves.toBeUndefined();
 
     expect(cancelRun).toHaveBeenCalledOnce();
     expect(logError).not.toHaveBeenCalled();
@@ -87,7 +88,7 @@ describe("cancelWorkflowToolRun", () => {
     vi.mocked(resumeHook).mockRejectedValue(new Error("hook delivery unavailable"));
     vi.mocked(cancelRun).mockRejectedValue(new Error("run cancellation unavailable"));
 
-    await expect(cancelWorkflowToolRun(address, reason)).resolves.toBeUndefined();
+    await expect(cancelWorkflowToolRun(address, cancel)).resolves.toBeUndefined();
 
     expect(cancelRun).toHaveBeenCalledWith(world, address.runId, { cancelReason: reason });
     expect(logError).toHaveBeenCalledTimes(2);

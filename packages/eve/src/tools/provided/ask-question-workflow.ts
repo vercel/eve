@@ -12,7 +12,7 @@ export async function executeAskQuestionTool(
 ): Promise<AskQuestionOutput> {
   "use workflow";
 
-  const answer = await ctx.ask(toAskQuestionRequest(input), { signal: ctx.interruptSignal });
+  const answer = await ctx.ask(toAskQuestionRequest(input));
   return toAskQuestionOutput(answer);
 }
 

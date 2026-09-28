@@ -12,7 +12,6 @@ import {
   type SubagentAdapterState,
 } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
-import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import { createLogger } from "#internal/logging.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { toErrorMessage } from "#shared/errors.js";
@@ -22,6 +21,9 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 
 const log = createLogger("execution.delegated-parent-notification");
+
+/** Error code for a delegated agent whose execution threw. */
+const SUBAGENT_EXECUTION_FAILED = "SUBAGENT_EXECUTION_FAILED";
 
 /** Settled turn payload forwarded from the owner to the caller. */
 export interface SettledTurnNotification {

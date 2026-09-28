@@ -3,6 +3,7 @@ import {
   ActivityObserverKey,
   ActivityPendingBlockersKey,
   ActivityRootTurnIdKey,
+  ActivityTaskCallsKey,
 } from "#context/keys.js";
 import { projectActivityEvents } from "#execution/activity-events.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
@@ -24,6 +25,7 @@ export async function observeSessionActivity(input: {
       rootTurnId: input.ctx.get(ActivityRootTurnIdKey),
       sessionId: input.sessionId,
       suppressRootSettlement: (input.ctx.get(ActivityPendingBlockersKey)?.length ?? 0) > 0,
+      taskCallIds: input.ctx.get(ActivityTaskCallsKey),
       workIdentity: observer.workIdentity,
     }),
     sink: observer.sink,
@@ -35,6 +37,7 @@ export function projectSessionActivity(input: {
   readonly rootTurnId?: string;
   readonly sessionId: string;
   readonly suppressRootSettlement?: boolean;
+  readonly taskCallIds?: readonly string[];
   readonly workIdentity?: ActivityWorkIdentityV1;
 }): readonly ActivityEventV1[] {
   const work = workFor(input);
@@ -68,6 +71,7 @@ export function projectSessionActivity(input: {
       event: input.event,
       eventId: input.event.meta.id,
       lineage: work,
+      taskCallIds: input.taskCallIds,
     }),
   );
   return events;

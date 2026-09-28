@@ -291,6 +291,8 @@ export interface SubagentInputRequestEvent {
   readonly requests: readonly InputRequest[];
   readonly sequence: number;
   readonly stepIndex: number;
+  /** The task that asks, when a task's run forwards the request. */
+  readonly taskId?: string;
   readonly turnId: string;
 }
 

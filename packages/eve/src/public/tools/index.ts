@@ -36,7 +36,13 @@ export {
 
 export {
   defineWorkflowTool,
+  type WorkflowExecuteToolDefinition,
+  type WorkflowServeCall,
+  type WorkflowServeContext,
+  type WorkflowServeReceive,
+  type WorkflowServeToolDefinition,
   type WorkflowStepToolContext,
+  type WorkflowTaskToolDefinition,
   type WorkflowToolContext,
   type WorkflowToolDefinition,
   type AgentMessageResult,

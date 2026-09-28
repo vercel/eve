@@ -60,10 +60,10 @@ function expectReviewSummary(turn: EveEvalTurn) {
 }
 
 async function expectParallelReviews(t: EveEvalContext, turn: EveEvalTurn) {
-  const calls = turn.events
-    .filter((event) => event.type === "subagent.called")
+  const sessions = turn.events
+    .filter((event) => event.type === "agent.started")
     .filter(({ data }) => data.name === "reviewer");
-  const childIds = calls.map(({ data }) => data.childSessionId);
+  const childIds = sessions.map(({ data }) => data.sessionId);
   assert.equal(childIds.length, 5, "no repeated delegation");
   assert.equal(new Set(childIds).size, 5, "five distinct child sessions");
   const children = await Promise.all(childIds.map((id) => t.target.watchTurn(id).result()));

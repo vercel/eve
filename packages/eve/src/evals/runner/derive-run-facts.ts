@@ -1,4 +1,8 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import type {
+  AgentStartedStreamEvent,
+  MessageStreamEvent,
+  TaskSettledStreamEvent,
+} from "#protocol/message.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -13,15 +17,12 @@ interface MutableToolCall {
   sessionId?: string;
 }
 
-interface MutableSubagentCall {
-  callId: string;
-  childSessionId?: string;
-  name: string;
-  remoteUrl?: string;
-  output?: JsonValue;
-  status: EveEvalSubagentCall["status"];
-  turnIndex: number;
-  sessionId?: string;
+/** One call to an agent task, as `task.started` reports it. */
+interface AgentCall {
+  readonly callId: string;
+  readonly name: string;
+  readonly taskId: string;
+  readonly turnIndex: number;
 }
 
 /**
@@ -48,9 +49,9 @@ const PARKING_EVENT_TYPES: ReadonlySet<MessageStreamEvent["type"]> = new Set([
  * Extracts derived execution facts from a completed run's stream events.
  *
  * Tool calls pair each `actions.requested` entry with its matching
- * `action.result` by call id; subagent calls join `subagent.called` /
- * `subagent.started` with `subagent.completed` the same way. These facts
- * power checks, scorers, and reporters.
+ * `action.result` by call id. Subagent calls are the calls to agent tasks,
+ * paired with their `task.settled` the same way. These facts power checks,
+ * scorers, and reporters.
  */
 export function deriveRunFacts(
   events: readonly MessageStreamEvent[],
@@ -59,8 +60,9 @@ export function deriveRunFacts(
   const sessionId = options?.sessionId;
   const toolCalls: MutableToolCall[] = [];
   const toolCallsByCallId = new Map<string, MutableToolCall>();
-  const subagentCalls: MutableSubagentCall[] = [];
-  const subagentCallsByCallId = new Map<string, MutableSubagentCall>();
+  const agentCalls: AgentCall[] = [];
+  const settledTaskCalls = new Map<string, TaskSettledStreamEvent["data"]>();
+  const agentSessions: AgentStartedStreamEvent["data"][] = [];
   const inputRequests: InputRequest[] = [];
   let turnIndex = -1;
   let messageCount = 0;
@@ -81,22 +83,6 @@ export function deriveRunFacts(
     };
     toolCalls.push(call);
     toolCallsByCallId.set(callId, call);
-    return call;
-  };
-
-  const ensureSubagentCall = (callId: string, name: string): MutableSubagentCall => {
-    const existing = subagentCallsByCallId.get(callId);
-    if (existing !== undefined) return existing;
-
-    const call: MutableSubagentCall = {
-      callId,
-      name,
-      status: "working",
-      turnIndex: Math.max(turnIndex, 0),
-      sessionId,
-    };
-    subagentCalls.push(call);
-    subagentCallsByCallId.set(callId, call);
     return call;
   };
 
@@ -124,43 +110,24 @@ export function deriveRunFacts(
           const call = ensureToolCall(result.callId, result.toolName, {});
           call.output = result.output;
           call.status = status;
-          // An agent tool runs as a workflow tool; its tool result settles the delegation.
-          const subagentCall = subagentCallsByCallId.get(result.callId);
-          if (subagentCall?.status === "working") {
-            subagentCall.output ??= result.output;
-            subagentCall.status = status === "rejected" ? "failed" : status;
-          }
-        } else if (result.kind === "subagent-result") {
-          const call = ensureSubagentCall(result.callId, result.subagentName);
-          call.output = call.output ?? result.output;
-          if (result.origin === "child" && result.outcome.result.kind === "cancelled") {
-            call.status = "cancelled";
-          } else {
-            call.status = status === "rejected" ? "failed" : status;
-          }
         }
         break;
       }
 
-      case "subagent.called": {
-        const call = ensureSubagentCall(event.data.callId, event.data.name);
-        call.childSessionId = event.data.childSessionId;
-        if (event.data.remote !== undefined) {
-          call.remoteUrl = event.data.remote.url;
-        }
+      case "task.started": {
+        const { callId, kind, name, taskId } = event.data;
+        if (kind !== "agent") break;
+        agentCalls.push({ callId, name, taskId, turnIndex: Math.max(turnIndex, 0) });
         break;
       }
 
-      case "subagent.started": {
-        ensureSubagentCall(event.data.callId, event.data.subagentName);
+      case "task.settled": {
+        settledTaskCalls.set(event.data.callId, event.data);
         break;
       }
 
-      case "subagent.completed": {
-        const call = ensureSubagentCall(event.data.callId, event.data.subagentName);
-        if (call.status !== "working") break;
-        call.output = event.data.output;
-        call.status = "completed";
+      case "agent.started": {
+        agentSessions.push(event.data);
         break;
       }
 
@@ -191,10 +158,16 @@ export function deriveRunFacts(
     }
   }
 
+  const subagentCalls = deriveSubagentCalls({
+    agentCalls,
+    agentSessions,
+    sessionId,
+    settledTaskCalls,
+  });
   return {
     toolCalls: toolCalls as readonly EveEvalToolCall[],
     toolCallCount: toolCalls.length,
-    subagentCalls: subagentCalls as readonly EveEvalSubagentCall[],
+    subagentCalls,
     subagentCallCount: subagentCalls.length,
     inputRequests,
     parked: endedParkedOnInput(events),
@@ -202,6 +175,36 @@ export function deriveRunFacts(
     reasoningBlockCount,
     failureCode,
   };
+}
+
+/**
+ * Every call to an agent task, with its session from the task's
+ * `agent.started` once that session opened.
+ */
+function deriveSubagentCalls(input: {
+  readonly agentCalls: readonly AgentCall[];
+  readonly agentSessions: readonly AgentStartedStreamEvent["data"][];
+  readonly sessionId: string | undefined;
+  readonly settledTaskCalls: ReadonlyMap<string, TaskSettledStreamEvent["data"]>;
+}): EveEvalSubagentCall[] {
+  const agentSessionsByTaskId = new Map<string, AgentStartedStreamEvent["data"]>();
+  for (const session of input.agentSessions) {
+    if (session.taskId !== undefined) agentSessionsByTaskId.set(session.taskId, session);
+  }
+  return input.agentCalls.map((call) => {
+    const session = agentSessionsByTaskId.get(call.taskId);
+    const settled = input.settledTaskCalls.get(call.callId);
+    return {
+      callId: call.callId,
+      childSessionId: session?.sessionId,
+      name: call.name,
+      output: settled?.output,
+      remoteUrl: session?.remote?.url,
+      sessionId: input.sessionId,
+      status: settled?.status ?? "working",
+      turnIndex: call.turnIndex,
+    };
+  });
 }
 
 /**

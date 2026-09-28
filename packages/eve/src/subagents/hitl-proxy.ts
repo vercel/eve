@@ -42,6 +42,7 @@ export async function emitProxiedInputRequest(input: {
       requests: input.hookPayload.event.requests,
       sequence: input.hookPayload.event.sequence,
       stepIndex: input.hookPayload.event.stepIndex,
+      taskId: input.hookPayload.event.taskId,
       turnId: input.hookPayload.event.turnId,
     }),
   );

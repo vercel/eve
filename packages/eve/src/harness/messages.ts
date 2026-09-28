@@ -17,7 +17,8 @@ export type FrameworkMessageKind =
   | "context.compaction"
   | "memory.load"
   | "execution.continuation"
-  | "execution.retry";
+  | "execution.retry"
+  | "task.result";
 
 /** Semantic classification for every user-role message in model history. */
 export type UserMessageKind = "user" | FrameworkMessageKind;
@@ -108,7 +109,8 @@ export function isFrameworkMessageKind(value: unknown): value is FrameworkMessag
     value === "context.compaction" ||
     value === "memory.load" ||
     value === "execution.continuation" ||
-    value === "execution.retry"
+    value === "execution.retry" ||
+    value === "task.result"
   );
 }
 
@@ -428,9 +430,10 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
       auth = item.auth;
     }
     if (item.caller !== undefined) {
-      if (caller !== undefined) {
+      if (caller !== undefined && caller.callId !== item.caller.callId) {
         throw new Error("Cannot coalesce deliveries from different turns.");
       }
+      // The same caller's later message awaits its reply at its own address.
       caller = item.caller;
     }
     payloads.push(...item.payloads);

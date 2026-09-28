@@ -368,6 +368,10 @@ function projectInvocation(
           result = safeJson(event.data.message);
         }
         break;
+      case "turn.waiting":
+        // Text completed before the turn parked was interim; the reply comes after it resumes.
+        result = undefined;
+        break;
       case "turn.completed":
         settled = "completed";
         break;

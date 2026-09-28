@@ -1,10 +1,14 @@
-import { FatalError, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
-import { resolveAgentAction, resolveAgentStartTarget } from "#execution/agent-sessions/target.js";
+import {
+  resolveAgentAction,
+  resolveAgentStartTarget,
+  type SubagentStartTarget,
+} from "#execution/agent-sessions/target.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
-import type { SubagentStartTarget } from "#execution/tools/subagent/start.js";
 import {
   createWorkflowCallbackUrl,
   resolveWorkflowCallbackBaseUrl,
@@ -21,7 +25,6 @@ import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
-import { toErrorMessage } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SubagentParentContext } from "#subagents/invocation.js";
 import {
@@ -30,7 +33,7 @@ import {
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
-} from "#subagents/remote-dispatch.js";
+} from "#execution/agent-sessions/remote.js";
 import { buildSubagentRunInput } from "#subagents/tool.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 
@@ -57,20 +60,35 @@ export type AgentSessionAddress =
       readonly url: string;
     };
 
-/** One message to a session; its turn's result and questions arrive on `replyTo`. */
-export interface AgentSessionMessage {
+/** A session a run opened, with the context of the call that opened it: its lineage. */
+export interface OpenedAgentSession {
+  readonly address: AgentSessionAddress;
   readonly context: AgentSessionContext;
+}
+
+/**
+ * One message to a session, as the call that sends it: the session runs the
+ * message with that call's auth. Its turn's result and questions arrive on
+ * `replyTo`.
+ */
+export interface AgentSessionMessage {
+  readonly auth: SessionAuth;
   readonly message: string;
   readonly outputSchema?: JsonObject;
   readonly replyTo: string;
 }
 
 /**
- * Opens a run's session with its first message. `key` names the handle within
- * the run, so a retried step reaches the same session instead of a second one.
+ * Opens a run's session with its first message, as a child of the call whose
+ * `context` it binds. `key` names the handle within the run, so a retried step
+ * reaches the same session instead of a second one.
  */
 export async function openAgentSessionStep(
-  input: AgentSessionMessage & { readonly key: string; readonly name: string },
+  input: AgentSessionMessage & {
+    readonly context: AgentSessionContext;
+    readonly key: string;
+    readonly name: string;
+  },
 ): Promise<AgentSessionAddress> {
   "use step";
 
@@ -82,25 +100,25 @@ export async function openAgentSessionStep(
     dynamicSelections: context.dynamicSelections,
     input: { message: input.message, outputSchema: input.outputSchema, target: input.name },
   });
-  const plan = resolveAgentStartTarget({
+  const target = resolveAgentStartTarget({
     action,
     bundle,
     dynamicSelections: context.dynamicSelections,
     isRootSession: context.parent.rootSessionId === context.parent.sessionId,
   });
-  if (plan.kind === "reject") {
-    throw new FatalError(toErrorMessage(plan.result.output));
+  const start = { auth: input.auth, bundle, context, key: input.key, replyTo: input.replyTo };
+  if (target.kind === "remote") {
+    return await startRemoteSession({ ...start, target });
   }
-  const start = { bundle, context, key: input.key, replyTo: input.replyTo };
-  if (plan.target.kind === "remote") {
-    return await startRemoteSession({ ...start, target: plan.target });
-  }
-  return await startLocalSession({ ...start, target: plan.target });
+  return await startLocalSession({ ...start, target });
 }
 
-/** Sends a later message; it joins the session's running turn or starts the next. */
+/**
+ * Sends a later message; it joins the session's running turn or starts the
+ * next. It keeps the session's lineage and carries its own auth.
+ */
 export async function sendAgentSessionMessageStep(
-  input: AgentSessionMessage & { readonly address: AgentSessionAddress },
+  input: AgentSessionMessage & OpenedAgentSession,
 ): Promise<void> {
   "use step";
 
@@ -109,7 +127,7 @@ export async function sendAgentSessionMessageStep(
     const remote = await resolveSessionRemote(context, address);
     await continueRemoteAgentSession({
       activityObserver: context.activityObserver,
-      auth: context.auth,
+      auth: input.auth.current,
       callback: {
         callId: context.parent.callId,
         subagentName: address.name,
@@ -128,7 +146,7 @@ export async function sendAgentSessionMessageStep(
   }
   const result = await dispatchWorkflowSessionCommand({
     command: {
-      auth: context.auth,
+      auth: input.auth.current,
       caller: {
         activityObserver: context.activityObserver,
         callId: context.parent.callId,
@@ -146,10 +164,7 @@ export async function sendAgentSessionMessageStep(
 }
 
 /** Cancels a session's running turn; the turn still reports, as cancelled. */
-export async function cancelAgentSessionTurnStep(input: {
-  readonly address: AgentSessionAddress;
-  readonly context: AgentSessionContext;
-}): Promise<void> {
+export async function cancelAgentSessionTurnStep(input: OpenedAgentSession): Promise<void> {
   "use step";
 
   const { address } = input;
@@ -170,18 +185,14 @@ export async function cancelAgentSessionTurnStep(input: {
 
 /** Ends a run's sessions when the run finishes, cancelling any turn still running. */
 export async function endAgentSessionsStep(input: {
-  readonly context: AgentSessionContext;
-  readonly sessions: readonly AgentSessionAddress[];
+  readonly sessions: readonly OpenedAgentSession[];
 }): Promise<void> {
   "use step";
 
-  await Promise.all(input.sessions.map((address) => endAgentSession(input.context, address)));
+  await Promise.all(input.sessions.map(endAgentSession));
 }
 
-async function endAgentSession(
-  context: AgentSessionContext,
-  address: AgentSessionAddress,
-): Promise<void> {
+async function endAgentSession({ address, context }: OpenedAgentSession): Promise<void> {
   try {
     if (address.kind === "remote") {
       const remote = await resolveSessionRemote(context, address);
@@ -205,6 +216,7 @@ async function endAgentSession(
 }
 
 interface SessionStart<Target extends SubagentStartTarget> {
+  readonly auth: SessionAuth;
   readonly bundle: CompiledBundle;
   readonly context: AgentSessionContext;
   readonly key: string;
@@ -215,18 +227,18 @@ interface SessionStart<Target extends SubagentStartTarget> {
 async function startLocalSession(
   input: SessionStart<Extract<SubagentStartTarget, { readonly kind: "local" }>>,
 ): Promise<AgentSessionAddress> {
-  const { bundle, context, target } = input;
+  const { auth, bundle, context, target } = input;
   const { action } = target;
   const { childContinuationToken, runInput } = buildSubagentRunInput({
     action,
     activityObserver: context.activityObserver,
-    auth: context.auth,
+    auth: auth.current,
     capabilities: context.capabilities,
     channelMetadata: context.channelMetadata,
     continuationKey: input.key,
     graph: bundle.graph,
     inheritedConversation: context.conversation,
-    initiatorAuth: context.initiatorAuth,
+    initiatorAuth: auth.initiator,
     limits: context.limits,
     parent: createParentContext(context, input.replyTo),
     sandboxSessionId: context.sandbox.sessionId,
@@ -253,7 +265,7 @@ async function startLocalSession(
 async function startRemoteSession(
   input: SessionStart<Extract<SubagentStartTarget, { readonly kind: "remote" }>>,
 ): Promise<AgentSessionAddress> {
-  const { bundle, context, target } = input;
+  const { auth, bundle, context, target } = input;
   const { action } = target;
   const remote = resolveRemoteAgentForAction({
     dynamicRemoteAgent: target.dynamicRemoteAgent,
@@ -272,9 +284,9 @@ async function startRemoteSession(
       parentSessionId: context.parent.sessionId,
       parentTurnId: context.parent.turn.id,
     }),
-    auth: context.auth,
+    auth: auth.current,
     callbackBaseUrl,
-    initiatorAuth: context.initiatorAuth,
+    initiatorAuth: auth.initiator,
     operationId: `agent-session:${input.key}`,
     originAudience: context.trace.originAudience,
     parent: createParentContext(context, input.replyTo),

@@ -613,7 +613,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             callId,
             childSessionId,
             childStreamPath,
-            parentSessionId,
             parent,
           });
           if (found === undefined) {

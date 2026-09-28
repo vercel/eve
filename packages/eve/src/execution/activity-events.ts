@@ -1,6 +1,10 @@
 import { normalizePresentationText } from "#shared/presentation-text.js";
 import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
-import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
+import type {
+  ActivityActionPhase,
+  ActivityEventV1,
+  ActivityWorkIdentityV1,
+} from "#protocol/activity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 export function projectActivityEvents(input: {
@@ -8,6 +12,8 @@ export function projectActivityEvents(input: {
   readonly event: UnstampedMessageStreamEvent;
   readonly eventId?: string;
   readonly lineage: ActivityWorkIdentityV1;
+  /** Calls to tasks: their `action.result` is a receipt, and `task.settled` settles them. */
+  readonly taskCallIds?: readonly string[];
 }): readonly ActivityEventV1[] {
   const { event, lineage } = input;
   if (event.type === "actions.requested") {
@@ -87,8 +93,8 @@ export function projectActivityEvents(input: {
     }
     const id = actionId(lineage.id, result.callId);
     const label = activityLabel(event.data.presentation?.[result.callId]?.label);
-    return [
-      ...(label === undefined
+    const labelUpdates =
+      label === undefined
         ? []
         : [
             {
@@ -97,15 +103,14 @@ export function projectActivityEvents(input: {
               kind: "action.label.updated" as const,
               label,
             },
-          ]),
-      {
-        actionId: id,
-        eventId: `${id}:settled:${event.data.status}`,
-        kind: "action.settled",
-        outcome: event.data.status,
-        settledAt: input.at,
-      },
-    ];
+          ];
+    const isTaskReceipt = input.taskCallIds?.includes(result.callId) === true;
+    if (isTaskReceipt) return labelUpdates;
+    return [...labelUpdates, actionSettled(id, event.data.status, input.at)];
+  }
+  if (event.type === "task.settled") {
+    const id = actionId(lineage.id, event.data.callId);
+    return [actionSettled(id, event.data.status, input.at)];
   }
   if (event.type === "authorization.required") {
     const id = blockerId(
@@ -244,6 +249,20 @@ export function projectActivityEvents(input: {
     ];
   }
   return [];
+}
+
+function actionSettled(
+  id: string,
+  outcome: Exclude<ActivityActionPhase, "running">,
+  settledAt: string,
+): ActivityEventV1 {
+  return {
+    actionId: id,
+    eventId: `${id}:settled:${outcome}`,
+    kind: "action.settled",
+    outcome,
+    settledAt,
+  };
 }
 
 function activityLabel(value: string | undefined): string | undefined {

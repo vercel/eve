@@ -36,13 +36,9 @@ interface RemoteAgentStreamCoordinates {
   readonly callId: string;
   readonly childSessionId: string;
   readonly childStreamPath: string;
-  readonly parentSessionId: string;
 }
 
-/**
- * Finds the remote child the parent session recorded for one proxy route, from
- * its `agent.started` event or, for the model's agent tools, `subagent.called`.
- */
+/** Finds the remote child the parent session recorded for one proxy route, from its `agent.started` event. */
 export async function findRemoteAgentBinding(
   input: RemoteAgentStreamCoordinates & {
     readonly parent: {
@@ -75,27 +71,15 @@ function readRemoteAgentBinding(
   event: MessageStreamEvent,
   coordinates: RemoteAgentStreamCoordinates,
 ): RemoteAgentBinding | undefined {
-  if (event.type === "agent.started") {
-    const { data } = event;
-    // The stream path embeds the parent session id, so matching it binds the parent.
-    const matches =
-      data.callId === coordinates.callId &&
-      data.sessionId === coordinates.childSessionId &&
-      data.streamPath === coordinates.childStreamPath;
-    if (!matches || data.remote === undefined) return undefined;
-    return { name: data.name, ...data.remote };
-  }
-  if (event.type === "subagent.called") {
-    const { data } = event;
-    const matches =
-      data.sessionId === coordinates.parentSessionId &&
-      data.callId === coordinates.callId &&
-      data.childSessionId === coordinates.childSessionId &&
-      data.childStreamPath === coordinates.childStreamPath;
-    if (!matches || data.remote === undefined) return undefined;
-    return { name: data.toolName, ...data.remote };
-  }
-  return undefined;
+  if (event.type !== "agent.started") return undefined;
+  const { data } = event;
+  // The stream path embeds the parent session id, so matching it binds the parent.
+  const matches =
+    data.callId === coordinates.callId &&
+    data.sessionId === coordinates.childSessionId &&
+    data.streamPath === coordinates.childStreamPath;
+  if (!matches || data.remote === undefined) return undefined;
+  return { name: data.name, ...data.remote };
 }
 
 export function normalizeEveCors(cors: EveChannelCors | undefined): ChannelCors {

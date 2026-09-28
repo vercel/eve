@@ -87,10 +87,11 @@ handle can also automatically resume on later I/O. A hook failure, including a
 failed stop, follows the normal
 [hook failure behavior](#what-happens-when-a-hook-throws).
 
-For `subagent.called` and `subagent.completed`, `ctx.session.id` identifies the
-parent session. Typed handlers and `*` handlers receive this context even when
-the subagent event arrives between parent turns. These hooks can use
-`ctx.getSandbox()` against the parent session.
+For `task.started`, `task.settled`, and `agent.started`, `ctx.session.id`
+identifies the session that started the task or opened the subagent session.
+Typed handlers and `*` handlers receive this context even when the event
+arrives between turns. These hooks can use `ctx.getSandbox()` against that
+session, and sandbox changes they make are kept for its next turn.
 
 ### Narrowing tool results
 
@@ -184,7 +185,7 @@ Hooks always run after the event is durably recorded, so if a hook throws, the s
 
 eve logs a thrown or rejected handler with the hook slug, subscription, event type, event ID, and session ID, then runs the remaining subscribers in order. The current turn, subagent notification, and session continue. This applies to every stream-event hook, including `turn.started`, `step.started`, and failure events. Throwing from a hook does not reject work or veto a turn. To stop the running turn, call [`ctx.cancel()`](#cancel-the-running-turn-from-a-hook).
 
-A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate. If persisting state after a subagent notification fails, the workflow runtime retries the notification step, which can publish the event again.
+A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate. If persisting state after a `task.started`, `task.settled`, or `agent.started` event fails, the workflow runtime retries the publishing step, which can publish the event again.
 
 ## Cancel the running turn from a hook
 
@@ -215,7 +216,7 @@ The remaining subscribers for the event still run. Then eve cancels the turn the
 
 `ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: eve ignores a call from work the handler does not await and logs a warning.
 
-`ctx.cancel()` only stops a running turn. eve logs a warning and ignores the call on `step.failed`, `turn.completed`, `turn.failed`, `turn.cancelled`, `turn.waiting`, `session.waiting`, `session.completed`, `session.failed`, `context.cleared`, `agent.started`, and `subagent.*` events, and during clear or compact requests.
+`ctx.cancel()` only stops a running turn. eve logs a warning and ignores the call on `step.failed`, `turn.completed`, `turn.failed`, `turn.cancelled`, `turn.waiting`, `session.waiting`, `session.completed`, `session.failed`, `context.cleared`, `task.started`, `task.settled`, and `agent.started`, and during clear or compact requests.
 
 ## Subagent isolation
 

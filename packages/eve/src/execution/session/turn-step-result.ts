@@ -33,6 +33,15 @@ export function resolveSessionStepResult(
     };
   }
 
+  if (stepResult.held !== undefined) {
+    return {
+      action: "held",
+      serializedContext: nextSerializedContext,
+      sessionState: nextState,
+      taskIds: stepResult.held.taskIds,
+    };
+  }
+
   if (stepResult.next === null) {
     const pending = derivePendingState(stepResult.session);
 

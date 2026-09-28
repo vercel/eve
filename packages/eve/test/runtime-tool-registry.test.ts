@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { RuntimeRegistryError } from "../src/internal/runtime-registry.js";
-import { subagentToolExecuteWorkflowReference } from "../src/runtime/subagents/workflow-reference.js";
 import { createRuntimeToolRegistry } from "../src/runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "../src/runtime/types.js";
 import { toInputSchema } from "../src/tools/schema.js";
@@ -74,7 +73,7 @@ describe("createRuntimeToolRegistry", () => {
         createResolvedToolDefinition({
           behavior: {
             availability: [],
-            handling: { kind: "workflow-tool", workflowId },
+            handling: { entryPoint: "execute", kind: "workflow-tool", workflowId },
           },
           logicalPath: "tools/deploy.ts",
           name: "deploy",
@@ -88,7 +87,6 @@ describe("createRuntimeToolRegistry", () => {
         handling: { kind: "dispatch", target: { kind: "workflow-tool-call", workflowId } },
       },
     });
-    expect(registry.preparedTools[0]?.task).toEqual({ workflowId });
     expect(registry.preparedTools[0]).not.toHaveProperty("workflowId");
     expect(registry.preparedTools[0]).not.toHaveProperty("nodeId");
     expect(registry.preparedTools[0]).not.toHaveProperty("resultKind");
@@ -101,7 +99,7 @@ describe("createRuntimeToolRegistry", () => {
         createResolvedToolDefinition({
           behavior: {
             availability: [],
-            handling: { kind: "workflow-tool", workflowId },
+            handling: { entryPoint: "execute", kind: "workflow-tool", workflowId },
           },
           logicalPath: "tools/agent.ts",
           name: "agent",
@@ -111,14 +109,13 @@ describe("createRuntimeToolRegistry", () => {
     });
 
     const prepared = registry.preparedTools[0];
-    expect(prepared?.task).toEqual({ workflowId });
     expect(prepared?.behavior?.handling).toEqual({
       kind: "dispatch",
-      target: { kind: "workflow-tool-call", workflowId },
+      target: { entryPoint: "execute", kind: "workflow-tool-call", workflowId },
     });
   });
 
-  it("uses the shared stable workflow for a restored application-owned agent tool", async () => {
+  it("prepares a restored application-owned agent tool as self-delegation", async () => {
     const registry = await createRuntimeToolRegistry(
       {
         tools: [
@@ -137,10 +134,6 @@ describe("createRuntimeToolRegistry", () => {
     );
 
     const prepared = registry.preparedTools[0];
-    expect(prepared?.task).toEqual({
-      nodeId: "__root__",
-      workflowId: subagentToolExecuteWorkflowReference.workflowId,
-    });
     expect(prepared?.behavior?.handling).toEqual({
       kind: "dispatch",
       target: {

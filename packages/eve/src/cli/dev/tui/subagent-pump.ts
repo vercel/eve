@@ -1,7 +1,7 @@
 /**
- * The subagent child-stream subsystem: for every `subagent.called` on the
- * parent stream, a parallel pump over the child session folds its events
- * into the renderer's nested subagent view. Extracted from the runner —
+ * The subagent child-stream subsystem: for every call to an agent task on
+ * the parent stream, a parallel pump over the agent's session folds its
+ * events into the renderer's nested subagent view. Extracted from the runner —
  * the subsystem touches nothing but its own run state, the client, and the
  * {@link SubagentView} seam.
  */
@@ -10,8 +10,9 @@ import type { Client, StreamReconnectPolicy } from "#client/index.js";
 import {
   isCurrentTurnBoundaryEvent,
   type ActionResultStreamEvent,
+  type AgentStartedStreamEvent,
   type MessageStreamEvent,
-  type SubagentCalledStreamEvent,
+  type TaskStartedStreamEvent,
 } from "#protocol/message.js";
 
 /**
@@ -74,8 +75,10 @@ export type SubagentRun = {
   parentTurnId: string;
   /** Parent completion is provisional; only a child boundary is authoritative. */
   status: "open" | "provisional" | "authoritative";
-  /** Dispatch event whose parent-origin child stream this run follows. */
-  called: SubagentCalledStreamEvent;
+  /** The parent session, whose client follows the child stream. */
+  parentSessionId: string;
+  /** The agent task's session, whose stream this run follows. */
+  started: AgentStartedStreamEvent;
   /**
    * One entry per logical "child message" — independent of the child's
    * `stepIndex` field, which the harness can reuse across multiple
@@ -123,6 +126,11 @@ export interface SubagentPumpOptions {
   onToolCompleted?: (subagentName: string, toolName: string, output: unknown) => Promise<void>;
 }
 
+/** An agent task: its session is announced once, and every call to the task reaches it. */
+interface AgentTask {
+  started?: AgentStartedStreamEvent;
+}
+
 export class SubagentPump {
   readonly #client: Client | undefined;
   readonly #view: SubagentView | undefined;
@@ -131,6 +139,7 @@ export class SubagentPump {
     | ((subagentName: string, toolName: string, output: unknown) => Promise<void>)
     | undefined;
   readonly #runs = new Map<string, SubagentRun>();
+  readonly #tasks = new Map<string, AgentTask>();
   readonly #pumps = new Map<string, AbortController>();
   /** Durable child cursor shared by repeated calls into one conversation subagent. */
   readonly #childStreamIndices = new Map<string, number>();
@@ -145,36 +154,68 @@ export class SubagentPump {
     this.#onToolCompleted = options.onToolCompleted;
   }
 
+  /** A call started or reached a task. A call to an agent task opens a section at once. */
+  taskStarted(event: TaskStartedStreamEvent, parentSessionId: string | undefined): void {
+    const { callId, kind, taskId, turnId } = event.data;
+    if (kind !== "agent") return;
+    const task = this.#tasks.get(taskId);
+    if (task === undefined) {
+      this.#tasks.set(taskId, {});
+      return;
+    }
+    if (task.started !== undefined && parentSessionId !== undefined) {
+      this.#begin({ callId, parentSessionId, parentTurnId: turnId, started: task.started });
+    }
+  }
+
   /**
-   * The moment a dispatch is known to be a subagent call, its section
-   * header replaces the parent-level tool row (or its still-preparing
-   * placeholder — subagent dispatches never upgrade one, since their
-   * actions are not tool-call kind). Without this the placeholder is
-   * swept at the step boundary and nothing shows until the child's first
-   * content arrives. A later parent-stream translator may replay the call;
-   * re-entry only refreshes the name.
+   * A run opened a session. The session an agent task opens is its agent's;
+   * sessions other tools open have no section.
    */
-  begin(called: SubagentCalledStreamEvent): void {
-    const callId = called.data.callId;
+  agentStarted(started: AgentStartedStreamEvent, parentSessionId: string | undefined): void {
+    const { callId, taskId, turnId } = started.data;
+    const task = taskId === undefined ? undefined : this.#tasks.get(taskId);
+    if (task === undefined) return;
+    task.started ??= started;
+    if (parentSessionId === undefined) return;
+    this.#begin({ callId, parentSessionId, parentTurnId: turnId, started: task.started });
+  }
+
+  /**
+   * The moment a call is known to reach an agent, its section header
+   * replaces the parent-level tool row (or its still-preparing
+   * placeholder). Without this the placeholder is swept at the step boundary
+   * and nothing shows until the child's first content arrives. A later
+   * parent-stream translator may replay the call; re-entry only refreshes
+   * the name.
+   */
+  #begin(input: {
+    readonly callId: string;
+    readonly parentSessionId: string;
+    readonly parentTurnId: string;
+    readonly started: AgentStartedStreamEvent;
+  }): void {
+    const { callId, started } = input;
     const existing = this.#runs.get(callId);
     if (existing === undefined) {
       this.#runs.set(callId, {
-        name: called.data.name,
-        childSessionId: called.data.childSessionId,
-        parentTurnId: called.data.turnId,
+        name: started.data.name,
+        childSessionId: started.data.sessionId,
+        parentSessionId: input.parentSessionId,
+        parentTurnId: input.parentTurnId,
         status: "open",
-        called,
+        started,
         steps: new Map(),
         currentSectionKey: null,
         nextSectionKey: 0,
         tools: new Map(),
       });
     } else {
-      existing.name = called.data.name;
+      existing.name = started.data.name;
     }
     this.#view?.markChildToolCallId(callId);
     if (existing !== undefined && existing.status !== "open") return;
-    this.#view?.begin({ callId, name: called.data.name });
+    this.#view?.begin({ callId, name: started.data.name });
     if (existing !== undefined) return;
     this.#activateOrQueue(callId);
   }
@@ -194,6 +235,7 @@ export class SubagentPump {
     }
     this.#pumps.clear();
     this.#runs.clear();
+    this.#tasks.clear();
     this.#childStreamIndices.clear();
     this.#activeChildCalls.clear();
     this.#queuedChildCalls.clear();
@@ -248,13 +290,11 @@ export class SubagentPump {
       const { childSessionId } = run;
       let cursor = this.#childStreamIndices.get(childSessionId) ?? 0;
       try {
-        const events = client.sessions
-          .attach(run.called.data.sessionId)
-          .streamSubagent(run.called, {
-            signal: controller.signal,
-            startIndex: cursor,
-            streamReconnectPolicy: childStreamReconnectPolicy,
-          });
+        const events = client.sessions.attach(run.parentSessionId).agent(run.started).stream({
+          signal: controller.signal,
+          startIndex: cursor,
+          streamReconnectPolicy: childStreamReconnectPolicy,
+        });
         for await (const event of events) {
           if (controller.signal.aborted) return;
           this.#childStreamIndices.set(childSessionId, (cursor += 1));
@@ -269,8 +309,8 @@ export class SubagentPump {
           return;
         }
       } catch {
-        // Only a non-retryable failure ends the follower early; the parent's
-        // `subagent.completed` still settles the section.
+        // Only a non-retryable failure ends the follower early; the call's
+        // `task.settled` still settles the section.
       } finally {
         controller.abort();
         if (this.#pumps.get(callId) === controller) this.#pumps.delete(callId);
@@ -339,8 +379,8 @@ export class SubagentPump {
    * Settles a subagent section: re-emits a finalized snapshot for any
    * still-streaming step (flipping its right-title off `streaming`), sweeps
    * preparing ghosts, and marks the section Done. The run's status field is
-   * the idempotency authority — the child's turn boundary and the parent's
-   * `subagent.completed` can both land here.
+   * the idempotency authority — the child's turn boundary and the call's
+   * `task.settled` can both land here.
    */
   #finalizeRun(callId: string, authoritative: boolean): void {
     const run = this.#runs.get(callId);

@@ -42,6 +42,8 @@ export function summarizeTurnEvents(
     if (isTurnSegmentBoundary(event, pendingInputRequests)) boundary = event;
     if (isTurnFailureEvent(event)) failure = event;
     if (isFinalMessageCompleted(event)) message = event.data.message ?? undefined;
+    // Text completed before the turn parked was interim; the reply comes after it resumes.
+    if (event.type === "turn.waiting") message = undefined;
     if (event.type === "input.requested") inputRequests.push(...event.data.requests);
     if (event.type === "authorization.required") {
       pendingAuthorizations.set(event.data.name, event.data);

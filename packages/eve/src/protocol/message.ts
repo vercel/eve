@@ -289,6 +289,8 @@ export interface InputRequestedStreamEvent {
     requests: readonly InputRequest[];
     sequence: number;
     stepIndex: number;
+    /** The task that asks, when the request comes from a task's run. */
+    taskId?: string;
     turnId: string;
   };
   type: "input.requested";
@@ -358,57 +360,29 @@ export interface ActionPartialStreamEvent {
 }
 
 /**
- * Stream event emitted when the parent workflow starts a child subagent session.
- */
-export interface SubagentCalledStreamEvent {
-  data: {
-    agentId?: string;
-    callId: string;
-    childSessionId: string;
-    childStreamPath: string;
-    sessionId: string;
-    sequence: number;
-    name: string;
-    remote?: {
-      /**
-       * Key to the authored credential functions (`auth`/`headers`) for this
-       * remote child, resolved at stream-proxy time by
-       * `resolveRemoteAgentStreamHeaders`. Static subagent → the node id in
-       * `subagentRegistry.subagentsByNodeId`; dynamic subagent → its
-       * `credentialsStepId` in the step registry. The event stores this key —
-       * never resolved header values — because tokens expire and this event
-       * is persisted and streamed to clients. Absent when the remote child
-       * has no authored credentials.
-       */
-      resolverId?: string;
-      url: string;
-    };
-    toolName: string;
-    turnId: string;
-    workflowId: string;
-  };
-  type: "subagent.called";
-}
-
-/**
  * Stream event emitted when a workflow run opens a session with `ctx.agent`.
  * `callId` and `turnId` name the tool call whose run opened it; follow the
- * session with `session.streamSubagent(event)`.
+ * session with `session.agent(event).stream()`. For a task's run it comes
+ * after that call's `task.started`.
  */
 export interface AgentStartedStreamEvent {
   data: {
     callId: string;
     /** The turn of the call whose run opened the session. */
     turnId: string;
+    /** The task whose run opened the session; absent when an `execute` call opened it. */
+    taskId?: string;
     name: string;
     /** The opened session's id. */
     sessionId: string;
     /** A local session's stream route, or the parent-origin proxy for a remote one. */
     streamPath: string;
     /**
-     * Where a remote session runs, read by the parent's stream proxy. As on
-     * `subagent.called`, `resolverId` keys the authored credential functions,
-     * never resolved header values.
+     * Where a remote session runs, read by the parent's stream proxy.
+     * `resolverId` keys the authored credential functions (`auth` and
+     * `headers`): a static agent's node id, or a dynamic agent's
+     * `credentialsStepId`. The event is persisted and streamed to clients, so
+     * it carries this key, never resolved header values.
      */
     remote?: {
       resolverId?: string;
@@ -419,40 +393,46 @@ export interface AgentStartedStreamEvent {
 }
 
 /**
- * Stream event emitted when an inline subagent execution starts.
+ * Stream event emitted when a call starts a task. `(taskId, callId)`
+ * identifies the call; `callId` is the tool call clients attach status to.
+ * It comes before every event the task's run causes for the call, such as
+ * `agent.started` and the call's `task.settled`.
  */
-export interface SubagentStartedStreamEvent {
+export interface TaskStartedStreamEvent {
   data: {
     callId: string;
-    subagentName: string;
+    /**
+     * `"agent"` for a subagent's generated tool, local or remote; `"tool"`
+     * for an authored tool, including one that opens sessions with
+     * `ctx.agent`. An agent call that fails before its session opens has no
+     * `agent.started`, so this is how a client tells it is an agent call.
+     */
+    kind: "agent" | "tool";
+    /** The tool whose call started the task. */
+    name: string;
+    taskId: string;
+    turnId: string;
   };
-  type: "subagent.started";
+  type: "task.started";
 }
 
 /**
- * Stream event (`type: "subagent.event"`) wrapping one child stream event
- * produced by an inline subagent, under `data.event`, tagged with the
- * originating `data.callId` and `data.subagentName`.
+ * Stream event emitted once when a task's call settles: by the run's return
+ * or failure, or by a cancel. `turnId` is the call's turn, the same as on its
+ * `task.started`.
  */
-export interface SubagentChildEventStreamEvent {
+export interface TaskSettledStreamEvent {
   data: {
     callId: string;
-    event: UnstampedMessageStreamEvent;
-    subagentName: string;
+    /** Why the call failed; present only when `status` is `"failed"`. */
+    error?: { message: string };
+    /** The call's result; present only when `status` is `"completed"`. */
+    output?: JsonValue;
+    status: "completed" | "failed" | "cancelled";
+    taskId: string;
+    turnId: string;
   };
-  type: "subagent.event";
-}
-
-/**
- * Stream event emitted after the parent accepts a successful subagent invocation result.
- */
-export interface SubagentCompletedStreamEvent {
-  data: {
-    callId: string;
-    output: string;
-    subagentName: string;
-  };
-  type: "subagent.completed";
+  type: "task.settled";
 }
 
 /**
@@ -706,6 +686,8 @@ export interface AuthorizationRequiredStreamEvent {
     name: string;
     sequence: number;
     stepIndex: number;
+    /** The task that needs the sign-in, when it comes from a task's run. */
+    taskId?: string;
     turnId: string;
     webhookUrl?: string;
   };
@@ -747,6 +729,8 @@ export interface AuthorizationCompletedStreamEvent {
     reason?: string;
     sequence: number;
     stepIndex: number;
+    /** The task that needed the sign-in, when it comes from a task's run. */
+    taskId?: string;
     turnId: string;
   };
   type: "authorization.completed";
@@ -810,10 +794,8 @@ export type UnstampedMessageStreamEvent =
   | SessionStartedStreamEvent
   | SessionWaitingStreamEvent
   | ResultCompletedStreamEvent
-  | SubagentCalledStreamEvent
-  | SubagentChildEventStreamEvent
-  | SubagentCompletedStreamEvent
-  | SubagentStartedStreamEvent
+  | TaskSettledStreamEvent
+  | TaskStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
   | InputResolvedStreamEvent
@@ -1207,6 +1189,7 @@ export function createAuthorizationRequiredEvent(input: {
   readonly name: string;
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly turnId: string;
   readonly webhookUrl?: string;
 }): AuthorizationRequiredStreamEvent {
@@ -1229,6 +1212,9 @@ export function createAuthorizationRequiredEvent(input: {
   if (input.webhookUrl !== undefined) {
     data.webhookUrl = input.webhookUrl;
   }
+  if (input.taskId !== undefined) {
+    data.taskId = input.taskId;
+  }
   return {
     data,
     type: "authorization.required",
@@ -1249,6 +1235,7 @@ export function createAuthorizationCompletedEvent(input: {
   readonly reason?: string;
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly turnId: string;
 }): AuthorizationCompletedStreamEvent {
   const data: AuthorizationCompletedStreamEvent["data"] = {
@@ -1269,6 +1256,9 @@ export function createAuthorizationCompletedEvent(input: {
   }
   if (input.reason !== undefined) {
     data.reason = input.reason;
+  }
+  if (input.taskId !== undefined) {
+    data.taskId = input.taskId;
   }
   return {
     data,
@@ -1297,17 +1287,17 @@ export function createInputRequestedEvent(input: {
   readonly requests: readonly InputRequest[];
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly turnId: string;
 }): InputRequestedStreamEvent {
-  return {
-    data: {
-      requests: input.requests,
-      sequence: input.sequence,
-      stepIndex: input.stepIndex,
-      turnId: input.turnId,
-    },
-    type: "input.requested",
+  const data: InputRequestedStreamEvent["data"] = {
+    requests: input.requests,
+    sequence: input.sequence,
+    stepIndex: input.stepIndex,
+    turnId: input.turnId,
   };
+  if (input.taskId !== undefined) data.taskId = input.taskId;
+  return { data, type: "input.requested" };
 }
 
 /** Creates the authoritative `input.resolved` event for one pending HITL batch. */
@@ -1382,47 +1372,35 @@ export function createActionPartialEvent(input: {
   };
 }
 
-/**
- * Creates the `subagent.called` event for one started child workflow session.
- */
-export function createSubagentCalledEvent(input: {
-  readonly agentId?: string;
-  readonly callId: string;
-  readonly childSessionId: string;
-  readonly sessionId: string;
-  readonly sequence: number;
-  readonly name: string;
-  readonly remote?: {
-    readonly resolverId?: string;
-    readonly url: string;
-  };
-  readonly toolName: string;
-  readonly turnId: string;
-  readonly workflowId: string;
-}): SubagentCalledStreamEvent {
+/** Creates the `task.started` event for one call that starts a task. */
+export function createTaskStartedEvent(
+  input: TaskStartedStreamEvent["data"],
+): TaskStartedStreamEvent {
   return {
     data: {
-      agentId: input.agentId,
       callId: input.callId,
-      childSessionId: input.childSessionId,
-      childStreamPath:
-        input.remote === undefined
-          ? createEveSessionStreamRoutePath(input.childSessionId)
-          : createEveSubagentStreamRoutePath({
-              callId: input.callId,
-              childSessionId: input.childSessionId,
-              parentSessionId: input.sessionId,
-            }),
-      sessionId: input.sessionId,
-      sequence: input.sequence,
+      kind: input.kind,
       name: input.name,
-      remote: input.remote,
-      toolName: input.toolName,
+      taskId: input.taskId,
       turnId: input.turnId,
-      workflowId: input.workflowId,
     },
-    type: "subagent.called",
+    type: "task.started",
   };
+}
+
+/** Creates the `task.settled` event for one settled task call. */
+export function createTaskSettledEvent(
+  input: TaskSettledStreamEvent["data"],
+): TaskSettledStreamEvent {
+  const data: TaskSettledStreamEvent["data"] = {
+    callId: input.callId,
+    status: input.status,
+    taskId: input.taskId,
+    turnId: input.turnId,
+  };
+  if (input.output !== undefined) data.output = input.output;
+  if (input.error !== undefined) data.error = input.error;
+  return { data, type: "task.settled" };
 }
 
 /**
@@ -1437,6 +1415,7 @@ export function createAgentStartedEvent(input: {
     readonly url: string;
   };
   readonly sessionId: string;
+  readonly taskId?: string;
   readonly turnId: string;
 }): AgentStartedStreamEvent {
   const data: AgentStartedStreamEvent["data"] = {
@@ -1446,6 +1425,7 @@ export function createAgentStartedEvent(input: {
     sessionId: input.sessionId,
     streamPath: createEveSessionStreamRoutePath(input.sessionId),
   };
+  if (input.taskId !== undefined) data.taskId = input.taskId;
   if (input.remote !== undefined) {
     data.remote = input.remote;
     data.streamPath = createEveSubagentStreamRoutePath({

@@ -9,16 +9,16 @@ export default defineEval({
       "Call the approval-child subagent exactly once and relay its final result when it completes.",
     );
     let parent = started.session;
-    let called = started.events.find(
-      (event) => event.type === "subagent.called" && event.data.name === "approval-child",
+    let child = started.events.find(
+      (event) => event.type === "agent.started" && event.data.name === "approval-child",
     );
-    if (called?.type !== "subagent.called") {
+    if (child?.type !== "agent.started") {
       const live = watchNextTurn(t, parent, "approval child dispatch wait");
-      called = await live.waitForEvent("subagent.called", { data: { name: "approval-child" } });
+      child = await live.waitForEvent("agent.started", { data: { name: "approval-child" } });
       parent = live.session;
     }
-    if (called.type !== "subagent.called") throw new Error("Approval child was not called.");
-    const childTurn = t.target.watchTurn(called.data.childSessionId);
+    if (child.type !== "agent.started") throw new Error("Approval child was not called.");
+    const childTurn = t.target.watchTurn(child.data.sessionId);
     const pending = await waitForInput(t, parent);
     const request = pending.requireInputRequest({
       prompt: /Approve the deployment/i,
@@ -26,7 +26,7 @@ export default defineEval({
     });
     const parkedChild = await childTurn.result();
 
-    const resumedChild = t.target.watchTurn(called.data.childSessionId, {
+    const resumedChild = t.target.watchTurn(child.data.sessionId, {
       startIndex: parkedChild.session.state.streamIndex,
     });
     const approved = await pending.start("approve");
