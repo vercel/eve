@@ -248,7 +248,7 @@ PORT=3001 pnpm dev
 To run the web app and eve as Vercel peer services, use:
 
 ```bash
-pnpm dev:services
+pnpm dev:all
 ```
 
 Open the matching local URL and make sure the Vercel App contains the same callback URL.

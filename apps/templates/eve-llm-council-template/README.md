@@ -34,17 +34,16 @@ The main pieces are:
 
 ```bash
 pnpm install
-pnpm exec eve link
 pnpm dev
 ```
 
 Run the complete Vercel service graph with:
 
 ```bash
-pnpm dev:services
+pnpm dev:all
 ```
 
-`eve link` connects the app to a Vercel project and pulls the AI Gateway credentials needed by the models. Open the local URL printed by Next.js.
+`pnpm dev:all` starts without a linked Vercel project. To use the AI Gateway models, link a project with `pnpm exec eve link`; that also pulls the required credentials. Open the local URL printed by Next.js.
 
 ## Checks
 

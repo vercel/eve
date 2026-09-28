@@ -21,7 +21,7 @@
     "build:web": "nuxt build --cwd apps/web",
     "dev": "nuxt dev --cwd apps/web",
     "dev:eve": "eve dev",
-    "dev:services": "vercel dev",
+    "dev:all": "vercel dev --local",
     "dev:web": "nuxt dev --cwd apps/web",
     "start": "nuxt preview --cwd apps/web",
     "typecheck": "nuxt typecheck --cwd apps/web",

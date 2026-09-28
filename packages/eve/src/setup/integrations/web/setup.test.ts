@@ -61,7 +61,7 @@ describe("Web setup", () => {
     );
   });
 
-  it("requires a linked project when Vercel is selected", async () => {
+  it("does not require a Vercel project when Vercel services are selected", async () => {
     const effects = deps();
     const resolveVercelProject = vi.fn(async () => ({ orgId: "team", projectId: "project" }));
     const ctx = createSetupContexts({
@@ -76,7 +76,7 @@ describe("Web setup", () => {
       hosting: "vercel",
       packageManager: "pnpm",
     });
-    expect(resolveVercelProject).toHaveBeenCalledWith("Web Chat");
+    expect(resolveVercelProject).not.toHaveBeenCalled();
   });
 
   it("does not require a Vercel project for other hosts", async () => {
@@ -161,6 +161,7 @@ describe("Web setup", () => {
       expect.stringContaining('root: "apps/web"'),
       { force: true },
     );
+    expect(effects.syncHostFrameworkPreset).not.toHaveBeenCalled();
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
       expect.stringContaining('"dev": "eve dev"'),
@@ -168,14 +169,8 @@ describe("Web setup", () => {
     );
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
-      expect.stringContaining('"dev:services": "vercel dev"'),
+      expect.stringContaining('"dev:all": "vercel dev --local"'),
       { force: true },
-    );
-    expect(effects.syncHostFrameworkPreset).toHaveBeenCalledWith(
-      ctx.apply.presenter,
-      "/project",
-      expect.any(Function),
-      { signal: undefined },
     );
   });
 
@@ -199,7 +194,7 @@ describe("Web setup", () => {
     );
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
-      expect.stringContaining('"dev:services": "vercel dev"'),
+      expect.stringContaining('"dev:all": "vercel dev --local"'),
       { force: true },
     );
   });
@@ -217,7 +212,7 @@ describe("Web setup", () => {
     await expect(
       applyWebSetup({ hosting: "vercel", packageManager: "npm" }, ctx.apply, effects),
     ).resolves.toEqual({
-      facts: [{ label: "", value: "Start locally with `npm run dev:services`." }],
+      facts: [{ label: "", value: "Start locally with `npm run dev:all`." }],
     });
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/agent/channels/eve.ts",
@@ -263,6 +258,12 @@ describe("Web setup", () => {
       "/project/vercel.ts",
       expect.anything(),
       expect.anything(),
+    );
+    expect(effects.syncHostFrameworkPreset).toHaveBeenCalledWith(
+      ctx.apply.presenter,
+      "/project",
+      expect.any(Function),
+      { signal: undefined },
     );
   });
 });

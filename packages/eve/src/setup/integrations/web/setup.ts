@@ -94,9 +94,6 @@ export async function prepareWebSetup(
       required: true,
     }),
   );
-  if (hosting === "vercel") {
-    await context.resolveVercelProject("Web Chat");
-  }
   return {
     hosting,
     packageManager: (await deps.detectPackageManager(project.environmentRoot)).kind,
@@ -125,7 +122,7 @@ async function configurePeerServiceScripts(root: string, deps: WebSetupDeps): Pr
   const scripts = { ...document.scripts };
   scripts.dev ??= "eve dev";
   scripts["dev:eve"] ??= "eve dev";
-  scripts["dev:services"] ??= "vercel dev";
+  scripts["dev:all"] ??= "vercel dev --local";
   await deps.writeTextFile(path, `${JSON.stringify({ ...document, scripts }, null, 2)}\n`, {
     force: true,
   });
@@ -194,15 +191,15 @@ export default withEve(nextConfig);
     await deps.writeTextFile(nextConfigPath, PEER_SERVICE_NEXT_CONFIG, { force: true });
     await deps.writeTextFile(vercelTsPath, PEER_SERVICE_VERCEL_CONFIG, { force: true });
     await configurePeerServiceScripts(project.environmentRoot, deps);
+    startScript = "dev:all";
+  } else {
+    await deps.writeTextFile(nextConfigPath, NEXT_HOSTED_CONFIG, { force: true });
     await deps.syncHostFrameworkPreset(
       context.presenter,
       project.environmentRoot,
       createPromptCommandOutput(context.presenter.log),
       { signal: context.signal },
     );
-    startScript = "dev:services";
-  } else {
-    await deps.writeTextFile(nextConfigPath, NEXT_HOSTED_CONFIG, { force: true });
     startScript = "dev:web";
   }
   context.presenter.log.success("Configured channel: web");
