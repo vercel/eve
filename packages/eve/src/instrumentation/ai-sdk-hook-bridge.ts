@@ -26,6 +26,7 @@ type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telem
 interface AttemptState {
   readonly capturesInputs: boolean;
   readonly capturesOutputs: boolean;
+  readonly modelCallIndexes: Map<number, number>;
   readonly modelKeys: Map<string, string>;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
@@ -45,6 +46,7 @@ export function createAiSdkHookBridge(
   const state: AttemptState = {
     capturesInputs: hooks.capturesInputs ?? hooks.capturesContent,
     capturesOutputs: hooks.capturesOutputs ?? hooks.capturesContent,
+    modelCallIndexes: new Map(),
     modelKeys: new Map(),
     runtimeContext:
       runtimeContext !== undefined && Object.keys(runtimeContext).length > 0
@@ -68,16 +70,26 @@ export function createAiSdkHookBridge(
       if (started !== undefined) await hooks.publish(started);
     },
     async onLanguageModelCallStart(event) {
-      const key = modelCallIdempotencyKey(state.scope, state.stepNumber ?? 0);
+      const stepNumber = state.stepNumber ?? 0;
+      const callIndex = state.modelCallIndexes.get(stepNumber) ?? 0;
+      state.modelCallIndexes.set(stepNumber, callIndex + 1);
+      const key = modelCallIdempotencyKey(state.scope, stepNumber, callIndex);
       state.modelKeys.set(event.callId, key);
       const started = toModelCallStarted(state, key, event);
       await hooks.publish(started);
     },
-    executeLanguageModelCall({ callId, execute }) {
+    async executeLanguageModelCall({ callId, execute }) {
       const key = state.modelKeys.get(callId);
-      return key === undefined
-        ? execute()
-        : runInContext({ idempotencyKey: key, scope, type: "model.call" }, execute);
+      if (key === undefined) return execute();
+      try {
+        return await runInContext({ idempotencyKey: key, scope, type: "model.call" }, execute);
+      } catch (error) {
+        if (state.modelKeys.get(callId) === key) state.modelKeys.delete(callId);
+        await hooks.publish(
+          Object.freeze({ error, idempotencyKey: key, scope, type: "model.call.failed" }),
+        );
+        throw error;
+      }
     },
     async onLanguageModelCallEnd(event) {
       const key = state.modelKeys.get(event.callId);

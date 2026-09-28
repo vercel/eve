@@ -417,7 +417,7 @@ describe("exported agent telemetry contract", () => {
           scope: childScope,
           type: "step.attempt.started",
         });
-        const modelKey = modelCallIdempotencyKey(childScope, 0);
+        const modelKey = modelCallIdempotencyKey(childScope, 0, 0);
         await childHooks.publish({
           idempotencyKey: modelKey,
           model: { modelId: "test", provider: "test" },

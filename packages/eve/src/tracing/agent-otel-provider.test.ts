@@ -3131,7 +3131,7 @@ describe("createAgentOtelInstrumentation", () => {
       scope,
       type: "step.attempt.started",
     });
-    const idempotencyKey = modelCallIdempotencyKey(scope, 0);
+    const idempotencyKey = modelCallIdempotencyKey(scope, 0, 0);
     await runtime.hooks.publish({
       idempotencyKey,
       input: { messages: [] },
