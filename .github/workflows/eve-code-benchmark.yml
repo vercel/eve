@@ -67,8 +67,8 @@ jobs:
       group: eve-code-${{ needs.request.outputs.pr || github.ref }}-${{ needs.request.outputs.slug }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    # Every trial runs in parallel, so a run lasts about as long as its slowest
-    # trial (15-minute agent timeout plus preparation and verification).
+    # Trials run in waves of up to 16 sandboxes; each trial can take up to the
+    # 15-minute agent timeout plus preparation and verification.
     timeout-minutes: 90
     steps:
       # vercel/eve is public and eve-bench is private; GitHub never lets a public
@@ -92,13 +92,16 @@ jobs:
           dataset: swe-lean
           # The PR comment's ranking tables show these plus each dimension's winner.
           contenders: eve-code@baseline,eve-code@head
-          model: ${{ vars.EVE_CODE_BENCH_MODEL || 'openai/gpt-6-luna' }}
-          # opencode drops Gemini's tool-call thought signatures, so Gemini stops reasoning
-          # after its first steps there; gpt-6-luna needs no signature to keep reasoning.
+          # Sonnet keeps Anthropic's prompt-cache behavior (tools first, cache writes)
+          # visible at half Opus's price. Avoid Gemini: opencode drops its tool-call
+          # thought signatures, so it stops reasoning after the first steps there.
+          model: ${{ vars.EVE_CODE_BENCH_MODEL || 'anthropic/claude-sonnet-5.5' }}
           reasoning: low
-          attempts: "1"
-          # Per harness: one sandbox per task, so all trials start at once.
-          concurrency: "8"
+          # One attempt per task could not separate a 10-15% token change from
+          # trial noise; five gives the paired bootstrap enough samples.
+          attempts: "5"
+          # The action's maximum. 7 tasks x 5 attempts per contender run in waves.
+          concurrency: "16"
           native-build: "false"
           # Baselines and cross-harness references resolve automatically from the
           # durable result store; only dispatch/push/schedule runs publish to it.
