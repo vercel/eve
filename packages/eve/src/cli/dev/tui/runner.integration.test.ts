@@ -71,8 +71,12 @@ function assistantText(view: AgentTUIConversationView): string[] {
   );
 }
 
-function startRunner(server: FakeEveServer, renderer: AgentTUIRenderer) {
-  vi.stubGlobal("fetch", server.fetch);
+function startRunner(
+  server: FakeEveServer,
+  renderer: AgentTUIRenderer,
+  fetch: typeof globalThis.fetch = server.fetch,
+) {
+  vi.stubGlobal("fetch", fetch);
   const run = new EveTUIRunner({
     client: new Client({ host: "http://localhost:3000" }),
     renderer,
@@ -280,14 +284,26 @@ describe("eve dev conversation", () => {
     await run;
   });
 
-  it("cancels only the turn the user watched start", async () => {
+  it.each([
+    ["Esc", { type: "cancel" }],
+    ["/cancel", { type: "submit", text: "/cancel" }],
+  ] as const)("cancels with %s only the turn the user watched start", async (_label, cancel) => {
     const server = new FakeEveServer(silent());
+    const created = Promise.withResolvers<void>();
     const tui = scriptedRenderer();
-    const run = startRunner(server, tui.renderer);
+    const run = startRunner(server, tui.renderer, async (input, init) => {
+      // Hold session creation open so the cancel lands before any session exists.
+      if (init?.method === "POST" && new URL(String(input)).pathname === "/eve/v1/session") {
+        await created.promise;
+      }
+      return await server.fetch(input, init);
+    });
 
     await tui.input({ type: "submit", text: "Write a long report." });
     await vi.waitFor(() => expect(tui.latest().working).toBe(true));
-    await tui.input({ type: "cancel" });
+    await tui.input(cancel);
+    created.resolve();
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
     await Promise.resolve();
     // No turn ID yet: cancellation waits instead of guessing.
     expect(server.requestsTo("POST", "/cancel")).toHaveLength(0);

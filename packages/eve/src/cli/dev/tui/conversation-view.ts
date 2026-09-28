@@ -1,4 +1,5 @@
 import type { ConversationState } from "#client/conversation-state.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 import type { EveAgentStoreSnapshot } from "#client/eve-agent-store.js";
 import type { EveAgentReducer } from "#client/reducer.js";
 import {
@@ -47,10 +48,15 @@ export const tuiSessionReducer: EveAgentReducer<TuiSessionData> = {
           ? { ...data, turnFailureKeys: [] }
           : { ...rest, modelTurnId: turnId, turnFailureKeys: [] };
       }
-      case "step.started":
-        return event.data.modelId === data.modelId
-          ? data
-          : { ...data, modelId: event.data.modelId, modelTurnId: event.data.turnId };
+      case "step.started": {
+        // The model id is printed in the status line, so it must not carry terminal controls.
+        const modelId =
+          stripAnsi(event.data.modelId.slice(0, 256)).replace(/\s+/gu, " ").trim() || undefined;
+        if (modelId === data.modelId) return data;
+        const { modelId: _modelId, ...rest } = data;
+        const modelTurnId = event.data.turnId;
+        return modelId === undefined ? { ...rest, modelTurnId } : { ...rest, modelId, modelTurnId };
+      }
       case "step.completed": {
         const usage = event.data.usage;
         if (usage === undefined) return data;

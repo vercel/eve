@@ -8,6 +8,7 @@ import {
   detachEveAgentStore,
   EveAgentStore,
 } from "#client/eve-agent-store.js";
+import { isAbortError } from "#client/eve-agent-store-helpers.js";
 import { normalizeActionRequest, normalizeActionResult } from "#client/message-action-parts.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import type { SendTurnPayload } from "#client/types.js";
@@ -45,7 +46,6 @@ import {
   formatFailureHint,
   formatFailureMessage,
   interruptedError,
-  isAbortLikeError,
   isInterruptedError,
   localFailureHint,
 } from "./errors.js";
@@ -715,9 +715,7 @@ export class EveTUIRunner {
         initialDraft = undefined;
         if (input === undefined) continue;
         if (input.type === "cancel") {
-          void this.#store.cancel().catch((error: unknown) => {
-            this.#renderer.renderNotice?.(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
-          });
+          this.#cancelTurn();
           continue;
         }
         if (input.type === "interrupt") {
@@ -751,14 +749,15 @@ export class EveTUIRunner {
         this.#finishCommand({ kind: "dismiss" });
         this.#lifecycle?.requestStop();
         return "exit";
-      case "cancel":
-        await this.#runSessionCommand({
-          absent: "No active turn to cancel",
-          accepted: "Cancellation requested",
-          failed: "Couldn't cancel the turn",
-          invoke: () => this.#store.cancel(),
+      case "cancel": {
+        const working = isWorking(this.#store.snapshot.status);
+        if (working) this.#cancelTurn();
+        this.#finishCommand({
+          kind: "result",
+          summary: working ? "Cancellation requested" : "No active turn to cancel",
         });
         return;
+      }
       case "reset":
         await this.#resetSession();
         return;
@@ -827,7 +826,7 @@ export class EveTUIRunner {
         ? { message }
         : { message, turnPolicy: "queue" };
     void this.#store.send(input).catch((error: unknown) => {
-      if (this.#disposed || isAbortLikeError(error)) return;
+      if (this.#disposed || isAbortError(error)) return;
       this.#renderer.renderError?.(
         steering ? "Steering failed" : "Error",
         this.#formatTransportError(error),
@@ -935,7 +934,7 @@ export class EveTUIRunner {
     }
     if (responses.length === 0) return;
     void this.#store.send({ inputResponses: responses }).catch((error: unknown) => {
-      if (this.#disposed || isAbortLikeError(error)) return;
+      if (this.#disposed || isAbortError(error)) return;
       this.#renderer.renderError?.("Error", this.#formatTransportError(error));
     });
   }
@@ -959,10 +958,21 @@ export class EveTUIRunner {
 
   #resetConversation(): void {
     this.#store.reset();
+    this.#clearRunnerState();
+  }
+
+  #clearRunnerState(): void {
     this.#dismissedInputs.clear();
     this.#handledHandoffs.clear();
     this.#recordedFailures.clear();
     this.#runtimeArtifacts?.clear();
+  }
+
+  /** Cancels the running turn without holding the composer; the store waits for its turn ID. */
+  #cancelTurn(): void {
+    void this.#store.cancel().catch((error: unknown) => {
+      this.#renderer.renderNotice?.(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
+    });
   }
 
   /** Runs a session mutation and gives every control command one completion policy. */
@@ -1008,7 +1018,7 @@ export class EveTUIRunner {
       });
       return;
     }
-    this.#resetConversation();
+    this.#clearRunnerState();
     this.#renderer.reset?.();
     this.#finishCommand({ kind: "dismiss" });
   }

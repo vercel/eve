@@ -157,12 +157,15 @@ export class ConversationTranscript {
       }
     }
     const vanished = [...this.#optimistic].filter(([id]) => !optimistic.has(id));
+    const pendingTexts = new Set(optimistic.values());
     for (const message of messages) {
       if (message.role !== "user" || message.metadata?.optimistic === true) continue;
       if (this.#confirmed.has(message.id)) continue;
-      this.#confirmed.add(message.id);
       const text = userText(message);
       const match = vanished.findIndex(([, candidate]) => candidate === text);
+      // An early server echo can share a snapshot with its optimistic twin; wait for the swap.
+      if (match === -1 && pendingTexts.has(text)) continue;
+      this.#confirmed.add(message.id);
       if (match === -1) continue;
       this.#aliases.set(message.id, vanished[match]![0]);
       vanished.splice(match, 1);
@@ -171,6 +174,8 @@ export class ConversationTranscript {
   }
 
   #userBlock(message: EveMessage): Block | undefined {
+    // A server copy waiting on its optimistic twin's swap would otherwise print twice.
+    if (message.metadata?.optimistic !== true && !this.#confirmed.has(message.id)) return undefined;
     const body = stripTerminalControls(userText(message));
     if (body.trim().length === 0) return undefined;
     const id = `user:${this.#aliases.get(message.id) ?? message.id}`;

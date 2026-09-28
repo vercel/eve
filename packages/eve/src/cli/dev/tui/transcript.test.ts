@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { initialConversationState, reduceConversation } from "#client/conversation-reducer.js";
+import {
+  initialConversationState,
+  reduceConversation,
+  type ConversationEvent,
+} from "#client/conversation-reducer.js";
 import type { ConversationState } from "#client/conversation-state.js";
-import type { EveAgentReducerEvent } from "#client/reducer.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import {
   createActionResultEvent,
@@ -35,12 +38,12 @@ const options: TranscriptOptions = {
 };
 
 let stamp = 0;
-function event(value: UnstampedMessageStreamEvent): EveAgentReducerEvent {
+function event(value: UnstampedMessageStreamEvent): MessageStreamEvent {
   return stampTestEvent(value, ++stamp);
 }
 
 function conversation(
-  events: readonly EveAgentReducerEvent[],
+  events: readonly ConversationEvent[],
   state: ConversationState = initialConversationState(),
 ): ConversationState {
   return events.reduce(reduceConversation, state);
@@ -431,18 +434,20 @@ describe("ConversationTranscript", () => {
       },
     ]);
     const [echo] = transcript.project(view(optimistic, true), options);
+    const received = event(
+      createMessageReceivedEvent({
+        message: "Summarize Alice's notes.",
+        sequence: 0,
+        turnId: "turn_1",
+      }),
+    );
+    const echoOnly = [expect.objectContaining({ kind: "user", id: echo!.id })];
 
-    const confirmed = conversation([
-      event(
-        createMessageReceivedEvent({
-          message: "Summarize Alice's notes.",
-          sequence: 0,
-          turnId: "turn_1",
-        }),
-      ),
-    ]);
-    const blocks = transcript.project(view(confirmed, true), options);
-    expect(blocks).toEqual([expect.objectContaining({ kind: "user", id: echo!.id })]);
+    // The server's copy can arrive before the store swaps out the optimistic message.
+    expect(transcript.project(view(conversation([received], optimistic), true), options)).toEqual(
+      echoOnly,
+    );
+    expect(transcript.project(view(conversation([received]), true), options)).toEqual(echoOnly);
   });
 
   it("renders each failure once with its hint and a pointer to the full detail", () => {
