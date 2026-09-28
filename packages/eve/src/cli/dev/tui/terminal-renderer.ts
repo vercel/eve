@@ -746,11 +746,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#argumentTypeahead !== undefined) {
       return renderArgumentSuggestions(this.#argumentTypeahead, this.#theme, width);
     }
-    const inlineHint =
-      this.#typeahead === undefined ? undefined : inlineCommandHint(this.#typeahead);
-    return inlineHint === undefined &&
-      this.#typeahead !== undefined &&
-      isTypeaheadOpen(this.#typeahead)
+    return this.#typeahead !== undefined && isTypeaheadOpen(this.#typeahead)
       ? renderCommandSuggestions(this.#typeahead, this.#theme, width)
       : [];
   }
@@ -4598,9 +4594,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (queueRows.length > 0) rows.push(...queueRows, "");
 
     if (this.#inputActive) {
-      // A complete command name with a single match collapses the dropdown into
-      // a dim argument hint trailing the prompt; partial or ambiguous drafts
-      // still open the list above the input.
+      // A complete command can show its argument hint beside the caret while
+      // its matching suggestion remains visible beneath the prompt.
       const inlineHint =
         this.#typeahead !== undefined ? inlineCommandHint(this.#typeahead) : undefined;
       const typeaheadRows = this.#typeaheadDrawerRows(width);

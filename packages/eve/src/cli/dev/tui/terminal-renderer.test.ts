@@ -5344,18 +5344,15 @@ describe("TerminalRenderer command typeahead", () => {
     renderer.shutdown();
   });
 
-  it("collapses a complete command into an inline argument hint", async () => {
+  it("keeps the suggestion visible for a complete command alongside its argument hint", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
     input.type("/model");
     const snapshot = screen.snapshot();
-    // The prompt row carries the dim argument shape inline (the caret sits
-    // between the typed name and the hint)...
-    expect(snapshot).toContain("/model");
+    expect(snapshot).toContain("│ /model");
     expect(snapshot).toContain("[provider/model]");
-    // ...and the dropdown (with its description column) is gone.
-    expect(snapshot).not.toContain("Choose a model, speed, and reasoning");
+    expect(snapshot).toContain("Choose a model, speed, and reasoning");
 
     input.enter();
     expect(await prompt).toBe("/model");

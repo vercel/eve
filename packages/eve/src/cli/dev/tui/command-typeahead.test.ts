@@ -99,7 +99,7 @@ describe("inlineCommandHint", () => {
     expect(inlineCommandHint(typeaheadFor(COMMANDS, "/model"))).toBe("[provider/model]");
   });
 
-  it("returns an empty string for a complete argument-less command (still collapses)", () => {
+  it("returns an empty string for a complete argument-less command", () => {
     expect(inlineCommandHint(typeaheadFor(COMMANDS, "/help"))).toBe("");
   });
 
