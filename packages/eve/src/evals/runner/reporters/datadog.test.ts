@@ -282,13 +282,7 @@ describe("Datadog", () => {
       expect.objectContaining({ label: "eve_message_count", value: 1 }),
       expect.objectContaining({ label: "eve_reasoning_block_count", value: 0 }),
     ]);
-    expect(experiment.submitEvaluationMetrics.mock.calls[0]?.[1]).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          tags: expect.objectContaining({ assertion_name: expect.anything() }),
-        }),
-      ]),
-    );
+    expect(submittedSpan).not.toHaveProperty("metadata.eveAssertionScores");
   });
 
   it("redacts target URL secrets and omits execution errors when recordErrors is disabled", async () => {
@@ -349,21 +343,24 @@ describe("Datadog", () => {
     expect(experiment.submitSpan.mock.calls[0]?.[0]).not.toHaveProperty(
       "metadata.eveFailedAssertions",
     );
+    expect(experiment.submitSpan.mock.calls[0]?.[0]).not.toHaveProperty(
+      "metadata.eveAssertionScores",
+    );
     expect(experiment.submitEvaluationMetrics.mock.calls[0]?.[1]).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           label: "gate_messageIncludes_private_expectation",
           tags: {
-            assertion_index: "1",
             assertion_severity: "gate",
             assertion_passed: "false",
+            assertion_count: "1",
           },
         }),
       ]),
     );
   });
 
-  it("records assertion name tags and failure messages by default", async () => {
+  it("records each assertion's score and failure messages by default", async () => {
     const { config, experiment } = makeConfig();
     const reporter = Datadog(config);
     const result = makeEvalResult({
@@ -392,26 +389,20 @@ describe("Datadog", () => {
         },
       ],
     );
-    expect(experiment.submitEvaluationMetrics.mock.calls[0]?.[1]).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          label: "gate_messageIncludes_private_expectation",
-          tags: expect.objectContaining({
-            assertion_name: "messageIncludes(private expectation)",
-          }),
-        }),
-      ]),
-    );
+    expect(experiment.submitSpan.mock.calls[0]?.[0]).toHaveProperty("metadata.eveAssertionScores", [
+      { name: "messageIncludes(private expectation)", severity: "gate", score: 0 },
+    ]);
   });
 
-  it("deduplicates assertion metric labels and reserves built-in labels", async () => {
+  it("combines repeated assertion names into one metric scored by the lowest member", async () => {
     const { config, experiment } = makeConfig({ recordInputs: false });
     const reporter = Datadog(config);
     const result = makeEvalResult({
       assertions: [
         { name: "same label", score: 1, severity: "soft", passed: true, errored: false },
-        { name: "same@label", score: 1, severity: "soft", passed: true, errored: false },
-        { name: "same label", score: 1, severity: "soft", passed: true, errored: false },
+        { name: "same@label", score: 0.5, severity: "soft", passed: false, errored: false },
+        { name: "same label", score: 0.8, severity: "soft", passed: true, errored: false },
+        { name: "same label", score: 1, severity: "gate", passed: true, errored: false },
         { name: "eve_tool_call_count", score: 1, severity: "soft", passed: true, errored: false },
       ],
     });
@@ -420,9 +411,16 @@ describe("Datadog", () => {
     await reporter.onEvalComplete(result);
 
     expect(experiment.submitEvaluationMetrics.mock.calls[0]?.[1]).toEqual([
-      expect.objectContaining({ label: "same_label" }),
-      expect.objectContaining({ label: "same_label_2" }),
-      expect.objectContaining({ label: "same_label_3" }),
+      {
+        label: "same_label",
+        value: 0.5,
+        tags: { assertion_severity: "soft", assertion_passed: "false", assertion_count: "3" },
+      },
+      {
+        label: "gate_same_label",
+        value: 1,
+        tags: { assertion_severity: "gate", assertion_passed: "true", assertion_count: "1" },
+      },
       expect.objectContaining({ label: "eve_tool_call_count_2" }),
       expect.objectContaining({ label: "eve_tool_call_count" }),
       expect.objectContaining({ label: "eve_subagent_call_count" }),

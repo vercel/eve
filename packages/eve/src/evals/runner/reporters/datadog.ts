@@ -1,6 +1,10 @@
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import {
+  composeAssertionScoreMetadata,
+  groupAssertionScores,
+} from "#evals/runner/reporters/assertion-scores.js";
+import {
   getDatadogDataset,
   MISSING_DATASET_API_MESSAGE,
   resolveDatadogClient,
@@ -48,7 +52,7 @@ export interface DatadogReporterConfig {
   readonly recordOutputs?: boolean;
   /** Include `metadata.expectedOutput`, `metadata.expected`, or `metadata.expected_output` on experiment rows. Defaults to true. */
   readonly recordExpectedOutputs?: boolean;
-  /** Include raw assertion names as metric tags and failure messages in row metadata. Defaults to true. */
+  /** Include each assertion's name and score, and failure messages, in row metadata. Defaults to true. */
   readonly recordAssertionDetails?: boolean;
   /** Include execution error messages, which may contain application data. Defaults to true. */
   readonly recordErrors?: boolean;
@@ -322,10 +326,7 @@ class DatadogReporter implements EvalReporter {
     }
 
     const span = await this.#experiment.submitSpan(spanInput);
-    await this.#experiment.submitEvaluationMetrics(
-      span,
-      resolveEvaluationMetrics(result, this.#recording.recordAssertionDetails),
-    );
+    await this.#experiment.submitEvaluationMetrics(span, resolveEvaluationMetrics(result));
   }
 }
 
@@ -481,6 +482,7 @@ function resolveResultMetadata(
     if (failedAssertions.length > 0) {
       metadata.eveFailedAssertions = failedAssertions;
     }
+    metadata.eveAssertionScores = composeAssertionScoreMetadata(result.assertions);
   }
   if (result.result.derived.failureCode) {
     metadata.eveFailureCode = result.result.derived.failureCode;
@@ -488,28 +490,22 @@ function resolveResultMetadata(
   return metadata;
 }
 
-function resolveEvaluationMetrics(
-  result: EveEvalResult,
-  recordAssertionDetails: boolean,
-): DatadogEvaluationMetricInput[] {
+function resolveEvaluationMetrics(result: EveEvalResult): DatadogEvaluationMetricInput[] {
   const metrics: DatadogEvaluationMetricInput[] = [];
   const usedLabels = new Set<string>(BUILT_IN_METRIC_LABELS);
+  const groups = groupAssertionScores(result.assertions, (assertion) =>
+    toDatadogMetricLabel(assertion.severity === "gate" ? `gate_${assertion.name}` : assertion.name),
+  );
 
-  for (const [index, assertion] of result.assertions.entries()) {
-    const rawLabel = assertion.severity === "gate" ? `gate_${assertion.name}` : assertion.name;
-    const tags: Record<string, string> = {
-      assertion_index: String(index + 1),
-      assertion_severity: assertion.severity,
-      assertion_passed: String(assertion.passed),
-    };
-    if (recordAssertionDetails) {
-      tags.assertion_name = assertion.name;
-      tags.assertion_label = rawLabel;
-    }
+  for (const [label, group] of groups) {
     metrics.push({
-      label: reserveDatadogMetricLabel(toDatadogMetricLabel(rawLabel), usedLabels),
-      value: assertion.score,
-      tags,
+      label: reserveDatadogMetricLabel(label, usedLabels),
+      value: group.score,
+      tags: {
+        assertion_severity: group.assertions[0]?.severity ?? "soft",
+        assertion_passed: String(group.assertions.every((assertion) => assertion.passed)),
+        assertion_count: String(group.assertions.length),
+      },
     });
   }
 
