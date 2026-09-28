@@ -19,7 +19,6 @@ function deps(): WebSetupDeps {
       environmentRoot: appRoot,
       kind: "standalone",
     })),
-    syncHostFrameworkPreset: vi.fn(async () => {}),
     writeTextFile: vi.fn(async () => {}),
   };
 }
@@ -161,7 +160,6 @@ describe("Web setup", () => {
       expect.stringContaining('root: "apps/web"'),
       { force: true },
     );
-    expect(effects.syncHostFrameworkPreset).not.toHaveBeenCalled();
     expect(effects.writeTextFile).toHaveBeenCalledWith(
       "/project/package.json",
       expect.stringContaining('"dev": "eve dev"'),
@@ -258,12 +256,6 @@ describe("Web setup", () => {
       "/project/vercel.ts",
       expect.anything(),
       expect.anything(),
-    );
-    expect(effects.syncHostFrameworkPreset).toHaveBeenCalledWith(
-      ctx.apply.presenter,
-      "/project",
-      expect.any(Function),
-      { signal: undefined },
     );
   });
 });

@@ -5,8 +5,6 @@ import { resolveEveProjectContext } from "#internal/project-context.js";
 import { select } from "#setup/ask.js";
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
 import { pathExists, writeTextFile } from "#setup/scaffold/files.js";
-import { createPromptCommandOutput } from "#setup/cli/index.js";
-import { syncHostFrameworkPreset } from "#setup/vercel-project-framework.js";
 import { WEB_CHANNEL_TEMPLATES } from "#setup/scaffold/create/web-template.js";
 import {
   defineSetupIntegration,
@@ -46,7 +44,6 @@ export interface WebSetupDeps {
   pathExists: typeof pathExists;
   readTextFile(path: string): Promise<string>;
   resolveEveProjectContext: typeof resolveEveProjectContext;
-  syncHostFrameworkPreset: typeof syncHostFrameworkPreset;
   writeTextFile: typeof writeTextFile;
 }
 
@@ -55,7 +52,6 @@ const defaultDeps: WebSetupDeps = {
   pathExists,
   readTextFile: (path) => readFile(path, "utf8"),
   resolveEveProjectContext,
-  syncHostFrameworkPreset,
   writeTextFile,
 };
 
@@ -194,12 +190,6 @@ export default withEve(nextConfig);
     startScript = "dev:all";
   } else {
     await deps.writeTextFile(nextConfigPath, NEXT_HOSTED_CONFIG, { force: true });
-    await deps.syncHostFrameworkPreset(
-      context.presenter,
-      project.environmentRoot,
-      createPromptCommandOutput(context.presenter.log),
-      { signal: context.signal },
-    );
     startScript = "dev:web";
   }
   context.presenter.log.success("Configured channel: web");
