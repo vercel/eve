@@ -79,7 +79,6 @@ export async function emitProxiedSubagentEvent(input: {
         workflowAsk === undefined
           ? relayed.result
           : relayed.result.map(([requestId, route]) => [requestId, { ...route, workflowAsk }]),
-      forChildContinuationToken: hookPayload.childContinuationToken,
       session: scopedSession,
     });
   }

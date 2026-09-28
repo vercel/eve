@@ -95,7 +95,6 @@ it("relays a withdrawn workflow question's input.resolved to the stream and its 
         },
       ],
     ],
-    forChildContinuationToken: "ask-1",
     session: base.snapshot.session as HarnessSession,
   });
 

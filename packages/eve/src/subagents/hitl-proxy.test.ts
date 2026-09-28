@@ -44,7 +44,6 @@ describe("routeDeliverPayload", () => {
           },
         ],
       ],
-      forChildContinuationToken: "child-alias",
       session: createSession(),
     });
 
@@ -80,7 +79,6 @@ describe("routeDeliverPayload", () => {
           { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "tool-approval" },
         ],
       ],
-      forChildContinuationToken: "child-a",
       session: upsertProxyInputRequests({
         entries: [
           [
@@ -88,7 +86,6 @@ describe("routeDeliverPayload", () => {
             { childContinuationToken: "child-b", event: REQUEST_EVENT, kind: "tool-approval" },
           ],
         ],
-        forChildContinuationToken: "child-b",
         session: createSession(),
       }),
     });
@@ -137,7 +134,6 @@ describe("routeDeliverPayload", () => {
           { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "tool-approval" },
         ],
       ],
-      forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
@@ -160,7 +156,6 @@ describe("routeDeliverPayload", () => {
           { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "session-limit" },
         ],
       ],
-      forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
@@ -175,17 +170,19 @@ describe("routeDeliverPayload", () => {
       {
         childContinuationToken: "child-a",
         payload: { inputResponses: [{ optionId: "stop", requestId: "req-limit" }] },
-        resolved: {
-          event: REQUEST_EVENT,
-          resolutions: [
-            {
-              kind: "session-limit",
-              outcome: "answered",
-              requestId: "req-limit",
-              response: { optionId: "stop", requestId: "req-limit" },
-            },
-          ],
-        },
+        resolved: [
+          {
+            event: REQUEST_EVENT,
+            resolutions: [
+              {
+                kind: "session-limit",
+                outcome: "answered",
+                requestId: "req-limit",
+                response: { optionId: "stop", requestId: "req-limit" },
+              },
+            ],
+          },
+        ],
       },
     ]);
     expect(routed.parentAction).toEqual({ kind: "cancel-turn" });
@@ -220,7 +217,6 @@ describe("routeDeliverPayload message resolution", () => {
             },
           ],
         ],
-        forChildContinuationToken: `hook-${requestId}`,
         session,
       });
     }
@@ -239,7 +235,7 @@ describe("routeDeliverPayload message resolution", () => {
       {
         childContinuationToken: "hook-ask-1",
         payload: { inputResponses: [{ optionId: "2", requestId: "ask-1" }] },
-        resolved: { resolutions: [{ outcome: "answered", requestId: "ask-1" }] },
+        resolved: [{ resolutions: [{ outcome: "answered", requestId: "ask-1" }] }],
       },
     ]);
   });
@@ -279,7 +275,6 @@ describe("routeDeliverPayload message resolution", () => {
           { childContinuationToken: "child-token", event: REQUEST_EVENT, kind: "question" },
         ],
       ],
-      forChildContinuationToken: "child-token",
       session: askSession([["ask-1", { allowFreeform: true }]]),
     });
     const routed = routeDeliverPayload({

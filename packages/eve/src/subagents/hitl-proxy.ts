@@ -82,8 +82,8 @@ export interface RoutedChildDelivery {
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
-  /** What forwarding this bucket resolves on the routing session. */
-  readonly resolved: ProxiedInputResolutions;
+  /** What forwarding this bucket resolves on the routing session, per child batch. */
+  readonly resolved: readonly ProxiedInputResolutions[];
 }
 
 /**
@@ -113,8 +113,6 @@ interface ChildResponseBucket {
   readonly workflowAsk?: WorkflowAskRoute;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  /** A child's routes all come from its latest batch, so they share coordinates. */
-  readonly event: PendingInputBatchEvent;
   /** Parent-visible request IDs answered in this bucket. */
   readonly parentRequestIds: string[];
   readonly responses: InputResponse[];
@@ -158,7 +156,6 @@ export function routeDeliverPayload(input: {
     if (existing !== undefined) return existing;
     const bucket: ChildResponseBucket = {
       childContinuationToken: route.childContinuationToken,
-      event: route.event,
       parentRequestIds: [],
       responses: [],
       routes: [],
@@ -198,7 +195,6 @@ export function routeDeliverPayload(input: {
       workflowAsk,
       childContinuationToken,
       childSessionInbox,
-      event,
       parentRequestIds,
       responses,
       routes,
@@ -221,10 +217,7 @@ export function routeDeliverPayload(input: {
       return {
         childContinuationToken,
         payload: { inputResponses: responses },
-        resolved: {
-          event,
-          resolutions: resolveRetiredRequests({ entries, responses, retireRequestIds }),
-        },
+        resolved: resolveRetiredRequests({ entries, responses, retireRequestIds }),
         ...(childSessionInbox !== undefined && { childSessionInbox }),
         ...(workflowAsk !== undefined && { workflowAsk }),
       };
@@ -254,19 +247,30 @@ export function routeDeliverPayload(input: {
   return { forChildren, forSelf, parentAction };
 }
 
+/** Identifies the batch an `input.requested` raised; a child can have several open. */
+export function inputBatchKey(event: PendingInputBatchEvent): string {
+  return [event.turnId, event.stepIndex, event.sequence].join("\0");
+}
+
 function resolveRetiredRequests(input: {
   readonly entries: ReadonlyMap<string, ProxyInputRequest>;
   readonly responses: readonly InputResponse[];
   readonly retireRequestIds: ReadonlySet<string>;
-}): InputResolution[] {
+}): ProxiedInputResolutions[] {
   const responses = new Map(input.responses.map((response) => [response.requestId, response]));
-  const resolutions: InputResolution[] = [];
+  const batches = new Map<
+    string,
+    { event: PendingInputBatchEvent; resolutions: InputResolution[] }
+  >();
   for (const requestId of input.retireRequestIds) {
     const route = input.entries.get(requestId);
     if (route === undefined) continue;
-    resolutions.push(toInputResolution(requestId, route, responses.get(requestId)));
+    const key = inputBatchKey(route.event);
+    const batch = batches.get(key) ?? { event: route.event, resolutions: [] };
+    batch.resolutions.push(toInputResolution(requestId, route, responses.get(requestId)));
+    batches.set(key, batch);
   }
-  return resolutions;
+  return [...batches.values()];
 }
 
 function toInputResolution(

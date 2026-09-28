@@ -341,7 +341,6 @@ describe("resolvePendingCoordination", () => {
           },
         ],
       ],
-      forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
       session: upsertProxyInputRequests({
         entries: [
           [
@@ -354,7 +353,6 @@ describe("resolvePendingCoordination", () => {
             },
           ],
         ],
-        forChildContinuationToken: answerToken,
         session: withRun,
       }),
     });

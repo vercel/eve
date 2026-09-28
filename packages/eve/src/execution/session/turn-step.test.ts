@@ -332,7 +332,6 @@ describe("routeProxiedDeliverStep", () => {
           },
         ],
       ],
-      forChildContinuationToken: "stale-alias",
       session: createStubSession({
         continuationToken: "parent-token",
         sessionId: "parent-session",
@@ -396,7 +395,6 @@ describe("routeProxiedDeliverStep", () => {
           },
         ],
       ],
-      forChildContinuationToken: "ask-1",
       session: createStubSession(),
     });
     installSessionStoreMocks([session]);
@@ -456,7 +454,6 @@ describe("routeProxiedDeliverStep", () => {
           },
         ],
       ],
-      forChildContinuationToken: "ask-1",
       session: createStubSession(),
     });
     installSessionStoreMocks([session]);
@@ -493,7 +490,6 @@ describe("routeProxiedDeliverStep", () => {
           { childContinuationToken: "child-token", event: REQUEST_EVENT, kind: "tool-approval" },
         ],
       ],
-      forChildContinuationToken: "child-token",
       session: createStubSession({
         continuationToken: "parent-token",
         sessionId: "parent-session",
@@ -529,6 +525,83 @@ describe("routeProxiedDeliverStep", () => {
     });
   });
 
+  it("routes answers to every batch a child has open and resolves each at its own coordinates", async () => {
+    // A child relaying for two of its own children raises two batches before either is answered.
+    const first = { sequence: 5, stepIndex: 0, turnId: "turn_0" };
+    const second = { sequence: 9, stepIndex: 0, turnId: "turn_0" };
+    let session = createStubSession({
+      continuationToken: "parent-token",
+      sessionId: "parent-session",
+    });
+    for (const [requestId, event] of [
+      ["request-1", first],
+      ["request-2", second],
+    ] as const) {
+      session = upsertProxyInputRequests({
+        entries: [
+          [requestId, { childContinuationToken: "child-token", event, kind: "tool-approval" }],
+        ],
+        session,
+      });
+    }
+    installSessionStoreMocks([session]);
+    const inputResponses = [
+      { optionId: "approve", requestId: "request-1" },
+      { optionId: "approve", requestId: "request-2" },
+    ];
+
+    const result = await routeProxiedDeliverStep({
+      serializedContext: createSerializedContext(),
+      sessionWritable: createTestWritable(),
+      delivery: { kind: "deliver", payloads: [{ inputResponses }] },
+      sessionState: createStubSessionState({
+        continuationToken: "parent-token",
+        hasProxyInputRequests: true,
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(result).toMatchObject({ kind: "continue", remainder: undefined });
+    expect(resumeHookMock).toHaveBeenCalledTimes(1);
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "eve:inbox:v1:child-token",
+      expect.objectContaining({ payloads: [{ inputResponses }] }),
+    );
+    const writes = workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? [];
+    expect(
+      writes.map((chunk) => JSON.parse(new TextDecoder().decode(chunk as Uint8Array))),
+    ).toEqual([
+      expect.objectContaining({
+        data: {
+          ...first,
+          resolutions: [
+            {
+              kind: "tool-approval",
+              outcome: "approved",
+              requestId: "request-1",
+              response: inputResponses[0],
+            },
+          ],
+        },
+        type: "input.resolved",
+      }),
+      expect.objectContaining({
+        data: {
+          ...second,
+          resolutions: [
+            {
+              kind: "tool-approval",
+              outcome: "approved",
+              requestId: "request-2",
+              response: inputResponses[1],
+            },
+          ],
+        },
+        type: "input.resolved",
+      }),
+    ]);
+  });
+
   it("preserves envelope fields and reindexes metadata across routed payloads", async () => {
     const auth = {
       attributes: {},
@@ -552,7 +625,6 @@ describe("routeProxiedDeliverStep", () => {
           { childContinuationToken: "child-token-b", event: REQUEST_EVENT, kind: "question" },
         ],
       ],
-      forChildContinuationToken: "child-token-a",
       session: upsertProxyInputRequests({
         entries: [
           [
@@ -560,7 +632,6 @@ describe("routeProxiedDeliverStep", () => {
             { childContinuationToken: "child-token-b", event: REQUEST_EVENT, kind: "question" },
           ],
         ],
-        forChildContinuationToken: "child-token-b",
         session: createStubSession(),
       }),
     });

@@ -80,51 +80,18 @@ export function hasProxyInputRequests(state: SessionStateMap | undefined): boole
 }
 
 /**
- * Replaces prior entries for `forChildContinuationToken` with the provided
- * ones. A child raising a fresh batch overwrites its prior batch so the
- * parent never keeps stale request metadata. Other children's routes stay
- * independently answerable.
+ * Adds a child batch's routes. Earlier routes stay: a child can have several
+ * batches open at once, its own and those it relays for its children, and
+ * each route lasts until an answer, withdrawal, or cancellation retires it.
  */
 export function upsertProxyInputRequests(input: {
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-  readonly forChildContinuationToken: string;
   readonly session: HarnessSession;
 }): HarnessSession {
-  return {
-    ...input.session,
-    state: upsertProxyInputRequestState({
-      entries: input.entries,
-      forChildContinuationToken: input.forChildContinuationToken,
-      state: input.session.state,
-    }),
-  };
-}
-
-/** State-only variant for control-plane steps that already hold a durable projection. */
-export function upsertProxyInputRequestState(input: {
-  readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-  readonly forChildContinuationToken: string;
-  readonly state: SessionStateMap | undefined;
-}): SessionStateMap | undefined {
-  const next: Record<string, ProxyInputRequest> = {};
-
-  for (const [requestId, route] of Object.entries(readMap(input.state))) {
-    if (route.childContinuationToken !== input.forChildContinuationToken) {
-      next[requestId] = route;
-    }
-  }
-
-  for (const [requestId, route] of input.entries) {
-    next[requestId] = route;
-  }
-
-  const state = { ...input.state };
-  if (Object.keys(next).length === 0) {
-    delete state[PROXY_INPUT_REQUESTS_KEY];
-  } else {
-    state[PROXY_INPUT_REQUESTS_KEY] = next;
-  }
-  return Object.keys(state).length > 0 ? state : undefined;
+  return writeMap(input.session, {
+    ...readMap(input.session.state),
+    ...Object.fromEntries(input.entries),
+  });
 }
 
 /** Removes every proxy route the predicate selects. */

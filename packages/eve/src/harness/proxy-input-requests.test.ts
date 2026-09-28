@@ -43,39 +43,11 @@ describe("upsertProxyInputRequests", () => {
       entries: [
         ["req-1", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
       ],
-      forChildContinuationToken: "child-a",
       session,
     });
 
     expect(hasProxyInputRequests(next.state)).toBe(true);
     expect(getProxyInputRequests(next.state).get("req-1")).toEqual({
-      childContinuationToken: "child-a",
-      event: REQUEST_EVENT,
-      kind: "question",
-    });
-  });
-
-  it("replaces prior entries for the same child continuation token", () => {
-    let session = upsertProxyInputRequests({
-      entries: [
-        ["req-1", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
-      ],
-      forChildContinuationToken: "child-a",
-      session: createSession(),
-    });
-
-    session = upsertProxyInputRequests({
-      entries: [
-        ["req-2", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
-      ],
-      forChildContinuationToken: "child-a",
-      session,
-    });
-
-    const entries = getProxyInputRequests(session.state);
-    expect(entries.size).toBe(1);
-    expect(entries.get("req-1")).toBeUndefined();
-    expect(entries.get("req-2")).toEqual({
       childContinuationToken: "child-a",
       event: REQUEST_EVENT,
       kind: "question",
@@ -88,7 +60,6 @@ describe("upsertProxyInputRequests", () => {
         ["req-1", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
         ["req-2", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
       ],
-      forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
@@ -99,7 +70,6 @@ describe("upsertProxyInputRequests", () => {
           { childContinuationToken: "child-b", event: REQUEST_EVENT, kind: "tool-approval" },
         ],
       ],
-      forChildContinuationToken: "child-b",
       session,
     });
 
@@ -114,7 +84,6 @@ describe("upsertProxyInputRequests", () => {
       entries: [
         ["req-a", { childContinuationToken: "child-a", event: REQUEST_EVENT, kind: "question" }],
       ],
-      forChildContinuationToken: "child-a",
       session: createSession(),
     });
 
@@ -125,7 +94,6 @@ describe("upsertProxyInputRequests", () => {
           { childContinuationToken: "child-b", event: REQUEST_EVENT, kind: "tool-approval" },
         ],
       ],
-      forChildContinuationToken: "child-b",
       session,
     });
 
@@ -163,7 +131,6 @@ describe("toProxyInputRequestEntries", () => {
     });
     const session = upsertProxyInputRequests({
       entries,
-      forChildContinuationToken: "reusable-alias",
       session: createSession(),
     });
 

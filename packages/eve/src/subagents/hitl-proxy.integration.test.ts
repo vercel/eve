@@ -306,7 +306,6 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     // response routes back down to the right descendant.
     const parkedSession = upsertProxyInputRequests({
       entries,
-      forChildContinuationToken: hookPayload.childContinuationToken,
       session: buildEmptySession("parent-token", "sess-parent"),
     });
 
@@ -322,17 +321,19 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
         payload: {
           inputResponses: [{ optionId: "approve", requestId: "req-approve-1" }],
         },
-        resolved: {
-          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
-          resolutions: [
-            {
-              kind: "tool-approval",
-              outcome: "approved",
-              requestId: "req-approve-1",
-              response: { optionId: "approve", requestId: "req-approve-1" },
-            },
-          ],
-        },
+        resolved: [
+          {
+            event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+            resolutions: [
+              {
+                kind: "tool-approval",
+                outcome: "approved",
+                requestId: "req-approve-1",
+                response: { optionId: "approve", requestId: "req-approve-1" },
+              },
+            ],
+          },
+        ],
       },
     ]);
   });
@@ -403,12 +404,10 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
     let parkedSession = buildEmptySession("parent-token", "sess-parent");
     parkedSession = upsertProxyInputRequests({
       entries: entriesA,
-      forChildContinuationToken: payloadA.childContinuationToken,
       session: parkedSession,
     });
     parkedSession = upsertProxyInputRequests({
       entries: entriesB,
-      forChildContinuationToken: payloadB.childContinuationToken,
       session: parkedSession,
     });
 

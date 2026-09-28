@@ -8,7 +8,7 @@ import {
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import { relaySessionEvents, type SessionEventTarget } from "#execution/publish-session-events.js";
-import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
+import { inputBatchKey, routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { sendWorkflowAskAnswers } from "#execution/tools/workflow/answer.js";
 import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
@@ -37,11 +37,19 @@ interface ChildBucket {
   readonly workflowAsk?: WorkflowAskRoute;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  readonly event: PendingInputBatchEvent;
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
   readonly payloads: DeliverPayload[];
-  /** Keyed by request id: a request resolves once however many payloads answer it. */
-  readonly resolutions: Map<string, InputResolution>;
+  /**
+   * Keyed by batch, then request id: each batch gets its own `input.resolved`,
+   * and a request resolves once however many payloads answer it.
+   */
+  readonly resolved: Map<
+    string,
+    {
+      readonly event: PendingInputBatchEvent;
+      readonly resolutions: Map<string, InputResolution>;
+    }
+  >;
 }
 
 /**
@@ -78,7 +86,9 @@ export async function routeProxiedDeliverStep(
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
       if (forChild.workflowAsk !== undefined) {
-        for (const { requestId } of forChild.resolved.resolutions) resolvedQuestions.add(requestId);
+        for (const { resolutions } of forChild.resolved) {
+          for (const { requestId } of resolutions) resolvedQuestions.add(requestId);
+        }
       }
       const key = [
         forChild.childContinuationToken,
@@ -88,17 +98,21 @@ export async function routeProxiedDeliverStep(
         workflowAsk: forChild.workflowAsk,
         childContinuationToken: forChild.childContinuationToken,
         childSessionInbox: forChild.childSessionInbox,
-        event: forChild.resolved.event,
         metadata: [],
         payloads: [],
-        resolutions: new Map(),
+        resolved: new Map(),
       };
       const childPayloadIndex = child.payloads.length;
       child.payloads.push(forChild.payload);
-      for (const resolution of forChild.resolved.resolutions) {
-        if (!child.resolutions.has(resolution.requestId)) {
-          child.resolutions.set(resolution.requestId, resolution);
+      for (const { event, resolutions } of forChild.resolved) {
+        const batchKey = inputBatchKey(event);
+        const batch = child.resolved.get(batchKey) ?? { event, resolutions: new Map() };
+        for (const resolution of resolutions) {
+          if (!batch.resolutions.has(resolution.requestId)) {
+            batch.resolutions.set(resolution.requestId, resolution);
+          }
         }
+        child.resolved.set(batchKey, batch);
       }
       if (routed.forSelf === undefined && childIndex === 0) {
         for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
@@ -128,14 +142,16 @@ export async function routeProxiedDeliverStep(
         childDelivery,
       );
     }
-    if (child.resolutions.size > 0) {
+    const forwardedRequestIds: string[] = [];
+    for (const { event, resolutions } of child.resolved.values()) {
       resolvedEvents.push(
-        createInputResolvedEvent({ resolutions: [...child.resolutions.values()], ...child.event }),
+        createInputResolvedEvent({ resolutions: [...resolutions.values()], ...event }),
       );
+      forwardedRequestIds.push(...resolutions.keys());
     }
     // Successfully forwarded request IDs are retired so later deliveries
     // cannot route through stale entries.
-    durableSession = retireProxyInputRequests(durableSession, [...child.resolutions.keys()]);
+    durableSession = retireProxyInputRequests(durableSession, forwardedRequestIds);
     retired = true;
   }
 
