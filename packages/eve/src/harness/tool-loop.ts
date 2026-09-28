@@ -2910,6 +2910,8 @@ async function handleStepResult(input: {
   }
 
   return finishTurn({
+    deferOutputSchema:
+      contextStorage.getStore()?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() === true,
     emissionState,
     emit,
     history: promptMessages,
@@ -2982,6 +2984,8 @@ async function emitStructuredResult(
  * waits for the next message.
  */
 async function finishTurn(input: {
+  /** A background task makes this reply interim; keep the caller's schema for its wake. */
+  readonly deferOutputSchema: boolean;
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly history: readonly HarnessModelMessage[];
@@ -3004,6 +3008,14 @@ async function finishTurn(input: {
   }
 
   const structured = extractFinalOutput(result);
+  if (structured === undefined && input.deferOutputSchema) {
+    if (emit) {
+      emissionState = await emitTurnEpilogue(emit, emissionState);
+      session = setHarnessEmissionState(session, emissionState);
+    }
+    return { next: null, session, settledTurn: { output: stepOutput ?? "" } };
+  }
+
   if (structured === undefined) {
     // The schema belongs to the settled turn. A later conversation turn that
     // omits outputSchema must not inherit a failed turn's contract.
