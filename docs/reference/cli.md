@@ -249,7 +249,7 @@ Runs with malformed generation metadata remain stored and dormant for that serve
 
 Recovery eligibility is decided before startup queue delivery begins. Hot reload does not recheck admitted runs against the latest workflow sources, so follow-up turns, cancellation, and `/new` retain their existing behavior. Changing an authored workflow body while it is running can likewise cause replay failure.
 
-At startup and after snapshot pruning, `eve dev` cancels unfinished runs whose runtime snapshots are missing. This includes waiting conversations and session timeout workflows. Cancellation records the reason in the run history without a terminal warning; normal run-data retention still applies. Stopping `eve dev` does not intentionally cancel runs whose snapshots remain available.
+With the built-in local Workflow World, `eve dev` cancels unfinished runs whose runtime snapshots are missing, at startup and after snapshot pruning. This includes waiting conversations and session timeout workflows. Cancellation records the reason in the run history without a terminal warning; normal run-data retention still applies. Stopping `eve dev` does not cancel runs whose snapshots remain available, but recovering them on the next start requires `--resume`.
 
 Recovery limits:
 
