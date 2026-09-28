@@ -15,7 +15,7 @@ import type { WebSearchProvider } from "#shared/web-search.js";
 /**
  * The provider backend resolved for one web search tool invocation.
  */
-export type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel";
+type WebSearchBackend = "anthropic" | "exa" | "google" | "openai" | "parallel";
 
 /**
  * Maps an upstream provider tool type (the literal `type` string the AI SDK

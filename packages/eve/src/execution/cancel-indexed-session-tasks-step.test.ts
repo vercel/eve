@@ -7,6 +7,7 @@ import {
   readWorkflowTaskView,
   type BackgroundWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const { cancelOwnedTaskMock, deserializeContextMock, hydrateDurableSessionMock } = vi.hoisted(
   () => ({
@@ -34,6 +35,7 @@ describe("cancelAllIndexedSessionTasksStep", () => {
   });
 
   it("cancels every indexed task sequentially with the hydrated parent session", async () => {
+    const logs = captureLogRecords();
     const task1 = indexedTask("task-1");
     const task2 = indexedTask("task-2");
 
@@ -61,9 +63,16 @@ describe("cancelAllIndexedSessionTasksStep", () => {
       serializedContext: { context: "latest" },
       session: "runtime-session",
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "failed to settle background task instrumentation",
+      }),
+    );
   });
 
   it("leaves a task working when cancellation fails", async () => {
+    const logs = captureLogRecords();
     cancelOwnedTaskMock.mockRejectedValueOnce(new Error("Cancellation unavailable"));
     const result = await cancelAllIndexedSessionTasksStep({
       serializedContext: {},
@@ -74,6 +83,15 @@ describe("cancelAllIndexedSessionTasksStep", () => {
         .query()
         .map((task) => task.status),
     ).toEqual(["working", "cancelled"]);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to cancel indexed task" }),
+    );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "failed to settle background task instrumentation",
+      }),
+    );
   });
 
   it("does not require runtime context when no tasks are indexed", async () => {

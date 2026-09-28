@@ -25,6 +25,7 @@ import { isBrandedToolEntry, type DynamicToolSet } from "#tools/dynamic.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { readDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 import { resolveHeaders } from "#runtime/connections/mcp-client.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 function connection(name: string): ResolvedConnectionDefinition {
   return {
@@ -199,6 +200,47 @@ describe("connection dynamic tools", () => {
     expect(Object.values(tools).every(isBrandedToolEntry)).toBe(true);
   });
 
+  it("keeps the connection identity in durable callback closures without separate call state", async () => {
+    let instanceId = "account-a";
+    const executeTool = vi.fn(async () => ({ ok: true }));
+    const base = registry({
+      connections: [{ ...connection("linear"), instanceId }],
+      loadTools: {
+        linear: async () => [
+          { name: "list_issues", description: "List issues", inputSchema: { type: "object" } },
+        ],
+      },
+    });
+    const ctx = new ContextContainer();
+    ctx.set(ConnectionRegistryKey, {
+      ...base,
+      getConnections: () => [{ ...connection("linear"), instanceId }],
+      getClient: (name) => ({ ...base.getClient(name), executeTool }),
+    });
+    await contextStorage.run(ctx, async () => {
+      const resolve = getConnectionSearchResolver().events["step.started"]!;
+      const context = {
+        channel: {},
+        model: null,
+        messages: [],
+        session: { auth: { current: null, initiator: null }, id: "identity-test" },
+      } satisfies DynamicResolveContext;
+      const initial = (await resolve({}, context)) as DynamicToolSet;
+      await initial["connection_search"]!.execute({ keywords: "list issues" }, {} as ToolContext);
+      const tools = (await resolve({}, context)) as DynamicToolSet;
+      const callback = readDurableDynamicToolCallbacks(tools["linear__list_issues"]!)!.execute!;
+      expect(callback.closure).toMatchObject({ connectionName: "linear", instanceId: "account-a" });
+      instanceId = "account-b";
+      await expect(
+        callback.callback(callback.closure, {} as never, { callId: "call-1" } as never),
+      ).rejects.toThrow("connection for this tool call changed or is unavailable");
+      expect(executeTool).not.toHaveBeenCalled();
+      expect([...ctx.entries()].some(([key]) => key.name === "eve.pendingConnectionCalls")).toBe(
+        false,
+      );
+    });
+  });
+
   it("forwards the authored tool call ID to connection execution", async () => {
     const linear = connection("linear");
     const executeTool = vi.fn(
@@ -256,6 +298,7 @@ describe("connection dynamic tools", () => {
 
 describe("connection_search", () => {
   it("fails when every targeted connection fails to load", async () => {
+    const logs = captureLogRecords();
     const incident = connection("incident");
     const connectionRegistry = registry({
       connections: [incident],
@@ -273,6 +316,9 @@ describe("connection_search", () => {
       }),
     ).rejects.toThrow(
       'Failed to load tools for "incident": MCP SSE Transport Error: 400 Bad Request',
+    );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "failed to load connection tools" }),
     );
   });
 
@@ -292,6 +338,7 @@ describe("connection_search", () => {
   });
 
   it("fails when authorization cannot be started", async () => {
+    const logs = captureLogRecords();
     const salesforce: ResolvedConnectionDefinition = {
       ...connection("salesforce"),
       authorization: {
@@ -331,6 +378,9 @@ describe("connection_search", () => {
         },
       ),
     ).rejects.toThrow('Failed to start authorization for "salesforce": OAuth provider unavailable');
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "connection authorization failed" }),
+    );
   });
 
   it("returns connection summaries when loading succeeds without a keyword match", async () => {
@@ -351,6 +401,7 @@ describe("connection_search", () => {
   });
 
   it("returns matches and errors when at least one connection loads", async () => {
+    const logs = captureLogRecords();
     const incident = connection("incident");
     const linear = connection("linear");
     const connectionRegistry = registry({
@@ -386,6 +437,9 @@ describe("connection_search", () => {
         error: 'Failed to load tools for "incident": MCP SSE Transport Error: 400 Bad Request',
       },
     ]);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "failed to load connection tools" }),
+    );
   });
 
   it("does not complete an unrelated connection authorization", async () => {
@@ -536,6 +590,7 @@ describe("connection_search", () => {
   it.each([false, true])(
     "completes connection auth through the shared token cache (fresh token refused: %s)",
     async (refused) => {
+      const logs = captureLogRecords();
       const getToken = vi.fn(async () => {
         throw new ConnectionAuthorizationRequiredError("salesforce");
       });
@@ -607,6 +662,10 @@ describe("connection_search", () => {
           callback: { method: "GET", params: { code: "approved" } },
         }),
       );
+      const failures = logs.records.filter(
+        (record) => record.message === "connection authorization failed",
+      );
+      expect(failures).toHaveLength(refused ? 1 : 0);
     },
   );
 

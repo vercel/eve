@@ -1,18 +1,18 @@
-import { resolve } from "node:path";
-
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  findCliApplicationRoot,
-  resolveCliApplicationProject,
-  resolveCliApplicationRoot,
-  type ResolveCliApplicationRootDependencies,
-} from "#cli/application-root.js";
+import { findCliApplicationRoot, resolveCliApplicationProject } from "#cli/application-root.js";
 import {
   createDiscoverErrorDiagnostic,
   DISCOVER_PROJECT_NOT_FOUND,
 } from "#discover/diagnostics.js";
-import { DiscoveryProjectResolutionError } from "#discover/project.js";
+import { DiscoveryProjectResolutionError, resolveDiscoveryProject } from "#discover/project.js";
+
+vi.mock("#discover/project.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#discover/project.js")>()),
+  resolveDiscoveryProject: vi.fn(),
+}));
+
+const resolveDiscoveryProjectMock = vi.mocked(resolveDiscoveryProject);
 
 function projectNotFound(path: string): DiscoveryProjectResolutionError {
   return new DiscoveryProjectResolutionError(
@@ -24,81 +24,53 @@ function projectNotFound(path: string): DiscoveryProjectResolutionError {
   );
 }
 
-function dependencies(
-  implementation: ResolveCliApplicationRootDependencies["resolveDiscoveryProject"],
-): ResolveCliApplicationRootDependencies {
-  return { resolveDiscoveryProject: vi.fn(implementation) };
-}
-
-describe("resolveCliApplicationRoot", () => {
+describe("CLI application root", () => {
   it("returns the complete project resolved by discovery", async () => {
     const project = {
       agentRoot: "/repo/agent",
       appRoot: "/repo",
       layout: "nested" as const,
     };
-    const deps = dependencies(async () => project);
+    resolveDiscoveryProjectMock.mockResolvedValueOnce(project);
 
-    await expect(resolveCliApplicationProject("/repo/agent/tools", deps)).resolves.toEqual(project);
-  });
-
-  it("uses the application root resolved by project discovery", async () => {
-    const deps = dependencies(async () => ({
-      agentRoot: "/repo/agent",
-      appRoot: "/repo",
-      layout: "nested",
-    }));
-
-    await expect(resolveCliApplicationRoot("/repo/agent/tools", deps)).resolves.toBe("/repo");
+    await expect(resolveCliApplicationProject("/repo/agent/tools")).resolves.toEqual(project);
   });
 
   it("finds a named agent workspace member", async () => {
-    const deps = dependencies(async () => ({
+    resolveDiscoveryProjectMock.mockResolvedValueOnce({
       agentRoot: "/repo/agents/billing/agent",
       appRoot: "/repo/agents/billing",
       layout: "nested",
-    }));
+    });
 
-    await expect(findCliApplicationRoot("/repo/agents/billing/tools", deps)).resolves.toBe(
+    await expect(findCliApplicationRoot("/repo/agents/billing/tools")).resolves.toBe(
       "/repo/agents/billing",
     );
   });
 
   it("finds flat application roots", async () => {
-    const deps = dependencies(async () => ({
+    resolveDiscoveryProjectMock.mockResolvedValueOnce({
       agentRoot: "/repo/agents/billing",
       appRoot: "/repo/agents/billing",
       layout: "flat",
-    }));
+    });
 
-    await expect(findCliApplicationRoot("/repo/agents/billing", deps)).resolves.toBe(
+    await expect(findCliApplicationRoot("/repo/agents/billing")).resolves.toBe(
       "/repo/agents/billing",
     );
   });
 
   it("returns undefined when finding from outside an application", async () => {
-    const deps = dependencies(async (path) => {
+    resolveDiscoveryProjectMock.mockImplementationOnce(async (path) => {
       throw projectNotFound(path ?? process.cwd());
     });
 
-    await expect(findCliApplicationRoot("/workspace/packages", deps)).resolves.toBeUndefined();
-  });
-
-  it("preserves cwd when resolving from outside an application", async () => {
-    const deps = dependencies(async (path) => {
-      throw projectNotFound(path ?? process.cwd());
-    });
-
-    await expect(resolveCliApplicationRoot("./workspace/packages", deps)).resolves.toBe(
-      resolve("./workspace/packages"),
-    );
+    await expect(findCliApplicationRoot("/workspace/packages")).resolves.toBeUndefined();
   });
 
   it("does not hide unexpected discovery failures", async () => {
-    const deps = dependencies(async () => {
-      throw new Error("read failed");
-    });
+    resolveDiscoveryProjectMock.mockRejectedValueOnce(new Error("read failed"));
 
-    await expect(resolveCliApplicationRoot("/workspace", deps)).rejects.toThrow("read failed");
+    await expect(findCliApplicationRoot("/workspace")).rejects.toThrow("read failed");
   });
 });

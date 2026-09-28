@@ -113,8 +113,8 @@ export interface GenericChannelDefinition<
 
   /**
    * Classifies who can observe the originating conversation. The hook runs
-   * after route auth with channel state, the authenticated principal, run mode,
-   * and deployment environment. Return `"unknown"` when classification is not
+   * after route auth with channel state, the authenticated principal, and
+   * deployment environment. Return `"unknown"` when classification is not
    * confident; consumers treat it as non-public.
    */
   readonly audience?: (input: AudienceContext<TState>) => ChannelAudience;

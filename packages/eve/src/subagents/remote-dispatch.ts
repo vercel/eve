@@ -104,7 +104,6 @@ export async function startRemoteAgentSession(input: {
     activityObserver?: ActivityObserverConfig;
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
-    mode: "conversation" | "task";
     operationId?: string;
     outputSchema?: object;
   } = {
@@ -123,9 +122,7 @@ export async function startRemoteAgentSession(input: {
       action: input.action,
       remote: input.remote,
     }),
-    mode: "conversation",
-    outputSchema:
-      normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
+    outputSchema: normalizeRequestedOutputSchema(input.action.input.outputSchema),
   };
   if (input.activityObserver !== undefined) requestBody.activityObserver = input.activityObserver;
   if (forwardedPrincipal !== undefined) {
@@ -475,7 +472,6 @@ export function resolveRemoteAgentForAction(input: {
       logicalPath: string;
       name: string;
       nodeId: string;
-      outputSchema?: ResolvedRuntimeRemoteAgentNode["outputSchema"];
       path: string;
       sourceId: string;
       sourceKind: "module";
@@ -486,7 +482,6 @@ export function resolveRemoteAgentForAction(input: {
       logicalPath: definition.logicalPath,
       name: input.remoteAgentName,
       nodeId: input.nodeId,
-      outputSchema: config.outputSchema,
       path: config.path,
       sourceId: definition.sourceId,
       sourceKind: "module",

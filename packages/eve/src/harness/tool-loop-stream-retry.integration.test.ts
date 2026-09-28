@@ -47,7 +47,6 @@ function createEventCollector(): {
 function createConfig(model: LanguageModel, emit: HarnessEmitFn): ToolLoopHarnessConfig {
   return {
     handleEvent: emit,
-    mode: "task",
     resolveModel: vi.fn().mockResolvedValue(model),
     tools: new Map(),
   };
@@ -91,7 +90,7 @@ afterEach(() => {
 });
 
 describe("tool loop streamed provider retries", () => {
-  it("retries an overloaded stream and preserves prior task work", async () => {
+  it("retries an overloaded stream and preserves prior work", async () => {
     vi.spyOn(Math, "random").mockReturnValue(0);
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -121,7 +120,8 @@ describe("tool loop streamed provider retries", () => {
     });
 
     expect(doStream).toHaveBeenCalledTimes(2);
-    expect(result.next).toEqual({ done: true, output: "Recovered answer." });
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: "Recovered answer." });
     expect(result.session.history).toContainEqual({
       content: "Prior work is complete.",
       role: "assistant",
@@ -172,8 +172,8 @@ describe("tool loop streamed provider retries", () => {
     // The exhausted failure reports the catalog's curated summary for the
     // overloaded shape rather than the provider's raw "Overloaded", with
     // the remediation hint riding along in the parent-facing output.
-    expect(result.next).toMatchObject({
-      done: true,
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({
       isError: true,
       output:
         "The model provider is overloaded or timing out upstream of AI Gateway. " +
@@ -181,6 +181,7 @@ describe("tool loop streamed provider retries", () => {
     });
     expect(events.filter((event) => event.type === "step.failed")).toHaveLength(1);
     expect(events.filter((event) => event.type === "turn.failed")).toHaveLength(1);
-    expect(events.filter((event) => event.type === "session.failed")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "session.failed")).toHaveLength(0);
+    expect(events.at(-1)?.type).toBe("session.waiting");
   });
 });

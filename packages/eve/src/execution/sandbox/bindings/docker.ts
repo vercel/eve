@@ -1,5 +1,6 @@
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
+import { toErrorMessage } from "#shared/errors.js";
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
@@ -110,6 +111,17 @@ export function createDockerSandboxProvider(
     return daemonCheck;
   }
 
+  async function inspectContainerRunning(containerName: string): Promise<boolean | undefined> {
+    const inspect = await cli.run([
+      "container",
+      "inspect",
+      "--format",
+      "{{.State.Running}}",
+      containerName,
+    ]);
+    return inspect.exitCode === 0 ? inspect.stdout.trim() === "true" : undefined;
+  }
+
   async function openDockerSession(
     context: SandboxProviderSessionContext,
     openOptions: Readonly<DockerSandboxRuntimeOptions> | undefined,
@@ -125,36 +137,39 @@ export function createDockerSandboxProvider(
         templateKey: artifact.imageReference,
       });
     }
-    const inspect = await cli.run([
-      "container",
-      "inspect",
-      "--format",
-      "{{.State.Running}}",
-      containerName,
-    ]);
-    if (inspect.exitCode === 0) {
-      if (inspect.stdout.trim() !== "true") {
-        expectDockerSuccess(
-          await cli.run(["start", containerName]),
-          `restart sandbox session container "${containerName}"`,
-        );
-      }
-    } else {
+    let running = await inspectContainerRunning(containerName);
+    if (running === undefined) {
       if (!createIfMissing) {
         throw new Error(`Docker sandbox session container "${containerName}" no longer exists.`);
       }
-      await startDockerContainer({
-        cli,
-        containerName,
-        image: artifact.imageReference,
-        initialNetworkPolicy: openOptions?.networkPolicy ?? "allow-all",
-        options,
-        role: "session",
-        tags: {
-          agent: context.session.id,
-          sessionId: context.session.id,
-        },
-      });
+      try {
+        await startDockerContainer({
+          cli,
+          containerName,
+          image: artifact.imageReference,
+          initialNetworkPolicy: openOptions?.networkPolicy ?? "allow-all",
+          options,
+          role: "session",
+          tags: {
+            agent: context.session.id,
+            sessionId: context.session.id,
+          },
+        });
+        running = true;
+      } catch (error) {
+        // Session container names derive from the session, so another
+        // process can win the create race. Accept only that exact loss.
+        running = /is already in use/u.test(toErrorMessage(error))
+          ? await inspectContainerRunning(containerName)
+          : undefined;
+        if (running === undefined) throw error;
+      }
+    }
+    if (!running) {
+      expectDockerSuccess(
+        await cli.run(["start", containerName]),
+        `restart sandbox session container "${containerName}"`,
+      );
     }
     const containerIdentity = await resolveDockerHandleIdentity(cli, containerName);
     const session = buildSandboxSession(

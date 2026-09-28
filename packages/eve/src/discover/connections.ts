@@ -16,20 +16,19 @@ import { collectNamedSlotCandidates } from "#discover/slots.js";
  * Shared diagnostic emitted when the authored `connections/` root is not a
  * directory.
  */
-export const DISCOVER_CONNECTIONS_DIRECTORY_INVALID = "discover/connections-directory-invalid";
+const DISCOVER_CONNECTIONS_DIRECTORY_INVALID = "discover/connections-directory-invalid";
 
 /**
  * Discovery diagnostic emitted when a connection exists in both file form
  * (`connections/<name>.ts`) and folder form (`connections/<name>/`).
  */
-export const DISCOVER_CONNECTION_FILE_FOLDER_COLLISION =
-  "discover/connection-file-folder-collision";
+const DISCOVER_CONNECTION_FILE_FOLDER_COLLISION = "discover/connection-file-folder-collision";
 
 /**
  * Discovery diagnostic emitted when a folder-form connection contains no
  * `connection.ts` definition module.
  */
-export const DISCOVER_CONNECTION_FOLDER_EMPTY = "discover/connection-folder-empty";
+const DISCOVER_CONNECTION_FOLDER_EMPTY = "discover/connection-folder-empty";
 
 /**
  * Filename of the connection definition module inside a folder-form

@@ -2,7 +2,10 @@ import { cp, mkdir, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
 import { EXTENSION_COMPATIBILITY_MANIFEST_FILENAME } from "#compiler/extension-compatibility.js";
-import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
+import {
+  isAuthoredTestPath,
+  SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS,
+} from "#discover/filesystem.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
   bundleExtensionDistributionGraph,
@@ -24,14 +27,14 @@ export async function emitExtensionDistribution(input: {
   readonly stagedOutDir: string;
   readonly transactionRoot: string;
 }): Promise<readonly string[]> {
-  const sourceFiles = await collectExtensionSourceFiles(input.sourceRoot);
-  const skillPackageRoots = input.manifest.skills
-    .filter((skill) => skill.sourceKind === "skill-package")
-    .map((skill) => relative(input.sourceRoot, skill.rootPath).replaceAll("\\", "/"));
+  const resourceRoots = collectExtensionResourceRoots(input.manifest).map((root) =>
+    relative(input.sourceRoot, root).replaceAll("\\", "/"),
+  );
+  const sourceFiles = await collectExtensionSourceFiles(input.sourceRoot, resourceRoots);
   const moduleFiles = sourceFiles.filter(
     (file) =>
       isAuthoredModule(file.logicalPath) &&
-      !skillPackageRoots.some((root) => file.logicalPath.startsWith(`${root}/`)),
+      !resourceRoots.some((root) => file.logicalPath.startsWith(`${root}/`)),
   );
   await copyDistributionDataFiles({
     files: sourceFiles,
@@ -75,6 +78,16 @@ export async function emitExtensionDistribution(input: {
   }
   await emitDeclarationBarrels(input);
   return emitted.imports;
+}
+
+function collectExtensionResourceRoots(manifest: AgentSourceManifest): string[] {
+  return [
+    ...manifest.sandboxWorkspaces.map((workspace) => workspace.sourcePath),
+    ...manifest.skills.flatMap((skill) =>
+      skill.sourceKind === "skill-package" ? [skill.rootPath] : [],
+    ),
+    ...manifest.subagents.flatMap((subagent) => collectExtensionResourceRoots(subagent.manifest)),
+  ];
 }
 
 /**
@@ -131,15 +144,21 @@ interface ExtensionSourceFile {
 
 async function collectExtensionSourceFiles(
   sourceRoot: string,
+  resourceRoots: readonly string[],
   directory = sourceRoot,
 ): Promise<ExtensionSourceFile[]> {
   const files: ExtensionSourceFile[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const absolutePath = join(directory, entry.name);
+    const logicalPath = relative(sourceRoot, absolutePath).replaceAll("\\", "/");
+    if (
+      isAuthoredTestPath(logicalPath) &&
+      !resourceRoots.some((root) => logicalPath.startsWith(`${root}/`))
+    )
+      continue;
     if (entry.isDirectory()) {
-      files.push(...(await collectExtensionSourceFiles(sourceRoot, absolutePath)));
+      files.push(...(await collectExtensionSourceFiles(sourceRoot, resourceRoots, absolutePath)));
     } else if (entry.isFile()) {
-      const logicalPath = relative(sourceRoot, absolutePath).replaceAll("\\", "/");
       if (logicalPath === EXTENSION_COMPATIBILITY_MANIFEST_FILENAME) {
         throw new Error(
           `The extension source cannot contain "${EXTENSION_COMPATIBILITY_MANIFEST_FILENAME}"; eve reserves it for generated compatibility metadata.`,

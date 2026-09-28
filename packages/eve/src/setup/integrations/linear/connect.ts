@@ -4,7 +4,7 @@ import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { runVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
 import { z } from "#compiled/zod/index.js";
 
-export const LINEAR_TRIGGER_PATH = "/eve/v1/linear";
+const LINEAR_TRIGGER_PATH = "/eve/v1/linear";
 const LINEAR_AGENT_SESSION_TRIGGER_EVENT = "AgentSessionEvent";
 
 /** Identity of the Linear connector provisioned for an agent channel. */
@@ -14,7 +14,7 @@ export interface LinearConnectorRef {
 }
 
 /** Effects used to provision a Linear Connect connector. */
-export interface ProvisionLinearConnectorDeps {
+interface ProvisionLinearConnectorDeps {
   runVercel: typeof runVercel;
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }

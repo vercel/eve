@@ -129,12 +129,6 @@ function stableSerialize(value: unknown, seen = new WeakSet<object>()): string {
   return typeof value;
 }
 
-export function getSandboxEnvironmentConfigurationHash(
-  environment: SandboxEnvironmentIdentity,
-): string {
-  return environment[CONFIGURATION_HASH];
-}
-
 export function getSandboxEnvironmentRuntime(
   environment: SandboxEnvironmentIdentity,
 ): SandboxProviderRuntime {

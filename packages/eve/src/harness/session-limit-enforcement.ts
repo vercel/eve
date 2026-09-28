@@ -8,8 +8,8 @@
  *    grant a fresh budget window, or cancel the in-flight turn tree.
  * 2. {@link enforceSessionUsageLimit} runs before each model call and, when
  *    the session is over budget, parks it on the deterministic continuation
- *    prompt (sessions that can reach a human) or fails it (task-mode sessions
- *    without HITL — nobody can answer the prompt).
+ *    prompt (sessions that can request input) or fails it (nobody can answer
+ *    the prompt).
  */
 import { createInputRequestedEvent } from "#protocol/message.js";
 import {
@@ -70,25 +70,6 @@ export async function applySessionLimitContinuation(
     return { result: null, session: bumpSessionRuntimeUsageLimits(input.session) };
   }
 
-  // A session parked on the continuation prompt always satisfies the
-  // cancelled-park guard (conversation mode, or a continuation token
-  // anchoring it to a waiting parent) — parking the prompt required one of
-  // the two. The terminal fallback covers any future caller that resolves
-  // a decline outside that state, where a thrown cancellation could not
-  // settle as a park.
-  const canSettleCancelledPark =
-    input.config.mode === "conversation" || input.session.continuationToken !== "";
-  if (!canSettleCancelledPark) {
-    const violation = getSessionUsageLimitViolation(input.session);
-    return {
-      result:
-        violation === null
-          ? { next: { done: true, output: "" }, session: input.session }
-          : await failSessionUsageLimit({ ...input, violation }),
-      session: input.session,
-    };
-  }
-
   throw new SessionLimitDeclinedError();
 }
 
@@ -96,9 +77,8 @@ export async function applySessionLimitContinuation(
  * Pre-model-call gate for the session token budget.
  *
  * Returns `null` when the session is within budget. Over budget, sessions
- * that can reach a human park on the deterministic continuation prompt;
- * task-mode sessions without HITL fail fast with
- * `SESSION_TOKEN_LIMIT_REACHED`.
+ * that can request input park on the deterministic continuation prompt;
+ * others fail fast with `SESSION_TOKEN_LIMIT_REACHED`.
  */
 export async function enforceSessionUsageLimit(
   input: SessionLimitPolicyInput & { readonly messages: readonly HarnessModelMessage[] },
@@ -115,7 +95,7 @@ export async function enforceSessionUsageLimit(
   if (
     violationWindow(violation) > 0 &&
     emit !== undefined &&
-    (input.config.mode === "conversation" || input.config.capabilities?.requestInput === true)
+    input.config.capabilities?.requestInput === true
   ) {
     return parkOnSessionUsageLimit({ ...input, emit, violation });
   }
@@ -163,9 +143,7 @@ async function parkOnSessionUsageLimit(input: {
     }),
   );
 
-  if (input.config.mode === "conversation") {
-    emissionState = await emitTurnEpilogue(input.emit, emissionState, input.config.mode);
-  }
+  emissionState = await emitTurnEpilogue(input.emit, emissionState);
 
   return {
     next: null,
@@ -221,11 +199,7 @@ async function failSessionUsageLimit(input: {
   }
 
   return {
-    next: {
-      done: true,
-      isError: input.config.mode === "task" ? true : undefined,
-      output: input.config.mode === "task" ? message : "",
-    },
+    next: { done: true, output: "" },
     session: input.session,
   };
 }

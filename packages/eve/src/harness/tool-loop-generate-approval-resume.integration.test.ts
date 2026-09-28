@@ -36,6 +36,10 @@ import {
   stampDurableDynamicCallback,
 } from "#tools/durable-callbacks.js";
 
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
+
 const usage = {
   inputTokens: {
     cacheRead: undefined,
@@ -261,7 +265,6 @@ function createConfig(
     ],
   ]);
   return {
-    mode: "conversation",
     resolveModel: async (): Promise<LanguageModel> => model,
     tools,
   };
@@ -452,7 +455,6 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
           order.push(`step.started:${String(version)}`);
         }
       },
-      mode: "conversation",
       resolveStepDynamicTools: (input) =>
         preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [resolver] }),
       resolveModel: async (): Promise<LanguageModel> => model,
@@ -732,6 +734,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     });
     const config = {
       ...createConfig(model, execute),
+      capabilities: { requestInput: true },
       handleEvent: async () => {},
     } satisfies ToolLoopHarnessConfig;
     const usageState = {

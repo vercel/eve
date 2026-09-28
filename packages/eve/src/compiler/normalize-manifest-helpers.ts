@@ -8,7 +8,6 @@ import type {
   CompiledRemoteAgentNode,
   CompiledSubagentNode,
 } from "#compiler/manifest.js";
-import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { normalizeSubagentConfig } from "#compiler/normalize-subagent.js";
 import {
@@ -65,13 +64,6 @@ export function assertUniqueRegistryIds(registries: readonly AgentSourceRegistry
       ids.add(sourceId);
     }
   }
-}
-
-export function assertRootOwnedSpecialTool(candidate: AgentModuleCandidate, label: string): void {
-  if (candidate.nodeId !== ROOT_COMPILED_AGENT_NODE_ID) {
-    throw new Error(`${label} can only be enabled on the root agent.`);
-  }
-  assertNonExtensionSpecialTool(candidate, label);
 }
 
 export function assertNonExtensionSpecialTool(
@@ -166,9 +158,6 @@ export function createCompiledRemoteAgent(input: {
   };
   if (input.sourceRef.exportName !== undefined) {
     Object.assign(node, { exportName: input.sourceRef.exportName });
-  }
-  if (input.definition.outputSchema !== undefined) {
-    Object.assign(node, { outputSchema: input.definition.outputSchema });
   }
   if (input.definition.tool !== undefined) Object.assign(node, { tool: input.definition.tool });
   if (input.definition.url !== undefined) Object.assign(node, { url: input.definition.url });

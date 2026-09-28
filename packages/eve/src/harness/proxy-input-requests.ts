@@ -44,6 +44,8 @@ export interface ProxyInputRequest {
   /** Trusted parent-derived capability URL for a remote task child. */
   readonly childResponseUrl?: string;
   readonly kind: InputRequestKind;
+  /** Question metadata lets the human-facing parent resolve plain text before proxying by ID. */
+  readonly question?: AnswerHookQuestion;
   /** Present when the route is authorized by a parent-owned durable task. */
   readonly taskId?: string;
 }
@@ -222,12 +224,19 @@ export function toProxyInputRequestEntries(
       childSessionInbox?: SessionInboxAddress;
       childResponseUrl?: string;
       readonly kind: InputRequestKind;
+      question?: AnswerHookQuestion;
       taskId?: string;
     } & { readonly batch: ProxyInputRequestBatch } = {
       batch,
       childContinuationToken: payload.childContinuationToken,
       kind: request.kind,
     };
+    if (request.kind === "question") {
+      route.question = {
+        ...(request.allowFreeform !== undefined && { allowFreeform: request.allowFreeform }),
+        ...(request.options !== undefined && { options: [...request.options] }),
+      };
+    }
     if (taskId !== undefined) route.taskId = taskId;
     if (payload.childSessionInbox?.sessionId === payload.childSessionId) {
       route.childSessionInbox = payload.childSessionInbox;
@@ -304,6 +313,8 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   const batch = "batch" in value ? parseProxyInputRequestBatch(value.batch) : undefined;
   const answerHook = "answerHook" in value ? parseAnswerHookRoute(value.answerHook) : undefined;
   if ("answerHook" in value && answerHook === undefined) return undefined;
+  const question = "question" in value ? parseAnswerHookQuestion(value.question) : undefined;
+  if ("question" in value && question === undefined) return undefined;
   const childSessionInbox = "childSessionInbox" in value ? value.childSessionInbox : undefined;
   if (childSessionInbox !== undefined && !isSessionInboxAddress(childSessionInbox))
     return undefined;
@@ -315,6 +326,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     childRequestId?: string;
     childResponseUrl?: string;
     readonly kind: InputRequestKind;
+    question?: AnswerHookQuestion;
     taskId?: string;
   } = {
     childContinuationToken: value.childContinuationToken,
@@ -325,6 +337,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;
   if (typeof childRequestId === "string") request.childRequestId = childRequestId;
   if (typeof childResponseUrl === "string") request.childResponseUrl = childResponseUrl;
+  if (question !== undefined) request.question = question;
   if (typeof taskId === "string") request.taskId = taskId;
   return request;
 }

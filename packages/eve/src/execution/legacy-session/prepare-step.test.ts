@@ -17,7 +17,6 @@ const session = {
 };
 const input = {
   completionToken: "original:turn",
-  mode: "task",
   version: 2,
   stepInput: {
     input: { kind: "deliver", payloads: [] },

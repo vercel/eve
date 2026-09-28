@@ -24,13 +24,11 @@ import type {
 } from "#channel/types.js";
 import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { isReservedSessionCommandToken } from "#execution/session-inbox/address.js";
-import type { RunMode } from "#shared/run-mode.js";
 
 interface BaseChannelAddressDeliveryOptions {
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly initiatorAuth?: SessionAuthContext | null;
-  readonly mode?: RunMode;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
   readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
@@ -45,7 +43,7 @@ export type ChannelAddressDeliveryOptions<TState = undefined> = [TState] extends
  * Dynamic handle for whichever durable session currently owns one channel-local address.
  * Only {@link send} may create a session when the address is unowned.
  */
-export interface ChannelAddress<TState = undefined> {
+interface ChannelAddress<TState = undefined> {
   readonly continuationToken: string;
   deliver(input: SendPayload, options: ChannelAddressDeliveryOptions<TState>): Promise<Session>;
   send(
@@ -64,9 +62,7 @@ export interface ChannelAddress<TState = undefined> {
 }
 
 /** Factory for binding a route-local continuation token to a {@link ChannelAddress}. */
-export type ChannelAddressFn<TState = undefined> = (
-  continuationToken: string,
-) => ChannelAddress<TState>;
+type ChannelAddressFn<TState = undefined> = (continuationToken: string) => ChannelAddress<TState>;
 
 /** Creates one channel address backed by the runtime's continuation dispatch primitive. */
 export function createChannelAddress<TState = undefined>(input: {
@@ -141,13 +137,11 @@ export function createChannelAddress<TState = undefined>(input: {
               state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
             };
       if (adapter !== input.adapter) copyChannelActivityPresentation(input.adapter, adapter);
-      const capabilities: RunInput["capabilities"] =
-        options.mode === "task" ? undefined : { requestInput: true };
       const runInput: RunInput = {
         taskDeliveryPolicy,
         adapter,
         auth: options.auth,
-        capabilities,
+        capabilities: { requestInput: true },
         callback: options.callback,
         channelName: input.channelName,
         continuationConflictCommand: command,
@@ -159,7 +153,6 @@ export function createChannelAddress<TState = undefined>(input: {
           message: serializeUrlFilePartsInMessage(payload.message) ?? "",
           outputSchema: payload.outputSchema,
         },
-        mode: options.mode ?? "conversation",
         requestId: metadata.requestId,
         title: options.title,
       };

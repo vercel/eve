@@ -6,7 +6,6 @@ export {
   type ChannelSetupChoiceOptions,
   type ChannelSetupLog,
   type DisabledChannelReasons,
-  type SetupSpinnerIntent,
   withPhase,
 } from "./channel-setup-prompter.js";
 export { createPromptCommandOutput, type PromptCommandLog } from "./command-output.js";

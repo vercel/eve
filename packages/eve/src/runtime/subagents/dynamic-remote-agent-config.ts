@@ -8,14 +8,11 @@ import {
 } from "#internal/authored-module.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
-import type { JsonObject } from "#shared/json.js";
-import { serializeOutputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 export interface DynamicRemoteAgentConfig {
   readonly credentialsStepId?: string;
   readonly description: string;
   readonly forwardPrincipal?: boolean;
-  readonly outputSchema?: JsonObject;
   readonly path: string;
   readonly tool?: boolean;
   readonly url: string;
@@ -29,17 +26,7 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
   const record = expectObjectRecord(input.value, message);
   expectOnlyKnownKeys(
     record,
-    [
-      "auth",
-      "description",
-      "forwardPrincipal",
-      "headers",
-      "kind",
-      "outputSchema",
-      "path",
-      "tool",
-      "url",
-    ],
+    ["auth", "description", "forwardPrincipal", "headers", "kind", "path", "tool", "url"],
     message,
   );
 
@@ -62,7 +49,6 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
     credentialsStepId?: string;
     description: string;
     forwardPrincipal?: boolean;
-    outputSchema?: JsonObject;
     path: string;
     tool?: boolean;
     url: string;
@@ -77,9 +63,6 @@ export async function normalizeDynamicRemoteAgentConfig(input: {
   }
   if (record.forwardPrincipal !== undefined) {
     config.forwardPrincipal = expectBoolean(record.forwardPrincipal, message);
-  }
-  if (record.outputSchema !== undefined) {
-    config.outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource);
   }
   if (record.tool !== undefined) {
     config.tool = expectBoolean(record.tool, message);

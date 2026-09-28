@@ -4,7 +4,7 @@ import { defineAgent, defineDynamic } from "eve";
 const requestedModel = process.env.EVE_E2E_MODEL;
 const selectedModel =
   requestedModel === undefined || requestedModel === MOCK_MODEL_SENTINEL
-    ? "openai/gpt-5.6-sol"
+    ? "openai/gpt-6-sol"
     : requestedModel;
 
 if (requestedModel === MOCK_MODEL_SENTINEL) {

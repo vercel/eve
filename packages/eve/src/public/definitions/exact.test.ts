@@ -18,10 +18,7 @@ import {
   defineDynamic as defineDynamicInstructions,
   defineInstructions,
 } from "#public/definitions/instructions.js";
-import {
-  defineInstrumentation,
-  type ProviderDefinition,
-} from "#public/definitions/instrumentation.js";
+import { defineInstrumentation, type ProviderDefinition } from "#public/instrumentation/index.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { DockerSandbox, VercelSandbox } from "#sandbox/providers.js";
 import { defineSchedule } from "#public/definitions/schedule.js";

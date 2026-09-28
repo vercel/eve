@@ -86,7 +86,7 @@ export interface TelegramContext {
 }
 
 /** Channel-owned Telegram context returned by `context()`. */
-export interface TelegramChannelContext extends TelegramContext {
+interface TelegramChannelContext extends TelegramContext {
   state: TelegramChannelState;
 }
 

@@ -17,7 +17,7 @@ describe("parseConnectPrincipalType", () => {
     );
   });
 
-  it("documents setup while keeping the registry-only connect command hidden", () => {
+  it("hides the registry-owned command group", () => {
     const program = new Command();
     registerIntegrationCommands({
       program,
@@ -29,9 +29,9 @@ describe("parseConnectPrincipalType", () => {
       },
     });
 
-    expect(program.helpInformation()).toContain("integration");
+    expect(program.helpInformation()).not.toContain("integration");
     const integration = program.commands.find((command) => command.name() === "integration");
-    expect(integration?.helpInformation()).toContain("setup [options] <kind>");
+    expect(integration?.helpInformation()).not.toContain("setup [options] <kind>");
     expect(integration?.helpInformation()).not.toContain("connect <slug>");
   });
 });

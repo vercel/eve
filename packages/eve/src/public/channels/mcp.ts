@@ -1,4 +1,4 @@
-import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import { parseJsonObject } from "#shared/json.js";
 import { z } from "#compiled/zod/index.js";
 import {
   defineChannel,
@@ -421,7 +421,6 @@ function createInvocationTools(
             : `${agentDescription} ${startDescription}`,
         inputSchema: z.strictObject({
           message: utf8Bounded(MAX_MESSAGE_BYTES).min(1),
-          outputSchema: z.looseObject({}).optional(),
         }),
         name: "agent_start",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
@@ -430,7 +429,6 @@ function createInvocationTools(
         const invocation = await execution.create({
           auth: context.auth,
           message: body.message,
-          outputSchema: asJsonObject(body.outputSchema),
         });
         return invocationResult(invocation);
       },
@@ -558,20 +556,6 @@ function invocationResult(invocation: AgentInvocation): McpCallToolResult {
   };
 }
 
-function asJsonObject(value: unknown): JsonObject | undefined {
-  if (value === undefined) return undefined;
-  try {
-    const schema = parseJsonObject(value);
-    validateOutputSchemaComplexity(schema);
-    return schema;
-  } catch (error) {
-    throw new McpToolOperationError(
-      "invalid_input",
-      error instanceof Error ? error.message : "outputSchema must be a JSON object.",
-    );
-  }
-}
-
 const AUTHORIZATION_CHALLENGE_SCHEMA = z.strictObject({
   displayName: z.string().optional(),
   expiresAt: z.iso.datetime().optional(),
@@ -655,41 +639,3 @@ const AGENT_INVOCATION_OUTPUT_SCHEMA = z.discriminatedUnion("status", [
   }),
   AGENT_INVOCATION_BASE_SCHEMA.extend({ status: z.literal("cancelled") }),
 ]);
-
-const MAX_OUTPUT_SCHEMA_BYTES = 64 * 1_024;
-const MAX_OUTPUT_SCHEMA_DEPTH = 32;
-const MAX_OUTPUT_SCHEMA_NODES = 2_048;
-
-function validateOutputSchemaComplexity(schema: JsonObject): void {
-  if (new TextEncoder().encode(JSON.stringify(schema)).byteLength > MAX_OUTPUT_SCHEMA_BYTES) {
-    throw new Error(`outputSchema must be at most ${String(MAX_OUTPUT_SCHEMA_BYTES)} bytes.`);
-  }
-
-  let nodes = 0;
-  const visit = (value: import("#shared/json.js").JsonValue, depth: number): void => {
-    nodes++;
-    if (nodes > MAX_OUTPUT_SCHEMA_NODES) {
-      throw new Error(
-        `outputSchema must contain at most ${String(MAX_OUTPUT_SCHEMA_NODES)} nodes.`,
-      );
-    }
-    if (depth > MAX_OUTPUT_SCHEMA_DEPTH) {
-      throw new Error(
-        `outputSchema must be at most ${String(MAX_OUTPUT_SCHEMA_DEPTH)} levels deep.`,
-      );
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item, depth + 1);
-      return;
-    }
-    if (value === null || typeof value !== "object") return;
-    for (const [key, entry] of Object.entries(value)) {
-      if (key === "$ref" && typeof entry === "string" && !entry.startsWith("#")) {
-        throw new Error("outputSchema external $ref values are not supported.");
-      }
-      visit(entry, depth + 1);
-    }
-  };
-
-  visit(schema, 0);
-}

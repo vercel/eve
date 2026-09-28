@@ -35,7 +35,6 @@ const traceContext = (
   audience,
   channel: { kind: "http" as const },
   environment: "production" as const,
-  mode: "conversation" as const,
   principalType: "anonymous",
 });
 
@@ -87,13 +86,16 @@ describe("instrumentation idempotency keys", () => {
   });
 
   it("derives model identity without an AI SDK call ID", () => {
-    expect(modelCallIdempotencyKey(scope, 2)).toBe("model:session-1:turn-1:0:0:2");
+    expect(modelCallIdempotencyKey(scope, 2, 0)).toBe("model:session-1:turn-1:0:0:2:0");
+    expect(modelCallIdempotencyKey(scope, 2, 0)).not.toBe(modelCallIdempotencyKey(scope, 2, 1));
   });
 
   it("separates model attempts and SDK tool calls", () => {
     const retry = { ...scope, attemptId: "session-1:turn-1:0:1", attemptIndex: 1 };
     expect(attemptIdempotencyKey(scope)).not.toBe(attemptIdempotencyKey(retry));
-    expect(modelCallIdempotencyKey(scope, 0)).not.toBe(toolCallIdempotencyKey(scope, "call-1", 0));
+    expect(modelCallIdempotencyKey(scope, 0, 0)).not.toBe(
+      toolCallIdempotencyKey(scope, "call-1", 0),
+    );
   });
 });
 
@@ -208,7 +210,7 @@ describe("provider state lifecycle", () => {
   });
 
   it("releases unterminated model state when its attempt ends", async () => {
-    const modelKey = modelCallIdempotencyKey(scope, 0);
+    const modelKey = modelCallIdempotencyKey(scope, 0, 0);
     const hooks = createInstrumentationHooks([
       {
         events: { "model.call.started": (_event, ctx) => ctx.state.set("open") },
@@ -233,7 +235,7 @@ describe("provider state lifecycle", () => {
   });
 
   it("releases attempt-owned state after its provider is removed", async () => {
-    const modelKey = modelCallIdempotencyKey(scope, 0);
+    const modelKey = modelCallIdempotencyKey(scope, 0, 0);
     const starts = createInstrumentationHooks([
       {
         events: { "model.call.started": (_event, ctx) => ctx.state.set("open") },
@@ -583,7 +585,7 @@ describe("provider dispatch groups", () => {
     const observed: unknown[] = [];
     const mutableScope = { ...scope };
     const event: InstrumentationModelCallStartedEvent = {
-      idempotencyKey: modelCallIdempotencyKey(mutableScope, 0),
+      idempotencyKey: modelCallIdempotencyKey(mutableScope, 0, 0),
       input: { messages: [{ content: "private", role: "user" }] },
       model: { modelId: "model", provider: "test" },
       scope: mutableScope,
@@ -640,7 +642,7 @@ describe("provider dispatch groups", () => {
 
     await contextStorage.run(new ContextContainer(), async () => {
       await hooks.publish({
-        idempotencyKey: modelCallIdempotencyKey(sharedScope, 0),
+        idempotencyKey: modelCallIdempotencyKey(sharedScope, 0, 0),
         input: { messages: [] },
         model: { modelId: "model", provider: "test" },
         scope: sharedScope,
@@ -649,7 +651,7 @@ describe("provider dispatch groups", () => {
       await hooks.publish({
         content: [],
         finishReason: "stop",
-        idempotencyKey: modelCallIdempotencyKey(sharedScope, 0),
+        idempotencyKey: modelCallIdempotencyKey(sharedScope, 0, 0),
         scope: sharedScope,
         type: "model.call.completed",
         usage: {},

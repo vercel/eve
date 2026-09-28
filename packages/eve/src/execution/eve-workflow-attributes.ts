@@ -60,7 +60,7 @@ import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
  * delegated child runs. Tag emitters use this to populate
  * `$eve.subagent`.
  */
-export interface SessionIdentitySummary {
+interface SessionIdentitySummary {
   readonly nodeId: string;
 }
 
@@ -82,7 +82,7 @@ interface SerializedSessionParent {
 /**
  * Parent session lineage decoded from the serialized run context.
  */
-export interface SessionParentLineage {
+interface SessionParentLineage {
   readonly callId?: string;
   readonly rootSessionId?: string;
   readonly sessionId?: string;
@@ -121,7 +121,7 @@ export function isWorkflowTraceContentVisible(serializedContext: Record<string, 
   });
 }
 
-export function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unknown>): boolean {
+function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unknown>): boolean {
   return serializedContext[OtelTraceEnabledKey.name] === true;
 }
 
@@ -195,7 +195,7 @@ export function readScheduleId(serializedContext: Record<string, unknown>): stri
 }
 
 /** Reads the bounded title stored for a top-level session. */
-export function readSessionTitle(serializedContext: Record<string, unknown>): string | undefined {
+function readSessionTitle(serializedContext: Record<string, unknown>): string | undefined {
   const title = serializedContext[SessionTitleKey.name];
   return isNonEmptyString(title) ? title : undefined;
 }

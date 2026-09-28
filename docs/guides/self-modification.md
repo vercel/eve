@@ -3,7 +3,7 @@ title: "Self-Modification"
 description: "Ask your agent to update its own instructions, tools, skills, and other authored files during local development."
 ---
 
-When `eve dev` starts a local server, it mounts the bundled self-modification extension by default. Ask your agent to change its instructions, tools, skills, or other files under `agent/`; eve delegates the source work to the `self-modification__agent` subagent. Connecting to an existing server with `eve dev <url>` does not add the bundled extension to that server.
+When `eve dev` starts a local server, it mounts the bundled self-modification extension by default. Ask your agent to change its instructions, tools, skills, or other files under `agent/`; eve delegates the source work to the `self-modification__agent` subagent. Connecting to an existing server with `eve remote connect --url <url>` does not add the bundled extension to that server.
 
 The bundled extension is for local development and is not included in production builds.
 

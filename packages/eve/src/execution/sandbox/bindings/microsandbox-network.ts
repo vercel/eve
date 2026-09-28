@@ -63,7 +63,7 @@ interface MicrosandboxNativePortRange {
   readonly start: number;
 }
 
-export interface MicrosandboxNetworkPlan {
+interface MicrosandboxNetworkPlan {
   readonly disabled: boolean;
   readonly policy: MicrosandboxNetworkPolicy | null;
   readonly transformHeaderRules: readonly MicrosandboxTransformHeaderRule[];

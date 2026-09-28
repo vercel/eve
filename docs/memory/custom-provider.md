@@ -95,7 +95,7 @@ Every handler receives a `MemoryOperationContext`:
 | `memory.scope.value`     | The resolved scope string or tuple                                                                         |
 | `memory.slot`            | The path-derived slot name                                                                                 |
 | `messages`               | Projected conversation history for this phase                                                              |
-| `operationId`            | Stable per session, sequence, phase, and slot. Use it as an idempotency key.                               |
+| `operationId`            | Stable per session, turn, step, phase, and slot. Use it as an idempotency key.                             |
 | `abortSignal`            | Cancellation for the operation                                                                             |
 | `session`                | Session ID, authentication, and other `SessionContext` fields                                              |
 

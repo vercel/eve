@@ -12,7 +12,7 @@ eve acp
 Without a URL, the client starts one process from the eve application root. It supervises a local development server, and closing the ACP connection stops that owned server. To bridge ACP to a deployed eve agent, pass its URL:
 
 ```sh
-eve acp https://agent.example.com
+eve acp --url https://agent.example.com
 ```
 
 For a recognized Vercel deployment, eve verifies the exact origin and resolves a short-lived project-scoped OIDC token from the local Vercel session. Remote access requires an existing authorized Vercel session; account login runs during local deployment. Configure required Trusted Sources access in the target project before launching ACP. `VERCEL_AUTOMATION_BYPASS_SECRET` remains available for deployments configured with a Protection Bypass for Automation token.

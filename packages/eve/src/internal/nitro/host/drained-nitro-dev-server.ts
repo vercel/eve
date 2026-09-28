@@ -24,7 +24,7 @@ export interface DrainedDevServerListener {
   readonly url: string | undefined;
 }
 
-export interface DevelopmentWorkerReplacement {
+interface DevelopmentWorkerReplacement {
   readonly dispose?: () => Promise<void>;
   readonly entry: string;
   readonly workerData: Readonly<Record<string, unknown>>;

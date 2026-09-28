@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
-import { clearActiveSandboxHandlesForTest } from "#execution/sandbox/active-handles.js";
+import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { sessionCommandInboxWorkflow } from "#internal/testing/session-inbox-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
@@ -41,7 +41,7 @@ describe("session reset integration", () => {
         }),
       ).resolves.toEqual({ previousSessionId: first.runId, status: "reset" });
 
-      await expect(first.returnValue).resolves.toEqual([]);
+      await expect(first.returnValue).resolves.toBeUndefined();
       await expect(runtime.resolveContinuation(continuationToken)).resolves.toBeUndefined();
 
       const second = await start(sessionCommandInboxWorkflow, [{ token: continuationToken }]);
@@ -64,7 +64,7 @@ describe("session reset integration", () => {
     } finally {
       const status = await first.status;
       if (status === "pending" || status === "running") await first.cancel();
-      clearActiveSandboxHandlesForTest();
+      await shutdownActiveSandboxHandles();
     }
   });
 });

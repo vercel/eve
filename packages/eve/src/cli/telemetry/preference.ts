@@ -11,7 +11,7 @@ import { z } from "#compiled/zod/index.js";
 
 const EVE_TELEMETRY_NOTICE_VERSION = 1;
 
-export type EveTelemetryPreference = {
+type EveTelemetryPreference = {
   readonly enabled: boolean;
   readonly notified: boolean;
 };

@@ -58,7 +58,7 @@ export function defaultGitHubAuth(ctx: GitHubInboundContext): SessionAuthContext
 }
 
 /** Options used by the built-in GitHub comment dispatch hook. */
-export interface GitHubDefaultDispatchOptions {
+interface GitHubDefaultDispatchOptions {
   readonly botName?: GitHubBotNameResolver;
 }
 
@@ -81,7 +81,7 @@ export async function defaultOnComment(
 }
 
 /** Options used by built-in GitHub event handlers. */
-export interface GitHubDefaultEventOptions {
+interface GitHubDefaultEventOptions {
   readonly api?: GitHubApiOptions;
   readonly botName?: GitHubBotNameResolver;
   readonly credentials?: GitHubChannelCredentials;

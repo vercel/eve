@@ -6,7 +6,7 @@ import type {
 } from "#cli/dev/tui/types.js";
 
 /** Parsed `eve dev` options that control terminal-UI behavior. */
-export interface DevelopmentTuiOptions {
+interface DevelopmentTuiOptions {
   readonly assistantResponseStats?: AssistantResponseStatsMode;
   readonly connectionAuth?: TerminalPartDisplayMode;
   readonly contextSize?: number;
@@ -18,7 +18,7 @@ export interface DevelopmentTuiOptions {
 }
 
 /** Whether `eve dev` launches the terminal UI or keeps only the server running. */
-export type DevUiMode = "tui" | "headless";
+type DevUiMode = "tui" | "headless";
 
 /** Resolves the UI mode from parsed flags and terminal interactivity. */
 export function resolveDevUiMode(input: {

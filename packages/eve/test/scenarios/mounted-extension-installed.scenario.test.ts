@@ -1,33 +1,42 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
 import { EXTENSION_CAPABILITY_VERSIONS } from "../../src/compiler/extension-compatibility.js";
+import { loadCompiledModuleMapFromAuthoredSource } from "../../src/internal/authored-module-map-loader.js";
 import {
   buildExtensionPackage,
   tryReadExtensionBuildConfig,
 } from "../../src/internal/nitro/host/build-extension.js";
-import { loadCompiledModuleMapFromAuthoredSource } from "../../src/internal/authored-module-map-loader.js";
-import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
+import {
+  useTemporaryAppRoots,
+  useTemporaryDirectories,
+} from "../../src/internal/testing/use-temporary-app-roots.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "../../src/runtime/loaders/manifest.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
 import { loadResolvedModuleExport } from "../../src/runtime/resolve-helpers.js";
 
-const scenarioApp = useScenarioApp();
-const tempRoots: string[] = [];
+// Scenario tier: building the extension package spawns tsc for declarations.
+const createAppRoot = useTemporaryAppRoots();
+const createScratchDirectory = useTemporaryDirectories();
 
-afterEach(async () => {
-  await Promise.all(
-    tempRoots
-      .splice(0)
-      .map((root) => rm(root, { force: true, maxRetries: 5, recursive: true, retryDelay: 200 })),
-  );
-});
+/**
+ * Compiles the app and hydrates the module map from authored source, the
+ * `eve eval` / `eve dev` path.
+ */
+async function compileRuntimeGraph(appRoot: string) {
+  await compileAgent({ startPath: appRoot });
+  const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
+  const [manifest, moduleMap] = await Promise.all([
+    loadCompiledManifest({ compiledArtifactsSource }),
+    loadCompiledModuleMapFromAuthoredSource({ compiledArtifactsSource }),
+  ]);
+  return { graph: await resolveRuntimeAgentGraph({ manifest, moduleMap }), manifest, moduleMap };
+}
 
 const PACKAGE_NAME = "@acme/installed-crm";
 const EXT_TREE: Readonly<Record<string, string>> = {
@@ -189,8 +198,7 @@ const EXT_TREE: Readonly<Record<string, string>> = {
  * and normalize the emitted agent-shaped distribution.
  */
 async function buildInstalledExtensionFiles(): Promise<Record<string, string>> {
-  const extRoot = await mkdtemp(join(tmpdir(), "eve-ext-src-"));
-  tempRoots.push(extRoot);
+  const extRoot = await createScratchDirectory("eve-ext-src-");
   await writeFile(
     join(extRoot, "package.json"),
     `${JSON.stringify(
@@ -257,9 +265,7 @@ describe("mounted extension installed under node_modules", () => {
         subagent: EXTENSION_CAPABILITY_VERSIONS.subagent,
       },
     });
-    const app = await scenarioApp({
-      name: "mounted-extension-installed",
-      installDependencies: true,
+    const app = await createAppRoot("eve-mounted-extension-installed-", {
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
         "agent/instructions.md": "You are a precise assistant.\n",
@@ -284,14 +290,7 @@ describe("mounted extension installed under node_modules", () => {
       },
     });
 
-    await compileAgent({ startPath: app.appRoot });
-
-    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(app.appRoot);
-    const [manifest, moduleMap] = await Promise.all([
-      loadCompiledManifest({ compiledArtifactsSource }),
-      loadCompiledModuleMapFromAuthoredSource({ compiledArtifactsSource }),
-    ]);
-    const graph = await resolveRuntimeAgentGraph({ manifest, moduleMap });
+    const { graph, manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
 
     const echo = graph.root.agent.tools.find((entry) => entry.name === "crm__echo");
     expect(echo).toBeDefined();

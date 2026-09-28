@@ -12,6 +12,27 @@ const SKILL_DIRECTIVE = /load the `([^`]+)` skill/iu;
  */
 export function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
+  if (message.includes("EVE_SANDBOX_CURL_FANOUT")) {
+    return request.toolResults.some((result) => result.name === "bash")
+      ? "curl fanout complete"
+      : {
+          toolCalls: [...message.matchAll(/^curl-\d+: `([^`]+)`$/gmu)].map(([, command]) => ({
+            input: { command },
+            name: "bash",
+          })),
+        };
+  }
+  if (message.includes("DYNAMIC-TURN-REPLAY-START")) {
+    const gate = request.toolResults.find((result) => result.name === "dynamic-turn-replay-gate");
+    if (gate === undefined) {
+      return { toolCalls: [{ input: {}, name: "dynamic-turn-replay-gate" }] };
+    }
+    const probe = request.toolResults.find((result) => result.name === "dynamic_turn_replay_probe");
+    return probe === undefined
+      ? { toolCalls: [{ input: {}, name: "dynamic_turn_replay_probe" }] }
+      : formatOutput(probe.output);
+  }
+
   let lastAuthoredUserIndex = -1;
   let lastToolResultIndex = -1;
   for (let index = 0; index < request.messages.length; index += 1) {

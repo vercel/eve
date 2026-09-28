@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { readRegistryConfig } from "./registry-project.js";
+import { prepareWebRegistryProject, readRegistryConfig } from "./registry-project.js";
 
 describe("readRegistryConfig", () => {
   it("reads registry mappings from an agent workspace package", async () => {
@@ -22,5 +22,16 @@ describe("readRegistryConfig", () => {
     await expect(readRegistryConfig(agentRoot)).resolves.toEqual({
       registries: { "@acme": "https://example.com/r/{name}.json" },
     });
+  });
+});
+
+describe("prepareWebRegistryProject", () => {
+  it("leaves a fresh app for the registry transaction to create", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-registry-web-project-"));
+    const tsconfigPath = join(workspaceRoot, "apps", "web", "tsconfig.json");
+
+    await prepareWebRegistryProject(workspaceRoot);
+
+    await expect(readFile(tsconfigPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

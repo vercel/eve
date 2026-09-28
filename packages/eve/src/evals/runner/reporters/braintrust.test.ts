@@ -105,14 +105,6 @@ describe("Braintrust", () => {
     });
   });
 
-  it("creates a reporter", () => {
-    const reporter = Braintrust(makeConfig());
-    expect(reporter).toBeDefined();
-    expect(reporter.onRunStart).toBeTypeOf("function");
-    expect(reporter.onEvalComplete).toBeTypeOf("function");
-    expect(reporter.onRunComplete).toBeTypeOf("function");
-  });
-
   it("onEvalComplete is a no-op when experiment is not initialized", () => {
     const reporter = Braintrust(makeConfig());
 

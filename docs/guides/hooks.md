@@ -211,7 +211,7 @@ export default defineHook({
 });
 ```
 
-The remaining subscribers for the event still run. Then eve cancels the turn the same way [`session.cancel()`](./client/streaming) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. A cancel from `turn.started` or `step.started` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller. A task-mode session with no caller, such as a scheduled run, ends with `session.completed`.
+The remaining subscribers for the event still run. Then eve cancels the turn the same way [`session.cancel()`](./client/streaming) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. A cancel from `turn.started` or `step.started` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
 
 `ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: eve ignores a call from work the handler does not await and logs a warning.
 
@@ -220,6 +220,8 @@ The remaining subscribers for the event still run. Then eve cancels the turn the
 ## Subagent isolation
 
 Subagents may carry their own `agent/hooks/` directory. Subagent hooks fire only inside the subagent scope. Parent-agent hooks do not fire for subagent turns, and subagent hooks see only the subagent's own context.
+
+Interactive events such as `input.requested` and `authorization.required` are also published on the parent stream. Parent hooks observe these events after the parent channel handler and stream write, with the parent's session, agent, and channel context. The event retains the child's turn coordinates, so `event.data.turnId` can differ from `ctx.session.turn.id`. The accompanying parent `turn.completed` and `session.waiting` events also invoke parent hooks; they do not resolve pending input requests.
 
 ## Hook vs tool vs provider
 

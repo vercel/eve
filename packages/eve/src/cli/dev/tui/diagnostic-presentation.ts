@@ -9,7 +9,7 @@ const DIAGNOSTIC_SUMMARY_MAX_CHARACTERS = 240;
  */
 const ERROR_HEADLINE_PATTERN = /^\s*(?:message|name):\s*\S|^\s*[A-Z][\w$]*Error\b/u;
 
-export type DiagnosticPresentation =
+type DiagnosticPresentation =
   | { readonly kind: "inline"; readonly text: string }
   | {
       readonly kind: "stored";

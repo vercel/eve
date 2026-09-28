@@ -18,7 +18,6 @@ const EVE_CATALOG_FINGERPRINT_FILES = [
   "tsconfig.json",
 ] as const;
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
-const VENDOR_WARNING_LOG_PATH = join(EVE_PACKAGE_ROOT, "scripts", "vendor-warning-log.mjs");
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 const VERCEL_BLOB_DIST_ROOT = dirname(require.resolve("@vercel/blob"));
@@ -26,26 +25,6 @@ const VERCEL_SANDBOX_DIST_ROOT = join(
   dirname(require.resolve("@vercel/sandbox/package.json")),
   "dist",
 );
-
-type VendorWarningLog = {
-  readonly createVendoredDependencyWarningFilter: () => {
-    readonly onLog: (
-      level: string,
-      log: {
-        readonly id?: string;
-        readonly ids?: readonly string[];
-        readonly loc?: { readonly file?: string };
-        readonly message: string;
-        readonly pluginCode?: string;
-      },
-      defaultHandler: (level: string, log: { readonly message: string }) => void,
-    ) => void;
-  };
-};
-
-async function loadVendorWarningLog(): Promise<VendorWarningLog> {
-  return (await import(pathToFileURL(VENDOR_WARNING_LOG_PATH).href)) as VendorWarningLog;
-}
 
 function containsSourceMapComment(source: string): boolean {
   return /(?:^|\n)\s*\/\/# sourceMappingURL=/u.test(source);
@@ -221,111 +200,6 @@ describe("compiled vendor assets", () => {
         expect(vendoredSource).toBe(upstreamSource);
       }),
     );
-  });
-
-  it("suppresses dependency warnings without hiding actionable logs", async () => {
-    const { createVendoredDependencyWarningFilter } = await loadVendorWarningLog();
-    const forwardedLogs: string[] = [];
-    const filter = createVendoredDependencyWarningFilter();
-    const dependencyFilePath = join(
-      EVE_PACKAGE_ROOT,
-      "..",
-      "..",
-      "node_modules",
-      "fixture",
-      "index.js",
-    );
-    const generatedCompiledFilePath = join(
-      EVE_PACKAGE_ROOT,
-      ".generated",
-      "compiled",
-      "gray-matter",
-      "index.js",
-    );
-    const distCompiledFilePath = join(
-      EVE_PACKAGE_ROOT,
-      "dist",
-      "src",
-      "compiled",
-      "gray-matter",
-      "index.js",
-    );
-    const scriptFilePath = join(EVE_PACKAGE_ROOT, "scripts", "vendor-compiled.mjs");
-
-    filter.onLog(
-      "warn",
-      {
-        loc: {
-          file: dependencyFilePath,
-        },
-        message: "dependency implementation detail",
-      },
-      (level, log) => {
-        forwardedLogs.push(`${level}:${log.message}`);
-      },
-    );
-    filter.onLog(
-      "warn",
-      {
-        id: generatedCompiledFilePath,
-        message: "generated compiled dependency implementation detail",
-      },
-      (level, log) => {
-        forwardedLogs.push(`${level}:${log.message}`);
-      },
-    );
-    filter.onLog(
-      "warn",
-      {
-        loc: {
-          file: distCompiledFilePath,
-        },
-        message: "dist compiled dependency implementation detail",
-      },
-      (level, log) => {
-        forwardedLogs.push(`${level}:${log.message}`);
-      },
-    );
-    filter.onLog(
-      "warn",
-      {
-        id: scriptFilePath,
-        message: "eve vendoring warning",
-      },
-      (level, log) => {
-        forwardedLogs.push(`${level}:${log.message}`);
-      },
-    );
-    filter.onLog(
-      "warn",
-      {
-        id: scriptFilePath,
-        ids: [scriptFilePath, generatedCompiledFilePath],
-        message: "mixed eve and dependency warning",
-        pluginCode: generatedCompiledFilePath,
-      },
-      (level, log) => {
-        forwardedLogs.push(`${level}:${log.message}`);
-      },
-    );
-    filter.onLog(
-      "error",
-      {
-        loc: {
-          file: dependencyFilePath,
-        },
-        message: "dependency build failure",
-      },
-      (level, log) => {
-        forwardedLogs.push(`${level}:${log.message}`);
-      },
-    );
-
-    expect(forwardedLogs).toEqual([
-      "warn:eve vendoring warning",
-      "warn:mixed eve and dependency warning",
-      "error:dependency build failure",
-    ]);
   });
 
   it("copies @workflow/core declaration files from the installed package", async () => {

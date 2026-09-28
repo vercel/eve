@@ -43,7 +43,7 @@ interface ExecuteTaskOptions {
  * set when the `test` body threw (e.g. a failed `expectOk()` or a bespoke
  * `throw`); the partial run is still captured so recorded assertions report.
  */
-export interface ExecuteTaskResult {
+interface ExecuteTaskResult {
   readonly result: EveEvalTaskResult;
   readonly assertions: readonly AssertionResult[];
   readonly error?: string;

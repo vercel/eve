@@ -1,6 +1,5 @@
 import type { ContextContainer } from "#context/container.js";
 import { dispatchDynamicConnectionEvent } from "#context/dynamic-connection-lifecycle.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import {
   createSessionStartedEvent,
@@ -24,14 +23,11 @@ export function bindDynamicConnections(
     async rehydrate(
       state: HarnessEmissionState,
       runtime: RuntimeIdentity,
-      betweenTurns: boolean,
+      turn?: { readonly sequence: number; readonly turnId: string },
     ): Promise<void> {
       if (!state.sessionStarted) return;
       await dispatch(createSessionStartedEvent({ runtime }));
-      if (betweenTurns) return;
-      await dispatch(
-        createTurnStartedEvent({ sequence: state.sequence, turnId: activeTurnId(state) }),
-      );
+      if (turn !== undefined) await dispatch(createTurnStartedEvent(turn));
     },
   };
 }

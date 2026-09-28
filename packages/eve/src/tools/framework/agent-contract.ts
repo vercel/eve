@@ -1,4 +1,3 @@
-import type { JsonObject } from "#shared/json.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 export const AGENT_TOOL_NAME = "agent";
@@ -13,7 +12,6 @@ export const AGENT_TOOL_DESCRIPTION = [
 export interface SubagentToolInput {
   agentId?: string | null;
   message: string;
-  outputSchema?: JsonObject;
 }
 
 export const SUBAGENT_TOOL_INPUT_SCHEMA = defineJsonSchema<SubagentToolInput>({
@@ -28,11 +26,6 @@ export const SUBAGENT_TOOL_INPUT_SCHEMA = defineJsonSchema<SubagentToolInput>({
       type: "string",
       description:
         "The message to send to the subagent. Provide all context the subagent needs to complete the task; the subagent does not see the parent's history.",
-    },
-    outputSchema: {
-      type: "object",
-      description:
-        "Only provide a non-empty JSON Schema when the caller explicitly requests structured output; otherwise omit this field. The subagent must match a provided schema, and that structured output becomes the tool result.",
     },
   },
   required: ["message"],

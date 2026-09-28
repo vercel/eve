@@ -9,14 +9,11 @@ import { SandboxKey, SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import {
-  clearGitHubInstallationTokenCache,
-  seedGitHubInstallationTokenForTests,
-} from "#public/channels/github/auth.js";
 import { defaultGitHubAuth } from "#public/channels/github/defaults.js";
 import { githubChannel } from "#public/channels/github/githubChannel.js";
 import { type GitHubChannelState } from "#public/channels/github/state.js";
 import { signGitHubWebhookBody } from "#public/channels/github/verify.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const SECRET = "github-secret";
 
@@ -193,10 +190,6 @@ async function firePost(
 describe("githubChannel", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    clearGitHubInstallationTokenCache();
-    for (const apiBaseUrl of ["https://api.github.com", "https://github.test"]) {
-      seedGitHubInstallationTokenForTests({ apiBaseUrl, installationId: 55, token: "ghs_test" });
-    }
   });
 
   it("acks ping deliveries without dispatching", async () => {
@@ -319,6 +312,7 @@ describe("githubChannel", () => {
   });
 
   it("retries a failed botName resolver on the next delivery instead of pinning", async () => {
+    const logs = captureLogRecords();
     const resolveBotName = vi
       .fn()
       .mockRejectedValueOnce(new Error("no request context"))
@@ -348,6 +342,12 @@ describe("githubChannel", () => {
 
     expect(first.send).not.toHaveBeenCalled();
     expect(second.send).toHaveBeenCalledTimes(1);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "githubChannel: botName resolver failed; retrying on the next event",
+      }),
+    );
   });
 
   it("falls back to the credentials' appSlug when botName is not configured", async () => {
@@ -478,6 +478,7 @@ describe("githubChannel", () => {
   });
 
   it("returns 401 when webhookVerifier rejects", async () => {
+    const logs = captureLogRecords();
     const verifier = vi.fn().mockRejectedValue(new Error("nope"));
     const channel = githubChannel({
       botName: "testbot",
@@ -501,6 +502,9 @@ describe("githubChannel", () => {
 
     expect(response.status).toBe(401);
     expect(send).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "github inbound verification failed" }),
+    );
   });
 
   it("does not dispatch unmentioned default issue comments", async () => {
@@ -529,7 +533,7 @@ describe("githubChannel", () => {
       api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
       botName: "testbot",
       credentials: {
-        appId: "test-app",
+        installationToken: "ghs_test",
         webhookSecret: SECRET,
       },
     });
@@ -561,7 +565,7 @@ describe("githubChannel", () => {
     const channel = githubChannel({
       api: { apiBaseUrl: "https://github.test", fetch: prContextFetch() },
       botName: "testbot",
-      credentials: { appId: "test-app", webhookSecret: SECRET },
+      credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
     });
     const { send } = await firePost(
       channel,
@@ -660,7 +664,7 @@ describe("githubChannel", () => {
     const hook = vi.fn();
     const channel = githubChannel({
       api: { apiBaseUrl: "https://github.test", fetch: prContextFetch() },
-      credentials: { appId: "test-app", webhookSecret: SECRET },
+      credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
       onPullRequest(ctx, pullRequest) {
         hook(ctx.conversation, pullRequest);
         return { auth: defaultGitHubAuth(ctx) };
@@ -719,7 +723,7 @@ describe("githubChannel", () => {
     const hook = vi.fn();
     const commonConfig = {
       api: { apiBaseUrl: "https://github.test", fetch: prContextFetch() },
-      credentials: { appId: "test-app", webhookSecret: SECRET },
+      credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
     };
     const channel =
       testCase.event === "check_suite"
@@ -794,6 +798,7 @@ describe("githubChannel", () => {
   });
 
   it("invokes CI hooks without dispatching when no pull request is associated", async () => {
+    const logs = captureLogRecords();
     const hook = vi.fn();
     const channel = githubChannel({
       credentials: { webhookSecret: SECRET },
@@ -826,6 +831,12 @@ describe("githubChannel", () => {
       [],
     );
     expect(send).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "GitHub CI event cannot dispatch without an associated pull request",
+      }),
+    );
   });
 
   it("ignores issue, pull request, and CI webhooks without opt-in hooks", async () => {
@@ -887,7 +898,7 @@ describe("githubChannel", () => {
         githubChannel({
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
           credentials: {
-            appId: "test-app",
+            installationToken: "ghs_test",
             webhookSecret: SECRET,
           },
         }),
@@ -929,7 +940,7 @@ describe("githubChannel", () => {
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
           botName: "testbot",
           credentials: {
-            appId: "test-app",
+            installationToken: "ghs_test",
             webhookSecret: SECRET,
           },
         }),
@@ -979,7 +990,7 @@ describe("githubChannel", () => {
         githubChannel({
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
           botName: () => Promise.resolve("testbot"),
-          credentials: { appId: "test-app", webhookSecret: SECRET },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
         }),
       ),
       {
@@ -1026,7 +1037,7 @@ describe("githubChannel", () => {
       getAdapter(
         githubChannel({
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
-          credentials: { appId: "test-app", webhookSecret: SECRET },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
         }),
       ),
       {
@@ -1071,7 +1082,7 @@ describe("githubChannel", () => {
       getAdapter(
         githubChannel({
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
-          credentials: { appId: "test-app", webhookSecret: SECRET },
+          credentials: { installationToken: "ghs_test", webhookSecret: SECRET },
         }),
       ),
       {
@@ -1099,6 +1110,7 @@ describe("githubChannel", () => {
   });
 
   it("turn.started adds an eyes reaction to the triggering comment", async () => {
+    const logs = captureLogRecords();
     const fetchMock = vi
       .fn()
       .mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ id: 77 }))));
@@ -1107,7 +1119,7 @@ describe("githubChannel", () => {
         githubChannel({
           api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
           credentials: {
-            appId: "test-app",
+            installationToken: "ghs_test",
             webhookSecret: SECRET,
           },
         }),
@@ -1136,6 +1148,9 @@ describe("githubChannel", () => {
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       "https://github.test/repos/vercel/eve/issues/comments/10/reactions",
     ]);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "GitHub checkout failed — swallowed" }),
+    );
   });
 
   it("turn.started checks out the triggering GitHub ref", async () => {
@@ -1155,7 +1170,7 @@ describe("githubChannel", () => {
       getAdapter(
         githubChannel({
           credentials: {
-            appId: "test-app",
+            installationToken: "ghs_test",
             webhookSecret: SECRET,
           },
         }),

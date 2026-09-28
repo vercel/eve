@@ -7,7 +7,6 @@ import type {
   TaskDeliveryPolicy,
 } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
-import type { RunMode } from "#shared/run-mode.js";
 
 export interface ParsedCreateBody {
   taskDeliveryPolicy?: TaskDeliveryPolicy;
@@ -15,7 +14,6 @@ export interface ParsedCreateBody {
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
   message?: string | UserContent;
-  mode?: RunMode;
   context?: readonly string[];
   operationId?: string;
   outputSchema?: JsonObject;
@@ -28,7 +26,6 @@ export function validateMessageFreeCreate(input: {
   readonly hasClientContext: boolean;
   readonly hasMessageField: boolean;
   readonly message: string | UserContent | undefined;
-  readonly mode: RunMode | undefined;
   readonly outputSchema: JsonObject | undefined;
 }): Response | undefined {
   if (input.hasMessageField && input.message === undefined) {
@@ -38,12 +35,6 @@ export function validateMessageFreeCreate(input: {
     );
   }
   if (input.message !== undefined) return undefined;
-  if (input.mode === "task") {
-    return Response.json(
-      { error: "Task sessions require a non-empty 'message'.", ok: false },
-      { status: 400 },
-    );
-  }
   if (
     input.hasClientContext ||
     input.callback !== undefined ||

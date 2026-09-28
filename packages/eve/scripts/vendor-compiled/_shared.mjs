@@ -48,7 +48,7 @@ import { dirname, isAbsolute, join, parse, posix, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildWithNitroRolldown } from "../nitro-rolldown.mjs";
-import { createVendoredDependencyWarningFilter } from "../vendor-warning-log.mjs";
+import { onVendoredDependencyLog } from "../../src/internal/bundler/vendored-dependency-log.ts";
 
 const declarationsDir = fileURLToPath(new URL("./declarations/", import.meta.url));
 const require = createRequire(import.meta.url);
@@ -673,7 +673,6 @@ async function bundleStandaloneModule({
   packageRoot,
   sharedSpecifiers,
 }) {
-  const warningFilter = createVendoredDependencyWarningFilter();
   const entries = getModuleEntries(module, packageInfo);
   const platform = getModulePlatform(module);
 
@@ -701,7 +700,7 @@ async function bundleStandaloneModule({
       minify: true,
       sourcemap: false,
     },
-    onLog: warningFilter.onLog,
+    onLog: onVendoredDependencyLog,
   });
 }
 
@@ -713,7 +712,6 @@ async function bundleModuleGroup({
   compiledRoot,
   sharedSpecifiers,
 }) {
-  const warningFilter = createVendoredDependencyWarningFilter();
   const entrypoints = Object.fromEntries(
     preparedModules.flatMap(({ module, packageInfo }) =>
       getModuleEntries(module, packageInfo).map((entry) => [
@@ -761,7 +759,7 @@ async function bundleModuleGroup({
       minify: true,
       sourcemap: false,
     },
-    onLog: warningFilter.onLog,
+    onLog: onVendoredDependencyLog,
   });
 }
 

@@ -65,7 +65,7 @@ export interface DiscordContext {
 }
 
 /** Channel-owned Discord context returned by `context()`. */
-export type DiscordChannelContext = DiscordContext & { state: DiscordChannelState };
+type DiscordChannelContext = DiscordContext & { state: DiscordChannelState };
 
 /** Event-handler Discord context, including continuation routing. */
 export interface DiscordEventContext extends DiscordChannelContext, ChannelContinuationOps {}

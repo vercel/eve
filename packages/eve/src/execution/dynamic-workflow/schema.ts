@@ -26,7 +26,7 @@ export interface WorkflowProgramInput {
 
 export type WorkflowProgramOptions = Pick<WorkflowProgramInput, "maxSubagents">;
 
-export interface WorkflowProgramAgentCall {
+interface WorkflowProgramAgentCall {
   readonly input: {
     readonly agentId?: string;
     readonly message: string;

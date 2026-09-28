@@ -69,6 +69,21 @@ export function captureTurnEvents(
 }
 
 /**
+ * Reads the run's first turn, then cancels the parked session. Returns the
+ * turn's final assistant message.
+ */
+export async function readFirstTurnReply(run: WorkflowRunHandle): Promise<string | null> {
+  const stream = captureTurnEvents(run);
+  try {
+    const turn = await stream.nextTurn();
+    return filterEventsByType(turn, "message.completed").at(-1)?.data.message ?? null;
+  } finally {
+    stream.dispose();
+    await run.cancel();
+  }
+}
+
+/**
  * Asserts that `events` contains one contiguous occurrence of `types`, in
  * order, without intervening matches.
  *
@@ -117,7 +132,7 @@ export function filterEventsByType<T extends UnstampedMessageStreamEvent["type"]
  * Options accepted by {@link captureTurnEvents} and
  * {@link captureTurnSequence}.
  */
-export interface CaptureTurnEventsOptions {
+interface CaptureTurnEventsOptions {
   /**
    * Text decoder used to convert stream bytes into UTF-8 strings. Defaults
    * to a fresh `TextDecoder`. Tests rarely need to override this.

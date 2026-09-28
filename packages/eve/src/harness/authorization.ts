@@ -111,26 +111,6 @@ export function requestAuthorization(
 }
 
 /**
- * Returns a model-safe copy of `signal` with runtime-only challenge state stripped.
- *
- * Used for the copy the AI SDK records as a tool output. The shape stays a
- * valid {@link AuthorizationSignal} so every `isAuthorizationSignal` consumer
- * still detects it; the park detector reads the full resume, principal, and
- * resolved-instance state from the harness's out-of-band stash.
- */
-export function redactSignalResume(signal: AuthorizationSignal): AuthorizationSignal {
-  return requestAuthorization(
-    signal.challenges.map((entry) => ({
-      attemptId: entry.attemptId,
-      candidateId: entry.candidateId,
-      name: entry.name,
-      challenge: entry.challenge,
-      hookUrl: entry.hookUrl,
-    })),
-  );
-}
-
-/**
  * Reads the authorization callback on resume. Returns `undefined` if
  * not resuming from an authorization request.
  *

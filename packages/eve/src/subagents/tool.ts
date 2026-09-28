@@ -16,17 +16,14 @@ import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
-import type { JsonObject } from "#shared/json.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 
 export type SubagentInputSource =
   | {
       readonly description: string;
-      readonly outputSchema?: JsonObject;
       readonly type: "local";
     }
   | {
-      readonly outputSchema?: JsonObject;
       readonly type: "runtime";
     };
 
@@ -37,7 +34,7 @@ export type SubagentInputSource =
  * {@link RunInput} so dispatch sites never re-derive the token from
  * `(callId, parentSessionId)` on their own.
  */
-export interface SubagentRunInputBuild {
+interface SubagentRunInputBuild {
   readonly childContinuationToken: string;
   readonly runInput: RunInput;
 }
@@ -151,10 +148,9 @@ export function buildSubagentRunInput(input: {
         action,
         source,
       }),
-      outputSchema: requestedOutputSchema ?? source.outputSchema,
+      outputSchema: requestedOutputSchema,
     },
     limits: inheritedLimits,
-    mode: "conversation",
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,

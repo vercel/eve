@@ -34,7 +34,6 @@ import {
 } from "#public/channels/upload-policy.js";
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import type { RunMode } from "#shared/run-mode.js";
 import {
   parseTaskDeliveryPolicyField,
   parseTurnPolicyField,
@@ -90,9 +89,6 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
     if (observerRejection !== undefined) return observerRejection;
   }
 
-  const mode = parseModeField(payload.mode);
-  if (mode instanceof Response) return mode;
-
   const taskDeliveryPolicy = parseTaskDeliveryPolicyField(payload.taskDeliveryPolicy, message);
   if (taskDeliveryPolicy instanceof Response) return taskDeliveryPolicy;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
@@ -104,7 +100,6 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
     hasClientContext: payload.clientContext !== undefined,
     hasMessageField: "message" in payload,
     message,
-    mode,
     outputSchema,
   });
   if (messageFreeRejection !== undefined) return messageFreeRejection;
@@ -122,7 +117,6 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
     activityObserver,
     callback,
     capabilities,
-    mode,
     context,
     outputSchema,
   };
@@ -397,15 +391,6 @@ function parseCapabilitiesField(value: unknown): SessionCapabilities | Response 
   }
 
   return requestInput === undefined ? {} : { requestInput };
-}
-
-function parseModeField(value: unknown): RunMode | Response | undefined {
-  if (value === undefined) return undefined;
-  if (value === "conversation" || value === "task") return value;
-  return Response.json(
-    { error: "Expected 'mode' to be either 'conversation' or 'task'.", ok: false },
-    { status: 400 },
-  );
 }
 
 function parseMessageField(value: unknown): string | UserContent | undefined | Response {

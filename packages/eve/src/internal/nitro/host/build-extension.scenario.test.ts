@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -64,6 +64,47 @@ async function createExtensionPackage(pkg?: Record<string, unknown>): Promise<st
 }
 
 describe("extension build output", () => {
+  it.each([true, false])(
+    "omits test runtime entries with authored tsconfig=%s",
+    async (hasTsConfig) => {
+      const root = await createExtensionPackage();
+      if (!hasTsConfig) await rm(join(root, "tsconfig.json"));
+      const files = {
+        "tools/crm_search.test.ts": hasTsConfig
+          ? 'throw new Error("test executed"); export {};'
+          : 'describe("crm", () => { it("works", () => { expect(1).toBe(1); }); });',
+        "lib/client.spec.ts": 'throw new Error("spec executed"); export {};',
+        "lib/state.test.ts":
+          'import { defineState } from "eve/context"; export const state = defineState("test", () => 0);',
+        "tools/__tests__/setup.ts": 'throw new Error("test setup executed"); export {};',
+        "tools/__tests__/_manifest.json": "{}",
+        "skills/checks/SKILL.md":
+          "---\nname: checks\ndescription: Run checks.\n---\nRun the checks.",
+        "skills/checks/scripts/check.test.ts":
+          'import { defineState } from "eve/context"; defineState("resource-test", () => 0);',
+      };
+      for (const [path, content] of Object.entries(files)) {
+        await mkdir(dirname(join(root, "extension", path)), { recursive: true });
+        await writeFile(join(root, "extension", path), content);
+      }
+      const config = await tryReadExtensionBuildConfig(root);
+      const outDir = await buildExtensionPackage(root, config!);
+      const emitted = await readdir(join(outDir, "extension"), { recursive: true });
+      expect(emitted.filter((path) => path.endsWith(".mjs")).sort()).toEqual([
+        "extension.mjs",
+        join("tools", "crm_search.mjs"),
+      ]);
+      expect(emitted).toContain(join("skills", "checks", "scripts", "check.test.ts"));
+      expect(emitted.includes(join("tools", "crm_search.test.d.ts"))).toBe(hasTsConfig);
+      expect(emitted.includes(join("tools", "__tests__", "setup.d.ts"))).toBe(hasTsConfig);
+      const manifestPath = join(outDir, "extension", "_manifest.json");
+      expect(
+        parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath)
+          .requires,
+      ).not.toHaveProperty("state");
+    },
+  );
+
   it("emits an agent-shaped runnable distribution and thin package entrypoints", async () => {
     const root = await createExtensionPackage();
     const config = await tryReadExtensionBuildConfig(root);
@@ -81,6 +122,40 @@ describe("extension build output", () => {
     expect(await readFile(join(outDir, "extension", "tools", "crm_search.mjs"), "utf8")).toContain(
       "Search the CRM",
     );
+  });
+
+  it("retains explicitly imported test modules without a tsconfig", async () => {
+    const root = await createExtensionPackage();
+    await rm(join(root, "tsconfig.json"));
+    await mkdir(join(root, "extension", "lib", "__tests__"), { recursive: true });
+    await writeFile(
+      join(root, "extension", "lib", "__tests__", "value.ts"),
+      'import { defineState } from "eve/context"; export const state = defineState("value", () => 0); export const value = "imported value";',
+    );
+    await writeFile(
+      join(root, "extension", "tools", "crm_search.ts"),
+      [
+        'import { state, value } from "../lib/__tests__/value";',
+        'export default { description: "Search the CRM.", async execute() { return { value, hasState: state !== undefined }; } };',
+      ].join("\n"),
+    );
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+    const tool = await import(
+      pathToFileURL(join(outDir, "extension", "tools", "crm_search.mjs")).href
+    );
+    await expect(tool.default.execute()).resolves.toEqual({
+      value: "imported value",
+      hasState: true,
+    });
+    expect(
+      await readFile(join(outDir, "extension", "lib", "__tests__", "value.d.ts"), "utf8"),
+    ).toContain("imported value");
+    const manifestPath = join(outDir, "extension", "_manifest.json");
+    expect(
+      parseExtensionCompatibilityManifest(await readFile(manifestPath, "utf8"), manifestPath)
+        .requires.state,
+    ).toBe(EXTENSION_CAPABILITY_VERSIONS.state);
   });
 
   it.each([
@@ -411,6 +486,27 @@ export default defineHook({ events: { "turn.started": async () => {
     await expect(
       readFile(join(outDir, "extension", "skills", "triage", "scripts", "check.mjs"), "utf8"),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("preserves test files inside subagent sandbox workspaces", async () => {
+    const root = await createExtensionPackage();
+    const subagentRoot = join(root, "extension", "subagents", "researcher");
+    const workspaceFiles = {
+      "check.test.js": 'describe("workspace", () => {});',
+      "__tests__/fixture.json": '{"value":"workspace fixture"}',
+    };
+    for (const [path, content] of Object.entries(workspaceFiles)) {
+      const filePath = join(subagentRoot, "sandbox", "workspace", path);
+      await mkdir(dirname(filePath), { recursive: true });
+      await writeFile(filePath, content);
+    }
+    await writeFile(join(subagentRoot, "agent.ts"), 'export default { description: "Research." };');
+    const config = await tryReadExtensionBuildConfig(root);
+    const outDir = await buildExtensionPackage(root, config!);
+    const workspace = join(outDir, "extension", "subagents", "researcher", "sandbox", "workspace");
+    for (const [path, content] of Object.entries(workspaceFiles)) {
+      await expect(readFile(join(workspace, path), "utf8")).resolves.toBe(content);
+    }
   });
 
   it("sanitizes kebab-case tool names into valid export bindings", async () => {

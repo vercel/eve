@@ -9,7 +9,7 @@ const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const runtimeAssetDirs = ["src/cli/commands/agent-prompt"];
 // Built-in extension trees are discovered from dist, so their instructions and
 // skills must ship beside the compiled modules.
-const extensionAssetDirs = ["src/extensions/code/extension"];
+const extensionAssetDirs = ["src/extensions/code/extension", "src/computer-use/extension"];
 // Hand-written declaration files are tsc inputs, not outputs. The ambient
 // `workflow` module types are referenced from `eve/tools` and exported as
 // `eve/workflow-modules`, so they ship beside the emitted declarations.

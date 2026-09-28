@@ -1,6 +1,13 @@
+import { setImmediate } from "node:timers/promises";
+
 import { defineInstrumentation } from "eve/instrumentation";
 
 import marker from "../../authored-assets/instrumentation.txt?raw";
+
+// Instrumentation and tools are bundled separately, so the test needs process-wide state.
+declare global {
+  var eveE2eInstrumentationReady: boolean | undefined;
+}
 
 const INSTRUMENTATION_MARKER = "authored-instrumentation-asset";
 
@@ -9,7 +16,8 @@ if (marker.trim() !== INSTRUMENTATION_MARKER) {
 }
 
 export default defineInstrumentation({
-  setup: () => {
-    void INSTRUMENTATION_MARKER;
+  async setup() {
+    await setImmediate();
+    globalThis.eveE2eInstrumentationReady = true;
   },
 });

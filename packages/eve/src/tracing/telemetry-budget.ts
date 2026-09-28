@@ -1,4 +1,4 @@
-export const TELEMETRY_PRINCIPAL_ID_BYTES = 1024;
+const TELEMETRY_PRINCIPAL_ID_BYTES = 1024;
 
 export function boundedPrincipalId(value: unknown): string | undefined {
   return typeof value === "string" &&

@@ -28,7 +28,7 @@ describe("bindDynamicConnections", () => {
     await lifecycle.rehydrate(
       { sequence: 3, sessionStarted: true, stepIndex: 1, turnId: "turn_3" },
       { agentId: "agent", eveVersion: "test" },
-      false,
+      { sequence: 3, turnId: "turn_3" },
     );
 
     expect(seen).toEqual(["session.started", "turn.started"]);
@@ -54,7 +54,7 @@ describe("bindDynamicConnections", () => {
     await lifecycle.rehydrate(
       { sequence: 4, sessionStarted: true, stepIndex: 0, turnId: "" },
       { agentId: "agent", eveVersion: "test" },
-      true,
+      undefined,
     );
 
     expect(seen).toEqual(["session.started"]);

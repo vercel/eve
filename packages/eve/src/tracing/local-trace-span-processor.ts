@@ -6,8 +6,10 @@ import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
 
 import { createLogger, formatError } from "#internal/logging.js";
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
+import { indexLocalTraceConversation } from "#tracing/local-trace-discovery-index.js";
 
 interface ReadableSpanLike {
+  readonly attributes: Readonly<Record<string, unknown>>;
   readonly spanContext: () => { readonly spanId: string; readonly traceId: string };
 }
 
@@ -25,6 +27,10 @@ export function resolveLocalTraceSchemaDirectory(appRoot: string): string {
   return join(resolveLocalTraceStoreDirectory(appRoot), LOCAL_TRACE_SCHEMA_DIRECTORY);
 }
 
+function resolveLocalTraceDirectory(appRoot: string, traceId: string): string {
+  return join(resolveLocalTraceSchemaDirectory(appRoot), traceId);
+}
+
 /**
  * Resolves the directory holding one trace's span segments.
  *
@@ -32,7 +38,7 @@ export function resolveLocalTraceSchemaDirectory(appRoot: string): string {
  * the trace last received a span.
  */
 export function resolveLocalTraceSegmentsDirectory(appRoot: string, traceId: string): string {
-  return join(resolveLocalTraceSchemaDirectory(appRoot), traceId, LOCAL_TRACE_SEGMENTS_DIRECTORY);
+  return join(resolveLocalTraceDirectory(appRoot, traceId), LOCAL_TRACE_SEGMENTS_DIRECTORY);
 }
 
 /** Persists spans from agent-owned traces as immutable OTLP/JSON segments. */
@@ -57,12 +63,20 @@ export class LocalTraceSpanProcessor implements SpanProcessor {
     if (!isHexId(traceId, 32) || !isHexId(spanId, 16)) return;
     const payload = JsonTraceSerializer.serializeRequest([span]);
     if (payload === undefined) return;
-
+    const recordedConversationId = span.attributes["gen_ai.conversation.id"];
+    const conversationId =
+      typeof recordedConversationId === "string" && recordedConversationId.length > 0
+        ? recordedConversationId
+        : undefined;
     this.#queue = this.#queue
       .then(async () => {
-        const directory = resolveLocalTraceSegmentsDirectory(this.#appRoot, traceId);
-        await mkdir(directory, { recursive: true });
-        await atomicWriteFile(join(directory, `${spanId}.otlp.json`), payload);
+        const traceDirectory = resolveLocalTraceDirectory(this.#appRoot, traceId);
+        const segmentsDirectory = resolveLocalTraceSegmentsDirectory(this.#appRoot, traceId);
+        await mkdir(segmentsDirectory, { recursive: true });
+        await atomicWriteFile(join(segmentsDirectory, `${spanId}.otlp.json`), payload);
+        if (conversationId !== undefined) {
+          await indexLocalTraceConversation({ conversationId, traceDirectory });
+        }
       })
       .catch((error: unknown) => {
         if (!this.#reportedFailure) {

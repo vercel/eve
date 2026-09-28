@@ -5,11 +5,13 @@
  * cards directly; model response spans provide assistant cards.
  */
 
+import { formatCostUsd } from "#cli/commands/trace-detail.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
 import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local-trace-reader.js";
 import { agentTurnIdentity } from "#tracing/agent-span-contract.js";
+import { localTraceSpanCostUsd } from "#tracing/local-trace-summary.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";
@@ -443,14 +445,8 @@ function assistantMetrics(
     parts.push(`${glyph.arrowUp}${formatCompactTokenCount(item.inputTokens)}`);
   if (item.outputTokens !== undefined)
     parts.push(`${glyph.arrowDown}${formatCompactTokenCount(item.outputTokens)}`);
-  if (item.costUsd !== undefined) parts.push(formatCost(item.costUsd));
+  if (item.costUsd !== undefined) parts.push(formatCostUsd(item.costUsd));
   return parts.length === 0 ? "" : colors.dim(parts.join(" · "));
-}
-
-/** Formats a USD cost with enough precision for typical AI inference prices. */
-function formatCost(usd: number): string {
-  if (usd >= 0.01) return `$${usd.toFixed(2)}`;
-  return `$${usd.toFixed(4)}`;
 }
 
 /** Reads the gateway cost from the model span's ancestor step span. */
@@ -464,7 +460,7 @@ function stepCostUsd(
   while (span.parentSpanId !== undefined) {
     span = byId.get(span.parentSpanId);
     if (span === undefined) return undefined;
-    if (span.name === "agent.step") return numberAttribute(span, "gen_ai.usage.cost");
+    if (span.name === "agent.step") return localTraceSpanCostUsd(span);
   }
   return undefined;
 }

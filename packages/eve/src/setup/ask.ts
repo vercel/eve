@@ -105,6 +105,8 @@ export type Question<T> = {
       search?: boolean;
       /** Placeholder for the filter line while it is empty. */
       placeholder?: string;
+      /** Render option hints inline or on a separate line in interactive TUI panels. */
+      hintLayout?: "stacked" | "inline";
     }
   | { kind: "confirm" }
   | {
@@ -214,7 +216,7 @@ export interface Asker {
 }
 
 /** A ladder rung: wraps an asker and resolves (or rewrites) some questions. */
-export type AskerDecorator = (inner: Asker) => Asker;
+type AskerDecorator = (inner: Asker) => Asker;
 
 // Channel-level outcomes are signals, not return values: they must cross every
 // box unchanged so the driver (CLI, agent loop) can react with full context.
@@ -234,7 +236,7 @@ export interface Resolution {
 }
 
 /** Every resolution is announced with its source: nothing is silently assumed. */
-export interface AskerEvents {
+interface AskerEvents {
   onResolved?: (resolution: Resolution) => void;
 }
 
@@ -343,6 +345,7 @@ async function renderQuestion<T>(prompter: Prompter, question: Question<T>): Pro
             ),
       search: question.search,
       placeholder: question.placeholder,
+      hintLayout: question.hintLayout,
     });
     return coerceAnswer(question, chosen);
   }
@@ -595,7 +598,7 @@ export function withRequired(keys: readonly string[]): AskerDecorator {
 }
 
 /** The two detected/recommended rungs of the ladder. */
-export type AnswerPolicy = "confirm-detected" | "assume";
+type AnswerPolicy = "confirm-detected" | "assume";
 
 /**
  * The detected/recommended rungs. "confirm-detected" turns a detected value

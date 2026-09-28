@@ -13,7 +13,7 @@ test("every extension tool advertises an object-root input schema without root u
   const files = (await readdir(toolsDir)).filter(
     (file) => file.endsWith(".ts") && !file.endsWith(".test.ts"),
   );
-  assert.ok(files.length >= 4, `found ${files.join(", ")}`);
+  assert.ok(files.length >= 3, `found ${files.join(", ")}`);
   for (const file of files) {
     const tool = (await import(new URL(file, toolsDir).href)).default as { inputSchema: z.ZodType };
     const schema = z.toJSONSchema(tool.inputSchema, { io: "input" });

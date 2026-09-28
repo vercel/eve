@@ -18,7 +18,7 @@ export default defineAgent({
 ```
 
 For a static AI Gateway model ID, you can make the same source change from the
-project root with `eve set --model anthropic/claude-opus-5.5` or from the local
+project root with `eve set model anthropic/claude-opus-5.5` or from the local
 dev TUI with `/model anthropic/claude-opus-5.5`.
 
 The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `spacexai/grok-4.7`; authoring the file replaces that source.
@@ -59,6 +59,13 @@ follows the current caller when a later turn changes users. An authored value
 at either provider path takes precedence and is forwarded unchanged. When
 `auth.current` is `null`, eve does not add an identifier. The same rules apply
 to compaction calls.
+
+For AI Gateway model calls, eve sets `providerOptions.gateway.sessionId` to the
+`gen_ai.conversation.id` used by Agent Runs. By default, all turns in a
+conversation, including delegated subagents and compaction calls routed through
+Gateway, share that ID so their Gateway generations can be found together.
+Direct-provider calls do not receive the option. An authored `gateway.sessionId`
+takes precedence; AI Gateway hashes IDs longer than 256 characters.
 
 ### Choose the model dynamically
 
@@ -133,7 +140,7 @@ A dynamic model selection can return `reasoning` alongside `model` to override
 the agent-level setting for that selection. Omitting it inherits the agent setting;
 `"provider-default"` explicitly uses the provider's default.
 
-Run `eve set --reasoning high` to update this field from the command line.
+Run `eve set model --reasoning high` to update this field from the command line.
 
 ## Compaction
 
@@ -191,8 +198,8 @@ could retry against a fresh quota share. A reply that answers neither option
 is queued while the existing prompt stays pending; eve does not raise another
 copy. The reply is processed once the budget is granted.
 
-Sessions that cannot reach a human — task-mode runs such as schedules and
-delegated runs without input proxying — skip the prompt and fail the next model
+Sessions that cannot request input from a human, such as markdown schedules and
+delegated runs without input proxying, skip the prompt and fail the next model
 call with `SESSION_TOKEN_LIMIT_REACHED` for token budgets or
 `SESSION_TOKEN_COST_LIMIT_REACHED` for model token cost. A delegated task with
 no inherited quota also fails instead of raising a continuation prompt that
@@ -328,15 +335,14 @@ it falls back to the World's default retention period.
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
-| Field          | Type                                    | Default          | Description                                                                                                                                                                                                                                               |
-| -------------- | --------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                             |
-| `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                    |
-| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                               |
-| `experimental` | `AgentExperimentalDefinition`           | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data. |
-| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.                                                              |
-| `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                  |
-| `tool`         | `boolean`                               | `true`           | Exposes this agent to its parent model as a tool. On the root agent, controls the built-in `agent` tool. A subagent with `tool: false` remains callable from authored workflow tools through `ctx.agent()`.                                               |
+| Field          | Type                                  | Default          | Description                                                                                                                                                                                                                                               |
+| -------------- | ------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reasoning`    | `AgentReasoningDefinition`            | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                                                             |
+| `modelOptions` | `AgentModelOptionsDefinition`         | none             | Provider option overrides forwarded to the model call.                                                                                                                                                                                                    |
+| `limits`       | `AgentLimitsDefinition`               | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                                                               |
+| `experimental` | `AgentExperimentalDefinition`         | unset            | Unstable opt-ins. `workflow.world` selects the Workflow world package on the root agent; `workflow.modelCallsPerStep` batches sequential model calls into a wider replay unit; `workflow.retention` controls how long the durable runtime keeps run data. |
+| `build`        | `{ externalDependencies?: string[] }` | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.                                                  |
+| `tool`         | `boolean`                             | `true`           | Exposes this agent to its parent model as a tool. On the root agent, controls the built-in `agent` tool. A subagent with `tool: false` remains callable from authored workflow tools through `ctx.agent()`.                                               |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.
 

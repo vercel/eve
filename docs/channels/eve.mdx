@@ -49,8 +49,8 @@ See [Start a session](../concepts/sessions-runs-and-streaming#start-a-session) f
 initialization boundary, first-turn identity, readiness response, and retry behavior.
 
 The create request still requires route auth. Session audience and the timeout are selected
-at creation; they do not change when the first message arrives. Task mode and turn-scoped
-fields such as `clientContext` and `outputSchema` require a message on the create request.
+at creation; they do not change when the first message arrives. Turn-scoped fields such as
+`clientContext` and `outputSchema` require a message on the create request.
 
 Include an initial message to create the session and start its first turn in one request:
 
@@ -200,8 +200,8 @@ call the endpoint. `auth` still controls access. For a classification that
 depends on channel state or application-specific verified data, use a [custom
 channel audience](./custom#conversation-audience).
 
-You can also pass a function that receives `caller`, channel, run mode, and
-deployment environment. Classification is fixed at session creation, so a later
+You can also pass a function that receives `caller`, channel, and deployment
+environment. Classification is fixed at session creation, so a later
 turn from a different caller does not reclassify the session.
 
 For a remote agent, a trusted dispatch can forward the original audience and

@@ -964,11 +964,6 @@ describe("createVercelSandbox", () => {
     );
   });
 
-  it("exposes a stable provider name", () => {
-    const provider = createTestVercelSandbox();
-    expect(provider).toBeDefined();
-  });
-
   it("prepares the base runtime during sandbox init", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session" });

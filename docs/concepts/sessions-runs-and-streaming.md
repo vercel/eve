@@ -41,8 +41,8 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session
 
 eve starts the durable workflow, establishes its inbox, and waits for the first message before
 running session-scoped initialization or emitting `session.started`. The first message sent to the returned
-`sessionId` remains `turn_0`. Message-free creation supports conversation mode only and does not
-accept turn-scoped `clientContext`, `outputSchema`, callbacks, or activity observers.
+`sessionId` remains `turn_0`. Message-free creation does not accept turn-scoped `clientContext`,
+`outputSchema`, callbacks, or activity observers.
 
 To create the session and start its first turn in one request, include the message:
 
@@ -79,15 +79,15 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `action.result`           | A tool call returned.                                                                                                                              |
 | `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or a `ctx.ask()` question); carries `requests`.                           |
 | `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.                                             |
-| `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                                                   |
+| `subagent.called`         | A subagent was delegated; carries `childSessionId` and the `childStreamPath` that `session.streamSubagent()` follows.                              |
 | `subagent.completed`      | The parent recorded a successful subagent invocation result; carries the actual output.                                                            |
 | `reasoning.appended`      | A reasoning text delta.                                                                                                                            |
 | `reasoning.completed`     | The finalized reasoning block.                                                                                                                     |
 | `message.appended`        | An assistant text delta.                                                                                                                           |
 | `message.completed`       | A finalized assistant text block.                                                                                                                  |
 | `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                                                      |
-| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                                                     |
-| `compaction.completed`    | A compaction checkpoint was written to durable history.                                                                                            |
+| `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `stepIndex`, and `usageInputTokens`.                                    |
+| `compaction.completed`    | A compaction checkpoint was written to durable history; carries the same model, session, turn, and step identity.                                  |
 | `authorization.required`  | A connection needs OAuth; carries `name`, `description`, and an `authorization` challenge.                                                         |
 | `authorization.completed` | A connection's authorization resolved; carries `outcome`.                                                                                          |
 | `step.completed`          | A model step finished; carries `finishReason` and usage.                                                                                           |
@@ -119,7 +119,7 @@ Note: consider the privacy, confidentiality, and user-experience implications fo
 
 When a task explicitly requires conditional delivery and there is nothing new to report, the agent can finish with exactly `<eve-empty-delivery/>`. eve emits `message.completed` with `message: null` for that intentional silence. The marker must be the entire response, apart from surrounding whitespace; the HTML-escaped form `&lt;eve-empty-delivery/&gt;` is also accepted. A response that quotes the marker in prose or code is delivered normally.
 
-A delegated subagent publishes progress on its own child-session stream. The parent emits `subagent.called` with a `childSessionId`, which a client uses to attach. Both blocking and background calls emit `subagent.completed` with the actual output after the parent records a successful outcome. A background working receipt is an `action.result` tool output; it does not emit completion. Older streams can contain receipt-bearing completion events marked by `data.backgroundTask`; those are admission only. Completion does not mean that the reusable child session has ended. Background task terminal outcomes also arrive as task-triggered `message.received` notifications with `data.kind: "execution.background_task"`. The default frontend reducer retains these events in `events` but does not project their runtime-authored text as participant messages.
+A delegated subagent publishes progress on its own child-session stream. The parent emits `subagent.called` with a `childSessionId` and a `childStreamPath`, which a client follows with `session.streamSubagent()`. Both blocking and background calls emit `subagent.completed` with the actual output after the parent records a successful outcome. A background working receipt is an `action.result` tool output; it does not emit completion. Older streams can contain receipt-bearing completion events marked by `data.backgroundTask`; those are admission only. Completion does not mean that the reusable child session has ended. Background task terminal outcomes also arrive as task-triggered `message.received` notifications with `data.kind: "execution.background_task"`. The default frontend reducer retains these events in `events` but does not project their runtime-authored text as participant messages.
 
 `step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally. Whatever the turn streamed before cancellation stays on the stream. Durable history keeps the accepted user input and previously settled work, but discards incomplete assistant output and unfinished tool state. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
 
@@ -128,8 +128,7 @@ A provider response ending with `content-filter` fails with `MODEL_CALL_FAILED`,
 `details.finishReason: "content-filter"`. Details also include the Gateway
 `generationId` when available. eve does not retry the filtered response or emit
 `message.completed` for its partial text; deltas already streamed remain visible.
-Conversation sessions wait for another user message, while task-mode runs return
-a failed result.
+The session then waits for another user message.
 
 ## The event envelope
 
@@ -235,7 +234,7 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel \
   -d '{"tasks":true}'
 ```
 
-`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. Inspect task state in a later turn to confirm task cancellation. The session then accepts the next message normally. A task-mode session with no caller, such as a scheduled run, has no next message, so it ends with `session.completed`, and its result carries the error "The turn was cancelled." Background work that has not yet been admitted is rejected with the cancelled step. Each cancelled child reports its own boundary on its child-session stream. A live but already-parked session returns `"accepted"`; plain cancellation is a no-op there, while `tasks: true` still cancels indexed tasks. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+`"accepted"` means the live session durably queued the request; cancellation completes asynchronously. Confirm turn cancellation on the stream as `turn.cancelled` followed by `session.waiting`. Inspect task state in a later turn to confirm task cancellation. The session then accepts the next message normally. Background work that has not yet been admitted is rejected with the cancelled step. Each cancelled child reports its own boundary on its child-session stream. A live but already-parked session returns `"accepted"`; plain cancellation is a no-op there, while `tasks: true` still cancels indexed tasks. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
 The HTTP route returns `202` for `"accepted"` and `200` for
 `"no_active_turn"`. Only the accepted result includes `sessionId`.

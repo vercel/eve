@@ -9,7 +9,7 @@ import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/messag
 import type { InputRequest } from "#shared/input.js";
 
 /** A connection authorization challenge that remains unresolved at a turn boundary. */
-export interface PendingAuthorization {
+interface PendingAuthorization {
   readonly authorization?: AuthorizationRequiredStreamEvent["data"]["authorization"];
   readonly description: string;
   readonly name: string;
@@ -17,7 +17,7 @@ export interface PendingAuthorization {
 }
 
 /** Canonical projection of the lifecycle state represented by one turn's events. */
-export interface TurnEventSummary {
+interface TurnEventSummary {
   readonly boundary: UnstampedMessageStreamEvent | undefined;
   readonly failure: TurnFailureStreamEvent | undefined;
   readonly inputRequests: readonly InputRequest[];

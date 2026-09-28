@@ -492,6 +492,29 @@ describe("Docker provider create", () => {
     expect(findCall(calls, (args) => args[0] === "run")).toBeUndefined();
   });
 
+  it("attaches to the peer container when another process wins the create race", async () => {
+    const appRoot = await createScratchDirectory("eve-docker-sandbox-");
+    let peerCreated = false;
+    const { calls, cli } = createFakeDockerCli((args) => {
+      if (isContainerInspect(args)) {
+        return peerCreated ? { exitCode: 0, stdout: "true\n" } : { exitCode: 1 };
+      }
+      if (args[0] === "run") {
+        peerCreated = true;
+        return {
+          exitCode: 125,
+          stderr: `docker: Error response from daemon: Conflict. The container name "/${PROVIDER_CONTAINER_NAME}" is already in use by container "d6b4ad87".`,
+        };
+      }
+      return undefined;
+    });
+
+    await createEngine({ cli }).openSession({ appRoot, sandboxName: SESSION_KEY });
+
+    expect(calls.filter(({ args }) => args[0] === "run")).toHaveLength(1);
+    expect(findCall(calls, (args) => args[0] === "start")).toBeUndefined();
+  });
+
   async function createRunningSessionHandle(input: {
     readonly respond?: (args: readonly string[]) => FakeResponse | undefined;
     readonly options?: DockerSandboxEnvironmentOptions;

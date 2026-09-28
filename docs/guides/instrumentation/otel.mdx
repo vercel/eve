@@ -38,6 +38,36 @@ does not affect lifecycle instrumentation created with `defineInstrumentation()`
 See [Audience](../channels/overview#audience) for how channels classify the
 conversation passed to this policy.
 
+## Instrument Node.js dependencies
+
+Pass OpenTelemetry instrumentation instances to `otel({ instrumentations })`.
+For example, install the PostgreSQL instrumentation alongside `pg`:
+
+```bash
+pnpm add pg @opentelemetry/instrumentation-pg
+```
+
+```ts title="agent/instrumentation/otel.ts"
+import { PgInstrumentation } from "@opentelemetry/instrumentation-pg";
+import { otel } from "eve/instrumentation/otel";
+
+export default otel({
+  instrumentations: [new PgInstrumentation()],
+});
+```
+
+Keep the instrumented package external so Node.js module hooks can intercept
+it. Add `pg` to your agent's [build configuration](/docs/agent-config#other-defineagent-fields):
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "openai/gpt-5.4-mini",
+  build: { externalDependencies: ["pg"] },
+});
+```
+
 ## Add an OpenTelemetry destination
 
 Use this section when sending traces to a third-party destination. Install

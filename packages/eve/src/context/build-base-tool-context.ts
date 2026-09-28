@@ -5,7 +5,7 @@ import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 
 /** Base context shared by tool executors. */
-export type BaseToolContext = SessionContext & {
+type BaseToolContext = SessionContext & {
   readonly abortSignal: AbortSignal;
   readonly callId: string;
   readonly toolName: string;

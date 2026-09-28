@@ -5,12 +5,13 @@ import { z } from "#compiled/zod/index.js";
 import {
   createMcpStreamableHttpServer,
   defineMcpTool,
-  MCP_LEGACY_PROTOCOL_VERSION,
   MCP_PROTOCOL_VERSION,
   MCP_REQUEST_BODY_MAX_BYTES,
   McpToolOperationError,
 } from "#internal/mcp/streamable-http-server.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
+const MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25";
 const MCP_PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion";
 const MCP_CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo";
 const MCP_CLIENT_CAPABILITIES_META_KEY = "io.modelcontextprotocol/clientCapabilities";
@@ -319,6 +320,7 @@ describe("stateless MCP Streamable HTTP server", () => {
   });
 
   it("sanitizes unexpected tool failures behind an error id", async () => {
+    const logs = captureLogRecords();
     const handle = createMcpStreamableHttpServer({
       authenticate: async () => auth,
       name: "eve-test",
@@ -359,6 +361,9 @@ describe("stateless MCP Streamable HTTP server", () => {
     expect(JSON.stringify(body.result)).not.toContain("secret=");
     expect(body.result.content[0]?.text).toContain(
       String(body.result.structuredContent.error.errorId),
+    );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "MCP tool call failed" }),
     );
   });
 

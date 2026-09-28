@@ -15,9 +15,7 @@ vi.mock("#execution/terminal-session-completion-step.js", () => ({
 vi.mock("#execution/terminal-session-failure-step.js", () => ({
   emitTerminalSessionFailureStep: vi.fn(),
 }));
-vi.mock("#subagents/callback-step.js", () => ({ fireSessionCallbackStep: vi.fn() }));
 vi.mock("#subagents/parent-notification.js", () => ({
-  notifyDelegatedParentStep: vi.fn(),
   notifyTurnCallerStep: vi.fn(),
 }));
 
@@ -61,7 +59,6 @@ function sessionAwaitingCallerNotification() {
       settledTurn: { output: "Verification is running." },
     },
     {},
-    "conversation",
     {},
     "current",
   );
@@ -86,7 +83,6 @@ describe("session finalization with an unsettled caller", () => {
       const result = await finalizeSession(outcome, {
         caller,
         cursor: { serializedContext: {}, sessionState: sessionAwaitingCallerNotification() },
-        mode: "conversation",
         sessionWritable: new WritableStream(),
       });
       expect(result).toMatchObject({
@@ -114,7 +110,6 @@ describe("session finalization with an unsettled caller", () => {
       {
         caller: undefined,
         cursor: { serializedContext: {}, sessionState: sessionAwaitingCallerNotification() },
-        mode: "conversation",
         sessionWritable: new WritableStream(),
       },
     );

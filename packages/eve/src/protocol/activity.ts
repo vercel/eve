@@ -1,10 +1,10 @@
-export const MAX_ACTIVITY_EVENTS_PER_BATCH = 100;
+const MAX_ACTIVITY_EVENTS_PER_BATCH = 100;
 
 export type ActivityWorkKind = "root-turn" | "subagent" | "remote-agent" | "task";
 export type ActivityWorkPhase = "running" | "completed" | "failed" | "cancelled";
-export type ActivityActionKind = "tool" | "skill";
+type ActivityActionKind = "tool" | "skill";
 export type ActivityActionPhase = "running" | "completed" | "failed" | "rejected" | "cancelled";
-export type ActivityBlockerKind = "approval" | "authorization" | "input";
+type ActivityBlockerKind = "approval" | "authorization" | "input";
 export type ActivityBlockerPhase = "blocked" | "completed" | "cancelled" | "failed";
 
 export interface ActivityWorkIdentityV1 {

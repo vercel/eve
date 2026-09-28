@@ -34,7 +34,7 @@ import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import { AGENT_SPAN_NAMES, workflowInvocationSpanName } from "#tracing/agent-span-contract.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
-export interface AgentActionInstrumentation {
+interface AgentActionInstrumentation {
   readonly events: Pick<
     NonNullable<InstrumentationProviderDefinition["events"]>,
     "action.completed" | "action.failed" | "action.started"

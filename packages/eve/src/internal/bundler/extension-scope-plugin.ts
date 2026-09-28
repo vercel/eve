@@ -5,7 +5,7 @@ import { resolve, sep } from "node:path";
  * One extension's on-disk source root paired with the namespace its durable
  * state keys and config binding must be scoped to.
  */
-export interface ExtensionScope {
+interface ExtensionScope {
   /** Absolute path to the extension's source root. */
   readonly sourceRoot: string;
   /** Package-derived namespace (e.g. `acme-crm`). */

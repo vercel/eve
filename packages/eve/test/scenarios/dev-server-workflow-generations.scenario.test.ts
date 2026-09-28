@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -39,7 +39,7 @@ const WORKFLOW_GENERATION_DESCRIPTOR: ScenarioAppDescriptor = {
 function createGenerationMarkerToolSource(marker: string, crashOnce: boolean): string {
   const lifecycle = crashOnce
     ? [
-        'import { existsSync, renameSync, watch, writeFileSync } from "node:fs";',
+        'import { existsSync, watch, writeFileSync } from "node:fs";',
         'import { basename, join } from "node:path";',
         "",
         "async function waitForPath(path: string) {",
@@ -64,19 +64,11 @@ function createGenerationMarkerToolSource(marker: string, crashOnce: boolean): s
         '    const startedPath = join(process.cwd(), ".turn-started");',
         '    const crashPath = join(process.cwd(), ".crash-turn-worker");',
         '    const crashedPath = join(process.cwd(), ".turn-worker-crashed");',
-        '    const restartPath = join(process.cwd(), ".restart-generation-test");',
         '    writeFileSync(startedPath, "ready");',
-        "    if (existsSync(restartPath)) {",
-        '      const recoveredPath = join(process.cwd(), ".recovered-turn-started");',
-        "      const temporaryRecoveredPath = `${recoveredPath}.${process.pid}.tmp`;",
-        `      writeFileSync(temporaryRecoveredPath, JSON.stringify({ instrumentation: String(globalThis.__EVE_INSTRUMENTATION_MARKER__ ?? "missing"), marker: ${JSON.stringify(marker)} }));`,
-        "      renameSync(temporaryRecoveredPath, recoveredPath);",
-        "    } else {",
-        "      await waitForPath(crashPath);",
-        "      if (!existsSync(crashedPath)) {",
-        '        writeFileSync(crashedPath, "crashed");',
-        "        process.exit(1);",
-        "      }",
+        "    await waitForPath(crashPath);",
+        "    if (!existsSync(crashedPath)) {",
+        '      writeFileSync(crashedPath, "crashed");',
+        "      process.exit(1);",
         "    }",
       ]
     : [];
@@ -150,9 +142,9 @@ describe("eve dev server workflow generations", () => {
     DEV_SERVER_SCENARIO_TIMEOUT_MS,
   );
 
-  it(
-    "makes a newly added tool available to the next turn in a continued session",
-    async () => {
+  it.each(["tool", "workflow"] as const)(
+    "makes a newly added %s available to the next turn and allows session reset",
+    async (kind) => {
       const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
       const server = await startEveDev(app.appRoot);
 
@@ -167,7 +159,20 @@ describe("eve dev server workflow generations", () => {
 
         await writeFile(
           join(app.appRoot, "agent", "tools", "get_added_marker.ts"),
-          createGenerationMarkerToolSource("added-tool", false),
+          kind === "tool"
+            ? createGenerationMarkerToolSource("added-tool", false)
+            : [
+                'import { defineWorkflowTool } from "eve/tools";',
+                'import { z } from "zod";',
+                "export default defineWorkflowTool({",
+                '  description: "Return the added workflow marker.",',
+                "  inputSchema: z.object({ city: z.string().optional() }),",
+                "  async execute() {",
+                '    "use workflow";',
+                '    return { marker: "added-tool" };',
+                "  },",
+                "});",
+              ].join("\n"),
         );
         await forceDevelopmentRebuild(server.url);
 
@@ -179,67 +184,13 @@ describe("eve dev server workflow generations", () => {
 
         expect(secondResult.sessionId).toBe(firstSessionId);
         expect(readCompletedMessages(secondResult.events)).toContain("added-tool");
-      } finally {
-        await server.stop();
-      }
-    },
-    DEV_SERVER_SCENARIO_TIMEOUT_MS,
-  );
-
-  // Re-enable after https://github.com/vercel/workflow/pull/3824 ships and eve
-  // vendors the release with abortable local queue deliveries.
-  it.skip(
-    "recovers a nonterminal child Workflow on its selected generation after restart",
-    async () => {
-      const app = await scenarioApp(WORKFLOW_GENERATION_DESCRIPTOR);
-      let server = await startEveDev(app.appRoot, {
-        env: { WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1" },
-      });
-      const turnStartedPath = join(app.appRoot, ".turn-started");
-      const restartPath = join(app.appRoot, ".restart-generation-test");
-      const recoveredPath = join(app.appRoot, ".recovered-turn-started");
-
-      try {
-        await writeFile(
-          join(app.appRoot, "agent", "tools", "get_marker.ts"),
-          createGenerationMarkerToolSource("generation-one-runtime", true),
-        );
-        await forceDevelopmentRebuild(server.url);
-        await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("one");
-
-        const interruptedTurn = sendDevelopmentMessage({
-          message: "Use get_marker.",
-          session: createDevelopmentSessionState(),
-          serverUrl: server.url,
-        }).catch(() => undefined);
-        await waitForPath(turnStartedPath);
-
-        await writeFile(
-          join(app.appRoot, "agent", "tools", "get_marker.ts"),
-          createGenerationMarkerToolSource("generation-two", false),
-        );
-        await writeFile(
-          join(app.appRoot, "agent", "instrumentation", "reload.ts"),
-          createInstrumentationSource("two"),
-        );
-        await forceDevelopmentRebuild(server.url);
-        await expect(fetchText(server.url, "/instrumentation-marker")).resolves.toBe("two");
-
-        await server.crash();
-        await withinDeadline(interruptedTurn, "Interrupted client stream did not settle.");
-        await writeFile(restartPath, "restart");
-        server = await startEveDev(app.appRoot, {
-          env: { WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1" },
+        const reset = await fetch(new URL(`/eve/v1/session/${firstSessionId}/reset`, server.url), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ reason: "Start a new conversation after rebuilding" }),
+          signal: AbortSignal.timeout(10_000),
         });
-        await waitForPath(recoveredPath);
-        await expect(
-          readFile(recoveredPath, "utf8").then((source) => JSON.parse(source) as unknown),
-        ).resolves.toEqual({
-          // The recorded generation owns both its tool and instrumentation
-          // sources, even when recovery happens in a freshly started worker.
-          instrumentation: "one",
-          marker: "generation-one-runtime",
-        });
+        expect(reset.status, await reset.text()).toBe(200);
       } finally {
         await server.stop();
       }

@@ -1,8 +1,5 @@
 import { z } from "#compiled/zod/index.js";
 
-/** Outcome of requesting cooperative turn cancellation. */
-export type CancelTurnStatus = "accepted" | "no_active_turn";
-
 /** Transport-independent result of requesting cooperative turn cancellation. */
 export type CancelTurnResult =
   | { readonly sessionId: string; readonly status: "accepted" }

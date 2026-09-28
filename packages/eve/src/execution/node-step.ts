@@ -12,7 +12,6 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
-import type { RunMode } from "#shared/run-mode.js";
 import {
   resolveRuntimeModelReference,
   type RuntimeModelResolutionScope,
@@ -25,6 +24,7 @@ import type { PreparedRuntimeTool, PreparedRuntimeWorkflowTask } from "#runtime/
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { connectionToolReplayIdentity } from "#execution/tools/connection-search.js";
 import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
@@ -42,7 +42,7 @@ const log = createLogger("execution.node-step");
  * `createWorkflowRuntime`, so callers pass the constructor directly —
  * no wrapper needed.
  */
-export type CreateRuntime = (config: {
+type CreateRuntime = (config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId?: string;
 }) => Runtime;
@@ -50,7 +50,7 @@ export type CreateRuntime = (config: {
 /**
  * Input for building a harness step for one resolved runtime node.
  */
-export interface CreateExecutionNodeStepInput {
+interface CreateExecutionNodeStepInput {
   readonly steeringSignal?: AbortSignal;
   /** Cancellation signal forwarded to the tool-loop harness. */
   readonly abortSignal?: AbortSignal;
@@ -69,10 +69,13 @@ export interface CreateExecutionNodeStepInput {
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
+  readonly prepareApprovalTurn?: (event: {
+    readonly sequence: number;
+    readonly turnId: string;
+  }) => Promise<void>;
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
-  readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
 }
@@ -104,7 +107,8 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     historyProjector: input.historyProjector,
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
-    mode: input.mode,
+    prepareApprovalTurn: input.prepareApprovalTurn,
+    toolReplayIdentity: connectionToolReplayIdentity,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({
         ...resolveInput,

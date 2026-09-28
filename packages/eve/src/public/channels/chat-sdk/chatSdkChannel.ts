@@ -140,7 +140,6 @@ export type ChatSdkChannelEvents<TAdapters extends ChatSdkAdapters = ChatSdkAdap
 export interface ChatSdkSendOptions {
   readonly auth?: SessionAuthContext | null;
   readonly callback?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["callback"];
-  readonly mode?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["mode"];
   /** Updates the session policy; omission preserves it. */
   readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly thread: SerializedThread | Thread | string;
@@ -578,7 +577,6 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
     state: { thread },
   };
   if (options.callback !== undefined) deliveryOptions.callback = options.callback;
-  if (options.mode !== undefined) deliveryOptions.mode = options.mode;
   if (options.title !== undefined) deliveryOptions.title = options.title;
   if (options.turnPolicy !== undefined) deliveryOptions.turnPolicy = options.turnPolicy;
   if (options.taskDeliveryPolicy !== undefined)

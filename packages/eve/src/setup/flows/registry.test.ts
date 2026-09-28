@@ -118,6 +118,33 @@ describe("runRegistryFlow", () => {
     expect(flow.browseRegistryCatalog).not.toHaveBeenCalled();
     expect(flow.installRegistryItem).toHaveBeenCalledOnce();
   });
+  it("reports unfinished setup separately from a cancelled installation", async () => {
+    const flow = deps();
+    flow.installRegistryItem = vi.fn(async () => ({
+      output: [],
+      setupIncomplete: { resumeCommand: "eve add channel/slack --skip-install" },
+    }));
+
+    await expect(
+      runRegistryFlow({
+        appRoot: "/agent",
+        initialAddress: "channel/slack",
+        prompter: createFakePrompter().prompter,
+        deps: flow,
+      }),
+    ).resolves.toEqual({
+      kind: "done",
+      result: {
+        outcomes: [
+          {
+            kind: "incomplete",
+            title: "channel/slack",
+            resumeCommand: "eve add channel/slack --skip-install",
+          },
+        ],
+      },
+    });
+  });
   it("reports an installation failure without another decision prompt", async () => {
     const flow = deps();
     flow.installRegistryItem = vi.fn(async () => {
@@ -135,7 +162,13 @@ describe("runRegistryFlow", () => {
     ).resolves.toMatchObject({
       kind: "done",
       result: {
-        failures: [{ title: "connection/linear", message: "Dependency installation failed." }],
+        outcomes: [
+          {
+            kind: "failed",
+            title: "connection/linear",
+            message: "Dependency installation failed.",
+          },
+        ],
       },
     });
 

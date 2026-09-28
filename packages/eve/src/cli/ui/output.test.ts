@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createCliTheme,
-  renderCliBanner,
   renderCliSection,
-  renderCliSpeakerLine,
   renderCliTaggedLine,
   sanitizeForTerminal,
 } from "./output.js";
@@ -61,23 +59,9 @@ describe("CLI renderers", () => {
     ).toBe("[EVENT] beforeafter red");
   });
 
-  it("sanitize speaker-line messages and speakers before rendering", () => {
+  it("sanitize section fields before rendering", () => {
     const theme = createCliTheme({ color: false });
 
-    expect(
-      renderCliSpeakerLine(theme, {
-        message: `${osc8Start}linked${osc8End}`,
-        speaker: `agent${c1Osc}`,
-      }),
-    ).toBe("agent> linked");
-  });
-
-  it("sanitize banner and section fields before rendering", () => {
-    const theme = createCliTheme({ color: false });
-
-    expect(renderCliBanner(theme, { subtitle: `sub${dcs}title`, title: `ev${oscTitle}e` })).toBe(
-      "eve\n===\nsubtitle",
-    );
     expect(
       renderCliSection(theme, {
         rows: [{ label: `Na${oscTitle}me`, value: `Val${osc52}ue` }],

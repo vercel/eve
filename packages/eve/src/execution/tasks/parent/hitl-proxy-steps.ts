@@ -72,6 +72,12 @@ export async function recordTaskInputRequestStep(input: {
       kind: request.kind,
       taskId: input.request.taskId,
     };
+    if (request.kind === "question") {
+      route.question = {
+        ...(request.allowFreeform !== undefined && { allowFreeform: request.allowFreeform }),
+        ...(request.options !== undefined && { options: [...request.options] }),
+      };
+    }
     if (remoteResponseUrl !== undefined) route.childResponseUrl = remoteResponseUrl;
     return [parentRequest.requestId, route] as const;
   });

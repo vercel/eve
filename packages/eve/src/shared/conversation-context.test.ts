@@ -22,7 +22,6 @@ function run(input: Partial<RunInput>): RunInput {
     adapter: { kind: "http" },
     auth: null,
     input: { message: "hello" },
-    mode: "conversation",
     ...input,
   };
 }
@@ -65,7 +64,6 @@ describe("buildConversationContext", () => {
       audience: "private",
       channel: { kind: "http", name: undefined },
       environment: "preview",
-      mode: "conversation",
       principalType: "user",
     });
   });
@@ -191,10 +189,8 @@ describe("buildConversationContext", () => {
           audience: "public",
           channel: { kind: "channel:slack", name: "slack" },
           environment: "production",
-          mode: "conversation",
           principalType: "user",
         },
-        mode: "task",
       }),
       "production",
     );

@@ -28,6 +28,7 @@ export interface PendingInputBatchEvent {
  * assistant turn's requests plus its withheld model output.
  */
 export interface PendingInputBatch {
+  readonly toolReplayIdentities?: Readonly<Record<string, string>>;
   readonly event?: PendingInputBatchEvent;
   readonly activityRootTurnId?: string;
   readonly requests: readonly InputRequest[];
@@ -138,6 +139,7 @@ function setPendingInputBatches(
       event: batch.event,
       activityRootTurnId: batch.activityRootTurnId,
       responseAuthRequiredRequestIds: batch.responseAuthRequiredRequestIds,
+      toolReplayIdentities: batch.toolReplayIdentities,
       requests: [...batch.requests],
       responseMessages: [...batch.responseMessages],
     }));
@@ -151,6 +153,7 @@ function setPendingInputBatches(
  * batches stay open and independently answerable.
  */
 export function appendPendingInputBatch(input: {
+  readonly toolReplayIdentities?: Readonly<Record<string, string>>;
   readonly event?: PendingInputBatchEvent;
   readonly activityRootTurnId?: string;
   readonly requests: readonly InputRequest[];
@@ -165,6 +168,7 @@ export function appendPendingInputBatch(input: {
       activityRootTurnId:
         input.activityRootTurnId ?? contextStorage.getStore()?.get(ActivityRootTurnIdKey),
       responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
+      toolReplayIdentities: input.toolReplayIdentities,
       requests: input.requests,
       responseMessages: input.responseMessages,
     },
@@ -197,15 +201,13 @@ export function activityRequestIdsForRootTurn(
 
 /**
  * Merges any queued follow-up input into the current step input and clears it
- * from session state. When `preferCurrentInput` is set, fresh input is returned
- * alone and the queued input remains deferred.
+ * from session state.
  *
  * Used when the harness has to process a pending tool-approval response first
  * and defer the user's new message to the next internal model step.
  */
 export function consumeDeferredStepInput(input: {
   readonly input?: StepInput;
-  readonly preferCurrentInput?: boolean;
   readonly session: HarnessSession;
 }): {
   readonly input?: StepInput;
@@ -215,12 +217,6 @@ export function consumeDeferredStepInput(input: {
 
   if (deferredInput === undefined) {
     return input;
-  }
-
-  // A fresh task delivery may answer the request that caused the deferral.
-  // Resolve it alone, leaving the older turn input queued for the next step.
-  if (input.preferCurrentInput === true && input.input !== undefined) {
-    return { input: input.input, session: input.session };
   }
 
   const session = clearDeferredStepInput(input.session);
@@ -236,14 +232,6 @@ export function consumeDeferredStepInput(input: {
     input: coalesceTurnInputs(deferredInput, input.input),
     session,
   };
-}
-
-/**
- * Returns true when the session carries queued follow-up input for the next
- * internal harness step.
- */
-export function hasDeferredStepInput(session: HarnessSession): boolean {
-  return getDeferredStepInput(session) !== undefined;
 }
 
 export function getDeferredStepInput(session: HarnessSession): StepInput | undefined {

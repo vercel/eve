@@ -287,7 +287,6 @@ async function runInitSteps(input: {
   const debug = isLogLevelEnabled("debug");
   const initTarget = await resolveInitTarget({ parentDirectory, target });
   const evePackage = resolveInitEvePackageOverride();
-  const selfModificationEnabled = false;
 
   const startedAt = dependencies.now();
   const progressOptions = {
@@ -466,7 +465,6 @@ async function runInitSteps(input: {
         elapsedMs: dependencies.now() - startedAt,
         agentLaunched,
         gitResult,
-        selfModificationEnabled,
       };
     }
 
@@ -474,7 +472,6 @@ async function runInitSteps(input: {
       ...project,
       elapsedMs: dependencies.now() - startedAt,
       agentLaunched,
-      selfModificationEnabled,
     };
   } catch (error) {
     trackTerminal?.(
@@ -553,9 +550,6 @@ export async function runInitCommand(
     logger.log(
       `${pc.green("✓")} Added an ${EVE_WORDMARK} agent to ${pc.bold(result.projectPath)} ${pc.dim(`in ${formatElapsed(result.elapsedMs)}`)}`,
     );
-  }
-  if (result.selfModificationEnabled) {
-    logger.log(`${pc.green("✓")} Enabled self-modification`);
   }
 
   if (result.kind === "created" && result.gitResult.kind === "failed") {

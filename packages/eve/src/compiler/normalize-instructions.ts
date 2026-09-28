@@ -24,7 +24,7 @@ import {
  * Either a static instructions definition or a dynamic resolver that
  * produces model messages at runtime.
  */
-export type CompiledInstructionsEntry =
+type CompiledInstructionsEntry =
   | { readonly kind: "instructions"; readonly definition: CompiledInstructionsDefinition }
   | {
       readonly kind: "dynamic-instructions";
@@ -120,22 +120,4 @@ export async function compileInstructionsEntry(
       sourceKind: source.sourceKind,
     },
   };
-}
-
-/**
- * @deprecated Use {@link compileInstructionsEntry} instead. Kept for
- * backwards compatibility with callers that pass a single source.
- */
-export async function compileInstructions(
-  agentRoot: string,
-  source: InstructionsSourceRef,
-  options: SourceDefinitionCompileOptions,
-): Promise<CompiledInstructionsDefinition> {
-  const entry = await compileInstructionsEntry(agentRoot, source, options);
-  if (entry.kind === "dynamic-instructions") {
-    throw new Error(
-      `Expected static instructions from "${source.logicalPath}" but got a dynamic resolver. Use compileInstructionsEntry instead.`,
-    );
-  }
-  return entry.definition;
 }

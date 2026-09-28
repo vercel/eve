@@ -21,3 +21,8 @@ out/
 *.log
 *.tsbuildinfo
 pnpm-debug.log*
+
+apps/web/.next
+apps/web/.nuxt
+apps/web/.output
+apps/web/node_modules

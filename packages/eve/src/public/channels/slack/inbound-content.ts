@@ -17,30 +17,29 @@ function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unkno
   if (!trimmedText) return extracted;
   if (!extracted) return text;
 
-  if (normalizeComparableText(extracted) === normalizeComparableText(trimmedText)) {
-    return text;
-  }
-
-  const normalizedExtracted = normalizeComparableText(extracted);
   const normalizedTrimmed = normalizeComparableText(trimmedText);
+  const normalizedExtracted = normalizeComparableText(extracted);
+  if (normalizedExtracted === normalizedTrimmed) return text;
+
+  const attachmentText = extractLegacyAttachmentLines(raw.attachments).join("\n").trim();
+  if (attachmentText) {
+    const blockText = extractBlockKitLines(raw.blocks).join("\n").trim();
+    const content = [
+      text,
+      ...(blockText && !normalizedTrimmed.includes(normalizeComparableText(blockText))
+        ? [blockText]
+        : []),
+      ...(!normalizedTrimmed.includes(normalizeComparableText(attachmentText))
+        ? [attachmentText]
+        : []),
+    ];
+    return content.join("\n");
+  }
 
   if (extracted.length > trimmedText.length && normalizedExtracted.includes(normalizedTrimmed)) {
     return extracted;
   }
-
-  if (hasSharedMessageAttachment(raw.attachments)) {
-    if (normalizedTrimmed.includes(normalizedExtracted)) return text;
-    return `${text}\n${extracted}`;
-  }
-
-  if (extracted.length >= trimmedText.length * 2) {
-    const hasLegacyAttachments = Array.isArray(raw.attachments) && raw.attachments.length > 0;
-    if (hasLegacyAttachments && !normalizedExtracted.includes(normalizedTrimmed)) {
-      return `${text}\n${extracted}`;
-    }
-    return extracted;
-  }
-
+  if (extracted.length >= trimmedText.length * 2) return extracted;
   return text;
 }
 
@@ -159,18 +158,6 @@ function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
   }
 
   return lines;
-}
-
-function hasSharedMessageAttachment(legacyAttachments: unknown): boolean {
-  if (!Array.isArray(legacyAttachments)) return false;
-  return legacyAttachments.some(
-    (attachment) =>
-      isObject(attachment) &&
-      (Array.isArray(attachment.message_blocks) ||
-        attachment.is_share === true ||
-        attachment.is_msg_unfurl === true ||
-        attachment.is_reply_unfurl === true),
-  );
 }
 
 function extractSlackMessageUnfurlLines(messageBlocks: unknown): string[] {
@@ -375,7 +362,10 @@ export function readSlackTextObject(textObject: unknown): string {
 }
 
 function normalizeComparableText(input: string): string {
-  return input.replace(/\s+/gu, " ").trim();
+  return input
+    .replace(/<(https?:\/\/[^|>]+)>/gu, "$1")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
 function formatInboundRichTextLink(url: string, label: string): string {

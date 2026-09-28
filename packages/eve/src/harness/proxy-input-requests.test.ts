@@ -204,6 +204,7 @@ describe("toProxyInputRequestEntries", () => {
           },
           childContinuationToken: "child-a",
           kind: "question",
+          question: {},
         },
       ],
       [

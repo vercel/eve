@@ -5,6 +5,7 @@ import type {
 import type { WorkflowToolAgentRequest } from "#execution/tools/workflow/messages.js";
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { jsonValuesEqual, type JsonValue } from "#shared/json.js";
+import type { ToolInputResponseResponder } from "#tools/definition.js";
 
 /** Durable lifecycle status for one unit of background work. */
 export type TaskStatus = "working" | "input_required" | "completed" | "failed" | "cancelled";
@@ -137,6 +138,7 @@ export interface TaskInboundAnswerInput {
     readonly requestId: string;
     readonly text?: string;
   }[];
+  readonly responder?: ToolInputResponseResponder;
   readonly kind: "input-response";
   readonly taskId: string;
 }

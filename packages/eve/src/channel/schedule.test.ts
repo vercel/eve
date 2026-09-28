@@ -108,7 +108,6 @@ describe("ScheduleDispatcher", () => {
         expect.objectContaining({
           adapter: SCHEDULE_ADAPTER,
           input: { message: "Run heartbeat task." },
-          mode: "task",
           auth: SCHEDULE_APP_AUTH,
         }),
       );

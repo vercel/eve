@@ -24,7 +24,7 @@ import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-c
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
 import type { HandleMessageStreamEvent, InputResolution } from "#protocol/message.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
-import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { JsonValue } from "#shared/json.js";
 import { parseJsonValue } from "#shared/json.js";
 
 export class WorkflowAgentInvocationExecution {
@@ -39,7 +39,6 @@ export class WorkflowAgentInvocationExecution {
   async create(input: {
     readonly auth: SessionAuthContext | null;
     readonly message: string | UserContent;
-    readonly outputSchema?: JsonObject;
   }): Promise<AgentInvocation> {
     const continuationToken = `invocation:${crypto.randomUUID()}`;
     const handle = await this.#createSession({
@@ -50,8 +49,7 @@ export class WorkflowAgentInvocationExecution {
         continuationToken,
         ownerKey: invocationOwnerKey(input.auth),
       },
-      input: { message: input.message, outputSchema: input.outputSchema },
-      mode: "task",
+      input: { message: input.message },
     });
 
     const run = await this.#readInvocationRun(handle.sessionId, input.auth);
@@ -71,19 +69,13 @@ export class WorkflowAgentInvocationExecution {
   }): Promise<AgentInvocation | undefined> {
     const run = await this.#readInvocationRun(input.invocationId, input.auth);
     if (run === undefined) return undefined;
-
-    if (isTerminalRunStatus(run.status)) {
-      const events =
-        run.status === "failed" ? await readRecentPersistedEvents(input.invocationId) : [];
-      return await terminalInvocation(run, events);
-    }
-    const events = await readRecentPersistedEvents(input.invocationId);
-    return projectNonterminal(
-      run.runId,
-      run.createdAt.toISOString(),
-      run.expiredAt?.toISOString(),
-      events,
-    );
+    const base = {
+      createdAt: run.createdAt.toISOString(),
+      expiresAt: run.expiredAt?.toISOString(),
+      invocationId: run.runId,
+    };
+    if (run.status === "cancelled") return { ...base, status: "cancelled" };
+    return projectInvocation(base, run.status, await readRecentPersistedEvents(input.invocationId));
   }
 
   async update(input: {
@@ -310,55 +302,94 @@ function replaysResolvedBatch(
   return true;
 }
 
-function projectNonterminal(
-  invocationId: string,
-  createdAt: string,
-  expiresAt: string | undefined,
+type InvocationFailureEvent = Extract<
+  HandleMessageStreamEvent,
+  { type: "session.failed" | "turn.failed" }
+>;
+
+/**
+ * Projects the invocation from its latest turn. The session parks after the
+ * turn settles, so `turn.completed` or a failure event — not the run
+ * status — is what completes the invocation. A pending input or
+ * authorization park also closes its turn, so it takes precedence.
+ */
+function projectInvocation(
+  base: { readonly createdAt: string; readonly expiresAt?: string; readonly invocationId: string },
+  runStatus: string,
   events: readonly HandleMessageStreamEvent[],
 ): AgentInvocation {
   const authorizations = new Map<string, AgentInvocationAuthorizationRequest>();
   let inputBatch: PendingInputBatch | undefined;
   let result: JsonValue | undefined;
+  let settled: "completed" | "cancelled" | InvocationFailureEvent | undefined;
   for (const event of events) {
-    if (event.type === "input.requested") {
-      inputBatch = pendingInputBatch(event);
-    } else if (event.type === "input.resolved") {
-      if (inputBatch !== undefined) {
-        inputBatch = withoutResolved(inputBatch, event.data.resolutions);
+    switch (event.type) {
+      case "turn.started":
+        authorizations.clear();
+        inputBatch = undefined;
+        result = undefined;
+        settled = undefined;
+        break;
+      case "input.requested":
+        inputBatch = pendingInputBatch(event);
+        break;
+      case "input.resolved":
+        if (inputBatch !== undefined) {
+          inputBatch = withoutResolved(inputBatch, event.data.resolutions);
+        }
+        settled = undefined;
+        break;
+      case "authorization.required": {
+        const authorization: {
+          authorization?: AgentInvocationAuthorizationRequest["authorization"];
+          description: string;
+          name: string;
+          webhookUrl?: string;
+        } = {
+          description: event.data.description,
+          name: event.data.name,
+        };
+        if (event.data.authorization !== undefined) {
+          authorization.authorization = event.data.authorization;
+        }
+        if (event.data.webhookUrl !== undefined) {
+          authorization.webhookUrl = event.data.webhookUrl;
+        }
+        authorizations.set(event.data.name, authorization);
+        break;
       }
-    } else if (event.type === "turn.started") {
-      authorizations.clear();
-      inputBatch = undefined;
-      result = undefined;
-    } else if (event.type === "authorization.required") {
-      const authorization: {
-        authorization?: AgentInvocationAuthorizationRequest["authorization"];
-        description: string;
-        name: string;
-        webhookUrl?: string;
-      } = {
-        description: event.data.description,
-        name: event.data.name,
-      };
-      if (event.data.authorization !== undefined) {
-        authorization.authorization = event.data.authorization;
-      }
-      if (event.data.webhookUrl !== undefined) {
-        authorization.webhookUrl = event.data.webhookUrl;
-      }
-      authorizations.set(event.data.name, authorization);
-    } else if (event.type === "authorization.completed") {
-      authorizations.delete(event.data.name);
-    } else if (
-      event.type === "message.completed" &&
-      event.data.finishReason !== "tool-calls" &&
-      event.data.message !== null
-    ) {
-      result = safeJson(event.data.message);
+      case "authorization.completed":
+        authorizations.delete(event.data.name);
+        settled = undefined;
+        break;
+      case "message.completed":
+        // Only tool-call narration continues the turn; any other finish is the reply.
+        if (event.data.finishReason !== "tool-calls" && event.data.message !== null) {
+          result = safeJson(event.data.message);
+        }
+        break;
+      case "turn.completed":
+        settled = "completed";
+        break;
+      case "turn.cancelled":
+        settled = "cancelled";
+        break;
+      case "turn.failed":
+      case "session.failed":
+        settled = event;
+        break;
     }
   }
+  const failure = typeof settled === "object" ? settled : undefined;
+  const failed = (): AgentInvocation => ({
+    ...base,
+    error: publicInvocationFailure(base.invocationId, failure),
+    status: "failed",
+  });
+  // A pending batch can outlive its session (timeout, failure); nobody can answer it then.
+  if (runStatus === "failed" || failure?.type === "session.failed") return failed();
+  if (runStatus === "completed") return { ...base, result, status: "completed" };
   const pendingAuthorizations = [...authorizations.values()];
-  const base = { createdAt, expiresAt, invocationId, result };
   if (pendingAuthorizations.length > 0) {
     return {
       ...base,
@@ -367,40 +398,17 @@ function projectNonterminal(
         ...AgentInvocationAuthorizationRequest[],
       ],
       pollAfterMs: 1_000,
+      result,
       status: "authorization_required",
     };
   }
   if (inputBatch !== undefined) {
-    return { ...base, inputRequests: inputBatch.requests, status: "input_required" };
+    return { ...base, inputRequests: inputBatch.requests, result, status: "input_required" };
   }
-  return { ...base, pollAfterMs: 1_000, status: "working" };
-}
-
-async function terminalInvocation(
-  run: {
-    readonly createdAt: Date;
-    readonly error?: unknown;
-    readonly expiredAt?: Date;
-    readonly runId: string;
-    readonly status: string;
-  },
-  events: readonly HandleMessageStreamEvent[],
-): Promise<AgentInvocation> {
-  const base = {
-    createdAt: run.createdAt.toISOString(),
-    expiresAt: run.expiredAt?.toISOString(),
-    invocationId: run.runId,
-  };
-  if (run.status === "cancelled") return { ...base, status: "cancelled" };
-  if (run.status === "failed") {
-    return {
-      ...base,
-      error: publicInvocationFailure(run.runId, events),
-      status: "failed",
-    };
-  }
-  const returned = await getRun<{ readonly output: unknown }>(run.runId).returnValue;
-  return { ...base, result: safeJson(returned.output), status: "completed" };
+  if (failure !== undefined) return failed();
+  if (settled === "cancelled") return { ...base, status: "cancelled" };
+  if (settled === "completed") return { ...base, result, status: "completed" };
+  return { ...base, pollAfterMs: 1_000, result, status: "working" };
 }
 
 function workingInvocation(
@@ -421,9 +429,8 @@ function safeJson(value: unknown): JsonValue {
 
 function publicInvocationFailure(
   runId: string,
-  events: readonly HandleMessageStreamEvent[],
+  event: InvocationFailureEvent | undefined,
 ): Extract<AgentInvocation, { readonly status: "failed" }>["error"] {
-  const event = [...events].reverse().find((candidate) => candidate.type === "session.failed");
   const data: Record<string, string> = { runId };
   if (event !== undefined) data.eveCode = event.data.code;
 
@@ -445,9 +452,7 @@ function publicInvocationFailure(
   return { code: -32603, data, message: semantic.message };
 }
 
-function semanticFailure(
-  event: Extract<HandleMessageStreamEvent, { type: "session.failed" }>["data"],
-): {
+function semanticFailure(event: InvocationFailureEvent["data"]): {
   readonly hint?: string;
   readonly id: string;
   readonly message: string;
@@ -487,9 +492,7 @@ function semanticFailure(
   return summary;
 }
 
-function fallbackFailure(
-  event: Extract<HandleMessageStreamEvent, { type: "session.failed" }>["data"],
-): {
+function fallbackFailure(event: InvocationFailureEvent["data"]): {
   readonly message: string;
   readonly name?: string;
 } | null {
@@ -519,9 +522,5 @@ function conflict(message: string): AgentInvocationMutationResult {
 }
 
 function isTerminal(status: AgentInvocationStatus): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
-}
-
-function isTerminalRunStatus(status: string): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
 }

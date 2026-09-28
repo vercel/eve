@@ -16,6 +16,7 @@ import { defineAgent } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { createSessionStartedEvent, createTurnStartedEvent } from "#protocol/message.js";
 import type { ResolvedDynamicSubagentResolver } from "#runtime/subagents/registry.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 describe("dynamic subagent lifecycle", () => {
   it("omits a subagent when its resolver returns null", async () => {
@@ -299,7 +300,6 @@ describe("dynamic subagent lifecycle", () => {
       description: "Research on the remote deployment.",
       forwardPrincipal: true,
       headers,
-      outputSchema: { properties: { answer: { type: "string" } }, type: "object" },
       url: async () => "https://research.example.com",
     });
     const credentialsFactory = Object.assign(
@@ -392,6 +392,7 @@ describe("dynamic subagent lifecycle", () => {
   });
 
   it("omits an invalid non-null result", async () => {
+    const logs = captureLogRecords();
     const ctx = createContext();
     const { resolver } = createResolver({
       handler: () => false,
@@ -405,6 +406,12 @@ describe("dynamic subagent lifecycle", () => {
     });
 
     expect(buildDynamicSubagentTools(ctx)).toEqual([]);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Dynamic subagent resolver (session.started) threw — omitting subagent.",
+      }),
+    );
   });
 
   it("refreshes session availability once per runtime revision", async () => {

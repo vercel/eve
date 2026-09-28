@@ -3,9 +3,9 @@ import { z } from "#compiled/zod/index.js";
 import type { DiscoverDiagnostic, DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
 import type { AgentSourceDescriptor } from "#compiler/source-graph.js";
 
-export const compilerDiagnosticSeveritySchema = z.enum(["error", "warning"]);
+const compilerDiagnosticSeveritySchema = z.enum(["error", "warning"]);
 
-export const compilerDiagnosticSourceSchema = z
+const compilerDiagnosticSourceSchema = z
   .object({
     logicalPath: z.string().optional(),
     nodeId: z.string().min(1),
@@ -21,7 +21,7 @@ export const compilerDiagnosticSourceSchema = z
     "Compiler diagnostic source must identify a logical, compiled, or physical source.",
   );
 
-export type CompilerDiagnosticSource = z.infer<typeof compilerDiagnosticSourceSchema>;
+type CompilerDiagnosticSource = z.infer<typeof compilerDiagnosticSourceSchema>;
 
 export const compilerDiagnosticSchema = z
   .object({

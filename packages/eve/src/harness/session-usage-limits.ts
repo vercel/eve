@@ -1,4 +1,4 @@
-export interface SessionUsageAmounts {
+interface SessionUsageAmounts {
   readonly costUsd?: number;
   readonly inputTokens: number;
   readonly outputTokens: number;

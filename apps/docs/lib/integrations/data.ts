@@ -31,7 +31,7 @@ import type { ConnectionProtocol } from "@eve/catalog";
  */
 export type AuthMode = "user" | "app" | "jwtBearer" | "apiKey";
 
-export interface ApiKeySpec {
+interface ApiKeySpec {
   /** Server-side environment variable containing the API key. */
   env: string;
   /** Header used to send the API key. */
@@ -2714,5 +2714,3 @@ export const integrations: Integration[] = [
 
 export const getIntegration = (slug: string): Integration | undefined =>
   integrations.find((integration) => integration.slug === slug);
-
-export const integrationSlugs = (): string[] => integrations.map((integration) => integration.slug);

@@ -4,7 +4,7 @@ import { parseJsonObject, type JsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#tools/schema.js";
 
-export interface WorkflowToolHarnessDefinitionInput {
+interface WorkflowToolHarnessDefinitionInput {
   readonly definition: HarnessToolDefinition;
   readonly executeInput?: (input: unknown) => JsonValue;
   /** Selected agent definition's runtime graph ID; absent for authored workflow tools. */
@@ -62,7 +62,7 @@ export function createPreparedWorkflowToolHarnessDefinition(
 }
 
 /** Returns a task receipt after the background scope starts the owning run. */
-export function createWorkflowToolBackgroundExecute(input: {
+function createWorkflowToolBackgroundExecute(input: {
   readonly toolName: string;
   readonly workflowId: string;
 }): NonNullable<HarnessToolDefinition["execute"]> {

@@ -14,7 +14,7 @@ export function isSettledSessionTail(events: readonly MessageStreamEvent[]): boo
   );
 }
 
-export function collectPendingAuthorizations(events: readonly MessageStreamEvent[]): Set<string> {
+function collectPendingAuthorizations(events: readonly MessageStreamEvent[]): Set<string> {
   const pending = new Set<string>();
   for (const event of events) updatePendingAuthorizations(pending, event);
   return pending;

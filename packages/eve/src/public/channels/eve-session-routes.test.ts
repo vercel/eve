@@ -6,7 +6,8 @@ import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { none } from "#public/channels/auth.js";
-import { eveChannel } from "#public/channels/eve.js";
+import { eveChannel, type TrustedForwarders } from "#public/channels/eve.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 function route(
   method: "GET" | "POST",
@@ -85,7 +86,6 @@ describe("eve ID-addressed session routes", () => {
           message: undefined,
           outputSchema: undefined,
         },
-        mode: "conversation",
       }),
     );
   });
@@ -173,7 +173,6 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
-          mode: "conversation",
         }),
         headers: {
           "content-type": "application/json",
@@ -214,7 +213,6 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
-          mode: "conversation",
         }),
         headers: {
           "content-type": "application/json",
@@ -343,12 +341,13 @@ describe("eve ID-addressed session routes", () => {
   it.each([true, false])(
     "promotes remote parent lineage only from a trusted forwarder (%s)",
     async (trusted) => {
+      const logs = captureLogRecords();
       const createSession = vi.fn().mockResolvedValue({
         events: new ReadableStream(),
         sessionId: "wrun_A",
       });
       const args = attachRouteSessionCreator(createArgs(), createSession);
-      const trustedForwarders = vi.fn(() => trusted);
+      const trustedForwarders = vi.fn<TrustedForwarders>(() => trusted);
       const parent = {
         callId: "call-1",
         rootSessionId: "root-session",
@@ -381,11 +380,17 @@ describe("eve ID-addressed session routes", () => {
 
       expect(response.status).toBe(202);
       expect(trustedForwarders).toHaveBeenCalledTimes(1);
+      // Lineage-only requests assert no principal.
+      expect(trustedForwarders).toHaveBeenCalledWith(expect.anything(), {});
       expect(createSession).toHaveBeenCalledWith(
         expect.objectContaining({
           parent: trusted ? parent : undefined,
         }),
       );
+      const untrusted = logs.records.filter(
+        (record) => record.message === "ignoring remote parent lineage from an untrusted forwarder",
+      );
+      expect(untrusted).toHaveLength(trusted ? 0 : 1);
     },
   );
 

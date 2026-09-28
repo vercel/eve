@@ -109,7 +109,6 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
           conversation: {
             audience: "private",
             channel: { kind: "channel:skill-context", name: "skill-context" },
-            mode: "conversation",
             environment: started.environment,
             principalType: "user",
           },

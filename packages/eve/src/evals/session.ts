@@ -9,10 +9,12 @@ import type {
   SendTurnInput,
   SendTurnOptions,
   SendTurnPayload,
+  StreamOptions,
 } from "#client/types.js";
 import type {
   MessageStreamEvent,
   RuntimeTraceContext,
+  SubagentCalledStreamEvent,
   TurnFailureStreamEvent,
 } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
@@ -142,6 +144,16 @@ export class EvalSessionDriver implements EveEvalSession {
 
   async cancel(): Promise<CancelSessionResult> {
     return await this.#session.cancel();
+  }
+
+  streamSubagent(
+    called: SubagentCalledStreamEvent,
+    options: StreamOptions = {},
+  ): AsyncIterable<MessageStreamEvent> {
+    return this.#session.streamSubagent(called, {
+      ...options,
+      signal: options.signal ?? this.#signal,
+    });
   }
 
   /** @internal */

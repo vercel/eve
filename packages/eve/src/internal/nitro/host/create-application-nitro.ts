@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
+import { configureInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
   resolvePackageRoot,
@@ -639,6 +640,9 @@ function configureSharedApplicationNitro(
   nitro: Nitro,
   preparedHost: PreparedApplicationHost,
 ): void {
+  if (preparedHost.compiledArtifacts.instrumentationPluginPath !== undefined) {
+    configureInstrumentationEntry(nitro, preparedHost.compiledArtifacts.instrumentationPluginPath);
+  }
   addNitroRoutingImportSpecifierPlugin(nitro);
   const workflowAliases = resolveWorkflowAliases();
   for (const [specifier, resolvedPath] of Object.entries(workflowAliases)) {

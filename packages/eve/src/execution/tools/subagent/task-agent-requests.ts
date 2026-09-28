@@ -7,20 +7,20 @@ import {
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { TaskAgentRequestDelivery } from "#tasks/types.js";
 
-export interface AgentRequestDelivery {
+interface AgentRequestDelivery {
   readonly ownerId: string;
   readonly replyTo: TaskAgentRequestDelivery["replyTo"];
   readonly request: TaskAgentRequestDelivery["request"];
   readonly taskId?: string;
 }
 
-export interface TaskAgentRequestContext {
+interface TaskAgentRequestContext {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
 
-export interface AppliedTaskAgentRequest {
+interface AppliedTaskAgentRequest {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }

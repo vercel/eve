@@ -36,9 +36,3 @@ export const SUBAGENT_EXECUTION_FAILED = "SUBAGENT_EXECUTION_FAILED";
 
 /** Error code for a remote agent session that failed to start. */
 export const REMOTE_AGENT_START_FAILED = "REMOTE_AGENT_START_FAILED";
-
-/** Fallback error code for a remote `session.failed` callback without error detail. */
-export const REMOTE_AGENT_FAILED = "REMOTE_AGENT_FAILED";
-
-/** Error code a child session reports back when the whole session failed. */
-export const SESSION_FAILED = "SESSION_FAILED";

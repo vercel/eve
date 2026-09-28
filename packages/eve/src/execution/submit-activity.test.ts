@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { submitActivity } from "#execution/submit-activity.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const event = {
   eventId: "root:session:turn:started",
@@ -63,6 +64,7 @@ describe("submitActivity", () => {
   });
 
   it("posts one versioned batch and swallows transport failure", async () => {
+    const logs = captureLogRecords();
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response(null, { status: 202 }))
@@ -78,5 +80,8 @@ describe("submitActivity", () => {
       events: [event],
       version: 1,
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "activity sink request failed" }),
+    );
   });
 });

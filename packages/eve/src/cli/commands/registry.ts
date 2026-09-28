@@ -38,7 +38,7 @@ import {
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import {
-  assertCanInstallWebChat,
+  prepareWebChatProjectRoot,
   prepareWebRegistryProject,
   readRegistryConfig,
 } from "./registry-project.js";
@@ -153,20 +153,6 @@ function itemAddress(item: string): string {
   return item.startsWith("@") || /^https?:\/\//.test(item)
     ? item
     : `${OFFICIAL_REGISTRY}/${item}.json`;
-}
-
-/** Installs an official registry item without running its declared setup command. */
-export async function installOfficialRegistryItem(
-  appRoot: string,
-  item: string,
-  options: AddCommandOptions = {},
-): Promise<void> {
-  const config = await readEveRegistryConfig(appRoot);
-  await addRegistryItems([itemAddress(item)], {
-    config,
-    cwd: appRoot,
-    overwrite: options.overwrite,
-  });
 }
 
 function assertCompatibleEveVersion(requiredVersion: string | undefined): void {
@@ -417,20 +403,18 @@ async function browseRegistryItems(
   if (errors.length > 0) process.exitCode = 1;
 }
 
-/** Resolves one official, configured, or URL-addressed item manifest. */
-export async function getRegistryItemManifest(appRoot: string, item: string): Promise<unknown> {
-  const config = await readEveRegistryConfig(appRoot);
-  const items = await getRegistryItems([itemAddress(item)], { config });
-  return items.length === 1 ? items[0] : items;
-}
-
 /** Installs an official, configured, or URL-addressed registry item. */
 export async function installRegistryItem(
   appRoot: string,
   item: string,
   options: AddCommandOptions & { prompter?: Prompter; signal?: AbortSignal } = {},
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
-): Promise<{ output: readonly string[]; setup?: RegistrySetupCompletion }> {
+): Promise<{
+  output: readonly string[];
+  setup?: RegistrySetupCompletion;
+  /** Files were added, but setup was cancelled or skipped. */
+  setupIncomplete?: { resumeCommand: string };
+}> {
   let failure: string | undefined;
   const output: string[] = [];
   const logger: RegistryCommandLogger = {
@@ -454,6 +438,9 @@ export async function installRegistryItem(
   process.exitCode = previousExitCode;
   if (failure !== undefined) throw new Error(failure);
   if (setup === false) throw new WizardCancelledError();
+  if (setup === "setup-incomplete") {
+    return { output, setupIncomplete: { resumeCommand: setupResumeCommand(item) } };
+  }
   const result: { output: readonly string[]; setup?: RegistrySetupCompletion } = { output };
   if (setup !== undefined) result.setup = setup;
   return result;
@@ -466,10 +453,16 @@ export async function runAddCommand(
   item: string,
   options: RunAddCommandOptions,
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
-): Promise<RegistrySetupCompletion | false | undefined> {
+): Promise<RegistrySetupCompletion | false | "setup-incomplete" | undefined> {
+  // Silent callers render the resume hint themselves from the structured result.
+  const setupIncomplete = (outcome: "cancelled" | "skipped") => {
+    if (options.silent !== true) logger.log(setupReminder(item, outcome));
+    return "setup-incomplete" as const;
+  };
   return runRegistryAction(logger, appRoot, async () => {
     const address = itemAddress(item);
-    if (address === itemAddress("channel/web")) await assertCanInstallWebChat(appRoot);
+    const projectRoot =
+      address === itemAddress("channel/web") ? await prepareWebChatProjectRoot(appRoot) : appRoot;
     const config = await readEveRegistryConfig(appRoot);
     if (options.skipInstall === true) {
       if (options.overwrite === true) {
@@ -507,15 +500,15 @@ export async function runAddCommand(
         setups: eveMetadata.setup,
         options,
         dependencies,
-        cancelledReminder: setupReminder(item, "cancelled"),
         resumeCommand: setupResumeCommand(item),
       });
+      if (completion === false && !options.nonInteractive) return setupIncomplete("cancelled");
       return reportCompletion(logger, item, completion, options);
     }
 
     const installReady = await prepareDeclaredPnpmBuildPolicy({
       logger,
-      appRoot,
+      appRoot: projectRoot,
       item,
       policies: eveMetadata?.install?.pnpm?.buildScripts,
       options,
@@ -523,10 +516,10 @@ export async function runAddCommand(
     if (!installReady) return false;
 
     if (address === itemAddress("channel/web")) {
-      await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(appRoot);
+      await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(projectRoot);
     }
     await installRegistryItemTransaction({
-      appRoot,
+      appRoot: projectRoot,
       item,
       registryItem,
       nonInteractive: options.nonInteractive,
@@ -534,7 +527,7 @@ export async function runAddCommand(
       install: async () => {
         await addRegistryItems([address], {
           config,
-          cwd: appRoot,
+          cwd: projectRoot,
           overwrite: options.overwrite,
           silent: options.silent,
         });
@@ -556,8 +549,7 @@ export async function runAddCommand(
     }
     if (options.skipSetup === true) {
       if (options.nonInteractive) return reportCompletion(logger, item, { facts: [] }, options);
-      logger.log(setupReminder(item, "skipped"));
-      return;
+      return setupIncomplete("skipped");
     }
     if (
       !options.nonInteractive &&
@@ -565,8 +557,7 @@ export async function runAddCommand(
       !interactive &&
       options.setupAuthorized !== true
     ) {
-      logger.log(setupReminder(item, "skipped"));
-      return;
+      return setupIncomplete("skipped");
     }
 
     if (!options.nonInteractive && !options.yes && options.setupAuthorized !== true) {
@@ -583,14 +574,10 @@ export async function runAddCommand(
             { value: "no", label: "No" },
           ],
         });
-        if (shouldRun === "no") {
-          logger.log(setupReminder(item, "skipped"));
-          return;
-        }
+        if (shouldRun === "no") return setupIncomplete("skipped");
       } catch (error) {
         if (!(error instanceof WizardCancelledError)) throw error;
-        logger.log(setupReminder(item, "cancelled"));
-        return;
+        return setupIncomplete("cancelled");
       }
     }
 
@@ -601,9 +588,9 @@ export async function runAddCommand(
       setups: eveMetadata.setup,
       options: { ...options, force: options.overwrite },
       dependencies,
-      cancelledReminder: setupReminder(item, "cancelled"),
       resumeCommand: setupResumeCommand(item),
     });
+    if (completion === false && !options.nonInteractive) return setupIncomplete("cancelled");
     return reportCompletion(logger, item, completion, options);
   });
 }

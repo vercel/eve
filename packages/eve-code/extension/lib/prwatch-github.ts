@@ -5,7 +5,7 @@ import extension from "../extension.ts";
 
 const GITHUB_API = "https://api.github.com";
 
-export const RepoSchema = z
+const RepoSchema = z
   .string()
   .trim()
   .regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/u)
@@ -56,7 +56,7 @@ export interface PullRequestWatchSnapshot {
   readonly url: string;
 }
 
-export interface PullRequestWatchNotificationState {
+interface PullRequestWatchNotificationState {
   readonly previousSnapshot: PullRequestWatchSnapshot | null;
   readonly redHeadPolls: number;
   readonly redHeadWakeSent: boolean;

@@ -1,5 +1,4 @@
 import { defineEval } from "eve/evals";
-import { includes } from "eve/evals/expect";
 
 export default defineEval({
   description:
@@ -10,16 +9,23 @@ export default defineEval({
       "Ask the `deny-all` subagent with message: Verify the configured environment sandbox capability.",
     );
     turn.expectOk();
-    const sessionId = turn.sessionId;
-    if (sessionId === undefined) throw new Error("Typed sandbox turn has no session id.");
     const completed = await t.target
-      .watchTurn(sessionId, { startIndex: requireStreamIndex(turn.session) })
+      .watchTurn(turn.sessionId, { startIndex: requireStreamIndex(turn.session) })
       .result();
     completed.expectOk();
+    const called = completed.events.find(
+      (event) => event.type === "subagent.called" && event.data.name === "deny-all",
+    );
+    if (called?.type !== "subagent.called") {
+      throw new Error("Typed sandbox turn did not call the deny-all subagent.");
+    }
+
+    const childTurn = await t.target.watchTurn(called.data.childSessionId).result();
+    childTurn.expectOk();
 
     t.succeeded();
     t.calledSubagent("deny-all", { count: 1, status: "completed" });
-    t.check(completed.message, includes(/blocked[^\n]*true/iu));
+    childTurn.calledTool("verify-typed-sandbox", { output: { blocked: true } });
   },
 });
 

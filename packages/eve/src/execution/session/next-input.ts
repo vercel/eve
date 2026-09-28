@@ -33,7 +33,6 @@ export type NextTurnInstruction =
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
   readonly cursor: SessionStateCursor;
-  readonly deferDeliveries?: boolean;
   readonly expectedAttemptIds?: ReadonlySet<string>;
   readonly queue: SessionInputQueue;
 }): Promise<NextTurnInstruction> {
@@ -54,7 +53,6 @@ export async function nextTurnDelivery(input: {
       if (routed.kind === "cancel-turn") return routed;
     }
     const selected = queue.takeNext(cursor.sessionState.snapshot.session.state, {
-      deferDeliveries: input.deferDeliveries,
       taskDeliveryPolicy:
         cursor.serializedContext[TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME] === "auto"
           ? "auto"

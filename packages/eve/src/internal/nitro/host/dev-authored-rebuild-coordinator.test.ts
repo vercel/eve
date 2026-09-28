@@ -124,12 +124,13 @@ const createRunner: DevelopmentRunnerFactory = () => {
   };
 };
 
-async function createCoordinatorWithServer() {
+async function createCoordinatorWithServer(onRuntimePruned?: () => Promise<void>) {
   const devServer = new DrainedNitroDevServer({ error: () => undefined }, createRunner);
   mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce("host-1");
   const coordinator = await createDevelopmentAuthoredRebuildCoordinator({
     devServer,
     initialHost: createHost("initial", "run-1"),
+    onRuntimePruned,
   });
   return { coordinator, devServer };
 }
@@ -139,6 +140,27 @@ beforeEach(() => {
 });
 
 describe("transactional authored rebuild coordinator", () => {
+  it.each(["host-1", "host-2"])(
+    "forwards reconciliation on activation with host fingerprint %s",
+    async (fingerprint) => {
+      const onRuntimePruned = vi.fn(async () => undefined);
+      const { coordinator, devServer } = await createCoordinatorWithServer(onRuntimePruned);
+      const candidate = createHost("candidate", "run-2");
+      mocks.prepareDevelopmentApplicationHost.mockResolvedValueOnce(candidate);
+      mocks.computeDevelopmentHostFingerprint.mockResolvedValueOnce(fingerprint);
+      try {
+        await coordinator.rebuild({ changedPaths: [] });
+        expect(mocks.activateDevelopmentGeneration).toHaveBeenCalledWith({
+          appRoot: candidate.appRoot,
+          generation: candidate.generation,
+          onRuntimePruned,
+        });
+      } finally {
+        await devServer.close();
+      }
+    },
+  );
+
   it("passes changed paths into extension preparation and retains its committed watch plan", async () => {
     const { coordinator, devServer } = await createCoordinatorWithServer();
     const candidate = createHost("candidate", "run-1");

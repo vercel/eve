@@ -45,8 +45,7 @@ export interface SendPayload {
    */
   readonly context?: readonly string[];
   /**
-   * Run-scoped JSON schema the turn's result must match. eve enforces the
-   * schema in conversation and task mode; mode only decides failure behavior.
+   * Run-scoped JSON schema the turn's result must match.
    */
   readonly outputSchema?: JsonObject;
 }

@@ -4,14 +4,14 @@ import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { runVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
 import { z } from "#compiled/zod/index.js";
 
-export const DISCORD_TRIGGER_PATH = "/eve/v1/discord";
+const DISCORD_TRIGGER_PATH = "/eve/v1/discord";
 
-export interface DiscordConnectorRef {
+interface DiscordConnectorRef {
   id: string;
   uid: string;
 }
 
-export interface ProvisionDiscordConnectorDeps {
+interface ProvisionDiscordConnectorDeps {
   runVercel: typeof runVercel;
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }

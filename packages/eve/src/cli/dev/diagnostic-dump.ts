@@ -142,7 +142,7 @@ function formatDump(input: {
 }
 
 /** Collects the real environment facts for {@link createDevDiagnosticDump}. */
-export async function collectDevEnvironmentInfo(appRoot: string): Promise<DevEnvironmentInfo> {
+async function collectDevEnvironmentInfo(appRoot: string): Promise<DevEnvironmentInfo> {
   const [vercelCli, sessionsDirectory] = await Promise.all([
     detectVercelCli(appRoot),
     measureSessionsDirectory(appRoot),

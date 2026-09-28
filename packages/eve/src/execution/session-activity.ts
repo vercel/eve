@@ -10,9 +10,9 @@ import {
   type ActivityWorkStateV1,
 } from "#protocol/activity.js";
 
-export const MAX_ACTIVITY_EVENT_IDS = 1_000;
-export const MAX_ACTIVITY_PENDING_SETTLEMENTS = 500;
-export const MAX_ACTIVITY_ENTITIES = 500;
+const MAX_ACTIVITY_EVENT_IDS = 1_000;
+const MAX_ACTIVITY_PENDING_SETTLEMENTS = 500;
+const MAX_ACTIVITY_ENTITIES = 500;
 
 export function createActivitySnapshot(): ActivitySnapshotV1 {
   return {

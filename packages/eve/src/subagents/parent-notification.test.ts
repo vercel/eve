@@ -7,7 +7,6 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   bindTurnCallerContextStep,
-  notifyDelegatedParentStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
@@ -15,7 +14,6 @@ import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
@@ -30,21 +28,6 @@ const fetchMock = vi.fn();
 
 const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 };
 const ZERO_USAGE = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
-
-function createSuccessResult(): RuntimeSubagentChildResult {
-  return {
-    callId: "call-1",
-    kind: "subagent-result",
-    origin: "child",
-    outcome: {
-      kind: "terminal",
-      result: { kind: "succeeded", output: "done" },
-      usageDelta: ZERO_USAGE,
-    },
-    output: "done",
-    subagentName: "research",
-  };
-}
 
 function createSerializedContext(
   adapterState: Record<string, unknown> = {},
@@ -73,88 +56,6 @@ function createSerializedContext(
   });
   return serializeContext(ctx);
 }
-
-describe("notifyDelegatedParentStep", () => {
-  beforeEach(() => {
-    resumeHookMock.mockReset();
-    resumeHookMock.mockResolvedValue(undefined as never);
-  });
-
-  it("attaches usage to a success result and folds it into the outcome delta", async () => {
-    await notifyDelegatedParentStep({
-      result: createSuccessResult(),
-      serializedContext: createSerializedContext(),
-      usage: USAGE,
-    });
-
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-tok", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "done" },
-            usageDelta: USAGE,
-          },
-          output: "done",
-          subagentName: "research",
-          usage: USAGE,
-        },
-      ],
-    });
-  });
-
-  it("omits usage when none is provided", async () => {
-    await notifyDelegatedParentStep({
-      result: createSuccessResult(),
-      serializedContext: createSerializedContext(),
-    });
-
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-tok", {
-      kind: "runtime-action-result",
-      results: [createSuccessResult()],
-    });
-  });
-
-  it("attaches usage to error results", async () => {
-    const errorResult: RuntimeSubagentChildResult = {
-      callId: "call-1",
-      isError: true,
-      kind: "subagent-result",
-      origin: "child",
-      outcome: {
-        kind: "terminal",
-        result: {
-          error: { code: "SUBAGENT_EXECUTION_FAILED", message: "boom" },
-          kind: "failed",
-        },
-        usageDelta: ZERO_USAGE,
-      },
-      output: { code: "SUBAGENT_EXECUTION_FAILED", message: "boom" },
-      subagentName: "research",
-    };
-
-    await notifyDelegatedParentStep({
-      result: errorResult,
-      serializedContext: createSerializedContext(),
-      usage: USAGE,
-    });
-
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-tok", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          ...errorResult,
-          outcome: { ...errorResult.outcome, usageDelta: USAGE },
-          usage: USAGE,
-        },
-      ],
-    });
-  });
-});
 
 describe("turn caller notification", () => {
   beforeEach(() => {

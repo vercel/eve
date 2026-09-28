@@ -22,7 +22,7 @@ export interface RowColors {
 }
 
 /** The glyphs the row painter draws; the TUI passes theme-derived values, the CLI the unicode set. */
-export interface RowGlyphs {
+interface RowGlyphs {
   /** Hollow cursor marker for an inert row. */
   pointer: string;
   /** Filled cursor marker for an actionable row. */

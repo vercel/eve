@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { Worker } from "node:worker_threads";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import { ensurePnpmOptionalDependencyDefaults } from "#setup/primitives/pm/pnpm-build-policy.js";
 
@@ -113,9 +113,14 @@ function mockProcessPlatform(platform: NodeJS.Platform): () => void {
   };
 }
 
+// Installs report progress on the console for the `eve dev` user; capture it
+// so the assertions below can check what that user sees.
+let consoleInfo: MockInstance<typeof console.info>;
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllEnvs();
+  consoleInfo = vi.spyOn(console, "info").mockImplementation(() => {});
   workerMockState.messages = [];
   workerMockState.workers = [];
   mockedExistsSync.mockReturnValue(false);
@@ -125,6 +130,10 @@ beforeEach(() => {
     queueMicrotask(() => child.emit("close", 0));
     return child;
   });
+});
+
+afterEach(() => {
+  consoleInfo.mockRestore();
 });
 
 describe("loadOptionalEnginePackage", () => {
@@ -493,6 +502,7 @@ describe("installPackageIntoProject", () => {
         ignoredOptionalDependencies: ["node-liblzma"],
       }),
     ).rejects.toThrow("exit 1");
+    expect(consoleInfo).not.toHaveBeenCalledWith('[eve:dev] installed "just-bash".');
   });
 
   it("uses the project's package manager", async () => {
@@ -513,6 +523,10 @@ describe("installPackageIntoProject", () => {
         shell: process.platform === "win32",
       }),
     );
+    expect(consoleInfo.mock.calls).toEqual([
+      ['[eve:dev] installing optional dependency "microsandbox" via `pnpm add -D microsandbox`...'],
+      ['[eve:dev] installed "microsandbox".'],
+    ]);
   });
 
   it("enables shell spawning on Windows so package manager shims resolve", async () => {

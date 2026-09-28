@@ -15,7 +15,7 @@ const PNPM_BUILD_POLICY_ANSWER_KEY = "install.pnpm.buildScripts";
 const AUTO_ACCEPT_RECOMMENDED_ITEMS = new Set(["eve/self-modification"]);
 type PnpmBuildPolicyChoice = PnpmBuildPolicyAction | "abort";
 
-export interface DeclaredPnpmBuildPolicy {
+interface DeclaredPnpmBuildPolicy {
   readonly packages: readonly string[];
   readonly optional: true;
   readonly recommendedAction: "ignore-optional";

@@ -22,7 +22,7 @@ export interface SetupConnectionConnectorOptions {
 }
 
 /** Connector identity returned by the Vercel CLI. */
-export interface ConnectConnectorRef {
+interface ConnectConnectorRef {
   uid: string;
   id: string;
   name?: string;
@@ -320,7 +320,6 @@ async function resolveFallbackConnector(
           ],
           { cwd: options.projectRoot, onOutput: createOutput, signal: options.signal },
         ),
-      { kind: "external-action", emphasis: "browser" },
     );
     const raw = parseConnectorRef(parseJson(created.stdout));
     const ownedId = raw?.id ?? CREATED_CONNECTOR.exec(transcript.join("\n"))?.[1];

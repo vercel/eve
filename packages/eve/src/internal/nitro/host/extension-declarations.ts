@@ -4,7 +4,10 @@ import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 
-import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "#discover/filesystem.js";
+import {
+  isAuthoredTestPath,
+  SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS,
+} from "#discover/filesystem.js";
 
 /**
  * Emits declarations for an extension source tree using the extension's own
@@ -121,6 +124,7 @@ function declarationLogicalPath(logicalPath: string): string {
 async function collectDeclarationInputs(directory: string): Promise<string[]> {
   const paths: string[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (isAuthoredTestPath(entry.name)) continue;
     const entryPath = join(directory, entry.name);
     if (entry.isDirectory()) {
       paths.push(...(await collectDeclarationInputs(entryPath)));

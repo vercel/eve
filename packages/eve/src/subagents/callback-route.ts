@@ -1,6 +1,5 @@
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { z } from "#compiled/zod/index.js";
-import { REMOTE_AGENT_FAILED } from "#subagents/agent-handle-errors.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type {
   SubagentAuthorizationEvent,
@@ -10,17 +9,8 @@ import type {
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
-import type { JsonValue } from "#shared/json.js";
 import { isInputRequest } from "#shared/input.js";
-import { tokenUsageWithCostSchema, type TokenUsage } from "#shared/token-usage.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
-
-const ZERO_TOKEN_USAGE: TokenUsage = {
-  cacheReadTokens: 0,
-  cacheWriteTokens: 0,
-  inputTokens: 0,
-  outputTokens: 0,
-};
 
 // Wire schemas of the child→parent callback route. Possession of the
 // callback token is the authorization to settle; results bind to the
@@ -114,26 +104,9 @@ const taskTurnStartedCallbackSchema = z.object({
  * Turn callbacks must carry the explicit `AgentTurnOutcome` envelope:
  * the receiving parent settles the child's handle from `outcome.kind`, so
  * a turn callback that cannot state its lifecycle is rejected rather than
- * guessed at (pre-1.0: no wire compatibility shims). `usage` stays
- * unvalidated here — {@link parseCallbackUsage} drops it, never rejects
- * it, when malformed.
+ * guessed at (pre-1.0: no wire compatibility shims).
  */
 const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
-  z.object({
-    callId: z.string().min(1),
-    kind: z.literal("session.completed"),
-    output: jsonValueSchema.optional(),
-    subagentName: z.string().min(1),
-    usage: z.unknown().optional(),
-  }),
-  z.object({
-    callId: z.string().min(1),
-    /** Absent on callbacks from older eve deployments. */
-    error: jsonValueSchema.optional(),
-    kind: z.literal("session.failed"),
-    subagentName: z.string().min(1),
-    usage: z.unknown().optional(),
-  }),
   z.object({
     callId: z.string().min(1),
     kind: z.literal("turn.completed"),
@@ -276,12 +249,7 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
   }
 
   const kind = callbackKind(value);
-  if (
-    kind !== "session.completed" &&
-    kind !== "session.failed" &&
-    kind !== "turn.completed" &&
-    kind !== "turn.failed"
-  ) {
+  if (kind !== "turn.completed" && kind !== "turn.failed") {
     return Response.json({ error: "Unsupported callback kind.", ok: false }, { status: 400 });
   }
 
@@ -290,51 +258,6 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
     return Response.json({ error: "Invalid session result callback.", ok: false }, { status: 400 });
   }
   const payload = parsed.data;
-
-  // Task-session terminal callbacks carry no outcome envelope on the wire;
-  // this boundary synthesizes the terminal verdict (a task session always
-  // ends with its result) so the parent settles from an explicit outcome.
-  if (payload.kind === "session.completed") {
-    const output = payload.output ?? "";
-    const usage = parseCallbackUsage(payload.usage);
-    const base: RuntimeSubagentChildResult = {
-      callId: payload.callId,
-      kind: "subagent-result",
-      origin: "child",
-      outcome: {
-        kind: "terminal",
-        result: { kind: "succeeded", output },
-        usageDelta: usage ?? ZERO_TOKEN_USAGE,
-      },
-      output,
-      subagentName: payload.subagentName,
-    };
-    return usage === undefined ? base : { ...base, usage };
-  }
-
-  if (payload.kind === "session.failed") {
-    const error: JsonValue =
-      payload.error === undefined
-        ? {
-            code: REMOTE_AGENT_FAILED,
-            message: "Remote agent failed.",
-          }
-        : payload.error;
-    const usage = parseCallbackUsage(payload.usage);
-    return {
-      callId: payload.callId,
-      isError: true,
-      kind: "subagent-result",
-      origin: "child",
-      outcome: {
-        kind: "terminal",
-        result: { error, kind: "failed" },
-        usageDelta: usage ?? ZERO_TOKEN_USAGE,
-      },
-      output: error,
-      subagentName: payload.subagentName,
-    };
-  }
 
   if (payload.kind === "turn.completed") {
     return {
@@ -359,17 +282,4 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
     output: payload.error,
     subagentName: payload.subagentName,
   };
-}
-
-/**
- * TokenUsage arrives from a remote callee that may run a different eve version,
- * so it is validated independently and dropped — never rejected — when
- * malformed. The rest of the callback still resumes the parent.
- */
-function parseCallbackUsage(value: unknown): TokenUsage | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  const parsed = tokenUsageWithCostSchema.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
 }

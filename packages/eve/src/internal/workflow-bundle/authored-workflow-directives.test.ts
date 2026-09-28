@@ -135,6 +135,24 @@ return inner();
     });
   });
 
+  it("rejects the removed eve/workflow import", async () => {
+    const source = `import { defineTool } from "eve/tools";
+import { agent } from "eve/workflow";
+export default defineTool({ async execute(input, ctx) { return agent(ctx, input); } });`;
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      /"eve\/workflow" has been removed/u,
+    );
+  });
+
+  it("ignores a workflow directive that is not the executor's first statement", async () => {
+    const source = toolModule('  async execute() { void 0; "use workflow"; return 1; },');
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).resolves.toEqual({
+      hasDirectives: true,
+      hasWorkflowDirective: false,
+      source,
+    });
+  });
+
   it("rejects a module-level directive", async () => {
     await expect(
       prepareAuthoredWorkflowDirectives({

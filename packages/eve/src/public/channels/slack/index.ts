@@ -76,6 +76,8 @@ export {
   type SlackUploadFilesResult,
 } from "#public/channels/slack/api.js";
 
+export { type SlackFetch, type SlackTransportOptions } from "#public/channels/slack/transport.js";
+
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
 export {

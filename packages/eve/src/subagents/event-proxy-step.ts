@@ -1,14 +1,12 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler } from "#channel/adapter.js";
 import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
-import { ModeKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { setChannelContext } from "#execution/channel-context.js";
+import { publishChannelEvent } from "#execution/publish-channel-event.js";
 import {
   createDurableSessionState,
   type DurableSession,
@@ -27,10 +25,8 @@ import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { TaskInputRequestDelivery } from "#tasks/types.js";
 
 type SubagentEventHookPayload =
@@ -127,8 +123,9 @@ export async function emitProxiedSubagentEvent(input: {
     // A re-emitted child event is a distinct event on the parent stream, so it
     // gets its own id rather than the child's.
     const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-      const transformed = await callAdapterEventHandler(adapter, event, adapterCtx);
-      await writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(transformed)));
+      // The child event is already routed; do not forward it again or apply
+      // the parent's scheduled-turn suppression from createSessionEventSink.
+      await publishChannelEvent({ adapter, adapterCtx, ctx, event, writer });
     };
 
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
@@ -139,7 +136,6 @@ export async function emitProxiedSubagentEvent(input: {
           session: await closeStandaloneAuthorizationEvent({
             emit,
             eventType: input.hookPayload.event.type,
-            mode: ctx.require(ModeKey),
             session: enrichedSession,
           }),
         };
@@ -148,7 +144,6 @@ export async function emitProxiedSubagentEvent(input: {
       const proxyResult = await emitProxiedInputRequest({
         emit,
         hookPayload: input.hookPayload,
-        mode: ctx.require(ModeKey),
         session: enrichedSession,
       });
       return { result: proxyResult.entries, session: proxyResult.session };
@@ -158,8 +153,6 @@ export async function emitProxiedSubagentEvent(input: {
   } finally {
     writer.releaseLock();
   }
-
-  setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
 
   if (
     input.recordProxyInputRequests !== false &&
@@ -188,17 +181,16 @@ export async function emitProxiedSubagentEvent(input: {
 async function closeStandaloneAuthorizationEvent(input: {
   readonly emit: (event: UnstampedMessageStreamEvent) => Promise<void>;
   readonly eventType: SubagentAuthorizationEventHookPayload["event"]["type"];
-  readonly mode: RunMode;
   readonly session: HarnessSession;
 }): Promise<HarnessSession> {
   if (
-    input.mode !== "conversation" ||
-    (input.eventType !== "authorization.required" && input.eventType !== "authorization.completed")
+    input.eventType !== "authorization.required" &&
+    input.eventType !== "authorization.completed"
   ) {
     return input.session;
   }
 
   const state = getHarnessEmissionState(input.session.state);
-  const nextState = await emitTurnEpilogue(input.emit, state, input.mode);
+  const nextState = await emitTurnEpilogue(input.emit, state);
   return setHarnessEmissionState(input.session, nextState);
 }

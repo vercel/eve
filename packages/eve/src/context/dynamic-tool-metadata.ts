@@ -59,7 +59,7 @@ export function isCurrentDynamicToolMetadata(
   return metadata.callbacks !== undefined && !isOldSourceOffsetDynamicToolMetadata(metadata);
 }
 
-export function isOldStepFunctionDynamicToolMetadata(
+function isOldStepFunctionDynamicToolMetadata(
   metadata: PersistedDynamicToolMetadata,
 ): metadata is OldStepFunctionDynamicToolMetadata {
   return metadata.callbacks === undefined;

@@ -5,47 +5,21 @@ import { workflowEntry } from "#execution/session/entry.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getActiveRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
+import { readFirstTurnReply } from "#internal/testing/events.js";
 
 function buildSerializedContext(overrides: {
   channelKind: string;
   continuationToken: string;
-  mode: string;
 }): Record<string, unknown> {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": { kind: overrides.channelKind, state: {} },
     "eve.continuationToken": overrides.continuationToken,
-    "eve.mode": overrides.mode,
   };
 }
 
-describe("AppHarness pilot", () => {
-  it("runs a task-mode turn end-to-end against an in-memory test runtime", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "pilot-agent" } });
-
-    const output = await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "hello pilot harness" },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken: "schedule:app-harness-pilot",
-            mode: "task",
-          }),
-        },
-      ]);
-
-      const result = await run.returnValue;
-      return result.output;
-    });
-
-    expect(typeof output).toBe("string");
-    expect(output).toContain("hello pilot harness");
-  });
-
+describe("AppHarness", () => {
   it("keeps compiled artifacts scoped to the test runtime session", async () => {
     const runtime = await createTestRuntime({ agent: { name: "scope-probe" } });
 
@@ -81,11 +55,10 @@ describe("AppHarness pilot", () => {
             serializedContext: buildSerializedContext({
               channelKind: "http",
               continuationToken: "schedule:app-harness-tenant-a",
-              mode: "task",
             }),
           },
         ]);
-        return (await run.returnValue).output;
+        return await readFirstTurnReply(run);
       }),
       runtimeB.run(async () => {
         const run = await start(workflowEntry, [
@@ -96,11 +69,10 @@ describe("AppHarness pilot", () => {
             serializedContext: buildSerializedContext({
               channelKind: "http",
               continuationToken: "schedule:app-harness-tenant-b",
-              mode: "task",
             }),
           },
         ]);
-        return (await run.returnValue).output;
+        return await readFirstTurnReply(run);
       }),
     ]);
 

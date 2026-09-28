@@ -15,7 +15,7 @@ export default defineEval({
   async test(t) {
     const started = await t.send(
       [
-        "Use the remote-loopback agent with this message (no outputSchema):",
+        "Use the remote-loopback agent with this message:",
         `"Remember this exact fact: ${MEMORABLE_FACT} Reply only with READY."`,
         "When it returns, reply with the single word: delegated.",
       ].join(" "),

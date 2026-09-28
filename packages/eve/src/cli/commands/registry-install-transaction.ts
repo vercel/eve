@@ -47,7 +47,7 @@ async function snapshotFile(path: string): Promise<Snapshot> {
   }
 }
 
-export async function snapshotRegistryInstall(
+async function snapshotRegistryInstall(
   appRoot: string,
   item: unknown,
 ): Promise<readonly Snapshot[]> {
@@ -55,7 +55,7 @@ export async function snapshotRegistryInstall(
   return await Promise.all(paths.map((path) => snapshotFile(resolve(appRoot, path))));
 }
 
-export async function rollbackRegistryInstall(
+async function rollbackRegistryInstall(
   appRoot: string,
   snapshots: readonly Snapshot[],
 ): Promise<{ readonly restored: boolean; readonly changed: readonly string[] }> {
@@ -74,16 +74,16 @@ export async function rollbackRegistryInstall(
   return { restored: changed.length === 0, changed };
 }
 
-export type RegistryInstallFailureCode = "pnpm_build_policy" | "dependency_install";
+type RegistryInstallFailureCode = "pnpm_build_policy" | "dependency_install";
 
-export function registryInstallFailureCode(error: unknown): RegistryInstallFailureCode {
+function registryInstallFailureCode(error: unknown): RegistryInstallFailureCode {
   const message = error instanceof Error ? error.message : String(error);
   return message.includes("ERR_PNPM_IGNORED_BUILDS") || message.includes("Ignored build scripts")
     ? "pnpm_build_policy"
     : "dependency_install";
 }
 
-export function registryInstallFailureMessage(code: RegistryInstallFailureCode): string {
+function registryInstallFailureMessage(code: RegistryInstallFailureCode): string {
   return code === "pnpm_build_policy"
     ? "Dependency installation stopped because pnpm requires build-script decisions. Run `pnpm approve-builds`, then retry the eve add command."
     : "Dependency installation failed. Retry the eve add command in a terminal for details.";

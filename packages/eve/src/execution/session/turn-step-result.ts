@@ -2,16 +2,13 @@ import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
-import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
-import type { RunMode } from "#shared/run-mode.js";
 import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 
 export function resolveSessionStepResult(
   stepResult: StepResult,
   nextSerializedContext: Record<string, unknown>,
-  mode: RunMode,
   beforeStepContext: Record<string, unknown>,
   /** The turn this step belongs to. */
   turnId: string,
@@ -43,9 +40,6 @@ export function resolveSessionStepResult(
     typeof stepResult.next === "object" &&
     "done" in stepResult.next
   ) {
-    if (mode === "task" && hasPendingInputBatch(stepResult.session.state)) {
-      throw new Error("Task mode cannot complete while input requests remain pending.");
-    }
     const sessionTotals = getTurnUsageState(stepResult.session.state)?.session;
     return {
       action: "done",

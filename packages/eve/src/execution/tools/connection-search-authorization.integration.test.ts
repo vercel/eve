@@ -10,6 +10,7 @@ import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { DynamicToolSet } from "#tools/dynamic.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 function setup() {
   const getToken = vi.fn(async () => {
@@ -92,6 +93,7 @@ describe("connection search callback availability", () => {
   // The real MCP client asks the provider for a token before making any HTTP request.
   for (const missing of ["session", "origin", "both"] as const) {
     it(`fails a private-only search when ${missing} is missing`, async () => {
+      const logs = captureLogRecords();
       const state = setup();
       if (missing !== "origin") state.context.delete(SessionIdKey);
       if (missing !== "session") state.context.delete(CallbackBaseUrlKey);
@@ -102,6 +104,9 @@ describe("connection search callback availability", () => {
         );
         expect(state.getToken).toHaveBeenCalledOnce();
         expect(state.startAuthorization).not.toHaveBeenCalled();
+        expect(logs.records).toContainEqual(
+          expect.objectContaining({ level: "warn", message: "connection authorization failed" }),
+        );
       } finally {
         await state.registry.dispose();
       }
@@ -109,6 +114,7 @@ describe("connection search callback availability", () => {
   }
 
   it("keeps public tools discoverable alongside the private connection's callback error", async () => {
+    const logs = captureLogRecords();
     const state = setup();
     state.context.delete(CallbackBaseUrlKey);
 
@@ -127,5 +133,8 @@ describe("connection search callback availability", () => {
     } finally {
       await state.registry.dispose();
     }
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "connection authorization failed" }),
+    );
   });
 });

@@ -72,7 +72,7 @@ export function resolveMicrosandboxTemplateRootPath(
   );
 }
 
-export function resolveMicrosandboxTemplatesDirectory(cacheDirectory: string): string {
+function resolveMicrosandboxTemplatesDirectory(cacheDirectory: string): string {
   return resolveLocalProviderTemplatesDirectory(cacheDirectory, MICROSANDBOX_CACHE_DIRECTORY_NAME);
 }
 

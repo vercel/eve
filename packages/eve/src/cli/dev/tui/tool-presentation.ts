@@ -3,7 +3,7 @@ import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
 /** Renderer-ready copy derived from a tool call without owning its lifecycle. */
-export interface ToolPresentation {
+interface ToolPresentation {
   readonly title: string;
   readonly subtitle: string;
   readonly summarizeResult: (output: unknown) => string | undefined;
@@ -233,7 +233,7 @@ export function presentTool(
     };
   }
   if (baseName === "final_output") {
-    // Task-mode terminal signal (subagent streams): its input is the
+    // Structured-output terminal signal: its input is the
     // structured result itself, kept behind the expanded `--tools full` view.
     return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
   }

@@ -1,4 +1,5 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
@@ -12,6 +13,7 @@ import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   resumeWorkflowToolRunAnswers,
   resumeWorkflowToolRunDismissal,
+  toToolInputResponseResponder,
 } from "#execution/tools/workflow/answer.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
@@ -69,7 +71,9 @@ export async function routeProxiedDeliverStep(input: {
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
   // Only a person's own message may answer or skip a pending question.
   const resolveMessage =
-    sourceDelivery.caller === undefined && sourceDelivery.taskDeliveryId === undefined;
+    !hasDelegatedSessionContext(input.serializedContext ?? {}) &&
+    sourceDelivery.caller === undefined &&
+    sourceDelivery.taskDeliveryId === undefined;
   // Every payload routes against the same state, so an answer-hook request
   // resolved by an earlier payload is hidden from later ones; its hook accepts
   // one answer, and later messages must reach the parent instead.
@@ -138,6 +142,7 @@ export async function routeProxiedDeliverStep(input: {
         mergeStrandedResponses(parentPayloads, child, taskId);
         continue;
       }
+      const payload = coalesceDeliverPayloads(child.payloads);
       const delivery = await sendTaskInboundPayload({
         taskInboxToken: entry.address.hookToken,
         payload: {
@@ -145,8 +150,9 @@ export async function routeProxiedDeliverStep(input: {
           childContinuationToken: child.childContinuationToken,
           childSessionInbox: child.childSessionInbox,
           childResponseUrl: child.childResponseUrl,
-          inputResponses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
+          inputResponses: payload.inputResponses ?? [],
           kind: "input-response",
+          responder: payload.responder ?? toToolInputResponseResponder(sourceDelivery.auth),
           taskId,
         },
       });
@@ -160,8 +166,13 @@ export async function routeProxiedDeliverStep(input: {
     }
 
     if (child.answerHook !== undefined) {
-      const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
-      await resumeWorkflowToolRunAnswers(child.childContinuationToken, responses);
+      const payload = coalesceDeliverPayloads(child.payloads);
+      const responses = payload.inputResponses ?? [];
+      await resumeWorkflowToolRunAnswers(
+        child.childContinuationToken,
+        responses,
+        payload.responder ?? toToolInputResponseResponder(sourceDelivery.auth),
+      );
       if (child.dismissedRequestIds.length > 0) {
         await resumeWorkflowToolRunDismissal(child.childContinuationToken);
       }

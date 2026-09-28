@@ -1,10 +1,17 @@
 import { jsonSchema, simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { afterAll, expect, it } from "vitest";
+import { afterAll, expect, it, vi } from "vitest";
+import type { ApprovalResponsePolicy } from "#approval/definition.js";
+import {
+  getApprovalAuditState,
+  markApprovalCandidateAuthorizationRequired,
+} from "#harness/approval-candidates.js";
+import { setPendingAuthorization } from "#harness/authorization.js";
 import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
+import { getBackgroundTasks, registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
@@ -13,6 +20,15 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { always } from "#tools/approval/policies.js";
+import { bindDynamicConnections } from "#execution/dynamic-connections.js";
+import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
+import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
+import { createTurnStartedEvent } from "#protocol/message.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 // Diagnostic probes assert desired outcomes. Pending state is created by the
 // real harness and SDK; only provider output and runtime result delivery are scripted.
@@ -26,9 +42,10 @@ afterAll(() => {
 
 function fixture(
   name: string,
-  responseAuthorized = false,
+  responseAuthorized: boolean | ApprovalResponsePolicy = false,
   outputLimit?: number,
   outputSchema?: HarnessSession["outputSchema"],
+  executorHasPendingTasks = false,
 ) {
   const script: Reply[] = [];
   const events: UnstampedMessageStreamEvent[] = [];
@@ -108,7 +125,13 @@ function fixture(
       ...(toolName.startsWith("gate")
         ? {
             approval: responseAuthorized
-              ? { request: always(), response: async () => ({ status: "allowed" as const }) }
+              ? {
+                  request: always(),
+                  response:
+                    typeof responseAuthorized === "function"
+                      ? responseAuthorized
+                      : async () => ({ status: "allowed" as const }),
+                }
               : always(),
           }
         : {}),
@@ -141,8 +164,31 @@ function fixture(
       throw new Error("Must dispatch through executor");
     },
   });
+  const restoredTurns: string[] = [];
   const harness = createToolLoopHarness({
-    mode: "conversation",
+    prepareApprovalTurn: async (event) => {
+      const ctx = new ContextContainer();
+      ctx.set(ConnectionRegistryKey, new ConnectionRegistryImpl([]));
+      await bindDynamicConnections(ctx, {
+        dynamicConnectionResolvers: [
+          {
+            slug: "notes",
+            sourceId: "notes",
+            sourceKind: "module",
+            logicalPath: "connections/notes.ts",
+            eventNames: ["turn.started"],
+            events: {
+              "turn.started": (event) => {
+                restoredTurns.push(
+                  (event as ReturnType<typeof createTurnStartedEvent>).data.turnId,
+                );
+                return null;
+              },
+            },
+          },
+        ],
+      }).dispatch(createTurnStartedEvent(event));
+    },
     capabilities: { requestInput: true },
     tools,
     resolveModel: async () => model,
@@ -161,6 +207,7 @@ function fixture(
       turn: { id: emission.turnId || `turn_${emission.sequence}`, sequence: emission.sequence },
     });
     ctx.set(BackgroundToolExecutorKey, {
+      hasPendingTasks: () => executorHasPendingTasks,
       async execute({ batch, options }) {
         expect(batch.calls.some((call) => call.callId === options.toolCallId)).toBe(true);
         executions.push("background-admitted");
@@ -201,12 +248,16 @@ function fixture(
   reports.push(report);
   return {
     script,
+    restoredTurns,
     executions,
     events,
     step,
     drive,
     get session() {
       return session;
+    },
+    updateSession(update: (session: HarnessSession) => HarnessSession) {
+      session = update(session);
     },
     pending: () => getPendingInputBatches(session.state).flatMap((b) => b.requests),
     async gate(...names: string[]) {
@@ -244,6 +295,7 @@ for (const variant of [
   "response-authorized",
 ] as const) {
   it(`finishes unrelated ${variant} tool turn while an approval stays open`, async () => {
+    const logs = captureLogRecords();
     const f = fixture(variant, variant === "response-authorized");
     await f.gate("gateA");
     f.script.push(
@@ -267,6 +319,9 @@ for (const variant of [
     }[variant];
     expect([...f.executions].sort()).toEqual(expectedExecutions.sort());
     expect(result.settledTurn?.output).toBe("FINAL");
+    expect(
+      logs.records.filter((record) => record.message === "tool execution failed"),
+    ).toHaveLength(variant === "fail" ? 1 : 0);
   });
 }
 
@@ -379,6 +434,7 @@ it("reaches the next budget prompt after a grant while an earlier approval remai
 
 for (const variant of ["fail", "invalid"]) {
   it(`recovers from ${variant} without pending input [control]`, async () => {
+    const logs = captureLogRecords();
     const f = fixture(`control-${variant}`);
     f.script.push(
       variant === "invalid" ? [{ toolName: "read", input: { n: "invalid" } }] : calls("fail"),
@@ -386,6 +442,9 @@ for (const variant of ["fail", "invalid"]) {
     );
     expect((await f.drive({ message: "Try the tool." })).settledTurn?.output).toBe("FINAL");
     if (variant === "invalid") expect(f.executions).toHaveLength(0);
+    expect(
+      logs.records.filter((record) => record.message === "tool execution failed"),
+    ).toHaveLength(variant === "fail" ? 1 : 0);
   });
 }
 
@@ -534,6 +593,203 @@ it("continues after responder-authorized approval of the older batch", async () 
   expect(result.settledTurn?.output).toBe("FINAL");
 });
 
+it.each(["rejected", "failed", "timed-out"] as const)(
+  "finishes a %s response attempt without starting a turn and permits retry",
+  async (outcome) => {
+    let allowed = false;
+    const policy = vi.fn(() => {
+      if (allowed) return { status: "allowed" as const };
+      if (outcome === "failed") throw new Error("Policy unavailable");
+      return { status: "rejected" as const, reason: "Alice needs Bob's approval." };
+    });
+    const f = fixture(`response-${outcome}`, policy);
+    await f.gate("gateA");
+    const input = {
+      attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
+        response,
+        auth: {
+          attributes: {},
+          authenticator: "test",
+          issuer: "test",
+          principalId: "alice",
+          principalType: "user" as const,
+        },
+      })),
+    };
+    const start = f.events.length;
+    const ingested = await f.step(input);
+    expect(typeof ingested.next).toBe("function");
+    expect(f.events.slice(start).map((event) => event.type)).toEqual(["approval.candidate"]);
+    expect(policy).not.toHaveBeenCalled();
+    const clock =
+      outcome === "timed-out"
+        ? vi.spyOn(Date, "now").mockReturnValue(Date.now() + 600_001)
+        : undefined;
+    try {
+      await f.drive();
+    } finally {
+      clock?.mockRestore();
+    }
+    const events = f.events.slice(start);
+    expect(events.at(-1)?.type).toBe("session.waiting");
+    expect(events.filter((event) => event.type === "session.waiting")).toHaveLength(1);
+    expect(events.some((event) => event.type === "turn.started")).toBe(false);
+    expect(getApprovalAuditState(f.session.state).candidateHistory.at(-1)?.status).toBe(outcome);
+    expect(f.pending()).toHaveLength(1);
+    expect(f.executions).toEqual([]);
+
+    allowed = true;
+    f.script.push("Bob approved the task.");
+    const retryStart = f.events.length;
+    await f.drive(input);
+    expect(f.pending()).toEqual([]);
+    expect(f.executions).toEqual(["gateA"]);
+    expect(
+      f.events.slice(retryStart).filter((event) => event.type === "session.waiting"),
+    ).toHaveLength(1);
+  },
+);
+
+it.each(["persisted", "executor"] as const)(
+  "finishes a refusal while unrelated background work is %s, like an ordinary conversation turn",
+  async (source) => {
+    const f = fixture(
+      `refusal-with-background-${source}`,
+      () => ({ status: "rejected", reason: "Bob must approve Alice's note." }),
+      undefined,
+      undefined,
+      source === "executor",
+    );
+    await f.gate("gateA");
+    if (source === "persisted") {
+      f.updateSession((session) =>
+        registerWorkflowToolRun(session, {
+          callId: "report-call",
+          toolName: "report",
+          lifetime: "session",
+          origin: { turnId: "report-turn", stepIndex: 0 },
+          address: { runId: "report-run", hookToken: "report-hook" },
+          task: {
+            taskId: "report-task",
+            metadata: { kind: "workflow", name: "report" },
+            dispatchContext: { auth: { current: null, initiator: null } },
+          },
+        }),
+      );
+    }
+    const ordinaryStart = f.events.length;
+    f.script.push("The report is still running.");
+    await f.drive({ message: "What is the report's status?" });
+    expect(f.events.slice(ordinaryStart).at(-1)?.type).toBe("session.waiting");
+
+    const responseStart = f.events.length;
+    await f.drive({
+      attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
+        response,
+        auth: {
+          attributes: {},
+          authenticator: "test",
+          issuer: "test",
+          principalId: "alice",
+          principalType: "user" as const,
+        },
+      })),
+    });
+    expect(f.events.slice(responseStart).map((event) => event.type)).toEqual([
+      "approval.candidate",
+      "approval.candidate",
+      "session.waiting",
+    ]);
+    expect(f.pending()).toHaveLength(1);
+    expect(f.executions).toEqual([]);
+    if (source === "persisted") {
+      expect(getBackgroundTasks(f.session.state).query({ state: "working" })).toHaveLength(1);
+    }
+  },
+);
+
+it("does not announce waiting while a candidate needs sign-in, then completes on expiry", async () => {
+  const policy = vi.fn(() => ({ status: "allowed" as const }));
+  const f = fixture("candidate-sign-in", policy);
+  await f.gate("gateA");
+  await f.step({
+    attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
+      response,
+      auth: {
+        attributes: {},
+        authenticator: "test",
+        issuer: "test",
+        principalId: "alice",
+        principalType: "user" as const,
+      },
+    })),
+  });
+  const candidate = getApprovalAuditState(f.session.state).activeCandidates[0]!;
+  const challenges = [
+    {
+      candidateId: candidate.candidateId,
+      name: "notes",
+      hookUrl: "https://example.com/callback",
+      challenge: { url: "https://example.com/sign-in" },
+    },
+  ];
+  f.updateSession((session) => ({
+    ...session,
+    state: setPendingAuthorization(
+      markApprovalCandidateAuthorizationRequired({
+        state: session.state,
+        candidateId: candidate.candidateId,
+        authorizationChallenges: challenges,
+      }),
+      { challenges },
+    ),
+  }));
+  const start = f.events.length;
+  await f.drive();
+  expect(f.events.slice(start)).toEqual([]);
+  expect(policy).not.toHaveBeenCalled();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(candidate.expiresAt + 1);
+  try {
+    await f.drive();
+  } finally {
+    clock.mockRestore();
+  }
+  expect(f.events.slice(start).map((event) => event.type)).toEqual([
+    "authorization.completed",
+    "approval.candidate",
+    "session.waiting",
+  ]);
+  expect(f.pending()).toHaveLength(1);
+});
+
+it("uses the normal turn boundary for a mixed accepted and refused delivery", async () => {
+  const f = fixture("mixed-response", ({ request }) =>
+    request.toolName === "gateA"
+      ? { status: "allowed" }
+      : { status: "rejected", reason: "Bob must approve this task." },
+  );
+  await f.gate("gateA");
+  f.script.push(calls("gateB"));
+  await f.drive({ message: "Prepare Bob's independent task." });
+  const start = f.events.length;
+  f.script.push("Alice's task is complete.");
+  await f.drive({
+    attributedInputResponses: f.pending().map((request) => ({
+      response: { requestId: request.requestId, optionId: "approve" },
+      auth: {
+        attributes: {},
+        authenticator: "test",
+        issuer: "test",
+        principalId: "alice",
+        principalType: "user" as const,
+      },
+    })),
+  });
+  expect(f.executions).toEqual(["gateA"]);
+  expect(f.pending().map((request) => request.action.toolName)).toEqual(["gateB"]);
+  expect(f.events.slice(start).filter((event) => event.type === "session.waiting")).toHaveLength(1);
+});
+
 it("resumes a complete batch while another batch has only a partial approval [control]", async () => {
   const f = fixture("complete-and-partial-approvals");
   // Given A and B need approval together, and a second independent B is pending.
@@ -543,6 +799,7 @@ it("resumes a complete batch while another batch has only a partial approval [co
   f.script.push(calls("gateB"));
   await f.drive({ message: "Prepare another independent B." });
   const independentB = f.pending().at(-1)!;
+  const independentTurn = getPendingInputBatches(f.session.state)[1]!.event!.turnId;
 
   // When one delivery answers A and the independent B.
   f.script.push("Independent B approved.");
@@ -555,6 +812,7 @@ it("resumes a complete batch while another batch has only a partial approval [co
 
   // Then only the complete batch executes and replies, without another model call.
   expect(result.settledTurn?.output).toBe("Independent B approved.");
+  expect(f.restoredTurns).toEqual([independentTurn]);
   expect(f.executions).toEqual(["gateB"]);
   expect(f.pending()).toHaveLength(2);
   f.script.push("Both approved.");

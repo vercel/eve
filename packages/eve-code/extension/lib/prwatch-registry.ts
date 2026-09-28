@@ -11,7 +11,7 @@ export interface PrwatchRegistration extends PrwatchTarget {
   readonly callId: string;
 }
 
-export interface PrwatchRecord {
+interface PrwatchRecord {
   readonly callId: string;
   readonly cancelled: boolean;
 }

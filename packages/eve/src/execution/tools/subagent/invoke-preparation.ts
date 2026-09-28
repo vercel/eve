@@ -42,7 +42,7 @@ import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
 
 const log = createLogger("execution.agent-invocation");
 
-export type OwnerAgentDispatchPlanEntry =
+type OwnerAgentDispatchPlanEntry =
   | {
       readonly kind: "resume";
       readonly action: RuntimeAgentHandleAction;
@@ -194,15 +194,7 @@ function classifyFreshStart(input: {
     dynamicAgentConfig?.description ??
     (registered?.definition.kind === "subagent" ? registered.definition.description : undefined);
   const source: SubagentInputSource =
-    description === undefined
-      ? { outputSchema: input.bundle.turnAgent.outputSchema, type: "runtime" }
-      : {
-          description,
-          outputSchema:
-            dynamicAgentConfig?.outputSchema ??
-            input.bundle.graph?.nodesByNodeId.get(action.nodeId)?.turnAgent?.outputSchema,
-          type: "local",
-        };
+    description === undefined ? { type: "runtime" } : { description, type: "local" };
   return {
     kind: "start",
     target: { action, dynamicSubagentAgentConfig: dynamicAgentConfig, kind: "local", source },

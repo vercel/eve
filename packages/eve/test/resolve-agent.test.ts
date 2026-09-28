@@ -2,9 +2,10 @@ import { asSchema } from "ai";
 import { describe, expect, it } from "vitest";
 import { z } from "#compiled/zod/index.js";
 
-import { compileFromMemory } from "../src/compiler/compile-from-memory.js";
+import { compileFromMemory } from "../src/internal/testing/compile-from-memory.js";
 import { defineTool } from "../src/tools/definition.js";
-import { ResolveAgentError, resolveAgent } from "../src/runtime/resolve-agent.js";
+import { resolveAgent } from "../src/runtime/resolve-agent.js";
+import { ResolveAgentError } from "../src/runtime/resolve-helpers.js";
 import { serializeInputSchema } from "../src/tools/schema.js";
 
 describe("resolveAgent", () => {

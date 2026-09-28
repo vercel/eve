@@ -604,7 +604,9 @@ export class EveAgentStore<TData> {
       if (this.#activeTurn === undefined && settled) this.#status = "ready";
     }
     this.#callbacks.onSessionChange?.(this.#session?.state);
-    this.#publish();
+    // Catch-up publishes once when it ends; a notification per replayed event would force one
+    // React commit per event within a single task and trip React's nested update limit.
+    if (this.#status !== "resuming") this.#publish();
     if (this.#activeTurn === undefined && wasStreaming && settled) {
       this.#callbacks.onFinish?.(this.#snapshot);
     }

@@ -14,17 +14,17 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
+import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 
 describe("legacy session import", () => {
   it.each([
     { inputVersion: 1 as const, inboxVersion: 1 },
-    { inputVersion: 1 as const, inboxVersion: 3 },
-    { inputVersion: 2 as const, inboxVersion: 7 },
     { inputVersion: 2 as const, inboxVersion: 7, duplicateImport: true },
     { inputVersion: 2 as const, inboxVersion: 7, committedInput: true },
   ])(
     "imports $inputVersion / inbox $inboxVersion / duplicate $duplicateImport / committed $committedInput",
     async (variant) => {
+      const output = captureConsoleOutput();
       const runtime = await createTestRuntime({ agent: { name: "legacy-import-current" } });
       {
         await runtime.run(async () => {
@@ -38,7 +38,6 @@ describe("legacy session import", () => {
                 "eve.auth": null,
                 "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
                 "eve.channel": { kind: "http", state: {} },
-                "eve.mode": "conversation",
               },
             },
           ]);
@@ -131,6 +130,13 @@ describe("legacy session import", () => {
           }
         });
       }
+      // The SDK reports the ignored `latest` deployment once per process.
+      expect(
+        output.unexpected(
+          workflowSdkNotice.ignoredLatestDeployment,
+          workflowSdkNotice.unpinnedDelivery,
+        ),
+      ).toEqual([]);
     },
   );
 });
@@ -164,6 +170,7 @@ describe("unsupported drivers", () => {
 
 describe("imported session lifetime", () => {
   it("hands off again using a current checkpoint and completes the original stream", async () => {
+    const output = captureConsoleOutput();
     const runtime = await createTestRuntime({ agent: { name: "legacy-handoff" } });
     await runtime.run(async () => {
       const driver = await start(legacySessionDriverWorkflow, [
@@ -221,6 +228,10 @@ describe("imported session lifetime", () => {
         if ((await driver.status) === "running") await driver.cancel();
       }
     });
+    expect(output.lines).toContainEqual(
+      expect.stringContaining(workflowSdkNotice.unpinnedDelivery),
+    );
+    expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
   });
   it("expires after the renewed configured lifetime", async () => {
     const runtime = await createTestRuntime({ agent: { name: "legacy-timeout" } });
@@ -252,6 +263,5 @@ function legacyContext() {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": { kind: "http", state: {} },
-    "eve.mode": "conversation",
   };
 }

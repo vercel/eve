@@ -24,16 +24,12 @@ import {
   parseInputResponses,
   type StrictInputResponses,
 } from "#shared/input.js";
-import type { JsonObject } from "#shared/json.js";
-import type { RunMode } from "#shared/run-mode.js";
 
 interface BaseChannelSendOptions {
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly context?: readonly string[];
   readonly initiatorAuth?: SessionAuthContext | null;
-  readonly mode?: RunMode;
-  readonly outputSchema?: JsonObject;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
   /** Updates the session policy; omission preserves it. New sessions default to auto, schedules to cohort. */
@@ -48,7 +44,6 @@ export type ChannelSendOptions<TState = undefined> = [TState] extends [undefined
 interface BaseChannelRespondOptions<TState = undefined> {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
-  readonly outputSchema?: JsonObject;
   readonly state?: Partial<TState>;
 }
 
@@ -116,7 +111,6 @@ export function createChannelOperations<TState = undefined>(input: {
             {
               context: options.context,
               message,
-              outputSchema: options.outputSchema,
             },
             options,
           );
@@ -130,7 +124,6 @@ export function createChannelOperations<TState = undefined>(input: {
             {
               context: options.context,
               inputResponses: validatedInputResponses,
-              outputSchema: options.outputSchema,
               state: options.state,
             },
             options,

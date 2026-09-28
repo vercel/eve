@@ -345,7 +345,6 @@ describe("startRemoteAgentSession", () => {
         "find the marker",
       ].join("\n"),
       capabilities: {},
-      mode: "conversation",
     });
     expect(
       readForwardedParentSessionBaggage(
@@ -485,7 +484,7 @@ describe("startRemoteAgentSession", () => {
     );
   });
 
-  it("sends a declared outputSchema on the remote create-session request", async () => {
+  it("sends a requested outputSchema on the remote create-session request", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -504,10 +503,11 @@ describe("startRemoteAgentSession", () => {
       type: "object",
     } as const;
 
+    const action = createAction();
     await startRemoteAgentSession({
-      action: createAction(),
+      action: { ...action, input: { ...action.input, outputSchema } },
       callbackBaseUrl: "https://caller.example.com",
-      remote: { ...createRemoteAgent(), outputSchema },
+      remote: createRemoteAgent(),
       session: {
         agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
         compaction: { recentWindowSize: 10, threshold: 100000 },
@@ -520,15 +520,13 @@ describe("startRemoteAgentSession", () => {
 
     const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
     expect(body.outputSchema).toEqual(outputSchema);
-    expect(body.mode).toBe("conversation");
     expect(body.capabilities).toEqual({});
   });
 
-  it("ignores an empty model-passed outputSchema instead of forwarding it", async () => {
-    // Models routinely pass `outputSchema: {}` despite the tool schema saying
-    // to omit it. An empty schema constrains nothing, but forwarding it flips
-    // the remote child into structured-output mode and discards its text
-    // reply — local subagent dispatch already drops it; remote must match.
+  it("ignores an empty requested outputSchema instead of forwarding it", async () => {
+    // An empty schema constrains nothing, but forwarding it flips the remote
+    // child into structured-output mode and discards its text reply; local
+    // subagent dispatch already drops it, and remote must match.
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({

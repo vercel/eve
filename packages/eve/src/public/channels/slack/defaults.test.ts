@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import { defaultEvents, defaultInputRequestedHandler } from "#public/channels/slack/defaults.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 function sessionContext(
   current: SessionContext["session"]["auth"]["current"] = null,
@@ -150,6 +151,7 @@ describe("defaultInputRequestedHandler private input requests", () => {
   });
 
   it("fails closed when no direct-message reviewer can be resolved", async () => {
+    const logs = captureLogRecords();
     const { channel, post, postDirectMessage, postEphemeral } = buildChannelStub();
 
     await defaultInputRequestedHandler(() => "direct-message")(
@@ -161,6 +163,12 @@ describe("defaultInputRequestedHandler private input requests", () => {
     expect(post).not.toHaveBeenCalled();
     expect(postDirectMessage).not.toHaveBeenCalled();
     expect(postEphemeral).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "direct-message input request not delivered because no reviewer was resolved",
+      }),
+    );
   });
 
   it("rolls back partial DM delivery without announcing an unusable approval", async () => {
@@ -198,6 +206,7 @@ describe("defaultInputRequestedHandler private input requests", () => {
   });
 
   it("keeps the actionable DM committed when its thread announcement fails", async () => {
+    const logs = captureLogRecords();
     const { channel, post, request } = buildChannelStub({
       triggeringMessageTs: "111.333",
       triggeringUserId: "U_REVIEWER",
@@ -219,6 +228,12 @@ describe("defaultInputRequestedHandler private input requests", () => {
       messageChannelId: "D123",
       messageTs: "dm3",
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "failed to announce private input request",
+      }),
+    );
   });
 
   it("previews the triggering message and updates the routed DM card after settlement", async () => {
@@ -626,6 +641,7 @@ describe("defaultEvents authorization.required", () => {
   });
 
   it("keeps the link-free public status when the ephemeral delivery fails", async () => {
+    const logs = captureLogRecords();
     const { channel, post, postEphemeral } = buildChannelStub({ triggeringUserId: "U777" });
     postEphemeral.mockRejectedValueOnce(new Error("ephemeral rejected"));
 
@@ -636,6 +652,9 @@ describe("defaultEvents authorization.required", () => {
     expect(publicText).toBe("Connect with Notion to continue");
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "Slack auth ephemeral delivery failed" }),
+    );
   });
 
   it("reuses an existing public status when authorization is already pending", async () => {

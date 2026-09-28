@@ -1,6 +1,6 @@
 import type { SessionTraceContext } from "#channel/types.js";
 import { ConversationIdKey } from "#context/keys.js";
-import { readConversationId } from "#tracing/conversation-context.js";
+import { readConversationId } from "#shared/conversation-identity.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";

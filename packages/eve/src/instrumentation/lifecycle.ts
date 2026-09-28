@@ -121,12 +121,13 @@ export function attemptIdempotencyKey(scope: InstrumentationAttemptScope): strin
   return `step:${scope.attemptId}`;
 }
 
-/** One model call occurs per AI SDK step within an eve attempt. */
+/** Identifies one provider call, including retries, within an AI SDK step. */
 export function modelCallIdempotencyKey(
   scope: InstrumentationAttemptScope,
   stepNumber: number,
+  callIndex: number,
 ): string {
-  return `model:${scope.attemptId}:${String(stepNumber)}`;
+  return `model:${scope.attemptId}:${String(stepNumber)}:${String(callIndex)}`;
 }
 
 export function toolCallIdempotencyKey(

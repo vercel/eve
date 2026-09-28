@@ -9,7 +9,7 @@ export interface CliApplicationContext {
   resolveAgent(): Promise<EveProjectContext>;
 }
 
-export type CliApplicationRootRequirement = (command: Command) => boolean;
+type CliApplicationRootRequirement = (command: Command) => boolean;
 
 /** Adds application-root resolution to a project-scoped CLI command. */
 export function applicationCommand(

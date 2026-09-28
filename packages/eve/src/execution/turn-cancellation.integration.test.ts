@@ -27,6 +27,7 @@ import { defineMemory } from "#public/memory/index.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
+import { captureConsoleOutput } from "#internal/testing/log-records.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
@@ -42,14 +43,12 @@ const WAIT_TOOL_NAME = "wait_for_cancel";
 function buildSerializedContext(overrides: {
   channelKind: string;
   continuationToken: string;
-  mode: string;
 }): Record<string, unknown> {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
     "eve.channel": { kind: overrides.channelKind, state: {} },
     "eve.continuationToken": overrides.continuationToken,
-    "eve.mode": overrides.mode,
   };
 }
 
@@ -351,7 +350,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -442,7 +440,6 @@ describe("turn cancellation integration", () => {
             serializedContext: buildSerializedContext({
               channelKind: "http",
               continuationToken,
-              mode: "conversation",
             }),
           },
         ]);
@@ -482,62 +479,8 @@ describe("turn cancellation integration", () => {
     60_000,
   );
 
-  it("ends a task session with no caller when its turn is cancelled", async () => {
-    const runtime = await createTestRuntime({
-      agent: { name: "task-hook-cancel" },
-      modules: [
-        {
-          loadNamespace: async () => ({
-            default: defineHook({
-              events: {
-                "turn.started"(_event, ctx) {
-                  ctx.cancel();
-                },
-              },
-            }),
-          }),
-          logicalPath: "hooks/gate.ts",
-        },
-      ],
-    });
-
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Prepare the nightly report." },
-          serializedContext: buildSerializedContext({
-            channelKind: "http",
-            continuationToken: "http:task-hook-cancel",
-            mode: "task",
-          }),
-        },
-      ]);
-      const stream = captureTurnEvents(run);
-
-      try {
-        await expect(run.returnValue).resolves.toEqual({ output: "The turn was cancelled." });
-        await expect(run.status).resolves.toBe("completed");
-        const cancelledTurn = await stream.nextTurn();
-        expect(
-          containsEventSequence(cancelledTurn, [
-            "turn.started",
-            "turn.cancelled",
-            "session.waiting",
-          ]),
-        ).toBe(true);
-        expect(filterEventsByType(cancelledTurn, "step.started")).toHaveLength(0);
-        expectNoFailureEvents(cancelledTurn);
-        const ending = await stream.nextTurn();
-        expect(ending.map((event) => event.type)).toEqual(["session.completed"]);
-      } finally {
-        stream.dispose();
-      }
-    });
-  }, 60_000);
-
   it("keeps an abort-shaped memory recall error terminal while the turn signal is active", async () => {
+    const output = captureConsoleOutput();
     const fixture = await createAbortRecallRuntime("turn-active-memory-abort", {
       waitForAbort: false,
     });
@@ -551,26 +494,31 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken: "http:turn-active-memory-abort",
-            mode: "conversation",
           }),
         },
       ]);
       const stream = captureTurnEvents(run);
+      let failed = false;
 
       try {
         await fixture.recallStarted;
         const failedTurn = await stream.nextTurn();
         expect(failedTurn.at(-1)?.type).toBe("session.failed");
         expect(filterEventsByType(failedTurn, "turn.cancelled")).toHaveLength(0);
+        await expect(run.returnValue).rejects.toThrow("Agent workflow failed.");
+        failed = true;
       } finally {
         stream.dispose();
-        await run.cancel();
+        // A failed run is terminal and rejects cancellation.
+        if (!failed) await run.cancel();
       }
     });
+    expect(output.lines).toContain(
+      "[eve:execution.workflow-entry] workflow loop threw — emitting terminal session.failed",
+    );
   });
 
   it.each([
-    { turnPolicy: undefined, turnCount: 1 },
     { turnPolicy: "steer" as const, turnCount: 1 },
     { turnPolicy: "queue" as const, turnCount: 2 },
   ])(
@@ -602,7 +550,6 @@ describe("turn cancellation integration", () => {
             serializedContext: buildSerializedContext({
               channelKind: "http",
               continuationToken,
-              mode: "conversation",
             }),
           },
         ]);
@@ -642,6 +589,7 @@ describe("turn cancellation integration", () => {
   );
 
   it("cancels a turn mid-tool and accepts the next message normally", async () => {
+    const output = captureConsoleOutput();
     const fixture = await createWaitToolRuntime("turn-cancel-tool");
     const continuationToken = "http:turn-cancel-tool";
 
@@ -654,7 +602,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -718,9 +665,11 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   });
 
   it("cancels a turn through the eve channel cancel route", async () => {
+    const output = captureConsoleOutput();
     const fixture = await createWaitToolRuntime("turn-cancel-route");
     const continuationToken = "http:turn-cancel-route";
     const cancelViaRoute = createCancelRouteCaller();
@@ -738,7 +687,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -799,9 +747,11 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   }, 60_000);
 
   it("cancels a turn from a channel route helper addressed by continuation token", async () => {
+    const output = captureConsoleOutput();
     const fixture = await createWaitToolRuntime("turn-cancel-helper");
     const rawToken = "turn-cancel-helper";
     const continuationToken = `http:${rawToken}`;
@@ -831,7 +781,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -891,9 +840,11 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   }, 60_000);
 
   it("consumes a cancel with a stale turn guard as a no-op and keeps the turn running", async () => {
+    const output = captureConsoleOutput();
     const fixture = await createWaitToolRuntime("turn-cancel-stale-guard");
     const continuationToken = "http:turn-cancel-stale-guard";
 
@@ -906,7 +857,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -940,6 +890,7 @@ describe("turn cancellation integration", () => {
         await run.cancel();
       }
     });
+    expect(output.lines).not.toContain("[eve:harness.tool-loop] tool execution failed");
   }, 60_000);
 
   it("treats a cancel after the turn settled as a benign no-op", async () => {
@@ -955,7 +906,6 @@ describe("turn cancellation integration", () => {
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);

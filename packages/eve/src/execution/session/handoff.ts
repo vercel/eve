@@ -12,7 +12,6 @@ import { startSessionOwnerStep } from "#execution/workflow-runtime.js";
 import { sessionHandoffMarkerToken } from "#execution/session-inbox/address.js";
 import { isSessionIdleForHandoffStep } from "#execution/session/handoff-steps.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
-import type { RunMode } from "#shared/run-mode.js";
 
 /**
  * Cross-deployment checkpoint contract. The successor may run a different eve
@@ -20,13 +19,12 @@ import type { RunMode } from "#shared/run-mode.js";
  * an incompatible successor rejects the handoff instead of misreading state.
  * Dynamic skill manifests retain instruction bodies and package revisions.
  */
-export const SESSION_CHECKPOINT_VERSION = 8;
+export const SESSION_CHECKPOINT_VERSION = 9;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {
   readonly version: typeof SESSION_CHECKPOINT_VERSION;
   readonly capabilities?: SessionCapabilities;
-  readonly mode: RunMode;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -42,7 +40,7 @@ export type SessionOwnerActivation =
       readonly payloads: readonly SessionInboxPayload[];
     };
 
-export type SessionTransferOutcome =
+type SessionTransferOutcome =
   | { readonly kind: "transferred" }
   | {
       readonly kind: "retained";
@@ -55,7 +53,7 @@ export type SessionTransferOutcome =
         | "activation-failed";
     };
 
-export interface SessionHandoffInput {
+interface SessionHandoffInput {
   readonly checkpoint: Omit<SessionCheckpoint, "serializedContext" | "sessionState" | "version">;
   readonly deploymentId: string;
   readonly inbox: SessionInboxHandle;

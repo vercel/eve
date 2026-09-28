@@ -19,7 +19,7 @@ import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js"
 import { hasConversationRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
 import type { CollectedOtel, RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import { registerOtelPipeline, type RegisteredOtelPipeline } from "#tracing/otel-registration.js";
-import { readConversationId } from "#tracing/conversation-context.js";
+import { readConversationId } from "#shared/conversation-identity.js";
 
 const log = createLogger("tracing.install-instrumentation-runtime");
 

@@ -318,6 +318,32 @@ async function executeConnectionSearch(
   return summaries;
 }
 
+export function connectionToolReplayIdentity(toolName: string): string | undefined {
+  const ctx = loadContext();
+  const discovered = ctx
+    .get(ConnectionSearchResultsKey)
+    ?.find((entry) => entry.qualifiedName === toolName);
+  if (discovered === undefined) return;
+  return ctx
+    .get(ConnectionRegistryKey)
+    ?.getConnections()
+    .find((connection) => connection.connectionName === discovered.connection)?.instanceId;
+}
+
+function assertConnectionToolInstance(closure: JsonObject): void {
+  if (typeof closure.instanceId !== "string") return;
+  const { connectionName } = readDiscoveredToolClosure(closure);
+  const connection = loadContext()
+    .get(ConnectionRegistryKey)
+    ?.getConnections()
+    .find((entry) => entry.connectionName === connectionName);
+  if (connection?.instanceId !== closure.instanceId) {
+    throw new Error(
+      "The connection for this tool call changed or is unavailable. Request a new tool call and approval.",
+    );
+  }
+}
+
 function readDiscoveredToolClosure(closure: JsonObject): {
   readonly connectionName: string;
   readonly toolName: string;
@@ -340,6 +366,7 @@ async function executeDiscoveredConnectionTool(
   if (registry === undefined) {
     throw new Error("Connection registry is unavailable while replaying a discovered tool.");
   }
+  assertConnectionToolInstance(closure);
   assertPendingConnectionAuthorizationInstances(registry);
   const scoped = await resolveInteractiveAuth(registry, connectionName);
   const auth = createAuthorizationExecution();
@@ -373,6 +400,7 @@ async function requestDiscoveredConnectionToolApproval(
   context: ApprovalContext,
 ) {
   const { connectionName } = readDiscoveredToolClosure(closure);
+  assertConnectionToolInstance(closure);
   const approval = loadContext().get(ConnectionRegistryKey)?.getConnectionApproval(connectionName);
   return approval === undefined ? "not-applicable" : await resolveApprovalPolicy(approval)(context);
 }
@@ -382,6 +410,7 @@ async function authorizeDiscoveredConnectionToolApproval(
   context: ApprovalResponseContext,
 ) {
   const { connectionName } = readDiscoveredToolClosure(closure);
+  assertConnectionToolInstance(closure);
   const approval = loadContext().get(ConnectionRegistryKey)?.getConnectionApproval(connectionName);
   const response =
     approval === undefined || typeof approval === "function" ? undefined : approval.response;
@@ -430,7 +459,14 @@ export async function resolveConnectionSearchDynamicTools() {
     const toolName = result.tool!;
     const approval = registry.getConnectionApproval(connectionName);
 
-    const closure = { connectionName, toolName };
+    const instanceId = connections.find(
+      (connection) => connection.connectionName === connectionName,
+    )?.instanceId;
+    const closure: { connectionName: string; toolName: string; instanceId?: string } = {
+      connectionName,
+      toolName,
+    };
+    if (instanceId !== undefined) closure.instanceId = instanceId;
     const discoveredTool = defineTool({
       description: result.description,
       inputSchema: (result.inputSchema ?? {

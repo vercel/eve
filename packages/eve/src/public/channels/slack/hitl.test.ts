@@ -4,10 +4,10 @@ import type { InputRequest } from "#shared/input.js";
 import {
   buildAnsweredBlocks,
   buildFreeformModalView,
+  decodeFreeformHitlActionId,
   decodeHitlActionId,
   deriveHitlResponse,
   formatInputRequestFallbackText,
-  freeformRequestIdFromActionId,
   HITL_ACTION_PREFIX,
   HITL_FREEFORM_ACTION_PREFIX,
   HITL_FREEFORM_MODAL_ACTION_ID,
@@ -395,14 +395,6 @@ describe("renderInputRequestBlocks", () => {
     expect(isFreeformAction(`${HITL_ACTION_PREFIX}call_abc`)).toBe(false);
   });
 
-  it("freeformRequestIdFromActionId extracts the trailing requestId slice", () => {
-    expect(freeformRequestIdFromActionId(`${HITL_FREEFORM_ACTION_PREFIX}call_xyz`)).toBe(
-      "call_xyz",
-    );
-    expect(freeformRequestIdFromActionId(`${HITL_ACTION_PREFIX}call_xyz`)).toBeUndefined();
-    expect(freeformRequestIdFromActionId(HITL_FREEFORM_ACTION_PREFIX)).toBeUndefined();
-  });
-
   it("preserves the return route on a freeform question", () => {
     const blocks = renderInputRequestBlocks(
       makeRequest({ requestId: "question_freeform", options: undefined }),
@@ -412,7 +404,7 @@ describe("renderInputRequestBlocks", () => {
       .action_id;
 
     expect(actionId).toBe("eve_input_freeform:route:C777:7.7:question_freeform");
-    expect(freeformRequestIdFromActionId(actionId)).toBe("question_freeform");
+    expect(decodeFreeformHitlActionId(actionId)?.requestId).toBe("question_freeform");
   });
 
   it("truncates section-block prompts past the Slack 3000-char cap", () => {

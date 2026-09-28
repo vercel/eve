@@ -44,7 +44,7 @@ export interface GitHubChannelState {
 }
 
 /** Minimal receive target needed to seed GitHub channel state. */
-export interface GitHubReceiveStateTarget {
+interface GitHubReceiveStateTarget {
   readonly installationId?: number;
   readonly issueNumber?: number;
   readonly pullRequestNumber?: number;

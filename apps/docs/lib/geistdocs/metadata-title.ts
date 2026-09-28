@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 export const siteTitle = "eve – durable AI agent framework";
-export const siteTitleTemplate = "%s – eve";
+const siteTitleTemplate = "%s – eve";
 
 export const rootTitleMetadata = {
   default: siteTitle,

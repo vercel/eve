@@ -66,7 +66,7 @@ export async function resolveDynamicToolDefinition(
  * Framework-owned definitions are already loaded with eve itself. Both use
  * the same validation, source registration, and resolver construction here.
  */
-export function resolveLoadedDynamicToolDefinition(
+function resolveLoadedDynamicToolDefinition(
   value: unknown,
   source: DynamicToolResolverSource,
   eventNames?: readonly string[],

@@ -4,7 +4,7 @@ import { join, relative, sep } from "node:path";
 import type { LogLevel } from "#internal/logging.js";
 import type { JsonObject } from "#shared/json.js";
 
-export type DevDiagnosticSource = "stderr" | "stdout" | "sandbox" | "workflow" | "tool" | "log";
+type DevDiagnosticSource = "stderr" | "stdout" | "sandbox" | "workflow" | "tool" | "log";
 
 /** Captured output or a failure summary attributed to one capture point. */
 export interface DevDiagnosticOutputEntry {
@@ -38,7 +38,7 @@ export interface DevDiagnosticSink {
   close(): Promise<void>;
 }
 
-export interface CreateDevDiagnosticSinkOptions {
+interface CreateDevDiagnosticSinkOptions {
   readonly now?: () => Date;
   readonly pid?: number;
 }

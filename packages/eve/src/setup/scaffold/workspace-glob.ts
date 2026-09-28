@@ -24,7 +24,7 @@ function workspacePatternToRegex(pattern: string): RegExp {
   return new RegExp(source, "u");
 }
 
-export function workspaceRelativePath(workspaceRoot: string, projectRoot: string): string {
+function workspaceRelativePath(workspaceRoot: string, projectRoot: string): string {
   return relative(workspaceRoot, resolve(projectRoot)).split(sep).join("/");
 }
 

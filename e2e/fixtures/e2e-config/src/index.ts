@@ -11,7 +11,7 @@ export { e2eJudgeModel } from "./judge.js";
  */
 export const MOCK_MODEL_SENTINEL = "mock";
 
-const DEFAULT_MODEL = "openai/gpt-5.6-sol";
+const DEFAULT_MODEL = "openai/gpt-6-sol";
 
 // Mock models carry no AI Gateway metadata, so mock-mode configs must state a
 // context window explicitly for the compiler. Fixtures that need a specific

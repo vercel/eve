@@ -36,7 +36,7 @@ export default teamsChannel({
 `;
 }
 
-export interface TeamsSetupPlan {
+interface TeamsSetupPlan {
   name: string;
   project: VercelProjectReference;
 }

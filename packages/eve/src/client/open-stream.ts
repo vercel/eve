@@ -5,7 +5,6 @@ import {
   EVE_STREAM_TAIL_INDEX_HEADER,
 } from "#protocol/message.js";
 import type { MessageStreamVersion } from "#protocol/message-version.js";
-import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
@@ -97,7 +96,8 @@ interface FollowStreamInput {
   readonly streamReadIdleTimeoutMs?: number;
   readonly resolveHeaders: () => Promise<Headers>;
   readonly redirect?: ClientRedirectPolicy;
-  readonly sessionId: string;
+  /** eve stream route path, such as a session stream or a parent-origin subagent stream. */
+  readonly path: string;
   readonly signal?: AbortSignal;
   readonly startIndex: number;
   /** Follow the live stream after the durable tail (default). `false` bounds the read at the tail. */
@@ -110,7 +110,7 @@ interface OpenStreamInput extends FollowStreamInput {
 }
 
 /**
- * Follows a session's durable event stream from an absolute cursor,
+ * Follows one durable event stream route from an absolute cursor,
  * transparently reconnecting whenever the transport ends.
  *
  * Transport endings reconnect from the advanced cursor. Progress resets the
@@ -289,7 +289,7 @@ export async function openStreamBody(
     input.signal?.throwIfAborted();
     const url = createClientUrl(
       input.host,
-      createEveSessionStreamRoutePath(input.sessionId),
+      input.path,
       Object.keys(searchParams).length > 0 ? searchParams : undefined,
     );
 

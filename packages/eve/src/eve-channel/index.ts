@@ -179,7 +179,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             let accepted = forwarded.accepted;
             if (!accepted && input.trustedForwarders !== undefined) {
               try {
-                accepted = await input.trustedForwarders(authResult);
+                accepted = await input.trustedForwarders(authResult, {});
               } catch (error) {
                 const errorId = logError(log, "trustedForwarders handler failed", error, {
                   forwarder: authResult.principalId,
@@ -312,8 +312,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             activityObserver: body.activityObserver,
             audienceAuth: authResult,
             auth: messageResult.auth,
-            capabilities:
-              body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
+            capabilities: body.capabilities ?? { requestInput: true },
             callback: body.callback,
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
@@ -325,7 +324,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               },
               body.context,
             ),
-            mode: body.mode ?? "conversation",
             conversationId:
               body.callback === undefined
                 ? undefined

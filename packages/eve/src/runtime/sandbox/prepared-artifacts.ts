@@ -56,7 +56,7 @@ export async function loadSandboxPreparedArtifact(input: {
   return entry?.artifact;
 }
 
-export async function loadSandboxPreparedArtifactsManifest(
+async function loadSandboxPreparedArtifactsManifest(
   source: RuntimeCompiledArtifactsSource,
 ): Promise<SandboxPreparedArtifactsManifest | null> {
   if (source.kind === "bundled") {

@@ -29,7 +29,7 @@ export function resolveEvalClientOptions(
   return options;
 }
 
-export interface CreateEvalClientOptions {
+interface CreateEvalClientOptions {
   /** Working directory for Vercel lookup and the fallback on-disk project link. */
   readonly workspaceRoot?: string;
   /** Test seams for the two authority-resolution boundaries. */

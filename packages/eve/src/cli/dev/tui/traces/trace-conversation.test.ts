@@ -436,11 +436,12 @@ describe("renderConversationItem", () => {
     expect(lines[1]).not.toMatch(/\buser\b/);
   });
 
-  it("shows gateway cost right-aligned when the step span carries it", () => {
+  it.each([
+    [{ "gen_ai.usage.cost": 0.0031 }, 0.0031],
+    [{ "gen_ai.usage.cost": 0.5, "gen_ai.usage.gateway_cost": 0.0123 }, 0.0123],
+  ])("shows the same cost and precision as the trace tree for %o", (attributes, cost) => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
-    const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {
-      "gen_ai.usage.cost": 0.0031,
-    });
+    const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, attributes);
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
       "gen_ai.request.model": "claude-test",
       "gen_ai.input.messages": JSON.stringify([
@@ -452,9 +453,9 @@ describe("renderConversationItem", () => {
     const assistant = buildConversationItems(trace([turn, step, model])).find(
       (item) => item.kind === "assistant",
     )!;
-    expect(assistant.costUsd).toBe(0.0031);
+    expect(assistant.costUsd).toBe(cost);
     const lines = renderConversationItem(assistant, 80, THEME, false, false).map(stripAnsi);
-    expect(lines[1]!.trimEnd()).toMatch(/\$0\.0031$/);
+    expect(lines[1]!.trimEnd().endsWith(`$${cost.toFixed(4)}`)).toBe(true);
   });
 
   it("renders tool calls as their own cards with args and result", () => {

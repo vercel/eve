@@ -2,7 +2,7 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunHandle, RunInput } from "#channel/types.js";
 
 type AgentInfoRouteResponse = () => Promise<Response>;
-export interface HomeRouteMetadata {
+interface HomeRouteMetadata {
   readonly agentName: string;
 }
 /**

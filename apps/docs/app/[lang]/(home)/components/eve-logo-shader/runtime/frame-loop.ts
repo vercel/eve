@@ -16,7 +16,7 @@ import type { ControlsRef, HeroRuntimeState } from "./state";
 // Imported only by index.tsx's single effect and driven by phase's useLoop.
 
 const ENV_YAW_LERP_SPEED = 3;
-export const AGENTS_ENV_YAW_LERP_SPEED = 3;
+const AGENTS_ENV_YAW_LERP_SPEED = 3;
 const AGENTS_ENV_YAW_OFFSET = -Math.PI * 0.1;
 const ASCII_MOUSE_LERP_SPEED = 6;
 const PAINT_MOVEMENT_GRACE_MS = 72;

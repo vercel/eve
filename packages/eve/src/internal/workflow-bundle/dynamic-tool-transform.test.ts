@@ -1662,7 +1662,8 @@ export default defineDynamic({
       }
       const tools = buildTools(baseUrl);
       const timestamp = Date.now();
-      console.log("tools built at", timestamp);
+      const audit = [];
+      audit.push("tools built at " + timestamp);
       return tools;
     },
   },

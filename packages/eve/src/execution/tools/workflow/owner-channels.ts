@@ -25,7 +25,7 @@ type ChannelReadResult<R> =
     ? { readonly channel: C; readonly next: IteratorResult<T> }
     : never;
 
-export type ChannelRead<R extends readonly ChannelReader<string, unknown>[]> = ChannelReadResult<
+type ChannelRead<R extends readonly ChannelReader<string, unknown>[]> = ChannelReadResult<
   R[number]
 >;
 

@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
 import type { ClientSessionState } from "#client/types.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_VERSION_HEADER,
+  createSubagentCalledEvent,
+  type SubagentCalledStreamEvent,
+} from "#protocol/message.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -1328,5 +1333,122 @@ describe("ClientSession", () => {
       vi.useRealTimers();
     }
     expect(streamStartIndices).toEqual([null, "2"]);
+  });
+});
+
+describe("ClientSession.streamSubagent", () => {
+  function calledEvent(
+    input: { readonly remote?: boolean; readonly sessionId?: string } = {},
+  ): SubagentCalledStreamEvent {
+    return createSubagentCalledEvent({
+      callId: "call_1",
+      childSessionId: "child_1",
+      name: "research",
+      remote:
+        input.remote === false
+          ? undefined
+          : { resolverId: "subagents/research", url: "https://remote.test" },
+      sequence: 1,
+      sessionId: input.sessionId ?? "session_1",
+      toolName: "research",
+      turnId: "turn_1",
+      workflowId: "workflow_1",
+    });
+  }
+
+  const childEvents = [
+    { type: "turn.started", data: { turnId: "child_turn_1" } },
+    { type: "turn.completed", data: { turnId: "child_turn_1" } },
+  ];
+
+  it("follows a remote child through the parent proxy with this session's credentials", async () => {
+    const requests: { readonly url: URL; readonly authorization: string | null }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
+      requests.push({
+        authorization: new Headers(init?.headers).get("authorization"),
+        url: new URL(String(request)),
+      });
+      return createBoundedStreamResponse(childEvents);
+    });
+    const parentState = { sessionId: "session_1", streamIndex: 4 };
+    const session = createSession(parentState, {
+      resolveHeaders: async () => new Headers({ authorization: "Bearer parent" }),
+    });
+
+    const types: string[] = [];
+    for await (const event of session.streamSubagent(calledEvent(), { follow: false })) {
+      types.push(event.type);
+    }
+
+    expect(types).toEqual(["turn.started", "turn.completed"]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url.origin).toBe("https://eve.test");
+    expect(requests[0]!.url.pathname).toBe(
+      "/eve/v1/session/session_1/subagents/call_1/child_1/stream",
+    );
+    expect(requests[0]!.url.searchParams.get("startIndex")).toBeNull();
+    expect(requests[0]!.authorization).toBe("Bearer parent");
+    expect(session.state).toBe(parentState);
+  });
+
+  it("resumes a child from its own cursor without touching the parent cursor", async () => {
+    const urls: URL[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      urls.push(new URL(String(request)));
+      return createStreamResponse(childEvents.slice(1));
+    });
+    const parentState = { sessionId: "session_1", streamIndex: 9 };
+    const session = createSession(parentState);
+
+    const types: string[] = [];
+    for await (const event of session.streamSubagent(calledEvent(), {
+      startIndex: 1,
+      streamReconnectPolicy: { reconnect: false },
+    })) {
+      types.push(event.type);
+    }
+
+    expect(types).toEqual(["turn.completed"]);
+    expect(urls[0]!.searchParams.get("startIndex")).toBe("1");
+    expect(session.state).toBe(parentState);
+  });
+
+  it("follows a local child through its own session stream route", async () => {
+    const urls: URL[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      urls.push(new URL(String(request)));
+      return createBoundedStreamResponse(childEvents);
+    });
+    const session = createSession();
+
+    for await (const _event of session.streamSubagent(calledEvent({ remote: false }), {
+      follow: false,
+    })) {
+      // Drain the bounded child stream.
+    }
+
+    expect(urls[0]!.pathname).toBe("/eve/v1/session/child_1/stream");
+  });
+
+  it("rejects a subagent event from a different parent session", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const session = createSession();
+
+    expect(() => session.streamSubagent(calledEvent({ sessionId: "session_2" }))).toThrow(
+      "streamSubagent() requires a subagent.called event from session session_1, but it came from session session_2.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a subagent event recorded before childStreamPath existed", () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const session = createSession();
+    const { childStreamPath: _, ...legacyData } = calledEvent().data;
+    const legacy = { ...calledEvent(), data: legacyData } as SubagentCalledStreamEvent;
+
+    expect(() => session.streamSubagent(legacy)).toThrow(
+      "streamSubagent() requires a subagent.called event with childStreamPath, but call call_1 has none. The event was recorded by an older eve version.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

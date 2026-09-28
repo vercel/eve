@@ -11,7 +11,6 @@ import {
   runSelectComponent,
   type ChannelSetupAwaitChoice,
   type PromptState,
-  type SetupSpinnerIntent,
 } from "#setup/cli/index.js";
 import { createRailLog, type RailSpinner } from "#setup/cli/index.js";
 import pc from "#compiled/picocolors/index.js";
@@ -301,7 +300,7 @@ export interface Prompter {
      * returning a handle whose `stop()` clears it. Present on the real prompter;
      * optional so lightweight test fakes can omit it.
      */
-    spinner?(message: string, intent?: SetupSpinnerIntent): RailSpinner;
+    spinner?(message: string): RailSpinner;
   };
 }
 

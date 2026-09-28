@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
-import { AuthKey, ChannelInstrumentationKey, ModeKey, SessionTraceSeedKey } from "#context/keys.js";
+import { AuthKey, ChannelInstrumentationKey, SessionTraceSeedKey } from "#context/keys.js";
 import { initializeSessionInstrumentation } from "#instrumentation/session-init.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
@@ -47,7 +47,6 @@ describe("initializeSessionInstrumentation", () => {
       principalId: "service-1",
       principalType: "service",
     });
-    ctx.set(ModeKey, "task");
 
     initializeSessionInstrumentation({ agentName: "test-agent", ctx });
 

@@ -1,4 +1,4 @@
-export const GH_SIGNED_COMMIT_VERSION = "2";
+export const GH_SIGNED_COMMIT_VERSION = "3";
 
 export const GH_SIGNED_COMMIT_SOURCE = String.raw`#!/usr/bin/env node
 const { execFileSync } = require("node:child_process");
@@ -122,7 +122,7 @@ async function request(method, path, body) {
 }
 
 function git(...values) {
-  return execFileSync("git", values, { stdio: ["ignore", "pipe", "inherit"] });
+  return execFileSync("git", values, { stdio: ["ignore", "pipe", "inherit"], maxBuffer: Infinity });
 }
 
 function fail(message) {

@@ -12,7 +12,6 @@ import {
   ConversationIdKey,
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
-  ModeKey,
   ParentSessionKey,
   ParentTraceContextKey,
   ActivityObserverKey,
@@ -24,7 +23,7 @@ import {
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { readConversationId } from "#tracing/conversation-context.js";
+import { readConversationId } from "#shared/conversation-identity.js";
 import { buildConversationContext } from "#channel/conversation-context.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
@@ -67,7 +66,6 @@ export function buildRunContext(input: {
     ctx.set(ContinuationTokenKey, run.continuationToken);
     ctx.set(ContinuationHookTokensKey, [run.continuationToken]);
   }
-  ctx.set(ModeKey, run.mode);
   ctx.set(AuthKey, auth);
   if (run.initiatorAuth !== undefined || run.input.message !== undefined) {
     ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);

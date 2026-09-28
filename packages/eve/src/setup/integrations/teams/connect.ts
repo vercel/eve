@@ -3,14 +3,14 @@ import type { VercelProjectReference } from "#setup/project-resolution.js";
 import { runVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
 import { z } from "#compiled/zod/index.js";
 
-export const TEAMS_TRIGGER_PATH = "/eve/v1/teams";
+const TEAMS_TRIGGER_PATH = "/eve/v1/teams";
 
-export interface TeamsConnectorRef {
+interface TeamsConnectorRef {
   id: string;
   uid: string;
 }
 
-export interface ProvisionTeamsConnectorDeps {
+interface ProvisionTeamsConnectorDeps {
   runVercel: typeof runVercel;
   runVercelCaptureStdout: typeof runVercelCaptureStdout;
 }

@@ -5,6 +5,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
+import { readDevelopmentGenerationAvailability } from "#internal/workflow/development-runtime-compatibility.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
@@ -652,6 +653,9 @@ describe("development generation artifacts", () => {
     const compileResult = await compileAgent({ startPath: app.appRoot });
     const generation = await stageDevelopmentGeneration(compileResult);
     expect(generation.workflowSourceFingerprint).toEqual(expect.any(String));
+    await expect(
+      readDevelopmentGenerationAvailability(app.appRoot, basename(generation.snapshotRoot)),
+    ).resolves.toEqual({ kind: "ready", runtimeAppRoot: generation.runtimeAppRoot });
 
     const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
       compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
@@ -679,6 +683,9 @@ describe("development generation artifacts", () => {
       await compileAgent({ startPath: app.appRoot }),
     );
     expect(helperChanged.workflowSourceFingerprint).not.toBe(generation.workflowSourceFingerprint);
+    await expect(
+      readDevelopmentGenerationAvailability(app.appRoot, basename(generation.snapshotRoot)),
+    ).resolves.toEqual({ kind: "ready", runtimeAppRoot: generation.runtimeAppRoot });
 
     await writeFile(
       join(app.appRoot, "agent", "tools", "plain.mjs"),
@@ -688,6 +695,9 @@ describe("development generation artifacts", () => {
       await compileAgent({ startPath: app.appRoot }),
     );
     expect(plainChanged.workflowSourceFingerprint).toBe(helperChanged.workflowSourceFingerprint);
+    await expect(
+      readDevelopmentGenerationAvailability(app.appRoot, basename(helperChanged.snapshotRoot)),
+    ).resolves.toEqual({ kind: "ready", runtimeAppRoot: helperChanged.runtimeAppRoot });
     expect(plainChanged.fingerprint).not.toBe(helperChanged.fingerprint);
   });
 

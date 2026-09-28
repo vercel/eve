@@ -5,7 +5,7 @@
  * as stable identifiers (sandbox key derivation, credential routing),
  * never to make authentication decisions.
  */
-export interface VercelOidcTokenClaims {
+interface VercelOidcTokenClaims {
   readonly ownerId: string | undefined;
   readonly projectId: string | undefined;
 }

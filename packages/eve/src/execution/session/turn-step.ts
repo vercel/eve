@@ -21,7 +21,6 @@ import {
   CapabilitiesKey,
   ChannelDeliveryKey,
   HandleEventKey,
-  ModeKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
   StaticModelReferenceKey,
@@ -69,7 +68,6 @@ import {
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
-import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import {
@@ -429,22 +427,23 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
               }),
           ),
         ]);
-        await rebindMissingCompiledDynamicToolCallbacks({
-          ctx,
-          event: createTurnStartedEvent({
-            sequence: initialEmissionState.sequence,
-            turnId: activeTurnId(initialEmissionState),
-          }),
-          messages: history.initial.messages,
-          resolvers: dynamicToolResolvers,
-        });
+        if (!isHarnessBetweenTurns(initialSession)) {
+          await rebindMissingCompiledDynamicToolCallbacks({
+            ctx,
+            event: createTurnStartedEvent({
+              sequence: initialEmissionState.sequence,
+              turnId: activeTurnId(initialEmissionState),
+            }),
+            messages: history.initial.messages,
+            resolvers: dynamicToolResolvers,
+          });
+        }
       }
     } catch (error) {
       await failChannelDeliveries(error);
       throw error;
     }
 
-    const mode = ctx.require(ModeKey);
     const modelCallsPerStep =
       bundle.resolvedAgent.config?.experimental?.workflow?.modelCallsPerStep ?? 1;
     const capabilities = ctx.get(CapabilitiesKey);
@@ -470,10 +469,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         compactOnly: input.input?.control === "compact",
         createRuntime: createWorkflowRuntime,
         handleEvent,
+        prepareApprovalTurn: (event) => dynamicConnections.dispatch(createTurnStartedEvent(event)),
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
         instrumentation,
-        mode,
         modelResolutionScope: {
           moduleMap: bundle.moduleMap,
           nodeId: bundle.nodeId,
@@ -499,22 +498,24 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
           const result = await runBackgroundStep(ctx, session, async (enrichedSession) => {
             ctx.setVirtualContext(HandleEventKey, handleEvent);
             ctx.setVirtualContext(StaticModelReferenceKey, effectiveAgent.turnAgent.model ?? null);
-            let schemaSession = firstCall
-              ? resolveEffectiveOutputSchema({
-                  agentOutputSchema: effectiveAgent.turnAgent.outputSchema,
-                  input: resolved,
-                  mode,
-                  session: enrichedSession,
-                })
-              : enrichedSession;
+            let schemaSession =
+              firstCall && resolved?.outputSchema !== undefined
+                ? { ...enrichedSession, outputSchema: resolved.outputSchema }
+                : enrichedSession;
+            const connectionState = getHarnessEmissionState(schemaSession.state);
             await dynamicConnections.rehydrate(
-              getHarnessEmissionState(schemaSession.state),
+              connectionState,
               runtimeIdentity,
-              isHarnessBetweenTurns(schemaSession),
+              isHarnessBetweenTurns(schemaSession)
+                ? undefined
+                : { sequence: connectionState.sequence, turnId: activeTurnId(connectionState) },
             );
             if (firstCall && completedAuths) {
               let emissionState = getHarnessEmissionState(schemaSession.state);
-              if (isHarnessBetweenTurns(schemaSession)) {
+              const startsTurn = completedAuths.some(
+                ({ candidateId }) => candidateId === undefined,
+              );
+              if (startsTurn && isHarnessBetweenTurns(schemaSession)) {
                 const turnInput = createTurnInputMessages(
                   consumeDeferredStepInput({ session: schemaSession, input: stepInput }).input,
                 );
@@ -556,10 +557,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                 }
                 schemaSession = setHarnessEmissionState(schemaSession, emissionState);
               }
-              for (const { authorization, result } of completedAuths) {
-                const candidateId = pendingAuth?.challenges.find(
-                  (challenge) => challenge.attemptId === result.attemptId,
-                )?.candidateId;
+              for (const { authorization, result, candidateId } of completedAuths) {
                 await handleEvent(
                   createAuthorizationCompletedEvent({
                     attemptId: result.attemptId,
@@ -610,7 +608,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     const durableResult = resolveSessionStepResult(
       stepResult,
       nextSerializedContext,
-      mode,
       input.serializedContext,
       activeTurnId(initialEmissionState),
     );

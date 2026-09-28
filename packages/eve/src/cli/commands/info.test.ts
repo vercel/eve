@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { getApplicationInfo } from "#internal/application/paths.js";

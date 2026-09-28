@@ -34,13 +34,7 @@ function startWorker(
 }
 
 function endTurn(session: HarnessSession, settledTurn: SettledTurn, turnId = "current-turn") {
-  return resolveSessionStepResult(
-    { next: null, session, settledTurn },
-    {},
-    "conversation",
-    {},
-    turnId,
-  );
+  return resolveSessionStepResult({ next: null, session, settledTurn }, {}, {}, turnId);
 }
 
 function withUsage(session: HarnessSession, inputTokens: number): HarnessSession {

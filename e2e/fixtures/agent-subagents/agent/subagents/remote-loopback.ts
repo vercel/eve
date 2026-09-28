@@ -15,7 +15,7 @@ export default defineDynamic({
     "session.started": () =>
       defineRemoteAgent({
         description:
-          "Remote loopback agent. Call this only when the user explicitly asks to use the remote-loopback agent, passing the user's requested message through unchanged. Never pass `outputSchema`.",
+          "Remote loopback agent. Call this only when the user explicitly asks to use the remote-loopback agent, passing the user's requested message through unchanged.",
         url: () =>
           process.env.VERCEL_URL !== undefined && process.env.VERCEL_URL !== ""
             ? `https://${process.env.VERCEL_URL}`

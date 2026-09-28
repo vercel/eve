@@ -1,11 +1,6 @@
 import { z } from "#compiled/zod/index.js";
 
-import {
-  agentTurnOutcomeSchema,
-  agentTurnOutcomeWithCostSchema,
-} from "#shared/agent-turn-outcome.js";
 import { jsonObjectSchema, jsonValueSchema } from "#shared/json-schemas.js";
-import { tokenUsageSchema, tokenUsageWithCostSchema } from "#shared/token-usage.js";
 
 /**
  * Eve-owned `tool-call` action requested by the model.
@@ -47,7 +42,7 @@ export type RuntimeRemoteAgentCallActionRequest = z.infer<
   typeof runtimeRemoteAgentCallActionRequestSchema
 >;
 
-export const runtimeRemoteAgentCallActionRequestSchema = z
+const runtimeRemoteAgentCallActionRequestSchema = z
   .object({
     callId: z.string(),
     description: z.string(),
@@ -194,17 +189,6 @@ export type RuntimeAgentDispatchRequest =
   | RuntimeSubagentDispatchRequest;
 
 /**
- * Zod schema for one runtime action request.
- */
-export const runtimeActionRequestSchema = z.discriminatedUnion("kind", [
-  runtimeLoadSkillActionRequestSchema,
-  runtimeRemoteAgentCallActionRequestSchema,
-  runtimeSubagentCallActionRequestSchema,
-  runtimeToolCallActionRequestSchema,
-  runtimeWorkflowToolCallActionRequestSchema,
-]);
-
-/**
  * Runtime-owned authored tool-result projected back into a harness resume call.
  */
 export type RuntimeToolResultActionResult = z.infer<typeof runtimeToolResultActionResultSchema>;
@@ -238,8 +222,8 @@ const runtimeToolResultActionResultSchema = z
  * turn. The parent settles the agent handle from `outcome.kind` and folds
  * `outcome.usageDelta` into its session totals; `output`/`isError` remain
  * the tool-result projection shown to the model. Every producer states the
- * envelope explicitly — task-mode boundaries synthesize a terminal one —
- * so the parent never infers lifecycle from an absent field. `usage`
+ * envelope explicitly, so the parent never infers lifecycle from an absent
+ * field. `usage`
  * carries the turn's token spend so the caller can attribute the
  * subagent's tokens.
  *
@@ -262,50 +246,6 @@ export interface RuntimeSubagentChildResult {
   readonly subagentName: string;
   readonly usage?: import("#shared/token-usage.js").TokenUsage;
 }
-
-const runtimeSubagentChildResultFields = {
-  backgroundTask: z
-    .strictObject({
-      status: z.literal("working"),
-      taskId: z.string(),
-    })
-    .optional(),
-  callId: z.string(),
-  isError: z.boolean().optional(),
-  kind: z.literal("subagent-result"),
-  origin: z.literal("child"),
-  output: jsonValueSchema,
-  subagentName: z.string(),
-};
-
-/** Token-only subagent result schema retained for historical wire formats. */
-export const runtimeSubagentChildResultSchema = z
-  .object({
-    backgroundTask: z
-      .strictObject({
-        status: z.literal("working"),
-        taskId: z.string(),
-      })
-      .optional(),
-    callId: z.string(),
-    isError: z.boolean().optional(),
-    kind: z.literal("subagent-result"),
-    origin: z.literal("child"),
-    outcome: agentTurnOutcomeSchema,
-    output: jsonValueSchema,
-    subagentName: z.string(),
-    usage: tokenUsageSchema.optional(),
-  })
-  .strict();
-
-/** Current subagent result schema, including optional model token cost. */
-export const runtimeSubagentChildResultWithCostSchema: z.ZodType<RuntimeSubagentChildResult> = z
-  .object({
-    ...runtimeSubagentChildResultFields,
-    outcome: agentTurnOutcomeWithCostSchema,
-    usage: tokenUsageWithCostSchema.optional(),
-  })
-  .strict();
 
 /**
  * Subagent failure synthesized on the parent side when no child produced a

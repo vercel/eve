@@ -5,6 +5,7 @@ import type {
   RuntimeIdentity,
   RuntimeTraceContext,
   MessageStreamEvent,
+  SubagentCalledStreamEvent,
 } from "#protocol/message.js";
 import type {
   CancelSessionResult,
@@ -12,6 +13,7 @@ import type {
   CreateSessionOptions,
   SendTurnInput,
   SendTurnOptions,
+  StreamOptions,
 } from "#client/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -292,7 +294,7 @@ export interface EveEvalLiveTurn {
 }
 
 /** Operations and state belonging to one accepted session. */
-export interface EveEvalSessionDriver {
+interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
   readonly events: readonly MessageStreamEvent[];
   /**
@@ -325,6 +327,15 @@ export interface EveEvalSessionDriver {
   start(message: string, options?: SendTurnOptions): Promise<EveEvalLiveTurn>;
   /** Send one text turn with a local file attached as a data URL. */
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
+  /**
+   * Follow one delegated child's stream through this parent session, with the
+   * eval client's credentials. Local children use their own stream route; remote
+   * children use the parent-origin proxy.
+   */
+  streamSubagent(
+    called: SubagentCalledStreamEvent,
+    options?: StreamOptions,
+  ): AsyncIterable<MessageStreamEvent>;
 }
 
 /** One accepted session, exposed by `t.session()`, turns, and target attachment helpers. */

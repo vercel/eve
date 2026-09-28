@@ -5,6 +5,7 @@ import { isTracingSuppressed } from "@opentelemetry/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { batchSpanProcessor } from "#tracing/batch-span-processor.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 interface RecordingExporter extends SpanExporter {
   readonly batches: readonly (readonly unknown[])[];
@@ -80,12 +81,16 @@ describe("batchSpanProcessor", () => {
   });
 
   it("logs a refused export rather than failing the turn that produced it", async () => {
+    const logs = captureLogRecords();
     const processor = batchSpanProcessor(recordingExporter({ fail: true }), {
       maxExportBatchSize: 1,
     });
 
     processor.onEnd(span(1));
     await expect(processor.forceFlush()).resolves.toBeUndefined();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "span export failed" }),
+    );
   });
 
   it("exports only sampled spans", async () => {
@@ -121,6 +126,7 @@ describe("batchSpanProcessor", () => {
   });
 
   it("does not overlap a later batch after the first times out", async () => {
+    const logs = captureLogRecords();
     vi.useFakeTimers();
     const batches: (readonly unknown[])[] = [];
     const callbacks: Array<(result: { code: number }) => void> = [];
@@ -153,9 +159,16 @@ describe("batchSpanProcessor", () => {
     expect(batchIndexes(batches)).toStrictEqual([[1], [2]]);
     callbacks[1]?.({ code: 0 });
     await flushed;
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "span export timed out; preserving exporter serialization",
+      }),
+    );
   });
 
   it("continues exporting after exporter forceFlush times out", async () => {
+    const logs = captureLogRecords();
     vi.useFakeTimers();
     const exporter = recordingExporter() as RecordingExporter & {
       forceFlush: () => Promise<void>;
@@ -175,9 +188,16 @@ describe("batchSpanProcessor", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(batchIndexes(exporter.batches)).toStrictEqual([[1], [2]]);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "exporter flush timed out; preserving exporter serialization",
+      }),
+    );
   });
 
   it("drains queued batches and closes the exporter after shutdown times out", async () => {
+    const logs = captureLogRecords();
     vi.useFakeTimers();
     const batches: (readonly unknown[])[] = [];
     const callbacks: Array<(result: { code: number }) => void> = [];
@@ -208,6 +228,12 @@ describe("batchSpanProcessor", () => {
     callbacks[1]?.({ code: 0 });
     await vi.advanceTimersByTimeAsync(0);
     expect(shutdown).toHaveBeenCalledOnce();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "span export timed out; preserving exporter serialization",
+      }),
+    );
   });
 
   it("drains and then closes the exporter on shutdown, and takes nothing after", async () => {

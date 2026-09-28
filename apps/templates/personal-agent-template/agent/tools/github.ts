@@ -1,7 +1,7 @@
 import { buildEveToolMap } from "@github-tools/sdk/eve";
 import { getToken, UserAuthorizationRequiredError } from "@vercel/connect";
 import { defineDynamic } from "eve/tools";
-import { CONNECT_USER_ISSUER, GITHUB_CONNECTOR } from "../../shared/connect.js";
+import { CONNECT_USER_ISSUER, GITHUB_CONNECTOR } from "../../lib/connect.js";
 
 export default defineDynamic({
   events: {

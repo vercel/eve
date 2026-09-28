@@ -29,7 +29,7 @@ import {
   type TaskView,
 } from "#tasks/types.js";
 
-export interface BackgroundWorkflowOwner {
+interface BackgroundWorkflowOwner {
   readonly kind: "session";
   readonly commands: ChannelReader<"commands", TaskRunInboundPayload>;
   readonly signal: AbortSignal;

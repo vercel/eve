@@ -344,6 +344,38 @@ describe("withEve Vercel config", () => {
     expect(rewrites).toBeUndefined();
   });
 
+  it("discovers a peer workspace through eveRoot", async () => {
+    const workspaceRoot = await createTempAppRoot();
+    const nextRoot = join(workspaceRoot, "apps", "web");
+    await Promise.all([
+      mkdir(join(workspaceRoot, "agents", "support", "agent"), { recursive: true }),
+      mkdir(join(workspaceRoot, "agents", "research", "agent"), { recursive: true }),
+      mkdir(nextRoot, { recursive: true }),
+      writeFile(
+        join(workspaceRoot, "package.json"),
+        JSON.stringify({ dependencies: { eve: "*" } }),
+      ),
+    ]);
+    process.chdir(nextRoot);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_URL", "preview.example.com");
+
+    await resolveConfig(withEve<TestConfig>({}, { eveRoot: "../.." }));
+    const outputConfig = await readJsonFile(join(nextRoot, ".vercel", "output", "config.json"));
+
+    expect(outputConfig).toMatchObject({
+      routes: expect.arrayContaining([
+        expect.objectContaining({ src: "^/eve/research/v1/(.*)$" }),
+        expect.objectContaining({ src: "^/eve/support/v1/(.*)$" }),
+      ]),
+      services: expect.objectContaining({
+        "eve-research": expect.objectContaining({ routePrefix: "/eve/research" }),
+        "eve-support": expect.objectContaining({ routePrefix: "/eve/support" }),
+      }),
+    });
+  });
+
   it("accepts a custom eve service build command", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
@@ -371,6 +403,28 @@ describe("withEve Vercel config", () => {
         },
       },
     });
+  });
+
+  it("discovers workspace members from an absolute eveRoot with a trailing slash", async () => {
+    const appRoot = await createTempAppRoot();
+    process.chdir(appRoot);
+    await mkdir(join(appRoot, "agents", "a", "agent"), { recursive: true });
+    await mkdir(join(appRoot, "agents", "b", "agent"), { recursive: true });
+    await writeFile(
+      join(appRoot, "package.json"),
+      `${JSON.stringify({ dependencies: { eve: "0.0.0" } })}\n`,
+    );
+    await writeFile(join(appRoot, "agents", "a", "agent", "agent.ts"), "export default {};\n");
+    await writeFile(join(appRoot, "agents", "b", "agent", "agent.ts"), "export default {};\n");
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    await resolveConfig(withEve<TestConfig>({}, { eveRoot: `${appRoot}/` }));
+    const outputConfig = (await readJsonFile(
+      join(appRoot, ".vercel", "output", "config.json"),
+    )) as { services?: Record<string, unknown> };
+
+    expect(Object.keys(outputConfig.services ?? {})).toEqual(["eve-a", "eve-b"]);
   });
 
   it("writes one Build Output service and route for each named agent", async () => {

@@ -8,10 +8,9 @@ import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { turnStep } from "#execution/session/turn-step.js";
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import type { RunMode } from "#shared/run-mode.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -45,38 +44,6 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("SessionExecution background task checkpoints", () => {
-  it("parks a yielded task-mode turn for background delivery", async () => {
-    const inbox: SessionInbox = {
-      claimedTokens: [],
-      claimSessionHook: vi.fn(),
-      claimSessionHooks: vi.fn(),
-      drain: () => [],
-      hasPending: () => false,
-      next: vi.fn(),
-      restore: vi.fn(),
-      onDelivery: () => () => {},
-      onInterrupt: () => () => {},
-    };
-    const sessionState = state("");
-    const settled = { notifyCaller: false, output: "Verification is running." };
-    vi.mocked(turnStep).mockResolvedValue({
-      action: "park",
-      hasPendingAuthorization: false,
-      hasPendingInputBatch: false,
-      serializedContext: {},
-      sessionState,
-      settled,
-    });
-
-    await expect(
-      createExecution({ inbox, mode: "task", sessionState }).runTurn(undefined),
-    ).resolves.toEqual({
-      authorizationAttemptIds: undefined,
-      kind: "park",
-      settled,
-    });
-  });
-
   it("retains the durable steering signal across steps until a correction uses it", async () => {
     const inbox: SessionInbox = {
       claimedTokens: [],
@@ -559,6 +526,55 @@ describe("SessionExecution background task checkpoints", () => {
   });
 
   it.each([
+    { capabilities: undefined, parks: false, serializedContext: {} },
+    { capabilities: { requestInput: true }, parks: true, serializedContext: {} },
+    {
+      capabilities: undefined,
+      parks: true,
+      serializedContext: { "eve.sessionCallback": { callId: "call_1", token: "parent" } },
+    },
+  ])(
+    "parks on pending input only when someone can answer it: %o",
+    async ({ capabilities, parks, serializedContext }) => {
+      const inbox: SessionInbox = {
+        claimedTokens: [],
+        claimSessionHook: vi.fn(),
+        claimSessionHooks: vi.fn(),
+        drain: vi.fn(() => []),
+        hasPending: vi.fn(() => false),
+        next: vi.fn(() => new Promise<never>(() => {})),
+        onDelivery: vi.fn(() => () => {}),
+        onInterrupt: vi.fn(() => () => {}),
+        restore: vi.fn(),
+      };
+      const execution = createExecution({
+        capabilities,
+        inbox,
+        serializedContext,
+        sessionState: state(""),
+      });
+      vi.mocked(turnStep)
+        .mockReset()
+        .mockImplementation(async (input) => ({
+          action: "park",
+          hasPendingAuthorization: false,
+          hasPendingInputBatch: true,
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        }));
+
+      const turn = execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
+      });
+      if (parks) {
+        await expect(turn).resolves.toMatchObject({ kind: "park" });
+      } else {
+        await expect(turn).rejects.toThrow("cannot request human input");
+      }
+    },
+  );
+
+  it.each([
     { backgroundTasks: false, settled: { notifyCaller: true, output: "Done." } },
     { backgroundTasks: true, settled: { notifyCaller: true, output: "Done." } },
     { backgroundTasks: false, settled: { notifyCaller: false, output: "Still working." } },
@@ -761,8 +777,8 @@ describe("SessionExecution background task checkpoints", () => {
 });
 
 function createExecution(input: {
+  readonly capabilities?: SessionCapabilities;
   readonly inbox: SessionInbox;
-  readonly mode?: RunMode;
   readonly queue?: SessionInputQueue;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -774,9 +790,9 @@ function createExecution(input: {
     sessionState: input.sessionState,
   });
   return new SessionExecution({
+    capabilities: input.capabilities,
     cursor,
     inbox: input.inbox,
-    mode: input.mode ?? "conversation",
     queue: input.queue ?? new SessionInputQueue(),
     sessionId: input.sessionState.sessionId,
   });

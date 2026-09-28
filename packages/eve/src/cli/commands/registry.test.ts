@@ -304,6 +304,50 @@ describe("registry commands", () => {
     ]);
   });
 
+  it("does not expose installer credentials in dependency failures", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      { name: "channel/photon-imessage", type: "registry:item" },
+    ]);
+    addRegistryItems.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          "Command failed: pnpm add https://token@example.com\nERR_PNPM_FETCH_404 token=secret",
+        ),
+        {
+          exitCode: 1,
+          stderr: "ERR_PNPM_FETCH_404 token=secret",
+        },
+      ),
+    );
+
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {
+      silent: true,
+    });
+
+    expect(logger.errors).toEqual([
+      "Dependency installation failed. Retry the eve add command in a terminal for details.",
+    ]);
+    expect(logger.errors.join("\n")).not.toContain("secret");
+    expect(logger.errors.join("\n")).not.toContain("example.com");
+  });
+
+  it("does not echo arbitrary installer output", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      { name: "channel/photon-imessage", type: "registry:item" },
+    ]);
+    addRegistryItems.mockRejectedValueOnce(new Error("arbitrary secret stderr"));
+
+    await runAddCommand(logger, "/project", "channel/photon-imessage", {
+      silent: true,
+    });
+
+    expect(logger.errors).toEqual([
+      "Dependency installation failed. Retry the eve add command in a terminal for details.",
+    ]);
+  });
+
   it("reports only paths that rollback could not restore", async () => {
     const logger = createLogger();
     getRegistryItems.mockResolvedValue([{ name: "extension/browser", type: "registry:item" }]);
@@ -438,7 +482,27 @@ describe("registry commands", () => {
     },
   );
 
-  it("rejects Web Chat before it can write into an agent workspace member", async () => {
+  it("rejects Web Chat at an unselected workspace root before mutation", async () => {
+    const logger = createLogger();
+    resolveEveProjectContext.mockResolvedValue({
+      environmentRoot: "/project",
+      kind: "workspace",
+      workspace: {
+        root: "/project",
+        members: [{ appRoot: "/project/agents/support", name: "support" }],
+      },
+    });
+
+    await runAddCommand(logger, "/project", "channel/web", {});
+
+    expect(logger.errors).toEqual(["Web Chat setup requires a selected workspace agent."]);
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(getRegistryItems).not.toHaveBeenCalled();
+    expect(addRegistryItems).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("installs Web Chat at the workspace root and sets up the selected member", async () => {
     const logger = createLogger();
     const appRoot = "/project/agents/support";
     resolveEveProjectContext.mockResolvedValue({
@@ -450,15 +514,40 @@ describe("registry commands", () => {
         members: [{ appRoot, name: "support" }],
       },
     });
-
-    await runAddCommand(logger, appRoot, "channel/web", {});
-
-    expect(logger.errors).toEqual([
-      "Web Chat installs a project-level Next.js application and cannot currently be added to a top-level agents/ workspace. Configure a root Next.js app with withEve({ agents }) instead.",
+    const runSetupCommand = vi.fn(async () => ({ kind: "completed" as const, facts: [] }));
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "channel/web",
+        type: "registry:item",
+        meta: {
+          eve: {
+            setup: [{ package: "eve", bin: "eve", args: ["integration", "setup", "web"] }],
+          },
+        },
+      },
     ]);
-    expect(getRegistryItems).not.toHaveBeenCalled();
-    expect(addRegistryItems).not.toHaveBeenCalled();
-    expect(process.exitCode).toBe(1);
+
+    await runAddCommand(
+      logger,
+      appRoot,
+      "channel/web",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetupCommand },
+    );
+
+    expect(addRegistryItems).toHaveBeenCalledWith(["https://eve.dev/r/channel/web.json"], {
+      config: expect.any(Object),
+      cwd: "/project",
+      overwrite: undefined,
+      silent: undefined,
+    });
+    expect(runSetupCommand).toHaveBeenCalledWith(
+      appRoot,
+      expect.any(Object),
+      "channel/web",
+      expect.objectContaining({ prompter: expect.any(Object) }),
+    );
+    expect(logger.errors).toEqual([]);
   });
 
   it("surfaces required deployment in non-interactive completion", async () => {
@@ -764,6 +853,53 @@ describe("registry commands", () => {
       "Setup cancelled. Run `eve add channel/slack --skip-install` when you're ready.",
     ]);
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it("treats a cancellation thrown by the setup CLI like a returned one", async () => {
+    const logger = createLogger();
+    const runSetup = vi.fn(async () => {
+      throw new WizardCancelledError();
+    });
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await runAddCommand(
+      logger,
+      "/project",
+      "channel/slack",
+      { yes: true },
+      { loadSetupCommandRunner: async () => runSetup },
+    );
+
+    expect(logger.logs).toEqual([
+      "Setup cancelled. Run `eve add channel/slack --skip-install` when you're ready.",
+    ]);
+    expect(logger.errors).toEqual([]);
+  });
+
+  it("returns unfinished setup to the TUI as a structured resume command", async () => {
+    const fake = createFakePrompter();
+    const runSetup = vi.fn(async () => ({ kind: "cancelled" as const }));
+    getRegistryItems.mockResolvedValue([
+      {
+        meta: { eve: { setup: [{ package: "@acme/slack", bin: "eve-slack", args: ["setup"] }] } },
+      },
+    ]);
+
+    await expect(
+      installRegistryItem(
+        "/project",
+        "channel/slack",
+        { prompter: fake.prompter, silent: true },
+        { loadSetupCommandRunner: async () => runSetup },
+      ),
+    ).resolves.toEqual({
+      output: [],
+      setupIncomplete: { resumeCommand: "eve add channel/slack --skip-install" },
+    });
   });
 
   it("runs setup directly without installing the item", async () => {

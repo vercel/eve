@@ -338,16 +338,6 @@ describe("nextTurnDelivery", () => {
     expect(queue.pendingCount).toBe(1);
   });
 
-  it("buffers task deliveries until the authorization callback arrives", async () => {
-    const inbox = createMockInbox([messageRead("deferred"), authorizationRead()]);
-    const queue = new SessionInputQueue();
-
-    const next = await nextTurnDelivery({ ...waitInput(inbox), queue, deferDeliveries: true });
-
-    expect(next.kind).toBe("authorization-resume");
-    expect(queue.pendingCount).toBe(1);
-  });
-
   it("reports session closure while waiting for authorization", async () => {
     const inbox = createMockInbox([{ result: { done: true, value: undefined } }]);
 
@@ -661,7 +651,7 @@ describe("buffered task completion batching", () => {
     expect(input.queue.pendingCount).toBe(0);
   });
 
-  it("auto preserves intervening user input and deferred delivery boundaries", async () => {
+  it("auto preserves intervening user input boundaries", async () => {
     const input = batchingInput(3);
     await input.cursor.apply({ serializedContext: { "eve.runtime.taskDeliveryPolicy": "auto" } });
     const question = {
@@ -677,9 +667,6 @@ describe("buffered task completion batching", () => {
       kind: "turn",
       delivery: question,
     });
-    expect(
-      input.queue.takeNext(undefined, { taskDeliveryPolicy: "auto", deferDeliveries: true }),
-    ).toBeUndefined();
     expect(input.queue.pendingCount).toBe(2);
     await expect(nextTurnDelivery(input)).resolves.toMatchObject({
       kind: "turn",

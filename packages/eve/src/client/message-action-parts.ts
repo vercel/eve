@@ -13,7 +13,7 @@ import type {
  * plain tool calls onto a single `dynamic-tool` UI part; this descriptor is the
  * shared shape those variants collapse to before rendering.
  */
-export interface ActionDescriptor {
+interface ActionDescriptor {
   readonly kind: "load-skill" | "subagent-call" | "tool-call";
   readonly name: string;
   readonly toolName: string;

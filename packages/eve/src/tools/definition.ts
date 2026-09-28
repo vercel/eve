@@ -103,13 +103,6 @@ export interface InternalToolDefinitionWithExecuteFn<
   execute: ToolExecuteFn<TInput, TOutput>;
 }
 
-export interface PublicToolDefinitionWithExecuteFn<
-  TInput = unknown,
-  TOutput = unknown,
-> extends PublicToolDefinition<TInput, TOutput> {
-  execute: ToolExecuteFn<TInput, TOutput>;
-}
-
 /**
  * A question a workflow tool asks the human on the session's channel, sent
  * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the
@@ -134,6 +127,13 @@ export interface ToolInputRequest {
   readonly prompt: string;
 }
 
+/** Public identity fields for the authenticated person who answered a question. */
+export interface ToolInputResponseResponder {
+  readonly authenticator: string;
+  readonly principalId: string;
+  readonly principalType: string;
+}
+
 /**
  * The outcome of a {@link ToolInputRequest}.
  *
@@ -147,6 +147,8 @@ export type ToolInputResponse =
       readonly status: "answered";
       /** The selected option's `id`, when the user picked one. */
       readonly optionId?: string;
+      /** Authenticated identity of the responder, without channel attributes. */
+      readonly responder?: ToolInputResponseResponder;
       /** Free text, when the user typed an answer. */
       readonly text?: string;
     }

@@ -1,5 +1,5 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "vitest";
 
@@ -16,7 +16,7 @@ import {
   type WebPackageVersions,
 } from "./index.js";
 import { PNPM_WORKSPACE_CONTENT } from "../primitives/pm/pnpm.js";
-import { WEB_APP_TEMPLATE_FILES } from "./create/web-template.js";
+import { WEB_CHANNEL_TEMPLATES } from "./create/web-template.js";
 import { pathExists } from "../path-exists.js";
 
 async function createTempDir(): Promise<string> {
@@ -484,6 +484,52 @@ describe("ensureChannel", () => {
     // CRLF (no repo .gitattributes), so compare line content, not line endings.
     const normalizeEol = (text: string): string => text.replaceAll("\r\n", "\n");
     expect(normalizeEol(channelSource)).toBe(normalizeEol(sourceChannel));
+  });
+
+  test("redirects direct Vercel service traffic to the local services router", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const proxySource = await readFile(join(projectRoot, "proxy.ts"), "utf8");
+    expect(proxySource).toContain('process.env.__VERCEL_DEV_RUNNING === "1"');
+    expect(proxySource).toContain('request.headers.get("x-forwarded-host")');
+    expect(proxySource).toContain("target.host = routerHost");
+  });
+
+  test("uses the targeted workspace agent as the Web Chat title", async () => {
+    const projectRoot = await createTempDir();
+    await mkdir(join(projectRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    await ensureChannel({
+      projectRoot,
+      kind: "web",
+      webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
+    });
+
+    const agentChatSource = await readFile(
+      join(projectRoot, "app/_components/agent-chat.tsx"),
+      "utf8",
+    );
+    expect(agentChatSource).toContain(
+      `const DEFAULT_AGENT_NAME = ${JSON.stringify(basename(projectRoot))};`,
+    );
+    expect(agentChatSource).toContain("const AGENT_NAME = WEB_CHAT_AGENT ?? DEFAULT_AGENT_NAME;");
   });
 
   test("scaffolds Web Chat questions as visible response forms", async () => {
@@ -955,6 +1001,18 @@ describe("resolveVercelHostFrameworkPreset", () => {
     );
 
     await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe(preset);
+  });
+
+  test("prefers a Vercel services config over root framework dependencies", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      JSON.stringify({ name: "demo", dependencies: { next: "16.2.6" } }),
+      "utf8",
+    );
+    await writeFile(join(projectRoot, "vercel.ts"), "export default { services: {} };\n", "utf8");
+
+    await expect(resolveVercelHostFrameworkPreset(projectRoot)).resolves.toBe("services");
   });
 
   test("returns undefined for a standalone eve project", async () => {
@@ -1469,7 +1527,7 @@ describe("scaffoldBaseProject", () => {
     const channelPath = join(projectRoot, "agent/channels/eve.ts");
     const channelSource = await readFile(channelPath, "utf8");
 
-    expect(channelSource).toBe(WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"]);
+    expect(channelSource).toBe(WEB_CHANNEL_TEMPLATES.default);
   });
 
   test("overwrites existing in-place scaffold files only when explicitly allowed", async () => {

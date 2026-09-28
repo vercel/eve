@@ -16,7 +16,6 @@ const conversation: ConversationContext = {
   audience: "private",
   channel: { kind: "http" },
   environment: "production",
-  mode: "conversation",
   principalType: "anonymous",
 };
 

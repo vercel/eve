@@ -383,11 +383,6 @@ describe("just-bash custom commands", () => {
 });
 
 describe("just-bash provider", () => {
-  it("exposes a distinct stable provider name", () => {
-    const provider = createJustBashProvider();
-    expect(provider).toBeDefined();
-  });
-
   it("creates a fresh session when no template key is requested", async () => {
     const appRoot = await createTemporaryCacheDirectory("fresh-session");
     const provider = createJustBashProvider();

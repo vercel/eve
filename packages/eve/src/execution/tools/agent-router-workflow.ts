@@ -11,12 +11,7 @@ export async function executeAgentRouterTool(
   "use workflow";
 
   const target = await chooseTarget(input.message, descriptions(ctx), ctx.abortSignal);
-  return ctx.agent(
-    target,
-    input.outputSchema === undefined
-      ? { message: input.message }
-      : { message: input.message, outputSchema: input.outputSchema },
-  );
+  return ctx.agent(target, { message: input.message });
 }
 
 async function chooseTarget(

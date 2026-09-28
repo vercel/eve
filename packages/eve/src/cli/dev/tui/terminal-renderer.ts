@@ -12,6 +12,7 @@ import type {
   AgentTUIStreamResult,
   AgentTUIToolApprovalRequest,
   AgentTUIToolApprovalResponse,
+  CommandPresentation,
   ConnectionAuthUpdate,
   SubagentStepUpdate,
   SubagentView,
@@ -43,12 +44,13 @@ import {
 import {
   isPromptControlCommand,
   parsePromptCommand,
+  promptCommandSpec,
   PROMPT_COMMANDS,
+  type ArgumentTypeaheadCommand,
   type PromptCommandSpec,
 } from "./prompt-commands.js";
 import {
   enterBadge,
-  renderFlowDrawer,
   flowMessageRows,
   renderAcknowledgeQuestion,
   renderSelectQuestion,
@@ -60,12 +62,11 @@ import {
   type SetupPanelOption,
   type SetupSelectPanelState,
 } from "./setup-panel.js";
+import { renderFlowDrawer, renderTransientDrawer } from "./flow-drawer.js";
 import type {
   SetupEditableSelectResult,
-  SetupFlowIndicator,
   SetupFlowInterrupt,
   SetupFlowRenderer,
-  SetupFlowStatus,
   SetupSelectRequest,
   SetupSelectResult,
 } from "./setup-flow.js";
@@ -79,7 +80,6 @@ import {
   selectValueAtCursor,
   type SelectState,
 } from "#setup/cli/select-state.js";
-import { renderCursorRow } from "#setup/cli/option-row.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
@@ -134,6 +134,7 @@ import {
   renderInputText,
   renderInputWithBlockCursor,
   stripAnsi,
+  wrapVisibleLine,
   stripTerminalControls,
 } from "#cli/ui/terminal-text.js";
 import type { VercelStatusSnapshot } from "./vercel-status.js";
@@ -148,7 +149,7 @@ import {
 } from "./tool-presentation.js";
 import { FileContentCache } from "./file-content-cache.js";
 import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
-import { renderQuestionPanel } from "./question-panel.js";
+import { renderQuestionChoices, renderQuestionPanel } from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
 import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
@@ -233,18 +234,15 @@ function completedTurnStatus(input: {
   return "Done";
 }
 
-type SetupFlowIndicatorState = { kind: "spinner" } | { kind: "pulse"; startedAtMs: number };
-
-type SetupFlowStatusState =
-  | { kind: "progress"; text: string; startedAtMs: number }
-  | { kind: "external-action"; text: string; emphasis: string; startedAtMs: number };
+type SetupFlowStatusState = { text: string; startedAtMs: number };
 
 type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: number };
 
 type SetupFlowState = {
   title: string;
   navigation?: PlannerNavigation;
-  indicator: SetupFlowIndicatorState;
+  /** When the flow's pulse started, so its blink stays on a steady beat. */
+  startedAtMs: number;
   lines: FlowPanelLine[];
   summary?: { headline: string; facts: readonly { label: string; value: string }[] };
   status?: SetupFlowStatusState;
@@ -276,7 +274,7 @@ const STATUS_LINE_LEFT_PADDING = "  ";
 
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 
-export type TerminalRendererOptions = {
+type TerminalRendererOptions = {
   input?: TerminalInput;
   output?: TerminalOutput;
   tools?: TerminalPartDisplayMode;
@@ -296,12 +294,12 @@ export type TerminalRendererOptions = {
   availablePromptCommands?: readonly PromptCommandSpec[];
   /** Catalog entries available to inline `/model`, `/add`, and `/login` completion. */
   argumentSuggestions?: (
-    command: "model" | "add" | "login",
+    command: ArgumentTypeaheadCommand,
   ) => Promise<readonly PromptArgumentSuggestion[]>;
   onExitRequest?: () => void;
 };
 
-export type AgentHeaderOptions = {
+type AgentHeaderOptions = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
@@ -416,6 +414,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Live (uncommitted) blocks, in transcript order. */
   #blocks: Block[] = [];
   readonly #blockById = new Map<string, Block>();
+  /** The invocation whose gutter awaits the command's outcome. */
+  #pendingCommandEcho: Block | undefined;
   /** Section ids already committed to scrollback — never re-rendered. */
   readonly #committedIds = new Set<string>();
   /**
@@ -588,8 +588,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** Monotonic id source — committed cycle ids must never be reused. */
   #devRebuildSequence = 0;
   #pendingEchoedPrompt?: string;
-  /** The open HITL question overlay, painted above the input area. */
-  #questionPanel?: (width: number) => string[];
+  /** The open HITL drawer, painted above the input area. */
+  #hitlDrawer?: (width: number) => ReturnType<typeof renderTransientDrawer>;
+  #transientPanel?: (width: number) => ReturnType<typeof renderTransientDrawer>;
+  #transientPanelClose?: () => void;
   /** The active setup flow's bordered panel: progress, question, status. */
   #setupFlow?: SetupFlowState;
   /** The clearable setup attention line (`⚠ … · /deploy`), rendered in the live footer. */
@@ -634,7 +636,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #terminalBackground?: RgbColor;
   readonly setupFlow: SetupFlowRenderer = {
-    begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
+    begin: (title) => this.#beginSetupFlow(title),
     setNavigation: (navigation) => this.#setSetupFlowNavigation(navigation),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
     readSelect: (options) => this.#readSetupSelect(options),
@@ -1029,7 +1031,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
               argumentOpen === undefined &&
               selected !== undefined &&
               this.#argumentSuggestions !== undefined &&
-              (selected.name === "add" || selected.name === "login" || selected.name === "model")
+              (selected.name === "add" ||
+                selected.name === "login" ||
+                selected.name === "loglevel" ||
+                selected.name === "model")
             ) {
               apply(lineOf(typeaheadCompletion(selected)));
               break;
@@ -1044,19 +1049,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
             if (prompt.trim().length === 0) break;
             this.#typeahead = undefined;
             this.#argumentTypeahead = undefined;
-            this.#promptHistory.add(prompt);
+            if (promptCommandSpec(prompt)?.spec.history !== "omit") this.#promptHistory.add(prompt);
             this.#inputActive = false;
             this.#stopCaretBlink();
             this.#status = STATUS.processing;
             if (isPromptControlCommand(prompt)) {
-              // Commands echo as their own line (blue, under the prompt
-              // glyph) so the elbow-connected outcome has an invocation to
-              // hang under — never as a user chat message.
-              this.#pushBlock({
-                kind: "command",
-                body: stripTerminalControls(prompt.trim()),
-                live: false,
-              });
+              // Commands echo as their own line so the elbow-connected
+              // outcome has an invocation to hang under — never as a user
+              // chat message.
+              this.#pushCommandEcho(stripTerminalControls(prompt.trim()));
             } else {
               this.#startWorking();
               this.#addUserBlock(prompt);
@@ -1288,11 +1289,46 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#stopTicker();
     this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
-    this.#status = `Approve ${formatToolApprovalTitle(request)}?  (y/n)`;
     this.#interrupted = false;
+    let approvalCursor = 0;
+    this.#hitlDrawer = (width) =>
+      renderTransientDrawer(
+        [
+          `  ${this.#theme.colors.bold(`Approve ${formatToolApprovalTitle(request)}?`)}`,
+          "",
+          ...renderQuestionChoices(
+            [
+              { id: "yes", label: "Yes" },
+              { id: "no", label: "No" },
+            ],
+            approvalCursor,
+            this.#theme,
+          ),
+        ],
+        ["y yes · n no · Ctrl-C cancel"],
+        this.#theme,
+        width,
+      );
     this.#paint();
 
     return await new Promise((resolve, reject) => {
+      const approve = () => {
+        this.#hitlDrawer = undefined;
+        this.#startWorking();
+        this.#status = STATUS.processing;
+        this.#detachInput();
+        this.#paint();
+        resolve({ approved: true });
+      };
+      const deny = () => {
+        this.#hitlDrawer = undefined;
+        this.#startWorking();
+        this.#status = STATUS.processing;
+        this.#markToolDenied(request.toolCallId);
+        this.#detachInput();
+        this.#paint();
+        resolve({ approved: false, reason: "Denied by user." });
+      };
       this.#rejectActiveReader = reject;
       this.#consumeKey = (key) => {
         switch (key.type) {
@@ -1301,27 +1337,30 @@ export class TerminalRenderer implements AgentTUIRenderer {
             // accident; terminal framing is not an authentication signal.
             if (key.framing !== "unframed") break;
             const value = key.value.toLowerCase();
-            if (value === "y") {
-              this.#startWorking();
-              this.#status = STATUS.processing;
-              this.#detachInput();
-              this.#paint();
-              resolve({ approved: true });
-            } else if (value === "n") {
-              this.#startWorking();
-              this.#status = STATUS.processing;
-              this.#markToolDenied(request.toolCallId);
-              this.#detachInput();
-              this.#paint();
-              resolve({ approved: false, reason: "Denied by user." });
-            }
+            if (value === "y") approve();
+            else if (value === "n") deny();
             break;
           }
+          case "up":
+          case "ctrl-p":
+            approvalCursor = 0;
+            this.#paint();
+            break;
+          case "down":
+          case "ctrl-n":
+            approvalCursor = 1;
+            this.#paint();
+            break;
+          case "enter":
+            if (approvalCursor === 0) approve();
+            else deny();
+            break;
           case "ctrl-r":
             this.#paint();
             break;
           case "ctrl-c":
             this.#interrupted = true;
+            this.#hitlDrawer = undefined;
             this.#stop();
             reject(interruptedError());
             break;
@@ -1352,12 +1391,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const totalRows = optionList.length + (hasFreeformRow ? 1 : 0);
     const sectionKey = questionSectionId(question.requestId);
 
-    // The overlay is the primary surface for option questions; text mode
-    // serves prompts without options. Esc (with nothing to clear) dismisses
+    // Both question shapes use a drawer. Esc (with nothing to clear) dismisses
     // the question: it resolves `undefined`, the runner returns to the
     // prompt, and the server records the still-parked request as `ignored`
     // when the user's next message resumes the turn.
-    let mode: "overlay" | "text" = hasOptions ? "overlay" : "text";
+    let mode: "select" | "text" = hasOptions ? "select" : "text";
     let cursorIndex = 0;
     let editor = EMPTY_LINE;
 
@@ -1365,29 +1403,46 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     // The panel closure reads the mutable interaction state at paint time,
     // so key handlers only update it and repaint.
-    const overlayPanel = (width: number): string[] =>
-      renderQuestionPanel(
-        {
-          prompt: stripTerminalControls(question.prompt),
-          options: optionList,
-          cursor: cursorIndex,
-          allowFreeform: hasFreeformRow,
-          editor,
-          caretVisible: this.#caretVisible,
-        },
+    const selectDrawer = (width: number) =>
+      renderTransientDrawer(
+        renderQuestionPanel(
+          {
+            prompt: stripTerminalControls(question.prompt),
+            options: optionList,
+            cursor: cursorIndex,
+            allowFreeform: hasFreeformRow,
+            editor,
+            caretVisible: this.#caretVisible,
+          },
+          this.#theme,
+          width,
+        ),
+        ["↑/↓ move · enter to select · esc to dismiss"],
         this.#theme,
         width,
       );
 
-    const renderTextSection = () => {
-      this.#upsertBlock({
-        id: sectionKey,
-        kind: "question",
-        title: stripTerminalControls(question.prompt),
-        body: formatQuestionContent(question, undefined, this.#theme),
-        preformatted: true,
-        live: true,
+    const textPanel = (width: number) => {
+      const inputRows = promptInputRows({
+        text: editor.text,
+        cursor: editor.cursor,
+        width: Math.max(1, width - 2),
+        theme: this.#theme,
+        caretVisible: this.#caretVisible,
+        ghost: "",
+        maxRows: 3,
       });
+      if (inputRows.at(-1) === "") inputRows.pop();
+      return renderTransientDrawer(
+        [
+          `  ${this.#theme.colors.bold(stripTerminalControls(question.prompt))}`,
+          "",
+          ...inputRows.map((row) => `  ${row}`),
+        ],
+        ["Enter submit · Esc dismiss"],
+        this.#theme,
+        width,
+      );
     };
 
     const syncFreeformCaret = () => {
@@ -1399,11 +1454,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
     };
 
-    const enterOverlay = () => {
-      mode = "overlay";
+    const enterSelectDrawer = () => {
+      mode = "select";
       this.#inputActive = false;
       this.#removeBlock(sectionKey);
-      this.#questionPanel = overlayPanel;
+      this.#hitlDrawer = selectDrawer;
       this.#status = "";
       syncFreeformCaret();
       this.#paint();
@@ -1411,8 +1466,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const enterTextMode = () => {
       mode = "text";
-      this.#questionPanel = undefined;
-      renderTextSection();
+      this.#hitlDrawer = textPanel;
       this.#inputActive = true;
       this.#syncInput(editor);
       this.#status = "";
@@ -1420,18 +1474,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#paint();
     };
 
-    if (mode === "overlay") {
-      enterOverlay();
-    } else {
-      enterTextMode();
-    }
+    if (mode === "select") enterSelectDrawer();
+    else enterTextMode();
 
     const finalize = (resolved: {
       optionId?: string;
       text?: string;
       label: string;
     }): AgentTUIInputQuestionResponse => {
-      this.#questionPanel = undefined;
+      this.#hitlDrawer = undefined;
       this.#upsertBlock({
         id: sectionKey,
         kind: "question",
@@ -1455,7 +1506,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // Dismissal resolves `undefined` — no answer travels and the question stays
     // open; the transcript records it compactly instead of keeping its options.
     const dismiss = () => {
-      this.#questionPanel = undefined;
+      this.#hitlDrawer = undefined;
       this.#upsertBlock({
         id: sectionKey,
         kind: "question",
@@ -1500,7 +1551,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             return;
           }
           this.#interrupted = true;
-          this.#questionPanel = undefined;
+          this.#hitlDrawer = undefined;
           this.#stopCaretBlink();
           this.#stop();
           reject(interruptedError());
@@ -1512,7 +1563,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           return;
         }
 
-        if (mode === "overlay") {
+        if (mode === "select") {
           const textNavigation = setupSelectionIntent(key, {
             textNavigation: !isOnFreeformRow(),
           });
@@ -1554,19 +1605,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
                 if (edited !== undefined) {
                   editor = edited;
                   this.#showCaret();
-                  this.#paint();
-                }
-                break;
-              }
-              // A number press selects its row directly; the freeform row's
-              // number moves focus into its inline editor instead.
-              if (key.type === "text" && /^[1-9]$/u.test(key.value)) {
-                const rowIndex = Number(key.value) - 1;
-                if (rowIndex < optionList.length) {
-                  selectOptionAt(rowIndex);
-                } else if (rowIndex === optionList.length && hasFreeformRow) {
-                  cursorIndex = rowIndex;
-                  syncFreeformCaret();
                   this.#paint();
                 }
               }
@@ -1987,33 +2025,152 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  /** Commits a slash-command invocation that was started without prompt input. */
-  renderCommandInvocation(text: string, status?: "failed"): void {
+  /** Echoes a slash-command invocation that was started without prompt input. */
+  renderCommandInvocation(text: string): void {
     const content = stripTerminalControls(text);
     if (content.trim().length === 0) return;
     this.#start();
-    const block: Block = {
-      kind: "command",
-      body: content,
-      live: false,
-    };
-    if (status === "failed") block.status = "error";
-    this.#pushBlock(block);
+    this.#pushCommandEcho(content);
     this.#paint();
   }
 
-  /** Commits one command outcome, promoting explicit status to a top-level result. */
-  renderCommandResult(text: string, tone?: "success" | "error"): void {
-    const content = stripAnsi(text);
-    if (content.trim().length === 0) return;
+  /** Lets `/help` select a command without leaving a transcript row. */
+  async choosePromptCommand(commands: readonly PromptCommandSpec[]): Promise<string | undefined> {
     this.#start();
-    this.#pushBlock({
-      kind: "result",
-      body: content,
-      live: false,
-      status: tone === "success" ? "done" : undefined,
-    });
+    this.#inputActive = false;
+    let state = typeaheadFor(commands, "/");
+    this.#transientPanel = (width) => {
+      const rows = renderCommandSuggestions(state, this.#theme, width);
+      const visible = Math.max(1, this.#height() - 7);
+      const start = Math.max(0, Math.min(state.selectedIndex - visible + 1, rows.length - visible));
+      return renderTransientDrawer(
+        rows.slice(start, start + visible),
+        ["↑/↓ move · Enter select · Esc close"],
+        this.#theme,
+        width,
+      );
+    };
+    this.#status = "";
     this.#paint();
+    return await new Promise((resolve) => {
+      this.#transientPanelClose = () => resolve(undefined);
+      this.#consumeKey = (key) => {
+        if (key.type === "up" || key.type === "ctrl-p") {
+          state = moveTypeaheadSelection(state, -1);
+          this.#paint();
+        } else if (key.type === "down" || key.type === "ctrl-n") {
+          state = moveTypeaheadSelection(state, 1);
+          this.#paint();
+        } else if (key.type === "enter") {
+          const command = selectedTypeaheadCommand(state);
+          this.#closeTransientPanel();
+          resolve(command === undefined ? undefined : typeaheadCompletion(command));
+        } else if (key.type === "escape" || key.type === "ctrl-c") {
+          this.#closeTransientPanel();
+          resolve(undefined);
+        }
+      };
+      this.#attachInput();
+    });
+  }
+
+  /** Shows local application metadata without retaining it in the transcript. */
+  async showInfoPanel(text: string): Promise<void> {
+    this.#start();
+    this.#inputActive = false;
+    const plainText = stripAnsi(text);
+    let scroll = 0;
+    const infoRows = (width: number) =>
+      plainText
+        .split("\n")
+        .flatMap((line) =>
+          wrapVisibleLine(line, Math.max(1, width - 4)).map((part) => `  ${part}`),
+        );
+    this.#transientPanel = (width) => {
+      const rows = infoRows(width);
+      const visible = Math.max(1, this.#height() - 7);
+      scroll = Math.min(scroll, Math.max(0, rows.length - visible));
+      return renderTransientDrawer(
+        rows.slice(scroll, scroll + visible),
+        [rows.length > visible ? "↑/↓ scroll · Esc close" : "Esc to close"],
+        this.#theme,
+        width,
+      );
+    };
+    this.#status = "";
+    this.#paint();
+    await new Promise<void>((resolve) => {
+      this.#transientPanelClose = resolve;
+      this.#consumeKey = (key) => {
+        if (key.type === "up" || key.type === "ctrl-p") {
+          scroll = Math.max(0, scroll - 1);
+          this.#paint();
+        } else if (key.type === "down" || key.type === "ctrl-n") {
+          const visible = Math.max(1, this.#height() - 7);
+          scroll = Math.min(scroll + 1, Math.max(0, infoRows(this.#width()).length - visible));
+          this.#paint();
+        } else if (key.type === "escape" || key.type === "ctrl-c" || key.type === "enter") {
+          this.#closeTransientPanel();
+          resolve();
+        }
+      };
+      this.#attachInput();
+    });
+  }
+
+  #closeTransientPanel(): void {
+    this.#transientPanel = undefined;
+    this.finishCommand({ kind: "dismiss" });
+    this.#consumeKey = undefined;
+    this.#transientPanelClose = undefined;
+    this.#detachInput();
+    this.#paint();
+  }
+
+  /** Completes the active command's transcript record in one operation. */
+  finishCommand(outcome: CommandPresentation): void {
+    if (outcome.kind === "dismiss") {
+      if (this.#removePendingCommandEcho()) this.#paint();
+      return;
+    }
+    const echo = this.#settleCommandEcho(outcome.summary);
+    if (echo !== undefined) echo.status = "done";
+    const content = outcome.message === undefined ? "" : stripAnsi(outcome.message);
+    if (content.trim().length === 0) {
+      if (echo !== undefined) this.#paint();
+      return;
+    }
+    this.#start();
+    this.#pushBlock({ kind: "result", body: content, live: false });
+    this.#paint();
+  }
+
+  #removePendingCommandEcho(): boolean {
+    const block = this.#pendingCommandEcho;
+    if (block === undefined) return false;
+    this.#pendingCommandEcho = undefined;
+    this.#blocks = this.#blocks.filter((candidate) => candidate !== block);
+    return true;
+  }
+
+  /**
+   * The echo stays live, and so out of scrollback, until its command settles:
+   * its gutter pulses meanwhile, then carries the outcome.
+   */
+  #pushCommandEcho(body: string): void {
+    if (this.#pendingCommandEcho !== undefined) this.#settleCommandEcho();
+    const block: Block = { kind: "command", body, live: true };
+    this.#pendingCommandEcho = block;
+    this.#pushBlock(block);
+  }
+
+  #settleCommandEcho(summary?: string): Block | undefined {
+    const block = this.#pendingCommandEcho;
+    if (block === undefined) return undefined;
+    this.#pendingCommandEcho = undefined;
+    block.live = false;
+    if (summary !== undefined) block.result = stripTerminalControls(summary);
+    return block;
   }
 
   /**
@@ -2021,16 +2178,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * every flow line, question, and status renders inside it; the transcript
    * above stays untouched.
    */
-  #beginSetupFlow(title: string, indicator: SetupFlowIndicator = "spinner"): void {
+  #beginSetupFlow(title: string): void {
     this.#start();
     if (this.#startupEditor === undefined) this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
-    const indicatorState: SetupFlowIndicatorState =
-      indicator === "pulse" ? { kind: "pulse", startedAtMs: Date.now() } : { kind: "spinner" };
     this.#setupFlow = {
       title: stripTerminalControls(title),
-      indicator: indicatorState,
+      startedAtMs: Date.now(),
       lines: [],
       outputBuffer: [],
     };
@@ -2284,7 +2439,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#start();
     const flow = this.#requireSetupFlow();
     flow.status = {
-      kind: "progress",
       text: stripTerminalControls(opts.status),
       startedAtMs: Date.now(),
     };
@@ -2721,7 +2875,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#setupFlow === undefined) {
       this.#setupFlow = {
         title: "",
-        indicator: { kind: "spinner" },
+        startedAtMs: Date.now(),
         lines: [],
         outputBuffer: [],
         // Fabricated for a bare question (no begin/end pair) — closed with
@@ -2867,18 +3021,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * status into the working indicator; `undefined` clears it. Nothing is ever
    * committed to the transcript.
    */
-  #setFlowStatus(status: SetupFlowStatus | undefined): void {
+  #setFlowStatus(status: string | undefined): void {
     const content: SetupFlowStatusState | undefined =
       status === undefined
         ? undefined
-        : typeof status === "string"
-          ? { kind: "progress", text: stripTerminalControls(status), startedAtMs: Date.now() }
-          : {
-              kind: "external-action",
-              text: stripTerminalControls(status.text),
-              emphasis: stripTerminalControls(status.emphasis),
-              startedAtMs: Date.now(),
-            };
+        : { text: stripTerminalControls(status), startedAtMs: Date.now() };
     if (this.#setupFlow !== undefined) {
       this.#setupFlow.status = content;
       if (content === undefined) this.#setupFlow.preview = undefined;
@@ -3165,6 +3312,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
   };
 
   #stop() {
+    this.#hitlDrawer = undefined;
+    const closeTransientPanel = this.#transientPanelClose;
+    if (closeTransientPanel !== undefined) {
+      this.#transientPanelClose = undefined;
+      this.#transientPanel = undefined;
+      this.finishCommand({ kind: "dismiss" });
+      this.#consumeKey = undefined;
+      closeTransientPanel();
+    }
     // An open trace viewer must leave the alt screen before teardown, and its
     // awaited `open()` resolves so the runner loop can observe the shutdown.
     this.#closeTraceViewer();
@@ -3190,6 +3346,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // vanishing with the repaint area. The in-place rebuild status and any
     // open log run settle first so their last state survives as scrollback.
     this.#settleDevRebuildStatus();
+    this.#settleCommandEcho();
     for (const block of this.#blocks) {
       if (block.kind === "log" && block.id === undefined) block.live = false;
     }
@@ -3361,7 +3518,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#messageQueue.requestCancellation();
           this.#cancelRequestedByUser = true;
           this.renderCommandInvocation(message.trim());
-          this.renderCommandResult("Turn cancellation requested.");
+          this.finishCommand({ kind: "result", summary: "Cancellation requested" });
           this.#requestTurnCancel();
           this.#paint();
           break;
@@ -3710,7 +3867,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
           this.#provisionalSubagentCallIds.has(block.subagentCallId)) ||
         block.status === "approval" ||
         block.status === "running" ||
-        (block.kind === "connection-auth" && block.live)
+        (block.kind === "connection-auth" && block.live) ||
+        // A command's echo settles only with its own outcome.
+        block === this.#pendingCommandEcho
       ) {
         continue;
       }
@@ -4305,6 +4464,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       ),
     };
     if (previous !== undefined) context.previous = previous;
+    if (this.#setupFlow !== undefined) context.setupFlowOpen = true;
+    if (this.#transientPanel !== undefined) context.transientPanelOpen = true;
     const rows = renderBlockLines(block, width, this.#theme, context);
     if ((block.depth ?? 0) === 0 && leadsWithGap(block, previous)) {
       return ["", ...rows];
@@ -4320,16 +4481,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return isProgressPulseVisible(Date.now() - startedAtMs) ? glyph : " ";
   }
 
-  #setupFlowIndicator(flow: SetupFlowState, status?: SetupFlowStatusState): FlowPanelIndicator {
-    if (flow.indicator.kind === "spinner") {
-      return { glyph: this.#spinnerFrame(), color: "yellow" };
-    }
+  #setupFlowIndicator(flow: SetupFlowState): FlowPanelIndicator {
     return {
       glyph: this.#progressPulseGlyph(
-        flow.indicator.startedAtMs,
+        flow.startedAtMs,
         this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
       ),
-      color: status?.kind === "external-action" ? "yellow" : "green",
     };
   }
 
@@ -4337,12 +4494,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const c = this.#theme.colors;
     const rows: string[] = [""];
 
-    // The HITL question overlay owns the footer down to the status bar —
-    // no indicator or hint row beneath it (the panel carries its own).
-    if (this.#questionPanel !== undefined) {
-      rows.push(...this.#questionPanel(width), "");
-      this.#pushStatusLine(rows, width);
-      return rows;
+    if (this.#transientPanel !== undefined) {
+      const drawer = this.#transientPanel(width);
+      return [...drawer.rows, ...drawer.controls];
+    }
+
+    // The HITL drawer opens one row below the transcript, then owns the
+    // footer down to its controls with no status line beneath it.
+    if (this.#hitlDrawer !== undefined) {
+      const drawer = this.#hitlDrawer(width);
+      return [...rows, ...drawer.rows, ...drawer.controls];
     }
 
     const flow = this.#setupFlow;
@@ -4351,7 +4512,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // very state the line shows (link, pending deploy, model), so mid-flow
       // values are guaranteed stale; it reappears, refreshed, when the
       // panel closes.
-      const indicator = this.#setupFlowIndicator(flow, flow.status);
+      const indicator = this.#setupFlowIndicator(flow);
       let status: FlowPanelStatus | undefined;
       if (flow.status !== undefined) {
         const { startedAtMs, ...flowStatus } = flow.status;
@@ -4446,9 +4607,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#exitArmed) {
         rows.push(clip(c.dim("Press Ctrl+C again to exit"), width), "");
       }
-      // A fully typed known command paints blue, confirming it will dispatch
-      // as a command instead of being sent to the agent as a message.
-      const isCommand = isPromptControlCommand(this.#inputText);
       const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
       const statusRows: string[] = [];
       this.#pushStatusLine(statusRows, width);
@@ -4471,7 +4629,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         width,
         theme: this.#theme,
         caretVisible: this.#caretVisible,
-        isCommand,
         ghost,
         maxRows: maxPromptRows,
       };
@@ -4503,7 +4660,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // Every waiting state — a streaming turn, a just-submitted prompt, a
     // question answer or approval resuming — shows the one live turn bar,
     // with the inert prompt anchored beneath it while a stream owns the
-    // turn. The `└ Done in …` coda is this bar's settled form.
+    // turn. The `Done in … (↑ … ↓ …)` coda is this bar's settled form.
     const waitingOnStream = turnIndicator.kind === "waiting" && this.#flowlessStatus === undefined;
     if (this.#streamDraftActive || waitingOnStream) {
       rows.push(this.#streamingTurnBar(width));
@@ -4560,20 +4717,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return clip(`${marker} ${label}${tokens}`, width);
   }
 
-  /**
-   * The settled coda: `3min 24s ── ↑ 32.4K ↓ 682`, with token flow only once
-   * the turn has moved a token.
-   */
+  /** The settled coda's duration and optional token flow. */
   #turnStatsBody(elapsedMs: number): string {
-    return `${formatTurnDuration(elapsedMs)}${this.#turnFlowSuffix()}`;
-  }
-
-  /** ` ── ↑ 32.4K ↓ 682` once the turn has moved a token; empty before. */
-  #turnFlowSuffix(): string {
     const { inputTokens, outputTokens } = this.#turnClock.usage;
-    if (inputTokens === 0 && outputTokens === 0) return "";
-    const seg = this.#theme.glyph.dash.repeat(2);
-    return ` ${seg} ${formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph)}`;
+    const flow =
+      inputTokens === 0 && outputTokens === 0
+        ? ""
+        : ` (${formatTokenFlow({ inputTokens, outputTokens }, this.#theme.glyph)})`;
+    return `${formatTurnDuration(elapsedMs)}${flow}`;
   }
 
   /**
@@ -4600,7 +4751,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       width,
       theme: this.#theme,
       caretVisible: true,
-      isCommand: false,
       ghost: "",
       maxRows: 4,
       inert: options.inert,
@@ -5055,8 +5205,6 @@ interface PromptInputRowsInput {
   readonly width: number;
   readonly theme: Theme;
   readonly caretVisible: boolean;
-  /** A fully typed known command is bold, confirming it will dispatch as a command. */
-  readonly isCommand: boolean;
   readonly ghost: string;
   readonly maxRows: number;
   /**
@@ -5081,7 +5229,6 @@ function promptInputRows({
   width,
   theme,
   caretVisible,
-  isCommand,
   ghost,
   maxRows,
   placeholder,
@@ -5105,10 +5252,7 @@ function promptInputRows({
     return [clip(`${theme.glyph.prompt} ${body}`, width), ""];
   }
 
-  const style = (segment: string): string => {
-    const rendered = renderInputText(segment);
-    return isCommand && rendered.length > 0 ? c.bold(rendered) : rendered;
-  };
+  const style = renderInputText;
 
   const layout = layoutPromptInput({ text, cursor });
   const visibleCount = Math.min(Math.max(1, maxRows), layout.rows.length);
@@ -5117,7 +5261,12 @@ function promptInputRows({
     Math.min(layout.caretRow - visibleCount + 1, layout.rows.length - visibleCount),
   );
   // An inert prompt's typed draft keeps the mark dim: the state is legible without claiming readiness.
-  const promptGlyph = inert === true ? c.dim(theme.glyph.prompt) : c.cyan(theme.glyph.prompt);
+  const promptGlyph =
+    inert === true
+      ? c.dim(theme.glyph.prompt)
+      : text.startsWith("/")
+        ? theme.glyph.user
+        : theme.glyph.prompt;
   const ellipsis = c.dim(theme.glyph.ellipsis);
   // Reserve the gutter and the block cursor's trailing cell at end-of-line.
   // The gutter sits at column 0, sharing a column with the conversation
@@ -5422,42 +5571,6 @@ function formatConnectionAuthContent(
     const reason = stripTerminalControls(update.reason);
     if (reason.length > 0) lines.push(`Reason: ${reason}`);
   }
-  return lines.join("\n");
-}
-
-function formatQuestionContent(
-  question: AgentTUIInputQuestion,
-  highlight: number | undefined,
-  theme: Theme,
-): string {
-  const c = theme.colors;
-  const lines: string[] = [];
-  const options = question.options ?? [];
-
-  if (options.length > 0) {
-    for (const [index, option] of options.entries()) {
-      const labelText = stripTerminalControls(option.label);
-      const descriptionText =
-        option.description === undefined ? "" : stripTerminalControls(option.description);
-      const selected = highlight === index;
-      const description =
-        descriptionText.length > 0
-          ? `${selected ? " " : "  "}${c.dim(`— ${descriptionText}`)}`
-          : "";
-      const content = selected ? `${theme.glyph.selectedPointer} ${labelText}` : `  ${labelText}`;
-      const selection = renderCursorRow(content, selected, c);
-      lines.push(`${selection}${description}`);
-    }
-    if (question.allowFreeform === true) {
-      const selected = highlight === options.length;
-      const label = "Type your own answer";
-      const content = selected ? `${theme.glyph.selectedPointer} ${label}` : `  ${c.dim(label)}`;
-      lines.push(renderCursorRow(content, selected, c));
-    }
-  } else {
-    lines.push(c.dim("  (type your answer)"));
-  }
-
   return lines.join("\n");
 }
 

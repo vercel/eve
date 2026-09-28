@@ -1,7 +1,4 @@
-/**
- * Sends delegated task results to their parent and conversation results to
- * the caller of each turn.
- */
+/** Sends settled turn results to the caller of each turn. */
 
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
@@ -26,55 +23,6 @@ import { postSessionCallbackRequest } from "#execution/session-callback-request.
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 const log = createLogger("execution.delegated-parent-notification");
-
-/**
- * Resumes the parent owner's hook with a delegated subagent result.
- * No-op for root sessions.
- *
- * `usage` — the completed child's session-total token spend — is
- * attached to success results so the caller can attribute the
- * subagent's tokens. Error results never carry usage.
- */
-export async function notifyDelegatedParentStep(input: {
-  readonly result: RuntimeSubagentChildResult | undefined;
-  readonly serializedContext: Record<string, unknown>;
-  readonly usage?: TokenUsage;
-}): Promise<void> {
-  "use step";
-
-  if (input.result === undefined) {
-    return;
-  }
-
-  const ctx = await deserializeContext(input.serializedContext);
-  const adapter = ctx.get(ChannelKey);
-
-  if (adapter?.kind !== SUBAGENT_ADAPTER_KIND) {
-    return;
-  }
-
-  const parentContinuationToken = String(adapter.state?.parentContinuationToken ?? "");
-  if (parentContinuationToken === "") {
-    return;
-  }
-
-  // A task child reports its session totals exactly once, so those totals
-  // are the turn's usage delta; the terminal envelope carries them so the
-  // parent folds spend from the outcome alone.
-  const result =
-    input.usage === undefined
-      ? input.result
-      : {
-          ...input.result,
-          outcome: { ...input.result.outcome, usageDelta: input.usage },
-          usage: input.usage,
-        };
-
-  await resumeHook(parentContinuationToken, {
-    kind: "runtime-action-result",
-    results: [result],
-  });
-}
 
 /** Settled turn payload forwarded from the owner to the caller. */
 export interface SettledTurnNotification {

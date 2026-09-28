@@ -51,9 +51,8 @@ The root session receives `agent` by default. The model calls it to delegate a t
 
 ```ts
 {
-  message: string;       // everything the child needs; it does not see the parent's history
-  agentId?: string;      // continue or steer an existing child
-  outputSchema?: object; // require structured output for this turn
+  message: string;  // everything the child needs; it does not see the parent's history
+  agentId?: string; // continue or steer an existing child
 }
 ```
 
@@ -239,7 +238,7 @@ The root built-in `agent` tool is the exception. Its children reuse the root's s
 
 ## What the parent sees
 
-eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId?, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to require structured output for that turn; the child remains available for follow-up messages afterward.
+eve lowers every tool-enabled subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. To require structured output from a child, call it from an authored workflow tool with [`ctx.agent(name, { message, outputSchema })`](./tools/workflows); the schema applies to that turn, and the child remains available for follow-up messages afterward.
 
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
@@ -249,9 +248,8 @@ A directly declared subagent's tool name is the bare path-derived name, with no 
 
 ```ts
 {
-  message: string;       // all context the child needs; it never sees the parent's history
-  agentId?: string;      // continue or steer an existing child
-  outputSchema?: object; // require structured output for this turn
+  message: string;  // all context the child needs; it never sees the parent's history
+  agentId?: string; // continue or steer an existing child
 }
 ```
 
@@ -259,7 +257,7 @@ By default, a subagent named `researcher` collides with an authored tool named `
 
 Do not rely on subagent delegation by itself as an approval boundary. Put sensitive tools behind `approval`, connection approval, route/session authorization, or other controls wherever those tools can be called.
 
-Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, read `subagent.called.data.childSessionId` and subscribe at `GET /eve/v1/session/:childSessionId/stream`.
+Each delegated subagent spins up its own child session and stream. The parent stream carries the control-plane events `subagent.called` and `subagent.completed`, plus interactive `input.requested`, `authorization.required`, and `authorization.completed` events proxied from descendants so the root channel can prompt the user. To follow the child's other progress, pass the `subagent.called` event to [`session.streamSubagent()`](./guides/client/streaming#follow-a-subagent) on a client session attached to the parent. It reads `subagent.called.data.childStreamPath`: the child's own session stream for a local child, or a parent-origin proxy for a remote child, which the parent authenticates to the remote deployment.
 
 Both blocking and background invocations emit `subagent.called` after dispatch and `subagent.completed` after the parent records successful completion. Completion carries the actual output and identifies the same invocation by `callId`; the child session can remain available for reuse. A background working receipt is returned as an `action.result` tool output and does not emit completion. Background completion events do not wait for the cohort report. Failure and cancellation are not successful completion; task notifications retain those outcomes.
 

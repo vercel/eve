@@ -253,7 +253,7 @@ async function collectWorkspaceRootEntries(
   source: ProjectSource,
   workspacePath: string,
 ): Promise<readonly string[]> {
-  const entries = await readSortedDirectoryEntries(source, workspacePath);
+  const entries = await readSortedDirectoryEntries(source, workspacePath, { includeTests: true });
   const rendered: string[] = [];
 
   for (const entry of entries) {

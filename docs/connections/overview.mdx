@@ -58,6 +58,28 @@ must also set `instanceKey` to a stable, non-secret account or tenant identifier
 See [Dynamic capabilities](/docs/guides/dynamic-capabilities#dynamic-connections)
 for event scope, naming, conflicts, and durable recovery behavior.
 
+Tools from a `turn.started` connection can require approval, including an
+`approval.response` policy. When an approval resumes between turns, eve rebuilds
+the connection callbacks before checking the response policy, even in a fresh
+process. This restoration uses the pending request's turn coordinates and the
+current authenticated session context; it does not emit another public
+`turn.started` event. The response policy still receives the authenticated
+responder separately. When one delivery answers requests from different turns,
+eve restores each candidate's originating connection scope before its policy
+check, then prepares the complete batch selected for tool replay. Keep connection
+resolvers idempotent because restoration can run them again.
+
+Restoration uses current resolver results, not a historical connection snapshot.
+If the tool is absent from the persisted tool metadata, or its required response
+policy is unavailable, eve refuses the response and leaves the request pending.
+eve does not reconstruct missing tool metadata from earlier turns. Before replay, eve checks that the
+approved tool is still available and that its connection identity has not
+changed since the call requested approval. A missing or changed connection
+fails the replay rather than sending the call to a replacement destination.
+Request a new tool call and approval after correcting the connection. Identity
+includes the endpoint and `instanceKey`; use a distinct `instanceKey` for each
+account or tenant even when they share an endpoint.
+
 ## Static-token auth
 
 `getToken` returns a `TokenResult` (`{ token, expiresAt? }`), and eve sends it as `Authorization: Bearer <token>` on every request. Because it runs on each connection attempt, you can mint a fresh token from wherever you keep secrets, including an env var, a secrets manager, an internal vault, or your own OAuth exchange:

@@ -1,39 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { gfmToSlackMrkdwn, slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
-
-describe("gfmToSlackMrkdwn", () => {
-  it("converts ** and __ bold to single-star bold", () => {
-    expect(gfmToSlackMrkdwn("**a** and __b__")).toBe("*a* and *b*");
-  });
-
-  it("converts ~~strike~~ to ~strike~", () => {
-    expect(gfmToSlackMrkdwn("~~gone~~")).toBe("~gone~");
-  });
-
-  it("converts [label](url) to <url|label>", () => {
-    expect(gfmToSlackMrkdwn("see [docs](https://x.dev)")).toBe("see <https://x.dev|docs>");
-  });
-
-  it("escapes Slack control characters in link labels", () => {
-    expect(gfmToSlackMrkdwn("see [a < b](https://x.dev?a=1&b=2)")).toBe(
-      "see <https://x.dev?a=1&b=2|a &lt; b>",
-    );
-  });
-
-  it("leaves links with Slack control characters in the URL unchanged", () => {
-    expect(gfmToSlackMrkdwn("see [bad](https://x.dev/a|b)")).toBe("see [bad](https://x.dev/a|b)");
-  });
-
-  it("leaves fenced code blocks untouched", () => {
-    const fenced = "before\n```\n**not bold**\n```\nafter";
-    expect(gfmToSlackMrkdwn(fenced)).toBe(fenced);
-  });
-
-  it("leaves inline code spans untouched", () => {
-    expect(gfmToSlackMrkdwn("call `**foo**` here")).toBe("call `**foo**` here");
-  });
-});
+import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
 describe("slackMrkdwnToGfm", () => {
   it("decodes user mentions with and without a display name", () => {

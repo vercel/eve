@@ -23,7 +23,7 @@ export interface SandboxLike {
   }>;
 }
 
-export interface RepoGuidelines {
+interface RepoGuidelines {
   /** Repo-relative path of the root guideline file, or null when absent. */
   rootPath: string | null;
   /** Root guideline content (capped at {@link MAX_GUIDELINE_BYTES}). */

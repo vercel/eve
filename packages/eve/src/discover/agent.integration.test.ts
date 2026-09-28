@@ -55,6 +55,47 @@ const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
  * here against an in-memory {@link buildMemoryAgentProject} tree.
  */
 describe("discoverAgent (memory)", () => {
+  it.each(["agent", "extension"] as const)(
+    "excludes colocated tests from %s definitions and local subagents",
+    async (role) => {
+      const agentFiles: Record<string, string> = {
+        "instructions.md": "Help Alice check the weather.",
+        "tools/weather.ts": "export default {};",
+        "tools/nested/weather.mjs": "export default {};",
+        "subagents/researcher/agent.ts": "export default {};",
+        "subagents/researcher/tools/weather.ts": "export default {};",
+      };
+      const baseline = await discoverAgent({ ...buildMemoryAgentProject({ agentFiles }), role });
+      expect(baseline.diagnostics).toEqual([]);
+
+      for (const directory of [
+        "tools",
+        "hooks",
+        "channels",
+        "connections",
+        "skills",
+        "schedules",
+        "instructions",
+        "memory",
+        "lib",
+        "extensions",
+        "subagents",
+        "tools/nested",
+        "subagents/researcher/tools",
+      ]) {
+        for (const extension of ["ts", "mts", "cts", "js", "mjs", "cjs"]) {
+          agentFiles[`${directory}/weather.test.${extension}`] = "throw new Error('test module');";
+          agentFiles[`${directory}/weather.spec.${extension}`] = "throw new Error('spec module');";
+        }
+        agentFiles[`${directory}/__tests__/fixture.json`] = "{}";
+        agentFiles[`${directory}/__tests__/weather.ts`] = "throw new Error('test directory');";
+      }
+
+      const result = await discoverAgent({ ...buildMemoryAgentProject({ agentFiles }), role });
+      expect(result).toEqual(baseline);
+    },
+  );
+
   it("discovers flat and named memory slots with path-derived identities", async () => {
     const flat = buildMemoryAgentProject({
       agentFiles: { "instructions.md": "Remember.", "memory.ts": "export default {};" },

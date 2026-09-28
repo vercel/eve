@@ -109,6 +109,7 @@ describe("recordTaskInputRequestStep", () => {
       childContinuationToken: request.replyTo,
       childRequestId: "req-1",
       kind: "question",
+      question: {},
       taskId: "task-1",
     });
   });
