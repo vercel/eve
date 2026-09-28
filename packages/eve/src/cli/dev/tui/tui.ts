@@ -77,19 +77,19 @@ function inlineArgumentSuggestions(appRoot: string) {
         await import("#setup/boxes/select-model.js");
       const catalog = await fetchGatewayCatalog().catch(() => undefined);
       return modelOptionsFromCatalog(catalog).map((option) => {
-        const reasoning = gatewayModelCapabilities(catalog, option.value)?.reasoningLevels;
+        const capabilities = gatewayModelCapabilities(catalog, option.value);
         return {
           value: option.value,
           label: option.value,
           hint: option.hint,
-          ...(reasoning === undefined || reasoning.length === 0
-            ? {}
-            : {
+          ...(capabilities?.reasoning
+            ? {
                 next: [
                   { value: "default", label: "default" },
-                  ...reasoning.map((value) => ({ value, label: value })),
+                  ...capabilities.reasoningLevels.map((value) => ({ value, label: value })),
                 ],
-              }),
+              }
+            : {}),
         };
       });
     }
