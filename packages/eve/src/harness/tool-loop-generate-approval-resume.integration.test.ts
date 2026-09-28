@@ -1028,94 +1028,134 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     });
   });
 
-  it("executes a response-authorized approval after memory recall and a user instruction", async () => {
-    const ctx = createApprovalContext();
-    const execute = vi.fn(async () => "/workspace");
-    const recall = vi.fn(async () => ({ messages: [] }));
-    const instruction = vi.fn(() =>
-      defineInstructions({
-        content: "Current date and time: 2026-09-28T00:00:00.000Z (UTC).",
-        role: "user",
-      }),
-    );
-    const memories = [
-      {
-        ...defineMemory({
-          namespace: "issue-3899",
-          provider: { recall: { "turn.started": recall } },
-          scope: "user-1",
+  it.each([
+    { decision: "approve" as const, label: "empty recall", recalledMessages: [] },
+    {
+      decision: "approve" as const,
+      label: "a recalled message",
+      recalledMessages: [{ content: "Remembered context", id: "memory-1" }],
+    },
+    { decision: "cancel" as const, label: "empty recall", recalledMessages: [] },
+  ])(
+    "handles $decision after $label and a user instruction",
+    async ({ decision, recalledMessages }) => {
+      const ctx = createApprovalContext();
+      const execute = vi.fn(async () => "/workspace");
+      const recall = vi.fn(async () => ({ messages: recalledMessages }));
+      const instruction = vi.fn(() =>
+        defineInstructions({
+          content: "Current date and time: 2026-09-28T00:00:00.000Z (UTC).",
+          role: "user",
         }),
-        logicalPath: "memory/profile.ts",
-        slot: "profile",
-        sourceId: "memory/profile.ts",
-        sourceKind: "module" as const,
-        visibility: "scope" as const,
-      },
-    ];
-    const resolvers = [
-      {
-        eventNames: ["turn.started"],
-        events: { "turn.started": instruction },
-        logicalPath: "instructions/timestamp.ts",
-        slug: "timestamp",
-        sourceId: "instructions/timestamp.ts",
-        sourceKind: "module" as const,
-      },
-    ];
-    const model = new MockLanguageModelV4({
-      doStream: textStreamResult("The command completed."),
-      modelId: "generate-approval-resume-model",
-      provider: "eve-integration-mock",
-    });
-    const handleEvent: ToolLoopHarnessConfig["handleEvent"] = async (event, messages) => {
-      const lifecycleMessages = await dispatchMemoryLifecycleEvent({
-        appRoot: "/app",
-        ctx,
-        event,
-        memories: memories as never,
-        messages,
-        nodeId: "__root__",
+      );
+      const memories = [
+        {
+          ...defineMemory({
+            namespace: "issue-3899",
+            provider: { recall: { "turn.started": recall } },
+            scope: "user-1",
+          }),
+          logicalPath: "memory/profile.ts",
+          slot: "profile",
+          sourceId: "memory/profile.ts",
+          sourceKind: "module" as const,
+          visibility: "scope" as const,
+        },
+      ];
+      const resolvers = [
+        {
+          eventNames: ["turn.started"],
+          events: { "turn.started": instruction },
+          logicalPath: "instructions/timestamp.ts",
+          slug: "timestamp",
+          sourceId: "instructions/timestamp.ts",
+          sourceKind: "module" as const,
+        },
+      ];
+      const model = new MockLanguageModelV4({
+        doStream: textStreamResult("The command completed."),
+        modelId: "generate-approval-resume-model",
+        provider: "eve-integration-mock",
       });
-      await dispatchDynamicInstructionEvent({
-        ctx,
-        event,
-        messages: lifecycleMessages,
-        resolvers: resolvers as never,
+      const handleEvent: ToolLoopHarnessConfig["handleEvent"] = async (event, messages) => {
+        const lifecycleMessages = await dispatchMemoryLifecycleEvent({
+          appRoot: "/app",
+          ctx,
+          event,
+          memories: memories as never,
+          messages,
+          nodeId: "__root__",
+        });
+        await dispatchDynamicInstructionEvent({
+          ctx,
+          event,
+          messages: lifecycleMessages,
+          resolvers: resolvers as never,
+        });
+      };
+      const runStep = createToolLoopHarness({
+        ...createConfig(model, execute, {
+          request: () => "user-approval",
+          response: () => ({ status: "allowed" as const }),
+        }),
+        handleEvent,
       });
-    };
-    const runStep = createToolLoopHarness({
-      ...createConfig(model, execute, {
-        request: () => "user-approval",
-        response: () => ({ status: "allowed" as const }),
-      }),
-      handleEvent,
-    });
 
-    let result = await contextStorage.run(ctx, () =>
-      runStep(createPendingApprovalSession(undefined, true), {
-        attributedInputResponses: [
-          {
-            auth: ctx.require(AuthKey),
-            response: { optionId: "approve", requestId: approvalRequest.approvalId },
-          },
-        ],
-      }),
-    );
-    for (let index = 0; index < 3 && typeof result.next === "function"; index += 1) {
-      const next = result.next;
-      result = await contextStorage.run(ctx, () => next(result.session));
-    }
+      let result = await contextStorage.run(ctx, () =>
+        runStep(createPendingApprovalSession(undefined, true), {
+          attributedInputResponses: [
+            {
+              auth: ctx.require(AuthKey),
+              response: { optionId: decision, requestId: approvalRequest.approvalId },
+            },
+          ],
+        }),
+      );
+      for (let index = 0; index < 3 && typeof result.next === "function"; index += 1) {
+        const next = result.next;
+        result = await contextStorage.run(ctx, () => next(result.session));
+      }
 
-    expect(recall).toHaveBeenCalledOnce();
-    expect(instruction).toHaveBeenCalledOnce();
-    expect(execute).toHaveBeenCalledExactlyOnceWith(
-      toolCall.input,
-      expect.objectContaining({ toolCallId: toolCall.toolCallId }),
-    );
-    expect(findPart(model.doStreamCalls[0]?.prompt ?? [], "tool-result")).toMatchObject({
-      output: { type: "text", value: "canonical:/workspace" },
-      toolCallId: toolCall.toolCallId,
-      toolName: toolCall.toolName,
-    });
-  });
+      expect(recall).toHaveBeenCalledOnce();
+      expect(instruction).toHaveBeenCalledOnce();
+      if (decision === "approve") {
+        expect(execute).toHaveBeenCalledExactlyOnceWith(
+          toolCall.input,
+          expect.objectContaining({ toolCallId: toolCall.toolCallId }),
+        );
+      } else {
+        expect(execute).not.toHaveBeenCalled();
+      }
+      const providerPrompt = model.doStreamCalls[0]?.prompt ?? [];
+      expect(providerPrompt).toContainEqual(
+        expect.objectContaining({
+          content: [
+            expect.objectContaining({
+              text: "Current date and time: 2026-09-28T00:00:00.000Z (UTC).",
+            }),
+          ],
+          role: "user",
+        }),
+      );
+      expect(
+        providerPrompt.some((message) =>
+          JSON.stringify(message.content).includes("Remembered context"),
+        ),
+      ).toBe(recalledMessages.length > 0);
+      expect(
+        result.session.history.some(
+          (message) =>
+            message.role === "user" &&
+            JSON.stringify(message.content).includes("Current date and time"),
+        ),
+      ).toBe(true);
+      if (decision === "approve") {
+        expect(findPart(providerPrompt, "tool-result")).toMatchObject({
+          output: { type: "text", value: "canonical:/workspace" },
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+        });
+      }
+    },
+  );
 });

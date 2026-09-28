@@ -1106,21 +1106,30 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInstrumentation?.setTurnId(emissionState.turnId);
     }
 
-    const committedHistory = memoryCommit?.history ?? pending.session.history;
+    // Keep preamble messages before the approval transcript so the AI SDK still
+    // sees its approval response in the final tool message.
     const historyLength = pending.session.history.length;
+    const recalledMessages =
+      memoryCommit === undefined ? [] : memoryCommit.history.slice(pending.messages.length);
+    const messagesWithPreamble = [
+      ...pending.messages.slice(0, historyLength),
+      ...recalledMessages,
+      ...instructionMessages,
+      ...pending.messages.slice(historyLength),
+    ];
     session = setHarnessEmissionState(
       {
         ...pending.session,
-        history: validateHarnessModelMessages([...committedHistory, ...instructionMessages]),
+        history: validateHarnessModelMessages(
+          memoryCommit === undefined
+            ? [...pending.session.history, ...instructionMessages]
+            : messagesWithPreamble,
+        ),
         state: memoryCommit?.state ?? pending.session.state,
       },
       emissionState,
     );
-    let messages: HarnessModelMessage[] = validateHarnessModelMessages([
-      ...(memoryCommit?.history ?? pending.messages.slice(0, historyLength)),
-      ...instructionMessages,
-      ...(memoryCommit === undefined ? pending.messages.slice(historyLength) : []),
-    ]);
+    let messages: HarnessModelMessage[] = validateHarnessModelMessages(messagesWithPreamble);
 
     // A resolved session-limit continuation prompt grants a fresh token
     // budget or ends the session; see session-limit-enforcement.
