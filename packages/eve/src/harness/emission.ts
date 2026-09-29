@@ -371,9 +371,7 @@ async function consumeStreamContent(
 
   const emitActionRequest = async (projection: RuntimeActionRequestProjection): Promise<void> => {
     const { action } = projection;
-    if (emittedActionCallIds.has(action.callId)) {
-      return;
-    }
+    if (emittedActionCallIds.has(action.callId)) return;
 
     if (currentMessage.trim().length > 0) {
       await flushCurrentMessage();
@@ -397,13 +395,9 @@ async function consumeStreamContent(
     readonly toolCallId: string;
     readonly toolName: string;
   }): Promise<void> => {
-    if (providerToolCallIdsSeen.has(toolCall.toolCallId)) {
-      return;
-    }
+    if (providerToolCallIdsSeen.has(toolCall.toolCallId)) return;
     providerToolCallIdsSeen.add(toolCall.toolCallId);
-    if (emittedActionCallIds.has(toolCall.toolCallId)) {
-      return;
-    }
+    if (emittedActionCallIds.has(toolCall.toolCallId)) return;
     emittedActionCallIds.add(toolCall.toolCallId);
 
     if (currentMessage.trim().length > 0) {
@@ -638,6 +632,10 @@ async function consumeStreamContent(
           await emitActionResult(createRuntimeToolResultFromToolError(toolError));
           handledInlineToolResultCallIds.add(toolError.toolCallId);
           trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
+        } else if (!toolCallIdsSeenInStream.has(toolError.toolCallId)) {
+          // An approved call from an earlier step failed; the SDK keeps its error in history.
+          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
+          handledInlineToolResultCallIds.add(toolError.toolCallId);
         }
         break;
       }

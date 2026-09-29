@@ -509,11 +509,8 @@ async function requestConnectionApproval(
       : registry.getConnectionApproval(connection.connectionName);
   if (connection === undefined || approval === undefined) return "not-applicable";
 
-  // The AI SDK re-runs this policy before executing an approved call, so an
-  // existing pin must survive and a changed connection denies the call.
-  if (!matchesApprovalPin(context.callId, connection)) {
-    return { type: "denied", reason: CONNECTION_CHANGED_MESSAGE };
-  }
+  // The AI SDK re-runs this policy before executing an approved call. The
+  // first pin survives, so execution rejects a call whose connection changed.
   pinApprovedInstance(context.callId, connection);
   return await resolveApprovalPolicy(approval)({
     ...context,
