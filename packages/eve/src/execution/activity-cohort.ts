@@ -1,6 +1,6 @@
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { MatchedAuthorizationCallback } from "#execution/authorization-callback-match.js";
-import type { PendingAuthorizationState } from "#harness/authorization.js";
+import { getPendingAuthorization, type PendingAuthorizationState } from "#harness/authorization.js";
 import type { ContextContainer } from "#context/container.js";
 import {
   ActivityObserverKey,
@@ -8,9 +8,11 @@ import {
   ActivityRootTurnIdKey,
   ActivityTaskCallsKey,
 } from "#context/keys.js";
+import { isSessionLimitPromptBatch } from "#harness/hitl/session-limit-input-requests.js";
 import {
   activityRequestIdsForRootTurn,
   activityRootTurnIdForInputResponses,
+  getPendingInputBatches,
 } from "#harness/pending-input-batches.js";
 import type { SessionStateMap } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -82,8 +84,6 @@ export function updateActivityState(
   ) {
     // Every receipt of the turn's task calls is published before the turn ends.
     ctx.delete(ActivityTaskCallsKey);
-    // A cancel drops the turn's pending questions, so none holds its work open.
-    if (event.type === "turn.cancelled") ctx.delete(ActivityPendingBlockersKey);
   } else if (event.type === "input.requested") {
     addActivityBlockers(
       ctx,
@@ -99,6 +99,31 @@ export function updateActivityState(
   } else if (event.type === "authorization.completed") {
     clearActivityBlockers(ctx, [authorizationBlockerId(event)]);
   }
+}
+
+/**
+ * Keeps only the blockers a cancel leaves answerable: the session's own input
+ * requests and sign-ins. The cancel withdraws a session-limit prompt and what
+ * a child asked through the session, so those no longer hold its work open.
+ */
+export function retainAnswerableActivityBlockers(
+  ctx: ContextContainer,
+  sessionState: SessionStateMap | undefined,
+): void {
+  const pending = ctx.get(ActivityPendingBlockersKey);
+  if (pending === undefined) return;
+  const answerable = new Set([
+    ...getPendingInputBatches(sessionState).flatMap((batch) =>
+      isSessionLimitPromptBatch(batch) ? [] : batch.requests.map((request) => request.requestId),
+    ),
+    ...(getPendingAuthorization(sessionState)?.challenges ?? []).flatMap(
+      (challenge) => challenge.attemptId ?? challenge.candidateId ?? [],
+    ),
+  ]);
+  clearActivityBlockers(
+    ctx,
+    pending.filter((id) => !answerable.has(id)),
+  );
 }
 
 export function clearActivityBlockers(ctx: ContextContainer, ids: readonly string[]): void {

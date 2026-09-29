@@ -5,7 +5,10 @@ import {
   ActivityPendingBlockersKey,
   ActivityTaskCallsKey,
 } from "#context/keys.js";
-import { updateActivityState } from "#execution/activity-cohort.js";
+import {
+  retainAnswerableActivityBlockers,
+  updateActivityState,
+} from "#execution/activity-cohort.js";
 import { ContextContainer } from "#context/container.js";
 import {
   observeSessionActivity,
@@ -16,6 +19,8 @@ import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-
 import type { ActivitySnapshotV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { appendPendingInputBatch } from "#harness/pending-input-batches.js";
+import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 
 const at = "2026-01-01T00:00:00.000Z";
 
@@ -41,10 +46,15 @@ function context(): ContextContainer {
 function reduceProjection(input: {
   readonly events: readonly MessageStreamEvent[];
   readonly sessionId: string;
+  /** The session state a `turn.cancelled` settles, as `settleCancelledTurnStep` reads it. */
+  readonly cancelledState?: SessionStateMap;
   readonly workIdentity?: ActivityWorkIdentityV1;
 }): ActivitySnapshotV1 {
   const ctx = context();
   return input.events.reduce((snapshot, event) => {
+    if (event.type === "turn.cancelled") {
+      retainAnswerableActivityBlockers(ctx, input.cancelledState);
+    }
     updateActivityState(ctx, event);
     return reduceActivityBatch(snapshot, {
       events: projectSessionActivity({
@@ -69,26 +79,45 @@ const delegatedWork: ActivityWorkIdentityV1 = {
 };
 const questionBlockerId = `input:${delegatedWork.id}:request-1`;
 
-/** A delegated session whose turn asked a question and parked awaiting the answer. */
-const parkedOnQuestion: readonly MessageStreamEvent[] = [
-  { data: {}, meta: { at, id: "session-started" }, type: "session.started" },
-  {
+function inputRequested(
+  requestId: string,
+  kind: "question" | "tool-approval",
+  turnId = "child-turn",
+): MessageStreamEvent {
+  return {
     data: {
       requests: [
         {
-          action: { callId: "tool-1", input: {}, kind: "tool-call", toolName: "search" },
-          kind: "question",
+          action: { callId: `${requestId}-call`, input: {}, kind: "tool-call", toolName: "search" },
+          kind,
           prompt: "Which region?",
-          requestId: "request-1",
+          requestId,
         },
       ],
       sequence: 1,
       stepIndex: 0,
-      turnId: "child-turn",
+      turnId,
     },
-    meta: { at, id: "input-requested" },
+    meta: { at, id: `input-requested:${requestId}` },
     type: "input.requested",
-  },
+  };
+}
+
+const turnCancelled: MessageStreamEvent = {
+  data: { sequence: 1, turnId: "child-turn" },
+  meta: { at, id: "turn.cancelled:child-turn" },
+  type: "turn.cancelled",
+};
+
+/** A delegated session whose running turn asked a question. */
+const askedQuestion: readonly MessageStreamEvent[] = [
+  { data: {}, meta: { at, id: "session-started" }, type: "session.started" },
+  inputRequested("request-1", "question"),
+];
+
+/** The same session after its turn parked awaiting the answer. */
+const parkedOnQuestion: readonly MessageStreamEvent[] = [
+  ...askedQuestion,
   turnEvent("turn.completed", "child-turn"),
   {
     data: { continuationToken: "child-token", wait: "next-user-message" },
@@ -97,8 +126,16 @@ const parkedOnQuestion: readonly MessageStreamEvent[] = [
   },
 ];
 
-function projectDelegated(events: readonly MessageStreamEvent[]): ActivitySnapshotV1 {
-  return reduceProjection({ events, sessionId: "child-session", workIdentity: delegatedWork });
+function projectDelegated(
+  events: readonly MessageStreamEvent[],
+  cancelledState?: SessionStateMap,
+): ActivitySnapshotV1 {
+  return reduceProjection({
+    cancelledState,
+    events,
+    sessionId: "child-session",
+    workIdentity: delegatedWork,
+  });
 }
 
 describe("projectSessionActivity", () => {
@@ -326,18 +363,30 @@ describe("projectSessionActivity", () => {
     ).toMatchObject({ phase: "completed" });
   });
 
-  it("settles work and its question when a turn parked on the question is cancelled", () => {
-    const snapshot = projectDelegated([
-      ...parkedOnQuestion,
-      {
-        data: { sequence: 1, turnId: "child-turn" },
-        meta: { at, id: "turn.cancelled:child-turn" },
-        type: "turn.cancelled",
-      },
-    ]);
+  it("settles work and its question when the turn waiting on the question is cancelled", () => {
+    const snapshot = projectDelegated([...askedQuestion, turnCancelled]);
 
     expect(snapshot.work[delegatedWork.id]).toMatchObject({ phase: "cancelled" });
     expect(snapshot.blockers[questionBlockerId]).toMatchObject({ phase: "cancelled" });
+  });
+
+  it("keeps work open after a cancel while its own approval can still be answered", () => {
+    const approval = inputRequested("approval-1", "tool-approval");
+    const stillAwaitingApproval = appendPendingInputBatch({
+      requests: approval.type === "input.requested" ? approval.data.requests : [],
+      responseMessages: [],
+      session: {} as HarnessSession,
+    });
+
+    const snapshot = projectDelegated(
+      [...askedQuestion, approval, turnEvent("turn.completed", "child-turn"), turnCancelled],
+      stillAwaitingApproval.state,
+    );
+
+    expect(snapshot.work[delegatedWork.id]).toMatchObject({ phase: "running" });
+    expect(snapshot.blockers[`approval:${delegatedWork.id}:approval-1`]).toMatchObject({
+      phase: "blocked",
+    });
   });
 });
 

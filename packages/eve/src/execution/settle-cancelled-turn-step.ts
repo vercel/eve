@@ -3,6 +3,7 @@ import {
   getPendingCoordinationBatch,
 } from "#harness/coordination.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { retainAnswerableActivityBlockers } from "#execution/activity-cohort.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -45,6 +46,8 @@ export async function settleCancelledTurnStep(input: {
 
   const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
+  // Before `turn.cancelled` projects, so only what stays answerable holds the work open.
+  retainAnswerableActivityBlockers(ctx, durableSession.state);
   const emitted = await withSessionEventEmitter(
     { ctx, durableSession, origin: "own", sessionWritable: input.sessionWritable },
     async (emit, scopedSession) => ({

@@ -15,6 +15,7 @@ import {
 } from "#execution/workflow-runtime.js";
 import { parseSessionMessageBody } from "#eve-channel/request.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 const researcher = {
   description: "Researches a topic.",
@@ -39,6 +40,11 @@ const remoteResearcher = {
   sourceKind: "module",
   url: "https://remote.example.com",
 };
+
+vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  getWorkflowMetadata: () => ({ url: "https://parent.example.com" }),
+}));
 
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: async () => {
@@ -256,28 +262,40 @@ describe("agent session activity", () => {
     expect(bothDone.work[rootWorkId]).toMatchObject({ phase: "running" });
   });
 
-  it("continues a remote agent with an activity observer the remote accepts", async () => {
-    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(null));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await sendAgentSessionMessageStep({
-      address: {
-        callbackBaseUrl: "https://parent.example.com",
-        kind: "remote",
-        name: "remote_research",
-        nodeId: "agents/remote-research",
+  it("opens and continues a remote agent with one activity identity the remote accepts", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
+      Response.json({
+        ok: true,
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         sessionId: "remote-session",
-        url: "https://remote.example.com",
-      },
+        status: "accepted",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const context = callerContext();
+
+    const address = await openAgentSessionStep({
       auth,
-      context: callerContext(),
+      context,
+      key: "run-1:0",
+      message: "Research the topic.",
+      name: "remote_research",
+      replyTo: "reply-1",
+    });
+    await sendAgentSessionMessageStep({
+      address,
+      auth,
+      context,
       key: "run-1:0",
       message: "Go deeper.",
       replyTo: "reply-2",
     });
 
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1].body)) as Record<string, unknown>;
-    expect(parseSessionMessageBody(body)).toMatchObject({
+    const [opened, continued] = fetchMock.mock.calls.map(
+      ([, init]) => JSON.parse(String(init.body)) as Record<string, unknown>,
+    );
+    expect(continued?.activityObserver).toEqual(opened?.activityObserver);
+    expect(parseSessionMessageBody(continued ?? {})).toMatchObject({
       activityObserver: {
         workIdentity: { callId: "call-1", kind: "remote-agent", parentId: rootWorkId },
       },
