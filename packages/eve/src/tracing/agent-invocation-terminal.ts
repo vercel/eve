@@ -76,6 +76,7 @@ export function settleAgentInvocationTrace(input: {
             ? "cancelled"
             : "failed",
       usage: {
+        costUsd: usage.costUsd,
         inputTokenDetails: {
           cacheReadTokens: usage.cacheReadTokens,
           cacheWriteTokens: usage.cacheWriteTokens,

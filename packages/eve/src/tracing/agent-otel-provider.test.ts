@@ -2802,6 +2802,7 @@ describe("createAgentOtelInstrumentation", () => {
     const runtime = createRuntime();
     await emitAttempt({
       actionUsage: {
+        costUsd: 0.012,
         inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
         inputTokens: 10,
         outputTokens: 5,
@@ -2821,6 +2822,7 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.action.kind": "subagent-call",
       "agent.action.name": "weather",
       "agent.action.outcome": "completed",
+      "agent.usage.cost_usd": 0.012,
       "agent.usage.cache_read_tokens": 3,
       "agent.usage.cache_write_tokens": 4,
       "agent.usage.input_tokens": 10,

@@ -2,7 +2,12 @@ import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { getHarnessEmissionState } from "#harness/emission-state.js";
+import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission-state.js";
+import {
+  createFrameworkUserMessage,
+  createUserMessage,
+  TOOL_RESULT_BOUNDARY,
+} from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -321,6 +326,66 @@ describe("generation steering with the real AI SDK", () => {
     const prompt = JSON.stringify(doStream.mock.calls[1]?.[0].prompt);
     expect(prompt).toContain("saved");
     expect(prompt).toContain("Use the corrected year");
+    // The correction starts its own user turn instead of joining the tool result's.
+    const roles = (call: number) => doStream.mock.calls[call]![0].prompt.map(({ role }) => role);
+    expect(roles(0)).toEqual(["system", "user"]);
+    expect(roles(1)).toEqual(["system", "user", "assistant", "tool", "assistant", "user"]);
+    expect(doStream.mock.calls[1]![0].prompt.at(-2)).toMatchObject({
+      content: [{ text: TOOL_RESULT_BOUNDARY, type: "text" }],
+    });
+  });
+
+  it("starts a steering message's own user turn after tool results followed by a framework note", async () => {
+    const doStream = vi.fn<MockLanguageModelV3["doStream"]>(async () => ({
+      stream: new ReadableStream<Part>({
+        start(controller) {
+          finish(controller, "Quarterly Business Review");
+        },
+      }),
+    }));
+    const heldTurn = setHarnessEmissionState(
+      {
+        ...session(),
+        history: [
+          createUserMessage("user", "Compile Alice's churn report"),
+          {
+            role: "assistant",
+            content: [{ type: "tool-call", toolCallId: "report-1", toolName: "report", input: {} }],
+          },
+          {
+            role: "tool",
+            content: [
+              {
+                type: "tool-result",
+                toolCallId: "report-1",
+                toolName: "report",
+                output: { type: "text", value: "Started task report-1." },
+              },
+            ],
+          },
+          createFrameworkUserMessage("context.state", "Alice's reports are due Monday."),
+        ],
+      },
+      { sessionStarted: true, sequence: 0, stepIndex: 1, turnId: "turn_0" },
+    );
+    await createToolLoopHarness({
+      handleEvent: async () => {},
+      resolveModel: async () => new MockLanguageModelV3({ doStream }),
+      tools: new Map(),
+    })(heldTurn, { message: "What does QBR stand for?" });
+    const prompt = doStream.mock.calls[0]![0].prompt;
+    expect(prompt.map(({ role }) => role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "user",
+      "assistant",
+      "user",
+    ]);
+    expect(prompt.at(-2)).toMatchObject({
+      content: [{ text: TOOL_RESULT_BOUNDARY, type: "text" }],
+    });
   });
 
   it("does not interrupt after assistant text has been published", async () => {

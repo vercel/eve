@@ -148,7 +148,9 @@ import {
   normalizeModelMessages,
   normalizeUserContent,
   createTurnInputMessages,
+  followsToolResults,
   resolveAssistantStepText,
+  TOOL_RESULT_BOUNDARY,
   type HarnessModelMessage,
   type UserModelMessage,
   validateHarnessModelMessages,
@@ -1144,7 +1146,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       session = setTurnClientContextState(session, turnClientContext);
     }
 
-    messages = [...messages, ...preparedTurnInput];
+    const separatesToolResults =
+      stagedTurnContent !== undefined &&
+      frameworkMessageKind === undefined &&
+      followsToolResults(messages);
+    messages = [
+      ...messages,
+      ...(separatesToolResults
+        ? [{ content: TOOL_RESULT_BOUNDARY, role: "assistant" } as const]
+        : []),
+      ...preparedTurnInput,
+    ];
 
     const createModelMessages = (
       durableMessages: readonly HarnessModelMessage[],

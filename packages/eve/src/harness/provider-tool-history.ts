@@ -7,11 +7,13 @@ import type { ModelMessage, ToolModelMessage } from "ai";
  * message. Each matching call is rewritten as a normal call and consecutive
  * results are moved into a tool message at their original position when the
  * call lacks the matching marker or shares an assistant message with a local
- * tool call. Native provider-only call/result pairs remain untouched. Text
- * before a result remains before it; text after a result remains after it.
- * Local tool calls in a split message, with their approval requests, move to
- * its last assistant message, so the local results that follow the response
- * directly follow their calls.
+ * tool call. Native provider-only call/result pairs stay in the assistant
+ * message, but content after their results starts a new assistant message:
+ * AI Gateway replays a single message with a result followed by text as if
+ * the text came first. Text before a result remains before it; text after a
+ * result remains after it. Local tool calls in a split message, with their
+ * approval requests, move to its last assistant message, so the local results
+ * that follow the response directly follow their calls.
  */
 export function normalizeProviderToolHistory(input: {
   readonly messages: readonly ModelMessage[];
@@ -43,6 +45,7 @@ export function normalizeProviderToolHistory(input: {
 
     let assistantContent: typeof message.content = [];
     let toolContent: ToolModelMessage["content"] = [];
+    let afterProviderResult = false;
     const localCallParts: typeof message.content = [];
     const localCallIds = new Set<string>();
     const splits = message.content.some(
@@ -79,6 +82,9 @@ export function normalizeProviderToolHistory(input: {
         localCallParts.push(part);
       } else {
         flushTool();
+        // Parallel results stay together; anything else after them closes the message.
+        if (afterProviderResult && part.type !== "tool-result") flushAssistant();
+        afterProviderResult = part.type === "tool-result";
         assistantContent.push(
           part.type === "tool-call" && toolCallIdsToNormalize.has(part.toolCallId)
             ? { ...part, providerExecuted: false }

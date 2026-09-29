@@ -2688,6 +2688,80 @@ describe("EveTUIRunner reused step indexes", () => {
     const completes = emitted.filter((event) => event.type === "assistant-complete");
     expect(completes).toHaveLength(2);
   });
+
+  it("renders the answer a model writes after a provider-executed tool in the same step", async () => {
+    // One model call: a preamble, a provider-executed web search, then the
+    // answer, all under the same `turnId:stepIndex` with no new `step.started`.
+    const prompts: Array<string | undefined> = ["who won the finals", undefined];
+    const emitted: AgentTUIStreamEvent[] = [];
+    const part = { sequence: 0, stepIndex: 0, turnId: "t0" };
+    const session = sessionYielding([
+      { type: "step.started", data: part },
+      { type: "message.appended", data: { ...part, messageDelta: "I'll look it up." } },
+      {
+        type: "message.completed",
+        data: { ...part, finishReason: "tool-calls", message: "I'll look it up." },
+      },
+      {
+        type: "actions.requested",
+        data: {
+          ...part,
+          actions: [
+            {
+              callId: "search-1",
+              input: { query: "finals winner" },
+              kind: "tool-call",
+              toolName: "web_search",
+            },
+          ],
+        },
+      },
+      {
+        type: "action.result",
+        data: {
+          ...part,
+          result: {
+            callId: "search-1",
+            kind: "tool-result",
+            output: { results: [] },
+            toolName: "web_search",
+          },
+          status: "completed",
+        },
+      },
+      { type: "message.appended", data: { ...part, messageDelta: "The Knicks won." } },
+      {
+        type: "message.completed",
+        data: { ...part, finishReason: "stop", message: "The Knicks won." },
+      },
+      { type: "step.completed", data: { ...part, usage: {} } },
+      { type: "turn.completed", data: { sequence: 0, turnId: "t0" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
+    ]);
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          emitted.push(event);
+        }
+      }),
+    };
+
+    await new EveTUIRunner({ session, renderer, name: "Weather Agent" }).run();
+
+    const deltas = emitted.filter((event) => event.type === "assistant-delta");
+    expect(deltas.map((event) => event.delta)).toEqual(["I'll look it up.", "The Knicks won."]);
+    expect(deltas[0]?.id).not.toBe(deltas[1]?.id);
+    expect(emitted.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["tool-call", "tool-result"]),
+    );
+    expect(emitted.findIndex((event) => event.type === "tool-result")).toBeLessThan(
+      emitted.findIndex((event) => event.type === "assistant-delta" && event.id === deltas[1]?.id),
+    );
+  });
 });
 
 describe("EveTUIRunner replay guards", () => {

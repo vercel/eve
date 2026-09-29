@@ -194,6 +194,7 @@ describe("agent invocation trace coordinator", () => {
           usageDelta: {
             cacheReadTokens: 1,
             cacheWriteTokens: 2,
+            costUsd: 0.012,
             inputTokens: 3,
             outputTokens: 4,
           },
@@ -210,7 +211,7 @@ describe("agent invocation trace coordinator", () => {
       terminal: {
         acceptedAtMs: 3,
         outcome: "completed",
-        usage: { inputTokens: 3, outputTokens: 4 },
+        usage: { costUsd: 0.012, inputTokens: 3, outputTokens: 4 },
       },
     });
     expect(
