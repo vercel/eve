@@ -5,7 +5,7 @@ import { stampTestEvent } from "#internal/testing/events.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
   EVE_STREAM_VERSION_HEADER,
-  type SubagentCalledStreamEvent,
+  type AgentStartedStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
@@ -19,7 +19,6 @@ afterEach(() => {
 function fakeView(): SubagentView {
   return {
     begin: vi.fn(),
-    background: vi.fn(),
     upsertStep: vi.fn(),
     upsertTool: vi.fn(),
     removeTool: vi.fn(),
@@ -108,19 +107,51 @@ function pushableChildStream() {
   };
 }
 
-function subagentCalled(callId: string, turnId = "turn-1"): SubagentCalledStreamEvent {
-  return {
-    type: "subagent.called",
-    data: {
-      callId,
-      childSessionId: `child_${callId}`,
-      childStreamPath: `/eve/v1/children/${callId}/stream`,
-      name: "researcher",
-      sequence: 1,
-      sessionId: "parent",
-      turnId,
+interface AgentTaskOptions {
+  readonly name?: string;
+  readonly remote?: AgentStartedStreamEvent["data"]["remote"];
+  readonly sessionId?: string;
+  readonly streamPath?: string;
+  readonly turnId?: string;
+}
+
+/** Starts an agent task the way the parent stream announces it: the call, then its session. */
+function startAgentTask(
+  pump: SubagentPump,
+  callId: string,
+  options: AgentTaskOptions = {},
+): { readonly name: string; readonly taskId: string } {
+  const name = options.name ?? "researcher";
+  const taskId = `${name}-${callId}`;
+  const turnId = options.turnId ?? "turn-1";
+  callAgentTask(pump, { name, taskId }, callId, turnId);
+  const data: AgentStartedStreamEvent["data"] = {
+    callId,
+    name,
+    sessionId: options.sessionId ?? `child_${callId}`,
+    streamPath: options.streamPath ?? `/eve/v1/children/${callId}/stream`,
+    taskId,
+    turnId,
+  };
+  if (options.remote !== undefined) data.remote = options.remote;
+  pump.agentStarted({ data, type: "agent.started" }, "parent");
+  return { name, taskId };
+}
+
+/** A later call to a task reaches the session the task already opened. */
+function callAgentTask(
+  pump: SubagentPump,
+  task: { readonly name: string; readonly taskId: string },
+  callId: string,
+  turnId = "turn-1",
+): void {
+  pump.taskStarted(
+    {
+      data: { callId, kind: "agent", name: task.name, taskId: task.taskId, turnId },
+      type: "task.started",
     },
-  } as SubagentCalledStreamEvent;
+    "parent",
+  );
 }
 
 function responseOf(events: readonly MessageStreamEvent[]): Response {
@@ -179,14 +210,12 @@ function completedEvent(index: number): MessageStreamEvent {
 }
 
 describe("SubagentPump.settleCancelledTurn", () => {
-  it("cancels only foreground descendants of the exact turn", async () => {
-    const backgroundA = pushableChildStream();
-    const backgroundB = pushableChildStream();
-    const foregroundB = pushableChildStream();
+  it("cancels only descendants of the exact turn", async () => {
+    const childA = pushableChildStream();
+    const childB = pushableChildStream();
     const streams = new Map([
-      ["/eve/v1/children/background-a/stream", backgroundA],
-      ["/eve/v1/children/background-b/stream", backgroundB],
-      ["/eve/v1/children/foreground-b/stream", foregroundB],
+      ["/eve/v1/children/child-a/stream", childA],
+      ["/eve/v1/children/child-b/stream", childB],
     ]);
     const requests = serveChildStreams(({ path, signal }) => {
       const child = streams.get(path);
@@ -195,23 +224,19 @@ describe("SubagentPump.settleCancelledTurn", () => {
     });
     const { pump, view } = createPump();
 
-    pump.begin(subagentCalled("background-a", "turn-a"));
-    pump.background("background-a");
-    pump.begin(subagentCalled("background-b", "turn-b"));
-    pump.background("background-b");
-    pump.begin(subagentCalled("foreground-b", "turn-b"));
-    await vi.waitFor(() => expect(requests).toHaveLength(3));
+    startAgentTask(pump, "child-a", { turnId: "turn-a" });
+    startAgentTask(pump, "child-b", { turnId: "turn-b" });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
 
     pump.settleCancelledTurn("turn-b");
 
     expect(view.complete).toHaveBeenCalledTimes(1);
     expect(view.complete).toHaveBeenCalledWith({
       authoritative: true,
-      callId: "foreground-b",
+      callId: "child-b",
     });
-    expect(foregroundB.aborted).toBe(true);
-    expect(backgroundA.aborted).toBe(false);
-    expect(backgroundB.aborted).toBe(false);
+    expect(childB.aborted).toBe(true);
+    expect(childA.aborted).toBe(false);
     pump.abortAll();
   });
 
@@ -220,7 +245,7 @@ describe("SubagentPump.settleCancelledTurn", () => {
     const requests = serveChildStreams(({ signal }) => child.response(signal));
     const { pump, view } = createPump();
 
-    pump.begin(subagentCalled("call-1"));
+    startAgentTask(pump, "call-1");
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     child.push(reasoningEvent("**Searching for current events**", 0));
     await vi.waitFor(() =>
@@ -242,68 +267,23 @@ describe("SubagentPump.settleCancelledTurn", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(vi.mocked(view.upsertStep).mock.calls.length).toBe(updatesAfterSettle);
 
-    // The parent's late `subagent.completed` fallback settles as a no-op.
+    // The call's late `task.settled` settles as a no-op.
     const completions = vi.mocked(view.complete).mock.calls.length;
     pump.settle("call-1");
     expect(vi.mocked(view.complete).mock.calls.length).toBe(completions);
   });
 });
 
-describe("SubagentPump background receipts", () => {
-  it("retains a receipt that arrives before child dispatch", () => {
-    const view = fakeView();
-    const pump = new SubagentPump({ view, formatActionResultError: () => "failed" });
-    pump.background("call-1");
-    pump.begin(subagentCalled("call-1"));
-    pump.settleCancelledTurn("turn-1");
-    expect(view.background).toHaveBeenCalledWith({ callId: "call-1" });
-    expect(view.complete).not.toHaveBeenCalled();
-  });
-
-  it("keeps the section open until the child stream reaches its own boundary", async () => {
-    const child = pushableChildStream();
-    const requests = serveChildStreams(({ signal }) => child.response(signal));
-    const { pump, view } = createPump();
-
-    pump.begin(subagentCalled("call-1"));
-    pump.background("call-1");
-
-    expect(view.background).toHaveBeenCalledWith({ callId: "call-1" });
-    expect(view.complete).not.toHaveBeenCalled();
-
-    await vi.waitFor(() => expect(requests).toHaveLength(1));
-    child.push(reasoningEvent("still working", 0));
-    child.push(boundaryEvent(1));
-    await vi.waitFor(() =>
-      expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
-    );
-
-    expect(view.upsertStep).toHaveBeenCalledWith(
-      expect.objectContaining({ callId: "call-1", reasoning: "still working" }),
-    );
-  });
-
-  it("treats a child failure boundary as authoritative completion", async () => {
-    serveChildStreams(durableChild([failedBoundaryEvent(0)]));
-    const { pump, view } = createPump();
-
-    pump.begin(subagentCalled("call-1"));
-    pump.background("call-1");
-
-    await vi.waitFor(() =>
-      expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
-    );
-  });
-
+describe("SubagentPump completion", () => {
   it("reopens after parent completion and upgrades at the child boundary", async () => {
     const child = pushableChildStream();
     const requests = serveChildStreams(({ signal }) => child.response(signal));
     const { pump, view } = createPump();
 
-    pump.begin(subagentCalled("call-1"));
+    startAgentTask(pump, "call-1");
     pump.settle("call-1");
     expect(view.complete).toHaveBeenCalledWith({ authoritative: false, callId: "call-1" });
-    pump.begin(subagentCalled("call-1"));
+    startAgentTask(pump, "call-1");
     expect(view.begin).toHaveBeenCalledOnce();
 
     await vi.waitFor(() => expect(requests).toHaveLength(1));
@@ -346,7 +326,7 @@ describe("SubagentPump child stream transport", () => {
       const { pump, view } = createPump();
 
       try {
-        pump.begin(subagentCalled("call-1"));
+        startAgentTask(pump, "call-1");
         await vi.waitFor(() =>
           expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
         );
@@ -409,21 +389,17 @@ describe("SubagentPump child stream transport", () => {
     );
     const onToolCompleted = vi.fn(async () => {});
     const { pump, view } = createPump({ onToolCompleted });
-    const first = subagentCalled("call-1");
-    first.data.childSessionId = "conversation-child";
-    first.data.name = "self-modification__agent";
-    const second = subagentCalled("call-2", "turn-2");
-    second.data.childSessionId = "conversation-child";
-    second.data.name = "self-modification__agent";
-
-    pump.begin(first);
+    const task = startAgentTask(pump, "call-1", {
+      name: "self-modification__agent",
+      sessionId: "conversation-child",
+    });
     await vi.waitFor(() =>
       expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
     );
-    pump.begin(second);
+    callAgentTask(pump, task, "call-2", "turn-2");
     await vi.waitFor(() => expect(onToolCompleted).toHaveBeenCalledOnce());
 
-    expect(requests[1]).toMatchObject({ path: "/eve/v1/children/call-2/stream", startIndex: 1 });
+    expect(requests[1]).toMatchObject({ path: "/eve/v1/children/call-1/stream", startIndex: 1 });
     expect(onToolCompleted).toHaveBeenCalledWith("self-modification__agent", "registry_add", {
       status: "needs-terminal",
       address: "channel/slack",
@@ -438,15 +414,10 @@ describe("SubagentPump child stream transport", () => {
         : responseOf([reasoningEvent("second turn", 1), completedEvent(2)]),
     );
     const { pump, view } = createPump();
-    const first = subagentCalled("call-1");
-    first.data.childSessionId = "conversation-child";
-    const second = subagentCalled("call-2", "turn-2");
-    second.data.childSessionId = "conversation-child";
-
-    pump.begin(first);
+    const task = startAgentTask(pump, "call-1", { sessionId: "conversation-child" });
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     pump.settle("call-1");
-    pump.begin(second);
+    callAgentTask(pump, task, "call-2", "turn-2");
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(requests).toHaveLength(1);
@@ -457,7 +428,7 @@ describe("SubagentPump child stream transport", () => {
         expect.objectContaining({ callId: "call-2", reasoning: "second turn" }),
       ),
     );
-    expect(requests[1]).toMatchObject({ path: "/eve/v1/children/call-2/stream", startIndex: 1 });
+    expect(requests[1]).toMatchObject({ path: "/eve/v1/children/call-1/stream", startIndex: 1 });
   });
 
   it("leaves connection authorization events to the parent runner", async () => {
@@ -494,7 +465,7 @@ describe("SubagentPump child stream transport", () => {
     );
     const { pump, view } = createPump();
 
-    pump.begin(subagentCalled("call-1"));
+    startAgentTask(pump, "call-1");
     await vi.waitFor(() =>
       expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
     );
@@ -516,7 +487,7 @@ describe("SubagentPump child stream transport", () => {
     );
     const { pump, view } = createPump();
 
-    pump.begin(subagentCalled("call-1"));
+    startAgentTask(pump, "call-1");
     await vi.waitFor(() =>
       expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
     );
@@ -537,7 +508,7 @@ describe("SubagentPump child stream transport", () => {
     );
     const { pump, view } = createPump();
 
-    pump.begin(subagentCalled("call-1"));
+    startAgentTask(pump, "call-1");
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(requests).toHaveLength(9);
@@ -548,7 +519,7 @@ describe("SubagentPump child stream transport", () => {
     const requests = serveChildStreams(() => new Response("forbidden", { status: 403 }));
     const { pump, view } = createPump();
 
-    pump.begin(subagentCalled("call-1"));
+    startAgentTask(pump, "call-1");
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -561,17 +532,17 @@ describe("SubagentPump child stream transport", () => {
   it("uses the parent-authored child path and never the remote URL", async () => {
     const requests = serveChildStreams(durableChild([boundaryEvent(0)]));
     const { pump, view } = createPump({ host: "https://parent.example" });
-    const called = subagentCalled("remote-call");
-    called.data.childStreamPath = "/eve/v1/session/parent/subagents/remote-call/child/stream";
-    called.data.remote = { url: "https://remote.example/private" };
-
-    pump.begin(called);
+    const streamPath = "/eve/v1/session/parent/subagents/remote-call/child/stream";
+    startAgentTask(pump, "remote-call", {
+      remote: { url: "https://remote.example/private" },
+      streamPath,
+    });
     await vi.waitFor(() =>
       expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "remote-call" }),
     );
 
     expect(requests[0]!.url.origin).toBe("https://parent.example");
-    expect(requests[0]!.path).toBe(called.data.childStreamPath);
+    expect(requests[0]!.path).toBe(streamPath);
     expect(requests.map(({ url }) => url.href).join(" ")).not.toContain("remote.example");
   });
 
@@ -580,7 +551,7 @@ describe("SubagentPump child stream transport", () => {
     const requests = serveChildStreams(() => responseOf([]));
     const { pump } = createPump();
 
-    pump.begin(subagentCalled("call-1"));
+    startAgentTask(pump, "call-1");
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     pump.abortAll();
     await vi.advanceTimersByTimeAsync(10_000);

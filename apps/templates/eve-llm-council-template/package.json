@@ -12,7 +12,7 @@
     "build:web": "next build --turbopack apps/web",
     "dev": "next dev apps/web",
     "dev:eve": "eve dev",
-    "dev:services": "vercel dev",
+    "dev:all": "vercel dev --local",
     "dev:web": "next dev apps/web",
     "typecheck": "tsc -p apps/web/tsconfig.json"
   },

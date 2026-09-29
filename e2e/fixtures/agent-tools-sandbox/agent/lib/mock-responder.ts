@@ -12,12 +12,33 @@ const SKILL_DIRECTIVE = /load the `([^`]+)` skill/iu;
  */
 export function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
+  if (message.includes("EVE_SANDBOX_CURL_FANOUT")) {
+    return request.toolResults.some((result) => result.name === "bash")
+      ? "curl fanout complete"
+      : {
+          toolCalls: [...message.matchAll(/^curl-\d+: `([^`]+)`$/gmu)].map(([, command]) => ({
+            input: { command },
+            name: "bash",
+          })),
+        };
+  }
+  if (message.includes("DYNAMIC-TURN-REPLAY-START")) {
+    const gate = request.toolResults.find((result) => result.name === "dynamic-turn-replay-gate");
+    if (gate === undefined) {
+      return { toolCalls: [{ input: {}, name: "dynamic-turn-replay-gate" }] };
+    }
+    const probe = request.toolResults.find((result) => result.name === "dynamic_turn_replay_probe");
+    return probe === undefined
+      ? { toolCalls: [{ input: {}, name: "dynamic_turn_replay_probe" }] }
+      : formatOutput(probe.output);
+  }
+
   let lastAuthoredUserIndex = -1;
   let lastToolResultIndex = -1;
   for (let index = 0; index < request.messages.length; index += 1) {
     const entry = request.messages[index]!;
     if (entry.role === "tool") lastToolResultIndex = index;
-    if (entry.role === "user" && !entry.text.trim().startsWith("[Agents]")) {
+    if (entry.role === "user" && !isFrameworkMessage(entry.text)) {
       lastAuthoredUserIndex = index;
     }
   }
@@ -28,7 +49,8 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
     if (!turnHasToolResult) {
       return { toolCalls: [{ input: { message: subagent[2] }, name: subagent[1] }] };
     }
-    return toolOutput(request, subagent[1]);
+    // The agent call returned a receipt; its result arrives in a <task_result> message.
+    return taskResultOf(request, subagent[1]) ?? { toolCalls: [{ input: {}, name: "task_wait" }] };
   }
 
   const bash = BASH_DIRECTIVE.exec(message);
@@ -53,6 +75,22 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   return `Mock reply: ${message}`;
+}
+
+/** The `[Tasks]` note and `<task_result>` messages are eve's, not the user's. */
+function isFrameworkMessage(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.startsWith("[Tasks]") || trimmed.startsWith("<task_result");
+}
+
+function taskResultOf(request: MockModelRequest, tool: string): string | undefined {
+  const pattern = new RegExp(`<task_result [^>]*tool="${tool}"[^>]*>([\\s\\S]*?)</task_result>`);
+  for (const entry of [...request.messages].reverse()) {
+    if (entry.role !== "user") continue;
+    const body = entry.text.match(pattern)?.[1];
+    if (body !== undefined) return body;
+  }
+  return undefined;
 }
 
 function bashStdout(request: MockModelRequest): string {

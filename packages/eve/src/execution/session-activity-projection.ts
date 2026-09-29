@@ -3,7 +3,7 @@ import {
   ActivityObserverKey,
   ActivityPendingBlockersKey,
   ActivityRootTurnIdKey,
-  TurnTaskDeliveryKey,
+  ActivityTaskCallsKey,
 } from "#context/keys.js";
 import { projectActivityEvents } from "#execution/activity-events.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
@@ -19,22 +19,13 @@ export async function observeSessionActivity(input: {
 }): Promise<void> {
   const observer = input.ctx.get(ActivityObserverKey);
   if (observer === undefined) return;
-  const taskDelivery = input.ctx.get(TurnTaskDeliveryKey);
-  if (
-    observer.workIdentity === undefined &&
-    input.ctx.get(ActivityRootTurnIdKey) === undefined &&
-    (taskDelivery === "pending" || taskDelivery === "settled")
-  )
-    return;
   await submitActivity({
     events: projectSessionActivity({
       event: input.event,
       rootTurnId: input.ctx.get(ActivityRootTurnIdKey),
       sessionId: input.sessionId,
-      suppressRootSettlement:
-        taskDelivery === "initiating" ||
-        taskDelivery === "pending" ||
-        (input.ctx.get(ActivityPendingBlockersKey)?.length ?? 0) > 0,
+      suppressRootSettlement: (input.ctx.get(ActivityPendingBlockersKey)?.length ?? 0) > 0,
+      taskCallIds: input.ctx.get(ActivityTaskCallsKey),
       workIdentity: observer.workIdentity,
     }),
     sink: observer.sink,
@@ -46,6 +37,7 @@ export function projectSessionActivity(input: {
   readonly rootTurnId?: string;
   readonly sessionId: string;
   readonly suppressRootSettlement?: boolean;
+  readonly taskCallIds?: readonly string[];
   readonly workIdentity?: ActivityWorkIdentityV1;
 }): readonly ActivityEventV1[] {
   const work = workFor(input);
@@ -79,6 +71,7 @@ export function projectSessionActivity(input: {
       event: input.event,
       eventId: input.event.meta.id,
       lineage: work,
+      taskCallIds: input.taskCallIds,
     }),
   );
   return events;

@@ -142,7 +142,7 @@ describe("normalizeProviderToolHistory", () => {
     expect(normalized.outcomeEndsResponse).toBe(true);
   });
 
-  it("normalizes provider-owned results when the turn also calls a local tool", () => {
+  it("keeps local tool calls next to their results around provider-owned results", () => {
     const messages: ModelMessage[] = [
       {
         role: "assistant",
@@ -166,6 +166,19 @@ describe("normalizeProviderToolHistory", () => {
             toolName: "read_file",
             input: { filePath: "/workspace/a.ts" },
           },
+          {
+            type: "tool-call",
+            toolCallId: "search-2",
+            toolName: "web_search",
+            input: { query: "Follow-up result" },
+            providerExecuted: true,
+          },
+          {
+            type: "tool-result",
+            toolCallId: "search-2",
+            toolName: "web_search",
+            output: { type: "json", value: { results: [] } },
+          },
         ],
       },
       {
@@ -183,7 +196,7 @@ describe("normalizeProviderToolHistory", () => {
 
     const normalized = normalizeProviderToolHistory({
       messages,
-      providerExecutedOutcomeIds: new Set(["search-1"]),
+      providerExecutedOutcomeIds: new Set(["search-1", "search-2"]),
     });
 
     expect(normalized.messages).toEqual([
@@ -205,6 +218,29 @@ describe("normalizeProviderToolHistory", () => {
           {
             type: "tool-result",
             toolCallId: "search-1",
+            toolName: "web_search",
+            output: { type: "json", value: { results: [] } },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "search-2",
+            toolName: "web_search",
+            input: { query: "Follow-up result" },
+            providerExecuted: false,
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "search-2",
             toolName: "web_search",
             output: { type: "json", value: { results: [] } },
           },

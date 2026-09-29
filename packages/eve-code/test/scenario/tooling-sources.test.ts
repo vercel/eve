@@ -143,7 +143,9 @@ test("signed commit advances HEAD without rewriting the worktree", async () => {
     });
     const oldHead = oldHeadOutput.trim();
 
-    await writeFile(join(worktree, "tracked.txt"), "after\n");
+    // Larger than execFileSync's default 1 MiB maxBuffer, like a monorepo lockfile.
+    const after = "after\n".repeat(400_000);
+    await writeFile(join(worktree, "tracked.txt"), after);
     await writeFile(join(worktree, "untracked.txt"), "preserved\n");
     await execFileAsync("git", ["add", "tracked.txt"], { cwd: worktree });
     const { stdout: treeOutput } = await execFileAsync("git", ["write-tree"], { cwd: worktree });
@@ -163,10 +165,11 @@ test("signed commit advances HEAD without rewriting the worktree", async () => {
 
     const script = join(dir, "gh-signed-commit.cjs");
     const preload = join(dir, "fetch.cjs");
+    const commitRequest = join(dir, "commit-request.json");
     await writeFile(script, GH_SIGNED_COMMIT_SOURCE);
     await writeFile(
       preload,
-      `globalThis.fetch = async (url) => {\n  if (String(url).endsWith("/graphql")) return Response.json({ data: { createCommitOnBranch: { commit: { oid: process.env.NEW_HEAD } } } });\n  return Response.json({ object: { sha: process.env.OLD_HEAD } });\n};\n`,
+      `globalThis.fetch = async (url, init) => {\n  if (String(url).endsWith("/graphql")) {\n    require("node:fs").writeFileSync(process.env.COMMIT_REQUEST, init.body);\n    return Response.json({ data: { createCommitOnBranch: { commit: { oid: process.env.NEW_HEAD } } } });\n  }\n  return Response.json({ object: { sha: process.env.OLD_HEAD } });\n};\n`,
     );
     const { stdout } = await execFileAsync(
       process.execPath,
@@ -175,6 +178,7 @@ test("signed commit advances HEAD without rewriting the worktree", async () => {
         cwd: worktree,
         env: {
           ...process.env,
+          COMMIT_REQUEST: commitRequest,
           GH_TOKEN: "not-used",
           NEW_HEAD: newHead,
           NODE_OPTIONS: `--require=${preload}`,
@@ -184,6 +188,11 @@ test("signed commit advances HEAD without rewriting the worktree", async () => {
     );
 
     assert.equal(stdout.trim(), newHead);
+    const { variables } = JSON.parse(await readFile(commitRequest, "utf8"));
+    assert.equal(
+      Buffer.from(variables.input.fileChanges.additions[0].contents, "base64").toString(),
+      after,
+    );
     assert.equal(
       (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: worktree })).stdout.trim(),
       newHead,

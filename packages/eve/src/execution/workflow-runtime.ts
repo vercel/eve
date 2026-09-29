@@ -211,9 +211,7 @@ export function createWorkflowRuntime(config: {
         ownerDeploymentId: await resolveCurrentWorkflowDeploymentId(),
         serializedContext,
       };
-      const taskId = input.taskId ?? input.callback?.taskId;
       if (input.limits !== undefined) workflowInput.limits = input.limits;
-      if (taskId !== undefined) workflowInput.taskId = taskId;
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
       }
@@ -293,7 +291,7 @@ export function createWorkflowRuntime(config: {
     async dispatchSession<TCommand extends SessionCommand>(
       input: DispatchSessionInput<TCommand>,
     ): Promise<SessionCommandResult<TCommand>> {
-      return await dispatchWorkflowCommand({ sessionId: input.sessionId }, input.command);
+      return await dispatchWorkflowSessionCommand(input);
     },
 
     async getEventStream(
@@ -454,15 +452,18 @@ function inactiveCommandResult<TCommand extends SessionCommand>(
   return result as SessionCommandResult<TCommand>;
 }
 
+/** Sends one command to a session through its stable command inbox. */
+export async function dispatchWorkflowSessionCommand<TCommand extends SessionCommand>(
+  input: DispatchSessionInput<TCommand>,
+): Promise<SessionCommandResult<TCommand>> {
+  return await dispatchWorkflowCommand({ sessionId: input.sessionId }, input.command);
+}
+
 /** Requests cancellation through a session's stable command inbox. */
 export async function requestWorkflowTurnCancellation(
   input: CancelTurnInput,
 ): Promise<CancelTurnResult> {
-  const command: { kind: "cancel"; taskId?: string; tasks?: boolean; turnId?: string } = {
-    kind: "cancel",
-  };
-  if (input.taskId !== undefined) command.taskId = input.taskId;
-  if (input.tasks !== undefined) command.tasks = input.tasks;
+  const command: { kind: "cancel"; turnId?: string } = { kind: "cancel" };
   if (input.turnId !== undefined) command.turnId = input.turnId;
   return await dispatchWorkflowCommand({ sessionId: input.sessionId }, command);
 }

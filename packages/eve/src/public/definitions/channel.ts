@@ -37,7 +37,6 @@ export type {
   ResetSessionResult,
   SessionCallback,
   TurnPolicy,
-  TaskDeliveryPolicy,
 } from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
 export type { ChannelAudience } from "#shared/channel-audience.js";
@@ -208,6 +207,7 @@ export interface ChannelEvents<TCtx = void> {
   readonly "message.appended"?: ChannelEventHandler<"message.appended", TCtx>;
   readonly "reasoning.appended"?: ChannelEventHandler<"reasoning.appended", TCtx>;
   readonly "reasoning.completed"?: ChannelEventHandler<"reasoning.completed", TCtx>;
+  readonly "step.completed"?: ChannelEventHandler<"step.completed", TCtx>;
   readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
   readonly "turn.failed"?: ChannelEventHandler<"turn.failed", TCtx>;
   readonly "turn.completed"?: ChannelEventHandler<"turn.completed", TCtx>;
@@ -318,6 +318,7 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "message.appended": null,
   "reasoning.appended": null,
   "reasoning.completed": null,
+  "step.completed": null,
   "input.requested": null,
   "turn.failed": null,
   "turn.completed": null,

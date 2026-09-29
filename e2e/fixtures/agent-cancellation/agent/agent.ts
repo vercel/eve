@@ -2,11 +2,16 @@ import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
-const RECOVERY_REQUEST = "RESUME-CANCELLED-SLEEPER";
 const HITL_REQUEST = "GENERATED-PROGRAM-CHILD-HITL";
+const AGENT_TASK_CANCEL = "AGENT-TASK-CANCEL";
+const SLEEPER_FOLLOW_UP = "SLEEPER-FOLLOW-UP";
+const CANCELLED_TURN_FOLLOW_UP = "CANCELLATION-SUBAGENT-FOLLOW-UP-OK";
+/** How a call the cancelled turn stopped reads in history. */
+const CANCELLED_CALL_TEXT = "cancelled before this call finished";
 
 async function respond(request: MockModelRequest): Promise<MockModelResponse | string> {
   const message = request.lastUserMessage ?? "";
+  if (message.includes(AGENT_TASK_CANCEL)) return cancelAndContinueSleeper(request);
   if (message.includes("Alice is preparing the 2026 report.")) {
     await new Promise((resolve) => setTimeout(resolve, 30_000));
     return "Original 2026 report";
@@ -47,11 +52,14 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
   }
   if (message.includes("call the sleeper subagent")) {
     const hitl = message.includes(HITL_REQUEST);
-    const hitlResult = request.toolResults.find((entry) => entry.id === "hitl-sleeper");
-    if (hitlResult !== undefined) {
-      return typeof hitlResult.output === "string"
-        ? hitlResult.output
-        : JSON.stringify(hitlResult.output);
+    // The workflow tool runs as a task: its call returns a receipt, and the
+    // program's result arrives in a <task_result> message after task_wait.
+    const taskResult = request.messages.find(
+      (entry) => entry.role === "user" && entry.text.startsWith("<task_result"),
+    );
+    if (taskResult !== undefined) return taskResult.text;
+    if (request.toolResults.some((entry) => entry.name === "workflow")) {
+      return { toolCalls: [{ id: "wait-for-sleeper", input: {}, name: "task_wait" }] };
     }
     return {
       toolCalls: [
@@ -67,32 +75,52 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
       ],
     };
   }
-  if (message.includes("[Agents] listing")) {
-    return (
-      [...request.messages].reverse().find((entry) => entry.text.startsWith("[Agents]"))?.text ??
-      "No agents listed."
-    );
-  }
-  if (message.includes(RECOVERY_REQUEST)) {
-    const result = request.toolResults.find((entry) => entry.id === "resume-sleeper");
-    if (result !== undefined) {
-      return typeof result.output === "string" ? result.output : JSON.stringify(result.output);
-    }
-    const agentId = /agentId ("[^"]+")/u.exec(message)?.[1];
-    if (agentId === undefined) throw new Error("Recovery prompt has no sleeper agent id.");
+  if (message.includes(CANCELLED_TURN_FOLLOW_UP)) return replyAfterCancelledTurn(request);
+  return `Mock reply: ${message}`;
+}
+
+/**
+ * Answers the follow-up to a cancelled sleeper turn only when history keeps
+ * what that turn did: the sleeper call, and the calls the cancel stopped
+ * answered as cancelled. Without them the sleeper request would look unanswered.
+ */
+function replyAfterCancelledTurn(request: MockModelRequest): string {
+  const calledSleeper = request.toolResults.some((entry) => entry.id === "cancel-sleeper");
+  const cancelledCall = request.toolResults.some((entry) =>
+    String(entry.output).includes(CANCELLED_CALL_TEXT),
+  );
+  return calledSleeper && cancelledCall
+    ? CANCELLED_TURN_FOLLOW_UP
+    : "The cancelled turn's calls are missing from history.";
+}
+
+/**
+ * Calls the sleeper agent, waits briefly for it to reach its tool, cancels
+ * the task, then continues it by taskId and returns its follow-up result.
+ */
+function cancelAndContinueSleeper(request: MockModelRequest): MockModelResponse | string {
+  const calls = (name: string) => request.toolResults.filter((entry) => entry.name === name);
+  const [started, continued] = calls("sleeper");
+  if (started === undefined) {
     return {
-      toolCalls: [
-        {
-          id: "resume-sleeper",
-          input: {
-            js: `return await ctx.agent("sleeper", { agentId: ${agentId}, message: ${JSON.stringify(RECOVERY_REQUEST)} });`,
-          },
-          name: "workflow",
-        },
-      ],
+      toolCalls: [{ input: { message: "Please wait for cancellation." }, name: "sleeper" }],
     };
   }
-  return `Mock reply: ${message}`;
+  const taskId = /Started task (\S+)\./u.exec(String(started.output))?.[1];
+  if (taskId === undefined) throw new Error("The sleeper call returned no task receipt.");
+  if (calls("task_wait").length === 0) {
+    return { toolCalls: [{ input: { timeout: 2_000 }, name: "task_wait" }] };
+  }
+  if (calls("task_cancel").length === 0) {
+    return { toolCalls: [{ input: { taskId }, name: "task_cancel" }] };
+  }
+  if (continued === undefined) {
+    return { toolCalls: [{ input: { message: SLEEPER_FOLLOW_UP, taskId }, name: "sleeper" }] };
+  }
+  const result = [...request.messages]
+    .reverse()
+    .find((entry) => entry.role === "user" && entry.text.startsWith("<task_result"));
+  return result?.text ?? { toolCalls: [{ input: {}, name: "task_wait" }] };
 }
 
 const base = e2eAgentConfig({ mock: respond });

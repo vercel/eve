@@ -993,8 +993,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("settles an authorization block when its callback arrives in a later stream pass", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "background", name: "researcher" });
-    renderer.backgroundSubagent({ callId: "background" });
+    renderer.beginSubagent({ callId: "research", name: "researcher" });
     renderer.upsertConnectionAuth({
       name: "linear",
       description: "Authorization required for linear",
@@ -1158,54 +1157,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("keeps late background child output inside its section across parent turns", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "s1", name: "researcher" });
-    renderer.backgroundSubagent({ callId: "s1" });
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-delta", id: "parent-1", delta: "Research task started." },
-        { type: "assistant-complete", id: "parent-1" },
-        { type: "finish" },
-      ]),
-      { continueSession: true },
-    );
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-delta", id: "parent-2", delta: "It is still running." },
-        { type: "assistant-complete", id: "parent-2" },
-        { type: "finish" },
-      ]),
-      { continueSession: true, submittedPrompt: "cool" },
-    );
-
-    // The child emits after both parent turns. It still inserts beside its
-    // call's header, not at the current transcript edge beneath parent-2.
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "researcher",
-      childCallId: "dig-1",
-      toolName: "dig",
-      input: { phase: "sources" },
-      status: "executing",
-    });
-
-    const snapshot = screen.snapshot();
-    const header = snapshot.indexOf("※ subagent(researcher)");
-    const child = snapshot.indexOf("dig");
-    const firstParent = snapshot.indexOf("Research task started.");
-    const user = snapshot.indexOf("cool");
-    const secondParent = snapshot.indexOf("It is still running.");
-    expect(firstParent).toBeGreaterThan(-1);
-    expect(user).toBeGreaterThan(firstParent);
-    expect(secondParent).toBeGreaterThan(user);
-    expect(header).toBeGreaterThan(secondParent);
-    expect(child).toBeGreaterThan(header);
-    renderer.shutdown();
-  });
-
   it("swaps a dispatch's preparing placeholder for the section header", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1230,8 +1181,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     await screen.waitForText("Delegate");
 
-    // Subagent dispatches never upgrade the placeholder (their actions are
-    // not tool-call kind) — subagent.called supersedes it with the section.
+    // The agent's section supersedes the tool-call placeholder once agent.started arrives.
     renderer.markChildToolCallId("sub1");
     renderer.beginSubagent({ callId: "sub1", name: "agent" });
     await screen.waitForText("※ subagent(self)");
@@ -1316,193 +1266,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("commits an authoritative background completion out of the live prompt region", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "s1", name: "researcher" });
-    renderer.backgroundSubagent({ callId: "s1" });
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "researcher",
-      childCallId: "dig-1",
-      toolName: "dig",
-      input: { phase: "sources" },
-      status: "done",
-      output: { ok: true },
-    });
-
-    renderer.completeSubagent({ authoritative: true, callId: "s1" });
-    const outputAfterCommit = screen.rawOutput().length;
-    const prompt = renderer.readPrompt();
-    input.type("next message");
-
-    // Prompt repaint must not redraw the completed subagent cohort: it has
-    // moved to immutable scrollback and no longer occupies the live region.
-    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
-    input.enter();
-    expect(await prompt).toBe("next message");
-    renderer.shutdown();
-  });
-
-  it("keeps the activity ticker running while a background subagent remains live", async () => {
-    vi.useFakeTimers();
-    try {
-      const { screen, renderer } = makeRenderer();
-      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-      renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
-      renderer.upsertSubagentTool({
-        callId: "background",
-        subagentName: "researcher",
-        childCallId: "child-hold",
-        toolName: "hold",
-        input: { durationMs: 45_000 },
-        status: "executing",
-      });
-
-      await renderer.renderStream(streamOf([{ type: "finish" }]), {
-        continueSession: true,
-        submittedPrompt: "start background work",
-      });
-      const outputBeforeTick = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(90);
-      expect(screen.rawOutput().length).toBeGreaterThan(outputBeforeTick);
-
-      renderer.completeSubagent({ authoritative: true, callId: "background" });
-      const outputAfterCompletion = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(180);
-      expect(screen.rawOutput()).toHaveLength(outputAfterCompletion);
-      renderer.shutdown();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps the ticker running when one of two background subagents completes", async () => {
-    vi.useFakeTimers();
-    try {
-      const { screen, renderer } = makeRenderer();
-      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-      const startBackground = (callId: string) => {
-        renderer.beginSubagent({ callId, name: "hang-worker" });
-        renderer.backgroundSubagent({ callId });
-        renderer.upsertSubagentTool({
-          callId,
-          subagentName: "hang-worker",
-          childCallId: `${callId}-hold`,
-          toolName: "hold",
-          input: { durationMs: 45_000 },
-          status: "executing",
-        });
-      };
-
-      startBackground("first");
-      await renderer.renderStream(streamOf([{ type: "finish" }]), {
-        continueSession: true,
-        submittedPrompt: "start first background worker",
-      });
-      await renderer.renderStream(
-        streamOf([
-          { type: "assistant-complete", id: "a", text: "Mock reply: a" },
-          { type: "finish" },
-        ]),
-        { continueSession: true, submittedPrompt: "a" },
-      );
-      startBackground("second");
-      await renderer.renderStream(streamOf([{ type: "finish" }]), {
-        continueSession: true,
-        submittedPrompt: "start second background worker",
-      });
-
-      renderer.completeSubagent({ authoritative: true, callId: "first" });
-      const outputBeforeTick = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(90);
-      expect(screen.rawOutput().length).toBeGreaterThan(outputBeforeTick);
-
-      renderer.completeSubagent({ authoritative: true, callId: "second" });
-      const outputAfterCompletion = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(180);
-      expect(screen.rawOutput()).toHaveLength(outputAfterCompletion);
-      renderer.shutdown();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("stops background activity ticking when a session boundary abandons its child", async () => {
-    vi.useFakeTimers();
-    try {
-      const { screen, renderer } = makeRenderer();
-      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-      renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
-      renderer.upsertSubagentTool({
-        callId: "background",
-        subagentName: "researcher",
-        childCallId: "child-hold",
-        toolName: "hold",
-        input: { durationMs: 45_000 },
-        status: "executing",
-      });
-
-      renderer.renderSessionBoundary();
-      const outputAfterBoundary = screen.rawOutput().length;
-      await vi.advanceTimersByTimeAsync(180);
-      expect(screen.rawOutput()).toHaveLength(outputAfterBoundary);
-      renderer.shutdown();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("commits completed foreground turns ahead of a live background subagent", async () => {
-    const { screen, renderer } = makeRenderer(48, 8);
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "background", name: "researcher" });
-    // These settled blocks arrive before the parent reports that the child
-    // is background work. Reclassifying the child must release them from its
-    // formerly leading live cohort.
-    renderer.renderNotice("EARLY_SETTLED_FOREGROUND_ONE");
-    renderer.renderNotice("EARLY_SETTLED_FOREGROUND_TWO");
-    renderer.backgroundSubagent({ callId: "background" });
-    renderer.upsertSubagentStep({
-      callId: "background",
-      subagentName: "researcher",
-      sectionKey: 0,
-      reasoning: "",
-      message: "still researching background details",
-      finalized: false,
-    });
-
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-complete", id: "answer-1", text: "FIRST_COMPLETED_ANSWER" },
-        { type: "finish" },
-      ]),
-      { continueSession: true, submittedPrompt: "FIRST_COMPLETED_PROMPT" },
-    );
-    await renderer.renderStream(
-      streamOf([
-        { type: "assistant-complete", id: "answer-2", text: "SECOND_COMPLETED_ANSWER" },
-        { type: "finish" },
-      ]),
-      { continueSession: true, submittedPrompt: "SECOND_COMPLETED_PROMPT" },
-    );
-
-    const transcript = screen.snapshot();
-    expect(transcript).toContain("EARLY_SETTLED_FOREGROUND_ONE");
-    expect(transcript).toContain("EARLY_SETTLED_FOREGROUND_TWO");
-    expect(transcript).toContain("FIRST_COMPLETED_PROMPT");
-    expect(transcript).toContain("FIRST_COMPLETED_ANSWER");
-    expect(transcript).toContain("SECOND_COMPLETED_PROMPT");
-    expect(transcript).toContain("SECOND_COMPLETED_ANSWER");
-    expect(transcript).toContain("still researching background details");
-
-    renderer.completeSubagent({ authoritative: true, callId: "background" });
-    expect(screen.snapshot()).not.toContain("hidden while streaming");
-    renderer.shutdown();
-  });
-
   it("keeps parent completion provisional until delayed child output reaches its boundary", async () => {
     const { screen, input, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1540,46 +1303,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     await prompt;
     renderer.shutdown();
   });
-
-  it.each(["active", "idle"] as const)(
-    "settles only the %s cancelled turn's top-level tools",
-    async (mode) => {
-      const { screen, renderer } = makeRenderer();
-      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-      renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
-      renderer.upsertSubagentTool({
-        callId: "background",
-        subagentName: "researcher",
-        childCallId: "child-bash",
-        toolName: "bash",
-        input: { command: "background-child" },
-        status: "executing",
-      });
-      const result = streamOf([
-        {
-          type: "tool-call",
-          toolCallId: "current-bash",
-          toolName: "bash",
-          input: { command: "idle-current" },
-        },
-        { type: "turn-cancelled" },
-        { type: "finish" },
-      ]);
-
-      if (mode === "active") {
-        await renderer.renderStream(result, { continueSession: true });
-      } else {
-        await renderer.renderIdleStream(result, { continueSession: true });
-      }
-
-      const snapshot = screen.snapshot();
-      expect(snapshot).toContain("background-child");
-      expect(snapshot).toContain("idle-current");
-      expect(countOccurrences(snapshot, "interrupted")).toBe(1);
-      renderer.shutdown();
-    },
-  );
 
   it("renders parallel calls to the same subagent as ordinal-numbered sections", async () => {
     const { screen, renderer } = makeRenderer();
@@ -1721,17 +1444,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     await renderer.renderIdleStream(
       streamOf([
-        {
-          type: "tool-call",
-          input: { taskIds: ["task_123"] },
-          toolCallId: "cancel-1",
-          toolName: "task_cancel",
-        },
-        {
-          type: "tool-result",
-          output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
-          toolCallId: "cancel-1",
-        },
         { type: "assistant-delta", id: "wake-1", delta: "Research finished." },
         { type: "assistant-complete", id: "wake-1" },
         { type: "finish" },
@@ -2066,20 +1778,69 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("retires the placeholder after the first user message", async () => {
+  it("retires a local cue after the first user message, including after a header refresh", async () => {
     const { screen, input, renderer } = makeRenderer();
+    const info = createTestAgentInfoResult();
+    const header = {
+      name: "Orders",
+      serverUrl: "http://localhost:3000",
+      localDevelopment: true,
+      info: {
+        ...info,
+        instructions: {
+          dynamic: [],
+          static: [
+            {
+              ...info.agent.config,
+              name: "instructions",
+              role: "system" as const,
+              content: "Help with orders.",
+            },
+          ],
+        },
+        subagents: {
+          total: 1,
+          local: [
+            {
+              ...info.agent.config,
+              owner: {
+                kind: "extension" as const,
+                namespace: "self-modification",
+                packageName: "eve",
+              },
+              name: "self-modification__agent",
+              entryPath: "subagents/agent/agent.ts",
+              rootPath: "/eve/self-modification",
+              nodeId: "self-modification__agent",
+              parentNodeId: "__root__",
+              summary: {
+                channels: 0,
+                connections: 0,
+                hooks: 0,
+                instructions: 1,
+                memories: 0,
+                schedules: 0,
+                skills: 0,
+                tools: 1,
+              },
+            },
+          ],
+        },
+      },
+    };
+    renderer.renderAgentHeader(header);
 
     const first = renderer.readPrompt();
-    expect(screen.snapshot()).toContain("❯ Send a message…");
+    expect(screen.snapshot()).toContain("❯ Send a message, or ask me to add a channel…");
     input.type("hello");
     input.enter();
     expect(await first).toBe("hello");
+    await renderer.renderStream(streamOf([]), { continueSession: true, submittedPrompt: "hello" });
 
-    // Once the user has spoken, the empty prompt keeps the default-color `❯` but
-    // drops the invitation text; typing still colors the active `❯`.
+    renderer.renderAgentHeader(header);
     const second = renderer.readPrompt();
     expect(screen.snapshot()).toContain("❯");
-    expect(screen.snapshot()).not.toContain("Send a message…");
+    expect(screen.snapshot()).not.toContain("ask me to add a channel");
     input.type("again");
     expect(screen.snapshot()).toContain("❯ again");
     input.ctrlC();
@@ -2087,6 +1848,24 @@ describe("TerminalRenderer (inline scrollback)", () => {
     input.ctrlC();
     await expect(second).rejects.toThrow();
     renderer.shutdown();
+
+    const queued = makeRenderer();
+    queued.renderer.beginStartupDraft({ title: "Orders" });
+    queued.input.type("hello from startup");
+    queued.input.enter();
+    const startup = queued.renderer.finishStartupDraft();
+    expect(startup.queuedPrompt).toBe("hello from startup");
+    queued.renderer.renderAgentHeader(header);
+    await queued.renderer.renderStream(streamOf([]), {
+      continueSession: true,
+      submittedPrompt: startup.queuedPrompt,
+    });
+    const afterQueuedMessage = queued.renderer.readPrompt();
+    expect(queued.screen.snapshot()).not.toContain("ask me to add a channel");
+    queued.input.ctrlC();
+    queued.input.ctrlC();
+    await expect(afterQueuedMessage).rejects.toThrow();
+    queued.renderer.shutdown();
   });
 
   it("keeps collapsed reasoning out of the transcript behind the turn bar", async () => {
@@ -4658,8 +4437,7 @@ describe("TerminalRenderer setup flow session", () => {
     try {
       const { screen, renderer } = makeRenderer();
       renderer.setupFlow.begin("Add integration");
-      renderer.beginSubagent({ callId: "background", name: "researcher" });
-      renderer.backgroundSubagent({ callId: "background" });
+      renderer.beginSubagent({ callId: "research", name: "researcher" });
       let release!: () => void;
       const inherited = renderer.setupFlow.withInheritedStdio(
         () => new Promise<void>((resolve) => (release = resolve)),
@@ -5344,18 +5122,15 @@ describe("TerminalRenderer command typeahead", () => {
     renderer.shutdown();
   });
 
-  it("collapses a complete command into an inline argument hint", async () => {
+  it("keeps the suggestion visible for a complete command alongside its argument hint", async () => {
     const { screen, input, renderer } = makeRenderer();
 
     const prompt = renderer.readPrompt();
     input.type("/model");
     const snapshot = screen.snapshot();
-    // The prompt row carries the dim argument shape inline (the caret sits
-    // between the typed name and the hint)...
-    expect(snapshot).toContain("/model");
+    expect(snapshot).toContain("│ /model");
     expect(snapshot).toContain("[provider/model]");
-    // ...and the dropdown (with its description column) is gone.
-    expect(snapshot).not.toContain("Choose a model, speed, and reasoning");
+    expect(snapshot).toContain("Choose a model, speed, and reasoning");
 
     input.enter();
     expect(await prompt).toBe("/model");

@@ -66,33 +66,30 @@ function actionResult(input: {
   };
 }
 
-function subagentResult(input: {
-  callId: string;
-  subagentName: string;
-  output: unknown;
-  status: "completed" | "failed" | "rejected";
-}): UnstampedMessageStreamEvent {
-  return {
-    type: "action.result",
-    data: {
-      result: {
-        callId: input.callId,
-        kind: "subagent-result",
-        origin: "child",
-        outcome: {
-          kind: "terminal",
-          result: { kind: "succeeded", output: input.output as never },
-          usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
-        },
-        output: input.output as never,
-        subagentName: input.subagentName,
-      },
-      sequence: 1,
-      stepIndex: 0,
-      status: input.status,
-      turnId: "t1",
-    },
+function taskStarted(
+  callId: string,
+  name: string,
+  taskId: string,
+  kind: "agent" | "tool",
+): UnstampedMessageStreamEvent {
+  return { type: "task.started", data: { callId, kind, name, taskId, turnId: "t1" } };
+}
+
+function agentStarted(
+  callId: string,
+  name: string,
+  taskId: string,
+  remote?: { readonly url: string },
+): UnstampedMessageStreamEvent {
+  const data = {
+    callId,
+    name,
+    sessionId: `child-${callId}`,
+    streamPath: `/stream/${callId}`,
+    taskId,
+    turnId: "t1",
   };
+  return { type: "agent.started", data: remote === undefined ? data : { ...data, remote } };
 }
 
 function inputRequested(requestIds: readonly string[]): UnstampedMessageStreamEvent {
@@ -317,7 +314,7 @@ describe("deriveRunFacts", () => {
         type: "message.completed",
         data: {
           finishReason: "tool-calls",
-          message: null,
+          message: "Checking.",
           stepIndex: 1,
           turnId: "t1",
           sequence: 2,
@@ -347,209 +344,83 @@ describe("deriveRunFacts", () => {
     expect(facts.reasoningBlockCount).toBe(2);
   });
 
-  it("keeps a working receipt working until an actual result arrives", () => {
-    const admission: UnstampedMessageStreamEvent = {
-      type: "subagent.completed",
-      data: {
-        callId: "c1",
-        subagentName: "researcher",
-        output: "working",
-        backgroundTask: { status: "working", taskId: "task-1" },
-      },
-    };
-    const receipt: UnstampedMessageStreamEvent = {
-      type: "action.result",
-      data: {
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "t1",
-        status: "completed",
-        result: {
-          kind: "subagent-result",
-          origin: "child",
-          callId: "c1",
-          subagentName: "researcher",
-          backgroundTask: { status: "working", taskId: "task-1" },
-          output: { status: "working", taskId: "task-1" },
-          outcome: {
-            kind: "parked",
-            result: { kind: "succeeded", output: "working" },
-            usageDelta: {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-            },
+  it("derives one subagent call per call to an agent task", () => {
+    const facts = derive(
+      [
+        turnStarted("t1", 0),
+        taskStarted("c1", "weather", "weather-1", "agent"),
+        agentStarted("c1", "weather", "weather-1", { url: "http://127.0.0.1:4001" }),
+        {
+          type: "task.settled",
+          data: {
+            callId: "c1",
+            output: "Sunny, 72F",
+            status: "completed",
+            taskId: "weather-1",
+            turnId: "t1",
           },
         },
-      },
-    };
-    const toolReceipt = actionResult({
-      callId: "c1",
-      toolName: "researcher",
-      output: { agentId: "agent-1", status: "working", taskId: "task-1" },
-    });
-    for (const events of [
-      [admission],
-      [receipt],
-      [toolReceipt],
-      [admission, receipt],
-      [receipt, admission],
-    ]) {
-      expect(derive(events).subagentCalls).toEqual([
-        expect.objectContaining({ callId: "c1", status: "working" }),
-      ]);
-      expect(derive(events).subagentCalls[0]?.output).toBeUndefined();
-    }
-    const completed: UnstampedMessageStreamEvent = {
-      type: "subagent.completed",
-      data: { callId: "c1", subagentName: "researcher", output: "actual result" },
-    };
-    expect(derive([toolReceipt, completed, admission, receipt, toolReceipt]).subagentCalls).toEqual(
-      [expect.objectContaining({ callId: "c1", status: "completed", output: "actual result" })],
+        turnStarted("t2", 1),
+        taskStarted("c2", "weather", "weather-1", "agent"),
+      ],
+      { sessionId: "s0" },
     );
-    for (const status of ["failed", "rejected"] as const) {
-      const failure = subagentResult({
-        callId: "c1",
-        subagentName: "researcher",
-        output: "child failed",
-        status,
-      });
-      expect(derive([admission, failure, admission, receipt]).subagentCalls).toEqual([
-        expect.objectContaining({ callId: "c1", status: "failed", output: "child failed" }),
-      ]);
-    }
-  });
 
-  it("joins subagent.called with subagent.completed by call id", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      turnStarted("t1", 0),
-      {
-        type: "subagent.called",
-        data: {
-          callId: "c1",
-          childSessionId: "s1",
-          childStreamPath: "/eve/v1/session/s0/subagents/c1/s1/stream",
-          sessionId: "s0",
-          sequence: 1,
-          name: "weather",
-          remote: { url: "http://127.0.0.1:4001" },
-          toolName: "call_weather",
-          turnId: "t1",
-          workflowId: "w1",
-        },
-      },
-      {
-        type: "subagent.completed",
-        data: { callId: "c1", output: "Sunny, 72F", subagentName: "weather" },
-      },
-    ];
-
-    const facts = derive(events, { sessionId: "s0" });
     expect(facts.subagentCalls).toEqual([
       {
         callId: "c1",
-        childSessionId: "s1",
+        childSessionId: "child-c1",
         name: "weather",
-        remoteUrl: "http://127.0.0.1:4001",
         output: "Sunny, 72F",
+        remoteUrl: "http://127.0.0.1:4001",
+        sessionId: "s0",
         status: "completed",
         turnIndex: 0,
+      },
+      {
+        callId: "c2",
+        childSessionId: "child-c1",
+        name: "weather",
+        output: undefined,
+        remoteUrl: "http://127.0.0.1:4001",
         sessionId: "s0",
+        status: "working",
+        turnIndex: 1,
       },
     ]);
-    expect(facts.subagentCallCount).toBe(1);
   });
 
-  it("derives failed subagent calls from result-only events", () => {
+  it("counts agent tasks by kind, not by the sessions tasks open", () => {
     const facts = derive([
-      turnStarted("t1", 0),
-      subagentResult({
-        callId: "c1",
-        subagentName: "weather",
-        output: { code: "REMOTE_AGENT_START_FAILED" },
-        status: "failed",
-      }),
+      taskStarted("c1", "agent_router", "agent_router-1", "tool"),
+      agentStarted("c1", "weather", "agent_router-1"),
+      taskStarted("c2", "research", "research-1", "tool"),
+      agentStarted("c2", "research", "research-1"),
+      taskStarted("c3", "weather", "weather-1", "agent"),
+      {
+        type: "task.settled",
+        data: {
+          callId: "c3",
+          error: { message: "Remote agent is unreachable." },
+          status: "failed",
+          taskId: "weather-1",
+          turnId: "t1",
+        },
+      },
     ]);
 
     expect(facts.subagentCalls).toEqual([
       {
-        callId: "c1",
+        callId: "c3",
+        childSessionId: undefined,
         name: "weather",
-        output: { code: "REMOTE_AGENT_START_FAILED" },
+        output: undefined,
+        remoteUrl: undefined,
+        sessionId: undefined,
         status: "failed",
         turnIndex: 0,
-        sessionId: undefined,
       },
     ]);
-  });
-
-  it("extracts inline subagent calls from subagent.started events", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      {
-        type: "subagent.started",
-        data: { callId: "c1", subagentName: "inline-agent" },
-      },
-    ];
-    const facts = derive(events);
-    expect(facts.subagentCalls.map((call) => call.name)).toEqual(["inline-agent"]);
-    expect(facts.subagentCalls[0]?.status).toBe("working");
-  });
-
-  it("preserves explicit cancellation even when the action reports failure or a late completion", () => {
-    const cancelled: UnstampedMessageStreamEvent = {
-      type: "action.result",
-      data: {
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "t1",
-        status: "failed",
-        result: {
-          callId: "c1",
-          kind: "subagent-result",
-          origin: "child",
-          subagentName: "researcher",
-          isError: true,
-          output: "The agent invocation was cancelled.",
-          outcome: {
-            kind: "parked",
-            result: { kind: "cancelled" },
-            usageDelta: {
-              inputTokens: 0,
-              outputTokens: 0,
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-            },
-          },
-        },
-      },
-    };
-    const lateCompletion: UnstampedMessageStreamEvent = {
-      type: "subagent.completed",
-      data: { callId: "c1", subagentName: "researcher", output: "late result" },
-    };
-    for (const events of [[cancelled], [cancelled, lateCompletion]]) {
-      expect(derive(events).subagentCalls[0]).toMatchObject({
-        status: "cancelled",
-        output: "The agent invocation was cancelled.",
-      });
-    }
-  });
-
-  it("records every subagent invocation separately", () => {
-    const events: UnstampedMessageStreamEvent[] = [
-      {
-        type: "subagent.started",
-        data: { callId: "c1", subagentName: "agent-a" },
-      },
-      {
-        type: "subagent.started",
-        data: { callId: "c2", subagentName: "agent-a" },
-      },
-    ];
-    const facts = derive(events);
-    expect(facts.subagentCalls.map((call) => call.name)).toEqual(["agent-a", "agent-a"]);
-    expect(facts.subagentCallCount).toBe(2);
   });
 
   it("captures failure code from session.failed event", () => {

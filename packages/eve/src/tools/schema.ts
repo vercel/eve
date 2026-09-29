@@ -16,6 +16,15 @@ import type {
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
+import {
+  emitJsonSchema,
+  getStandardSchemaProperties,
+  readJsonSchemaEmitter,
+  type SchemaDirection,
+  type SchemaResult,
+} from "#tools/schema-emission.js";
+
+export { serializeOutputSchema } from "#tools/schema-emission.js";
 
 /**
  * eve-owned schema contract for tool input and output schemas: a Standard
@@ -33,13 +42,6 @@ export type ToolSchema<Input = unknown, Output = Input> = StandardSchemaV1<Input
  * conversion.
  */
 export type ToolSchemaSource = StandardJSONSchemaV1 | StandardSchemaV1 | Record<string, unknown>;
-
-type SchemaDirection = "input" | "output";
-
-/** `null` and `undefined` pass through every conversion untouched. */
-type SchemaResult<TSource, TResult> = TSource extends null | undefined ? TSource : TResult;
-
-const JSON_SCHEMA_TARGET: StandardJSONSchemaV1.Target = "draft-07";
 
 /**
  * Resolves a source into a live input {@link ToolSchema}. Live schemas pass
@@ -72,17 +74,6 @@ export function serializeInputSchema<T extends ToolSchemaSource | null | undefin
   source: T,
 ): SchemaResult<T, JsonObject> {
   return serializeSchema(source, "input") as SchemaResult<T, JsonObject>;
-}
-
-/**
- * Serializes an output schema source into canonical JSON Schema data (no
- * `$schema` key) for compiled artifacts, durable state, and protocol
- * responses. `null` and `undefined` pass through untouched.
- */
-export function serializeOutputSchema<T extends ToolSchemaSource | null | undefined>(
-  source: T,
-): SchemaResult<T, JsonObject> {
-  return serializeSchema(source, "output") as SchemaResult<T, JsonObject>;
 }
 
 /**
@@ -140,6 +131,66 @@ export function defineJsonSchema<T = unknown>(
 
 /** Schemas built by {@link defineJsonSchema}, which reach the model exactly as written. */
 const plainJsonSchemas = new WeakSet<object>();
+
+/** An optional string property added to an input schema. */
+export interface OptionalStringProperty {
+  readonly description: string;
+  readonly name: string;
+}
+
+/**
+ * Extends an object input schema with an optional string property that the
+ * schema itself never sees: validation splits the property off, validates the
+ * rest with `schema`, and returns the property alongside the result. A plain
+ * JSON Schema stays advertised as written.
+ */
+export function withOptionalStringProperty(
+  schema: ToolSchema,
+  property: OptionalStringProperty,
+): ToolSchema {
+  const emit = (): Record<string, unknown> =>
+    addOptionalStringProperty(serializeInputSchema(schema), property);
+  const extended = {
+    "~standard": {
+      version: 1,
+      vendor: "eve",
+      validate: (value: unknown) => validateWithProperty(schema, property.name, value),
+      jsonSchema: { input: emit, output: emit },
+    },
+  } as ToolSchema;
+  if (plainJsonSchemas.has(schema)) plainJsonSchemas.add(extended);
+  return extended;
+}
+
+function addOptionalStringProperty(
+  schema: JsonObject,
+  property: OptionalStringProperty,
+): Record<string, unknown> {
+  const properties = isObject(schema.properties) ? schema.properties : {};
+  return {
+    ...schema,
+    type: schema.type ?? "object",
+    properties: {
+      ...properties,
+      [property.name]: { description: property.description, type: "string" },
+    },
+  };
+}
+
+async function validateWithProperty(
+  schema: ToolSchema,
+  name: string,
+  value: unknown,
+): Promise<StandardSchemaV1.Result<unknown>> {
+  if (!isObject(value) || !(name in value)) return await schema["~standard"].validate(value);
+  const { [name]: propertyValue, ...rest } = value;
+  if (typeof propertyValue !== "string") {
+    return { issues: [{ message: `Expected "${name}" to be a string.`, path: [name] }] };
+  }
+  const result = await schema["~standard"].validate(rest);
+  if (result.issues !== undefined || !isObject(result.value)) return result;
+  return { value: { ...result.value, [name]: propertyValue } };
+}
 
 /**
  * Permissive schema lowered onto model-visible tools whose definitions
@@ -241,59 +292,24 @@ function serializeSchema(
   return toJsonObject(source, direction);
 }
 
-/**
- * Normalizes one source into canonical JSON Schema data. Standard Schemas
- * emit their requested direction; plain data passes through. The `$schema`
- * version key is always stripped so every eve boundary carries one canonical
- * wire form.
- */
 function toJsonObject(source: ToolSchemaSource, direction: SchemaDirection): JsonObject {
-  const standard = getStandardSchemaProperties(source);
-  const jsonSchema = standard?.jsonSchema;
-  const emit =
-    typeof jsonSchema === "object" && jsonSchema !== null
-      ? (jsonSchema as Record<string, unknown>)[direction]
-      : undefined;
-  const vendor = typeof standard?.vendor === "string" ? standard.vendor : "unknown";
-  if (standard !== undefined && typeof emit !== "function" && vendor === "zod") {
-    if (direction === "input") {
-      // Zod 3 and early Zod 4 releases predate Standard JSON Schema. The schema
-      // comes from the author's own Zod, which the author's AI SDK also uses.
-      const schema = asSchema(source as Parameters<typeof asSchema>[0]);
-      const { $schema: _schemaVersion, ...canonical } = parseJsonObject(schema.jsonSchema);
-      return canonical;
-    }
-
-    throw new Error(
-      "Zod 3 cannot emit an output JSON Schema. Upgrade to Zod 4 or provide a plain JSON Schema object.",
-    );
+  if (direction === "input" && isLegacyZodSchema(source)) {
+    // Zod 3 and early Zod 4 releases predate Standard JSON Schema. The schema
+    // comes from the author's own Zod, which the author's AI SDK also uses.
+    const schema = asSchema(source as Parameters<typeof asSchema>[0]);
+    const { $schema: _schemaVersion, ...canonical } = parseJsonObject(schema.jsonSchema);
+    return canonical;
   }
-
-  if (standard !== undefined && typeof emit !== "function") {
-    throw new Error(
-      `Standard Schema vendor "${vendor}" does not support JSON Schema conversion. Provide a Standard Schema implementation with JSON Schema conversion or a plain JSON Schema object.`,
-    );
-  }
-
-  const raw =
-    standard === undefined
-      ? parseJsonObject(source)
-      : parseJsonObject(
-          (emit as StandardJSONSchemaV1.Converter[SchemaDirection])({
-            target: JSON_SCHEMA_TARGET,
-          }),
-        );
-  const { $schema: _schemaVersion, ...canonical } = raw;
-  return canonical;
+  return emitJsonSchema(source, direction);
 }
 
-function getStandardSchemaProperties(value: unknown): Record<string, unknown> | undefined {
-  if (typeof value !== "object" || value === null || !("~standard" in value)) return undefined;
-
-  const standard = (value as Record<string, unknown>)["~standard"];
-  return typeof standard === "object" && standard !== null
-    ? (standard as Record<string, unknown>)
-    : undefined;
+function isLegacyZodSchema(source: ToolSchemaSource): boolean {
+  const standard = getStandardSchemaProperties(source);
+  return (
+    standard !== undefined &&
+    standard.vendor === "zod" &&
+    readJsonSchemaEmitter(standard, "input") === undefined
+  );
 }
 
 // ---------------------------------------------------------------------------

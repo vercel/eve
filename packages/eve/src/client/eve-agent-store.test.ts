@@ -596,7 +596,7 @@ describe("EveAgentStore prewarming", () => {
     expect(store.snapshot.session?.streamIndex).toBe(6);
   });
 
-  it("keeps following background completion after a refused approval returns to waiting", async () => {
+  it("keeps following an unsolicited turn after a refused approval returns to waiting", async () => {
     const live = controlledStreamResponse();
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -653,11 +653,11 @@ describe("EveAgentStore prewarming", () => {
       ]),
     );
 
-    const background = stampTestEvents([
+    const unsolicited = stampTestEvents([
       createTurnStartedEvent({ sequence: 1, turnId: "turn-report" }),
       createMessageCompletedEvent({
         finishReason: "stop",
-        message: "Bob's background report is complete.",
+        message: "Bob's report is complete.",
         sequence: 1,
         stepIndex: 0,
         turnId: "turn-report",
@@ -665,18 +665,18 @@ describe("EveAgentStore prewarming", () => {
       createSessionWaitingEvent(),
     ]).map((event) => ({
       ...event,
-      meta: { ...event.meta, id: `background-${event.meta.id}`, deliveryIds: ["report-delivery"] },
+      meta: { ...event.meta, id: `unsolicited-${event.meta.id}`, deliveryIds: ["report-delivery"] },
     }));
-    live.emit(background[0]!);
+    live.emit(unsolicited[0]!);
     await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
-    for (const event of background.slice(1)) live.emit(event);
+    for (const event of unsolicited.slice(1)) live.emit(event);
     await vi.waitFor(() =>
-      expect(store.snapshot.events).toEqual([...initialEvents, ...refusal, ...background]),
+      expect(store.snapshot.events).toEqual([...initialEvents, ...refusal, ...unsolicited]),
     );
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.data.messages.flatMap((message) => message.parts)).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: "text", text: "Bob's background report is complete." }),
+        expect.objectContaining({ type: "text", text: "Bob's report is complete." }),
       ]),
     );
     expect(onEvent).toHaveBeenCalledTimes(5);
@@ -684,7 +684,7 @@ describe("EveAgentStore prewarming", () => {
     expect(fetchMock.mock.calls[0]![1]?.signal?.aborted).toBe(false);
   });
 
-  it("projects a background turn that arrives while another message is being accepted", async () => {
+  it("projects an unsolicited turn that arrives while another message is being accepted", async () => {
     const live = controlledStreamResponse();
     const accepted = Promise.withResolvers<Response>();
     const fetchMock = vi
@@ -698,21 +698,21 @@ describe("EveAgentStore prewarming", () => {
     const sending = store.send({ message: "Next question" });
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
-    const background = stampTestEvents([
-      createTurnStartedEvent({ sequence: 0, turnId: "turn_background" }),
+    const unsolicited = stampTestEvents([
+      createTurnStartedEvent({ sequence: 0, turnId: "turn_scheduled" }),
       createMessageCompletedEvent({
         finishReason: "stop",
-        message: "Background result",
+        message: "Scheduled result",
         sequence: 1,
         stepIndex: 0,
-        turnId: "turn_background",
+        turnId: "turn_scheduled",
       }),
       createSessionWaitingEvent(),
     ]).map((event) => ({
       ...event,
-      meta: { ...event.meta, deliveryIds: ["background-delivery"] },
+      meta: { ...event.meta, deliveryIds: ["scheduled-delivery"] },
     }));
-    for (const event of background) live.emit(event);
+    for (const event of unsolicited) live.emit(event);
     await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(3));
     expect(store.snapshot.data.messages.some((message) => message.metadata?.optimistic)).toBe(true);
 
@@ -729,7 +729,7 @@ describe("EveAgentStore prewarming", () => {
     await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(6));
     await sending;
 
-    expect(store.snapshot.events).toEqual([...background, ...messageTurn]);
+    expect(store.snapshot.events).toEqual([...unsolicited, ...messageTurn]);
     expect(store.snapshot.data.messages.some((message) => message.metadata?.optimistic)).toBe(
       false,
     );

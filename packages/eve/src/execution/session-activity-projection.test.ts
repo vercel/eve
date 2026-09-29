@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ActivityObserverKey, TurnTaskDeliveryKey } from "#context/keys.js";
+import { ActivityObserverKey, ActivityTaskCallsKey } from "#context/keys.js";
+import { updateActivityState } from "#execution/activity-cohort.js";
 import { ContextContainer } from "#context/container.js";
 import {
   observeSessionActivity,
@@ -20,6 +21,17 @@ function turnEvent(type: "turn.started" | "turn.completed", turnId = "turn-1"): 
     meta: { at, id: `${type}:${turnId}` },
     type,
   };
+}
+
+function context(): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(ActivityObserverKey, {
+    sink: {
+      url: "https://agent.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+      version: 1,
+    },
+  });
+  return ctx;
 }
 
 function reduceProjection(input: {
@@ -92,7 +104,7 @@ describe("projectSessionActivity", () => {
     ]);
   });
 
-  it("keeps an originating root open while HITL or background work is pending", () => {
+  it("keeps an originating root open while HITL or subagent work is pending", () => {
     const event = turnEvent("turn.completed", "turn-1");
     expect(
       projectSessionActivity({
@@ -116,6 +128,60 @@ describe("projectSessionActivity", () => {
       [workId]: expect.objectContaining({ id: workId, phase: "completed" }),
     });
     expect(snapshot.pendingSettlements).toEqual({});
+  });
+
+  it("keeps a task call running from its receipt until task.settled", () => {
+    const ctx = context();
+    const coordinates = { sequence: 0, stepIndex: 0, turnId: "turn-1" };
+    const call = { callId: "call-1", taskId: "task-1", turnId: "turn-1" };
+    const receipt: MessageStreamEvent = {
+      data: {
+        ...coordinates,
+        result: { callId: "call-1", kind: "tool-result", output: "Started", toolName: "report" },
+        status: "completed",
+      },
+      meta: { at, id: "receipt" },
+      type: "action.result",
+    };
+    const settled: MessageStreamEvent = {
+      data: { ...call, error: { message: "Source unavailable." }, status: "failed" },
+      meta: { at, id: "task-settled" },
+      type: "task.settled",
+    };
+    const events: MessageStreamEvent[] = [
+      {
+        data: {
+          ...coordinates,
+          actions: [{ callId: "call-1", input: {}, kind: "tool-call", toolName: "report" }],
+        },
+        meta: { at, id: "actions" },
+        type: "actions.requested",
+      },
+      {
+        data: { ...call, kind: "tool", name: "report" },
+        meta: { at, id: "task-started" },
+        type: "task.started",
+      },
+      receipt,
+    ];
+    const reduce = (snapshot: ActivitySnapshotV1, event: MessageStreamEvent) => {
+      updateActivityState(ctx, event);
+      return reduceActivityBatch(snapshot, {
+        events: projectSessionActivity({
+          event,
+          sessionId: "session-1",
+          taskCallIds: ctx.get(ActivityTaskCallsKey),
+        }),
+        version: 1,
+      });
+    };
+    const actionId = `action:${deriveRootTurnActivityWorkId({ sessionId: "session-1", turnId: "turn-1" })}:call-1`;
+
+    const afterReceipt = events.reduce(reduce, createActivitySnapshot());
+    expect(afterReceipt.actions[actionId]).toMatchObject({ phase: "running" });
+
+    const afterSettled = reduce(afterReceipt, settled);
+    expect(afterSettled.actions[actionId]).toMatchObject({ phase: "failed" });
   });
 
   it("uses the durable partial event id for activity updates", () => {
@@ -238,18 +304,6 @@ describe("projectSessionActivity", () => {
 describe("observeSessionActivity", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  function context(taskDelivery?: "none" | "initiating" | "pending" | "settled"): ContextContainer {
-    const ctx = new ContextContainer();
-    ctx.set(ActivityObserverKey, {
-      sink: {
-        url: "https://agent.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
-        version: 1,
-      },
-    });
-    if (taskDelivery !== undefined) ctx.set(TurnTaskDeliveryKey, taskDelivery);
-    return ctx;
-  }
-
   it("does not submit events with no activity projection", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -267,34 +321,6 @@ describe("observeSessionActivity", () => {
     await observeSessionActivity({ ctx: context(), event, sessionId: "session-1" });
 
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("does not project internal background-task delivery turns as new root work", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    for (const taskDelivery of ["pending", "settled"] as const) {
-      await observeSessionActivity({
-        ctx: context(taskDelivery),
-        event: turnEvent("turn.started", `turn-${taskDelivery}`),
-        sessionId: "session-1",
-      });
-    }
-
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("keeps projecting the turn that initiates background tasks", async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await observeSessionActivity({
-      ctx: context("initiating"),
-      event: turnEvent("turn.started"),
-      sessionId: "session-1",
-    });
-
-    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("submits projected activity and swallows transport failure", async () => {

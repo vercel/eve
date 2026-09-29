@@ -161,61 +161,41 @@ export class SelfModificationHarness {
     const parent = await liveParent.result();
     parent.expectOk();
     const call = parent.requireToolCall(SELF_MODIFICATION_AGENT);
-    const agentId = typeof call.input.agentId === "string" ? call.input.agentId : undefined;
-    const message = agentId === undefined ? undefined : call.input.message;
-    if (agentId !== undefined && (typeof message !== "string" || message.length === 0))
+    const taskId = typeof call.input.taskId === "string" ? call.input.taskId : undefined;
+    const message = taskId === undefined ? undefined : call.input.message;
+    if (taskId !== undefined && (typeof message !== "string" || message.length === 0))
       throw new Error("Self-modification continuation omitted its message.");
 
-    let called = [...this.#turns]
+    const sessionEvents = [...this.#turns]
       .filter((turn) => turn.sessionId === parent.sessionId)
-      .flatMap((turn) => turn.events)
-      .find(
-        (event) =>
-          event.type === "subagent.called" &&
-          event.data.name === SELF_MODIFICATION_AGENT &&
-          (agentId === undefined
-            ? liveParent.events.includes(event)
-            : event.data.agentId === agentId),
-      );
-    let continuation: EveEvalLiveTurn | undefined;
-    if (called?.type !== "subagent.called") {
-      continuation = this.#t.target.watchTurn(parent.sessionId, {
-        startIndex: liveParent.session.state.streamIndex,
-      });
-      this.#turns.add(continuation);
-      const data: { name: string; agentId?: string } = { name: SELF_MODIFICATION_AGENT };
-      if (agentId !== undefined) data.agentId = agentId;
-      called = await continuation.waitForEvent("subagent.called", { data });
+      .flatMap((turn) => turn.events);
+    const task = sessionEvents.find(
+      (event) =>
+        event.type === "task.started" &&
+        event.data.name === SELF_MODIFICATION_AGENT &&
+        (taskId === undefined ? liveParent.events.includes(event) : event.data.taskId === taskId),
+    );
+    const started = sessionEvents.find(
+      (event) =>
+        event.type === "agent.started" &&
+        task?.type === "task.started" &&
+        event.data.taskId === task.data.taskId,
+    );
+    if (started?.type !== "agent.started") {
+      throw new Error("Self-modification parent turn did not start its child agent.");
     }
-    const [child] = await Promise.all([
-      this.#readChild(
-        called.data.childSessionId,
-        typeof message === "string" ? message : undefined,
-      ),
-      continuation?.result().then((turn) => turn.expectOk()),
-    ]);
-    this.#t.calledSubagent(SELF_MODIFICATION_AGENT, { status: "working" });
+    const child = await this.#readChild(
+      started.data.sessionId,
+      typeof message === "string" ? message : undefined,
+    );
+    this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
     return { child, parent, session: liveParent.session };
   }
 
-  /** Approves the registry install on the parent and observes the resumed child turn. */
+  /** Approves the registry install the parent turn paused on and observes the resumed child turn. */
   async approveRegistry(run: SelfModificationRun): Promise<EveEvalTurn> {
     const toolName = "registry_add";
-    const liveParent = this.#t.target.watchTurn(run.session.sessionId, {
-      startIndex: run.session.state.streamIndex,
-    });
-    this.#turns.add(liveParent);
-    const approval = await liveParent.waitForEvent("input.requested", {
-      data: { requests: [{ action: { kind: "tool-call", toolName } }] },
-    });
-    const requests = approval.data.requests.filter(
-      (request) => request.action.kind === "tool-call" && request.action.toolName === toolName,
-    );
-    if (requests.length !== 1) {
-      throw new Error(`Expected one pending ${toolName} approval, found ${requests.length}.`);
-    }
-    (await liveParent.result()).expectOk();
-    const session = liveParent.session;
+    const session = run.session;
     session.requireInputRequest({ toolName });
     const childSessionId = run.child.sessionId;
     const previousChild = [...this.#turns]
@@ -323,7 +303,7 @@ export class SelfModificationHarness {
     for (const turn of this.#turns) {
       sessionIds.add(turn.sessionId);
       for (const event of turn.events) {
-        if (event.type === "subagent.called") sessionIds.add(event.data.childSessionId);
+        if (event.type === "agent.started") sessionIds.add(event.data.sessionId);
       }
     }
     const signal = AbortSignal.timeout(CLEANUP_TIMEOUT_MS);

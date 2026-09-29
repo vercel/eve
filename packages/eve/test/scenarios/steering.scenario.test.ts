@@ -7,9 +7,9 @@ import { startEveDev } from "./dev-server-harness.js";
 const scenarioApp = useScenarioApp();
 
 describe("durable generation steering", () => {
-  it("does not repeat a model step when background children wake the owner mid-lease", async () => {
+  it("does not repeat a model step when subagent children wake the owner mid-lease", async () => {
     const app = await scenarioApp({
-      name: "steering-background-wakes",
+      name: "steering-child-wakes",
       installDependencies: true,
       files: {
         "agent/instructions.md": "Delegate the five work items.\n",
@@ -29,7 +29,7 @@ export default defineAgent({
         "agent/subagents/worker/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 export default defineAgent({
-  description: "Complete a work item in the background.",
+  description: "Complete a work item.",
   model: mockModel(async () => {
     await new Promise(resolve => setTimeout(resolve, 2000));
     return "Work complete";
@@ -43,7 +43,7 @@ export default defineAgent({
         EVE_MOCK_AUTHORED_MODELS: "",
         NODE_ENV: "production",
         // A one-second lease expires mid-step, so the ownership backstop
-        // races the background wakes into the single-flight guard.
+        // races the child wakes into the single-flight guard.
         WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
       },
     });
@@ -55,8 +55,15 @@ export default defineAgent({
       const steps = events
         .filter((event) => event.type === "step.started")
         .map((event) => `${event.data.turnId}:${event.data.stepIndex}`);
-      expect(steps).toHaveLength(2);
+      // The first step starts five worker tasks; later steps read their
+      // results as they arrive. No step may run twice.
+      expect(steps.length).toBeGreaterThan(2);
       expect(new Set(steps).size).toBe(steps.length);
+      expect(
+        events.filter(
+          (event) => event.type === "task.settled" && event.data.status === "completed",
+        ),
+      ).toHaveLength(5);
       expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
       expect(server.stderr()).toContain("Step execution already in flight in this process");
     } finally {

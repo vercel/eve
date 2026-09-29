@@ -137,10 +137,10 @@ describe("Slack activity activity", () => {
     );
   });
 
-  it("renders inherited child tool activity beneath an existing task row", () => {
+  it("renders inherited child tool activity beneath an existing subagent row", () => {
     const task = {
       id: "work:task",
-      kind: "task" as const,
+      kind: "subagent" as const,
       name: "slack",
       parentId: root.id,
       rootSessionId: "root",
@@ -172,22 +172,22 @@ describe("Slack activity activity", () => {
     );
   });
 
-  it("renders a background task instead of its duplicate initiating tool action", () => {
-    const task = {
-      callId: "call-background",
-      id: "work:background",
+  it("renders a delegated child instead of its duplicate initiating tool action", () => {
+    const child = {
+      callId: "call-researcher",
+      id: "work:researcher",
       kind: "subagent" as const,
       name: "researcher",
       parentId: root.id,
       rootSessionId: "root",
       rootTurnId: "turn",
     };
-    const background = reduceActivityBatch(createActivitySnapshot(), {
+    const delegated = reduceActivityBatch(createActivitySnapshot(), {
       events: [
         { eventId: "root", kind: "work.started", startedAt: "1", work: root },
         {
           action: {
-            id: `action:${root.id}:call-background`,
+            id: `action:${root.id}:call-researcher`,
             kind: "tool",
             name: "researcher",
             parentWorkId: root.id,
@@ -198,12 +198,12 @@ describe("Slack activity activity", () => {
           kind: "action.started",
           startedAt: "2",
         },
-        { eventId: "task", kind: "work.started", startedAt: "3", work: task },
+        { eventId: "child", kind: "work.started", startedAt: "3", work: child },
       ],
       version: 1,
     });
 
-    expect(activityMessages(background).get("turn")).toBe("```\n• Working\n└── • researcher\n```");
+    expect(activityMessages(delegated).get("turn")).toBe("```\n• Working\n└── • researcher\n```");
   });
 
   it("keeps temporarily orphaned nested work renderable", () => {

@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.67.2",
+  "version": "0.68.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -187,11 +187,6 @@
       "import": "./dist/src/public/tools/connection-search.js",
       "default": "./dist/src/public/tools/connection-search.js"
     },
-    "./tools/task_cancel": {
-      "types": "./dist/src/public/tools/task-cancel.d.ts",
-      "import": "./dist/src/public/tools/task-cancel.js",
-      "default": "./dist/src/public/tools/task-cancel.js"
-    },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",
       "import": "./dist/src/public/tools/glob.js",
@@ -367,6 +362,24 @@
       "types": "./dist/src/extensions/code/extension/lib/prwatch.d.ts",
       "import": "./dist/src/extensions/code/extension/lib/prwatch.js",
       "default": "./dist/src/extensions/code/extension/lib/prwatch.js"
+    },
+    "./computer-use": {
+      "eve-source": "./dist/src/computer-use/extension/extension.js",
+      "types": "./dist/src/computer-use/extension/extension.d.ts",
+      "import": "./dist/src/computer-use/extension/extension.js",
+      "default": "./dist/src/computer-use/extension/extension.js"
+    },
+    "./computer-use/tools": {
+      "eve-source": "./dist/src/computer-use/tools.js",
+      "types": "./dist/src/computer-use/tools.d.ts",
+      "import": "./dist/src/computer-use/tools.js",
+      "default": "./dist/src/computer-use/tools.js"
+    },
+    "./computer-use/sandbox": {
+      "eve-source": "./dist/src/computer-use/extension/lib/sandbox.js",
+      "types": "./dist/src/computer-use/extension/lib/sandbox.d.ts",
+      "import": "./dist/src/computer-use/extension/lib/sandbox.js",
+      "default": "./dist/src/computer-use/extension/lib/sandbox.js"
     },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
@@ -618,6 +631,9 @@
       },
       "./extensions/code": {
         "dist": "./dist/src/extensions/code/extension"
+      },
+      "./computer-use": {
+        "dist": "./dist/src/computer-use/extension"
       }
     }
   }

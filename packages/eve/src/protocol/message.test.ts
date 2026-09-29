@@ -17,7 +17,7 @@ import {
   createResultCompletedEvent,
   createSessionWaitingEvent,
   createStepStartedEvent,
-  createSubagentCalledEvent,
+  createAgentStartedEvent,
   createTurnCancelledEvent,
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
@@ -32,7 +32,7 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("25");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("26");
   });
 
   it.each(["21", "22", "23", "24"] as const)(
@@ -283,25 +283,20 @@ describe("message stream protocol", () => {
   it("authors local and remote child stream paths", () => {
     const input = {
       callId: "call/1",
-      childSessionId: "child/1",
       name: "research",
-      sequence: 1,
-      sessionId: "parent/1",
-      toolName: "research",
-      turnId: "turn_1",
-      workflowId: "workflow_1",
+      parentSessionId: "parent/1",
+      sessionId: "child/1",
+      turnId: "turn/1",
     };
 
-    expect(createSubagentCalledEvent(input).data.childStreamPath).toBe(
-      "/eve/v1/session/child%2F1/stream",
-    );
+    expect(createAgentStartedEvent(input).data.streamPath).toBe("/eve/v1/session/child%2F1/stream");
     expect(
-      createSubagentCalledEvent({
+      createAgentStartedEvent({
         ...input,
         remote: { resolverId: "remote/research", url: "https://remote.example" },
       }).data,
     ).toMatchObject({
-      childStreamPath: "/eve/v1/session/parent%2F1/subagents/call%2F1/child%2F1/stream",
+      streamPath: "/eve/v1/session/parent%2F1/subagents/call%2F1/child%2F1/stream",
       remote: { resolverId: "remote/research", url: "https://remote.example" },
     });
   });

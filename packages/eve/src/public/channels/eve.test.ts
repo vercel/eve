@@ -1,4 +1,5 @@
 import type { FilePart, UserContent } from "ai";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -872,7 +873,6 @@ describe("eveChannel — onMessage", () => {
         callback: {
           callId: "call-2",
           subagentName: "research",
-          taskId: "task-2",
           token: "tok123",
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
@@ -887,7 +887,6 @@ describe("eveChannel — onMessage", () => {
         callback: {
           callId: "call-2",
           subagentName: "research",
-          taskId: "task-2",
           token: "tok123",
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
@@ -1097,6 +1096,7 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/v1/callback/tok123",
         },
         message: "hi",
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
       }),
     );
 
@@ -1124,6 +1124,7 @@ describe("eveChannel — create session (text)", () => {
           url: "https://caller.example.com/eve/support/v1/callback/tok123",
         },
         message: "hi",
+        protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
       }),
     );
 

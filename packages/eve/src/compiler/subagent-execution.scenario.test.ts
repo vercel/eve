@@ -27,10 +27,6 @@ describe("subagent compilation", () => {
     const child = manifest.subagents[0];
 
     expect(child).not.toHaveProperty("execution");
-    if (child?.configResolver !== undefined) throw new Error("Expected a static child.");
-    const toolNames = child?.agent.tools.map((tool) => tool.name);
-    expect(toolNames).toContain("task_cancel");
-    expect(toolNames).not.toContain("task_update");
   });
 
   it("compiles a subagent without root configuration", async () => {

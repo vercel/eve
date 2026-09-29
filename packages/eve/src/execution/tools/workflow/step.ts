@@ -7,7 +7,6 @@ import {
   type WorkflowToolRunContext,
 } from "#execution/tools/workflow/ask.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import {
   createAuthorizationRequiredEvent,
   createAuthorizationCompletedEvent,
@@ -226,6 +225,7 @@ async function reportAuthorization(
     name: challenge.name,
     sequence: run.from.sequence,
     stepIndex: run.from.stepIndex,
+    taskId: run.from.taskId,
     turnId: run.from.turnId,
     authorization: challenge.challenge,
   };
@@ -240,7 +240,7 @@ async function reportAuthorization(
   const acknowledged = createHook<void>();
   try {
     await withAbort(
-      resumeHookStep(run.owner.inbox, {
+      run.owner.send({
         kind: "request",
         from: run.from,
         replyTo: acknowledged.token,

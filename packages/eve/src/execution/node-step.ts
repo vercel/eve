@@ -17,10 +17,10 @@ import {
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { createTaskToolHarnessDefinitions } from "#execution/tools/tasks.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
-import type { PreparedRuntimeTool, PreparedRuntimeWorkflowTask } from "#runtime/sessions/turn.js";
+import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
+import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
@@ -28,7 +28,7 @@ import { connectionToolReplayIdentity } from "#execution/tools/connection-search
 import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
-} from "#execution/tools/workflow/background.js";
+} from "#execution/tools/workflow/harness-definition.js";
 import {
   resolveWebSearchActivityLabel,
   WEB_SEARCH_TOOL_NAME,
@@ -186,7 +186,7 @@ function createRuntimeDynamicModelEventDispatcher(
  * Resolves unified {@link HarnessToolDefinition}s from the node's registries.
  *
  * For authored tools: copies all lifecycle fields from the resolved definition.
- * Prepared workflow-task tools share the workflow-tool harness path.
+ * Prepared workflow-backed tools share the workflow-tool harness path.
  * Tools without `execute` (provider-managed) get entries with schema but no execute.
  */
 export function createNodeHarnessTools(input: {
@@ -213,8 +213,9 @@ function resolveHarnessToolDefinition(input: {
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
   const registeredTool = findRegisteredRuntimeTool(input.node.toolRegistry, input.tool.name);
+  const workflowId = workflowIdForHandling(input.tool.behavior?.handling);
 
-  if (isPreparedRuntimeWorkflowTool(input.tool)) {
+  if (workflowId !== undefined) {
     if (registeredTool === null) {
       return createPreparedWorkflowToolHarnessDefinition(input.tool);
     }
@@ -225,8 +226,7 @@ function resolveHarnessToolDefinition(input: {
         definition: registeredTool.definition,
         rootOnly: input.tool.rootOnly,
       }),
-      nodeId: input.tool.task.nodeId,
-      workflowId: input.tool.task.workflowId,
+      workflowId,
     });
   }
 
@@ -246,30 +246,12 @@ function resolveHarnessToolDefinition(input: {
   });
 }
 
-type PreparedRuntimeWorkflowTool = PreparedRuntimeTool & {
-  readonly task: PreparedRuntimeWorkflowTask;
-};
-
-function isPreparedRuntimeWorkflowTool(
-  tool: PreparedRuntimeTool,
-): tool is PreparedRuntimeWorkflowTool {
-  return tool.task !== undefined;
-}
-
 function createRegisteredHarnessToolDefinition(input: {
   readonly behavior?: HarnessToolDefinition["behavior"];
   readonly definition: ResolvedToolDefinition;
   readonly rootOnly?: boolean;
 }): HarnessToolDefinition {
   const def = input.definition;
-  if (def.owner.kind === "framework") {
-    const taskDefinition = createTaskToolHarnessDefinitions().find(
-      (definition) => definition.name === def.name,
-    );
-    if (taskDefinition !== undefined) {
-      return { ...taskDefinition, behavior: input.behavior };
-    }
-  }
   const rawExecute = def.execute;
 
   const definition: HarnessToolDefinition = {
@@ -282,7 +264,6 @@ function createRegisteredHarnessToolDefinition(input: {
     approvalKey: def.approvalKey,
     behavior: input.behavior,
     description: def.description,
-    execution: def.execution,
     executeInput: def.executeInput,
     execute: resolveAuthoredExecute({
       rawExecute,

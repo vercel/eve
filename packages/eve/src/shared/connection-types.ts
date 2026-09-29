@@ -467,4 +467,9 @@ export interface ConnectionClient {
     options: ConnectionToolExecuteOptions,
   ): Promise<unknown>;
   getToolMetadata(): Promise<readonly ConnectionToolMetadata[]>;
+  /**
+   * Projects an {@link executeTool} result to what the model sees, when the
+   * protocol defines a projection. Resolves `undefined` when it does not.
+   */
+  toModelOutput?(toolName: string, output: unknown): Promise<unknown>;
 }

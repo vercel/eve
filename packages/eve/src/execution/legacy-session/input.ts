@@ -25,13 +25,8 @@ export function readLegacyTurnInput(value: unknown): LegacyTurnInput {
     isObject(value.initialStep) && isObject(value.initialStep.result)
       ? value.initialStep.result
       : undefined;
-  const state =
-    (committed?.action === "cancelled" ? committed.backgroundTaskState : undefined) ??
-    committed?.sessionState ??
-    committed?.backgroundTaskState ??
-    step.sessionState;
-  const context =
-    committed?.serializedContext ?? committed?.backgroundTaskContext ?? step.serializedContext;
+  const state = committed?.sessionState ?? step.sessionState;
+  const context = committed?.serializedContext ?? step.serializedContext;
   if (
     !isObject(state) ||
     typeof state.sessionId !== "string" ||

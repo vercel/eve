@@ -9,7 +9,7 @@ import type {
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import { setChannelActivityRenderers, setChannelBuildMetadata } from "#channel/compiled-channel.js";
-import type { SessionAuthContext, TaskDeliveryPolicy, TurnPolicy } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -48,6 +48,12 @@ import {
   defaultOnDirectMessage,
   postCompletedSlackReply,
 } from "#public/channels/slack/defaults.js";
+import {
+  bufferToolCallMessage,
+  clearPendingStep,
+  recordStepActions,
+  takeTextBeforeTaskWait,
+} from "#public/channels/slack/step-text.js";
 import {
   parseMessageEvent,
   type SlackEvent,
@@ -240,13 +246,21 @@ export interface SlackChannelState {
    */
   triggeringUserId?: string | null;
   /**
-   * Buffered text from a `message.completed` event whose `finishReason`
-   * was `"tool-calls"`. The default `actions.requested` handler uses the
-   * first non-empty line as the next typing indicator, surfacing the
-   * model's pre-tool narration instead of the action label. Cleared at
-   * `turn.started` and after use.
+   * The step's text from `message.completed` events whose `finishReason`
+   * was `"tool-calls"`, joined by newlines and kept until the step
+   * completes. The default `actions.requested` handler shows its first
+   * non-empty line as typing status for the step's first actions. At
+   * `step.completed` the channel posts it when the step's only action was
+   * `task_wait`, outside a schedule's turn, whichever `actions.requested`
+   * and `message.completed` handlers are in use. Cleared at `turn.started`
+   * and `step.completed`.
    */
   pendingToolCallMessage?: string | null;
+  /**
+   * Names of the actions the current model step requested, collected across
+   * its `actions.requested` events until `step.completed`.
+   */
+  stepActionNames?: string[] | null;
   /**
    * Last reasoning-derived typing indicator sent by the default
    * `reasoning.appended` handler. Used to surface substantial progressive
@@ -344,8 +358,6 @@ export interface SlackInitialMessage {
  * Options for one turn requested by a generic Slack event handler.
  */
 export interface SlackEventSendOptions {
-  /** Updates the session policy; omission preserves it. */
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   readonly auth: SessionAuthContext | null;
   readonly target: SlackReceiveTarget;
   /** Overrides the workflow run title without changing the message sent to the model. */
@@ -589,7 +601,10 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
  * only that event's built-in default (see {@link defaultEvents}). Handlers
  * receive the event data, the {@link SlackEventContext}, and the session
  * {@link SessionContext}; `session.failed` receives only data and channel
- * context and exposes the ID as `data.sessionId`.
+ * context and exposes the ID as `data.sessionId`. Overriding
+ * `actions.requested` or `message.completed` doesn't stop the channel from
+ * posting a step's text at `step.completed` when the step's only action was
+ * `task_wait`.
  */
 export interface SlackChannelEvents {
   readonly "approval.candidate"?: SlackEventHandler<"approval.candidate">;
@@ -629,7 +644,9 @@ export interface SlackChannelEvents {
  * handler keeps the full {@link SlackEventContext} because it owns the
  * public link-free status while user overrides remain private-only. The
  * factory adapts user overrides into this shape with
- * {@link constrainAuthorizationRequired}.
+ * {@link constrainAuthorizationRequired}. `step.completed` has no default
+ * and can't be overridden: the factory handles it to post a step's text
+ * before a `task_wait`.
  */
 export interface SlackChannelInternalEvents extends Omit<
   SlackChannelEvents,
@@ -637,6 +654,7 @@ export interface SlackChannelInternalEvents extends Omit<
 > {
   readonly "authorization.required"?: SlackEventHandler<"authorization.required">;
   readonly "input.requested"?: SlackEventHandler<"input.requested">;
+  readonly "step.completed"?: SlackEventHandler<"step.completed">;
 }
 
 export type SlackApprovalChannel = "direct-message" | "thread";
@@ -821,7 +839,6 @@ const activityOwnedMessageCompleted: NonNullable<SlackChannelEvents["message.com
   event,
   channel,
 ) => {
-  channel.state.pendingToolCallMessage = null;
   if (event.finishReason !== "tool-calls" && event.message) {
     await postCompletedSlackReply(channel, event.message);
   }
@@ -831,7 +848,6 @@ const clearSlackTurnState: NonNullable<SlackChannelEvents["turn.started"]> = asy
   _data,
   channel,
 ) => {
-  channel.state.pendingToolCallMessage = null;
   channel.state.lastReasoningTypingAtMs = null;
   channel.state.lastReasoningTypingStatus = null;
 };
@@ -943,11 +959,26 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       if (triggeringUserId !== undefined) {
         channel.state.triggeringUserId = triggeringUserId;
       }
+      clearPendingStep(channel.state);
       await turnStartedHandler(data, channel, ctx);
     },
     "reasoning.appended": reasoningHandler,
-    "actions.requested": actionsHandler,
-    "message.completed": messageCompletedHandler,
+    async "actions.requested"(data, channel, ctx) {
+      recordStepActions(channel.state, data.actions);
+      await actionsHandler(data, channel, ctx);
+    },
+    async "message.completed"(data, channel, ctx) {
+      if (data.finishReason === "tool-calls") {
+        bufferToolCallMessage(channel.state, data.message);
+      } else {
+        channel.state.pendingToolCallMessage = null;
+      }
+      await messageCompletedHandler(data, channel, ctx);
+    },
+    async "step.completed"(_data, channel) {
+      const text = takeTextBeforeTaskWait(channel.state);
+      if (text !== null) await postCompletedSlackReply(channel, text);
+    },
     "input.requested": inputRequestedHandler,
     "authorization.required":
       authorizationRequiredOverride === undefined
@@ -1088,7 +1119,6 @@ async function receiveOnSlack(
     readonly message: string | UserContent;
     readonly target: SlackReceiveTarget;
     readonly title?: string;
-    readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
   },
   deps: {
     readonly from: ChannelFrom<SlackChannelState>;
@@ -1169,7 +1199,6 @@ async function receiveOnSlack(
     auth: input.auth,
     state,
     title: input.title,
-    taskDeliveryPolicy: input.taskDeliveryPolicy,
   });
 }
 
@@ -1503,9 +1532,9 @@ async function dispatchSlackEvent(input: {
       input.resolveSession(slackContinuationToken(target.channelId, target.threadTs)),
     respond: (inputResponses, { auth, target }) =>
       sourceFor(target).respond(inputResponses, { auth }),
-    send: (message, { auth, target, title, taskDeliveryPolicy }) =>
+    send: (message, { auth, target, title }) =>
       receiveOnSlack(
-        { auth, message, target, title, taskDeliveryPolicy },
+        { auth, message, target, title },
         {
           from: input.from,
           api: input.api,

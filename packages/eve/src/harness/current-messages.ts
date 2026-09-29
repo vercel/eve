@@ -17,12 +17,6 @@ interface CurrentMessagesOptions {
   readonly projectedMessages?: readonly HarnessModelMessage[];
 }
 
-const ANNOUNCEMENT_KINDS = {
-  availableSkills: "context.state",
-  deliveryInstruction: "context.instruction",
-  taskState: "context.state",
-} as const satisfies Record<keyof HistoryState, FrameworkMessageKind>;
-
 /** Builds the model view and durable history for one step. */
 export function createCurrentMessages(
   history: readonly HarnessModelMessage[],
@@ -82,12 +76,11 @@ export function createCurrentMessages(
   return {
     add,
     addAnnouncements(announcements) {
-      for (const key of ["availableSkills", "taskState", "deliveryInstruction"] as const) {
-        const message = announcements[key];
-        if (message === undefined || message.length === 0 || historyState[key] === message)
-          continue;
-        if (add(message, ANNOUNCEMENT_KINDS[key])) historyState[key] = message;
+      const skills = announcements.availableSkills;
+      if (skills === undefined || skills.length === 0 || historyState.availableSkills === skills) {
+        return;
       }
+      if (add(skills, "context.state")) historyState.availableSkills = skills;
     },
     addSystem(messages) {
       systemMessages.push(...(Array.isArray(messages) ? messages : [messages]));

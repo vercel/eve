@@ -25,30 +25,27 @@ export default defineEval({
     const parent = await session.start(
       "Use the workflow tool exactly once to fan out two independent echo-marker subagent calls. In its JavaScript, create the messages 'workflow alpha' and 'workflow beta', map them through ctx.agent calls to echo-marker inside Promise.all, and return the resulting two-element array. Do not call echo-marker outside workflow. Then reply with the returned array verbatim as JSON.",
     );
-    const firstCalled = await parent.waitForEvent("subagent.called", {
+    const firstStarted = await parent.waitForEvent("agent.started", {
       data: { name: "echo-marker" },
     });
-    const firstChild = t.target.watchTurn(firstCalled.data.childSessionId).result();
-    const secondCalled = await parent.waitForEvent("subagent.called", {
+    const firstChild = t.target.watchTurn(firstStarted.data.sessionId).result();
+    const secondStarted = await parent.waitForEvent("agent.started", {
       data: {
-        callId: (callId) => callId !== firstCalled.data.callId,
         name: "echo-marker",
+        sessionId: (sessionId) => sessionId !== firstStarted.data.sessionId,
       },
     });
-    if (secondCalled.data.childSessionId === firstCalled.data.childSessionId) {
-      throw new Error("Parallel workflow calls reused one child session.");
-    }
-    const secondChild = t.target.watchTurn(secondCalled.data.childSessionId).result();
+    const secondChild = t.target.watchTurn(secondStarted.data.sessionId).result();
     const [turn, firstChildTurn, secondChildTurn] = await Promise.all([
       parent.result(),
       firstChild,
       secondChild,
     ]);
-    const latestCallAt = [firstCalled.meta.at, secondCalled.meta.at].sort().at(-1)!;
+    const latestCallAt = [firstStarted.meta.at, secondStarted.meta.at].sort().at(-1)!;
 
     t.succeeded();
     t.calledTool("workflow", { input: isFanOutProgram, count: 1 });
-    turn.calledSubagent("echo-marker", { count: 2, status: "completed" });
+    turn.event("agent.started", { count: 2, data: { name: "echo-marker" } });
     firstChildTurn.eventsSatisfy(
       "first child does not complete before both children start",
       (events) =>

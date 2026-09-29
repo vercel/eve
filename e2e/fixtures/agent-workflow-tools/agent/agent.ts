@@ -1,6 +1,9 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { latestTaskResult } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
+
+import { respondToTaskScenario } from "./lib/task-scenarios.ts";
 
 /**
  * Deterministic script: each directive names the workflow tool to call with
@@ -16,7 +19,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         toolCalls: [{ id: skillCallId, name: "load_skill", input: { skill: "delegation-policy" } }],
       };
     }
-    const mode = /SUBAGENT-HOOKS:(direct|waiting|background)/u.exec(hookScenario)?.[1];
+    const mode = /SUBAGENT-HOOKS:(direct|waiting)/u.exec(hookScenario)?.[1];
     if (auditing) {
       const auditTool = request.lastUserMessage?.includes("DYNAMIC-SKILL-CONTEXT")
         ? "read_dynamic_skill_context"
@@ -26,12 +29,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         ? { toolCalls: [{ name: auditTool, input: {} }] }
         : JSON.stringify(audit.output);
     }
-    const tool =
-      mode === "direct"
-        ? "workflow-marker"
-        : mode === "waiting"
-          ? "blocking_agent"
-          : "background_agent";
+    const tool = mode === "direct" ? "workflow-marker" : "blocking_agent";
     if (!request.toolResults.some((entry) => entry.name === tool)) {
       return {
         toolCalls: [
@@ -43,24 +41,20 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         ],
       };
     }
-    const delivery = [...request.userMessages]
-      .reverse()
-      .find((entry) => entry.startsWith("[Task state]\n") || entry.startsWith("Background task "));
+    // The agent call returned a receipt; its result arrives in a <task_result> message.
+    if (mode === "direct") {
+      return latestTaskResult(request, tool) ?? { toolCalls: [{ name: "task_wait", input: {} }] };
+    }
     const result = request.toolResults.find((entry) => entry.name === tool);
-    return (
-      delivery ??
-      (typeof result?.output === "string" ? result.output : JSON.stringify(result?.output))
-    );
+    return typeof result?.output === "string" ? result.output : JSON.stringify(result?.output);
   }
 
   const message =
     [...request.userMessages]
       .reverse()
-      .find(
-        (entry) =>
-          /^(WORKFLOW-|(?:Background task|Deploy) task_)/u.test(entry) ||
-          entry.includes("private-catalog"),
-      ) ?? "";
+      .find((entry) => entry.startsWith("WORKFLOW-") || entry.includes("private-catalog")) ?? "";
+  const scenario = respondToTaskScenario(request, directiveOf(message));
+  if (scenario !== undefined) return scenario;
   if (message.includes("private-catalog")) {
     const result = request.toolResults.find((entry) => entry.name === "connection_search");
     if (result === undefined) {
@@ -93,25 +87,9 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     }
     return `WORKFLOW-PROBE-RESULT ${String(result.output)}`;
   }
-  if (message.includes("WORKFLOW-MIXED-AGENTS-START")) {
-    const mixedResults = request.toolResults.filter(
-      (result) => result.id === "blocking-agent-call" || result.id === "background-agent-call",
-    );
-    if (mixedResults.length < 2) {
-      return {
-        toolCalls: [
-          { id: "blocking-agent-call", input: { service: "api" }, name: "blocking_agent" },
-          { id: "background-agent-call", input: { service: "api" }, name: "background_agent" },
-        ],
-      };
-    }
-    return "WORKFLOW-MIXED-AGENTS-INITIAL-RESULT";
-  }
-
   for (const [directive, tool] of [
     ["WORKFLOW-DEPLOY-START", "deploy_service"],
     ["WORKFLOW-CONFIRM-START", "confirm_deploy"],
-    ["WORKFLOW-REPORT-START", "report_deploy"],
     ["WORKFLOW-ESCALATE-START", "escalate_deploy"],
     ["WORKFLOW-HOLD-START", "hold_deploy"],
     ["WORKFLOW-FANOUT-START", "fanout_deploy"],
@@ -129,17 +107,12 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     }`;
   }
 
-  if (message.includes("is completed") && message.includes("WORKFLOW-REPORT-COMPLETE")) {
-    return "WORKFLOW-REPORT-DONE";
-  }
-  if (message.includes("is completed") && message.includes("WORKFLOW-CHILD:api:background")) {
-    return "WORKFLOW-MIXED-AGENTS-BACKGROUND-DONE";
-  }
-  if (message.startsWith("Background task ")) {
-    return "WORKFLOW-REPORT-ACK";
-  }
-
   return "WORKFLOW-IDLE";
+}
+
+/** A directive is the first word of its message; any text after it is for people reading it. */
+function directiveOf(message: string): string {
+  return message.trim().split(/\s+/u)[0] ?? "";
 }
 
 const base = e2eAgentConfig({ mock: respond });

@@ -232,8 +232,9 @@ test("workflow names and concurrency preserve independent authorized harness run
   );
   assert.match(workflow, /artifact-name: swe-lean-\$\{\{ needs\.request\.outputs\.slug \}\}/u);
   assert.match(workflow, /push:\n\s+branches: \[main\]/u);
-  // One sandbox per task and harness: all eight SWE-lean trials start at once.
-  assert.match(workflow, /concurrency: "8"/u);
+  // Five attempts per task, run in waves of the action's maximum of 16 sandboxes.
+  assert.match(workflow, /attempts: "5"/u);
+  assert.match(workflow, /concurrency: "16"/u);
   assert.match(workflow, /agent-ref: \$\{\{ needs\.request\.outputs\.sha \}\}/u);
 });
 
@@ -246,7 +247,7 @@ test("the consumer tracks eve-bench main and owns its model selection", async ()
   assert.match(workflow, /uses: \.\/\.eve-bench-action/u);
   assert.match(
     workflow,
-    /model: \$\{\{ vars\.EVE_CODE_BENCH_MODEL \|\| 'openai\/gpt-6-luna' \}\}/u,
+    /model: \$\{\{ vars\.EVE_CODE_BENCH_MODEL \|\| 'anthropic\/claude-sonnet-5\.5' \}\}/u,
   );
   assert.match(workflow, /reasoning: low\n/u);
   assert.doesNotMatch(workflow, /runner-revision:/u);

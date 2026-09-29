@@ -23,8 +23,7 @@ interface FormattedSubagentInvocation extends StepInput {
  * Reads the `outputSchema` a `ctx.agent()` call requested. An empty `{}`
  * constrains nothing, but honoring it would flip the child into
  * structured-output mode and discard its text reply, so only a non-empty
- * object counts as a requested schema. Local and remote dispatch share this
- * rule.
+ * object counts as a requested schema.
  */
 export function normalizeRequestedOutputSchema(
   outputSchema: JsonValue | undefined,

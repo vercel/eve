@@ -17,7 +17,7 @@
     "db:studio": "drizzle-kit studio --config apps/web/drizzle.config.ts",
     "dev": "next dev apps/web",
     "dev:eve": "eve dev",
-    "dev:services": "vercel dev",
+    "dev:all": "vercel dev --local",
     "dev:web": "next dev apps/web",
     "start:eve": "eve start",
     "typecheck": "next typegen apps/web && tsgo --noEmit -p apps/web/tsconfig.json"

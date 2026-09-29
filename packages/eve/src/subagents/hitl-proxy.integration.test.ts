@@ -9,6 +9,7 @@ import { ContextContainer } from "#context/container.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
+import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -164,6 +165,15 @@ function buildEmptySession(continuationToken: string, sessionId: string): Harnes
   };
 }
 
+function buildOpenTurnSession(continuationToken: string, sessionId: string): HarnessSession {
+  return setHarnessEmissionState(buildEmptySession(continuationToken, sessionId), {
+    sessionStarted: true,
+    sequence: 3,
+    stepIndex: 1,
+    turnId: "turn_3",
+  });
+}
+
 /**
  * Builds an adapter-aware emit helper and a captured-events sink
  * paired to one parent context. The returned `emit` mirrors the
@@ -220,10 +230,11 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     });
 
     const { emit, events, persistAdapterState } = buildCapturingEmit(ctx);
-    const { entries, session: sessionAfterEmit } = await emitProxiedInputRequest({
+    const parentSession = buildOpenTurnSession("parent-token", "sess-parent");
+    const entries = await emitProxiedInputRequest({
       emit,
       hookPayload,
-      session: buildEmptySession("parent-token", "sess-parent"),
+      session: parentSession,
     });
     // Simulate the workflow step's post-step
     // `ctx.set(ChannelKey, { …adapter, state })` — the mutation the
@@ -246,20 +257,19 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
             requestIds: ["req-approve-1"],
           },
           childContinuationToken: "subagent:parent:call-1",
+          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
           kind: "tool-approval",
         },
       ],
     ]);
 
-    // The helper follows the proxied `input.requested` with a
-    // `turn.completed` + `session.waiting` pair so client event-stream
-    // readers stop draining and prompt for the HITL response.
-    const emittedTypes = events.map((event) => event.type);
-    expect(emittedTypes).toEqual(["input.requested", "turn.completed", "session.waiting"]);
-
-    // The returned session carries the advanced emission state so
-    // the next harness step starts a fresh logical turn.
-    expect(sessionAfterEmit.state?.["eve.harness.emission"]).toBeDefined();
+    // The proxied `input.requested` parks the parent's open turn with
+    // `turn.waiting`; the call that asked is still running, so the turn
+    // neither completes nor resets.
+    expect(events.slice(1)).toEqual([
+      { data: { sequence: 3, turnId: "turn_3" }, type: "turn.waiting" },
+    ]);
+    expect(events[0]?.type).toBe("input.requested");
 
     // The serialized adapter state must include mutations made while
     // rendering the proxied input request.
@@ -312,7 +322,17 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
         payload: {
           inputResponses: [{ optionId: "approve", requestId: "req-approve-1" }],
         },
-        retireRequestIds: ["req-approve-1"],
+        resolved: {
+          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+          resolutions: [
+            {
+              kind: "tool-approval",
+              outcome: "approved",
+              requestId: "req-approve-1",
+              response: { optionId: "approve", requestId: "req-approve-1" },
+            },
+          ],
+        },
       },
     ]);
   });
@@ -348,7 +368,7 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       request: requestA,
       subagentName: "descendantA",
     });
-    const { entries: entriesA } = await emitProxiedInputRequest({
+    const entriesA = await emitProxiedInputRequest({
       emit,
       hookPayload: payloadA,
       session: buildEmptySession("parent-token", "sess-parent"),
@@ -363,7 +383,7 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       request: requestB,
       subagentName: "descendantB",
     });
-    const { entries: entriesB } = await emitProxiedInputRequest({
+    const entriesB = await emitProxiedInputRequest({
       emit,
       hookPayload: payloadB,
       session: buildEmptySession("parent-token", "sess-parent"),

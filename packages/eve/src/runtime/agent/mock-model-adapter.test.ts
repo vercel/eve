@@ -73,29 +73,6 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  it("reports a task notification instead of re-calling the named tool", async () => {
-    const result = await generateWithPrompt(
-      [
-        {
-          content:
-            "Background task task_abc123 (conditional-marker) is completed.\n\nResult:\nDYNAMIC_SUBAGENT_ENABLED",
-          role: "user",
-        },
-      ],
-      [
-        {
-          inputSchema: { properties: { message: { type: "string" } }, type: "object" },
-          name: "conditional-marker",
-          type: "function",
-        },
-      ],
-    );
-
-    expect(result.content).toEqual([
-      expect.objectContaining({ text: expect.stringContaining("DYNAMIC_SUBAGENT_ENABLED") }),
-    ]);
-  });
-
   it("activates a matching skill when the available skill line includes a skill path", async () => {
     const result = await generateWithPrompt([
       {
@@ -721,12 +698,10 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  // Regression: the [Agents] announcement is user-role scaffolding injected
-  // after a subagent settles. Treating it as a turn boundary masked the tool
-  // result, and the adapter re-issued the same deterministic tool call — a
-  // duplicate start operation that fatally failed the parent session in the
-  // mock world suites.
-  it("replies to a tool result behind a framework [Agents] announcement instead of re-calling", async () => {
+  // Regression: the [Tasks] note is user-role scaffolding injected at a step
+  // boundary. Treating it as a turn boundary masked the tool result, and the
+  // adapter re-issued the same deterministic tool call.
+  it("replies to a tool result behind a framework [Tasks] note instead of re-calling", async () => {
     const result = await generateWithPrompt(
       [
         {
@@ -757,7 +732,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         },
         {
           content:
-            '[Agents]\n<agents>\n<agent id="ag_conditional-marker:5ae9bfd35776" name="conditional-marker">DYNAMIC_SUBAGENT_ENABLED</agent>\n</agents>',
+            '[Tasks]\n<tasks>\n</tasks>\n<idle>\n<task id="conditional-marker-5ae9bf" tool="conditional-marker"/>\n</idle>',
           role: "user",
         },
       ],

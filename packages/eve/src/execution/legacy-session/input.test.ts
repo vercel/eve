@@ -40,24 +40,6 @@ describe("legacy turn input", () => {
     expect(input.serializedContext).toEqual(committed.serializedContext);
     expect(input.delivery).toBeUndefined();
   });
-  it("uses the final committed checkpoint instead of the earlier background-task checkpoint", () => {
-    const finalState = { sessionId: "old", snapshot: "final" };
-    const input = readLegacyTurnInput({
-      version: 2,
-      stepInput: step,
-      completionToken: "old:turn:0",
-      initialStep: {
-        result: {
-          action: "park",
-          sessionState: finalState,
-          serializedContext: { final: true },
-          backgroundTaskState: { sessionId: "old", snapshot: "before" },
-        },
-      },
-    });
-    expect(input.sessionState).toEqual(finalState);
-    expect(input.delivery).toBeUndefined();
-  });
   it("rejects unknown formats before publishing an owner", () => {
     expect(() => readLegacyTurnInput({ version: 3 })).toThrow("Unsupported");
     expect(() => readLegacyTurnInput({ version: 2 })).toThrow("Invalid");

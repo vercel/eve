@@ -86,6 +86,7 @@ import type {
   TerminalPartDisplayMode,
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
+import { initialPromptPlaceholder } from "./prompt-placeholder.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { inspectError, type LogRecord } from "#internal/logging.js";
 import {
@@ -303,6 +304,7 @@ type AgentHeaderOptions = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
+  localDevelopment?: boolean;
 };
 
 type DisplayModes = {
@@ -433,14 +435,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #updateSequence = 0;
   /** Call ids per subagent name, for the sections' ordinal subtitles. */
   readonly #subagentCallsByName = new Map<string, string[]>();
-  /** Background sections kept at the live edge until their child boundary. */
-  readonly #backgroundSubagentCallIds = new Set<string>();
   /** Parent-completed sections retained as mutable until the child boundary. */
   readonly #provisionalSubagentCallIds = new Set<string>();
   /** Session-local file contents, so write blocks can render real diffs. */
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
   #agentHeader?: AgentHeaderOptions;
+  #initialPromptPlaceholder = "Send a message…";
   #startupPhase?: "starting" | "connecting" | "updating";
   #startupEditor?: LineState;
   #startupConsumer?: (key: TerminalKey) => void;
@@ -746,11 +747,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (this.#argumentTypeahead !== undefined) {
       return renderArgumentSuggestions(this.#argumentTypeahead, this.#theme, width);
     }
-    const inlineHint =
-      this.#typeahead === undefined ? undefined : inlineCommandHint(this.#typeahead);
-    return inlineHint === undefined &&
-      this.#typeahead !== undefined &&
-      isTypeaheadOpen(this.#typeahead)
+    return this.#typeahead !== undefined && isTypeaheadOpen(this.#typeahead)
       ? renderCommandSuggestions(this.#typeahead, this.#theme, width)
       : [];
   }
@@ -780,6 +777,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#resolvedModelId = undefined;
     }
     this.#agentHeader = options;
+    this.#initialPromptPlaceholder = initialPromptPlaceholder(
+      options.info,
+      options.localDevelopment === true,
+    );
     this.#start();
     const body = this.#renderAgentHeaderRows().join("\n");
     if (this.#agentHeaderRendered) {
@@ -867,7 +868,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
     this.#start(options);
-    this.#syncBackgroundActivityTicker();
+    this.#syncProvisionalSubagentTicker();
     this.#commitTurnStats();
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
@@ -1209,7 +1210,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#turnIndicator.kind === "waiting") {
         this.#turnIndicator = { kind: "idle" };
       }
-      this.#syncBackgroundActivityTicker();
+      this.#syncProvisionalSubagentTicker();
       this.#status = completedTurnStatus({
         interrupted: this.#interrupted,
         cancelled: this.#turnCancelled,
@@ -1223,7 +1224,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // prefix wedged and freeze scrollback for the rest of the session.
       if (this.#interrupted || turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
       this.#finalizeAllBlocks();
-      this.#syncBackgroundActivityTicker();
+      this.#syncProvisionalSubagentTicker();
       this.#diagnostics?.reportStats();
       this.#paint();
 
@@ -1275,7 +1276,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#sweepPreparingToolBlocks(turnState);
       if (turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
       this.#finalizeAllBlocks();
-      this.#syncBackgroundActivityTicker();
+      this.#syncProvisionalSubagentTicker();
       this.#diagnostics?.reportStats();
       this.#paint();
     }
@@ -1779,7 +1780,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   readonly subagents: SubagentView = {
     begin: (update) => this.beginSubagent(update),
-    background: (update) => this.backgroundSubagent(update),
     upsertStep: (update) => this.upsertSubagentStep(update),
     upsertTool: (update) => this.upsertSubagentTool(update),
     removeTool: (update) => this.removeSubagentTool(update),
@@ -1807,24 +1807,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * A background receipt closes the model tool call, not the child. Mark the
-   * header running so turn finalization cannot commit immutable scrollback
-   * before the child pump has folded in its later events.
-   */
-  backgroundSubagent(update: { callId: string }): void {
-    const header = this.#blockById.get(subagentHeaderId(update.callId));
-    if (header === undefined || this.#committedIds.has(subagentHeaderId(update.callId))) return;
-    header.status = "running";
-    header.live = true;
-    header.updateSeq = ++this.#updateSequence;
-    const wasBackground = this.#backgroundSubagentCallIds.has(update.callId);
-    this.#backgroundSubagentCallIds.add(update.callId);
-    if (!wasBackground) this.#moveSubagentCohortToBackgroundTail(update.callId);
-    this.#syncBackgroundActivityTicker();
-    this.#paint();
-  }
-
-  /**
    * Marks a subagent call complete — its final message has arrived — so the
    * section's closing corner reports `Done`. The header stays live until the
    * turn finalizes (committing mid-turn would freeze its child window).
@@ -1834,7 +1816,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (header === undefined) return;
     header.status = "done";
     if (update.authoritative) {
-      this.#backgroundSubagentCallIds.delete(update.callId);
       this.#provisionalSubagentCallIds.delete(update.callId);
       for (const block of this.#blocks) {
         if (block.subagentCallId === update.callId) block.live = false;
@@ -1845,7 +1826,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         if (block.subagentCallId === update.callId) block.live = true;
       }
     }
-    this.#syncBackgroundActivityTicker();
+    this.#syncProvisionalSubagentTicker();
     this.#paint();
   }
 
@@ -1973,14 +1954,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#childToolCallIds.clear();
     this.#parentToolBlockIds.clear();
     this.#subagentHeaders.clear();
-    this.#backgroundSubagentCallIds.clear();
     this.#provisionalSubagentCallIds.clear();
     this.#subagentCallsByName.clear();
     this.#messageQueue.reset();
     this.#nextSubmittedPromptOrigin = undefined;
     this.#fileContents.clear();
     this.#turnClock.reset();
-    this.#syncBackgroundActivityTicker();
+    this.#syncProvisionalSubagentTicker();
   }
 
   /**
@@ -3153,7 +3133,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#startTicker();
         this.#armFlowIdleTrap();
       } else {
-        this.#syncBackgroundActivityTicker();
+        this.#syncProvisionalSubagentTicker();
       }
       this.#live.reset();
       this.#paint();
@@ -3625,7 +3605,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #stopTicker() {
-    if (this.#hasLiveBackgroundActivity()) return;
+    if (this.#hasLiveProvisionalSubagents()) return;
     this.#clearTicker();
   }
 
@@ -3636,19 +3616,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
-  #hasLiveBackgroundActivity(): boolean {
+  #hasLiveProvisionalSubagents(): boolean {
     return this.#blocks.some(
       (block) =>
         block.live &&
         block.subagentCallId !== undefined &&
-        (this.#backgroundSubagentCallIds.has(block.subagentCallId) ||
-          this.#provisionalSubagentCallIds.has(block.subagentCallId)),
+        this.#provisionalSubagentCallIds.has(block.subagentCallId),
     );
   }
 
   /** Keeps mutable subagent sections visibly active after their parent turn settles. */
-  #syncBackgroundActivityTicker(): void {
-    if (this.#hasLiveBackgroundActivity()) {
+  #syncProvisionalSubagentTicker(): void {
+    if (this.#hasLiveProvisionalSubagents()) {
       this.#startTicker();
     } else if (!this.#streamDraftActive && this.#turnIndicator.kind === "idle") {
       this.#clearTicker();
@@ -3667,18 +3646,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #pushBlock(block: Block) {
     if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
     block.updateSeq = ++this.#updateSequence;
-    const isBackgroundChild =
-      block.subagentCallId !== undefined &&
-      this.#backgroundSubagentCallIds.has(block.subagentCallId);
-    const backgroundIndex = isBackgroundChild
-      ? -1
-      : this.#blocks.findIndex(
-          (candidate) =>
-            candidate.subagentCallId !== undefined &&
-            this.#backgroundSubagentCallIds.has(candidate.subagentCallId),
-        );
-    if (backgroundIndex < 0) this.#blocks.push(block);
-    else this.#blocks.splice(backgroundIndex, 0, block);
+    this.#blocks.push(block);
     if (block.id) this.#blockById.set(block.id, block);
   }
 
@@ -3721,6 +3689,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #addSubmittedPrompt(prompt: string | undefined) {
     if (prompt == null) return;
+    this.#hasUserMessage = true;
     const origin = this.#nextSubmittedPromptOrigin;
     this.#nextSubmittedPromptOrigin = undefined;
     if (this.#pendingEchoedPrompt === prompt) {
@@ -3812,9 +3781,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /**
    * Inserts a new child beside the rest of its call's cohort instead of at
-   * the transcript's live edge. Background children can emit after parent
-   * and user blocks from later turns; arrival order must not split their
-   * section.
+   * the transcript's live edge. A child's final events can arrive after later
+   * parent blocks; arrival order must not split its section.
    */
   #upsertSubagentBlock(block: Block) {
     if (block.id && this.#committedIds.has(block.id)) return;
@@ -3843,18 +3811,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #removeBlock(id: string) {
     this.#blocks = this.#blocks.filter((candidate) => candidate.id !== id);
     this.#blockById.delete(id);
-  }
-
-  /**
-   * Background children may outlive several foreground turns. Keep their
-   * mutable cohort at the live edge so it cannot hold those settled turns in
-   * the renderer's leading-prefix commit queue.
-   */
-  #moveSubagentCohortToBackgroundTail(callId: string): void {
-    const cohort = this.#blocks.filter((block) => block.subagentCallId === callId);
-    if (cohort.length === 0) return;
-    this.#blocks = this.#blocks.filter((block) => block.subagentCallId !== callId);
-    this.#blocks.push(...cohort);
   }
 
   #finalizeAllBlocks() {
@@ -4071,7 +4027,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#paint();
         break;
     }
-    // Activity is independent of transcript visibility and idle/background streams.
+    // Activity is independent of transcript visibility and idle streams.
     if (turnState === this.#activeTurnState && turnActivityLabel(turnState) !== previousActivity) {
       this.#paint();
     }
@@ -4598,9 +4554,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (queueRows.length > 0) rows.push(...queueRows, "");
 
     if (this.#inputActive) {
-      // A complete command name with a single match collapses the dropdown into
-      // a dim argument hint trailing the prompt; partial or ambiguous drafts
-      // still open the list above the input.
+      // A complete command can show its argument hint beside the caret while
+      // its matching suggestion remains visible beneath the prompt.
       const inlineHint =
         this.#typeahead !== undefined ? inlineCommandHint(this.#typeahead) : undefined;
       const typeaheadRows = this.#typeaheadDrawerRows(width);
@@ -4640,7 +4595,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             ? "Message · Enter to queue"
             : this.#hasUserMessage
               ? ""
-              : "Send a message…";
+              : this.#initialPromptPlaceholder;
       }
       const renderedPromptRows = promptInputRows(promptRows);
       // The prompt helper ends with a footer spacer; a drawer owns that gap.

@@ -16,6 +16,8 @@ import {
   type WorkspaceRootMutation,
 } from "../workspace-root.js";
 import { WEB_CHANNEL_TEMPLATES } from "./web-template.js";
+import { AGENT_INSTRUCTIONS_TEMPLATE } from "./instructions-template.js";
+import { SCAFFOLDED_AGENT_PATHS } from "./agent-paths.js";
 
 export const CURRENT_DIRECTORY_PROJECT_NAME = ".";
 
@@ -101,9 +103,9 @@ export function agentTemplateFiles(
   reasoning?: AgentReasoningDefinition,
 ): Record<string, string> {
   return {
-    "agent/agent.ts": renderAgentTemplate(model, reasoning),
-    "agent/channels/eve.ts": WEB_CHANNEL_TEMPLATES.default,
-    "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
+    [SCAFFOLDED_AGENT_PATHS.config]: renderAgentTemplate(model, reasoning),
+    [SCAFFOLDED_AGENT_PATHS.channel]: WEB_CHANNEL_TEMPLATES.default,
+    [SCAFFOLDED_AGENT_PATHS.instructions]: AGENT_INSTRUCTIONS_TEMPLATE,
   };
 }
 
@@ -220,15 +222,6 @@ export const ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX = `,
   }
 `;
 
-const AGENT_INSTRUCTIONS_TEMPLATE = `# Identity
-
-You are a general-purpose AI agent powered by eve, Vercel's agent framework.
-
-# Customization
-
-Your behavior and capabilities are defined by this project's code. You can be customized into whatever kind of agent the user wants by updating the project's instructions, tools, skills, connections, channels, subagents, and schedules.
-`;
-
 const SHARED_TEMPLATE_FILES: Record<string, string> = {
   "README.md": `# __EVE_INIT_APP_NAME__
 
@@ -266,8 +259,8 @@ eve deploy
 
 \`eve deploy\` links a Vercel project if needed and deploys the agent to production. See the [eve deployment documentation](https://eve.dev/docs/guides/deployment/vercel) for authentication, environment variables, and deployment options.
 `,
-  "agent/channels/eve.ts": WEB_CHANNEL_TEMPLATES.default,
-  "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
+  [SCAFFOLDED_AGENT_PATHS.channel]: WEB_CHANNEL_TEMPLATES.default,
+  [SCAFFOLDED_AGENT_PATHS.instructions]: AGENT_INSTRUCTIONS_TEMPLATE,
   "tsconfig.json": `{
   "compilerOptions": {
     "target": "ES2022",
@@ -368,7 +361,7 @@ function templateFiles(input: {
   includeRootOnlyPackageJsonFields: boolean;
 }): Record<string, string> {
   return {
-    "agent/agent.ts": input.byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
+    [SCAFFOLDED_AGENT_PATHS.config]: input.byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
     ...SHARED_TEMPLATE_FILES,
     "package.json": packageJsonTemplate(input.includeRootOnlyPackageJsonFields),
   };

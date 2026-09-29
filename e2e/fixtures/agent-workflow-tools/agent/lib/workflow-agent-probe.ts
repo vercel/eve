@@ -1,6 +1,8 @@
 import type { WorkflowToolContext } from "eve/tools";
 import { z } from "zod";
 
+import { replyFrom } from "./agent-reply.ts";
+
 export const workflowAgentProbeInputSchema = z.strictObject({
   kind: z.enum(["auth", "hitl"]),
 });
@@ -8,8 +10,7 @@ export const workflowAgentProbeInputSchema = z.strictObject({
 export async function executeWorkflowAgentProbe(
   input: z.infer<typeof workflowAgentProbeInputSchema>,
   ctx: WorkflowToolContext,
-): Promise<unknown> {
-  return await ctx.agent(input.kind === "hitl" ? "workflow-hitl" : "workflow-auth", {
-    message: `Run the ${input.kind} probe.`,
-  });
+): Promise<string | null> {
+  const name = input.kind === "hitl" ? "workflow-hitl" : "workflow-auth";
+  return await replyFrom(ctx, name, `Run the ${input.kind} probe.`);
 }

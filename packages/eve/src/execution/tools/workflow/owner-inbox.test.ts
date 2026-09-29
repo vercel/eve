@@ -7,7 +7,6 @@ import {
 
 const from = {
   callId: "call-1",
-  execution: "background" as const,
   input: { message: "Find it" },
   runId: "run-1",
   sequence: 0,
@@ -76,20 +75,6 @@ describe("workflow-tool task input", () => {
         turnId: "turn-child",
       },
     });
-  });
-
-  it("does not normalize workflow agent requests as human input", () => {
-    expect(() =>
-      workflowToolRunRequestToInputRequestPayload({
-        from,
-        replyTo: "subagent:parent:call-1",
-        request: {
-          input: { message: "Find it", target: "research" },
-          invocationId: "call-1",
-          kind: "agent-invoke",
-        },
-      }),
-    ).toThrow("A workflow agent request cannot be normalized as human input.");
   });
 });
 

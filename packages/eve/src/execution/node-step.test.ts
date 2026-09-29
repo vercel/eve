@@ -196,7 +196,6 @@ async function createNodeWithSourceOwnedTools(input: {
             : undefined,
           description: frameworkAgent ? AGENT_TOOL_DESCRIPTION : `${name} programmatic tool.`,
           execute: async () => `${name}-sentinel`,
-          execution: frameworkAgent ? "background" : undefined,
           inputSchema: frameworkAgent ? SUBAGENT_TOOL_INPUT_SCHEMA : null,
           logicalPath: `tools/${name}.ts`,
           name,
@@ -260,19 +259,18 @@ describe("createNodeHarnessTools", () => {
     expect(createNodeHarnessTools({ node }).get("web_search")?.label?.start).toBeUndefined();
   });
 
-  it("lowers the compiled framework agent tool as a background tool", async () => {
+  it("lowers the compiled framework agent tool as a workflow tool", async () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["agent"] });
     const agentTool = createNodeHarnessTools({ node }).get("agent");
 
     expect(agentTool?.description).toContain("split a large task into independent pieces");
     expect(agentTool?.description).toContain("multiple `agent` calls in one response");
     expect(agentTool?.description).toContain("run a small fixed set in parallel");
-    expect(agentTool?.description).toContain("include essential context");
+    expect(agentTool?.description).toContain("put everything it needs in message");
     expect(agentTool?.description).toContain("non-overlapping scopes");
-    expect(agentTool?.description).not.toContain("eve");
-    expect(agentTool?.execution).toBe("background");
-    expect(agentTool?.runtimeAction).toBeUndefined();
-    expect(agentTool?.execute).toBeDefined();
+    expect(agentTool?.description).not.toMatch(/\beve\b/);
+    expect(agentTool?.execute).toBeUndefined();
+    expect(agentTool?.workflowId).toBe("workflow//eve//agentToolServeWorkflow");
   });
 
   it("keeps an authored agent tool separate from self-delegation", async () => {
@@ -283,22 +281,12 @@ describe("createNodeHarnessTools", () => {
     const agentTool = createNodeHarnessTools({ node }).get("agent");
 
     expect(agentTool?.availableInSubagents).toBeUndefined();
-    expect(agentTool?.execution).toBeUndefined();
     expect(agentTool).not.toHaveProperty("resultKind");
     expect(agentTool?.rootOnly).toBeUndefined();
     expect(agentTool?.workflowId).toBeUndefined();
   });
 
-  it("lowers task_cancel from its framework definition", async () => {
-    const node = await createNodeWithSourceOwnedTools({ names: ["task_cancel"] });
-    const tools = createNodeHarnessTools({ node });
-
-    expect(tools.get("task_cancel")?.runtimeAction).toEqual({ kind: "task-control" });
-    expect(tools.get("task_cancel")?.execute).toBeUndefined();
-    expect(tools.has("task_sleep")).toBe(false);
-  });
-
-  it("executes compiled local and remote delegation tools as background tasks", async () => {
+  it("lowers compiled local and remote delegation tools as workflow tools", async () => {
     const delegationTools: StaticRuntimeTurnAgent["tools"] = [
       createPreparedRuntimeSubagentTool({
         description: "Delegate local research.",
@@ -328,21 +316,9 @@ describe("createNodeHarnessTools", () => {
       }),
     });
     for (const name of ["research", "reviewer"]) {
-      expect(tools.get(name)?.execution).toBe("background");
-      expect(tools.get(name)?.execute).toBeDefined();
-      expect(tools.get(name)?.runtimeAction).toBeUndefined();
-      expect(tools.get(name)?.nodeId).toEqual(expect.any(String));
-      expect(tools.get(name)?.workflowId).toBe("workflow//eve//subagentToolExecuteWorkflow");
+      expect(tools.get(name)?.execute).toBeUndefined();
+      expect(tools.get(name)?.workflowId).toBe("workflow//eve//agentToolServeWorkflow");
     }
-  });
-
-  it("does not recreate task tools absent from the compiled graph", async () => {
-    const tools = createNodeHarnessTools({
-      node: await createNodeWithSourceOwnedTools({ names: [] }),
-    });
-
-    expect(tools.has("task_update")).toBe(false);
-    expect(tools.has("task_cancel")).toBe(false);
   });
 });
 

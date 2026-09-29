@@ -82,6 +82,7 @@ describe("eve channel production audience", () => {
             turnId: "turn-1",
           },
           0,
+          0,
         ),
         input: { instructions: "private instructions", messages: [] },
         model: { modelId: "test", provider: "test" },

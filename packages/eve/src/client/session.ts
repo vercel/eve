@@ -1,11 +1,16 @@
-import { updatePendingAuthorizations } from "#client/session-utils.js";
-import type { MessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
-import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
+import {
+  isTurnSegmentBoundary,
+  updatePendingAuthorizations,
+  updatePendingInputRequests,
+} from "#client/session-utils.js";
+import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
   EVE_SESSION_ROUTE_PATH,
   createEveSessionRoutePath,
   createEveSessionStreamRoutePath,
 } from "#protocol/routes.js";
+import { ClientAgentSession } from "#client/agent-session.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
 import { followStreamIterable, sleep } from "#client/open-stream.js";
@@ -165,10 +170,9 @@ export class ClientSession {
     );
   }
 
-  /** Requests cooperative cancellation of this session's active turn and optionally its tasks. */
+  /** Requests cooperative cancellation of this session's active turn. */
   async cancel(options?: {
     readonly signal?: AbortSignal;
-    readonly tasks?: boolean;
     readonly turnId?: string;
   }): Promise<CancelSessionResult> {
     return await cancelClientSession({
@@ -211,50 +215,13 @@ export class ClientSession {
   }
 
   /**
-   * Follows one delegated child's durable event stream through this parent session.
-   *
-   * Pass a `subagent.called` event from this session. The client reads its
-   * `childStreamPath` with this session's host and credentials: a local child's
-   * own stream route, or the parent-origin proxy for a remote child, which the
-   * parent deployment authenticates to the remote agent. Reading the child never
-   * advances this session's cursor. The child cursor starts at `0`; pass
-   * `startIndex` to resume. Stop at a child turn boundary with
-   * `isCurrentTurnBoundaryEvent`.
-   *
-   * @throws {Error} When `called` belongs to a different session or has no
-   * `childStreamPath` because an older eve version recorded it.
+   * The session an agent run opened, as this session's stream announced it.
+   * Pass an `agent.started` event from this session, then follow the child
+   * with `stream()`; reads use this session's host and credentials, for local
+   * and remote agents alike.
    */
-  streamSubagent(
-    called: SubagentCalledStreamEvent,
-    options?: StreamOptions,
-  ): AsyncIterable<MessageStreamEvent> {
-    if (called.data.sessionId !== this.#state.sessionId) {
-      throw new Error(
-        `streamSubagent() requires a subagent.called event from session ${this.#state.sessionId}, but it came from session ${called.data.sessionId}.`,
-      );
-    }
-    // Events persisted before childStreamPath existed replay without it.
-    if (typeof called.data.childStreamPath !== "string") {
-      throw new Error(
-        `streamSubagent() requires a subagent.called event with childStreamPath, but call ${called.data.callId} has none. The event was recorded by an older eve version.`,
-      );
-    }
-    const startIndex = options?.startIndex ?? 0;
-    if (options?.follow === false && startIndex < 0) {
-      throw new Error(
-        "streamSubagent({ follow: false }) requires a nonnegative startIndex; a tail-relative cursor cannot be bounded.",
-      );
-    }
-    return followStreamIterable({
-      follow: options?.follow,
-      host: this.#context.host,
-      path: called.data.childStreamPath,
-      redirect: this.#context.redirect,
-      resolveHeaders: () => this.#context.resolveHeaders(),
-      signal: options?.signal,
-      startIndex,
-      streamReconnectPolicy: options?.streamReconnectPolicy,
-    });
+  agent(started: AgentStartedStreamEvent): ClientAgentSession {
+    return new ClientAgentSession(this.#context, started);
   }
 
   [followSession](options: FollowSessionOptions): AsyncIterable<MessageStreamEvent> {
@@ -287,6 +254,7 @@ export class ClientSession {
     let started = deliveryId === undefined;
     let reachedBoundary = false;
     const pendingAuthorizations = new Set<string>();
+    const pendingInputRequests = new Set<string>();
     try {
       for await (const event of source ??
         this.#readStream({
@@ -310,8 +278,9 @@ export class ClientSession {
           started = true;
         }
         updatePendingAuthorizations(pendingAuthorizations, event);
+        updatePendingInputRequests(pendingInputRequests, event);
         reachedBoundary =
-          isCurrentTurnBoundaryEvent(event) &&
+          isTurnSegmentBoundary(event, pendingInputRequests) &&
           (event.type !== "session.waiting" || pendingAuthorizations.size === 0);
         yield event;
         if (reachedBoundary) {
@@ -500,9 +469,6 @@ function createMessageBody(
   }
   if (!requireMessage && input.message !== undefined && input.turnPolicy !== undefined) {
     body.turnPolicy = input.turnPolicy;
-  }
-  if (input.message !== undefined && input.taskDeliveryPolicy !== undefined) {
-    body.taskDeliveryPolicy = input.taskDeliveryPolicy;
   }
   if (input.clientContext !== undefined) body.clientContext = input.clientContext;
   const outputSchema = serializeOutputSchema(input.outputSchema);

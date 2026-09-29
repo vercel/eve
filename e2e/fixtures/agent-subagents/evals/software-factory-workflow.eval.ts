@@ -29,17 +29,19 @@ export default defineEval({
 
     turn.expectOk();
     t.succeeded();
-    t.calledTool("workflow", {
+    t.calledTool("workflow", { count: 1 });
+    // The workflow tool runs as a task: its result settles the task, not the call.
+    t.event("task.settled", {
       count: 1,
-      output: (observed) => isDeepStrictEqual(observed, expected),
+      data: { output: (observed) => isDeepStrictEqual(observed, expected), status: "completed" },
     });
-    t.calledSubagent(TRIAGE, { count: 1, status: "completed" });
-    t.calledSubagent(REVIEW, { count: 1, status: "completed" });
-    t.calledSubagent(REPRODUCE, { count: 1, status: "completed" });
+    t.event("agent.started", { count: 1, data: { name: TRIAGE } });
+    t.event("agent.started", { count: 1, data: { name: REVIEW } });
+    t.event("agent.started", { count: 1, data: { name: REPRODUCE } });
     turn.eventsSatisfy("analysis fans out before reproduction consumes both results", (events) => {
       const called = new Map<string, number>();
       for (const [index, event] of events.entries()) {
-        if (event.type === "subagent.called" && !called.has(event.data.name)) {
+        if (event.type === "agent.started" && !called.has(event.data.name)) {
           called.set(event.data.name, index);
         }
       }

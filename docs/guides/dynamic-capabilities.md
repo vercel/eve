@@ -139,7 +139,8 @@ failure and omits the subagent.
 The resolved set applies to local and remote direct delegation. An authored workflow tool can
 also call a selected subagent through `ctx.agent`. A generated program can call it through the
 provided `workflow` tool. eve checks availability again before starting the child, so a stale or
-manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
+manually constructed call fails: a subagent tool call with `SUBAGENT_UNAVAILABLE`, and a
+`ctx.agent` session's first `send()` with an error saying the subagent is not available. Treat conditional
 availability as capability composition, not as the only authorization
 boundary: sensitive child tools still need their own authorization and
 approval checks.
@@ -330,7 +331,10 @@ A parked call binds to its callback within its session, lifecycle scope, and res
 
 - Editing a callback body while keeping its resolver entry and tool names is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
 - If a persisted session-scoped callback has no registered implementation (a fresh process, a redeploy, or an expired in-process binding), eve re-runs `session.started` resolvers once to rebind it, then replays.
-- If the owning resolver no longer returns that tool, replay fails closed with an explicit error instead of invoking something else. Ordinary turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors. Framework-provided resolvers such as memory provider-tool wrappers opt into the same generic missing-callback rebind while preserving their locked scope.
+- If an active turn resumes without a registered turn-scoped callback, eve re-runs the owning `turn.started` resolver to restore the callback while preserving the tool set and closure captured earlier in that turn. If an authored resolver no longer returns the tool, the turn can continue, but calling that tool fails closed. Framework-provided resolvers such as memory provider-tool wrappers require all of their callbacks to be restored and fail the continuation if their locked tool set changed.
+- Step-scoped callbacks are restored from the persisted step immediately before eve replays that step.
+
+A recovery rebind is not a new lifecycle event, but it can run resolver code again. Keep `session.started` and `turn.started` resolvers idempotent and return the same tool identities for the same persisted scope.
 
 ### Naming
 
@@ -347,13 +351,13 @@ A dynamic connection, tool, or skill whose name matches an **authored** one **ov
 
 ### Events
 
-| Event             | Resolver runs                                         | Tools available for             |
-| ----------------- | ----------------------------------------------------- | ------------------------------- |
-| `session.started` | At session start; may be redelivered during recovery¹ | Every model call in the session |
-| `turn.started`    | Once per turn                                         | Every model call in the turn    |
-| `step.started`    | Before each model call                                | That model call                 |
+| Event             | Resolver runs                                            | Tools available for             |
+| ----------------- | -------------------------------------------------------- | ------------------------------- |
+| `session.started` | At session start; may be redelivered during recovery¹    | Every model call in the session |
+| `turn.started`    | Once per turn; may re-run to restore a missing callback¹ | Every model call in the turn    |
+| `step.started`    | Before each model call                                   | That model call                 |
 
-¹ Workflow recovery can redeliver a resolver event, so keep resolvers idempotent. Replaying a parked callback does not depend on running the resolver again — except for the one-shot rebind described under [Identity and redeploys](#identity-and-redeploys).
+¹ Workflow recovery can redeliver an event or re-run a resolver to restore a missing callback, so keep resolvers idempotent. Rebinding restores the persisted tool set; it does not make newly returned tools available in the active turn.
 
 At `turn.started`, model, tool, skill, and subagent resolvers receive the visible conversation history and incoming message in `ctx.messages`, oldest first. Request context is included, and history projection still applies. Read these messages from the handler's second argument; the event itself contains turn metadata. Instruction resolvers use the separate snapshot described under [Dynamic instructions](#dynamic-instructions).
 

@@ -137,7 +137,7 @@ V can also propose facts via **`save_memory`** — approve or skip in chat. Edit
 
 ```bash
 pnpm dev          # Nuxt web app
-pnpm dev:services # Vercel dev runs the peer Nuxt and eve services
+pnpm dev:all      # Vercel dev runs the peer Nuxt and eve services
 pnpm typecheck    # TypeScript check
 pnpm build        # Production build
 pnpm db:generate  # Generate Drizzle migrations

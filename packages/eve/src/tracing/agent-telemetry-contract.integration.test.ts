@@ -367,12 +367,11 @@ describe("exported agent telemetry contract", () => {
           turnId: "turn_0",
           sessionState: {
             "eve.workflowTool": {
-              version: 3,
+              version: 4,
               runs: [
                 {
                   callId: "workflow",
                   toolName: "coordinate",
-                  lifetime: "turn" as const,
                   origin: { turnId: "turn-1", stepIndex: 0 },
                   address: { runId: "workflow-run", hookToken: "hook" },
                 },
@@ -417,7 +416,7 @@ describe("exported agent telemetry contract", () => {
           scope: childScope,
           type: "step.attempt.started",
         });
-        const modelKey = modelCallIdempotencyKey(childScope, 0);
+        const modelKey = modelCallIdempotencyKey(childScope, 0, 0);
         await childHooks.publish({
           idempotencyKey: modelKey,
           model: { modelId: "test", provider: "test" },

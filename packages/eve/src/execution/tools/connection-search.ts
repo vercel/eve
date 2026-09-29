@@ -12,6 +12,7 @@ import {
 } from "#connections/errors.js";
 import { defineTool } from "#tools/definition.js";
 import type { ToolContext } from "#tools/definition.js";
+import type { ToolModelOutput } from "#tools/model-output.js";
 import {
   resolveApprovalPolicy,
   type ApprovalContext,
@@ -382,6 +383,18 @@ async function executeDiscoveredConnectionTool(
   }
 }
 
+/** Delegates to the connection client's projection, falling back to the raw result as JSON. */
+async function discoveredConnectionToolModelOutput(
+  closure: JsonObject,
+  output: unknown,
+): Promise<ToolModelOutput> {
+  const { connectionName, toolName } = readDiscoveredToolClosure(closure);
+  const client = loadContext().get(ConnectionRegistryKey)?.getClient(connectionName);
+  const modelOutput = await client?.toModelOutput?.(toolName, output);
+  // The harness validates the shape in `normalizeToolModelOutput`.
+  return (modelOutput ?? { type: "json", value: output ?? null }) as ToolModelOutput;
+}
+
 function assertPendingConnectionAuthorizationInstances(registry: ConnectionRegistry): void {
   const connections = new Map(
     registry.getConnections().map((connection) => [connection.connectionName, connection]),
@@ -459,9 +472,11 @@ export async function resolveConnectionSearchDynamicTools() {
     const toolName = result.tool!;
     const approval = registry.getConnectionApproval(connectionName);
 
-    const instanceId = connections.find(
+    const resolvedConnection = connections.find(
       (connection) => connection.connectionName === connectionName,
-    )?.instanceId;
+    );
+    const instanceId = resolvedConnection?.instanceId;
+    const projectsMcpResult = resolvedConnection?.protocol === "mcp";
     const closure: { connectionName: string; toolName: string; instanceId?: string } = {
       connectionName,
       toolName,
@@ -477,9 +492,15 @@ export async function resolveConnectionSearchDynamicTools() {
       async execute(input: Record<string, unknown>, executeCtx) {
         return await executeDiscoveredConnectionTool(closure, input, executeCtx);
       },
+      toModelOutput: projectsMcpResult
+        ? (output: unknown) => discoveredConnectionToolModelOutput(closure, output)
+        : undefined,
     });
     stampDurableDynamicToolCallbacks(discoveredTool, {
       execute: { callback: executeDiscoveredConnectionTool, closure },
+      toModelOutput: projectsMcpResult
+        ? { callback: discoveredConnectionToolModelOutput, closure }
+        : undefined,
       ...(approval === undefined
         ? {}
         : {

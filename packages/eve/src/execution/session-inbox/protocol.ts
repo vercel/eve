@@ -23,13 +23,6 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
     throw new SessionInboxPayloadError("Session inbox payload must be an object with a kind.");
   }
   const payload = value as Record<string, unknown>;
-  if (
-    payload.taskDeliveryPolicy !== undefined &&
-    payload.taskDeliveryPolicy !== "auto" &&
-    payload.taskDeliveryPolicy !== "cohort"
-  ) {
-    throw new SessionInboxPayloadError('Task delivery policy must be "auto" or "cohort".');
-  }
   switch (payload.kind) {
     case "send": {
       if (payload.payload === null || typeof payload.payload !== "object") {
@@ -45,9 +38,7 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
         kind: "deliver",
         payloads: [command.payload],
         requestId: command.requestId,
-        taskDeliveryId: command.taskDeliveryId,
         turnPolicy: command.turnPolicy,
-        taskDeliveryPolicy: command.taskDeliveryPolicy,
       };
     }
     case "deliver": {

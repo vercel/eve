@@ -765,8 +765,66 @@ describe("slackChannel() default event handlers", () => {
     expect(parseSlackRequestBody(init as RequestInit)).toMatchObject({
       status: "Checking the issue context first.",
     });
-    expect(ctx.state.pendingToolCallMessage).toBeNull();
   });
+
+  it.each([
+    ["the default handlers", {}],
+    ["an overridden actions.requested", { events: { "actions.requested": async () => {} } }],
+  ])(
+    "posts a step's text only when its only tool call is task_wait, with %s",
+    async (_, config) => {
+      const adapter = withState(
+        getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" }, ...config })),
+        THREAD_STATE,
+      );
+      const ctx = buildAdapterContext(adapter, stubAccessor());
+      const runStep = async (
+        stepIndex: number,
+        toolNames: string[],
+        textBefore: string,
+        textAfter?: string,
+      ) => {
+        const coordinates = { sequence: 0, stepIndex, turnId: "t1" };
+        const completeText = (message: string) =>
+          callEvent(
+            adapter,
+            makeEvent("message.completed", { ...coordinates, finishReason: "tool-calls", message }),
+            ctx,
+          );
+        await completeText(textBefore);
+        for (const toolName of toolNames) {
+          const action = {
+            callId: `${stepIndex}-${toolName}`,
+            input: {},
+            kind: "tool-call",
+            toolName,
+          };
+          await callEvent(
+            adapter,
+            makeEvent("actions.requested", { ...coordinates, actions: [action] }),
+            ctx,
+          );
+        }
+        if (textAfter !== undefined) await completeText(textAfter);
+        await callEvent(
+          adapter,
+          makeEvent("step.completed", { ...coordinates, finishReason: "tool-calls" }),
+          ctx,
+        );
+      };
+
+      await runStep(0, ["task_wait"], "Checking revenue and incidents now.", "I'll report back.");
+      await runStep(1, ["task_wait", "search"], "Searching while I wait.");
+
+      const posts = fetchMock.mock.calls.filter(
+        ([url]) => String(url) === "https://slack.com/api/chat.postMessage",
+      );
+      expect(posts).toHaveLength(1);
+      expect(parseSlackRequestBody(posts[0]![1] as RequestInit)).toMatchObject({
+        markdown_text: "Checking revenue and incidents now.\nI'll report back.",
+      });
+    },
+  );
 
   it("message.completed clears typing without posting for empty delivery", async () => {
     const adapter = withState(
@@ -2805,7 +2863,7 @@ describe("slackChannel() generic Events API pipeline", () => {
     expect(compact).toHaveBeenCalledWith("C01:1700000000.000001");
   });
 
-  it("binds Slack state, title, and task policy on a generic event send", async () => {
+  it("binds Slack state and title on a generic event send", async () => {
     const send = vi.fn().mockResolvedValue({ id: "s1" });
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
@@ -2814,7 +2872,6 @@ describe("slackChannel() generic Events API pipeline", () => {
           auth: null,
           target: { channelId: "C01", threadTs: "1700000000.000001" },
           title: "Reaction follow-up",
-          taskDeliveryPolicy: "cohort",
         });
       },
     });
@@ -2833,7 +2890,6 @@ describe("slackChannel() generic Events API pipeline", () => {
         triggeringUserId: "U01",
       },
       title: "Reaction follow-up",
-      taskDeliveryPolicy: "cohort",
     });
   });
 

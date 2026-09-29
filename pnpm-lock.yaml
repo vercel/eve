@@ -792,28 +792,6 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
-  e2e/fixtures/agent-background-tools:
-    dependencies:
-      '@eve-e2e/config':
-        specifier: workspace:*
-        version: link:../e2e-config
-      '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.47(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(@upstash/redis@1.38.4)(sql.js@1.14.2)(supports-color@10.2.2)(typescript@7.0.2)
-      eve:
-        specifier: workspace:*
-        version: link:../../../packages/eve
-      zod:
-        specifier: 'catalog:'
-        version: 4.5.4
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.13.3
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-
   e2e/fixtures/agent-basic-runtime:
     dependencies:
       '@eve-e2e/config':
@@ -1289,32 +1267,7 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
-  e2e/fixtures/agent-task-reporting:
-    dependencies:
-      '@eve-e2e/config':
-        specifier: workspace:*
-        version: link:../e2e-config
-      '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.47(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(@upstash/redis@1.38.4)(sql.js@1.14.2)(supports-color@10.2.2)(typescript@7.0.2)
-      eve:
-        specifier: workspace:*
-        version: link:../../../packages/eve
-      just-bash:
-        specifier: 3.1.0
-        version: 3.1.0(supports-color@10.2.2)
-      zod:
-        specifier: 'catalog:'
-        version: 4.5.4
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.13.3
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-
-  e2e/fixtures/agent-task-wake-policy:
+  e2e/fixtures/agent-tasks:
     dependencies:
       '@eve-e2e/config':
         specifier: workspace:*
@@ -1535,28 +1488,6 @@ importers:
       toolkit-extension:
         specifier: workspace:*
         version: link:../toolkit-extension
-      zod:
-        specifier: 'catalog:'
-        version: 4.5.4
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.13.3
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-
-  e2e/fixtures/fixture-tasks:
-    dependencies:
-      '@eve-e2e/config':
-        specifier: workspace:*
-        version: link:../e2e-config
-      '@workflow/world-postgres':
-        specifier: 'catalog:'
-        version: 5.0.0-beta.47(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(@upstash/redis@1.38.4)(sql.js@1.14.2)(supports-color@10.2.2)(typescript@7.0.2)
-      eve:
-        specifier: workspace:*
-        version: link:../../../packages/eve
       zod:
         specifier: 'catalog:'
         version: 4.5.4
@@ -1888,6 +1819,25 @@ importers:
       '@vercel/connect':
         specifier: 'catalog:'
         version: 2.3.3(@ai-sdk/mcp@2.0.52(zod@4.5.4))(@auth/core@0.41.2)(@chat-adapter/slack@4.34.0(ai@7.0.105(zod@4.5.4))(bufferutil@4.1.0)(supports-color@10.2.2)(zod@4.5.4))(@modelcontextprotocol/sdk@1.30.0(supports-color@10.2.2)(zod@4.5.4))(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+      eve:
+        specifier: workspace:*
+        version: link:../eve
+      zod:
+        specifier: 'catalog:'
+        version: 4.5.4
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.13.3
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      typescript-compiler:
+        specifier: npm:typescript@6.0.3
+        version: typescript@6.0.3
+
+  packages/eve-computer-use:
+    dependencies:
       eve:
         specifier: workspace:*
         version: link:../eve

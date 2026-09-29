@@ -123,6 +123,7 @@ export default ${definer}({ description: "Probe", inputSchema: {}, execute: run 
     });
     const compiled = await compileAgentManifest(discovered.manifest);
     expect(compiled.tools.find((tool) => tool.name === "probe")?.behavior?.handling).toEqual({
+      entryPoint: "execute",
       kind: "workflow-tool",
       workflowId: "workflow//./agent/lib/run//run",
     });
@@ -138,7 +139,7 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
   "use workflow";
   return delegate(ctx, input);
 } });`,
-        "agent/lib/delegate.ts": `export async function delegate(ctx, input) { return ctx.agent("researcher", input); }`,
+        "agent/lib/delegate.ts": `export async function delegate(ctx, input) {\n  const response = await ctx.agent("researcher").send(input.message);\n  return (await response.result()).message;\n}`,
       },
       name: "valid-workflow-helper",
     });

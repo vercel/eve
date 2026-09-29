@@ -265,16 +265,6 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it("does not install task_update from the framework registry", async () => {
-    const compiled = await compileAgentManifest(manifest());
-
-    expect(compiled.tools.map((tool) => tool.name)).toContain("task_cancel");
-    expect(compiled.tools.map((tool) => tool.name)).not.toContain("task_update");
-    expect(Object.values(compiled.bindings).map((binding) => binding.logicalPath)).not.toContain(
-      "tools/task_update.ts",
-    );
-  });
-
   it("does not install ask_question from the framework registry", async () => {
     const compiled = await compileAgentManifest(manifest());
 
@@ -304,29 +294,7 @@ describe("compileAgentManifest source graph", () => {
       availableInSubagents: false,
       behavior: { availability: [] },
       description: "Route delegated work.",
-      execution: undefined,
     });
-  });
-
-  it.each(["task_cancel"])("rejects overriding closed framework tool %s", async (toolName) => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: `tools/${toolName}.ts`,
-        loadNamespace: async () => ({
-          default: defineTool({
-            description: "Replacement tool.",
-            execute: async () => null,
-            inputSchema: {},
-          }),
-        }),
-      },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
-    );
   });
 
   it("compiles a workflow tool with programmatic executor metadata", async () => {
@@ -352,10 +320,11 @@ describe("compileAgentManifest source graph", () => {
     expect(compiled.tools.find((tool) => tool.name === "durable")?.behavior).toEqual({
       availability: [],
       handling: {
+        entryPoint: "execute",
         kind: "workflow-tool",
         workflowId: "workflow//example/tool//execute",
       },
-      shape: { lifetime: "step", suspend: "workflow" },
+      shape: { suspend: "workflow" },
     });
   });
 
@@ -387,11 +356,10 @@ describe("compileAgentManifest source graph", () => {
       hasExecute: false,
     });
     expect(graph.root.turnAgent.tools.find((tool) => tool.name === "agent")).toMatchObject({
-      rootOnly: true,
-      task: {
-        nodeId: "__root__",
-        workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
+      behavior: {
+        handling: { kind: "dispatch", target: { kind: "self-agent-call", nodeId: "__root__" } },
       },
+      rootOnly: true,
     });
     expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
       behavior: {
@@ -725,6 +693,23 @@ describe("compileAgentManifest source graph", () => {
       compileAgentManifest(discovered, { sourceRegistries: [registry([])] }),
     ).rejects.toThrow(
       'Subagent "subagents/agent" uses the reserved name "agent". Rename its path; eve reserves "agent" for the built-in root-copy target.',
+    );
+  });
+
+  it("reserves the task tools' names", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/task_cancel.ts",
+        loadNamespace: async () => ({
+          default: defineTool({ description: "Cancel.", inputSchema: {}, execute: () => null }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'Tool "tools/task_cancel.ts" uses the reserved name "task_cancel". Rename its path; eve reserves "task_cancel" for its built-in task tool.',
     );
   });
 

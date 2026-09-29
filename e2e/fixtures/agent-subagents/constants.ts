@@ -5,7 +5,19 @@ export const WORKSPACE_LOOKUP_MESSAGE = [
 ].join(" ");
 export const WORKSPACE_FORWARDING_MARKER = "Shared workspace membership check.";
 
-export const SCHEDULED_REMOTE_ROOT_SCENARIO =
-  "SCHEDULED-REMOTE-ROOT Ask remote-loopback to prepare Alice's scheduled report.";
-export const SCHEDULED_REMOTE_CHILD_SCENARIO =
-  "SCHEDULED-REMOTE-CHILD Return exactly SCHEDULED-REMOTE-CHILD-RESULT.";
+/** The directive words of the notebook scripts, one per parent turn. */
+export const NOTEBOOK_DIRECTIVES = [
+  "NOTEBOOK-REMEMBER",
+  "NOTEBOOK-REVIEW",
+  "NOTEBOOK-RECALL",
+  "NOTEBOOK-CORRECT",
+] as const;
+export type NotebookDirective = (typeof NOTEBOOK_DIRECTIVES)[number];
+/** Starts every message the parent sends a notebook keeper. */
+export const NOTEBOOK_ENTRY = "NOTEBOOK-ENTRY";
+/** The fact a keeper must still know after its task is cancelled and continued. */
+export const NOTEBOOK_NAME = "Harbor Lumen 4482";
+/** The parent's correction, sent by `taskId` while the keeper measures the pier. */
+export const NOTEBOOK_CORRECTION = `${NOTEBOOK_ENTRY} Correction: Alice meant the south pier, not the north pier.`;
+/** What a keeper reports once it measures the pier Alice meant after her correction. */
+export const CORRECTED_MEASUREMENT = "NOTEBOOK-DEPTH south pier 4.2 m";

@@ -19,6 +19,7 @@ describe.each(["static", "dynamic"] as const)(
     let client: McpConnectionClient;
     let discoveryError: { code: number; message: string; data?: unknown } | undefined;
     let initializeError: { code: number; message: string } | undefined;
+    let callResult: Record<string, unknown>;
 
     async function createClient(protocolVersionDiscovery?: boolean) {
       const authored = defineMcpClientConnection({
@@ -67,6 +68,7 @@ describe.each(["static", "dynamic"] as const)(
         message: "Unsupported protocol version",
       };
       initializeError = undefined;
+      callResult = { content: [{ type: "text", text: "fixture-user" }] };
 
       // Replace only HTTP I/O: eve's connection, bundled SDK, and protocol parsing stay real.
       vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
@@ -112,7 +114,7 @@ describe.each(["static", "dynamic"] as const)(
             break;
           case "tools/call":
             expect(message.params?.name).toBe("getMyUser");
-            result = { content: [{ type: "text", text: "fixture-user" }] };
+            result = callResult;
             break;
           default:
             throw new Error(`Unexpected MCP method: ${message.method}`);
@@ -145,6 +147,42 @@ describe.each(["static", "dynamic"] as const)(
         { method: "tools/list", protocolVersion: "2025-11-25" },
         { method: "tools/call", protocolVersion: "2025-11-25" },
       ]);
+    });
+
+    it("projects call results for the model with the SDK's MCP conversion", async () => {
+      await createClient(false);
+      const project = async (result: Record<string, unknown>) => {
+        callResult = result;
+        const output = await client.executeTool("getMyUser", {}, { callId: "read-user" });
+        return client.toModelOutput("getMyUser", output);
+      };
+
+      await expect(
+        project({
+          _meta: { "io.modelcontextprotocol/serverInfo": { name: "fixture", version: "1" } },
+          content: [{ type: "text", text: '{"seats":132}' }],
+          structuredContent: { seats: 132 },
+        }),
+      ).resolves.toEqual({ type: "content", value: [{ type: "text", text: '{"seats":132}' }] });
+      await expect(
+        project({ content: [{ type: "text", text: "no such user" }], isError: true }),
+      ).resolves.toEqual({
+        type: "content",
+        value: [
+          { type: "text", text: "Tool call failed:" },
+          { type: "text", text: "no such user" },
+        ],
+      });
+      await expect(
+        project({ isError: true, structuredContent: { code: "NOT_FOUND" } }),
+      ).resolves.toEqual({
+        type: "content",
+        value: [
+          { type: "text", text: "Tool call failed:" },
+          { type: "text", text: '{"code":"NOT_FOUND"}' },
+        ],
+      });
+      await expect(client.toModelOutput("missing", {})).resolves.toBeUndefined();
     });
 
     it.each([undefined, true])("keeps discovery enabled when the option is %s", async (option) => {

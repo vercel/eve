@@ -6,6 +6,7 @@ import {
   ActivityObserverKey,
   ActivityPendingBlockersKey,
   ActivityRootTurnIdKey,
+  ActivityTaskCallsKey,
 } from "#context/keys.js";
 import {
   activityRequestIdsForRootTurn,
@@ -19,17 +20,12 @@ export function updateActivityRootForDelivery(input: {
   readonly ctx: ContextContainer;
   readonly delivery?: DeliverHookPayload;
   readonly sessionState: SessionStateMap | undefined;
-  readonly taskRootTurnId?: string;
 }): void {
   if (!input.ctx.has(ActivityObserverKey)) return;
-  if (input.taskRootTurnId !== undefined) {
-    input.ctx.set(ActivityRootTurnIdKey, input.taskRootTurnId);
-    return;
-  }
   const delivery = input.delivery;
   if (delivery === undefined) return;
   const hasMessage = delivery.payloads.some((payload) => payload.message !== undefined);
-  if (hasMessage && delivery.taskDeliveryId === undefined) {
+  if (hasMessage) {
     input.ctx.set(ActivityRootTurnIdKey, input.activeTurnId);
     input.ctx.delete(ActivityPendingBlockersKey);
     return;
@@ -71,12 +67,22 @@ export function restoreAuthorizationActivity(input: {
   return ids;
 }
 
-export function updateActivityBlockers(
+/** Tracks the pending blockers and task calls that activity projection reads. */
+export function updateActivityState(
   ctx: ContextContainer,
   event: UnstampedMessageStreamEvent,
 ): void {
   if (!ctx.has(ActivityObserverKey)) return;
-  if (event.type === "input.requested") {
+  if (event.type === "task.started") {
+    addActivityTaskCall(ctx, event.data.callId);
+  } else if (
+    event.type === "turn.completed" ||
+    event.type === "turn.failed" ||
+    event.type === "turn.cancelled"
+  ) {
+    // Every receipt of the turn's task calls is published before the turn ends.
+    ctx.delete(ActivityTaskCallsKey);
+  } else if (event.type === "input.requested") {
     addActivityBlockers(
       ctx,
       event.data.requests.map((request) => request.requestId),
@@ -98,6 +104,10 @@ export function clearActivityBlockers(ctx: ContextContainer, ids: readonly strin
   const remaining = (ctx.get(ActivityPendingBlockersKey) ?? []).filter((id) => !cleared.has(id));
   if (remaining.length === 0) ctx.delete(ActivityPendingBlockersKey);
   else ctx.set(ActivityPendingBlockersKey, remaining);
+}
+
+function addActivityTaskCall(ctx: ContextContainer, callId: string): void {
+  ctx.set(ActivityTaskCallsKey, [...(ctx.get(ActivityTaskCallsKey) ?? []), callId]);
 }
 
 function addActivityBlockers(ctx: ContextContainer, ids: readonly string[]): void {

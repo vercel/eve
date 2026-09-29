@@ -1,4 +1,4 @@
-import { emitTerminalSessionEvent } from "#execution/terminal-session-event.js";
+import { publishTerminalSessionEvent } from "#execution/publish-session-events.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import { createSessionFailedEvent } from "#protocol/message.js";
@@ -39,7 +39,7 @@ export async function emitTerminalSessionFailureStep(input: {
     code,
   });
 
-  await emitTerminalSessionEvent({
+  await publishTerminalSessionEvent({
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
     event: createSessionFailedEvent({ code, details, message, sessionId }),
     sessionWritable: input.sessionWritable,

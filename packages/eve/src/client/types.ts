@@ -6,7 +6,7 @@ import type { CancelTurnResult } from "#protocol/cancel-turn.js";
 import type { ClearStatus } from "#protocol/clear-session.js";
 import type { CompactStatus } from "#protocol/compact-session.js";
 import type { ResetStatus } from "#protocol/reset-session.js";
-import type { TurnPolicy, TaskDeliveryPolicy } from "#channel/types.js";
+import type { TurnPolicy } from "#channel/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 export type { HealthResult } from "#client/health-schema.js";
@@ -120,8 +120,6 @@ export interface CreateSessionOptions {
 export interface SendTurnOptions<TOutput = unknown> {
   /** Policy for a message sent while the fixed session has an active turn. */
   readonly turnPolicy?: TurnPolicy;
-  /** Updates the session’s background task reporting policy. Omit to preserve it. */
-  readonly taskDeliveryPolicy?: TaskDeliveryPolicy;
 
   /**
    * Ephemeral client/page context for the current turn.
@@ -163,10 +161,7 @@ export interface SendTurnOptions<TOutput = unknown> {
 }
 
 /** Options for answering pending HITL input requests on a client session. */
-export type RespondTurnOptions<TOutput = unknown> = Omit<
-  SendTurnOptions<TOutput>,
-  "taskDeliveryPolicy"
->;
+export type RespondTurnOptions<TOutput = unknown> = SendTurnOptions<TOutput>;
 
 /** @internal Transport envelope used by stores and command adapters. */
 export type SendTurnPayload<TOutput = unknown> =

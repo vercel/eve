@@ -36,11 +36,23 @@ export {
 
 export {
   defineWorkflowTool,
+  type WorkflowExecuteToolDefinition,
+  type WorkflowServeCall,
+  type WorkflowServeContext,
+  type WorkflowServeReceive,
+  type WorkflowServeToolDefinition,
   type WorkflowStepToolContext,
-  type TaskReceipt,
+  type WorkflowTaskToolDefinition,
   type WorkflowToolContext,
   type WorkflowToolDefinition,
-  type AgentInput,
+  type AgentMessageResult,
+  type AgentResponse,
+  type AgentSendOptions,
+  type AgentSession,
   type WorkflowAgentMetadata,
 } from "#tools/workflow-definition.js";
-export type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+export type {
+  ToolInputRequest,
+  ToolInputRequestOptions,
+  ToolInputResponse,
+} from "#tools/definition.js";

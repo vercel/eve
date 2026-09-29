@@ -35,6 +35,7 @@ const CATALOG: GatewayCatalogModel[] = [
     owned_by: "zai",
     released: 300,
     tags: ["web-search"],
+    reasoningEfforts: [],
   },
   {
     id: "openai/gpt-5-mini",
@@ -43,6 +44,7 @@ const CATALOG: GatewayCatalogModel[] = [
     owned_by: "openai",
     released: 200,
     tags: ["web-search"],
+    reasoningEfforts: [],
   },
   {
     id: "spacexai/grok-4.7",
@@ -51,11 +53,25 @@ const CATALOG: GatewayCatalogModel[] = [
     owned_by: "spacexai",
     released: 100,
     tags: ["reasoning"],
+    reasoningEfforts: [],
   },
   // Filtered out: not a language model.
-  { id: "openai/dall-e-3", name: "DALL-E 3", type: "image", owned_by: "openai" },
+  {
+    id: "openai/dall-e-3",
+    name: "DALL-E 3",
+    type: "image",
+    owned_by: "openai",
+    reasoningEfforts: [],
+  },
   // Filtered out: missing the web-search tag.
-  { id: "google/gemma-2", name: "Gemma 2", type: "language", owned_by: "google", tags: [] },
+  {
+    id: "google/gemma-2",
+    name: "Gemma 2",
+    type: "language",
+    owned_by: "google",
+    tags: [],
+    reasoningEfforts: [],
+  },
 ];
 
 describe("modelOptionsFromCatalog", () => {
@@ -91,6 +107,7 @@ describe("modelOptionsFromCatalog", () => {
         owned_by: "anthropic",
         released: 400,
         tags: ["web-search"],
+        reasoningEfforts: [],
       },
       ...CATALOG,
     ]);
@@ -115,6 +132,7 @@ describe("modelOptionsFromCatalog", () => {
         type: "language",
         owned_by: "acme",
         tags: ["web-search"],
+        reasoningEfforts: [],
       };
       if (released !== undefined) entry.released = released;
       return entry;
@@ -150,7 +168,7 @@ describe("parseGatewayModelCatalog", () => {
     expect(models.map((model) => model.id)).toEqual(["zai/glm-4.6", "openai/gpt-5-mini"]);
   });
 
-  it("keeps a model when only its optional catalog metadata is malformed", () => {
+  it("keeps valid reasoning efforts while ignoring malformed optional metadata", () => {
     expect(
       parseGatewayModelCatalog({
         data: [
@@ -161,6 +179,11 @@ describe("parseGatewayModelCatalog", () => {
             owned_by: "vendor",
             released: "unannounced",
             tags: null,
+            reasoning_options: [
+              { type: "toggle" },
+              { type: "effort", values: ["low", "high"] },
+              { type: "effort", values: null },
+            ],
           },
         ],
       }),
@@ -170,6 +193,7 @@ describe("parseGatewayModelCatalog", () => {
         name: "Experimental",
         type: "language",
         owned_by: "vendor",
+        reasoningEfforts: ["low", "high"],
       },
     ]);
   });

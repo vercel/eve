@@ -17,7 +17,6 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
   "cli/dev/tui/terminal-renderer.ts",
   "compiler/manifest.ts",
   // Lifecycle and stream emission share one ordered protocol boundary.
-  "harness/emission.ts",
   "harness/tool-loop.ts",
   "internal/nitro/host/create-application-nitro.ts",
   "protocol/message.ts",
@@ -27,8 +26,8 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
 ]);
 
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);
-// Generated copy of `@eve/code` (see scripts/sync-code-extension.mjs); its source lives outside eve.
-const GENERATED_SOURCE_PREFIXES = ["extensions/code/extension/"];
+// Generated copies of `@eve/code` and `@eve/computer-use` (see scripts/sync-extensions.mjs); their source lives outside eve.
+const GENERATED_SOURCE_PREFIXES = ["extensions/code/extension/", "computer-use/extension/"];
 
 describe("source file structure", () => {
   it("keeps production source files below the line-count cap", async () => {

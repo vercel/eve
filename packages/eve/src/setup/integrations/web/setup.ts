@@ -5,8 +5,6 @@ import { resolveEveProjectContext } from "#internal/project-context.js";
 import { select } from "#setup/ask.js";
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
 import { pathExists, writeTextFile } from "#setup/scaffold/files.js";
-import { createPromptCommandOutput } from "#setup/cli/index.js";
-import { syncHostFrameworkPreset } from "#setup/vercel-project-framework.js";
 import { WEB_CHANNEL_TEMPLATES } from "#setup/scaffold/create/web-template.js";
 import {
   defineSetupIntegration,
@@ -46,7 +44,6 @@ export interface WebSetupDeps {
   pathExists: typeof pathExists;
   readTextFile(path: string): Promise<string>;
   resolveEveProjectContext: typeof resolveEveProjectContext;
-  syncHostFrameworkPreset: typeof syncHostFrameworkPreset;
   writeTextFile: typeof writeTextFile;
 }
 
@@ -55,7 +52,6 @@ const defaultDeps: WebSetupDeps = {
   pathExists,
   readTextFile: (path) => readFile(path, "utf8"),
   resolveEveProjectContext,
-  syncHostFrameworkPreset,
   writeTextFile,
 };
 
@@ -94,9 +90,6 @@ export async function prepareWebSetup(
       required: true,
     }),
   );
-  if (hosting === "vercel") {
-    await context.resolveVercelProject("Web Chat");
-  }
   return {
     hosting,
     packageManager: (await deps.detectPackageManager(project.environmentRoot)).kind,
@@ -125,7 +118,7 @@ async function configurePeerServiceScripts(root: string, deps: WebSetupDeps): Pr
   const scripts = { ...document.scripts };
   scripts.dev ??= "eve dev";
   scripts["dev:eve"] ??= "eve dev";
-  scripts["dev:services"] ??= "vercel dev";
+  scripts["dev:all"] ??= "vercel dev --local";
   await deps.writeTextFile(path, `${JSON.stringify({ ...document, scripts }, null, 2)}\n`, {
     force: true,
   });
@@ -194,13 +187,7 @@ export default withEve(nextConfig);
     await deps.writeTextFile(nextConfigPath, PEER_SERVICE_NEXT_CONFIG, { force: true });
     await deps.writeTextFile(vercelTsPath, PEER_SERVICE_VERCEL_CONFIG, { force: true });
     await configurePeerServiceScripts(project.environmentRoot, deps);
-    await deps.syncHostFrameworkPreset(
-      context.presenter,
-      project.environmentRoot,
-      createPromptCommandOutput(context.presenter.log),
-      { signal: context.signal },
-    );
-    startScript = "dev:services";
+    startScript = "dev:all";
   } else {
     await deps.writeTextFile(nextConfigPath, NEXT_HOSTED_CONFIG, { force: true });
     startScript = "dev:web";

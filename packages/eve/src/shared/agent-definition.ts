@@ -203,13 +203,6 @@ export interface AgentLimitsDefinition {
  */
 export interface AgentExperimentalDefinition {
   /**
-   * Runs this agent's delegated subagent calls as durable background tasks.
-   * The originating tool call returns a task receipt immediately and the
-   * model manages the work through the `task_*` framework tools. Root agents
-   * only.
-   */
-  readonly tasks?: boolean;
-  /**
    * Durable Workflow runtime configuration.
    */
   readonly workflow?: AgentWorkflowDefinition;

@@ -22,21 +22,6 @@ export function assertFrameworkToolPolicy(
       'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
     );
   }
-  const closedDispatchSlots = {
-    "tools/task_cancel": "task-cancel",
-  } as const;
-  const expectedAction = closedDispatchSlots[slot as keyof typeof closedDispatchSlots];
-  if (
-    expectedAction !== undefined &&
-    result.kind === "tool" &&
-    (result.definition.behavior?.handling?.kind !== "dispatch" ||
-      result.definition.behavior.handling.action !== expectedAction)
-  ) {
-    const toolName = slot.slice("tools/".length);
-    throw new Error(
-      `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
-    );
-  }
 }
 
 export function applyAgentToolPolicy(

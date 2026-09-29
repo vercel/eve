@@ -143,6 +143,20 @@ export async function* confirmDeployWorkflow(
   return { approved, service: input.service };
 }
 
+export async function answerWithResponderWorkflow(
+  _input: DeployInput,
+  ctx: WorkflowToolContext,
+): Promise<string> {
+  "use workflow";
+
+  const answer = await ctx.ask({
+    display: "confirmation",
+    options: [{ id: "approve", label: "Approve" }],
+    prompt: "Apply this change?",
+  });
+  return JSON.stringify({ answer, runStartPrincipal: ctx.session.auth.current?.principalId });
+}
+
 export async function failingDeployWorkflow(input: DeployInput): Promise<never> {
   "use workflow";
 
@@ -157,18 +171,6 @@ export async function* reportingDeployWorkflow(
 
   const plan = await planDeployStep(input.service);
   yield `planned ${input.service}`;
-  return { plan };
-}
-
-export async function* backgroundDeployWorkflow(
-  input: DeployInput,
-  _ctx: WorkflowToolContext,
-): AsyncGenerator<string, { readonly plan: string }> {
-  "use workflow";
-
-  const plan = await planDeployStep(input.service);
-  yield `planned ${input.service}`;
-  yield `review ${plan}`;
   return { plan };
 }
 

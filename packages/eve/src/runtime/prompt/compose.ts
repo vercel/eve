@@ -11,9 +11,6 @@ import { formatConnectionsSection } from "#runtime/prompt/connections.js";
 const PARALLEL_ACTION_INSTRUCTION =
   "Tool execution\nA single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.";
 
-const AGENT_MESSAGING_INSTRUCTION =
-  "Agent messaging\nSubagent calls start durable background tasks and return immediately with a task receipt. After delegating, continue helping the user or end your turn. The task will notify you when it completes, fails, needs input, or sends an update; completion and failure notifications include the task's result. Agents you have already delegated to remain visible in the framework-authored `<agents>` conversation note. To steer delegated work, send the updated instruction to the original subagent tool with that agentId. If availability=busy, this steers its active turn at the next safe boundary, preserving the same taskId, child session, and pending approvals. Forward user steering to the affected child promptly; an acknowledgement alone does not update its work. Leave unrelated background work running. If availability=available, the same call continues the idle child. Calling a subagent without agentId starts a new agent session. Use task_cancel with its taskId to stop work without sending a replacement instruction.";
-
 /**
  * Input for composing the base authored instructions prompt for one
  * resolved agent.
@@ -22,7 +19,6 @@ interface ComposeRuntimeBasePromptInput {
   connections?: readonly ResolvedConnectionDefinition[];
   instructions?: readonly ResolvedInstructionsDefinition[];
   skills?: readonly ResolvedSkillDefinition[];
-  subagentsAvailable?: boolean;
   toolsAvailable?: boolean;
   workspaceSpec?: WorkspaceRuntimeSpec;
 }
@@ -36,7 +32,6 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
     ...createInstructionsPromptBlocks(input.instructions),
     ...createWorkspacePromptBlocks(input.workspaceSpec),
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
-    ...(input.subagentsAvailable ? [AGENT_MESSAGING_INSTRUCTION] : []),
     ...createConnectionsPromptBlocks(input.connections),
     ...createSkillsPromptBlocks(input.skills),
   ];

@@ -1,6 +1,6 @@
 import { defineJsonSchema } from "#tools/schema.js";
 
-export { executeAgentRouterTool } from "#execution/tools/agent-router-workflow.js";
+export { runAgentRouterTask } from "#execution/tools/agent-router-workflow.js";
 
 export const AGENT_ROUTER_TOOL_DESCRIPTION =
   "Route a task to the best available subagent based on each subagent's declared description.";
