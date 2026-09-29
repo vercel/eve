@@ -3,12 +3,16 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  BENCHMARK_DATASETS,
   BENCHMARK_HARNESSES,
+  DEFAULT_DATASET,
   DEFAULT_HARNESSES,
   resolveBenchmarkRequest,
 } from "./resolve-benchmark-request.mjs";
 
-const defaults = { harness: "eve-code,opencode,pi", slug: "eve-code+opencode+pi" };
+const sweLean = { dataset: "swe-lean", reasoning: "low", attempts: "5" };
+const deepsweLean = { dataset: "deepswe-lean", reasoning: "high", attempts: "3" };
+const defaults = { harness: "eve-code,opencode,pi", slug: "eve-code+opencode+pi", ...sweLean };
 
 const sha = "a".repeat(40);
 const pull = {
@@ -82,6 +86,7 @@ for (const harness of BENCHMARK_HARNESSES) {
     assert.deepEqual(await resolve(fixture({ body: `/benchmark ${harness}` })), {
       harness,
       slug: harness,
+      ...sweLean,
       sha,
       pr: "42",
     });
@@ -98,6 +103,42 @@ test("a comment can select several harnesses, comma- or space-separated, dedupli
     assert.equal(result.harness, "pi,eve-code");
     assert.equal(result.slug, "pi+eve-code");
   }
+});
+
+test("datasets keep the reasoning and attempts they were calibrated for", () => {
+  assert.equal(DEFAULT_DATASET, "swe-lean");
+  assert.deepEqual(BENCHMARK_DATASETS, {
+    "swe-lean": { reasoning: "low", attempts: "5" },
+    "deepswe-lean": { reasoning: "high", attempts: "3" },
+  });
+});
+
+test("a comment can select a dataset, with the default harnesses or its own list", async () => {
+  assert.deepEqual(await resolve(fixture({ body: "/benchmark deepswe-lean" })), {
+    ...defaults,
+    ...deepsweLean,
+    sha,
+    pr: "42",
+  });
+  for (const body of [
+    "/benchmark deepswe-lean eve-code,pi",
+    "/benchmark eve-code pi deepswe-lean",
+    "/benchmark eve-code, deepswe-lean, pi",
+  ]) {
+    const result = await resolve(fixture({ body }));
+    assert.deepEqual(
+      [result.dataset, result.reasoning, result.attempts, result.harness, result.slug],
+      ["deepswe-lean", "high", "3", "eve-code,pi", "eve-code+pi"],
+    );
+  }
+  assert.equal((await resolve(fixture({ body: "/benchmark swe-lean pi" }))).dataset, "swe-lean");
+});
+
+test("a comment cannot name two datasets", async () => {
+  await assert.rejects(
+    resolve(fixture({ body: "/benchmark swe-lean deepswe-lean" })),
+    /at most one benchmark dataset/u,
+  );
 });
 
 for (const permission of ["read", "triage", "none"]) {
@@ -204,6 +245,19 @@ test("manual dispatch defaults to the default harnesses and validates an explici
   await assert.rejects(resolve(input), /Supported benchmark harnesses/u);
 });
 
+test("manual dispatch can publish a deepswe-lean result and rejects unknown datasets", async () => {
+  const input = fixture({ eventName: "workflow_dispatch" });
+  input.context.payload.inputs = { harness: "", dataset: "deepswe-lean" };
+  assert.deepEqual(await resolve(input), {
+    ...defaults,
+    ...deepsweLean,
+    sha: input.context.sha,
+    pr: "",
+  });
+  input.context.payload.inputs.dataset = "terminal-bench";
+  await assert.rejects(resolve(input), /Supported benchmark datasets: swe-lean, deepswe-lean/u);
+});
+
 test("pushes to main publish the default harnesses at the pushed commit", async () => {
   const input = fixture({ eventName: "push" });
   assert.deepEqual(await resolve(input), { ...defaults, sha: input.context.sha, pr: "" });
@@ -226,14 +280,19 @@ test("workflow names and concurrency preserve independent authorized harness run
     workflow,
     /needs: request\n\s+if: needs\.request\.outputs\.run == 'true'\n\s+concurrency:/u,
   );
+  // A deepswe-lean run never cancels or overwrites a swe-lean run of the same harnesses.
   assert.match(
     workflow,
-    /group: eve-code-.*needs\.request\.outputs\.pr.*needs\.request\.outputs\.slug/u,
+    /group: eve-code-.*needs\.request\.outputs\.pr.*needs\.request\.outputs\.dataset.*needs\.request\.outputs\.slug/u,
   );
-  assert.match(workflow, /artifact-name: swe-lean-\$\{\{ needs\.request\.outputs\.slug \}\}/u);
+  assert.match(
+    workflow,
+    /artifact-name: \$\{\{ needs\.request\.outputs\.dataset \}\}-\$\{\{ needs\.request\.outputs\.slug \}\}/u,
+  );
   assert.match(workflow, /push:\n\s+branches: \[main\]/u);
-  // Five attempts per task, run in waves of the action's maximum of 16 sandboxes.
-  assert.match(workflow, /attempts: "5"/u);
+  assert.match(workflow, /options: \[swe-lean, deepswe-lean\]/u);
+  // Each dataset's attempts run in waves of the action's maximum of 16 sandboxes.
+  assert.match(workflow, /attempts: \$\{\{ needs\.request\.outputs\.attempts \}\}/u);
   assert.match(workflow, /concurrency: "16"/u);
   assert.match(workflow, /agent-ref: \$\{\{ needs\.request\.outputs\.sha \}\}/u);
 });
@@ -249,11 +308,11 @@ test("the consumer tracks eve-bench main and owns its model selection", async ()
     workflow,
     /model: \$\{\{ vars\.EVE_CODE_BENCH_MODEL \|\| 'anthropic\/claude-sonnet-5\.5' \}\}/u,
   );
-  assert.match(workflow, /reasoning: low\n/u);
+  assert.match(workflow, /reasoning: \$\{\{ needs\.request\.outputs\.reasoning \}\}\n/u);
   assert.doesNotMatch(workflow, /runner-revision:/u);
   assert.match(workflow, /blob-token: \$\{\{ secrets\.EVE_BENCH_BLOB_READ_WRITE_TOKEN \}\}/u);
   assert.doesNotMatch(workflow, /artifact-id/u);
-  assert.match(workflow, /dataset: swe-lean\n/u);
+  assert.match(workflow, /dataset: \$\{\{ needs\.request\.outputs\.dataset \}\}\n/u);
   assert.match(workflow, /contenders: eve-code@baseline,eve-code@head\n/u);
   assert.doesNotMatch(workflow, /^\s+task:/mu);
   assert.equal((workflow.match(/uses: \.\/\.eve-bench-action/gu) ?? []).length, 1);
