@@ -132,6 +132,151 @@ Production builds register schedules as Nitro scheduled tasks. On Vercel, Nitro'
 
 The gotcha is custom hosting. If you adapt the generated output to a process manager, container platform, or Nitro preset that only serves HTTP and does not start Nitro's scheduled task runner, the schedule definitions still compile, but they will not fire automatically. In that case, run eve through `eve start`, use a host that supports Nitro scheduled tasks, or trigger the same work from your own scheduler through an authenticated route, channel handoff, or application-specific job runner. The dev dispatch route above is only for `eve dev`; production builds do not mount it.
 
+## Experimental schedule collections
+
+A collection stores a request with the scheduling provider and starts a fresh session when the provider delivers an occurrence. This API is experimental and may change.
+
+`vercelScheduleProvider()` works on Vercel production deployments, and under `eve dev` with process-local storage. On preview deployments and self-hosted builds, its operations fail, because Vercel Schedules is not available there.
+
+```ts title="agent/schedules/requests.ts"
+import { defineScheduleCollection, defineScheduleDelivery } from "eve/experimental/schedules";
+import { vercelScheduleProvider } from "eve/experimental/schedules/vercel";
+import { resolveCurrentUser } from "../lib/identity";
+import { putReport } from "../lib/reports";
+
+export default defineScheduleCollection({
+  provider: vercelScheduleProvider(),
+  auth: ({ principal }) => resolveCurrentUser(principal),
+  deliveries: {
+    "team-archive": defineScheduleDelivery({
+      description: "Archive the full result as markdown in the team bucket.",
+      deliver: ({ content, idempotencyKey }) => putReport(`${idempotencyKey}.md`, content),
+    }),
+  },
+});
+```
+
+`provider`, `auth`, and `deliveries` are required. The default management scope is `byPrincipal`, so each caller manages only its own schedules. On every operation, eve derives a scope from the authenticated principal's type, authenticator, issuer, and ID, then hashes it with application and collection identity into the provider namespace. You can write `scope: byPrincipal` explicitly or supply a custom authorization/scope resolver. Deliveries do not affect this namespace.
+
+`auth` resolves the captured principal reference to execution auth when an occurrence fires, and again before every delivery attempt. Return `null` to deny execution. eve does not fall back to app identity or to a channel's resolver. Tool/connection authorization continues to run normally.
+
+The default request is a non-empty string of at most 2,000 characters. You can provide a Standard Schema to add validation, but the stored and executed request must remain a bounded string. Metadata defaults to `{}`; add a metadata schema only when the application needs bounded metadata. Store the work to perform (for example, “Tell a short joke”), not the timing or destination (“In one minute, reply in this thread”); those are captured separately. When an occurrence fires, eve presents the stored request as work to do now, and sends the result to the schedule's deliveries.
+
+### Deliveries
+
+A schedule cannot exist without a delivery. `deliveries` maps names to code that sends an occurrence's result somewhere: an SMS, a Slack thread, a file in S3. Every `create` call must name one or more of them, and there is no default. If the user has not said where results should go, the generated tool tells the model to ask. Management scope, which decides who can manage a schedule, is separate from where results go.
+
+Each delivery has up to three hooks. Only `description` and `deliver` are required:
+
+```ts title="agent/schedules/requests.ts"
+import {
+  DeliveryRejected,
+  defineScheduleCollection,
+  defineScheduleDelivery,
+} from "eve/experimental/schedules";
+import { vercelScheduleProvider } from "eve/experimental/schedules/vercel";
+import { resolveCurrentUser } from "../lib/identity";
+import { lookupPhone, phoneBelongsTo, sendSms } from "../lib/sms";
+
+export default defineScheduleCollection({
+  provider: vercelScheduleProvider(),
+  auth: ({ principal }) => resolveCurrentUser(principal),
+  deliveries: {
+    sms: defineScheduleDelivery({
+      description: "Text the creator's phone. Plain text, at most 320 characters.",
+      capture: async ({ session }) => {
+        const creator = session.auth.current;
+        if (!creator) throw new Error("Sign in to schedule SMS delivery.");
+        const phone = await lookupPhone(creator);
+        if (!phone) throw new Error("No phone on file. Ask the user to choose another delivery.");
+        return {
+          label: `SMS to ••• ${phone.slice(-4)}`,
+          binding: { userId: creator.principalId },
+        };
+      },
+      verify: async ({ binding, auth }) =>
+        (await phoneBelongsTo(binding.userId, auth)) || {
+          allowed: false,
+          reason: "The phone number no longer belongs to the creator.",
+        },
+      deliver: async ({ content, binding, idempotencyKey, abortSignal }) => {
+        if (content.length > 320)
+          throw new DeliveryRejected(`SMS is ${content.length} characters, max 320.`);
+        await sendSms(binding.userId, content, { idempotencyKey, abortSignal });
+      },
+    }),
+  },
+});
+```
+
+- `description` is read by the model. Say where the content goes and what format and length it needs.
+- `capture` runs once at creation, inside the creator's session. Record the destination from trusted context and throw to refuse. The message goes back to the model, so the model can tell the user and ask for another delivery. `capture` may run more than once around approval, so keep it idempotent and free of side effects. The returned `binding` is stored with the schedule and passed back to `verify` and `deliver`; store references such as a user ID rather than sensitive values such as a phone number. The optional `label` is returned by `create`.
+- `verify` runs immediately before every `deliver` attempt with freshly resolved `auth`. Return `{ allowed: false, reason }` when the recipient may no longer receive the content; the delivery fails permanently and nothing is sent. Throw to retry. This is where you enforce that the recipient still belongs to the creator.
+- `deliver` receives the content the run wrote for this delivery. It can run more than once, so pass `idempotencyKey` to external systems. Throw `DeliveryRejected` when retrying cannot help.
+
+The generated `create` tool requires a `deliveries` array of your configured names and lists each description for the model. The client requires the same array. An empty or unknown list fails with the available names. Deliveries are fixed at creation: `update` changes timing only, so to change where results go, delete the schedule and create it again. `create` returns each delivery's `label`; bindings are never returned. It requires user approval by default, because it causes messages to be sent. The approval shows the delivery names.
+
+`capture` can read the current conversation through `context.channel`. Slack's `currentTarget("thread")` returns the existing thread (or the current message as its root) and `currentTarget("channel")` returns only the channel; `mintPersonalTarget()` opens a direct message with the authenticated user. Put what `deliver` needs into the `binding`. eve does not send to channels for you: your `deliver` calls the destination's API, and posts to Slack with the Slack Web API. `verify` should check that the creator can still receive the message, for example that they are still a workspace member.
+
+When an occurrence fires, eve starts a fresh session as the resolved creator. With one delivery, the model's final reply is its content; with several, eve asks for one piece of content per delivery. Once the turn settles, eve runs each delivery in parallel. Each attempt has a 30-second limit and up to three attempts. Outcomes are reported to the collection's `delivery.succeeded` and `delivery.failed` events. With several deliveries, the model must return the structured result; if it answers in prose instead, the turn fails. If the turn fails or is cancelled, nothing is delivered and every delivery reports `delivery.failed`. Models that follow structured output reliably work best with several deliveries. An occurrence is not marked failed for a delivery failure, so watch these events. The delivery status is stored in the session, so a replayed step skips deliveries that already succeeded.
+
+### Generated tools and custom clients
+
+By default, a collection generates `create`, `get`, `list`, `update`, `enable`, `disable`, `invoke`, and `delete` tools. Each operation applies the collection's scope authorization policy. `get` and `list` do not require extra tool approval by default; `create`, `update`, `enable`, `disable`, `invoke`, and `delete` require user approval. Override approval for individual generated operations with eve's tool-approval policies:
+
+```ts title="agent/schedules/requests.ts"
+import { defineScheduleCollection } from "eve/experimental/schedules";
+import { vercelScheduleProvider } from "eve/experimental/schedules/vercel";
+import { auto } from "eve/tools/approval";
+import { teamArchive } from "../lib/deliveries";
+import { resolveCurrentUser } from "../lib/identity";
+
+export default defineScheduleCollection({
+  provider: vercelScheduleProvider(),
+  auth: ({ principal }) => resolveCurrentUser(principal),
+  deliveries: { "team-archive": teamArchive },
+  tools: { approval: { create: auto() } },
+});
+```
+
+`auto()` evaluates the exact call and asks the user to approve it when the action is risky or the evaluation cannot decide. Approval overrides affect only the generated tools, not scope authorization or tools called by a future scheduled run. Set `tools: false` to disable generated tools while retaining the client for authored tools. The client needs the active eve context, so call it inside a tool's `execute`, not at module scope:
+
+```ts title="agent/tools/list-requests.ts"
+import { schedules } from "eve/experimental/schedules";
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+import requests from "../schedules/requests";
+
+export default defineTool({
+  description: "List the caller's scheduled requests.",
+  inputSchema: z.object({}),
+  async execute() {
+    const client = await schedules(requests);
+    return await client.list({ limit: 20 });
+  },
+});
+```
+
+A custom tool can choose among collections with different policies, but the client still checks authorization on every operation. Schedule management is unavailable from scheduled execution.
+
+### Relative delays and timezones
+
+For a relative request such as “in one minute”, generated tools and the client accept `expression: { type: "delay", minutes: 1 }`. eve resolves the delay using its clock when the create/update operation executes, before asynchronous policy or provider calls, and persists a one-time UTC expression. No timezone or model clock calculation is needed. Delays accept whole minutes from 1 through 525,600 and round upward to minute precision, adding up to 59 seconds before provider and execution latency. Approval time is not part of the delay. Retrying a separate client operation resolves a new time; this is not an idempotency guarantee.
+
+Use `single` with a `YYYY-MM-DDTHH:mm` local datetime and IANA timezone for absolute times, or `cron` with a five-field expression and timezone for recurring work. Omitted timezones mean UTC. Ask for clarification only when the intended absolute/recurring local timezone is ambiguous. Relative delays never need one.
+
+### Read, update, and invocation limits
+
+`get` and `list` return provider identity, timing, state, and timestamps. They do not return stored request content, creator references, metadata, or delivery bindings. `update` changes timing only; unsupported content, metadata, or delivery patches are rejected. Enable and disable affect future occurrences, not work already admitted.
+
+`invoke(name)` requests an additional occurrence. Enqueue acceptance does not mean the occurrence ran successfully. Inactive schedules may be invoked; completed one-time schedules cannot. Manual invocation does not consume a pending one-time fire. Providers that cannot prove mutation idempotency do not make ambiguous retries safe.
+
+Collection occurrences use the same session execution machinery as other eve sessions but never run inside a channel: deliveries send the result after the turn settles. Unattended collection runs disable human input through session capabilities, not a run mode. Tool credentials are resolved as usual during execution. A settled turn does not terminate the session; sessions can remain parked until their timeout.
+
+Collection occurrences require a Workflow backend that supports retained hooks. eve admits each occurrence at most once and reports `occurrence.admitted` when it starts a session, or `occurrence.failed` when admission fails for good. A redelivered occurrence recovers its original session instead of starting another. An admitted occurrence that fails is not run again automatically; call `invoke` to run it again. Delivery side effects are not exactly once, so key them on `idempotencyKey`.
+
+Under `eve dev`, the Vercel provider uses process-local in-memory storage. There is no background schedule clock; call `invoke` through the client to dispatch work while developing.
+
 ## What to read next
 
 - [Channels](./channels/overview): deliver schedule output to users.
