@@ -19,7 +19,7 @@ export default defineEval({
     }
     const callback = new URL(required.data.webhookUrl);
     callback.searchParams.set("code", AUTHORIZATION_CODE);
-    const response = await fetch(callback);
+    const response = await t.target.fetch(`${callback.pathname}${callback.search}`);
     if (!response.ok) throw new Error(`Nested authorization callback returned ${response.status}.`);
 
     const turn = await live.result();

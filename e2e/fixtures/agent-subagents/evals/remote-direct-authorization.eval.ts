@@ -14,7 +14,7 @@ export default defineEval({
       throw new Error("Direct remote authorization has no callback URL.");
     const callback = new URL(required.data.webhookUrl);
     callback.searchParams.set("code", "direct-release-code");
-    const response = await fetch(callback);
+    const response = await t.target.fetch(`${callback.pathname}${callback.search}`);
     if (!response.ok) throw new Error(`Direct authorization callback returned ${response.status}.`);
     const turn = await live.result();
     turn.expectOk();

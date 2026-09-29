@@ -50,17 +50,30 @@ export function resolveWorkflowCallbackBaseUrl(metadataUrl: string): string {
 }
 
 /**
- * Builds a framework-owned callback URL from a resolved callback base URL.
+ * Builds a framework-owned callback URL that a browser or third party sees,
+ * such as the connection sign-in redirect handed to an IdP.
  *
  * `callbackPath` is appended to the full base URL rather than resolved
  * against it: the base may carry a public route prefix path, which
  * `new URL(path, base)` would drop for absolute paths.
  */
-export function createWorkflowCallbackUrl(baseUrl: string, callbackPath: string): string {
+export function createBrowserCallbackUrl(baseUrl: string, callbackPath: string): string {
   const callback = new URL(callbackPath, "http://eve.local");
   const url = new URL(baseUrl);
   url.pathname = joinEveRoutePath(url.pathname, callback.pathname);
   url.search = callback.search;
+  return url.toString();
+}
+
+/**
+ * Builds a framework-owned callback URL for server-to-server delivery.
+ *
+ * Unlike {@link createBrowserCallbackUrl}, it carries the deployment's
+ * Protection Bypass for Automation secret so the caller can reach a
+ * protected deployment.
+ */
+export function createWorkflowCallbackUrl(baseUrl: string, callbackPath: string): string {
+  const url = new URL(createBrowserCallbackUrl(baseUrl, callbackPath));
 
   // https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation
   const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();

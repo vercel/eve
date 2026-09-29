@@ -42,7 +42,7 @@ export default defineEval({
       throw new Error("Expected candidate OAuth URL.");
     }
     const callbackUrl = new URL(required.data.authorization.url);
-    const callback = await fetch(callbackUrl);
+    const callback = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
     if (!callback.ok)
       throw new Error(`Late fixture OAuth callback failed (${String(callback.status)}).`);
 
