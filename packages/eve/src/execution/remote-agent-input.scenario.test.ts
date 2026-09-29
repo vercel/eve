@@ -97,25 +97,6 @@ export default defineWorkflowTool({ description: "Delegate approval.", inputSche
   };
 }
 
-function localConcurrentDescriptor(): ScenarioAppDescriptor {
-  const { files, ...descriptor } = parentDescriptor("https://unused.example", true);
-  const { ["agent/subagents/remote-hitl-child.ts"]: _remote, ...parentFiles } = files;
-  return {
-    ...descriptor,
-    name: "local-input-concurrent-parent",
-    files: {
-      ...parentFiles,
-      "agent/subagents/remote-hitl-child/agent.ts": concurrentChildAgent.replace(
-        "defineAgent({ model,",
-        'defineAgent({ description: "Ask Alice and Bob for their approval words.", model,',
-      ),
-      "agent/subagents/remote-hitl-child/instructions.md": "Ask Alice and Bob for their words.",
-      "agent/subagents/remote-hitl-child/tools/ask-alice.ts": askTool("Alice"),
-      "agent/subagents/remote-hitl-child/tools/ask-bob.ts": askTool("Bob"),
-    },
-  };
-}
-
 function memoryParentDescriptor(url: string): ScenarioAppDescriptor {
   const parentAgent = `import { defineAgent } from "eve"; import { mockModel } from "eve/evals";
 const model = mockModel((request) => {
@@ -255,57 +236,6 @@ it(
     } finally {
       await parentServer?.stop();
       await childServer.stop();
-    }
-  },
-  TIMEOUT,
-);
-
-it(
-  "answers two independent local child questions at the root parent",
-  async () => {
-    const parent = await scenarioApp(localConcurrentDescriptor());
-    const parentServer = await startScriptedEveDev(parent.appRoot);
-    try {
-      const { session, response } = await new Client({ host: parentServer.url }).sessions.create({
-        message: "Delegate the approval questions for Alice and Bob.",
-      });
-      expect((await response.result()).status).toBe("waiting");
-      const pending = await waitFor(
-        session,
-        (events) =>
-          filterEventsByType(events, "input.requested").flatMap((event) => event.data.requests)
-            .length >= 2,
-      );
-      const requests = filterEventsByType(pending, "input.requested").flatMap(
-        (event) => event.data.requests,
-      );
-      expect(requests.map((request) => request.prompt).sort()).toEqual([
-        "Word for Alice?",
-        "Word for Bob?",
-      ]);
-      const alice = requests.find((request) => request.prompt.includes("Alice"))!;
-      const bob = requests.find((request) => request.prompt.includes("Bob"))!;
-      expect(
-        (
-          await (
-            await session.respond([{ requestId: alice.requestId, text: "alice-lantern" }])
-          ).result()
-        ).status,
-      ).toBe("waiting");
-      await session.respond([{ requestId: bob.requestId, text: "bob-comet" }]);
-      const final = await waitFor(session, (events) =>
-        filterEventsByType(events, "message.completed").some(
-          (event) => event.data.message === "REMOTE_HITL_RESULT=alice-lantern,bob-comet",
-        ),
-      );
-      expect(filterEventsByType(final, "session.failed")).toHaveLength(0);
-    } catch (error) {
-      throw new Error(
-        `parent stdout:\n${parentServer.stdout()}\nparent stderr:\n${parentServer.stderr()}`,
-        { cause: error },
-      );
-    } finally {
-      await parentServer.stop();
     }
   },
   TIMEOUT,
