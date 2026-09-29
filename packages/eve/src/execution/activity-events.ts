@@ -229,11 +229,12 @@ export function projectActivityEvents(input: {
       };
     });
   }
+  // Delegated work settles here too: its result reaches only the caller's
+  // reply hook, never the caller's stream.
   if (
-    lineage.kind === "root-turn" &&
-    (event.type === "turn.completed" ||
-      event.type === "turn.failed" ||
-      event.type === "turn.cancelled")
+    event.type === "turn.completed" ||
+    event.type === "turn.failed" ||
+    event.type === "turn.cancelled"
   ) {
     const outcome =
       event.type === "turn.completed"

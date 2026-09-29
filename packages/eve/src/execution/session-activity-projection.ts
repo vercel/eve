@@ -24,7 +24,7 @@ export async function observeSessionActivity(input: {
       event: input.event,
       rootTurnId: input.ctx.get(ActivityRootTurnIdKey),
       sessionId: input.sessionId,
-      suppressRootSettlement: (input.ctx.get(ActivityPendingBlockersKey)?.length ?? 0) > 0,
+      suppressSettlement: (input.ctx.get(ActivityPendingBlockersKey)?.length ?? 0) > 0,
       taskCallIds: input.ctx.get(ActivityTaskCallsKey),
       workIdentity: observer.workIdentity,
     }),
@@ -36,7 +36,8 @@ export function projectSessionActivity(input: {
   readonly event: MessageStreamEvent;
   readonly rootTurnId?: string;
   readonly sessionId: string;
-  readonly suppressRootSettlement?: boolean;
+  /** A turn that ends waiting on a person leaves its work open until it resumes. */
+  readonly suppressSettlement?: boolean;
   readonly taskCallIds?: readonly string[];
   readonly workIdentity?: ActivityWorkIdentityV1;
 }): readonly ActivityEventV1[] {
@@ -57,8 +58,7 @@ export function projectSessionActivity(input: {
     });
   }
   if (
-    input.suppressRootSettlement === true &&
-    work.kind === "root-turn" &&
+    input.suppressSettlement === true &&
     (input.event.type === "turn.completed" ||
       input.event.type === "turn.failed" ||
       input.event.type === "turn.cancelled")

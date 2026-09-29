@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ActivityObserverKey, ActivityTaskCallsKey } from "#context/keys.js";
+import {
+  ActivityObserverKey,
+  ActivityPendingBlockersKey,
+  ActivityTaskCallsKey,
+} from "#context/keys.js";
 import { updateActivityState } from "#execution/activity-cohort.js";
 import { ContextContainer } from "#context/container.js";
 import {
@@ -39,18 +43,19 @@ function reduceProjection(input: {
   readonly sessionId: string;
   readonly workIdentity?: ActivityWorkIdentityV1;
 }): ActivitySnapshotV1 {
-  return input.events.reduce(
-    (snapshot, event) =>
-      reduceActivityBatch(snapshot, {
-        events: projectSessionActivity({
-          event,
-          sessionId: input.sessionId,
-          workIdentity: input.workIdentity,
-        }),
-        version: 1,
+  const ctx = context();
+  return input.events.reduce((snapshot, event) => {
+    updateActivityState(ctx, event);
+    return reduceActivityBatch(snapshot, {
+      events: projectSessionActivity({
+        event,
+        sessionId: input.sessionId,
+        suppressSettlement: ctx.has(ActivityPendingBlockersKey),
+        workIdentity: input.workIdentity,
       }),
-    createActivitySnapshot(),
-  );
+      version: 1,
+    });
+  }, createActivitySnapshot());
 }
 
 describe("projectSessionActivity", () => {
@@ -111,7 +116,7 @@ describe("projectSessionActivity", () => {
         event,
         rootTurnId: "turn-1",
         sessionId: "session-1",
-        suppressRootSettlement: true,
+        suppressSettlement: true,
       }),
     ).toEqual([]);
   });
@@ -253,7 +258,7 @@ describe("projectSessionActivity", () => {
     ]);
   });
 
-  it("maps session.started to delegated work start and keeps HITL active while parked", () => {
+  it("keeps delegated work open while its turn waits on a person, then settles it with the resumed turn", () => {
     const workIdentity: ActivityWorkIdentityV1 = {
       callId: "call-1",
       id: "work:parent:turn-1:call-1",
@@ -263,40 +268,61 @@ describe("projectSessionActivity", () => {
       rootSessionId: "parent",
       rootTurnId: "turn-1",
     };
-    const snapshot = reduceProjection({
-      events: [
-        { data: {}, meta: { at, id: "session-started" }, type: "session.started" },
-        {
-          data: {
-            requests: [
-              {
-                action: { callId: "tool-1", input: {}, kind: "tool-call", toolName: "search" },
-                kind: "question",
-                prompt: "Which region?",
-                requestId: "request-1",
-              },
-            ],
-            sequence: 1,
-            stepIndex: 0,
-            turnId: "child-turn",
-          },
-          meta: { at, id: "input-requested" },
-          type: "input.requested",
+    const parked: MessageStreamEvent[] = [
+      { data: {}, meta: { at, id: "session-started" }, type: "session.started" },
+      {
+        data: {
+          requests: [
+            {
+              action: { callId: "tool-1", input: {}, kind: "tool-call", toolName: "search" },
+              kind: "question",
+              prompt: "Which region?",
+              requestId: "request-1",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "child-turn",
         },
-        turnEvent("turn.completed", "child-turn"),
-        {
-          data: { continuationToken: "child-token", wait: "next-user-message" },
-          meta: { at, id: "session-waiting" },
-          type: "session.waiting",
+        meta: { at, id: "input-requested" },
+        type: "input.requested",
+      },
+      turnEvent("turn.completed", "child-turn"),
+      {
+        data: { continuationToken: "child-token", wait: "next-user-message" },
+        meta: { at, id: "session-waiting" },
+        type: "session.waiting",
+      },
+    ];
+    const resumed: MessageStreamEvent[] = [
+      {
+        data: {
+          resolutions: [{ kind: "question", outcome: "answered", requestId: "request-1" }],
+          sequence: 2,
+          stepIndex: 0,
+          turnId: "child-turn-2",
         },
-      ],
-      sessionId: "child-session",
-      workIdentity,
+        meta: { at, id: "input-resolved" },
+        type: "input.resolved",
+      },
+      turnEvent("turn.started", "child-turn-2"),
+      {
+        data: { sequence: 2, turnId: "child-turn-2" },
+        meta: { at, id: "turn.cancelled:child-turn-2" },
+        type: "turn.cancelled",
+      },
+    ];
+    const project = (events: readonly MessageStreamEvent[]) =>
+      reduceProjection({ events, sessionId: "child-session", workIdentity });
+
+    const whileParked = project(parked);
+    expect(whileParked.work[workIdentity.id]).toMatchObject({ phase: "running" });
+    expect(whileParked.blockers[`input:${workIdentity.id}:request-1`]).toMatchObject({
+      phase: "blocked",
     });
 
-    expect(snapshot.work[workIdentity.id]).toMatchObject({ phase: "running" });
-    expect(snapshot.blockers[`input:${workIdentity.id}:request-1`]).toMatchObject({
-      phase: "blocked",
+    expect(project([...parked, ...resumed]).work[workIdentity.id]).toMatchObject({
+      phase: "cancelled",
     });
   });
 });
