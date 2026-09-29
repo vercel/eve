@@ -14,7 +14,7 @@ import {
 import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 
-export { resolveCompiledModuleExtensionScopeNamespace } from "#compiler/load-binding-namespace.js";
+export { resolveExtensionBindingMountId } from "#compiler/load-binding-namespace.js";
 
 export type CompiledModuleMap = z.infer<typeof compiledModuleMapSchema>;
 

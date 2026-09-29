@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
       _sourcePath: string,
       _options: {
         readonly externalDependencies: readonly string[];
-        readonly extensionScopeNamespace?: string;
+        readonly extension?: { readonly mountId: string };
       },
     ) => ({}),
   ),
@@ -117,12 +117,12 @@ describe("compiled module maps", () => {
 
     expect(mocks.loadAuthoredModuleNamespace).toHaveBeenCalledWith("/extension/tool.ts", {
       externalDependencies: [],
-      extensionScopeNamespace: "extensions/renamed-mount",
+      extension: { mountId: "extensions/renamed-mount" },
     });
     expect(
       mocks.loadAuthoredModuleNamespace.mock.calls
         .filter(([sourcePath]) => sourcePath.startsWith("/application/"))
-        .every(([, options]) => options.extensionScopeNamespace === undefined),
+        .every(([, options]) => options.extension === undefined),
     ).toBe(true);
   });
 

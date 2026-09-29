@@ -17,7 +17,6 @@ import {
   type ProgrammaticAgentSource,
   type ProgrammaticModuleLoadContext,
 } from "#compiler/source-graph.js";
-import { createBundledExtensionMount } from "#compiler/bundled-extension.js";
 import { materializeAuthoredModuleExport } from "#internal/authored-module.js";
 
 function source(
@@ -44,41 +43,6 @@ function candidate(
     registration,
   })[0]!;
 }
-
-describe("bundled extension declarations", () => {
-  it("registers a configured extension declaration without enumerating contributions", async () => {
-    const loadMount = vi.fn(async () => ({ config: { enabled: true }, mounted: true }));
-    const mount = createBundledExtensionMount({
-      loadMount,
-      entryPath: "/packages/example/extension/extension.ts",
-      importSpecifier: "eve/example",
-      config: {},
-      namespace: "example",
-      sourceDirectory: "/packages/example/extension",
-    });
-    const registry = createAgentSourceRegistry([], {
-      extensionDeclarations: [mount.declaration],
-    });
-    const declaration = mount.declaration.modules[0]!;
-
-    expect(declaration.logicalPath).toBe("extensions/example.ts");
-    expect(registry.sources.get(mount.declaration.id)).toMatchObject({
-      id: mount.declaration.id,
-    });
-    await expect(
-      loadProgrammaticModuleNamespace({
-        backing: {
-          kind: "programmatic",
-          moduleId: declaration.logicalPath,
-          registryId: mount.declaration.id,
-          revision: mount.declaration.revision,
-        },
-        registries: [registry],
-      }),
-    ).resolves.toEqual({ default: { config: { enabled: true }, mounted: true } });
-    expect(loadMount).toHaveBeenCalledOnce();
-  });
-});
 
 describe("derived programmatic sources", () => {
   it("memoizes definition factories within one module namespace", async () => {

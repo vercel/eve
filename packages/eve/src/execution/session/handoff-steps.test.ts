@@ -1,7 +1,7 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionCheckpoint } from "#execution/session/handoff.js";
+import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
 import { validateSessionCheckpointStep } from "#execution/session/handoff-steps.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -55,7 +55,7 @@ describe("validateSessionCheckpointStep", () => {
     );
   });
 
-  it.each([5, 6, 7, 8, 9, 11])(
+  it.each([5, 6, 7, 8, 10, 11])(
     "rejects checkpoint version %s before reading nested state",
     async (version) => {
       const checkpoint = createCheckpoint();
@@ -84,7 +84,7 @@ describe("validateSessionCheckpointStep", () => {
 
 function createCheckpoint(): SessionCheckpoint {
   return {
-    version: 10,
+    version: SESSION_CHECKPOINT_VERSION,
     sessionTimeoutMs: false,
     serializedContext: {},
     sessionState: createTestSessionState({

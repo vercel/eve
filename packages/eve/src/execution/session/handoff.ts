@@ -19,7 +19,7 @@ import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.
  * an incompatible successor rejects the handoff instead of misreading state.
  * Dynamic skill manifests retain instruction bodies and package revisions.
  */
-export const SESSION_CHECKPOINT_VERSION = 10;
+export const SESSION_CHECKPOINT_VERSION = 9;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {

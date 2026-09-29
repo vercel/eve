@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
-import {
-  createMountEvaluationContext,
-  type ExtensionCompileMount,
-} from "#compiler/extension-mount-evaluation.js";
+import type { ExtensionCompileMount } from "#compiler/load-binding-namespace.js";
+import { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js";
+import { bindingMountId } from "#compiler/extension-mount-bindings.js";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import {
@@ -56,7 +55,6 @@ import {
   normalizeSubagentConfig,
 } from "#compiler/normalize-subagent.js";
 import { compileToolEntry } from "#compiler/normalize-tool.js";
-import { createCompiledChannelRoutePlan } from "#compiler/channel-route-plan.js";
 import {
   finalizeNodeSourceState,
   type ComposedNodeSourceGraph,
@@ -70,6 +68,8 @@ import {
   assertUniqueBy,
   assertUniqueRegistryIds,
   compileExtensionMounts,
+  compileChannelRoutes,
+  createExtensionCompileMounts,
   createCompiledRemoteAgent,
   expectSubagentDescription,
   mergeExternalDependencies,
@@ -84,7 +84,6 @@ import {
   composeAgentModuleCandidates,
   createAgentModuleBinding,
   createProgrammaticModuleCandidates,
-  describeAgentSourceCandidate,
   disableComposedCandidate,
   instantiateProgrammaticTemplate,
   isAgentModuleCandidate,
@@ -441,12 +440,14 @@ class AgentGraphCompiler {
     externalDependencies: readonly string[],
   ): Promise<PhaseOneNodeSourceState> {
     const graph = this.composeNodeSources(input, externalDependencies);
-    const evaluation = createMountEvaluationContext({
-      node: input,
-      registries: this.registries,
-      mounts: this.mounts,
-      evaluationId: this.evaluationId,
-    });
+    const { mounts, sourceIds } = createExtensionCompileMounts(input.manifest, input.nodePath);
+    for (const [mountId, mount] of mounts) this.mounts.set(mountId, mount);
+    const evaluation = new NodeModuleEvaluationContext(
+      this.registries,
+      (binding) => sourceIds.get(bindingMountId(binding) ?? ""),
+      this.mounts,
+      this.evaluationId,
+    );
     evaluation.setBindings(
       Object.fromEntries(
         [...graph.composed.selected.values()]
@@ -620,21 +621,7 @@ class AgentGraphCompiler {
     assertUniqueBy(dynamicConnections, (connection) => connection.slug, "dynamic connection slug");
     assertUniqueBy(skills, (skill) => skill.name, "skill name");
 
-    const channelRoutes = createCompiledChannelRoutePlan({
-      bindings: state.bindings,
-      channels,
-      diagnostics: this.diagnostics,
-      nodeId: input.nodeId,
-      sources: Object.fromEntries(
-        state.orderedCandidates.map((candidate) => [
-          candidate.sourceId,
-          describeAgentSourceCandidate(candidate),
-        ]),
-      ),
-    });
-    for (const channel of channelRoutes.effective) {
-      state.evaluation.requireRuntimeEntry(channel.sourceId);
-    }
+    const channelRoutes = compileChannelRoutes(state, channels, this.diagnostics, input.nodeId);
     const extensionMounts = compileExtensionMounts(input.manifest, state.composed, input.nodePath);
     for (const mount of extensionMounts) {
       state.evaluation.requireRuntimeEntry(mount.mountSourceId);

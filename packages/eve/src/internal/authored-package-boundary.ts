@@ -55,6 +55,7 @@ export function createGenerationPackageBoundaryPlugin(input: {
         return undefined;
       }
 
+      if (input.extensionSpecifiers?.has(source)) return undefined;
       if (isFrameworkRuntimeImport(source, importer)) {
         if (input.extensionSpecifiers?.has(source)) return undefined;
         return { external: true, id: resolveFrameworkRuntimeImport(source) };

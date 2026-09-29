@@ -1,4 +1,5 @@
 import { basename, relative, resolve } from "node:path";
+import type { JsonObject } from "#shared/json.js";
 import type {
   MarkdownSourceRef,
   ModuleSourceRef,
@@ -153,7 +154,7 @@ export interface ResolvedExtensionMount {
     readonly sourceId: string;
     readonly importSpecifier: string;
     readonly entryPath: string;
-    readonly config: Record<string, unknown>;
+    readonly config: JsonObject;
   };
   /** Mount namespace derived from the mount filename (e.g. `crm`). */
   readonly namespace: string;

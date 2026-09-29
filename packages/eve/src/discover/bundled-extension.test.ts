@@ -7,7 +7,6 @@ import { createMemoryProjectSource } from "#discover/project-source.js";
 describe("discoverBundledExtension", () => {
   it("discovers the complete extension tree without declared file entries", async () => {
     const mount = createBundledExtensionMount({
-      loadMount: async () => ({}),
       entryPath: "/package/extension/extension.ts",
       importSpecifier: "eve/example",
       config: {},
