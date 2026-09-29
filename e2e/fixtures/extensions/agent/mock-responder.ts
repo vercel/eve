@@ -16,6 +16,19 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
       .join(" ");
   }
 
+  if (message.includes("Alice is checking the primary account")) {
+    const lookups = [
+      { name: "toolkit__toolkit_lookup", input: { account: "primary" } },
+      { name: "toolkit-alt__toolkit_lookup", input: { account: "secondary" } },
+    ];
+    const next = lookups.find(
+      (lookup) => !request.toolResults.some((result) => result.name === lookup.name),
+    );
+    return next === undefined
+      ? JSON.stringify(request.toolResults.map((result) => result.output))
+      : { toolCalls: [next] };
+  }
+
   if (!message.includes(`Call \`${LAYOUT_TOOL}\``)) {
     return `Mock reply: ${message}`;
   }

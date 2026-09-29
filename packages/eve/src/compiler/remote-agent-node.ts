@@ -52,12 +52,14 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
                 .strict()
                 .optional(),
               kind: z.literal("filesystem"),
+              mountId: z.string().optional(),
               sourcePath: z.string(),
             })
             .strict(),
           z
             .object({
               kind: z.literal("programmatic"),
+              mountId: z.string().optional(),
               moduleId: z.string(),
               registryId: z.string(),
               revision: z.string(),

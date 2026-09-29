@@ -15,6 +15,7 @@ export interface CompileAgentManifestOptions {
 }
 
 export interface NodeCompileInput {
+  readonly mountId?: string;
   readonly developmentExtensionCandidates?: readonly AgentModuleCandidate[];
   readonly extensionScope?: { readonly namespace: string; readonly sourceRoot: string };
   readonly inheritedExternalDependencies: readonly string[];

@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -58,6 +58,10 @@ describe("mounted extension via authored-source loader", () => {
           'const count = defineState("override-count", () => 0);',
           'export default { description: "Read overridden account", inputSchema: {}, execute: () => { count.update(n => n + 1); return { account: ext.config.account, count: count.get() }; } };',
         ].join("\n"),
+        "agent/extensions/one/subagents/helper/agent.mjs":
+          'export default { model: "openai/gpt-5.4", description: "Help with accounts" };',
+        "agent/extensions/one/subagents/helper/tools/peek.mjs":
+          'import ext from "@acme/crm"; export default { description: "Read account", inputSchema: {}, execute: () => ext.config.account };',
         "agent/extensions/two.mjs":
           'import ext from "@acme/crm"; export default ext({ account: "two" });',
         "node_modules/@acme/crm/package.json": JSON.stringify({
@@ -78,8 +82,12 @@ describe("mounted extension via authored-source loader", () => {
         ].join("\n"),
         "node_modules/@acme/crm/extension/tools/account.mjs": [
           'import ext from "@acme/crm";',
-          "const account = ext.config.account; export default { description: account, inputSchema: {}, execute: () => account };",
+          'import prompt from "./prompt.md?raw";',
+          'import asset from "./badge.svg";',
+          "const account = ext.config.account; export default { description: account, inputSchema: {}, execute: () => ({ account, prompt, asset }) };",
         ].join("\n"),
+        "node_modules/@acme/crm/extension/tools/prompt.md": "Account prompt",
+        "node_modules/@acme/crm/extension/tools/badge.svg": "<svg/>",
       },
     });
     const first = await compileRuntimeGraph(app.appRoot);
@@ -93,12 +101,26 @@ describe("mounted extension via authored-source loader", () => {
       const tool = first.manifest.tools.find((entry) => entry.name === `${name}__account`)!;
       return (
         map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[tool.sourceId]!.default as {
-          execute: () => string | { account: string; count: number };
+          execute: () => unknown;
         }
       ).execute();
     };
-    expect(read(first.moduleMap, "two")).toBe("two");
-    expect(read(second, "two")).toBe("two");
+    const accountResult = {
+      account: "two",
+      prompt: "Account prompt",
+      asset: "data:image/svg+xml;base64,PHN2Zy8+",
+    };
+    expect(read(first.moduleMap, "two")).toEqual(accountResult);
+    expect(read(second, "two")).toEqual(accountResult);
+    const helper = first.manifest.subagents.find((node) => node.name === "one__helper")!;
+    const peek = helper.agent.tools.find((tool) => tool.name === "peek")!;
+    expect(
+      (
+        first.moduleMap.nodes[helper.nodeId]!.modules[peek.sourceId]!.default as {
+          execute: () => string;
+        }
+      ).execute(),
+    ).toBe("one");
     const context = new ContextContainer();
     contextStorage.run(context, () => {
       expect(read(first.moduleMap, "one")).toEqual({ account: "one", count: 1 });
@@ -119,7 +141,7 @@ describe("mounted extension via authored-source loader", () => {
     const generated = (await import(`${moduleMapPath}?test=independent-config`)) as {
       default: typeof first.moduleMap;
     };
-    expect(read(generated.default, "two")).toBe("two");
+    expect(read(generated.default, "two")).toEqual(accountResult);
   });
 
   it("allocates a new authored-source graph on each load", async () => {
@@ -151,6 +173,11 @@ describe("mounted extension via authored-source loader", () => {
       (map) => map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[id]!.default,
     );
     expect(new Set(instances).size).toBe(4);
+    expect(
+      (await readdir(join(app.appRoot, ".eve", "compile"))).filter(
+        (name) => name.startsWith("authored-module-map-") && name.endsWith(".mjs"),
+      ),
+    ).toHaveLength(1);
   });
 
   it("isolates configured built-in extension mounts", async () => {
@@ -205,12 +232,21 @@ describe("mounted extension via authored-source loader", () => {
           eve: { extension: { source: "source", dist: "extension" } },
           exports: { ".": "./extension/extension.mjs" },
         }),
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
-          extension: 1,
-          tool: 1,
+        "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+          ...JSON.parse(compatibilityManifest({ extension: 1, tool: 1 })),
+          formatVersion: 2,
+          build: { externalDependencies: ["nested-dependency"] },
         }),
+        "node_modules/@acme/crm/node_modules/nested-dependency/package.json": JSON.stringify({
+          name: "nested-dependency",
+          type: "module",
+          exports: "./index.mjs",
+        }),
+        "node_modules/@acme/crm/node_modules/nested-dependency/index.mjs":
+          "export default 'nested-value';",
         "node_modules/@acme/crm/extension/extension.mjs": 'export { default } from "./handle.mjs";',
-        "node_modules/@acme/crm/extension/handle.mjs": "export default { instance: {} };",
+        "node_modules/@acme/crm/extension/handle.mjs":
+          "import value from 'nested-dependency'; export default { instance: { value } };",
         "node_modules/@acme/crm/extension/tools/check.mjs":
           'import ext from "@acme/crm"; export default { description: "Check instance", inputSchema: {}, execute: () => ext.instance };',
       },
@@ -221,6 +257,7 @@ describe("mounted extension via authored-source loader", () => {
       (mount) => (fallbackModules[mount.mountSourceId]!.default as { instance: object }).instance,
     );
     expect(fallbackMounts[0]).not.toBe(fallbackMounts[1]);
+    expect(fallbackMounts[0]).toEqual({ value: "nested-value" });
     const nextGraph = await loadCompiledModuleMapFromAuthoredSource({
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
     });
@@ -240,6 +277,7 @@ describe("mounted extension via authored-source loader", () => {
       appRoot: app.appRoot,
       manifest,
       moduleMapPath,
+      resolveExternalPaths: true,
     });
     await mkdir(join(app.appRoot, ".eve", "compile"), { recursive: true });
     await writeFile(moduleMapPath, code);

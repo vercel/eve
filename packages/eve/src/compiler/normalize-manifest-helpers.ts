@@ -1,4 +1,7 @@
 import { posix } from "node:path";
+import type { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js";
+import type { ComposedNodeSourceGraph, SelectedNodeConfig } from "#compiler/node-source-state.js";
+import { loadModuleBackedDefinition } from "#compiler/normalize-helpers.js";
 
 import { mountRefNamespace, packageStateNamespace } from "#discover/extensions.js";
 import type { AgentSourceManifest, LocalSubagentSourceRef } from "#discover/manifest.js";
@@ -12,13 +15,42 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { normalizeSubagentConfig } from "#compiler/normalize-subagent.js";
 import {
   canonicalSourceSlot,
+  createAgentModuleBinding,
   extensionMountId,
+  isAgentModuleCandidate,
   type AgentModuleCandidate,
   type AgentSourceOwner,
   type AgentSourceRegistry,
   type ComposedAgentModuleCandidates,
   type CompiledModuleBinding,
 } from "#compiler/source-graph.js";
+
+export async function loadSelectedNodeConfig(
+  state: ComposedNodeSourceGraph,
+  evaluation: NodeModuleEvaluationContext,
+): Promise<SelectedNodeConfig> {
+  const candidate = state.composed.selected.get("agent");
+  if (candidate === undefined || !isAgentModuleCandidate(candidate)) {
+    throw new Error("Every local agent node requires a selected module-backed agent.ts source.");
+  }
+  const binding = createAgentModuleBinding(candidate);
+  const projected = state.sourcesBySourceId.get(candidate.sourceId);
+  if (projected?.source.sourceKind !== "module") {
+    throw new Error(`Selected agent config source "${candidate.sourceId}" was not projected.`);
+  }
+  const source = projected.source;
+  return {
+    binding,
+    candidate,
+    definition: await loadModuleBackedDefinition({
+      binding,
+      kind: "agent config",
+      loadNamespace: evaluation.loadNamespace,
+      source,
+    }),
+    source,
+  };
+}
 
 export function collectSelectedSourceIds(composed: ComposedAgentModuleCandidates): Set<string> {
   return new Set([...composed.selected.values()].map((candidate) => candidate.sourceId));
@@ -181,6 +213,15 @@ export function compileExtensionMounts(
         externalDependencies: [...mount.externalDependencies],
         mountLogicalPath: mountRef.logicalPath,
         mountSourceId: mountRef.sourceId,
+        ...(mount.programmaticDeclaration === undefined
+          ? {}
+          : {
+              programmaticImport: {
+                specifier: mount.programmaticDeclaration.importSpecifier,
+                entryPath: mount.programmaticDeclaration.entryPath,
+                config: mount.programmaticDeclaration.config,
+              },
+            }),
         mountSourcePath: posix.join(manifest.agentRoot, mountRef.logicalPath),
         namespace: mount.namespace,
         packageName: mount.packageName,

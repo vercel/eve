@@ -21,6 +21,7 @@ import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artif
 import { createCompiledSandboxProviderPrunePlugin } from "#internal/nitro/host/compiled-sandbox-provider-prune-plugin.js";
 import { createDevelopmentRuntimePrunePlugin } from "#internal/nitro/host/development-runtime-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
+import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
 import {
   createExtensionExternalDependencyPlugin,
@@ -602,18 +603,7 @@ function createApplicationNitroBundlerConfiguration(
     createExtensionExternalDependencyPlugin(extensionMounts),
     createExtensionMountPlugin(
       extensionMounts,
-      new Map(
-        [
-          preparedHost.compileResult.manifest,
-          ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
-        ].flatMap((node) =>
-          Object.values(node.bindings).flatMap((binding) =>
-            binding.backing.kind === "filesystem" && binding.backing.mountId !== undefined
-              ? [[binding.backing.sourcePath, binding.backing.mountId] as const]
-              : [],
-          ),
-        ),
-      ),
+      extensionOverridePaths(preparedHost.compileResult.manifest),
     ),
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);

@@ -23,6 +23,7 @@ const moduleBacking = z.discriminatedUnion("kind", [
         .strict()
         .optional(),
       kind: z.literal("filesystem"),
+      mountId: z.string().optional(),
       sourcePath: z.string(),
     })
     .strict(),
@@ -30,6 +31,7 @@ const moduleBacking = z.discriminatedUnion("kind", [
     .object({
       dependencies: z.record(z.string(), z.string()).optional(),
       kind: z.literal("programmatic"),
+      mountId: z.string().optional(),
       moduleId: z.string(),
       parameters: z.record(z.string(), z.unknown()).optional(),
       registryId: z.string(),

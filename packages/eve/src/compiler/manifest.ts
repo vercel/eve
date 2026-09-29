@@ -58,7 +58,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 53;
+export const COMPILED_AGENT_MANIFEST_VERSION = 54;
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.
@@ -382,6 +382,7 @@ const programmaticModuleBackingSchema = z
   .object({
     dependencies: z.record(z.string(), z.string()).readonly().optional(),
     kind: z.literal("programmatic"),
+    mountId: z.string().optional(),
     moduleId: z.string(),
     parameters: jsonObjectSchema.optional(),
     registryId: z.string(),
@@ -946,6 +947,14 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
     sourceRoot: z.string(),
     mountSourceId: z.string(),
     mountSourcePath: z.string(),
+    programmaticImport: z
+      .object({
+        specifier: z.string(),
+        entryPath: z.string(),
+        config: z.record(z.string(), z.unknown()),
+      })
+      .strict()
+      .optional(),
     mountLogicalPath: z.string(),
   })
   .strict();
@@ -1033,6 +1042,11 @@ const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z.union([
  * call binds the extension's config on its instance handle before any tool runs.
  */
 export interface CompiledExtensionMount {
+  readonly programmaticImport?: {
+    readonly specifier: string;
+    readonly entryPath: string;
+    readonly config: Record<string, unknown>;
+  };
   /** Runtime packages this extension requires the consuming application to externalize. */
   readonly externalDependencies: readonly string[];
   /** Mount-derived namespace that prefixes the extension's tool/skill names. */

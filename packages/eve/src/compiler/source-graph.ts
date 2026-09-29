@@ -161,6 +161,7 @@ export type AgentModuleBacking =
     }
   | {
       readonly dependencies?: Readonly<Record<string, string>>;
+      readonly mountId?: string;
       readonly kind: "programmatic";
       readonly moduleId: string;
       readonly parameters?: JsonObject;

@@ -279,6 +279,45 @@ describe("Client request policy", () => {
     },
   );
 
+  it("accepts mount provenance for extension tools and application overrides", async () => {
+    const mountId = "extensions/crm";
+    const owners = [
+      { kind: "extension", mountId, namespace: "crm", packageName: "@acme/crm" },
+      { kind: "application" },
+    ];
+    const tools = owners.map((owner, index) => ({
+      binding: {
+        backing: {
+          kind: "filesystem",
+          sourcePath: `/app/tools/${index}.ts`,
+          externalDependencies: [],
+          mountId,
+        },
+        logicalPath: `tools/${index}.ts`,
+        owner,
+      },
+      description: "Read account",
+      hasAuth: false,
+      hasExecute: true,
+      hasModelOutputProjection: false,
+      hasOutputSchema: false,
+      inputSchema: {},
+      logicalPath: `tools/${index}.ts`,
+      name: `crm__${index}`,
+      owner,
+      requiresApproval: false,
+      sourceId: `tools/${index}.ts`,
+      sourceKind: "module",
+    }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ...AGENT_INFO, tools: { ...AGENT_INFO.tools, static: tools } }),
+    );
+    const info = await new Client({ host: "https://eve.test" }).info();
+    expect(info.tools.static.map((tool) => tool.binding?.backing)).toEqual(
+      tools.map((tool) => tool.binding.backing),
+    );
+  });
+
   it("accepts the legacy optional instrumentation field in v4 agent info", async () => {
     const owner = { kind: "application" as const };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

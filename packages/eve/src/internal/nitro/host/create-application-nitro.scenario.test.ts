@@ -31,6 +31,8 @@ import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-build
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
 import { defineTool } from "#tools/definition.js";
+import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
+import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 
@@ -102,8 +104,15 @@ async function createPreparedHost(
 ): Promise<PreparedDevelopmentApplicationHost> {
   const appRoot = "/tmp/weather-agent";
   const paths = resolveCompilerArtifactPaths(appRoot);
-  const modules: Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]> =
-    [];
+  const modules: Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]> = [
+    {
+      logicalPath: "sandbox.ts",
+      loadNamespace: async () => {
+        const environment = JustBashSandbox.environment();
+        return { environment, default: defineSandbox(() => environment.open()) };
+      },
+    },
+  ];
   if (input.websocket === true) {
     modules.push({
       logicalPath: "channels/voice.ts",
@@ -732,7 +741,7 @@ describe("application Nitro creation", () => {
     );
   });
 
-  it("leaves Nitro to classify unconfigured hosted dependencies", async () => {
+  it("traces only the configured sandbox engine and leaves other dependencies to Nitro", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -742,7 +751,7 @@ describe("application Nitro creation", () => {
 
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
-    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual([]);
+    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(["just-bash"]);
   });
 
   it("includes the workflow sandbox runtime plugin only for generated-program tools", async () => {

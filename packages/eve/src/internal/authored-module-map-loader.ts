@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { link, mkdir, unlink, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -63,15 +63,33 @@ async function hydrateCompiledModuleMapFromManifest(
     const moduleMapPath = join(runtimeAppRoot, ".eve", "compile", "authored-module-map.mjs");
     const { code } = await bundleAuthoredModuleMapForGeneration({
       appRoot: authoredAppRoot,
+      resolveExternalPaths: true,
       manifest,
       moduleMapPath,
     });
     const hash = createHash("sha256").update(code).digest("hex");
-    const fileName = `authored-module-map-${hash}-${randomUUID()}.mjs`;
+    const fileName = `authored-module-map-${hash}.mjs`;
     const outputPath = join(runtimeAppRoot, ".eve", "compile", fileName);
     await mkdir(join(runtimeAppRoot, ".eve", "compile"), { recursive: true });
-    await writeFile(outputPath, code, { flag: "wx" });
-    return await loadMaterializedCompiledModuleMap({ moduleMapPath: fileName, runtimeAppRoot });
+    const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporaryPath, code, { flag: "wx" });
+      try {
+        await link(temporaryPath, outputPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    } finally {
+      await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+    }
+    // Independent application loads need fresh mutable extension handles, but share bundle bytes.
+    return await loadMaterializedCompiledModuleMap({
+      moduleMapPath: fileName,
+      runtimeAppRoot,
+      instanceId: randomUUID(),
+    });
   }
 
   const nodes: CompiledModuleMap["nodes"] = {};
@@ -121,12 +139,13 @@ async function hydrateCompiledNodeScope(
 }
 
 async function loadMaterializedCompiledModuleMap(input: {
+  readonly instanceId?: string;
   readonly moduleMapPath: string;
   readonly runtimeAppRoot: string;
 }): Promise<CompiledModuleMap> {
   const moduleMapPath = join(input.runtimeAppRoot, ".eve", "compile", input.moduleMapPath);
   const moduleNamespace = (await import(
-    `${pathToFileURL(moduleMapPath).href}?generation=${encodeURIComponent(input.moduleMapPath)}`
+    `${pathToFileURL(moduleMapPath).href}?generation=${encodeURIComponent(input.instanceId ?? input.moduleMapPath)}`
   )) as { readonly default?: unknown; readonly moduleMap?: unknown };
   const parsed = compiledModuleMapSchema.safeParse(
     moduleNamespace.moduleMap ?? moduleNamespace.default,

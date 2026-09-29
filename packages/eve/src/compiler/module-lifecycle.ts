@@ -18,9 +18,13 @@ export class NodeModuleEvaluationContext {
   constructor(
     registries: readonly AgentSourceRegistry[],
     mountSourceId?: (binding: AgentModuleBinding) => string | undefined,
+    mounts?: Parameters<typeof createCompiledBindingNamespaceLoader>[0]["mounts"],
+    evaluationId?: string,
   ) {
     this.loadNamespace = createCompiledBindingNamespaceLoader({
       mountSourceId,
+      mounts,
+      evaluationId,
       onLoad: (sourceId) => this.#lifecycle.recordCompileLoad(sourceId),
       registries,
       resolveBinding: (sourceId) => this.#bindings[sourceId],

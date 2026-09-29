@@ -149,6 +149,9 @@ export type ExtensionSourceRef = ModuleSourceRef;
 export interface ResolvedExtensionMount {
   /** Programmatic declaration used when the mount does not exist on disk. */
   readonly programmaticDeclaration?: {
+    readonly importSpecifier: string;
+    readonly entryPath: string;
+    readonly config: Record<string, unknown>;
     readonly logicalPath: string;
     readonly sourceId: string;
   };

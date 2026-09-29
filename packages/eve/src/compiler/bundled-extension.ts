@@ -6,6 +6,9 @@ import { resolveInstalledPackageInfo, resolvePackageRoot } from "#internal/appli
 
 /** The small descriptor used for extensions shipped inside eve. */
 export interface BundledExtensionDescriptor {
+  readonly entryPath: string;
+  readonly importSpecifier: string;
+  readonly config: Record<string, unknown>;
   readonly loadMount: () => Promise<unknown>;
   readonly namespace: string;
   readonly sourceDirectory: string;
@@ -13,6 +16,9 @@ export interface BundledExtensionDescriptor {
 
 export interface BundledExtensionMount {
   readonly declaration: ProgrammaticAgentSource;
+  readonly entryPath: string;
+  readonly importSpecifier: string;
+  readonly config: Record<string, unknown>;
   readonly namespace: string;
   readonly packageName: string;
   readonly packageRoot: string;
@@ -42,6 +48,9 @@ export function createBundledExtensionMount(
 
   return Object.freeze({
     declaration,
+    entryPath: descriptor.entryPath,
+    importSpecifier: descriptor.importSpecifier,
+    config: descriptor.config,
     namespace: descriptor.namespace,
     packageName,
     packageRoot,

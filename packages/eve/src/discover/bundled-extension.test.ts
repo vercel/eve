@@ -8,6 +8,9 @@ describe("discoverBundledExtension", () => {
   it("discovers the complete extension tree without declared file entries", async () => {
     const mount = createBundledExtensionMount({
       loadMount: async () => ({}),
+      entryPath: "/package/extension/extension.ts",
+      importSpecifier: "eve/example",
+      config: {},
       namespace: "example",
       sourceDirectory: "/package/extension",
     });
@@ -31,6 +34,9 @@ describe("discoverBundledExtension", () => {
       "tools/nested/second.ts",
     ]);
     expect(result.mount.programmaticDeclaration).toEqual({
+      entryPath: "/package/extension/extension.ts",
+      importSpecifier: "eve/example",
+      config: {},
       logicalPath: "extensions/example.ts",
       sourceId: `${mount.declaration.id}:extensions/example.ts`,
     });

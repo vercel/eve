@@ -1,6 +1,5 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { createRequire } from "node:module";
-import { join, resolve, sep } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { resolve, sep } from "node:path";
 
 const MOUNT_QUERY = "?eve-mount=";
 
@@ -10,6 +9,7 @@ interface Mount {
   readonly packageName: string;
   readonly specifier?: string;
   readonly mountSourcePath?: string;
+  readonly programmaticImport?: { readonly specifier: string; readonly entryPath: string };
 }
 
 function canonical(path: string): string {
@@ -47,12 +47,13 @@ export function createExtensionMountPlugin(
         resolve: (
           source: string,
           importer?: string,
-          options?: { skipSelf: boolean },
+          options?: { skipSelf: boolean; kind?: "import-statement" },
         ) => Promise<{ id: string; external?: boolean } | null>;
       },
       source: string,
       importer?: string,
     ) {
+      if (source === "eve/context") return undefined;
       const query = source.indexOf(MOUNT_QUERY);
       const tagged =
         query >= 0 ? decodeURIComponent(source.slice(query + MOUNT_QUERY.length)) : undefined;
@@ -81,18 +82,19 @@ export function createExtensionMountPlugin(
         !within(importerPath, mount.root) &&
         overrideMounts.get(importerPath) === mount;
       const sourceMount =
-        mount !== undefined && cleanSource === mount.specifier ? mount : undefined;
-      const builtInEntry =
-        sourceMount?.packageName === "eve" && cleanImporter !== undefined
-          ? ((sourceMount.specifier === "eve/self-modification"
-              ? ["extension.ts", "extension.js"]
-                  .map((name) => join(sourceMount.root, name))
-                  .find((path) => existsSync(path))
-              : undefined) ?? createRequire(cleanImporter).resolve(cleanSource))
+        mount !== undefined &&
+        (cleanSource === mount.specifier || cleanSource === mount.programmaticImport?.specifier)
+          ? mount
           : undefined;
-      const resolved = await this.resolve(builtInEntry ?? cleanSource, cleanImporter, {
-        skipSelf: true,
-      });
+      // Use ESM conditions for authored exports; programmatic mounts supply their entry.
+      const resolved = await this.resolve(
+        sourceMount?.programmaticImport?.entryPath ?? cleanSource,
+        cleanImporter,
+        {
+          skipSelf: true,
+          kind: "import-statement",
+        },
+      );
       if (resolved === null || resolved.id.startsWith("\0")) return resolved;
       if (resolved.external) {
         if (sourceMount === undefined) return resolved;
@@ -100,7 +102,9 @@ export function createExtensionMountPlugin(
           `Extension export "${cleanSource}" for mount "${mountId}" was externalized; it must be bundled to isolate its configuration.`,
         );
       }
-      const path = canonical(resolved.id.split("?")[0]!);
+      // Assets have no mutable module state. Preserve their loader's query and identity.
+      if (!/\.(?:[cm]?[jt]sx?|json)$/.test(resolved.id)) return resolved;
+      const path = canonical(resolved.id);
       if (
         mount !== undefined &&
         (sourceMount !== undefined || (!override && within(path, mount.root)))
@@ -123,6 +127,7 @@ export function createExtensionMountPlugin(
       const query = id.indexOf(MOUNT_QUERY);
       if (query < 0) return undefined;
       const path = id.slice(0, query);
+      if (!/\.(?:[cm]?[jt]sx?|json)$/.test(path)) return undefined;
       const extension = path.slice(path.lastIndexOf(".") + 1);
       const moduleType =
         extension === "json"

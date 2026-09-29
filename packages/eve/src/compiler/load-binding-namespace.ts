@@ -5,6 +5,8 @@ import {
   memoizeModuleNamespaceFactories,
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
+import { bindingMountId } from "#compiler/extension-mount-bindings.js";
+import type { ExtensionCompileMount } from "#compiler/extension-mount-evaluation.js";
 import { packageStateNamespace } from "#discover/extensions.js";
 import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
 
@@ -15,6 +17,8 @@ export type CompiledBindingNamespaceLoader = (
 /** Loads one node's selected bindings with dependency ordering and per-phase caching. */
 export function createCompiledBindingNamespaceLoader(input: {
   readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
+  readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
+  readonly evaluationId?: string;
   readonly mountSourceId?: (binding: AgentModuleBinding) => string | undefined;
   readonly onLoad?: (sourceId: string) => void;
   readonly registries: readonly AgentSourceRegistry[];
@@ -49,6 +53,8 @@ export function createCompiledBindingNamespaceLoader(input: {
         binding,
         loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
         registries: input.registries,
+        mounts: input.mounts,
+        evaluationId: input.evaluationId,
       });
     })().then(memoizeModuleNamespaceFactories);
     cache.set(sourceId, loading);
@@ -61,12 +67,16 @@ export function createCompiledBindingNamespaceLoader(input: {
 async function loadCompiledBindingNamespace(input: {
   readonly binding: AgentModuleBinding;
   readonly loadDependency: CompiledBindingNamespaceLoader;
+  readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
+  readonly evaluationId?: string;
   readonly registries: readonly AgentSourceRegistry[];
 }): Promise<ProgrammaticModuleNamespace> {
   if (input.binding.backing.kind === "filesystem") {
     return await loadAuthoredModuleNamespace(input.binding.backing.sourcePath, {
       externalDependencies: input.binding.backing.externalDependencies,
       extensionScopeNamespace: resolveCompiledModuleExtensionScopeNamespace(input.binding),
+      mount: input.mounts?.get(bindingMountId(input.binding) ?? ""),
+      evaluationId: input.evaluationId,
     });
   }
   const dependencyNamespaces = Object.fromEntries(
