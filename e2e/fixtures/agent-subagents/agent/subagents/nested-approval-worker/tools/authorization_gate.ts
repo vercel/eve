@@ -3,6 +3,7 @@ import {
   defineInteractiveAuthorization,
 } from "eve/connections";
 import { defineTool } from "eve/tools";
+import { z } from "zod";
 
 const AUTHORIZATION_NAME = "nested-release-authorization";
 const AUTHORIZATION_CODE = "nested-release-code";
@@ -27,7 +28,7 @@ const authorization = defineInteractiveAuthorization<{ marker: "release" }>({
 
 export default defineTool({
   description: "Authorize Alice's release checklist.",
-  inputSchema: {},
+  inputSchema: z.object({}),
   async execute(_input, ctx) {
     const result = await ctx.getToken(authorization, {
       authKey: AUTHORIZATION_NAME,

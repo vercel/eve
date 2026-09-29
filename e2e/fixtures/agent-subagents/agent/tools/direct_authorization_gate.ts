@@ -3,6 +3,7 @@ import {
   defineInteractiveAuthorization,
 } from "eve/connections";
 import { defineTool } from "eve/tools";
+import { z } from "zod";
 
 const CODE = "direct-release-code";
 const NAME = "direct-release-authorization";
@@ -26,7 +27,7 @@ const authorization = defineInteractiveAuthorization<{ marker: "direct" }>({
 
 export default defineTool({
   description: "Authorize Alice's release checklist in the remote agent.",
-  inputSchema: {},
+  inputSchema: z.object({}),
   async execute(_input, ctx) {
     const result = await ctx.getToken(authorization, {
       authKey: NAME,
