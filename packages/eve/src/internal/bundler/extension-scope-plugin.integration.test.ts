@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
+import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
 import {
   createExtensionScopePlugin,
   createFixedNamespaceScopePlugin,
@@ -49,6 +50,63 @@ const STATE_MODULE = [
 ].join("\n");
 
 describe("extension-scope plugin (bundled)", () => {
+  it("evaluates shared extension source once per mount, including relative imports", async () => {
+    const { sourceRoot } = scratchModule('export { instance } from "../shared.ts";');
+    writeFileSync(join(sourceRoot, "shared.ts"), "export const instance = {};");
+    const entry = join(sourceRoot, "entry.ts");
+    writeFileSync(
+      entry,
+      [
+        'import { instance as research } from "./tools/budget.ts?eve-mount=extensions%2Fresearch";',
+        'import { instance as support } from "./tools/budget.ts?eve-mount=extensions%2Fsupport";',
+        "export const distinct = research !== support;",
+      ].join("\n"),
+    );
+    const code = await bundle(entry, [
+      createExtensionMountPlugin([
+        {
+          mountId: "extensions/research",
+          sourceRoot,
+          packageName: "@acme/test",
+          specifier: "@acme/test",
+        },
+        {
+          mountId: "extensions/support",
+          sourceRoot,
+          packageName: "@acme/test",
+          specifier: "@acme/test",
+        },
+      ]),
+    ]);
+    const result = (await import(`data:text/javascript,${encodeURIComponent(code)}`)) as {
+      distinct: boolean;
+    };
+    expect(result.distinct).toBe(true);
+  });
+  it("rejects an application import with two possible mount owners", async () => {
+    const { sourceRoot } = scratchModule("export const value = 1;");
+    const entry = join(sourceRoot, "..", "consumer.ts");
+    writeFileSync(entry, 'export { value } from "./extension/tools/budget.ts";');
+    await expect(
+      bundle(entry, [
+        createExtensionMountPlugin([
+          {
+            mountId: "extensions/research",
+            sourceRoot,
+            packageName: "@acme/test",
+            specifier: "@acme/test",
+          },
+          {
+            mountId: "extensions/support",
+            sourceRoot,
+            packageName: "@acme/test",
+            specifier: "@acme/test",
+          },
+        ]),
+      ]),
+    ).rejects.toThrow(/multiple extension mounts/);
+  });
+
   afterAll(() => {
     // Scratch dirs live under the OS temp root; leaving them is harmless and
     // avoids racing the bundler's async file handles on cleanup.

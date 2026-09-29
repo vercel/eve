@@ -148,10 +148,8 @@ export function mountRefNamespace(logicalPath: string): string {
 }
 
 /**
- * Derives the namespace that scopes an extension's durable state keys and config
- * binding from its package name. Unlike the mount namespace, this stays keyed to
- * the package (e.g. `@acme/crm` → `acme-crm`) so renaming the consumer's mount
- * file never orphans persisted state.
+ * Derives the legacy durable state prefix from an extension's package name.
+ * Renaming the consumer's mount file does not change existing state keys.
  */
 export function packageStateNamespace(packageName: string): string {
   return (

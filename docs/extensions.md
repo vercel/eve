@@ -193,7 +193,9 @@ For an extension with no configuration, mount its default export directly:
 export { default } from "@acme/gizmo";
 ```
 
-The same mount shape works with an npm package, a workspace dependency, or a linked local package.
+The same mount shape works with an npm package, a workspace dependency, or a linked local package. Each mount binds its own configuration, even when two mounts use the same package. Moving or renaming a mount creates a new instance.
+
+Extension state still uses package-prefixed keys. Two stateful mounts of the same package in one context can share a state slot; application-defined state keys are unchanged.
 
 ### Use an extension in a workspace
 

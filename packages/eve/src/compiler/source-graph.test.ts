@@ -47,12 +47,7 @@ function candidate(
 
 describe("bundled extension declarations", () => {
   it("registers a configured extension declaration without enumerating contributions", async () => {
-    const loadMount = vi.fn(async () => {
-      expect((globalThis as Record<symbol, unknown>)[Symbol.for("eve.ext-config-scope")]).toBe(
-        "eve",
-      );
-      return { config: { enabled: true }, mounted: true };
-    });
+    const loadMount = vi.fn(async () => ({ config: { enabled: true }, mounted: true }));
     const mount = createBundledExtensionMount({
       loadMount,
       namespace: "example",
@@ -79,9 +74,6 @@ describe("bundled extension declarations", () => {
       }),
     ).resolves.toEqual({ default: { config: { enabled: true }, mounted: true } });
     expect(loadMount).toHaveBeenCalledOnce();
-    expect(
-      (globalThis as Record<symbol, unknown>)[Symbol.for("eve.ext-config-scope")],
-    ).toBeUndefined();
   });
 });
 

@@ -151,6 +151,7 @@ export type AgentSourceForm = "derived" | "direct";
 export type AgentModuleBacking =
   | {
       readonly externalDependencies: readonly string[];
+      readonly mountId?: string;
       readonly extensionScope?: {
         readonly namespace: string;
         readonly sourceRoot: string;

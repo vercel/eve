@@ -15,8 +15,12 @@ export class NodeModuleEvaluationContext {
   readonly #lifecycle = new NodeModuleLifecycle();
   readonly loadNamespace: CompiledBindingNamespaceLoader;
 
-  constructor(registries: readonly AgentSourceRegistry[]) {
+  constructor(
+    registries: readonly AgentSourceRegistry[],
+    mountSourceId?: (binding: AgentModuleBinding) => string | undefined,
+  ) {
     this.loadNamespace = createCompiledBindingNamespaceLoader({
+      mountSourceId,
       onLoad: (sourceId) => this.#lifecycle.recordCompileLoad(sourceId),
       registries,
       resolveBinding: (sourceId) => this.#bindings[sourceId],

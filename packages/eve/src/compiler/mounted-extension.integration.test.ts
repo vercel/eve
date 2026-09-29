@@ -1,10 +1,14 @@
-import { stat } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { serializeContext } from "#context/serialize.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
+import { bundleAuthoredModuleMapForGeneration } from "#internal/authored-module-loader.js";
 import { useTemporaryAppRoots } from "#internal/testing/use-temporary-app-roots.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
@@ -41,6 +45,219 @@ async function compileRuntimeGraph(appRoot: string) {
  * mount and tool modules. Deterministic guard for the config-binding regression.
  */
 describe("mounted extension via authored-source loader", () => {
+  it("binds independent config for duplicate mounts and loaded application graphs", async () => {
+    const app = await createAppRoot("eve-independent-extension-config-", {
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/instructions.md": "Work with the available tools.",
+        "agent/extensions/one/extension.mjs":
+          'import ext from "@acme/crm"; export default ext({ account: "one" });',
+        "agent/extensions/one/tools/account.mjs": [
+          'import ext from "@acme/crm";',
+          'import { defineState } from "eve/context";',
+          'const count = defineState("override-count", () => 0);',
+          'export default { description: "Read overridden account", inputSchema: {}, execute: () => { count.update(n => n + 1); return { account: ext.config.account, count: count.get() }; } };',
+        ].join("\n"),
+        "agent/extensions/two.mjs":
+          'import ext from "@acme/crm"; export default ext({ account: "two" });',
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
+          extension: 1,
+          tool: 1,
+          config: 1,
+        }),
+        "node_modules/@acme/crm/extension/extension.mjs": [
+          'import { defineExtension } from "eve/extension";',
+          "const config = { '~standard': { version: 1, vendor: 'test', validate: value => ({ value }) } };",
+          "export default defineExtension({ config });",
+        ].join("\n"),
+        "node_modules/@acme/crm/extension/tools/account.mjs": [
+          'import ext from "@acme/crm";',
+          "const account = ext.config.account; export default { description: account, inputSchema: {}, execute: () => account };",
+        ].join("\n"),
+      },
+    });
+    const first = await compileRuntimeGraph(app.appRoot);
+    expect(first.manifest.tools.find((tool) => tool.name === "two__account")?.description).toBe(
+      "two",
+    );
+    const second = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+    });
+    const read = (map: typeof first.moduleMap, name: string) => {
+      const tool = first.manifest.tools.find((entry) => entry.name === `${name}__account`)!;
+      return (
+        map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[tool.sourceId]!.default as {
+          execute: () => string | { account: string; count: number };
+        }
+      ).execute();
+    };
+    expect(read(first.moduleMap, "two")).toBe("two");
+    expect(read(second, "two")).toBe("two");
+    const context = new ContextContainer();
+    contextStorage.run(context, () => {
+      expect(read(first.moduleMap, "one")).toEqual({ account: "one", count: 1 });
+      expect(read(second, "one")).toEqual({ account: "one", count: 2 });
+    });
+    expect(Object.keys(serializeContext(context))).toContain("override-count");
+    expect(first.manifest.bindings["ext-override:one:tools/account.mjs"]?.owner.kind).toBe(
+      "application",
+    );
+
+    const moduleMapPath = join(app.appRoot, ".eve", "compile", "config-map.mjs");
+    const { code } = await bundleAuthoredModuleMapForGeneration({
+      appRoot: app.appRoot,
+      manifest: first.manifest,
+      moduleMapPath,
+    });
+    await writeFile(moduleMapPath, code);
+    const generated = (await import(`${moduleMapPath}?test=independent-config`)) as {
+      default: typeof first.moduleMap;
+    };
+    expect(read(generated.default, "two")).toBe("two");
+  });
+
+  it("allocates a new authored-source graph on each load", async () => {
+    const app = await createAppRoot("eve-fallback-generation-", {
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/instructions.md": "Work with the available tools.",
+        "agent/extensions/one.mjs": 'import ext from "@acme/crm"; export default ext;',
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({ extension: 1 }),
+        "node_modules/@acme/crm/extension/extension.mjs": "export default { instance: {} };",
+      },
+    });
+    await compileAgent({ startPath: app.appRoot });
+    const source = createDiskRuntimeCompiledArtifactsSource(app.appRoot);
+    const maps = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        loadCompiledModuleMapFromAuthoredSource({ compiledArtifactsSource: source }),
+      ),
+    );
+    const manifest = await loadCompiledManifest({ compiledArtifactsSource: source });
+    const id = manifest.extensionMounts[0]!.mountSourceId;
+    const instances = maps.map(
+      (map) => map.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[id]!.default,
+    );
+    expect(new Set(instances).size).toBe(4);
+  });
+
+  it("isolates configured built-in extension mounts", async () => {
+    const app = await createAppRoot("eve-built-in-mounts-", {
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/instructions.md": "Work with the available tools.",
+        "agent/extensions/one.mjs":
+          'import code from "eve/extensions/code"; export default code({ worker: { model: "openai/gpt-5.4", reasoning: "high" } });',
+        "agent/extensions/two.mjs":
+          'import code from "eve/extensions/code"; export default code({ worker: { model: "openai/gpt-5.4", reasoning: "low" } });',
+      },
+    });
+    const { manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
+    const workers = ["one", "two"].map((name) =>
+      manifest.subagents.find((subagent) => subagent.name === `${name}__worker`)!,
+    );
+    expect(workers[0]?.owner).toMatchObject({ mountId: "extensions/one" });
+    const reasoning = workers.map((worker) => {
+      if ("configResolver" in worker) throw new Error("Expected static worker config.");
+      const configSourceId = worker.agent.config.source.sourceId;
+      const definition = moduleMap.nodes[worker.nodeId]!.modules[configSourceId]!.default as {
+        model: { events: { "session.started": () => { reasoning: string } } };
+      };
+      return definition.model.events["session.started"]().reasoning;
+    });
+    expect(reasoning).toEqual(["high", "low"]);
+    const second = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+    });
+    const secondReasoning = workers.map((worker) => {
+      if ("configResolver" in worker) throw new Error("Expected static worker config.");
+      const definition = second.nodes[worker.nodeId]!.modules[worker.agent.config.source.sourceId]!
+        .default as {
+        model: { events: { "session.started": () => { reasoning: string } } };
+      };
+      return definition.model.events["session.started"]().reasoning;
+    });
+    expect(secondReasoning).toEqual(["high", "low"]);
+  });
+
+  it("keeps module instances distinct across mounts in a generation graph", async () => {
+    const app = await createAppRoot("eve-mount-instances-", {
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/instructions.md": "Work with the available tools.",
+        "agent/extensions/one.mjs": 'import ext from "@acme/crm"; export default ext;',
+        "agent/extensions/two.mjs": 'import ext from "@acme/crm"; export default ext;',
+        "node_modules/@acme/crm/package.json": JSON.stringify({
+          name: "@acme/crm",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        }),
+        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest({
+          extension: 1,
+          tool: 1,
+        }),
+        "node_modules/@acme/crm/extension/extension.mjs": 'export { default } from "./handle.mjs";',
+        "node_modules/@acme/crm/extension/handle.mjs": "export default { instance: {} };",
+        "node_modules/@acme/crm/extension/tools/check.mjs":
+          'import ext from "@acme/crm"; export default { description: "Check instance", inputSchema: {}, execute: () => ext.instance };',
+      },
+    });
+    const { manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
+    const fallbackModules = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules;
+    const fallbackMounts = manifest.extensionMounts.map(
+      (mount) => (fallbackModules[mount.mountSourceId]!.default as { instance: object }).instance,
+    );
+    expect(fallbackMounts[0]).not.toBe(fallbackMounts[1]);
+    const nextGraph = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+    });
+    const nextModules = nextGraph.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules;
+    expect(
+      (nextModules[manifest.extensionMounts[0]!.mountSourceId]!.default as { instance: object })
+        .instance,
+    ).not.toBe(fallbackMounts[0]);
+    for (const [index, mount] of manifest.extensionMounts.entries()) {
+      const tool = manifest.tools.find((entry) => entry.name === `${mount.namespace}__check`)!;
+      expect((fallbackModules[tool.sourceId]!.default as { execute: () => object }).execute()).toBe(
+        fallbackMounts[index],
+      );
+    }
+    const moduleMapPath = join(app.appRoot, ".eve", "compile", "mount-map.mjs");
+    const { code } = await bundleAuthoredModuleMapForGeneration({
+      appRoot: app.appRoot,
+      manifest,
+      moduleMapPath,
+    });
+    await mkdir(join(app.appRoot, ".eve", "compile"), { recursive: true });
+    await writeFile(moduleMapPath, code);
+    const map = (await import(`${moduleMapPath}?test=mount-instances`)) as {
+      default: { nodes: Record<string, { modules: Record<string, Record<string, unknown>> }> };
+    };
+    const modules = map.default.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules;
+    const mounts = manifest.extensionMounts;
+    const instances = mounts.map(
+      (mount) => (modules[mount.mountSourceId]!.default as { instance: object }).instance,
+    );
+    expect(instances[0]).not.toBe(instances[1]);
+    for (const [index, mount] of mounts.entries()) {
+      const tool = manifest.tools.find((entry) => entry.name === `${mount.namespace}__check`)!;
+      const definition = modules[tool.sourceId]!.default as { execute: () => object };
+      expect(definition.execute()).toBe(instances[index]);
+    }
+  });
   it("binds mounted config so a composed tool reads it", async () => {
     const app = await createAppRoot("eve-mounted-extension-authored-source-", {
       files: {

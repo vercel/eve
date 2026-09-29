@@ -40,6 +40,7 @@ interface ResolvedAuthoredExternalModule {
 export function createGenerationPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
+  readonly extensionSpecifiers?: ReadonlySet<string>;
 }): Record<string, unknown> {
   return {
     name: "eve-generation-package-boundary",
@@ -54,6 +55,8 @@ export function createGenerationPackageBoundaryPlugin(input: {
       }
 
       if (isFrameworkRuntimeImport(source, importer)) {
+        if (input.extensionSpecifiers?.has(source) && importer?.includes("?eve-mount="))
+          return undefined;
         return { external: true, id: resolveFrameworkRuntimeImport(source) };
       }
 

@@ -2,25 +2,17 @@ import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
 /**
- * One extension's on-disk source root paired with the namespace its durable
- * state keys and config binding must be scoped to.
+ * One extension's on-disk source root paired with its legacy durable state prefix.
  */
 interface ExtensionScope {
   /** Absolute path to the extension's source root. */
   readonly sourceRoot: string;
   /** Package-derived namespace (e.g. `acme-crm`). */
   readonly packageNamespace: string;
+  readonly mountId?: string;
 }
 
 const VIRTUAL_PREFIX = "\0eve-ext-scope:";
-
-/** Framework module an extension-owned import is redirected through. */
-type ScopedFrameworkModule = "eve/context" | "eve/extension";
-
-const SCOPED_FRAMEWORK_MODULES: Record<ScopedFrameworkModule, "context" | "extension"> = {
-  "eve/context": "context",
-  "eve/extension": "extension",
-};
 
 /** The subset of the rolldown/rollup plugin shape this plugin implements. */
 export interface ExtensionScopeBundlerPlugin {
@@ -47,27 +39,12 @@ function isUnder(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}${sep}`);
 }
 
-function shimSource(kind: "context" | "extension", namespace: string): string {
-  const ns = JSON.stringify(namespace);
-  if (kind === "context") {
-    // Wrap `defineState` (the only runtime export) so the durable key is
-    // prefixed with the namespace baked into the bundle, not read from
-    // evaluation-order-sensitive global state.
-    return [
-      `import { defineState as __eveScopedDefineState } from "eve/context";`,
-      `export function defineState(name, initial) {`,
-      `  return __eveScopedDefineState(${ns} + "." + name, initial);`,
-      `}`,
-      "",
-    ].join("\n");
-  }
-  // Wrap `defineExtension` (the only runtime export) so the handle bakes the
-  // namespace — both the mount binding and the handle's `config` reader resolve
-  // to the same scope from any module in the extension.
+function shimSource(namespace: string): string {
+  // Legacy state keys stay package-prefixed until checkpoint admission changes.
   return [
-    `import { defineExtension as __eveScopedDefineExtension } from "eve/extension";`,
-    `export function defineExtension(options, namespace) {`,
-    `  return __eveScopedDefineExtension(options, namespace === undefined ? ${ns} : namespace);`,
+    `import { defineState as __eveScopedDefineState } from "eve/context";`,
+    `export function defineState(name, initial) {`,
+    `  return __eveScopedDefineState(${JSON.stringify(namespace)} + "." + name, initial);`,
     `}`,
     "",
   ].join("\n");
@@ -75,7 +52,7 @@ function shimSource(kind: "context" | "extension", namespace: string): string {
 
 /**
  * Builds the resolveId/load hook pair shared by both plugin modes. `namespaceFor`
- * returns the scope namespace for a given importer, or `undefined` to leave the
+ * returns the legacy state scope for an importer, or `undefined` to leave the
  * import untouched.
  */
 function scopeHooks(
@@ -85,15 +62,12 @@ function scopeHooks(
   return {
     name,
     resolveId(source: string, importer: string | undefined) {
-      const kind = SCOPED_FRAMEWORK_MODULES[source as ScopedFrameworkModule];
-      if (kind === undefined || importer === undefined || importer.startsWith("\0")) {
+      if (source !== "eve/context" || importer === undefined || importer.startsWith("\0")) {
         return undefined;
       }
       const namespace = namespaceFor(importer);
-      if (namespace === undefined) {
-        return undefined;
-      }
-      return `${VIRTUAL_PREFIX}${kind}:${namespace}`;
+      if (namespace === undefined) return undefined;
+      return `${VIRTUAL_PREFIX}context:${namespace}`;
     },
     load(id: string) {
       if (!id.startsWith(VIRTUAL_PREFIX)) {
@@ -101,9 +75,9 @@ function scopeHooks(
       }
       const descriptor = id.slice(VIRTUAL_PREFIX.length);
       const separatorIndex = descriptor.indexOf(":");
-      const kind = descriptor.slice(0, separatorIndex) as "context" | "extension";
+      if (descriptor.slice(0, separatorIndex) !== "context") return undefined;
       const namespace = descriptor.slice(separatorIndex + 1);
-      return { code: shimSource(kind, namespace), moduleType: "js" as const };
+      return { code: shimSource(namespace), moduleType: "js" as const };
     },
   };
 }
@@ -111,8 +85,8 @@ function scopeHooks(
 /**
  * Path-containment scope plugin for the whole-application bundle (the production
  * build). Any module physically under an extension's source root has its
- * `eve/context`/`eve/extension` imports redirected to a generated shim that
- * bakes the extension's package namespace into `defineState`/`defineExtension`.
+ * `eve/context` imports redirected to a generated shim that preserves the
+ * legacy package prefix for `defineState`.
  *
  * Returns `null` when there are no extensions, so consumer-only builds carry no
  * extra plugin and their output is byte-identical to a non-extension build.
@@ -126,15 +100,23 @@ export function createExtensionScopePlugin(
   const canonicalScopes = scopes.map((scope) => ({
     root: canonicalize(scope.sourceRoot),
     packageNamespace: scope.packageNamespace,
+    mountId: scope.mountId,
   }));
   return scopeHooks("eve-extension-scope", (importer) => {
-    const path = importerPath(importer);
-    for (const scope of canonicalScopes) {
-      if (isUnder(path, scope.root)) {
-        return scope.packageNamespace;
-      }
+    const mountQuery = importer.indexOf("?eve-mount=");
+    if (mountQuery >= 0) {
+      const mountId = decodeURIComponent(importer.slice(mountQuery + "?eve-mount=".length));
+      const owned = canonicalScopes.find((scope) => scope.mountId === mountId);
+      if (owned === undefined) throw new Error(`Unknown extension mount "${mountId}".`);
+      return isUnder(importerPath(importer), owned.root) ? owned.packageNamespace : undefined;
     }
-    return undefined;
+    const path = importerPath(importer);
+    const matches = canonicalScopes.filter((scope) => isUnder(path, scope.root));
+    if (matches.length === 0) return undefined;
+    if (new Set(matches.map((scope) => scope.packageNamespace)).size > 1) {
+      throw new Error(`Ambiguous extension scope for "${path}".`);
+    }
+    return matches[0]!.packageNamespace;
   });
 }
 

@@ -38,6 +38,7 @@ interface BoundModule {
 }
 
 interface BoundNodeScope {
+  readonly mounts: CompiledAgentResources["extensionMounts"];
   readonly modules: readonly BoundModule[];
   readonly nodeId: string;
 }
@@ -61,21 +62,54 @@ export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSour
   let index = 0;
   let usesProgrammaticLoader = false;
   const scopes: RenderedNodeScope[] = collectBoundNodeScopes(input.manifest).map((scope) => {
+    const mountIds = new Map(scope.mounts.map((mount) => [mount.mountSourceId, mount.mountId]));
+    const mountSourceIds = new Map(
+      scope.mounts.map((mount) => [mount.mountId, mount.mountSourceId]),
+    );
     const bindingNames = new Map(
       scope.modules.map((module) => [module.sourceId, `module_${index++}`] as const),
     );
+    const ordered = orderBoundModules(scope.modules, (binding) =>
+      mountSourceIds.get(
+        binding.backing.kind === "filesystem" && binding.backing.mountId !== undefined
+          ? binding.backing.mountId
+          : binding.owner.kind === "extension"
+            ? binding.owner.mountId
+            : "",
+      ),
+    );
     return {
-      modules: scope.modules.map(({ binding, sourceId }) => {
+      modules: ordered.map(({ binding, sourceId }) => {
         const bindingName = bindingNames.get(sourceId)!;
         if (binding.backing.kind === "filesystem") {
-          return {
-            bindingName,
-            importSpecifier: createImportSpecifier({
+          const specifier =
+            createImportSpecifier({
               fromDirectory: moduleMapDirectory,
               importSpecifierStyle,
               targetPath: binding.backing.sourcePath,
-            }),
-            initializer: `memoizeModuleNamespaceFactories(imported_${bindingName})`,
+            }) +
+            (binding.owner.kind === "extension" ||
+            mountIds.has(sourceId) ||
+            binding.backing.mountId !== undefined
+              ? `?eve-mount=${encodeURIComponent(binding.backing.mountId ?? (binding.owner.kind === "extension" ? binding.owner.mountId : mountIds.get(sourceId)!))}`
+              : "");
+          const contribution =
+            binding.owner.kind === "extension" || binding.backing.mountId !== undefined;
+          return {
+            bindingName,
+            importSpecifier: contribution ? undefined : specifier,
+            initializer: `memoizeModuleNamespaceFactories(${contribution ? `await import(${JSON.stringify(specifier)})` : `imported_${bindingName}`})`,
+            sourceId,
+          };
+        }
+        if (
+          mountIds.get(sourceId) === "extensions/self-modification" &&
+          binding.backing.registryId === "eve:development-extension:self-modification"
+        ) {
+          const specifier = `eve/self-modification?eve-mount=${encodeURIComponent(mountIds.get(sourceId)!)}`;
+          return {
+            bindingName,
+            initializer: `memoizeModuleNamespaceFactories({ default: (await import(${JSON.stringify(specifier)})).default({ local: { enabled: true } }) })`,
             sourceId,
           };
         }
@@ -132,7 +166,21 @@ export async function createProgrammaticCompiledModuleMap(
     const bindings = Object.fromEntries(
       scope.modules.map(({ binding, sourceId }) => [sourceId, binding]),
     );
-    const loadNamespace = createCompiledBindingNamespaceLoader({ bindings, registries });
+    const mountSourceIds = new Map(
+      scope.mounts.map((mount) => [mount.mountId, mount.mountSourceId]),
+    );
+    const loadNamespace = createCompiledBindingNamespaceLoader({
+      bindings,
+      registries,
+      mountSourceId: (binding) =>
+        mountSourceIds.get(
+          binding.backing.kind === "filesystem" && binding.backing.mountId !== undefined
+            ? binding.backing.mountId
+            : binding.owner.kind === "extension"
+              ? binding.owner.mountId
+              : "",
+        ),
+    });
     for (const { sourceId } of scope.modules) {
       modules[sourceId] = await loadNamespace(sourceId);
     }
@@ -162,7 +210,10 @@ export function collectRuntimeModuleBindingsForManifest(
   );
 }
 
-function orderBoundModules(modules: readonly BoundModule[]): readonly BoundModule[] {
+function orderBoundModules(
+  modules: readonly BoundModule[],
+  mountSourceId?: (binding: CompiledModuleBinding) => string | undefined,
+): readonly BoundModule[] {
   const bySourceId = new Map(modules.map((module) => [module.sourceId, module]));
   const ordered: BoundModule[] = [];
   const visiting = new Set<string>();
@@ -173,6 +224,11 @@ function orderBoundModules(modules: readonly BoundModule[]): readonly BoundModul
       throw new Error(`Compiled module dependency cycle includes "${module.sourceId}".`);
     }
     visiting.add(module.sourceId);
+    const mount = mountSourceId?.(module.binding);
+    if (mount !== undefined && mount !== module.sourceId) {
+      const dependency = bySourceId.get(mount);
+      if (dependency !== undefined) visit(dependency);
+    }
     if (module.binding.backing.kind === "programmatic") {
       for (const dependencySourceId of Object.values(module.binding.backing.dependencies ?? {})) {
         const dependency = bySourceId.get(dependencySourceId);
@@ -207,12 +263,14 @@ function collectBoundNodeScopes(manifest: CompiledAgentManifest): readonly Bound
   return [
     {
       modules: collectRuntimeModuleBindingsForManifest(manifest),
+      mounts: manifest.extensionMounts,
       nodeId: ROOT_COMPILED_AGENT_NODE_ID,
     },
     ...[...manifest.subagents]
       .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
       .map((subagent) => ({
         modules: collectRuntimeModuleBindingsForManifest(subagent.agent),
+        mounts: subagent.agent.extensionMounts,
         nodeId: subagent.nodeId,
       })),
   ];

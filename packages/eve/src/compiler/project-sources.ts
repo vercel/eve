@@ -154,6 +154,7 @@ export function projectAgentSources(input: {
         nodeId: input.nodeId,
         subagentsPath: posix.join(mountId, "subagents"),
         owner: { kind: "application" },
+        mountId,
         resources,
         sourceIdPrefix: `ext-override:${mount.namespace}:`,
         subagents,
@@ -190,6 +191,7 @@ function createFilesystemModuleCandidate(input: {
   readonly logicalPath: string;
   readonly nodeId: string;
   readonly owner: AgentSourceOwner;
+  readonly mountId?: string;
   readonly source: ModuleSourceRef;
   readonly sourceId?: string;
   readonly sourceRoot: string;
@@ -200,6 +202,7 @@ function createFilesystemModuleCandidate(input: {
       ? { extensionScope: input.extensionScope }
       : {}),
     kind: "filesystem" as const,
+    mountId: input.mountId,
     sourcePath: join(input.sourceRoot, input.source.logicalPath),
   };
   return {
@@ -258,6 +261,7 @@ function projectManifest(input: {
   readonly nodeId: string;
   readonly subagentsPath: string;
   readonly owner: AgentSourceOwner;
+  readonly mountId?: string;
   readonly resources: ProjectedResourceSource[];
   readonly sourceIdPrefix?: string;
   readonly subagents: ProjectedSubagentSource[];
@@ -275,6 +279,7 @@ function projectManifest(input: {
       logicalPath,
       nodeId: input.nodeId,
       owner: input.owner,
+      mountId: input.mountId,
       source,
       sourceId: sourceId(source.sourceId),
       sourceRoot: input.manifest.agentRoot,

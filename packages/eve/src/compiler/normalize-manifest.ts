@@ -1,4 +1,7 @@
+import { posix } from "node:path";
+
 import type { AgentSourceManifest } from "#discover/manifest.js";
+import { mountRefNamespace } from "#discover/extensions.js";
 import {
   type CompiledAgentDefinition,
   type CompiledAgentManifest,
@@ -437,7 +440,21 @@ class AgentGraphCompiler {
     externalDependencies: readonly string[],
   ): Promise<PhaseOneNodeSourceState> {
     const graph = this.composeNodeSources(input, externalDependencies);
-    const evaluation = new NodeModuleEvaluationContext(this.registries);
+    const mountsById = new Map(
+      input.manifest.resolvedExtensions.map((mount) => [
+        posix.join(input.nodePath, "extensions", mount.namespace),
+        mount.programmaticDeclaration?.sourceId ??
+          input.manifest.extensions.find(
+            (ref) => mountRefNamespace(ref.logicalPath) === mount.namespace,
+          )?.sourceId,
+      ]),
+    );
+    const evaluation = new NodeModuleEvaluationContext(this.registries, (binding) => {
+      const mountId = binding.backing.kind === "filesystem" ? binding.backing.mountId : undefined;
+      return mountsById.get(
+        mountId ?? (binding.owner.kind === "extension" ? binding.owner.mountId : ""),
+      );
+    });
     evaluation.setBindings(
       Object.fromEntries(
         [...graph.composed.selected.values()]

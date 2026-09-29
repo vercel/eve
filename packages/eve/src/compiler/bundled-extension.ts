@@ -1,4 +1,3 @@
-import { packageStateNamespace } from "#discover/extensions.js";
 import {
   defineProgrammaticExtensionMountDeclaration,
   type ProgrammaticAgentSource,
@@ -36,18 +35,7 @@ export function createBundledExtensionMount(
     modules: [
       {
         logicalPath,
-        loadNamespace: async () => {
-          const container = globalThis as Record<symbol, unknown>;
-          const scopeSymbol = Symbol.for("eve.ext-config-scope");
-          const previousScope = container[scopeSymbol];
-          container[scopeSymbol] = packageStateNamespace(packageName);
-          try {
-            return { default: await descriptor.loadMount() };
-          } finally {
-            if (previousScope === undefined) delete container[scopeSymbol];
-            else container[scopeSymbol] = previousScope;
-          }
-        },
+        loadNamespace: async () => ({ default: await descriptor.loadMount() }),
       },
     ],
   });

@@ -21,6 +21,7 @@ import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artif
 import { createCompiledSandboxProviderPrunePlugin } from "#internal/nitro/host/compiled-sandbox-provider-prune-plugin.js";
 import { createDevelopmentRuntimePrunePlugin } from "#internal/nitro/host/development-runtime-prune-plugin.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
+import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
 import {
   createExtensionExternalDependencyPlugin,
   resolveExtensionExternalDependencyPaths,
@@ -586,6 +587,7 @@ function createApplicationNitroBundlerConfiguration(
       node.extensionMounts.map((mount) => ({
         sourceRoot: mount.sourceRoot,
         packageNamespace: mount.packageNamespace,
+        mountId: mount.mountId,
       })),
     ),
   );
@@ -598,6 +600,21 @@ function createApplicationNitroBundlerConfiguration(
     compiledSandboxProviderPrunePlugin,
     createOptionalEngineDependencyPlugin(unconfiguredOptionalEnginePackages),
     createExtensionExternalDependencyPlugin(extensionMounts),
+    createExtensionMountPlugin(
+      extensionMounts,
+      new Map(
+        [
+          preparedHost.compileResult.manifest,
+          ...preparedHost.compileResult.manifest.subagents.map((subagent) => subagent.agent),
+        ].flatMap((node) =>
+          Object.values(node.bindings).flatMap((binding) =>
+            binding.backing.kind === "filesystem" && binding.backing.mountId !== undefined
+              ? [[binding.backing.sourcePath, binding.backing.mountId] as const]
+              : [],
+          ),
+        ),
+      ),
+    ),
     extensionScopePlugin,
   ].filter((plugin) => plugin !== null);
   const nitroRolldownConfig = {
