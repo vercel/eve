@@ -20,6 +20,7 @@ import {
 } from "#execution/tasks/table.js";
 import { getSessionTokenUsage } from "#harness/turn-tag-state.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
@@ -36,6 +37,9 @@ vi.mock("#execution/cancel-descendant-turns-step.js", () => ({
 }));
 vi.mock("#execution/route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
+}));
+vi.mock("#execution/tools/workflow/interrupt.js", () => ({
+  interruptWorkflowToolRun: vi.fn(),
 }));
 vi.mock("#execution/session/turn-waiting-step.js", () => ({
   publishTurnWaitingStep: vi.fn(async ({ serializedContext, sessionState }) => ({
@@ -725,6 +729,91 @@ describe("SessionExecution checkpoints", () => {
       expect.objectContaining({ delivery: answer }),
     );
     expect(queue.pendingCount).toBe(0);
+  });
+
+  it("routes an answer to its question before the message beside it interrupts the waited call", async () => {
+    const base = { ...state(""), hasProxyInputRequests: true };
+    const sessionState: DurableSessionState = {
+      ...base,
+      snapshot: {
+        session: registerWorkflowToolRun(base.snapshot.session, {
+          address: { hookToken: "deploy-control", runId: "deploy-run" },
+          callId: "deploy-call",
+          origin: { stepIndex: 0, turnId: "turn_0" },
+          toolName: "deploy",
+        }),
+      },
+    };
+    const correction: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "Also include Bob's service." }],
+    };
+    const answerAndCorrection: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [
+        { inputResponses: [{ requestId: "region", text: "us-east-1" }] },
+        { message: "Also include Bob's service." },
+      ],
+    };
+    const runtimePayloads: SessionInboxPayload[] = [answerAndCorrection, { kind: "cancel" }];
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => []),
+      hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
+      next: vi.fn(async () => runtimePayloads.shift()),
+      onDelivery: vi.fn(() => () => {}),
+      onAgentStarted: () => () => {},
+      onInterrupt: vi.fn(() => () => {}),
+      restore: vi.fn(),
+    };
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValue({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["deploy-call"],
+        serializedContext: {},
+        sessionState,
+      });
+    vi.mocked(dispatchCoordinationStep).mockReset().mockResolvedValue({
+      results: [],
+      serializedContext: {},
+      sessionState,
+    });
+    const order: string[] = [];
+    vi.mocked(routeDeliverToChildren).mockImplementation(async (input) => {
+      order.push("route");
+      return {
+        kind: "continue",
+        remainder: correction,
+        serializedContext: input.serializedContext,
+        sessionState: input.sessionState,
+      };
+    });
+    vi.mocked(interruptWorkflowToolRun)
+      .mockReset()
+      .mockImplementation(async () => {
+        order.push("interrupt");
+      });
+
+    await expect(
+      createExecution({ inbox, sessionState }).runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
+      }),
+    ).resolves.toEqual({ cancelled: true, kind: "park" });
+
+    expect(routeDeliverToChildren).toHaveBeenCalledWith(
+      expect.objectContaining({ delivery: answerAndCorrection }),
+    );
+    expect(interruptWorkflowToolRun).toHaveBeenCalledWith({
+      hookToken: "deploy-control",
+      runId: "deploy-run",
+    });
+    expect(order).toEqual(["route", "interrupt"]);
   });
 
   it("reports turn.waiting once when task_wait parks on a working task", async () => {
