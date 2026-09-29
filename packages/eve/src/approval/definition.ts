@@ -43,6 +43,13 @@ export type ApprovalPolicy<TInput = Record<string, unknown>> = (
 export interface ApprovalRequest<TInput = Record<string, unknown>> {
   readonly callId: string;
   readonly requestId: string;
+  /**
+   * Who requested the tool call: the auth of the caller whose turn made it,
+   * captured when the approval was requested. It stays the same while the
+   * request is pending, however many people continue the session, and is
+   * `null` when that caller was unauthenticated or anonymous.
+   */
+  readonly requester: SessionAuthContext | null;
   readonly toolInput?: ApprovalToolInput<TInput>;
   readonly toolName: string;
 }

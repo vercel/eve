@@ -1,7 +1,8 @@
 import type { ModelMessage } from "ai";
 
 import { contextStorage } from "#context/container.js";
-import { ActivityRootTurnIdKey } from "#context/keys.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { ActivityRootTurnIdKey, AuthKey, SessionKey } from "#context/keys.js";
 import type { InputRequest } from "#shared/input.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -32,6 +33,11 @@ export interface PendingInputBatch {
   readonly event?: PendingInputBatchEvent;
   readonly activityRootTurnId?: string;
   readonly requests: readonly InputRequest[];
+  /**
+   * Auth of the caller whose turn parked the batch, captured when it parked;
+   * `null` when that caller was unauthenticated.
+   */
+  readonly requester?: SessionAuthContext | null;
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
 }
@@ -138,6 +144,7 @@ function setPendingInputBatches(
     state[PENDING_INPUT_BATCHES_KEY] = batches.map((batch) => ({
       event: batch.event,
       activityRootTurnId: batch.activityRootTurnId,
+      requester: batch.requester,
       responseAuthRequiredRequestIds: batch.responseAuthRequiredRequestIds,
       toolReplayIdentities: batch.toolReplayIdentities,
       requests: [...batch.requests],
@@ -167,12 +174,34 @@ export function appendPendingInputBatch(input: {
       event: input.event,
       activityRootTurnId:
         input.activityRootTurnId ?? contextStorage.getStore()?.get(ActivityRootTurnIdKey),
+      requester: currentRequester(),
       responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
       toolReplayIdentities: input.toolReplayIdentities,
       requests: input.requests,
       responseMessages: input.responseMessages,
     },
   ]);
+}
+
+/**
+ * Every anonymous caller shares one synthetic identity, so an anonymous
+ * requester can't be told apart from another anonymous responder: record none.
+ */
+function currentRequester(): SessionAuthContext | null {
+  const context = contextStorage.getStore();
+  const auth = context?.get(AuthKey) ?? context?.get(SessionKey)?.auth.current ?? null;
+  return auth?.principalType === "anonymous" ? null : auth;
+}
+
+/** The requester recorded on the pending batch that holds `requestId`. */
+export function pendingInputRequester(
+  state: SessionStateMap | undefined,
+  requestId: string,
+): SessionAuthContext | null {
+  const batch = getPendingInputBatches(state).find((candidate) =>
+    candidate.requests.some((request) => request.requestId === requestId),
+  );
+  return batch?.requester ?? null;
 }
 
 export function activityRootTurnIdForInputResponses(

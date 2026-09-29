@@ -26,7 +26,7 @@ import {
   type AuthorizationChallenge,
 } from "#harness/authorization.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
-import { getPendingInputBatches } from "#harness/pending-input-batches.js";
+import { getPendingInputBatches, pendingInputRequester } from "#harness/pending-input-batches.js";
 import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -326,6 +326,7 @@ async function authorizeCandidate(input: {
         request: {
           callId: input.request.action.callId,
           requestId: input.request.requestId,
+          requester: pendingInputRequester(session.state, input.request.requestId),
           toolInput: input.request.action.input,
           toolName: input.request.action.toolName,
         },

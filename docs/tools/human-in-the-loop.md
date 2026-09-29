@@ -114,12 +114,49 @@ export default defineTool({
 The `response` policy receives:
 
 - `responder`: the authenticated principal that submitted the response, including its `principalId`, `principalType`, `authenticator`, and `attributes`. Your route or channel supplies this identity.
-- `request`: the stable `requestId`, `callId`, `toolName`, and typed `toolInput` for the call being approved.
+- `request`: the stable `requestId`, `callId`, `toolName`, and typed `toolInput` for the call being approved, plus `requester`: the authenticated principal whose turn made the call, or `null` when that caller was unauthenticated or anonymous. eve captures `requester` when the approval is requested, so it stays the same while other people continue the session.
 - `response`: the submitted decision. Response policies run for approval, so its current value is `{ decision: "approve" }`.
 - `session`: read-only session identity and lineage: `id`, `initiator`, `parent`, and `turn`.
 - `auth`: narrow `getToken(provider, options?)` and `requireAuth(provider, options?)` capabilities bound to the responder. Use these when authorization depends on a provider identity or permission; an interactive provider flow parks durably and then retries the policy.
 
 Return `{ status: "allowed" }` to accept the approval. Return `{ status: "rejected", reason }` to leave the shared request pending so another eligible responder can approve it.
+
+`session.initiator` is the person who started the session, and `request.requester` is the person who asked for this call. In a shared thread they can differ. Compare the full identity of `responder` with `request.requester` to let only the requester approve the call:
+
+```ts title="agent/tools/publish_release.ts"
+import { defineTool } from "eve/tools";
+import type { SessionAuthContext } from "eve/context";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
+
+function samePrincipal(a: SessionAuthContext, b: SessionAuthContext): boolean {
+  return (
+    a.authenticator === b.authenticator &&
+    a.issuer === b.issuer &&
+    a.principalType === b.principalType &&
+    a.principalId === b.principalId
+  );
+}
+
+export default defineTool({
+  description: "Publish a release.",
+  inputSchema: z.object({ version: z.string() }),
+  approval: {
+    request: always(),
+    // `requester` is null for an unauthenticated or anonymous caller, so no one matches it.
+    response: ({ request, responder }) =>
+      request.requester !== null && samePrincipal(responder, request.requester)
+        ? { status: "allowed" }
+        : {
+            status: "rejected",
+            reason: "Only the person who asked for this release can approve it.",
+          },
+  },
+  async execute(input) {
+    return publish(input);
+  },
+});
+```
 
 When a response is refused without starting a turn, the session returns to `session.waiting`. The client finishes the submission and keeps the approval prompt answerable. Submitting an answer does not confirm approval: `approval.settled` or `input.resolved` records the server's decision. You can inspect `approval.candidate` events for the response policy's refusal reason.
 

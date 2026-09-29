@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { jsonSchema } from "ai";
 import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import { AuthKey, SessionKey } from "#context/keys.js";
 import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
@@ -88,6 +88,37 @@ describe("coordinateApprovalDelivery", () => {
       tools: new Map(),
     });
   }
+
+  function parkedBy(auth: SessionAuthContext): HarnessSession {
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, auth);
+    return contextStorage.run(ctx, parkedSession);
+  }
+
+  it("passes the requester the batch parked with to the response policy", async () => {
+    const requester: SessionAuthContext = { ...responder, principalId: "bob" };
+    const ingested = await ingest(parkedBy(requester));
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
+    await authorize(ingested.session, response);
+    expect(response).toHaveBeenCalledWith(
+      expect.objectContaining({ request: expect.objectContaining({ requester }), responder }),
+    );
+  });
+
+  it("records no requester for an anonymous caller", async () => {
+    const anonymous: SessionAuthContext = {
+      attributes: {},
+      authenticator: "none",
+      principalId: "anonymous",
+      principalType: "anonymous",
+    };
+    const ingested = await ingest(parkedBy(anonymous));
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
+    await authorize(ingested.session, response);
+    expect(response).toHaveBeenCalledWith(
+      expect.objectContaining({ request: expect.objectContaining({ requester: null }) }),
+    );
+  });
 
   it.each(["rejected", "failed", "allowed"] as const)(
     "explicitly completes %s candidates only after ingestion",
