@@ -10,6 +10,10 @@ import {
 } from "#execution/durable-session-store.js";
 import { withSessionEventEmitter } from "#execution/publish-session-events.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
+import {
+  withSessionStateDelta,
+  type WithSessionStateDelta,
+} from "#execution/session/state-delta.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
@@ -25,13 +29,7 @@ export interface CancelledTurnSettleResult {
   readonly usage?: TokenUsage;
 }
 
-/**
- * Settles one cancelled turn: emits `turn.cancelled` → `session.waiting`,
- * drops pending coordination state, and persists the between-turns
- * session. Runs in the owner, whose wake sources exclude the
- * cancel hook, so a queued cancel wake cannot re-dispatch it.
- */
-export async function settleCancelledTurnStep(input: {
+interface CancelledTurnSettleInput {
   /**
    * Whether a caller receives the turn's usage. Only then is it marked
    * reported; otherwise the next settled turn reports it.
@@ -40,9 +38,25 @@ export async function settleCancelledTurnStep(input: {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<CancelledTurnSettleResult> {
-  "use step";
+}
 
+/**
+ * Settles one cancelled turn: emits `turn.cancelled` → `session.waiting`,
+ * drops pending coordination state, and persists the between-turns
+ * session. Runs in the owner, whose wake sources exclude the
+ * cancel hook, so a queued cancel wake cannot re-dispatch it.
+ */
+export async function settleCancelledTurnStep(
+  input: CancelledTurnSettleInput,
+): Promise<WithSessionStateDelta<CancelledTurnSettleResult>> {
+  "use step";
+  return await withSessionStateDelta(input, settleCancelledTurn);
+}
+
+/** {@link settleCancelledTurnStep} for a caller that is already a step and adopts the whole state. */
+export async function settleCancelledTurn(
+  input: CancelledTurnSettleInput,
+): Promise<CancelledTurnSettleResult> {
   const durableSession = readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const emitted = await withSessionEventEmitter(

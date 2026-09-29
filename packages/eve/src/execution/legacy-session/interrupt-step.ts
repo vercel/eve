@@ -8,7 +8,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
+import { settleCancelledTurn } from "#execution/settle-cancelled-turn-step.js";
 import type { PreparedLegacySession } from "./prepare-step.js";
 
 /** Only the elected importer may stop work or append cancellation events. */
@@ -81,7 +81,7 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
       sessionState: prepared.sessionState,
       serializedContext: prepared.serializedContext,
     };
-  return await settleCancelledTurnStep({
+  return await settleCancelledTurn({
     reportUsage: false,
     sessionWritable: prepared.input.sessionWritable,
     serializedContext: prepared.serializedContext,

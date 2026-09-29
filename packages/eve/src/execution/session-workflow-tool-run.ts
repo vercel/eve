@@ -49,18 +49,12 @@ export async function handleWorkflowToolRunMessage(
       await handleWorkflowToolRunWithdraw({ ...input, message });
       return undefined;
     case "report":
-      await input.cursor.apply(
-        await emitWorkflowToolRunReportStep({
-          ...input.cursor.stepState(),
-          from: message.from,
-          update: message.update,
-        }),
+      await input.cursor.advance((state) =>
+        emitWorkflowToolRunReportStep({ ...state, from: message.from, update: message.update }),
       );
       return undefined;
     case "agent-started":
-      await input.cursor.apply(
-        await emitAgentStartedStep({ ...input.cursor.stepState(), message }),
-      );
+      await input.cursor.advance((state) => emitAgentStartedStep({ ...state, message }));
       return undefined;
   }
 }
@@ -98,22 +92,19 @@ async function handleWorkflowToolRunRequest(
   if (message.request.kind === "authorization-request") {
     const request = message.request;
     await deliverWorkflowAuthorization({ ...message, request }, async () => {
-      await cursor.apply(
-        await runProxySubagentEventStep({
-          hookPayload: request.event,
-          ...cursor.stepState(),
-        }),
+      await cursor.advance((state) =>
+        runProxySubagentEventStep({ hookPayload: request.event, ...state }),
       );
     });
     return;
   }
-  await cursor.apply(
-    await runProxySubagentEventStep({
+  await cursor.advance((state) =>
+    runProxySubagentEventStep({
       ...(message.request.kind === "ask" && {
         workflowAsk: createWorkflowAskRoute(message.from, message.request),
       }),
       hookPayload: workflowToolRunRequestToInputRequestPayload(message),
-      ...cursor.stepState(),
+      ...state,
     }),
   );
 }
@@ -127,9 +118,9 @@ async function handleWorkflowToolRunWithdraw(
   input: HandlerInput<WorkflowToolRunWithdrawMessage>,
 ): Promise<void> {
   const { cursor, message } = input;
-  await cursor.apply(
-    await withdrawWorkflowToolRunQuestionStep({
-      ...cursor.stepState(),
+  await cursor.advance((state) =>
+    withdrawWorkflowToolRunQuestionStep({
+      ...state,
       control: message.control,
       requestId: message.replyTo,
       runId: message.from.runId,

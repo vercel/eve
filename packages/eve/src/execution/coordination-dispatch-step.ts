@@ -7,6 +7,10 @@ import {
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { publishSessionEvents } from "#execution/publish-session-events.js";
+import {
+  withSessionStateDelta,
+  type WithSessionStateDelta,
+} from "#execution/session/state-delta.js";
 import { startWorkflowTask, type StartWorkflowTaskInput } from "#execution/tools/workflow/start.js";
 import { sendToTask, startTaskRun } from "#execution/tasks/start.js";
 import {
@@ -23,9 +27,14 @@ type CoordinationDispatchStepInput = CoordinationDispatchInput & {
 
 export async function dispatchCoordinationStep(
   input: CoordinationDispatchStepInput,
-): Promise<CoordinationDispatchResult> {
+): Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
   "use step";
+  return await withSessionStateDelta(input, dispatchCoordination);
+}
 
+async function dispatchCoordination(
+  input: CoordinationDispatchStepInput,
+): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,

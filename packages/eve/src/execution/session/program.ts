@@ -235,12 +235,9 @@ async function runSessionLoop(
   const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
     if (caller !== undefined) {
-      await cursor.apply({
-        serializedContext: await bindTurnCallerContextStep({
-          caller,
-          serializedContext: cursor.serializedContext,
-        }),
-      });
+      await cursor.advance((state) =>
+        bindTurnCallerContextStep({ caller, serializedContext: state.serializedContext }),
+      );
     }
     progress.turnId = `turn_${String(turnIndex++)}`;
     const outcome = await execution.runTurn(payload, { caller });
@@ -259,11 +256,9 @@ async function runSessionLoop(
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
   const settleCancelledTurn = async (reportUsage: boolean) => {
-    const settled = await settleCancelledTurnStep({
-      ...cursor.stepState(),
-      reportUsage,
-    });
-    await cursor.apply(settled);
+    const settled = await cursor.advance((state) =>
+      settleCancelledTurnStep({ ...state, reportUsage }),
+    );
     progress.caller = undefined;
     return settled;
   };

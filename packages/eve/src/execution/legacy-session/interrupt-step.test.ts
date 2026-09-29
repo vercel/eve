@@ -13,7 +13,7 @@ vi.mock("#execution/terminate-child-sessions-step.js", () => ({
   terminateChildSessionsStep: mocks.children,
 }));
 vi.mock("#execution/settle-cancelled-turn-step.js", () => ({
-  settleCancelledTurnStep: mocks.settle,
+  settleCancelledTurn: mocks.settle,
 }));
 beforeEach(() => vi.resetAllMocks());
 function fixture(turnId = ""): PreparedLegacySession {

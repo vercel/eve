@@ -11,7 +11,7 @@ import { emitAgentStartedStep } from "#execution/tools/workflow/emit-workflow-to
  * step lasts as long as the model thinks, and clients follow a child from its
  * `agent.started`, so the event can't wait for the boundary.
  *
- * The step's result replaces the session state at the boundary, so nothing
+ * The step's delta applies to the state the step was given, so nothing
  * published during it may change that state. `agent.started` reaches no
  * channel handler and changes no activity, so its publication leaves the
  * state as it found it and is not adopted. Every other run message waits for

@@ -1,16 +1,18 @@
+import { publishSessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
 import {
-  publishSessionEvents,
-  type PublishedSessionEvents,
-  type SessionStepState,
-} from "#execution/publish-session-events.js";
+  withSessionStateDelta,
+  type SessionStateTransition,
+} from "#execution/session/state-delta.js";
 import { createTurnWaitingEvent } from "#protocol/message.js";
 
 /** Publishes `turn.waiting` for the open turn the session workflow just parked. */
 export async function publishTurnWaitingStep(
   target: SessionStepState,
-): Promise<PublishedSessionEvents> {
+): Promise<SessionStateTransition> {
   "use step";
 
-  const { sequence, turnId } = target.sessionState.emissionState;
-  return await publishSessionEvents(target, [createTurnWaitingEvent({ sequence, turnId })]);
+  return await withSessionStateDelta(target, async (input) => {
+    const { sequence, turnId } = input.sessionState.emissionState;
+    return await publishSessionEvents(input, [createTurnWaitingEvent({ sequence, turnId })]);
+  });
 }

@@ -1,8 +1,8 @@
+import { publishSessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
 import {
-  publishSessionEvents,
-  type PublishedSessionEvents,
-  type SessionStepState,
-} from "#execution/publish-session-events.js";
+  withSessionStateDelta,
+  type SessionStateTransition,
+} from "#execution/session/state-delta.js";
 import type {
   WorkflowToolRunAgentStartedMessage,
   WorkflowToolRunRef,
@@ -17,7 +17,7 @@ export async function emitWorkflowToolRunReportStep(
     readonly from: WorkflowToolRunRef;
     readonly update: JsonValue;
   },
-): Promise<PublishedSessionEvents> {
+): Promise<SessionStateTransition> {
   "use step";
 
   const event = createActionPartialEvent({
@@ -30,7 +30,7 @@ export async function emitWorkflowToolRunReportStep(
     stepIndex: input.from.stepIndex,
     turnId: input.from.turnId,
   });
-  return await publishSessionEvents(input, [event]);
+  return await withSessionStateDelta(input, (target) => publishSessionEvents(target, [event]));
 }
 
 /** Publishes `agent.started` for a session a workflow tool run opened. */
@@ -38,7 +38,7 @@ export async function emitAgentStartedStep(
   input: SessionStepState & {
     readonly message: WorkflowToolRunAgentStartedMessage;
   },
-): Promise<PublishedSessionEvents> {
+): Promise<SessionStateTransition> {
   "use step";
 
   const { from, session } = input.message;
@@ -57,5 +57,5 @@ export async function emitAgentStartedStep(
     ...(from.taskId !== undefined && { taskId: from.taskId }),
     turnId: from.turnId,
   });
-  return await publishSessionEvents(input, [event]);
+  return await withSessionStateDelta(input, (target) => publishSessionEvents(target, [event]));
 }

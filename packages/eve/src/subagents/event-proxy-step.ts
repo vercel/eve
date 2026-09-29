@@ -14,6 +14,10 @@ import {
   type PublishedSessionEvents,
   type SessionStepState,
 } from "#execution/publish-session-events.js";
+import {
+  withSessionStateDelta,
+  type SessionStateTransition,
+} from "#execution/session/state-delta.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { emitProxiedAuthorizationEvent, emitProxiedInputRequest } from "#subagents/hitl-proxy.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
@@ -29,19 +33,18 @@ export async function runProxySubagentEventStep(
     readonly workflowAsk?: WorkflowAskRoute;
     readonly hookPayload: SubagentEventHookPayload;
   },
-): Promise<PublishedSessionEvents> {
+): Promise<SessionStateTransition> {
   "use step";
 
-  const durableSession = readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
-
-  return emitProxiedSubagentEvent({
-    workflowAsk: input.workflowAsk,
-    ctx,
-    durableSession,
-    hookPayload: input.hookPayload,
-    sessionWritable: input.sessionWritable,
-  });
+  return await withSessionStateDelta(input, async (target) =>
+    emitProxiedSubagentEvent({
+      workflowAsk: target.workflowAsk,
+      ctx: await deserializeContext(target.serializedContext),
+      durableSession: readDurableSession(target.sessionState),
+      hookPayload: target.hookPayload,
+      sessionWritable: target.sessionWritable,
+    }),
+  );
 }
 
 /** Relays one child event through the parent session's channel. */

@@ -19,6 +19,10 @@ import { parseJsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
+import {
+  withSessionStateDelta,
+  type SessionStateTransition,
+} from "#execution/session/state-delta.js";
 
 const log = createLogger("execution.delegated-parent-notification");
 
@@ -207,15 +211,23 @@ export async function resolveInitialTurnCallerStep(input: {
 export async function bindTurnCallerContextStep(input: {
   readonly caller: TurnCaller | undefined;
   readonly serializedContext: Record<string, unknown>;
-}): Promise<Record<string, unknown>> {
+}): Promise<SessionStateTransition> {
   "use step";
 
-  const caller = input.caller;
-  if (caller === undefined) return input.serializedContext;
+  return await withSessionStateDelta(input, async ({ caller, serializedContext }) => ({
+    serializedContext: bindTurnCallerContext(caller, serializedContext),
+  }));
+}
+
+function bindTurnCallerContext(
+  caller: TurnCaller | undefined,
+  serializedContext: Record<string, unknown>,
+): Record<string, unknown> {
+  if (caller === undefined) return serializedContext;
   const withActivity =
     caller.activityObserver === undefined
-      ? input.serializedContext
-      : { ...input.serializedContext, [ActivityObserverKey.name]: caller.activityObserver };
+      ? serializedContext
+      : { ...serializedContext, [ActivityObserverKey.name]: caller.activityObserver };
   if (caller.replyTo.kind === "callback") {
     const callback = {
       callId: caller.callId,

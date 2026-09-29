@@ -39,7 +39,7 @@ export function sessionTaskTable(cursor: SessionStateCursor): TaskTable {
 export async function cancelWorkingTasks(cursor: SessionStateCursor): Promise<void> {
   const taskIds = workingTasks(sessionTaskTable(cursor)).map((record) => record.id);
   if (taskIds.length === 0) return;
-  await cursor.apply(await cancelTasksStep({ ...cursor.stepState(), taskIds }));
+  await cursor.advance((state) => cancelTasksStep({ ...state, taskIds }));
 }
 
 export async function answerTaskCancel(
@@ -55,7 +55,7 @@ export async function answerTaskCancel(
     return { ...taskToolResult(call.callId, TASK_CANCEL_TOOL_NAME, error), isError: true };
   }
   if (result.status === "cancelled") {
-    await cursor.apply(await cancelTasksStep({ ...cursor.stepState(), taskIds: [call.taskId] }));
+    await cursor.advance((state) => cancelTasksStep({ ...state, taskIds: [call.taskId] }));
   }
   return taskToolResult(
     call.callId,

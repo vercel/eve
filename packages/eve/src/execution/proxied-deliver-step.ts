@@ -8,6 +8,10 @@ import {
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
 import { relaySessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
+import {
+  withSessionStateDelta,
+  type WithSessionStateDelta,
+} from "#execution/session/state-delta.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
@@ -54,8 +58,14 @@ interface ChildBucket {
  */
 export async function routeProxiedDeliverStep(
   input: SessionStepState & { readonly delivery: DeliverHookPayload },
-): Promise<RoutedDeliverResult> {
+): Promise<WithSessionStateDelta<RoutedDeliverResult>> {
   "use step";
+  return await withSessionStateDelta(input, routeProxiedDeliver);
+}
+
+async function routeProxiedDeliver(
+  input: SessionStepState & { readonly delivery: DeliverHookPayload },
+): Promise<RoutedDeliverResult> {
   let durableSession = readDurableSession(input.sessionState);
   const sourceDelivery = input.delivery;
   const parentPayloads = new Map<number, DeliverPayload>();

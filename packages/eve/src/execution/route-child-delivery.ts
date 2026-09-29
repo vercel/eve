@@ -4,6 +4,7 @@ import {
   routeProxiedDeliverStep,
   type RoutedDeliverResult,
 } from "#execution/proxied-deliver-step.js";
+import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
 
 /**
  * Routes any descendant-bound input responses down to the owning child. A
@@ -20,14 +21,9 @@ export async function routeDeliverToChildren(input: {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
   readonly serializedContext: Record<string, unknown>;
-}): Promise<RoutedDeliverResult> {
+}): Promise<WithSessionStateDelta<RoutedDeliverResult>> {
   if (!input.sessionState.hasProxyInputRequests) {
-    return {
-      kind: "continue",
-      remainder: input.delivery,
-      serializedContext: input.serializedContext,
-      sessionState: input.sessionState,
-    };
+    return { kind: "continue", remainder: input.delivery, stateDelta: {} };
   }
 
   return await routeProxiedDeliverStep(input);

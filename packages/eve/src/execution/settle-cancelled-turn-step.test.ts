@@ -10,6 +10,7 @@ import {
   takeSessionUsageDelta,
 } from "#harness/turn-tag-state.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
+import { runSessionStateStep } from "#internal/testing/session-state-step.js";
 
 // The turn's stream events and channel context are not under test; the usage
 // the step reports and the session it persists are.
@@ -60,12 +61,15 @@ describe("settleCancelledTurnStep", () => {
       // Its next turn spent 50 more before Alice cancelled it.
       const cancelling = spend(settled, 50, "turn_2");
 
-      const result = await settleCancelledTurnStep({
-        reportUsage,
-        serializedContext: {},
-        sessionState: { ...base, snapshot: { session: cancelling } },
-        sessionWritable: new WritableStream<Uint8Array>(),
-      });
+      const result = await runSessionStateStep(
+        {
+          reportUsage,
+          serializedContext: {},
+          sessionState: { ...base, snapshot: { session: cancelling } },
+          sessionWritable: new WritableStream<Uint8Array>(),
+        },
+        settleCancelledTurnStep,
+      );
 
       expect(result.usage?.inputTokens).toBe(reported);
       // The next settled turn reports whatever the cancel didn't.

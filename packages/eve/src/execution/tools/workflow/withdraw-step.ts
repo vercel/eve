@@ -8,6 +8,10 @@ import {
   type PublishedSessionEvents,
   type SessionStepState,
 } from "#execution/publish-session-events.js";
+import {
+  withSessionStateDelta,
+  type SessionStateTransition,
+} from "#execution/session/state-delta.js";
 import type { WorkflowToolRunControlMessage } from "#execution/tools/workflow/messages.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
@@ -22,14 +26,21 @@ import { createInputResolvedEvent, type UnstampedMessageStreamEvent } from "#pro
  * first, so the question resolves from the session's first decision.
  */
 export async function withdrawWorkflowToolRunQuestionStep(
-  input: SessionStepState & {
-    readonly control: string;
-    readonly requestId: string;
-    readonly runId: string;
-  },
-): Promise<PublishedSessionEvents> {
+  input: WithdrawQuestionInput,
+): Promise<SessionStateTransition> {
   "use step";
+  return await withSessionStateDelta(input, withdrawWorkflowToolRunQuestion);
+}
 
+type WithdrawQuestionInput = SessionStepState & {
+  readonly control: string;
+  readonly requestId: string;
+  readonly runId: string;
+};
+
+async function withdrawWorkflowToolRunQuestion(
+  input: WithdrawQuestionInput,
+): Promise<PublishedSessionEvents> {
   const session = readDurableSession(input.sessionState);
   const withdrawn = withdrawWorkflowAsks(
     session,

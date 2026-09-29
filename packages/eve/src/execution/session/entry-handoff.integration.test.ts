@@ -2,14 +2,13 @@ import type { HandoffWorkflowEntryInput } from "#execution/session/entry-input.j
 import type { RunCreatedEventRequest } from "@workflow/world";
 import { assert, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
-import {
-  dehydrateWorkflowArguments,
-  hydrateStepReturnValue,
-  hydrateWorkflowArguments,
-} from "@workflow/core/serialization";
+import { dehydrateWorkflowArguments, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { captureTurnEvents } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import { waitForParkedTurnStep } from "#internal/testing/session-test-helpers.js";
+import {
+  readTurnStepStates,
+  waitForParkedTurnStep,
+} from "#internal/testing/session-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import {
@@ -130,25 +129,18 @@ describe("workflowEntry integration", () => {
           ).toBe(false);
           const candidateHooks = await world.hooks.list({ runId: candidateId });
           expect(candidateHooks.data).toEqual([]);
-          const turns = await vi.waitFor(
+          await vi.waitFor(
             async () => {
               const steps = await world.steps.list({ runId: anchor.runId, resolveData: "all" });
               const turns = steps.data.filter((step) => step.stepName.endsWith("//turnStep"));
               expect(turns).toHaveLength(2);
               // The waiting event is streamed before the step's return value is persisted.
               expect(turns.every((step) => step.output !== undefined)).toBe(true);
-              return turns;
             },
             { timeout: 5000 },
           );
-          const histories = await Promise.all(
-            turns.map(async (step) => {
-              const output = await hydrateStepReturnValue(step.output, anchor.runId, undefined);
-              return output.sessionState.snapshot.session.history as Array<{
-                role: string;
-                content: unknown;
-              }>;
-            }),
+          const histories = (await readTurnStepStates(anchor.runId)).map(
+            (state) => state.sessionState.snapshot.session.history,
           );
           const deliveries = histories.map((history) =>
             history.filter(
@@ -254,15 +246,8 @@ describe("workflowEntry integration", () => {
           let saved: string | undefined;
           await vi.waitFor(
             async () => {
-              const steps = await world.steps.list({
-                runId: owner.runId,
-                resolveData: "all",
-                pagination: { limit: 1000 },
-              });
-              for (const step of steps.data) {
-                if (!step.stepName.endsWith("//turnStep") || step.output === undefined) continue;
-                const result = await hydrateStepReturnValue(step.output, owner.runId, undefined);
-                const history = JSON.stringify(result.sessionState.snapshot.session.history);
+              for (const state of await readTurnStepStates(owner.runId)) {
+                const history = JSON.stringify(state.sessionState.snapshot.session.history);
                 if (history.includes("Bob sends a later sentinel.")) saved = history;
               }
               expect(saved).toBeDefined();

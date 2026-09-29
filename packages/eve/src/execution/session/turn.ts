@@ -40,7 +40,6 @@ import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-r
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type {
-  DurableStepResult,
   RuntimeActionResultStepInput,
   TurnOutcome,
   TurnStepPayload,
@@ -138,22 +137,20 @@ export class SessionExecution {
 
     while (true) {
       const { cursor } = this.input;
-      const result: DurableStepResult = await turn.agentStarts.publishWhile(
-        turnStep({
-          ...cursor.stepState(),
-          abortSignal: turn.signal,
-          input: nextStepInput,
-          steeringSignal: turn.steeringSignal,
-        }),
+      const result = await cursor.advance((state) =>
+        turn.agentStarts.publishWhile(
+          turnStep({
+            ...state,
+            abortSignal: turn.signal,
+            input: nextStepInput,
+            steeringSignal: turn.steeringSignal,
+          }),
+        ),
       );
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const turnCompleted = result.action === "park" && result.settled !== undefined;
 
-      await cursor.apply({
-        serializedContext: result.serializedContext,
-        sessionState: result.sessionState,
-      });
       await turn.admitBoundary();
       await this.handleAdmittedTaskEvents(turn);
 
@@ -181,15 +178,16 @@ export class SessionExecution {
       }
 
       if (pendingCallIds !== undefined && result.action === "park") {
-        const dispatchResult = await dispatchCoordinationStep({
-          action: result.action,
-          workflowToolRunOwner: {
-            inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
-          },
-          ...cursor.stepState(),
-        });
+        const dispatchResult = await cursor.advance((state) =>
+          dispatchCoordinationStep({
+            action: result.action,
+            workflowToolRunOwner: {
+              inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
+            },
+            ...state,
+          }),
+        );
         const initialAcceptedAtMs = dispatchResult.results.length === 0 ? undefined : Date.now();
-        await cursor.apply(dispatchResult);
 
         const runtimeResults = await this.waitForRuntimeActionResults({
           initialAcceptedAtMs,
@@ -229,8 +227,7 @@ export class SessionExecution {
     message: WorkflowToolRunMessage,
   ): Promise<RuntimeActionResult | undefined> {
     if (isTaskRunMessage(message)) {
-      const { cursor } = this.input;
-      await cursor.apply(await applyTaskRunMessageStep({ ...cursor.stepState(), message }));
+      await this.input.cursor.advance((state) => applyTaskRunMessageStep({ ...state, message }));
       return undefined;
     }
     return await handleWorkflowToolRunMessage({
@@ -397,10 +394,7 @@ export class SessionExecution {
       else accept(await answerTaskCancel(this.input.cursor, call));
     }
     const parked = this.resolveTaskWaits(waits, false, accept);
-    if (parked.length > 0) {
-      const { cursor } = this.input;
-      await cursor.apply(await publishTurnWaitingStep(cursor.stepState()));
-    }
+    if (parked.length > 0) await this.input.cursor.advance(publishTurnWaitingStep);
     return parked;
   }
 
@@ -658,11 +652,9 @@ class ActiveTurn {
         continue;
       }
       this.routedToChildren.add(sequence);
-      const routed = await routeDeliverToChildren({
-        delivery,
-        ...this.input.cursor.stepState(),
-      });
-      await this.input.cursor.apply(routed);
+      const routed = await this.input.cursor.advance((state) =>
+        routeDeliverToChildren({ delivery, ...state }),
+      );
       if (routed.kind === "cancel-turn") {
         this.input.queue.replaceDelivery(sequence, undefined);
         this.admitted.delete(sequence);

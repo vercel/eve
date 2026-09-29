@@ -50,8 +50,13 @@ import {
 } from "#harness/messages.js";
 import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
-import type { DurableStepResult, TurnStepInput } from "#execution/session/turn-step-types.js";
+import type {
+  DurableStepResult,
+  TurnStepInput,
+  TurnStepResult,
+} from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
+import { withSessionStateDelta } from "#execution/session/state-delta.js";
 import { createSessionEventSink } from "#execution/publish-session-events.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
@@ -95,9 +100,9 @@ function channelDeliveryErrorCode(error: unknown): string {
 export type { TurnStepInput };
 
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
-export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
+export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
-  return runSessionStep(rawInput);
+  return await withSessionStateDelta(input, runSessionStep);
 }
 
 async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
