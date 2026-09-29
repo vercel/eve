@@ -1883,6 +1883,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
               ...info.agent.config,
               owner: {
                 kind: "extension" as const,
+                mountId: "extensions/self-modification",
                 namespace: "self-modification",
                 packageName: "eve",
               },

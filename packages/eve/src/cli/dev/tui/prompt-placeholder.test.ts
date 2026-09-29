@@ -45,7 +45,12 @@ function scaffold(): AgentInfoResult {
       local: [
         {
           ...info.agent.config,
-          owner: { kind: "extension", namespace: "self-modification", packageName: "eve" },
+          owner: {
+            kind: "extension",
+            mountId: "extensions/self-modification",
+            namespace: "self-modification",
+            packageName: "eve",
+          },
           name: "self-modification__agent",
           entryPath: "subagents/agent/agent.ts",
           rootPath: "/eve/self-modification",
@@ -144,6 +149,7 @@ describe("initialPromptPlaceholder", () => {
                         ? {
                             owner: {
                               kind: "extension" as const,
+                              mountId: "extensions/orders",
                               packageName: "@acme/orders",
                               namespace: "orders",
                             },
