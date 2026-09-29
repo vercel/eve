@@ -48,25 +48,24 @@ export function createToolMetadata(
 }
 
 /**
- * Merges freshly derived tool metadata over any metadata already attached to a
- * tool part, preferring the new values while preserving earlier request and
- * response context.
+ * Applies a metadata patch to a tool part's existing metadata. Fields the patch leaves out keep
+ * their current values, and `kind` and `name` fall back to the current values, then the part's
+ * tool name.
  */
 export function mergeToolMetadata(
-  current: EveMessageToolMetadata | undefined,
-  next: EveMessageToolMetadata,
+  existing: EveDynamicToolPart | undefined,
+  patch: Partial<NonNullable<EveMessageToolMetadata["eve"]>>,
 ): EveMessageToolMetadata {
-  const kind = next.eve?.kind ?? current?.eve?.kind ?? "unknown";
-  const name = next.eve?.name ?? current?.eve?.name ?? "unknown";
-
+  const current = existing?.toolMetadata?.eve;
+  const defined: typeof patch = Object.fromEntries(
+    Object.entries(patch).filter(([, value]) => value !== undefined),
+  );
   return {
     eve: {
-      ...current?.eve,
-      ...next.eve,
-      inputRequest: next.eve?.inputRequest ?? current?.eve?.inputRequest,
-      inputResponse: next.eve?.inputResponse ?? current?.eve?.inputResponse,
-      kind,
-      name,
+      ...current,
+      ...defined,
+      kind: defined.kind ?? current?.kind ?? "unknown",
+      name: defined.name ?? current?.name ?? existing?.toolName ?? "unknown",
     },
   };
 }

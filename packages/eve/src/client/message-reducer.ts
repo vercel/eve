@@ -267,10 +267,10 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         event.data.status === "rejected" || event.data.error?.code === "TOOL_EXECUTION_DENIED";
       const failed = event.data.status === "failed" && !denied;
       const approvalId = existing?.approval?.id ?? event.data.result.callId;
-      const toolMetadata = mergeToolMetadata(
-        existing?.toolMetadata,
-        createToolMetadata(descriptor),
-      );
+      const toolMetadata = mergeToolMetadata(existing, {
+        kind: descriptor.kind,
+        name: descriptor.name,
+      });
       const resultPartBase = {
         input: existing?.input,
         stepIndex: event.data.stepIndex,
@@ -325,7 +325,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         state: "output-available",
         stepIndex: event.data.stepIndex,
         toolCallId: event.data.result.callId,
-        toolMetadata: mergeToolMetadata(existing?.toolMetadata, createToolMetadata(descriptor)),
+        toolMetadata: mergeToolMetadata(existing, { kind: descriptor.kind, name: descriptor.name }),
         toolName: existing?.toolName ?? descriptor.toolName,
         type: "dynamic-tool",
       };
@@ -338,13 +338,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       if (existing === undefined) return data;
       return updateToolPart(data, existing.toolCallId, {
         ...existing,
-        toolMetadata: mergeToolMetadata(existing.toolMetadata, {
-          eve: {
-            kind: existing.toolMetadata?.eve?.kind ?? "unknown",
-            name: existing.toolMetadata?.eve?.name ?? existing.toolName,
-            taskId: event.data.taskId,
-          },
-        }),
+        toolMetadata: mergeToolMetadata(existing, { taskId: event.data.taskId }),
       });
     }
 
@@ -457,13 +451,7 @@ function respondToInputRequest(data: EveMessageData, response: InputResponse): E
     approval.reason = response.text;
   }
 
-  const toolMetadata = mergeToolMetadata(existing.toolMetadata, {
-    eve: {
-      inputResponse: response,
-      kind: existing.toolMetadata?.eve?.kind ?? "unknown",
-      name: existing.toolMetadata?.eve?.name ?? existing.toolName,
-    },
-  });
+  const toolMetadata = mergeToolMetadata(existing, { inputResponse: response });
   return updateToolPart(
     data,
     existing.toolCallId,
