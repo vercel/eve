@@ -1,13 +1,17 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { replaceDurableSessionSnapshot } from "#execution/durable-session-store.js";
 import type { SessionStepState } from "#execution/publish-session-events.js";
+import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import { MidStepWrites } from "#execution/session/mid-step-writes.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { withSessionStateDelta } from "#execution/session/state-delta.js";
+import type { EarlyWritableRunMessage } from "#execution/tools/workflow/early-write.js";
 import {
   emitWorkflowToolRunReportStep,
   writeEarlyRunMessageEventStep,
 } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { withdrawWorkflowToolRunQuestionStep } from "#execution/tools/workflow/withdraw-step.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -27,6 +31,21 @@ const serializedContext = {
 };
 
 const openedSessions = defineState("test.opened-sessions", (): string[] => []);
+
+/** Alice's research run opened a helper session. */
+const helperOpened: EarlyWritableRunMessage = {
+  from: {
+    callId: "call-1",
+    input: {},
+    runId: "run-1",
+    sequence: 1,
+    stepIndex: 0,
+    toolName: "research",
+    turnId: "turn-1",
+  },
+  kind: "agent-started",
+  session: { kind: "local", name: "helper", nodeId: "helper", sessionId: "helper-1" },
+};
 
 async function createPublishingRuntime() {
   const hooked: { event: MessageStreamEvent; sessionId: string }[] = [];
@@ -150,19 +169,7 @@ it("dispatches an event written during another step in the next step, once its s
     // While Alice's model step runs, her research run opens a helper session.
     await cursor.advance(async (state) => {
       const pending = await writeEarlyRunMessageEventStep({
-        message: {
-          from: {
-            callId: "call-1",
-            input: {},
-            runId: "run-1",
-            sequence: 1,
-            stepIndex: 0,
-            toolName: "research",
-            turnId: "turn-1",
-          },
-          kind: "agent-started",
-          session: { kind: "local", name: "helper", nodeId: "helper", sessionId: "helper-1" },
-        },
+        message: helperOpened,
         serializedContext: state.serializedContext,
         sessionWritable: state.sessionWritable,
       });
@@ -199,6 +206,79 @@ it("dispatches an event written during another step in the next step, once its s
   ]);
   expect(cursor.serializedContext["test.opened-sessions"]).toEqual(["helper-1"]);
 });
+
+it("writes an agent.started while a model step runs, leaves its dispatch out of that step, and dispatches it once later with its state kept", async () => {
+  const { hooked, runtime, sessionWritable, streamed } = await createPublishingRuntime();
+  const cursor = new SessionStateCursor({
+    inbox: { claimSessionHooks: async () => {} },
+    serializedContext,
+    sessionState: createTestSessionState(),
+    sessionWritable,
+  });
+  const inbox = new RunMessageInbox();
+  const midStepWrites = new MidStepWrites(inbox, cursor);
+
+  await runtime.run(async () => {
+    let endModelStep = (): void => {};
+    const modelStepEnded = new Promise<void>((resolve) => {
+      endModelStep = resolve;
+    });
+    const modelStep = cursor.advance((state) =>
+      midStepWrites.during(
+        withSessionStateDelta(state, async () => {
+          await modelStepEnded;
+          return {};
+        }),
+      ),
+    );
+
+    // While Alice's model step runs, her research run opens a helper session.
+    inbox.receive(helperOpened);
+    await vi.waitFor(() => expect(streamed.map((event) => event.type)).toEqual(["agent.started"]));
+
+    endModelStep();
+    await modelStep;
+    expect(hooked).toEqual([]);
+
+    await cursor.drainPendingDispatches();
+  });
+
+  expect(streamed).toHaveLength(1);
+  expect(hooked).toEqual([{ event: streamed[0], sessionId: "test-session" }]);
+  expect(cursor.serializedContext["test.opened-sessions"]).toEqual(["helper-1"]);
+});
+
+/** The session inbox as a turn observes its workflow runs' messages; nothing else reaches it here. */
+class RunMessageInbox implements SessionInboxReader {
+  private readonly handlers = new Set<(message: WorkflowToolRunMessage) => void>();
+
+  receive(message: WorkflowToolRunMessage): void {
+    for (const handler of this.handlers) handler(message);
+  }
+
+  onWorkflowMessage(handler: (message: WorkflowToolRunMessage) => void): () => void {
+    this.handlers.add(handler);
+    return () => this.handlers.delete(handler);
+  }
+
+  async next(): Promise<undefined> {
+    return undefined;
+  }
+  drain(): [] {
+    return [];
+  }
+  hasPending(): boolean {
+    return false;
+  }
+  async whenPending(): Promise<void> {}
+  onInterrupt(): () => void {
+    return () => {};
+  }
+  onDelivery(): () => void {
+    return () => {};
+  }
+  restore(): void {}
+}
 
 /** Each attempt of a step reads its own copy of the input, as the workflow deserializes it. */
 function structuredCloneValues(state: SessionStepState): SessionStepState {
