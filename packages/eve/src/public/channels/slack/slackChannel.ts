@@ -263,8 +263,12 @@ export interface SlackChannelState {
    */
   pendingAuthMessageTs?: Record<string, string>;
   pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
-  pendingApprovalCandidateUsers?: Record<string, string>;
-  approvalResponderUsers?: Record<string, string>;
+  /**
+   * Principal id to Slack user id, recorded from Slack-authenticated turns and
+   * input responses. Default handlers use it to address the principal named on
+   * `authorization.required` and approval events.
+   */
+  slackUsersByPrincipal?: Record<string, string>;
 }
 
 /**
@@ -892,8 +896,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   });
   const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
   const authorizationRequiredOverride = config.events?.["authorization.required"];
-  const candidateHandler =
-    config.events?.["approval.candidate"] ?? defaultEvents["approval.candidate"]!;
   const activityOwnsTypingStatus = hasSlackActivityStatus(config.activity?.renderers);
   const turnStartedHandler =
     config.events?.["turn.started"] ??
@@ -921,25 +923,15 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const mergedEvents: SlackChannelInternalEvents = {
     ...defaultEvents,
     ...config.events,
-    async "approval.candidate"(data, channel, ctx) {
-      const responderUserId = channel.state.approvalResponderUsers?.[data.responderPrincipalId];
-      if (data.outcome === "pending" && responderUserId !== undefined) {
-        channel.state.pendingApprovalCandidateUsers = {
-          ...channel.state.pendingApprovalCandidateUsers,
-          [data.candidateId]: responderUserId,
-        };
-      }
-      await candidateHandler(data, channel, ctx);
-      if (data.outcome !== "pending") {
-        const users = { ...channel.state.pendingApprovalCandidateUsers };
-        delete users[data.candidateId];
-        channel.state.pendingApprovalCandidateUsers = users;
-      }
-    },
     async "turn.started"(data, channel, ctx) {
-      const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
-      if (triggeringUserId !== undefined) {
+      const current = ctx.session.auth.current;
+      const triggeringUserId = slackUserIdFromAuthContext(current);
+      if (current !== null && triggeringUserId !== undefined) {
         channel.state.triggeringUserId = triggeringUserId;
+        channel.state.slackUsersByPrincipal = {
+          ...channel.state.slackUsersByPrincipal,
+          [current.principalId]: triggeringUserId,
+        };
       }
       await turnStartedHandler(data, channel, ctx);
     },
@@ -977,8 +969,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       lastReasoningTypingStatus: null,
       pendingAuthMessageTs: {},
       pendingApprovalCards: {},
-      pendingApprovalCandidateUsers: {},
-      approvalResponderUsers: {},
+      slackUsersByPrincipal: {},
     },
     fetchFile: slackFetchFile,
     metadata(state): SlackInstrumentationMetadata {
@@ -1000,12 +991,12 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       if (typeof cards === "object" && cards !== null) {
         channel.state.pendingApprovalCards = { ...channel.state.pendingApprovalCards, ...cards };
       }
-      const responders = (payload.state as Partial<SlackChannelState> | undefined)
-        ?.approvalResponderUsers;
-      if (typeof responders === "object" && responders !== null) {
-        channel.state.approvalResponderUsers = {
-          ...channel.state.approvalResponderUsers,
-          ...responders,
+      const principalUsers = (payload.state as Partial<SlackChannelState> | undefined)
+        ?.slackUsersByPrincipal;
+      if (typeof principalUsers === "object" && principalUsers !== null) {
+        channel.state.slackUsersByPrincipal = {
+          ...channel.state.slackUsersByPrincipal,
+          ...principalUsers,
         };
       }
       return defaultDeliverResult(payload);

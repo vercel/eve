@@ -1240,7 +1240,7 @@ describe("slackChannel() default event handlers", () => {
     });
   });
 
-  it("refreshes triggeringUserId from the current Slack caller on every turn", async () => {
+  it("refreshes triggeringUserId and records the caller's principal on every turn", async () => {
     const onTurnStarted = vi.fn();
     const adapter = withState(
       getAdapter(
@@ -1275,6 +1275,7 @@ describe("slackChannel() default event handlers", () => {
     );
 
     expect(ctx.state.triggeringUserId).toBe("U_CURRENT");
+    expect(ctx.state.slackUsersByPrincipal).toEqual({ "slack:T01:U_CURRENT": "U_CURRENT" });
     expect(onTurnStarted).toHaveBeenCalledOnce();
   });
 
@@ -3638,7 +3639,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       },
       inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
       state: {
-        approvalResponderUsers: { "slack:T_ACTOR:U_APPROVER": "U_APPROVER" },
+        slackUsersByPrincipal: { "slack:T_ACTOR:U_APPROVER": "U_APPROVER" },
       },
     });
   });
@@ -3804,11 +3805,11 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]?.[1]).toMatchObject({
       auth: customAuth,
-      state: { approvalResponderUsers: { "employee:ada": "U_APPROVER" } },
+      state: { slackUsersByPrincipal: { "employee:ada": "U_APPROVER" } },
     });
   });
 
-  it("persists the responder mapping for later approval candidate feedback", async () => {
+  it("persists the responder principal mapping for later approval candidate feedback", async () => {
     fetchMock.mockImplementation(
       () =>
         new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
@@ -3832,7 +3833,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       ctx,
     );
 
-    expect(ctx.state.approvalResponderUsers).toEqual({ "slack:T01:U_APPROVER": "U_APPROVER" });
+    expect(ctx.state.slackUsersByPrincipal).toEqual({ "slack:T01:U_APPROVER": "U_APPROVER" });
 
     await callEvent(
       adapter,

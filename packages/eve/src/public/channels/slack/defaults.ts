@@ -3,7 +3,11 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
 import { describeActionRequests } from "#public/channels/slack/action-status.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
-import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
+import {
+  buildSlackAuthContext,
+  slackUserIdForPrincipal,
+  slackUserIdFromAuthContext,
+} from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
   buildAuthEphemeralBlocks,
@@ -363,7 +367,7 @@ export async function postCompletedSlackReply(
  */
 export const defaultEvents: SlackChannelInternalEvents = {
   async "approval.candidate"(event, channel, _ctx) {
-    const userId = channel.state.pendingApprovalCandidateUsers?.[event.candidateId];
+    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
     if (event.outcome === "pending" && userId !== undefined) {
       await channel.thread.postEphemeral(
         userId,
@@ -387,7 +391,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const messageChannelId = card.messageChannelId ?? channel.state.channelId;
     if (messageChannelId === null) return;
     const answerLabel = event.outcome === "approved" ? "Approve" : "Cancel";
-    const userId = channel.state.approvalResponderUsers?.[event.responderPrincipalId];
+    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
     const blocks = card.messageBlocks.flatMap((block) => {
       if (!blockContainsRequestAction(block, event.requestId)) return [block];
       if (typeof block !== "object" || block === null) return [];
@@ -552,14 +556,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 
-  async "authorization.required"(event, channel, ctx) {
+  async "authorization.required"(event, channel, _ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    const triggeringUserId =
-      event.candidateId === undefined
-        ? (slackUserIdFromAuthContext(ctx.session.auth.current) ??
-          channel.state.triggeringUserId ??
-          null)
-        : (channel.state.pendingApprovalCandidateUsers?.[event.candidateId] ?? null);
+    const triggeringUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
     const challengeUrl = event.authorization?.url;
 
     // Post a public, link-free status so everyone in the thread can see
