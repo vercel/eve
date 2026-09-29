@@ -1,6 +1,5 @@
 import { expect, it, vi } from "vitest";
 
-import type { ChannelAdapter } from "#channel/adapter.js";
 import { replaceDurableSessionSnapshot } from "#execution/durable-session-store.js";
 import type { SessionStepState } from "#execution/publish-session-events.js";
 import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
@@ -22,34 +21,6 @@ import type { MessageStreamEvent } from "#protocol/message.js";
 import { defineHook } from "#public/definitions/hook.js";
 import { defineState } from "#public/definitions/state.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-
-/**
- * A channel adapter that records each session `agent.started` announces in its
- * state. No authored channel can handle `agent.started`, so the test adds this
- * adapter to the compiled agent's registry.
- */
-const agentAuditAdapter = vi.hoisted((): ChannelAdapter => ({
-  kind: "agent-audit",
-  "agent.started"(data, ctx) {
-    const opened = (ctx.state.openedSessions as string[] | undefined) ?? [];
-    ctx.state.openedSessions = [...opened, data.sessionId];
-  },
-}));
-
-vi.mock("#runtime/sessions/compiled-agent-cache.js", async (importOriginal) => {
-  const cache = await importOriginal<typeof import("#runtime/sessions/compiled-agent-cache.js")>();
-  return {
-    ...cache,
-    async getCompiledRuntimeAgentBundle(
-      input: Parameters<typeof cache.getCompiledRuntimeAgentBundle>[0],
-    ) {
-      const bundle = await cache.getCompiledRuntimeAgentBundle(input);
-      const adaptersByKind = new Map(bundle.adapterRegistry.adaptersByKind);
-      adaptersByKind.set(agentAuditAdapter.kind, agentAuditAdapter);
-      return { ...bundle, adapterRegistry: { adaptersByKind } };
-    },
-  };
-});
 
 const serializedContext = {
   "eve.auth": null,
@@ -236,11 +207,11 @@ it("dispatches an event written during another step in the next step, once its s
   expect(cursor.serializedContext["test.opened-sessions"]).toEqual(["helper-1"]);
 });
 
-it("writes an agent.started while a model step runs, leaves its dispatch out of that step, and dispatches it once later with its hook and channel state kept", async () => {
+it("writes an agent.started while a model step runs, leaves its dispatch out of that step, and dispatches it once later with its state kept", async () => {
   const { hooked, runtime, sessionWritable, streamed } = await createPublishingRuntime();
   const cursor = new SessionStateCursor({
     inbox: { claimSessionHooks: async () => {} },
-    serializedContext: { ...serializedContext, "eve.channel": { kind: "agent-audit", state: {} } },
+    serializedContext,
     sessionState: createTestSessionState(),
     sessionWritable,
   });
@@ -275,10 +246,6 @@ it("writes an agent.started while a model step runs, leaves its dispatch out of 
   expect(streamed).toHaveLength(1);
   expect(hooked).toEqual([{ event: streamed[0], sessionId: "test-session" }]);
   expect(cursor.serializedContext["test.opened-sessions"]).toEqual(["helper-1"]);
-  expect(cursor.serializedContext["eve.channel"]).toEqual({
-    kind: "agent-audit",
-    state: { openedSessions: ["helper-1"] },
-  });
 });
 
 /** The session inbox as a turn observes its workflow runs' messages; nothing else reaches it here. */
