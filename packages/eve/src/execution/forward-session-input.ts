@@ -6,6 +6,7 @@ import {
   SessionInboxKey,
 } from "#context/keys.js";
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
+import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /** A remote session sends input to its caller instead of presenting it on its own channel. */
@@ -29,7 +30,8 @@ export async function forwardSessionInput(
     event.type === "input.requested"
       ? {
           callId: callback.callId,
-          childContinuationToken: ctx.require(ContinuationTokenKey),
+          childContinuationToken:
+            ctx.get(ContinuationTokenKey) ?? sessionCommandHookToken(ctx.require(SessionIdKey)),
           childSessionId: ctx.require(SessionIdKey),
           childSessionInbox: ctx.get(SessionInboxKey),
           event: event.data,

@@ -3,7 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
-import { AuthKey, ContinuationTokenKey, SessionCallbackKey, SessionIdKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ContinuationTokenKey,
+  SessionCallbackKey,
+  SessionIdKey,
+  SessionInboxKey,
+} from "#context/keys.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { createSessionEventSink } from "#execution/publish-session-events.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
@@ -195,6 +201,40 @@ describe("proxied stream hooks", () => {
       });
       expect(f.order).not.toContain("channel:input.requested");
       expect(f.events.map((event) => event.type)).toEqual(["input.requested"]);
+    } finally {
+      sink.release();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("forwards callback input without an operation ID through the session inbox", async () => {
+    const f = fixture();
+    f.ctx.delete(ContinuationTokenKey);
+    f.ctx.set(SessionInboxKey, { sessionId: "parent-session" });
+    f.ctx.set(SessionCallbackKey, {
+      callId: "remote-call",
+      subagentName: "remote-child",
+      token: "parent-reply",
+      url: "https://parent.example/eve/v1/callback/parent-reply",
+    });
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
+      Response.json({ ok: true }, { status: 202 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const sink = createSessionEventSink({
+      ctx: f.ctx,
+      sessionId: "parent-session",
+      sessionWritable: f.sessionWritable,
+    });
+    try {
+      await sink.emit({ type: "input.requested", data: f.hookPayload.event });
+      const forwarded = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+      expect(forwarded).toMatchObject({
+        childContinuationToken: "eve:session:parent-session:inbox",
+        childSessionInbox: { sessionId: "parent-session" },
+        kind: "subagent-input-request",
+      });
+      expect(f.order).not.toContain("channel:input.requested");
     } finally {
       sink.release();
       vi.unstubAllGlobals();

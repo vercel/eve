@@ -45,11 +45,31 @@ const sessionAuthorizationCallbackSchema = z.object({
   event: z.discriminatedUnion("type", [
     z.object({
       type: z.literal("approval.candidate"),
-      data: z.object({}).passthrough(),
+      data: z
+        .object({
+          candidateId: z.string(),
+          outcome: z.enum(["pending", "rejected", "failed", "timed-out", "stale"]),
+          requestId: z.string(),
+          responderPrincipalId: z.string(),
+          reason: z.string().optional(),
+          sequence: z.number(),
+          stepIndex: z.number(),
+          turnId: z.string(),
+        })
+        .passthrough(),
     }),
     z.object({
       type: z.literal("approval.settled"),
-      data: z.object({}).passthrough(),
+      data: z
+        .object({
+          outcome: z.enum(["approved", "cancelled"]),
+          requestId: z.string(),
+          responderPrincipalId: z.string(),
+          sequence: z.number(),
+          stepIndex: z.number(),
+          turnId: z.string(),
+        })
+        .passthrough(),
     }),
     z.object({
       type: z.literal("authorization.required"),

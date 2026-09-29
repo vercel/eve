@@ -8,7 +8,6 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import * as activityCohort from "#execution/activity-cohort.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { forwardSessionInput } from "#execution/forward-session-input.js";
-import { withInputSource } from "#subagents/input-source.js";
 import {
   createDurableSessionState,
   readDurableSession,
@@ -233,7 +232,9 @@ function openSessionEventStream(input: {
         : await callAdapterEventHandler(
             adapter,
             event,
-            withInputSource(adapterCtx, input.inputSource),
+            input.inputSource === undefined
+              ? adapterCtx
+              : { ...adapterCtx, inputSource: input.inputSource },
           );
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
       const stamped = stampMessageStreamEvent(
