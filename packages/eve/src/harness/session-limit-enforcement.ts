@@ -143,7 +143,7 @@ async function parkOnSessionUsageLimit(input: {
     }),
   );
 
-  emissionState = await emitTurnEpilogue(input.emit, emissionState);
+  emissionState = await emitTurnEpilogue(input.emit, emissionState, parkedSession.history);
 
   return {
     next: null,

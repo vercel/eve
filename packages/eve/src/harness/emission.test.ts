@@ -2,6 +2,7 @@ import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  emitTurnEpilogue,
   emitTurnPreamble,
   emitStreamContent,
   getHarnessEmissionState,
@@ -47,6 +48,21 @@ function createSession(state?: Record<string, unknown>): HarnessSession {
     state,
   };
 }
+
+describe("emitTurnEpilogue", () => {
+  it("passes settled history with turn.completed", async () => {
+    const emit = createEmitStub();
+    const history = [{ content: "settled reply", role: "assistant" as const }];
+
+    await emitTurnEpilogue(emit, EMISSION_STATE, history);
+
+    expect(emit).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ type: "turn.completed" }),
+      history,
+    );
+  });
+});
 
 describe("getHarnessEmissionState", () => {
   it("returns defaults when no state exists", () => {

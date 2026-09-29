@@ -934,7 +934,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ]),
           state: memoryCommit?.state ?? parkedSession.state,
         };
-        emissionState = await emitTurnEpilogue(emit, emissionState);
+        emissionState = await emitTurnEpilogue(emit, emissionState, parkedSession.history);
         return {
           next: null,
           session: setHarnessEmissionState(parkedSession, emissionState),
@@ -943,7 +943,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       if (resolvedCoordination.outcome === "resolved") {
         if (emit) {
-          emissionState = await emitTurnEpilogue(emit, emissionState);
+          emissionState = await emitTurnEpilogue(emit, emissionState, parkedSession.history);
           parkedSession = setHarnessEmissionState(parkedSession, emissionState);
         }
         return { next: null, session: parkedSession };
@@ -2724,7 +2724,7 @@ async function handleStepResult(input: {
         }),
       );
 
-      emissionState = await emitTurnEpilogue(emit, emissionState);
+      emissionState = await emitTurnEpilogue(emit, emissionState, parkedSession.history);
       parkedSession = setHarnessEmissionState(parkedSession, emissionState);
     }
 
@@ -2780,7 +2780,7 @@ async function handleStepResult(input: {
       // above: the session keeps serving ordinary turns while the challenge
       // is open, so the stream must close its turn boundary — clients wait
       // on `session.waiting` and would otherwise hang on the parked turn.
-      emissionState = await emitTurnEpilogue(emit, emissionState);
+      emissionState = await emitTurnEpilogue(emit, emissionState, authorizationHistory);
     }
 
     return {
@@ -2966,6 +2966,7 @@ async function emitStructuredResult(
   emit: NonNullable<ToolLoopHarnessConfig["handleEvent"]>,
   emissionState: ReturnType<typeof getHarnessEmissionState>,
   structured: JsonValue,
+  history: readonly HarnessModelMessage[],
 ): Promise<ReturnType<typeof getHarnessEmissionState>> {
   await emit(
     createResultCompletedEvent({
@@ -2975,7 +2976,7 @@ async function emitStructuredResult(
       turnId: emissionState.turnId,
     }),
   );
-  return emitTurnEpilogue(emit, emissionState);
+  return emitTurnEpilogue(emit, emissionState, history);
 }
 
 /**
@@ -2998,7 +2999,7 @@ async function finishTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState);
+      emissionState = await emitTurnEpilogue(emit, emissionState, history);
       session = setHarnessEmissionState(session, emissionState);
     }
     const settledTurn = { output: stepOutput ?? "" } satisfies SettledTurn;
@@ -3026,7 +3027,7 @@ async function finishTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured);
+    emissionState = await emitStructuredResult(emit, emissionState, structured, session.history);
     session = setHarnessEmissionState(session, emissionState);
   }
   const settledTurn = { output: structured } satisfies SettledTurn;
