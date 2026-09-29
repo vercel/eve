@@ -20,6 +20,7 @@ export default defineEval({
           .watchTurn(pending.sessionId, { startIndex: pending.state.streamIndex })
           .result();
     completion.messageIncludes("PARENT-QUESTION-COMPLETE: REMOTE-QUESTION-COMPLETE");
+    t.calledSubagent("remote-loopback", { count: 1, status: "completed" });
     t.noFailedActions();
   },
 });
