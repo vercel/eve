@@ -148,19 +148,6 @@ export function mountRefNamespace(logicalPath: string): string {
 }
 
 /**
- * Derives the legacy durable state prefix from an extension's package name.
- * Renaming the consumer's mount file does not change existing state keys.
- */
-export function packageStateNamespace(packageName: string): string {
-  return (
-    packageName
-      .replace(/^@/, "")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "extension"
-  );
-}
-
-/**
  * Resolves one extension mount to its package and agent-shaped source root
  * without importing the mount module. Reads the mount source text to extract
  * the package specifier, resolves the package, and reads

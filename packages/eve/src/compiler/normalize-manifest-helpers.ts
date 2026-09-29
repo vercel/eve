@@ -3,7 +3,7 @@ import type { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js"
 import type { ComposedNodeSourceGraph, SelectedNodeConfig } from "#compiler/node-source-state.js";
 import { loadModuleBackedDefinition } from "#compiler/normalize-helpers.js";
 
-import { mountRefNamespace, packageStateNamespace } from "#discover/extensions.js";
+import { mountRefNamespace } from "#discover/extensions.js";
 import type { AgentSourceManifest, LocalSubagentSourceRef } from "#discover/manifest.js";
 import type {
   CompiledAgentDefinition,
@@ -227,8 +227,7 @@ export function compileExtensionMounts(
         packageName: mount.packageName,
         specifier: mount.specifier,
         mountId: extensionMountId(nodePath, mount.namespace),
-        packageNamespace: packageStateNamespace(mount.packageName),
-        sourceRoot: mount.sourceRoot,
+            sourceRoot: mount.sourceRoot,
       },
     ];
   });

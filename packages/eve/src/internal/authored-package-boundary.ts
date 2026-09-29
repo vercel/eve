@@ -91,9 +91,9 @@ export function createGenerationPackageBoundaryPlugin(input: {
 }
 
 export function createRuntimeLoaderPackageBoundaryPlugin(input: {
-  readonly extensionSpecifier?: string;
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
+  readonly extensionSpecifier?: string;
 }): Record<string, unknown> {
   const canonicalPackageRoot = toCanonicalPath(input.packageRoot);
 

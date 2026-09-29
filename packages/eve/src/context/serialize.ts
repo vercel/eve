@@ -1,9 +1,12 @@
 import { type AlsContext, ContextContainer } from "#context/container.js";
 import { resolveKey } from "#context/key.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("context.serialize");
+const STATE_LAYOUT_KEY = "eve.stateLayout";
+const STATE_LAYOUT_VERSION = 1;
 
 /**
  * Serializes every value in the context to a plain JSON record.
@@ -22,6 +25,12 @@ export function serializeContext(ctx: AlsContext): Record<string, unknown> {
       throw error;
     }
   }
+  if (
+    data[BundleKey.name] !== undefined ||
+    Object.keys(data).some((name) => name.startsWith("eve:mount."))
+  ) {
+    data[STATE_LAYOUT_KEY] = STATE_LAYOUT_VERSION;
+  }
   return data;
 }
 
@@ -35,17 +44,51 @@ export async function deserializeContext(data: Record<string, unknown>): Promise
   const ctx = new ContextContainer();
 
   const serializedBundle = data[BundleKey.name];
+  if (data[STATE_LAYOUT_KEY] !== undefined && data[STATE_LAYOUT_KEY] !== STATE_LAYOUT_VERSION) {
+    throw incompatibleStateLayout();
+  }
+  if (
+    data[STATE_LAYOUT_KEY] === undefined &&
+    Object.keys(data).some((name) => data[name] !== undefined && name.startsWith("eve:mount."))
+  ) {
+    throw incompatibleStateLayout();
+  }
   if (serializedBundle !== undefined) {
     const codec = BundleKey.codec;
     if (codec === undefined) {
       throw new Error('Context key "eve.bundle" is missing a codec.');
     }
-    ctx.set(BundleKey, await codec.deserialize(serializedBundle, ctx));
+    const bundle = await codec.deserialize(serializedBundle, ctx);
+    if (data[STATE_LAYOUT_KEY] === undefined) {
+      const manifest = await loadCompiledManifest({
+        compiledArtifactsSource: bundle.compiledArtifactsSource,
+      });
+      if (
+        [manifest, ...manifest.subagents.map((subagent) => subagent.agent)].some(
+          (node) => node.extensionMounts.length > 0,
+        )
+      ) {
+        throw incompatibleStateLayout();
+      }
+    }
+    if (
+      data[STATE_LAYOUT_KEY] === undefined &&
+      Object.keys(data).some(
+        (name) =>
+          name !== BundleKey.name &&
+          name !== STATE_LAYOUT_KEY &&
+          data[name] !== undefined &&
+          resolveKey(name) === undefined,
+      )
+    ) {
+      throw incompatibleStateLayout();
+    }
+    ctx.set(BundleKey, bundle);
   }
 
   for (const [name, raw] of Object.entries(data)) {
     if (raw === undefined) continue;
-    if (name === BundleKey.name) continue;
+    if (name === BundleKey.name || name === STATE_LAYOUT_KEY) continue;
     const key = resolveKey(name);
     if (key === undefined) {
       // Unregistered key (e.g. renamed): dropping it silently loses data, so warn.
@@ -60,4 +103,10 @@ export async function deserializeContext(data: Record<string, unknown>): Promise
     }
   }
   return ctx;
+}
+
+function incompatibleStateLayout(): Error {
+  return new Error(
+    "Incompatible context state layout. Restore this session with its original deployment or start a new session; legacy extension state cannot be assigned to mounts automatically.",
+  );
 }

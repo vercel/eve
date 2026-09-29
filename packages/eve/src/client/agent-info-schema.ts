@@ -7,7 +7,7 @@ const owner = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("extension"),
-      mountId: mountIdSchema,
+      mountId: mountIdSchema.optional(),
       namespace: z.string(),
       packageName: z.string(),
     })

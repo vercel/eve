@@ -20,6 +20,9 @@ describe("defineState", () => {
     // silently corrupt context serialization.
     expect(() => defineState("eve.channel", () => null)).toThrow(/reserved/);
     expect(() => defineState("eve.budget", () => ({ count: 0 }))).toThrow(/reserved/);
+    expect(() => defineState("eve:mount.v1:extensions%2Fcrm:requests", () => 0)).toThrow(
+      /reserved/,
+    );
   });
 
   it("get() returns initial() on first read inside ALS", () => {

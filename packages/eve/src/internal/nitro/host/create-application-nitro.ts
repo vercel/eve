@@ -587,7 +587,6 @@ function createApplicationNitroBundlerConfiguration(
     ].flatMap((node) =>
       node.extensionMounts.map((mount) => ({
         sourceRoot: mount.sourceRoot,
-        packageNamespace: mount.packageNamespace,
         mountId: mount.mountId,
       })),
     ),

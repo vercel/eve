@@ -943,10 +943,10 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
     packageName: z.string(),
     specifier: z.string(),
     mountId: mountIdSchema,
-    packageNamespace: z.string(),
     sourceRoot: z.string(),
     mountSourceId: z.string(),
     mountSourcePath: z.string(),
+    mountLogicalPath: z.string(),
     programmaticImport: z
       .object({
         specifier: z.string(),
@@ -955,7 +955,6 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
       })
       .strict()
       .optional(),
-    mountLogicalPath: z.string(),
   })
   .strict();
 
@@ -1042,11 +1041,6 @@ const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z.union([
  * call binds the extension's config on its instance handle before any tool runs.
  */
 export interface CompiledExtensionMount {
-  readonly programmaticImport?: {
-    readonly specifier: string;
-    readonly entryPath: string;
-    readonly config: Record<string, unknown>;
-  };
   /** Runtime packages this extension requires the consuming application to externalize. */
   readonly externalDependencies: readonly string[];
   /** Mount-derived namespace that prefixes the extension's tool/skill names. */
@@ -1056,13 +1050,16 @@ export interface CompiledExtensionMount {
   readonly specifier: string;
   /** Canonical path of this mount in the root agent tree. */
   readonly mountId: string;
-  /** Package-derived namespace for durable extension state keys. */
-  readonly packageNamespace: string;
   /** Absolute path to the extension's distributed source root. */
   readonly sourceRoot: string;
   readonly mountSourceId: string;
   readonly mountSourcePath: string;
   readonly mountLogicalPath: string;
+  readonly programmaticImport?: {
+    readonly specifier: string;
+    readonly entryPath: string;
+    readonly config: Record<string, unknown>;
+  };
 }
 
 /**

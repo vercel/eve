@@ -21,7 +21,6 @@ import {
 
 // Keep this indirect so extension-contract declaration generation does not follow the dev-only mount.
 const SELF_MODIFICATION_EXTENSION_MODULE = "#self-modification/extension/extension.js";
-
 const SELF_MODIFICATION_CONFIG = { local: { enabled: true } };
 
 const DEVELOPMENT_EXTENSION_IDS = ["self-modification"] as const;

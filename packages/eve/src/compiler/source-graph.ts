@@ -188,6 +188,14 @@ export interface AgentModuleCandidate {
   readonly sourceId: string;
 }
 
+export function bindingMountId(binding: AgentModuleBinding): string | undefined {
+  return binding.backing.kind === "filesystem" && binding.backing.mountId !== undefined
+    ? binding.backing.mountId
+    : binding.owner.kind === "extension"
+      ? binding.owner.mountId
+      : undefined;
+}
+
 export interface AgentModuleBinding {
   readonly backing: AgentModuleBacking;
   readonly logicalPath: string;

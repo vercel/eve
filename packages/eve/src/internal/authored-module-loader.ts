@@ -15,7 +15,7 @@ import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-pac
 import { createAuthoredRelativeExtensionResolverPlugin } from "#internal/authored-relative-extension-resolver.js";
 import {
   createExtensionScopePlugin,
-  createFixedNamespaceScopePlugin,
+  createFixedMountScopePlugin,
 } from "#internal/bundler/extension-scope-plugin.js";
 import {
   RESOLVE_EXTENSIONS,
@@ -63,7 +63,6 @@ export interface AuthoredModuleLoadOptions {
     readonly mountId: string;
     readonly mountSourcePath: string;
     readonly packageName: string;
-    readonly packageNamespace: string;
     readonly sourceRoot: string;
     readonly specifier: string;
     readonly programmaticImport?: {
@@ -318,7 +317,6 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
       (node) =>
         node.extensionMounts.map((mount) => ({
-          packageNamespace: mount.packageNamespace,
           mountId: mount.mountId,
           sourceRoot: mount.sourceRoot,
         })),
@@ -510,7 +508,7 @@ async function buildAuthoredModuleBundle(
     ...configuration.plugins,
     options.mount !== undefined || options.extensionScopeNamespace === undefined
       ? null
-      : createFixedNamespaceScopePlugin(options.extensionScopeNamespace),
+      : createFixedMountScopePlugin(options.extensionScopeNamespace),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
     createAuthoredAssetImportPlugin({ packageRoot }),
     createAuthoredPackageTsConfigPathsPlugin({

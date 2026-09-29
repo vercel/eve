@@ -79,7 +79,7 @@ describe("compiled module maps", () => {
     expect(source).toContain("eve:default-sandbox:v1");
   });
 
-  it("loads extension bindings with their stable package namespace", async () => {
+  it("loads extension bindings with their logical mount identity", async () => {
     const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
     const [extensionSourceId, ...applicationSourceIds] = Object.keys(manifest.bindings).sort();
     if (extensionSourceId === undefined) throw new Error("Expected at least one module binding.");
@@ -117,7 +117,7 @@ describe("compiled module maps", () => {
 
     expect(mocks.loadAuthoredModuleNamespace).toHaveBeenCalledWith("/extension/tool.ts", {
       externalDependencies: [],
-      extensionScopeNamespace: "acme-crm",
+      extensionScopeNamespace: "extensions/renamed-mount",
     });
     expect(
       mocks.loadAuthoredModuleNamespace.mock.calls

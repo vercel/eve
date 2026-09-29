@@ -85,7 +85,7 @@ export default defineTool({
 
 If no configuration is needed, export `defineExtension()` and let consumers re-export it directly. Config schemas must validate synchronously.
 
-`defineState` is automatically scoped to the extension package, so the same state name does not collide with the consumer or another extension.
+`defineState` uses a durable key scoped to the logical mount path and the authored state name. Two mounts of the same package can use the same state name without sharing a slot in one context. Contributed subagents use their parent extension's mount identity, but retain their own runtime contexts.
 
 ### Add a subagent
 
@@ -195,7 +195,15 @@ export { default } from "@acme/gizmo";
 
 The same mount shape works with an npm package, a workspace dependency, or a linked local package. Each mount binds its own configuration, even when two mounts use the same package. Moving or renaming a mount creates a new instance.
 
-Extension state still uses package-prefixed keys. Two stateful mounts of the same package in one context can share a state slot; application-defined state keys are unchanged.
+Extension state belongs to the logical mount path (for example, `extensions/crm` or `subagents/research/extensions/crm`). A flat `crm.ts` mount and a directory `crm/extension.ts` mount have the same identity; moving or renaming the mount changes its state keys. Application-defined state keys are unchanged.
+
+### Upgrade from package-scoped extension state
+
+Deployments before this release stored extension state under package-prefixed keys. eve does not migrate that state to mount-owned keys or reset it during restore.
+
+- For agents with extensions, older session checkpoints and local context snapshots are incompatible. Keep the original deployment available to finish those sessions, or start new sessions on the updated deployment.
+- Checkpoints written before this release for agents without extensions can resume if they contain no unrecognized state keys.
+- Sessions written with mount-owned state cannot hand back to a pre-upgrade deployment.
 
 ### Use an extension in a workspace
 

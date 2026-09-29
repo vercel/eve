@@ -4,7 +4,7 @@ import { bindingMountId } from "#compiler/extension-mount-bindings.js";
 import { NodeModuleEvaluationContext } from "#compiler/module-lifecycle.js";
 import type { NodeCompileInput } from "#compiler/normalize-manifest-types.js";
 import type { AgentSourceRegistry } from "#compiler/source-graph.js";
-import { mountRefNamespace, packageStateNamespace } from "#discover/extensions.js";
+import { mountRefNamespace } from "#discover/extensions.js";
 import type { AuthoredModuleLoadOptions } from "#internal/authored-module-loader.js";
 
 export type ExtensionCompileMount = NonNullable<AuthoredModuleLoadOptions["mount"]>;
@@ -29,8 +29,7 @@ export function createMountEvaluationContext(input: {
       mountId,
       mountSourcePath: posix.join(input.node.manifest.agentRoot, declaration.logicalPath),
       packageName: mount.packageName,
-      packageNamespace: packageStateNamespace(mount.packageName),
-      sourceRoot: mount.sourceRoot,
+        sourceRoot: mount.sourceRoot,
       specifier: mount.specifier,
       ...(mount.programmaticDeclaration === undefined
         ? {}
