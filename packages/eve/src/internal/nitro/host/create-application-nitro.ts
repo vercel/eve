@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
+import { hasVercelScheduleCollections } from "#internal/schedules/consumer-route.js";
 import { configureInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import {
@@ -823,6 +824,9 @@ export async function createProductionApplicationNitro(
     vercel: createEveVercelOptions({
       agentName: preparedHost.compileResult.manifest.config.name,
       enabled: preset === "vercel",
+      hasVercelScheduleCollections: hasVercelScheduleCollections(
+        preparedHost.compileResult.manifest,
+      ),
       publicRoutePrefix: options.publicRoutePrefix,
       workspaceMember: options.workspaceMember,
     }),

@@ -1689,9 +1689,15 @@ importers:
       '@vercel/otel':
         specifier: 'catalog:'
         version: 2.1.3(@opentelemetry/api-logs@0.222.0)(@opentelemetry/api@1.9.1)(@opentelemetry/instrumentation@0.219.0(@opentelemetry/api@1.9.1)(supports-color@10.2.2))(@opentelemetry/resources@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-logs@0.221.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-metrics@2.11.0(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.6.1(@opentelemetry/api@1.9.1))
+      '@vercel/queue':
+        specifier: 0.5.1
+        version: 0.5.1(@opentelemetry/api@1.9.1)
       '@vercel/sandbox':
         specifier: 'catalog:'
         version: 3.3.0
+      '@vercel/schedules':
+        specifier: 0.0.0-alpha.10
+        version: 0.0.0-alpha.10
       '@vercel/sdk':
         specifier: 1.28.8
         version: 1.28.8
@@ -7541,6 +7547,10 @@ packages:
 
   '@vercel/sandbox@3.3.0':
     resolution: {integrity: sha512-TclqRD2joExyECTrrHsioi3Onw20X2YfpOYEzs3JpJUtAjOKYw2bMeXldKrUg+TB/TT7tPdDu8uKNxj9NE7QUg==}
+
+  '@vercel/schedules@0.0.0-alpha.10':
+    resolution: {integrity: sha512-eEMzK5tbofeIERVqO9EDrN+G0GS/Ka78IvgOrVDPjECrIlKWl6l4eXUE3LLHlU4R/Du5GRFsn2oRCIg3Eocnjg==}
+    engines: {node: '>=20.0.0'}
 
   '@vercel/sdk@1.28.8':
     resolution: {integrity: sha512-uAl+pEZZnFYRFzE/43ihP3aYTJ+4v0+coiMYobYMqtaERWknYKuRZWEj9Dk9r87yWXfxclsQugXkN42kaOcySw==}
@@ -21160,6 +21170,10 @@ snapshots:
     transitivePeerDependencies:
       - bare-abort-controller
       - react-native-b4a
+
+  '@vercel/schedules@0.0.0-alpha.10':
+    dependencies:
+      '@vercel/oidc': 3.8.0
 
   '@vercel/sdk@1.28.8':
     dependencies:
