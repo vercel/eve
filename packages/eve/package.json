@@ -544,6 +544,7 @@
     "test:tui": "pnpm run build:js && tsc -p tsconfig.tui.json --noEmit && node test/tui-client/run-all.mjs"
   },
   "dependencies": {
+    "@vercel/schedules": "0.0.0-alpha.10",
     "nitro": "3.0.260903-beta",
     "undici": "8.10.2"
   },
@@ -585,7 +586,6 @@
     "@vercel/otel": "catalog:",
     "@vercel/queue": "0.5.1",
     "@vercel/sandbox": "catalog:",
-    "@vercel/schedules": "0.0.0-alpha.10",
     "@vercel/sdk": "1.28.8",
     "@workflow/core": "5.0.0-beta.57",
     "@workflow/errors": "5.0.0-beta.24",

@@ -33,13 +33,12 @@ export function vercelScheduleProvider(
 ): ScheduleProvider {
   if (isEveDevEnvironment()) return DEVELOPMENT_PROVIDER;
 
-  let clientPromise: Promise<SchedulesClient> | undefined;
-  const client = () => (clientPromise ??= createClient(options));
+  const client = (signal: AbortSignal) => createClient(options, signal);
 
   const provider: ScheduleProvider = {
     kind: "vercel",
     async create(context, input) {
-      const schedules = await client();
+      const schedules = await client(context.abortSignal);
       let schedule = await schedules.create({
         expression: toVercelExpression(input.expression),
         jitter: input.expression.type === "cron" ? input.expression.jitter : undefined,
@@ -50,7 +49,14 @@ export function vercelScheduleProvider(
         timezone: input.expression.timezone,
       });
       if (input.state === "inactive") {
-        schedule = await schedules.disable({ name: input.name, namespace: context.namespace });
+        try {
+          schedule = await schedules.disable({ name: input.name, namespace: context.namespace });
+        } catch (error) {
+          throw new Error(
+            `Schedule ${JSON.stringify(input.name)} was created active, but disabling it failed; it may remain active.`,
+            { cause: error },
+          );
+        }
       }
       return fromVercelSchedule(schedule);
     },
@@ -61,15 +67,19 @@ export function vercelScheduleProvider(
       };
       if (cursor !== undefined) params.cursor = cursor;
       if (input.limit !== undefined) params.limit = input.limit;
-      const page = await (await client()).list(params);
+      const page = await (await client(context.abortSignal)).list(params);
       return { cursor: page.cursor, data: page.data.map(fromVercelSchedule) };
     },
     async get(context, name) {
-      const response = await getScheduleOrNull(await client(), name, context.namespace);
+      const response = await getScheduleOrNull(
+        await client(context.abortSignal),
+        name,
+        context.namespace,
+      );
       return response === null ? null : fromVercelSchedule(response);
     },
     async update(context, name, patch) {
-      const schedules = await client();
+      const schedules = await client(context.abortSignal);
       const params: Parameters<SchedulesClient["update"]>[0] = {
         name,
         namespace: context.namespace,
@@ -86,20 +96,20 @@ export function vercelScheduleProvider(
     },
     async enable(context, name) {
       return fromVercelSchedule(
-        await (await client()).enable({ name, namespace: context.namespace }),
+        await (await client(context.abortSignal)).enable({ name, namespace: context.namespace }),
       );
     },
     async disable(context, name) {
       return fromVercelSchedule(
-        await (await client()).disable({ name, namespace: context.namespace }),
+        await (await client(context.abortSignal)).disable({ name, namespace: context.namespace }),
       );
     },
     async invoke(context, name) {
-      await (await client()).invoke({ name, namespace: context.namespace });
+      await (await client(context.abortSignal)).invoke({ name, namespace: context.namespace });
     },
     async delete(context, name) {
       try {
-        await (await client()).delete({ name, namespace: context.namespace });
+        await (await client(context.abortSignal)).delete({ name, namespace: context.namespace });
         return true;
       } catch (error) {
         if (isNotFoundError(error)) return false;
@@ -111,10 +121,18 @@ export function vercelScheduleProvider(
   return provider;
 }
 
-async function createClient(options: VercelScheduleProviderOptions): Promise<SchedulesClient> {
+async function createClient(
+  options: VercelScheduleProviderOptions,
+  signal: AbortSignal,
+): Promise<SchedulesClient> {
   assertSupportedVercelEnvironment();
   const { SchedulesClient } = await import("@vercel/schedules");
-  return new SchedulesClient(options);
+  signal.throwIfAborted();
+  const fetchImpl = options.fetch ?? fetch;
+  return new SchedulesClient({
+    ...options,
+    fetch: (input, init) => fetchImpl(input, { ...init, signal }),
+  });
 }
 
 function createDispatchPayload(context: ScheduleProviderContext, payload: unknown) {

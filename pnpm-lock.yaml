@@ -1574,6 +1574,9 @@ importers:
       '@opentelemetry/api':
         specifier: ^1.0.0
         version: 1.9.1
+      '@vercel/schedules':
+        specifier: 0.0.0-alpha.10
+        version: 0.0.0-alpha.10
       braintrust:
         specifier: ^3.0.0
         version: 3.29.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.5.4)
@@ -1695,9 +1698,6 @@ importers:
       '@vercel/sandbox':
         specifier: 'catalog:'
         version: 3.3.0
-      '@vercel/schedules':
-        specifier: 0.0.0-alpha.10
-        version: 0.0.0-alpha.10
       '@vercel/sdk':
         specifier: 1.28.8
         version: 1.28.8
