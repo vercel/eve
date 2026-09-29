@@ -853,6 +853,7 @@ export const logos = {
   shopify: shopifyLogo,
   similarweb: similarwebLogo,
   stripe: stripeLogo,
+  link: linkLogo,
   supabase: supabaseLogo,
   "ticket-tailor": ticketTailorLogo,
   ticktick: ticktickLogo,
@@ -886,7 +887,6 @@ export const logos = {
   mux: muxLogo,
   browserbase: browserbaseLogo,
   jetty: jettyLogo,
-  "stripe-link": stripeLogo,
   "agent-browser": agentBrowserLogo,
 } as const;
 

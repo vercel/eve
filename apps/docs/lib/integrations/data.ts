@@ -1920,14 +1920,14 @@ The extension also supports inline screenshots, session naming, proxies, and pro
       },
     ],
   },
-  "stripe-link": {
-    logo: "stripe-link",
+  link: {
+    logo: "link",
     docsHref: "https://github.com/stripe/link-cli/tree/main/packages/integrations/eve",
-    keywords: ["stripe", "link", "wallet", "payments", "checkout", "spend requests", "approval"],
+    keywords: ["stripe", "wallet", "payments", "checkout", "spend requests", "approval"],
     install: `Install the Stripe Link extension for eve:
 
 \`\`\`bash
-eve add extension/stripe-link
+eve add extension/link
 \`\`\`
 
 The extension requires Node.js 24 or later. It uses a configured Link access token; it does not start OAuth or refresh tokens. The token's wallet is shared by every caller who can reach this agent, so mount it only on an appropriately access-controlled agent.`,
