@@ -2664,6 +2664,7 @@ async function handleStepResult(input: {
       },
       requests: inputRequests,
       toolReplayIdentities: captureToolReplayIdentities(config, approvalRequests),
+      responseAuthRequiredRequestIds: responsePolicyRequestIds(config, approvalRequests),
       responseMessages: [],
       session: parkedSession,
     });
@@ -2688,10 +2689,6 @@ async function handleStepResult(input: {
   // --- Park on input requests -----------------------------------------------
 
   if (inputRequests.length > 0) {
-    const responseAuthorizationTools = buildResponseAuthorizationTools({
-      authoredTools: config.tools,
-      context: contextStorage.getStore(),
-    });
     let parkedSession = appendPendingInputBatch({
       event: {
         sequence: emissionState.sequence,
@@ -2700,16 +2697,7 @@ async function handleStepResult(input: {
       },
       requests: inputRequests,
       toolReplayIdentities: captureToolReplayIdentities(config, approvalRequests),
-      responseAuthRequiredRequestIds: approvalRequests
-        .filter((request) => {
-          const approval = responseAuthorizationTools.get(request.action.toolName)?.approval;
-          return (
-            approval !== undefined &&
-            typeof approval !== "function" &&
-            approval.response !== undefined
-          );
-        })
-        .map((request) => request.requestId),
+      responseAuthRequiredRequestIds: responsePolicyRequestIds(config, approvalRequests),
       responseMessages: pendingResponseMessages,
       session: { ...baseSession, history: parkedInputHistory },
     });
@@ -3248,6 +3236,28 @@ function captureToolReplayIdentities(
     return identity === undefined ? [] : [[request.requestId, identity]];
   });
   return identities.length === 0 ? undefined : Object.fromEntries(identities);
+}
+
+/**
+ * The approvals whose tool defines a response policy. Every park path records
+ * them, so no Approve or Cancel of such an approval skips the policy.
+ */
+function responsePolicyRequestIds(
+  config: ToolLoopHarnessConfig,
+  requests: readonly InputRequest[],
+): readonly string[] {
+  const tools = buildResponseAuthorizationTools({
+    authoredTools: config.tools,
+    context: contextStorage.getStore(),
+  });
+  return requests
+    .filter((request) => {
+      const approval = tools.get(request.action.toolName)?.approval;
+      return (
+        approval !== undefined && typeof approval !== "function" && approval.response !== undefined
+      );
+    })
+    .map((request) => request.requestId);
 }
 
 function resolveApprovalKeyFromTools(

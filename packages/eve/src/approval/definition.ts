@@ -47,7 +47,7 @@ export interface ApprovalRequest<TInput = Record<string, unknown>> {
    * Who requested the tool call: the auth of the caller whose turn made it,
    * captured when the approval was requested. It stays the same while the
    * request is pending, however many people continue the session, and is
-   * `null` when that caller was unauthenticated.
+   * `null` when that caller was unauthenticated or anonymous.
    */
   readonly principal: SessionAuthContext | null;
   readonly toolInput?: ApprovalToolInput<TInput>;
@@ -68,9 +68,14 @@ export interface ApprovalResponseAuth {
   requireAuth(provider: ToolAuthProvider, options?: ToolAuthOptions): never;
 }
 
-/** Submitted decision passed to an approval response policy. */
+/** Submitted response passed to an approval response policy. */
 export interface ApprovalResponse {
   readonly decision: "approve" | "cancel";
+  /**
+   * Who submitted the response: the authenticated principal, including its
+   * `principalId`, `principalType`, `authenticator`, and `attributes`.
+   */
+  readonly principal: SessionAuthContext;
 }
 
 /** Context passed to an approval response policy. */
@@ -78,7 +83,6 @@ export interface ApprovalResponseContext<TInput = Record<string, unknown>> {
   readonly auth: ApprovalResponseAuth;
   readonly request: ApprovalRequest<TInput>;
   readonly response: ApprovalResponse;
-  readonly responder: SessionAuthContext;
   readonly session: ApprovalResponseSession;
 }
 

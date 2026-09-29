@@ -98,7 +98,7 @@ function setup(
   variation?: "destination" | "name" | "request-only",
 ) {
   const response = vi.fn((context: ApprovalResponseContext) => {
-    expect(context.responder.principalId).toBe("bob");
+    expect(context.response.principal.principalId).toBe("bob");
     expect(context.session.initiator?.principalId).toBe("alice");
     return reject
       ? { status: "rejected" as const, reason: "Only the notes owner can approve." }

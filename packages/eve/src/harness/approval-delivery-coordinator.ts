@@ -143,13 +143,11 @@ export async function coordinateApprovalDelivery(input: {
         attributedResponder !== undefined
           ? attributedResponder
           : (context?.get(AuthKey) ?? context?.get(SessionKey)?.auth.current ?? null);
-      if (
-        responder !== null &&
-        (response.optionId === "approve" || response.optionId === "cancel")
-      ) {
+      const decision = toCandidateDecision(response.optionId);
+      if (responder !== null && decision !== undefined) {
         const settled = settleDirectApprovalResponse({
           actor: responder,
-          outcome: response.optionId === "approve" ? "allowed" : "cancelled",
+          outcome: decision === "approve" ? "allowed" : "cancelled",
           requestId: response.requestId,
           settledAt: now,
           state: session.state,
@@ -315,8 +313,7 @@ async function authorizeCandidate(input: {
           toolInput: input.request.action.input,
           toolName: input.request.action.toolName,
         },
-        response: { decision: input.decision },
-        responder: input.responder,
+        response: { decision: input.decision, principal: input.responder },
         session: {
           id: context.session.id,
           initiator: context.session.auth.initiator,
@@ -488,7 +485,9 @@ function deliveryResult(
 }
 
 function toCandidateDecision(optionId: string | undefined): ApprovalCandidateDecision | undefined {
-  if (optionId === "approve" || optionId === "cancel") return optionId;
+  if (optionId === "approve") return "approve";
+  // ACP's Deny button sends "deny" where eve's own prompts send "cancel".
+  if (optionId === "cancel" || optionId === "deny") return "cancel";
   return undefined;
 }
 

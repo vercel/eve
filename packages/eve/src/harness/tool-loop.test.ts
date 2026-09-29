@@ -69,7 +69,7 @@ import {
   hasPendingInputBatch,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
-import { getDeferredStepInput } from "#harness/pending-input-batches.js";
+import { getDeferredStepInput, getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { getPendingCoordinationBatch, pendingCoordinationCallIds } from "#harness/coordination.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -304,6 +304,65 @@ function createTestConfig(
     ]),
     ...overrides,
   };
+}
+
+function mockApprovalAlongsideWorkflowTask(): void {
+  const gateToolCall = {
+    input: { action: "run" },
+    toolCallId: "gate-1",
+    toolName: "add",
+    type: "tool-call" as const,
+  };
+  const delegateToolCall = {
+    input: { message: "probe" },
+    toolCallId: "delegate-1",
+    toolName: "delegate",
+    type: "tool-call" as const,
+  };
+  setupMockAgent({
+    content: [
+      gateToolCall,
+      { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
+      delegateToolCall,
+    ],
+    finishReason: "tool-calls",
+    response: {
+      messages: [
+        {
+          content: [
+            gateToolCall,
+            { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
+            delegateToolCall,
+          ],
+          role: "assistant",
+        },
+      ],
+    },
+    responseMessages: [
+      {
+        content: [
+          {
+            output: { type: "text", value: "/workspace" },
+            toolCallId: "call-1",
+            toolName: "bash",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      {
+        content: [
+          gateToolCall,
+          { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
+          delegateToolCall,
+        ],
+        role: "assistant",
+      },
+    ],
+    text: "",
+    toolCalls: [gateToolCall, delegateToolCall],
+    toolResults: [],
+  });
 }
 
 function createDelegationToolMap(): ToolLoopHarnessConfig["tools"] {
@@ -1444,63 +1503,28 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("parks on both batches when one step carries a workflow task and an approval", async () => {
-    const gateToolCall = {
-      input: { action: "run" },
-      toolCallId: "gate-1",
-      toolName: "add",
-      type: "tool-call" as const,
-    };
-    const delegateToolCall = {
-      input: { message: "probe" },
-      toolCallId: "delegate-1",
-      toolName: "delegate",
-      type: "tool-call" as const,
-    };
-    setupMockAgent({
-      content: [
-        gateToolCall,
-        { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
-        delegateToolCall,
-      ],
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              gateToolCall,
-              { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
-              delegateToolCall,
-            ],
-            role: "assistant",
-          },
-        ],
-      },
-      responseMessages: [
-        {
-          content: [
-            {
-              output: { type: "text", value: "/workspace" },
-              toolCallId: "call-1",
-              toolName: "bash",
-              type: "tool-result",
-            },
-          ],
-          role: "tool",
-        },
-        {
-          content: [
-            gateToolCall,
-            { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
-            delegateToolCall,
-          ],
-          role: "assistant",
-        },
-      ],
-      text: "",
-      toolCalls: [gateToolCall, delegateToolCall],
-      toolResults: [],
+  it("records a response policy for an approval parked alongside a workflow task", async () => {
+    mockApprovalAlongsideWorkflowTask();
+    const delegation = createDelegationToolMap();
+    const tools = new Map(delegation);
+    tools.set("add", {
+      ...delegation.get("add")!,
+      approval: { request: () => "user-approval", response: () => ({ status: "allowed" }) },
     });
+    const runStep = createToolLoopHarness(createTestConfig(undefined, { tools }));
+
+    const parked = await runStep(createPendingBashApprovalSession(), {
+      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+    });
+
+    expect(getPendingCoordinationBatch(parked.session.state)).toBeDefined();
+    expect(getPendingInputBatches(parked.session.state)).toEqual([
+      expect.objectContaining({ responseAuthRequiredRequestIds: ["approval-gate"] }),
+    ]);
+  });
+
+  it("parks on both batches when one step carries a workflow task and an approval", async () => {
+    mockApprovalAlongsideWorkflowTask();
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(

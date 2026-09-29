@@ -38,11 +38,11 @@ export default defineTool({
   inputSchema: z.object({ marker: z.string() }),
   approval: {
     request: always(),
-    async response({ auth, response, responder }) {
+    async response({ auth, response }) {
       // Anyone may cancel; only an approval needs the responder's OAuth identity.
       if (response.decision === "cancel") return { status: "allowed" };
       const credential = await auth.getToken(fakeOAuth, { authKey: "fixture-oauth" });
-      return credential.providerSubject === responder.principalId
+      return credential.providerSubject === response.principal.principalId
         ? { status: "allowed" }
         : { status: "rejected", reason: "Fixture OAuth identity mismatch." };
     },

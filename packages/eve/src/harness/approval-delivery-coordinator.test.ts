@@ -76,7 +76,7 @@ describe("coordinateApprovalDelivery", () => {
     );
   }
 
-  async function ingest(session = parkedSession(), optionId: "approve" | "cancel" = "approve") {
+  async function ingest(session = parkedSession(), optionId = "approve") {
     return coordinateApprovalDelivery({
       now: 100,
       session,
@@ -103,7 +103,7 @@ describe("coordinateApprovalDelivery", () => {
     expect(response).toHaveBeenCalledWith(
       expect.objectContaining({
         request: expect.objectContaining({ principal: requester }),
-        responder,
+        response: { decision: "approve", principal: responder },
       }),
     );
   });
@@ -113,14 +113,14 @@ describe("coordinateApprovalDelivery", () => {
     const ingested = await ingest(parkedBy(requester), "cancel");
     expect(ingested.kind).toBe("continue-coordination");
 
-    const onlyRequester: ApprovalResponsePolicy = ({ request, responder: who }) =>
-      who.principalId === request.principal?.principalId
+    const onlyRequester: ApprovalResponsePolicy = ({ request, response }) =>
+      response.principal.principalId === request.principal?.principalId
         ? { status: "allowed" }
         : { reason: "Only the requester can respond.", status: "rejected" };
     const response = vi.fn(onlyRequester);
     const rejected = await authorize(ingested.session, response);
     expect(response).toHaveBeenCalledWith(
-      expect.objectContaining({ response: { decision: "cancel" } }),
+      expect.objectContaining({ response: { decision: "cancel", principal: responder } }),
     );
     expect(rejected.stepInput?.inputResponses ?? []).toEqual([]);
     expect(getApprovalAuditState(rejected.session.state).settlements).toEqual([]);
@@ -137,6 +137,18 @@ describe("coordinateApprovalDelivery", () => {
       tools: new Map(),
     });
     const settled = await authorize(requesterCancel.session, onlyRequester);
+    expect(settled.stepInput?.inputResponses).toEqual([
+      { optionId: "cancel", requestId: request.requestId },
+    ]);
+  });
+
+  it("authorizes ACP's Deny as a Cancel", async () => {
+    const ingested = await ingest(parkedSession(), "deny");
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
+    const settled = await authorize(ingested.session, response);
+    expect(response).toHaveBeenCalledWith(
+      expect.objectContaining({ response: { decision: "cancel", principal: responder } }),
+    );
     expect(settled.stepInput?.inputResponses).toEqual([
       { optionId: "cancel", requestId: request.requestId },
     ]);
