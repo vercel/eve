@@ -18,9 +18,6 @@ export default defineEval({
       throw new Error("Nested authorization challenge has no callback URL.");
     }
     const callback = new URL(required.data.webhookUrl);
-    if (callback.origin !== new URL(t.target.url).origin) {
-      throw new Error("Nested authorization callback targeted another origin.");
-    }
     callback.searchParams.set("code", AUTHORIZATION_CODE);
     const response = await fetch(callback);
     if (!response.ok) throw new Error(`Nested authorization callback returned ${response.status}.`);

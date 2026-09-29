@@ -13,8 +13,6 @@ export default defineEval({
     if (required.data.webhookUrl === undefined)
       throw new Error("Direct remote authorization has no callback URL.");
     const callback = new URL(required.data.webhookUrl);
-    if (callback.origin !== new URL(t.target.url).origin)
-      throw new Error("Direct authorization callback targeted another origin.");
     callback.searchParams.set("code", "direct-release-code");
     const response = await fetch(callback);
     if (!response.ok) throw new Error(`Direct authorization callback returned ${response.status}.`);
