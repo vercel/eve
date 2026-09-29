@@ -40,7 +40,6 @@ import {
   updateAnsweredHitlCard,
 } from "#public/channels/slack/interaction-cards.js";
 import { authorizeInputResponse } from "#public/channels/slack/input-response.js";
-import { slackPrincipalUserPatch } from "#public/channels/slack/auth.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
@@ -493,7 +492,7 @@ async function dispatchBlockInputResponses(input: {
       .from(slackContinuationToken(channelId, threadTs))
       .respond(input.submission.inputResponses, {
         auth: result.auth,
-        state: slackPrincipalUserPatch(result.auth, input.submission.user.id),
+        state: { triggeringUserId: input.submission.user.id },
       });
   } catch (error) {
     log.error("HITL interaction delivery failed", { error });
@@ -670,7 +669,7 @@ async function dispatchViewInputResponse(input: {
       .from(input.metadata.continuationToken)
       .respond(input.submission.inputResponses, {
         auth: result.auth,
-        state: slackPrincipalUserPatch(result.auth, input.submission.user.id),
+        state: { triggeringUserId: input.submission.user.id },
       });
   } catch (error) {
     log.error("freeform answer delivery failed", { error });

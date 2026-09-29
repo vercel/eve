@@ -18,19 +18,6 @@ export function slackUserIdFromAuthContext(auth: SessionAuthContext | null): str
   return typeof userId === "string" && userId.length > 0 ? userId : undefined;
 }
 
-/**
- * Records which Slack user an input response's principal belongs to. Keyed by
- * principal so custom `onInputResponse` auth still resolves to the Slack user
- * who clicked.
- */
-export function slackPrincipalUserPatch(
-  auth: SessionAuthContext | null | undefined,
-  slackUserId: string | null | undefined,
-): Pick<SlackChannelState, "slackUsersByPrincipal"> | undefined {
-  if (auth?.principalId === undefined || !slackUserId) return undefined;
-  return { slackUsersByPrincipal: { [auth.principalId]: slackUserId } };
-}
-
 /** Returns the Slack user recorded for a principal, if one has been seen in this thread. */
 export function slackUserIdForPrincipal(
   state: Pick<SlackChannelState, "slackUsersByPrincipal">,

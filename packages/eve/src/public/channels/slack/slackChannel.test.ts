@@ -12,7 +12,7 @@ import {
 import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import { AuthKey, SessionKey } from "#context/keys.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import {
   mockChannelContext,
@@ -190,6 +190,10 @@ function withState(
 
 function stubAccessor() {
   return { get: () => undefined, set: () => {} } as any;
+}
+
+function callerAccessor(auth: unknown) {
+  return { get: (key: unknown) => (key === AuthKey ? auth : undefined), set: () => {} } as any;
 }
 
 const stubAlsContext = (() => {
@@ -1240,7 +1244,24 @@ describe("slackChannel() default event handlers", () => {
     });
   });
 
-  it("refreshes triggeringUserId and records the caller's principal on every turn", async () => {
+  it("records the Slack user behind each delivered message's principal", async () => {
+    const adapter = withState(getAdapter(slackChannel()), THREAD_STATE);
+    const ctx = buildAdapterContext(
+      adapter,
+      callerAccessor({
+        attributes: { user_id: "U_ALICE" },
+        authenticator: "slack-webhook",
+        principalId: "slack:T01:U_ALICE",
+        principalType: "user",
+      }),
+    );
+
+    await adapter.deliver!({ message: "hello" }, ctx);
+
+    expect(ctx.state.slackUsersByPrincipal).toEqual({ "slack:T01:U_ALICE": "U_ALICE" });
+  });
+
+  it("refreshes triggeringUserId from the current Slack caller on every turn", async () => {
     const onTurnStarted = vi.fn();
     const adapter = withState(
       getAdapter(
@@ -1275,7 +1296,6 @@ describe("slackChannel() default event handlers", () => {
     );
 
     expect(ctx.state.triggeringUserId).toBe("U_CURRENT");
-    expect(ctx.state.slackUsersByPrincipal).toEqual({ "slack:T01:U_CURRENT": "U_CURRENT" });
     expect(onTurnStarted).toHaveBeenCalledOnce();
   });
 
@@ -3638,9 +3658,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
         principalType: "user",
       },
       inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
-      state: {
-        slackUsersByPrincipal: { "slack:T_ACTOR:U_APPROVER": "U_APPROVER" },
-      },
+      state: { triggeringUserId: "U_APPROVER" },
     });
   });
 
@@ -3803,10 +3821,16 @@ describe("slackChannel() HITL interaction pipeline", () => {
 
     expect(onInputResponse).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[1]).toMatchObject({
-      auth: customAuth,
-      state: { slackUsersByPrincipal: { "employee:ada": "U_APPROVER" } },
-    });
+    const delivery = send.mock.calls[0]?.[1] as Extract<
+      ObservedChannelDelivery<SlackChannelState>,
+      { readonly inputResponses: readonly unknown[] }
+    >;
+    expect(delivery).toMatchObject({ auth: customAuth, state: { triggeringUserId: "U_APPROVER" } });
+
+    const adapter = withState(getAdapter(channel), THREAD_STATE);
+    const ctx = buildAdapterContext(adapter, callerAccessor(customAuth));
+    await adapter.deliver!({ inputResponses: delivery.inputResponses, state: delivery.state }, ctx);
+    expect(ctx.state.slackUsersByPrincipal).toEqual({ "employee:ada": "U_APPROVER" });
   });
 
   it("persists the responder principal mapping for later approval candidate feedback", async () => {
@@ -3823,7 +3847,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       { readonly inputResponses: readonly unknown[] }
     >;
     const adapter = withState(getAdapter(channel), THREAD_STATE);
-    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const ctx = buildAdapterContext(adapter, callerAccessor(delivery.auth));
 
     await adapter.deliver!(
       {

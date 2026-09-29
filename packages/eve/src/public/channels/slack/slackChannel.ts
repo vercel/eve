@@ -9,7 +9,7 @@ import type {
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import { setChannelActivityRenderers, setChannelBuildMetadata } from "#channel/compiled-channel.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -264,8 +264,8 @@ export interface SlackChannelState {
   pendingAuthMessageTs?: Record<string, string>;
   pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
   /**
-   * Principal id to Slack user id, recorded from Slack-authenticated turns and
-   * input responses. Default handlers use it to address the principal named on
+   * Principal id to Slack user id, recorded as each message or input response
+   * is delivered. Default handlers use it to address the principal named on
    * `authorization.required` and approval events.
    */
   slackUsersByPrincipal?: Record<string, string>;
@@ -924,14 +924,9 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     ...defaultEvents,
     ...config.events,
     async "turn.started"(data, channel, ctx) {
-      const current = ctx.session.auth.current;
-      const triggeringUserId = slackUserIdFromAuthContext(current);
-      if (current !== null && triggeringUserId !== undefined) {
+      const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
+      if (triggeringUserId !== undefined) {
         channel.state.triggeringUserId = triggeringUserId;
-        channel.state.slackUsersByPrincipal = {
-          ...channel.state.slackUsersByPrincipal,
-          [current.principalId]: triggeringUserId,
-        };
       }
       await turnStartedHandler(data, channel, ctx);
     },
@@ -986,19 +981,14 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       return rebuildSlackContext(state, session, api, config.credentials);
     },
 
-    deliver(payload, channel) {
+    // The runtime hands `deliver` the full adapter context; `session.auth.current`
+    // is the caller of this delivery.
+    deliver(payload, channel: SlackChannelContext & { readonly session: SessionHandle }) {
       const cards = payload.pendingApprovalCards;
       if (typeof cards === "object" && cards !== null) {
         channel.state.pendingApprovalCards = { ...channel.state.pendingApprovalCards, ...cards };
       }
-      const principalUsers = (payload.state as Partial<SlackChannelState> | undefined)
-        ?.slackUsersByPrincipal;
-      if (typeof principalUsers === "object" && principalUsers !== null) {
-        channel.state.slackUsersByPrincipal = {
-          ...channel.state.slackUsersByPrincipal,
-          ...principalUsers,
-        };
-      }
+      recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
       return defaultDeliverResult(payload);
     },
 
@@ -1605,4 +1595,25 @@ async function deliverSlackMessage(input: {
   } catch (error) {
     logError(log, `${input.kind} delivery failed`, error, { channelId: message.channelId });
   }
+}
+
+/**
+ * Records the Slack user behind a delivery's principal. Slack-authenticated
+ * callers carry their user id; custom `onInputResponse` auth relies on the
+ * clicking user the interaction stamped on the payload.
+ */
+function recordSlackPrincipal(
+  state: SlackChannelState,
+  caller: SessionAuthContext | null,
+  payload: DeliverPayload,
+): void {
+  if (caller === null) return;
+  const stamped = (payload.state as Partial<SlackChannelState> | undefined)?.triggeringUserId;
+  const slackUserId =
+    slackUserIdFromAuthContext(caller) ?? (typeof stamped === "string" ? stamped : undefined);
+  if (slackUserId === undefined) return;
+  state.slackUsersByPrincipal = {
+    ...state.slackUsersByPrincipal,
+    [caller.principalId]: slackUserId,
+  };
 }

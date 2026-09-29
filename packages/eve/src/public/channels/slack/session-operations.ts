@@ -9,7 +9,6 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { InputResponse, StrictInputResponses } from "#shared/input.js";
 import type { UserContent } from "ai";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
-import { slackPrincipalUserPatch } from "#public/channels/slack/auth.js";
 
 type SlackSource = ChannelSource<SlackChannelState>;
 
@@ -58,14 +57,9 @@ export function bindSlackSessionOperations(input: {
       });
     },
     async respond(inputResponses, options = {}) {
-      const resolvedAuth = auth(options.auth);
       return await source.respond(inputResponses, {
         ...options,
-        auth: resolvedAuth,
-        state: {
-          ...options.state,
-          ...slackPrincipalUserPatch(resolvedAuth, input.state.triggeringUserId),
-        },
+        auth: auth(options.auth),
       });
     },
     async cancel(options) {
