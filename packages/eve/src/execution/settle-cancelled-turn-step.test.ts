@@ -4,7 +4,11 @@ import { ContextContainer } from "#context/container.js";
 import { ActivityPendingBlockersKey } from "#context/keys.js";
 import { deserializeContext } from "#context/serialize.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import { readDurableSession } from "#execution/durable-session-store.js";
+import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import type {
+  RestoredSessionStep,
+  SessionStepPublication,
+} from "#execution/publish-session-events.js";
 import { appendPendingInputBatch } from "#harness/pending-input-batches.js";
 import type { InputRequest } from "#shared/input.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
@@ -23,16 +27,26 @@ vi.mock("#context/serialize.js", () => ({
   deserializeContext: vi.fn(async () => new ContextContainer()),
   serializeContext: () => ({}),
 }));
-vi.mock("#execution/publish-session-events.js", () => ({
-  withSessionEventEmitter: async (
-    input: { readonly durableSession: HarnessSession },
-    emitEvents: (
-      emit: () => Promise<void>,
-      session: HarnessSession,
-    ) => Promise<{ readonly result: unknown; readonly session: HarnessSession }>,
+vi.mock("#execution/publish-session-events.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#execution/publish-session-events.js")>()),
+  publishFromSessionStep: async (
+    step: RestoredSessionStep,
+    publication: SessionStepPublication<unknown, unknown>,
+  ) => {
     // Hydration of a session with no compaction history yields empty compaction state.
-  ) =>
-    await emitEvents(async () => {}, { ...input.durableSession, compaction: {} } as HarnessSession),
+    const session = { ...step.durableSession, compaction: {} } as HarnessSession;
+    const update = publication.updateSession?.(
+      session,
+      await publication.publish(async () => {}, session),
+    ) ?? { session };
+    return {
+      published: {
+        serializedContext: {},
+        sessionState: createDurableSessionState({ session: update.session }),
+      },
+      result: update.result,
+    };
+  },
 }));
 
 function spend<T extends { readonly state?: SessionStateMap }>(

@@ -11,7 +11,7 @@ import {
   SessionInboxKey,
 } from "#context/keys.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
-import { createSessionEventSink } from "#execution/publish-session-events.js";
+import { openSessionEventPublisher } from "#execution/publish-session-events.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
@@ -184,13 +184,16 @@ describe("proxied stream hooks", () => {
       Response.json({ ok: true }, { status: 202 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const sink = createSessionEventSink({
+    const publisher = openSessionEventPublisher({
       ctx: f.ctx,
+      origin: "own",
       sessionId: "parent-session",
       sessionWritable: f.sessionWritable,
     });
     try {
-      await sink.emit({ type: "input.requested", data: f.hookPayload.event });
+      await publisher.writer.write(
+        await publisher.dispatcher.deliver({ type: "input.requested", data: f.hookPayload.event }),
+      );
       expect(fetchMock).toHaveBeenCalledOnce();
       const forwarded = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
       expect(forwarded).toMatchObject({
@@ -202,7 +205,7 @@ describe("proxied stream hooks", () => {
       expect(f.order).not.toContain("channel:input.requested");
       expect(f.events.map((event) => event.type)).toEqual(["input.requested"]);
     } finally {
-      sink.release();
+      publisher.writer.release();
       vi.unstubAllGlobals();
     }
   });
@@ -221,13 +224,16 @@ describe("proxied stream hooks", () => {
       Response.json({ ok: true }, { status: 202 }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    const sink = createSessionEventSink({
+    const publisher = openSessionEventPublisher({
       ctx: f.ctx,
+      origin: "own",
       sessionId: "parent-session",
       sessionWritable: f.sessionWritable,
     });
     try {
-      await sink.emit({ type: "input.requested", data: f.hookPayload.event });
+      await publisher.writer.write(
+        await publisher.dispatcher.deliver({ type: "input.requested", data: f.hookPayload.event }),
+      );
       const forwarded = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
       expect(forwarded).toMatchObject({
         childContinuationToken: "eve:session:parent-session:inbox",
@@ -236,7 +242,7 @@ describe("proxied stream hooks", () => {
       });
       expect(f.order).not.toContain("channel:input.requested");
     } finally {
-      sink.release();
+      publisher.writer.release();
       vi.unstubAllGlobals();
     }
   });
