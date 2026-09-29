@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
+const captured = vi.hoisted(() => ({
+  runtimeContext: undefined as RuntimeContextResolver | undefined,
+}));
+
 vi.mock("eve/instrumentation/otel", () => ({
-  otelIntegration: (options: unknown) => options,
+  otelIntegration: (options: { runtimeContext: RuntimeContextResolver }) => {
+    captured.runtimeContext = options.runtimeContext;
+    return options;
+  },
 }));
 vi.mock("@posthog/ai/otel", () => ({ PostHogTraceExporter: class {} }));
 
@@ -23,8 +30,9 @@ function posthogDistinctId(attributes: Record<string, unknown>): unknown {
 
 describe("PostHog instrumentation template", () => {
   it("records the session initiator under a span attribute PostHog reads as the distinct id", async () => {
-    const { default: integration } = await import("../../registry/instrumentation/posthog");
-    const { runtimeContext } = integration as unknown as { runtimeContext: RuntimeContextResolver };
+    await import("../../registry/instrumentation/posthog");
+    const { runtimeContext } = captured;
+    if (runtimeContext === undefined) throw new Error("template did not register runtimeContext");
 
     const context = runtimeContext({
       session: { auth: { current: null, initiator: { principalId: "user-1" } } },
