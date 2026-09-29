@@ -11,7 +11,7 @@ import {
 import { isAbortError } from "#client/eve-agent-store-helpers.js";
 import { normalizeActionRequest, normalizeActionResult } from "#client/message-action-parts.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
-import { agentCallLabel } from "./transcript.js";
+import { isTaskRetryRefusal } from "#protocol/task-tools.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
 import type {
@@ -133,8 +133,10 @@ export type AgentTUIInput =
 export type AgentTUIInputContext = {
   /** 1-based position among the requests answered in a row; the total grows as more arrive. */
   position?: { index: number; total: number };
-  /** The agent call or task that asked, named as its transcript section is. */
+  /** The task that asked, named as its transcript lines are. */
   requester?: string;
+  /** The task whose run asked; the renderer names it as its task lines do. */
+  taskId?: string;
 };
 
 export type AgentTUIToolApprovalRequest = {
@@ -471,6 +473,7 @@ export class EveTUIRunner {
   #reportedError?: Error;
   /** Failure cascades already recorded in diagnostics this turn. */
   readonly #recordedFailures = new Set<string>();
+  readonly #recordedAgentToolFailures = new Set<string>();
   readonly #lifecycle?: CommandLifecycle;
 
   constructor(options: EveTUIRunnerOptions) {
@@ -865,6 +868,7 @@ export class EveTUIRunner {
       conversationView(snapshot, this.#appRoot === undefined ? undefined : localFailureHint),
     );
     this.#reportSessionError(snapshot.error, snapshot.data.sessionFailed);
+    this.#recordAgentToolFailures(snapshot.conversation);
     this.#reportFirstResponse(snapshot.conversation);
     this.#queueRegistryHandoffs(snapshot.conversation);
     if (
@@ -913,12 +917,7 @@ export class EveTUIRunner {
       const inputs = this.#answerableInputs();
       const input = inputs[0];
       if (input === undefined) return;
-      const context = inputContext(
-        this.#store.snapshot.conversation,
-        input,
-        answered + 1,
-        answered + inputs.length,
-      );
+      const context = inputContext(input, answered + 1, answered + inputs.length);
       const response = await this.#readInputResponse(input.request, context, title);
       if (response === undefined) {
         // A skipped question stays open; the server decides whether the
@@ -1499,6 +1498,27 @@ export class EveTUIRunner {
     void this.#refreshAgentInfo(true);
   }
 
+  /** Agents' own tool failures reach the diagnostics log whatever the subagent display mode. */
+  #recordAgentToolFailures(conversation: ConversationState): void {
+    const diagnostics = this.#diagnostics;
+    if (diagnostics === undefined) return;
+    for (const agent of Object.values(conversation.agents)) {
+      if (agent.observation.status === "not-followed") continue;
+      for (const message of agent.observation.conversation?.messages ?? []) {
+        for (const part of message.parts) {
+          if (part.type !== "dynamic-tool" || part.state !== "output-error") continue;
+          if (this.#recordedAgentToolFailures.has(part.toolCallId)) continue;
+          this.#recordedAgentToolFailures.add(part.toolCallId);
+          diagnostics.append({
+            source: "tool",
+            summary: `${part.toolName} failed (subagent ${agent.name})`,
+            detail: part.errorText,
+          });
+        }
+      }
+    }
+  }
+
   /** Records session activity that the diagnostics log keeps regardless of display. */
   #recordDiagnostics(event: MessageStreamEvent): void {
     const diagnostics = this.#diagnostics;
@@ -1514,7 +1534,13 @@ export class EveTUIRunner {
         }
         break;
       case "action.result":
-        if (event.data.status === "failed") {
+        if (isTaskRetryRefusal(event)) {
+          diagnostics.append({
+            source: "tool",
+            summary: `${normalizeActionResult(event.data.result).toolName} was refused for the model to retry`,
+            detail: event.data.error?.message ?? "Refused.",
+          });
+        } else if (event.data.status === "failed") {
           diagnostics.append({
             source: "tool",
             summary: `${normalizeActionResult(event.data.result).toolName} failed`,
@@ -1631,17 +1657,14 @@ export function registryHandoffAddress(
 }
 
 function inputContext(
-  conversation: ConversationState,
   input: ConversationInput,
   index: number,
   total: number,
 ): AgentTUIInputContext | undefined {
   const context: AgentTUIInputContext = {};
   if (total > 1) context.position = { index, total };
-  const requester =
-    input.taskId === undefined ? undefined : agentCallLabel(conversation, input.taskId);
-  if (requester !== undefined) context.requester = requester;
-  return context.position === undefined && context.requester === undefined ? undefined : context;
+  if (input.taskId !== undefined) context.taskId = input.taskId;
+  return context.position === undefined && context.taskId === undefined ? undefined : context;
 }
 
 function toAgentTUIToolApprovalRequest(

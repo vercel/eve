@@ -374,8 +374,8 @@ describe("eve dev conversation", () => {
 
     await vi.waitFor(() => expect(server.requestsTo("POST", "/session_1")).toHaveLength(2));
     expect(readToolApproval.mock.calls.map(([request]) => request.context)).toEqual([
-      { requester: "subagent(number_picker:1)" },
-      { position: { index: 2, total: 2 }, requester: "subagent(number_picker:2)" },
+      { taskId: "task_1" },
+      { position: { index: 2, total: 2 }, taskId: "task_2" },
     ]);
     expect(
       server.requestsTo("POST", "/session_1").map((request) => request.body?.inputResponses),

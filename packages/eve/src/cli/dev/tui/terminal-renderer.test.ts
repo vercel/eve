@@ -15,14 +15,14 @@ import { initialConversationState, reduceConversation } from "#client/conversati
 import type { EveAgentReducerEvent } from "#client/reducer.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import {
-  createActionResultEvent,
   createActionsRequestedEvent,
-  createAgentStartedEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createTaskStartedEvent,
   createTurnStartedEvent,
+  createTurnWaitingEvent,
+  createTaskSettledEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import {
@@ -3800,7 +3800,7 @@ describe("TerminalRenderer conversation", () => {
   let sequence = 0;
   const stamped = (event: UnstampedMessageStreamEvent) => stampTestEvent(event, ++sequence);
 
-  it("places an agent call's section above tool rows that arrived before its agent started", async () => {
+  it("writes a task's start and end lines and shows it in the panel while it works", async () => {
     const { screen, renderer } = makeRenderer(100, 30);
     const prompt = readPrompt(renderer);
     const call = {
@@ -3810,14 +3810,14 @@ describe("TerminalRenderer conversation", () => {
       taskId: "task_1",
       turnId: "turn_1",
     };
-    const beforeAgent = [
+    const working = [
       stamped(createTurnStartedEvent({ sequence: 0, turnId: "turn_1" })),
       stamped(
         createActionsRequestedEvent({
           actions: [
             {
               callId: "pick_1",
-              input: { message: "Pick a number." },
+              input: { message: "Pick a number for Alice." },
               kind: "tool-call",
               toolName: "number_picker",
             },
@@ -3836,38 +3836,27 @@ describe("TerminalRenderer conversation", () => {
           turnId: "turn_1",
         }),
       ),
-      stamped(
-        createActionResultEvent({
-          result: {
-            callId: "wait_1",
-            kind: "tool-result",
-            output: "1 task is working.",
-            toolName: "task_wait",
-          },
-          sequence: 3,
-          stepIndex: 1,
-          turnId: "turn_1",
-        }),
-      ),
+      stamped(createTurnWaitingEvent({ sequence: 3, turnId: "turn_1" })),
     ];
-    renderer.renderConversation(conversationOf(beforeAgent, { working: true }));
+    renderer.renderConversation(conversationOf(working, { working: true }));
+    const during = screen.snapshot();
+    expect(during).toContain("※ number_picker  Pick a number for Alice.");
+    expect(during).toMatch(/※ number_picker +Starting/);
+    expect(during).toContain("Waiting for number_picker");
+    expect(during).not.toContain("task_wait");
+
     renderer.renderConversation(
       conversationOf(
         [
-          ...beforeAgent,
-          stamped(
-            createAgentStartedEvent({
-              ...call,
-              parentSessionId: "session_1",
-              sessionId: "child_1",
-            }),
-          ),
+          ...working,
+          stamped(createTaskSettledEvent({ ...call, output: "7", status: "completed" })),
         ],
         { working: true },
       ),
     );
-
-    expect(screen.snapshot()).toMatch(/subagent\(number_picker\)[^\n]*\n\n[^\n]*task_wait/);
+    const after = screen.snapshot();
+    expect(after).toMatch(/✓ number_picker +finished in/);
+    expect(after).not.toMatch(/※ number_picker +Starting/);
     renderer.requestInterrupt();
     await prompt.catch(() => {});
   });

@@ -2,6 +2,7 @@ import type { ConversationState } from "#client/conversation-state.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import type { EveAgentStoreSnapshot } from "#client/eve-agent-store.js";
 import type { EveAgentReducer } from "#client/reducer.js";
+import { isTaskRetryRefusal } from "#protocol/task-tools.js";
 import {
   failureKey,
   formatFailureDetail,
@@ -29,6 +30,15 @@ export interface TuiSessionData {
   readonly sessionFailed: boolean;
   /** Failure keys seen since the last `turn.started`, for cascade deduplication. */
   readonly turnFailureKeys: readonly string[];
+  /** Tools' authored `label` copy by call, which the canonical conversation drops. */
+  readonly toolLabels: Readonly<Record<string, ToolLabels>>;
+  /** Calls the session refused for the model to retry; people only see the retry. */
+  readonly withdrawnCallIds: readonly string[];
+}
+
+export interface ToolLabels {
+  readonly start?: string;
+  readonly complete?: string;
 }
 
 export const tuiSessionReducer: EveAgentReducer<TuiSessionData> = {
@@ -37,9 +47,34 @@ export const tuiSessionReducer: EveAgentReducer<TuiSessionData> = {
     failures: [],
     sessionFailed: false,
     turnFailureKeys: [],
+    toolLabels: {},
+    withdrawnCallIds: [],
   }),
   reduce(data, event) {
     switch (event.type) {
+      case "actions.requested": {
+        const presentation = event.data.presentation;
+        if (presentation === undefined) return data;
+        const toolLabels = { ...data.toolLabels };
+        for (const action of event.data.actions) {
+          const start = presentation[action.callId]?.label;
+          if (start !== undefined) toolLabels[action.callId] = { start };
+        }
+        return { ...data, toolLabels };
+      }
+      case "action.result": {
+        const { callId } = event.data.result;
+        if (isTaskRetryRefusal(event)) {
+          return { ...data, withdrawnCallIds: [...data.withdrawnCallIds, callId] };
+        }
+        const complete = event.data.presentation?.[callId]?.label;
+        if (complete === undefined) return data;
+        const toolLabels = {
+          ...data.toolLabels,
+          [callId]: { ...data.toolLabels[callId], complete },
+        };
+        return { ...data, toolLabels };
+      }
       case "turn.started": {
         const { turnId } = event.data;
         if (data.turnFailureKeys.length === 0 && turnId === data.modelTurnId) return data;

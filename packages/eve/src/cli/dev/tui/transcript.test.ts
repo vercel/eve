@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   initialConversationState,
   reduceConversation,
@@ -7,6 +7,7 @@ import {
 import type { ConversationState } from "#client/conversation-state.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import {
+  createActionInputAppendedEvent,
   createActionResultEvent,
   createActionsRequestedEvent,
   createAuthorizationCompletedEvent,
@@ -79,6 +80,61 @@ function toolResult(callId: string, toolName = "read_file") {
       turnId: "turn_1",
     }),
   );
+}
+
+function taskStarted(callId: string, name: string, taskId = "task_1") {
+  return event(createTaskStartedEvent({ callId, kind: "agent", name, taskId, turnId: "turn_1" }));
+}
+
+function agentStarted(callId: string) {
+  return event(
+    createAgentStartedEvent({
+      callId,
+      name: "research",
+      parentSessionId: "session_1",
+      sessionId: "child_1",
+      taskId: "task_1",
+      turnId: "turn_1",
+    }),
+  );
+}
+
+function settled(callId: string) {
+  return event(
+    createTaskSettledEvent({
+      callId,
+      output: "done",
+      status: "completed",
+      taskId: "task_1",
+      turnId: "turn_1",
+    }),
+  );
+}
+
+function parentText(message: string) {
+  return event(
+    createMessageCompletedEvent({ message, sequence: 4, stepIndex: 1, turnId: "turn_1" }),
+  );
+}
+
+function observe(events: readonly UnstampedMessageStreamEvent[]): ConversationEvent[] {
+  return events.map((childEvent) => ({
+    type: "client.agent.observed" as const,
+    data: { sessionId: "child_1", event: event(childEvent) },
+  }));
+}
+
+function childReply(turnId: string, message: string): ConversationEvent[] {
+  return observe([
+    createTurnStartedEvent({ sequence: 0, turnId }),
+    createMessageReceivedEvent({ message: `Question for ${turnId}`, sequence: 0, turnId }),
+    createMessageCompletedEvent({ message, sequence: 0, stepIndex: 0, turnId }),
+  ]);
+}
+
+/** Kind, task or agent name, and the line's detail, for reading placement at a glance. */
+function summarize(blocks: readonly Block[]) {
+  return blocks.map((block) => [block.kind, block.title ?? block.agentName, block.body]);
 }
 
 describe("ConversationTranscript", () => {
@@ -242,133 +298,76 @@ describe("ConversationTranscript", () => {
     expect(byId(blocks, "tool:call_2")).toMatchObject({ status: "running", live: true });
   });
 
-  it("keeps a task's tool row running past its receipt and its turn, and names what a waiting turn holds on", () => {
+  it("writes a task's start line at its call and names the tasks a waiting turn holds on", () => {
     const state = conversation([
       turn,
       toolCall("call_1", "summarize"),
+      taskStarted("call_1", "summarize"),
       toolResult("call_1", "summarize"),
-      event(
-        createTaskStartedEvent({
-          callId: "call_1",
-          kind: "agent",
-          name: "summarize",
-          taskId: "task_1",
-          turnId: "turn_1",
-        }),
-      ),
+      toolCall("wait_1", "task_wait"),
       event(createTurnWaitingEvent({ sequence: 3, turnId: "turn_1" })),
     ]);
+    const transcript = new ConversationTranscript();
     const working = view(state, true);
-    expect(
-      byId(new ConversationTranscript().project(working, options), "tool:call_1"),
-    ).toMatchObject({
-      status: "running",
-      live: true,
-    });
-    expect(turnActivity(working)).toBe("Waiting on summarize");
+    expect(transcript.project(working, options)).toEqual([
+      expect.objectContaining({
+        id: "task:call_1:start",
+        kind: "task",
+        taskKind: "agent",
+        title: "summarize",
+        live: false,
+      }),
+    ]);
+    expect(turnActivity(working, transcript.tasks)).toBe("Waiting for summarize");
     // A root approval in the same step ends the turn while the task keeps working.
-    expect(
-      byId(new ConversationTranscript().project(view(state, false), options), "tool:call_1"),
-    ).toMatchObject({ status: "running" });
+    expect(transcript.project(view(state, false), options)).toHaveLength(1);
+    expect(transcript.tasks.map((task) => task.name)).toEqual(["summarize"]);
   });
 
-  it("renders each agent call over its own turns, live while its reply can still arrive", () => {
-    const observe = (events: readonly UnstampedMessageStreamEvent[]) =>
-      events.map((childEvent) => ({
-        type: "client.agent.observed" as const,
-        data: { sessionId: "child_1", event: event(childEvent) as MessageStreamEvent },
-      }));
-    const childReply = (turnId: string, message: string) =>
-      observe([
-        createTurnStartedEvent({ sequence: 0, turnId }),
-        createMessageReceivedEvent({ message: `Question for ${turnId}`, sequence: 0, turnId }),
-        createMessageCompletedEvent({ message, sequence: 0, stepIndex: 0, turnId }),
-      ]);
-    const settled = (callId: string) =>
-      event(
-        createTaskSettledEvent({
-          callId,
-          output: "done",
-          status: "completed",
-          taskId: "task_1",
-          turnId: "turn_1",
-        }),
-      );
+  it("writes an agent's finished rows and end line where the transcript had reached, after its last events", () => {
+    vi.useFakeTimers({ now: 0 });
+    onTestFinished(() => void vi.useRealTimers());
     const called = conversation([
       turn,
       toolCall("call_1", "research"),
-      event(
-        createTaskStartedEvent({
-          callId: "call_1",
-          kind: "agent",
-          name: "research",
-          taskId: "task_1",
-          turnId: "turn_1",
-        }),
-      ),
-      event(
-        createAgentStartedEvent({
-          callId: "call_1",
-          name: "research",
-          parentSessionId: "session_1",
-          sessionId: "child_1",
-          taskId: "task_1",
-          turnId: "turn_1",
-        }),
-      ),
+      taskStarted("call_1", "research"),
+      agentStarted("call_1"),
       { type: "client.agent.following", data: { sessionId: "child_1" } },
       ...childReply("child_turn_1", "Bob's notes found."),
     ]);
     const transcript = new ConversationTranscript();
-    expect(transcript.project(view(called, true), options)).toEqual([
-      expect.objectContaining({ kind: "subagent", title: "research", live: true }),
-      expect.objectContaining({ kind: "subagent-step", body: "Bob's notes found.", live: false }),
+    expect(summarize(transcript.project(view(called, true), options))).toEqual([
+      ["task", "research", undefined],
+      ["subagent-step", "research", "Bob's notes found."],
     ]);
+    expect(transcript.tasks[0]).toMatchObject({ name: "research", step: "Bob's notes found." });
+
     // The call can settle on the root before the agent's turn ends on its own stream.
+    vi.setSystemTime(72_000);
     const reported = conversation([settled("call_1")], called);
-    expect(transcript.project(view(reported, true), options)[0]).toMatchObject({
-      kind: "subagent",
-      status: "done",
-      live: true,
-    });
+    expect(transcript.project(view(reported, true), options)).toHaveLength(2);
+    expect(transcript.tasks[0]).toMatchObject({ finishing: true });
     const ended = conversation(
-      observe([createTurnCompletedEvent({ sequence: 1, turnId: "child_turn_1" })]),
+      [
+        ...observe([createTurnCompletedEvent({ sequence: 1, turnId: "child_turn_1" })]),
+        parentText("Bob found his notes."),
+      ],
       reported,
     );
-    expect(transcript.project(view(ended, true), options)[0]).toMatchObject({
-      kind: "subagent",
-      status: "done",
-      live: false,
-    });
+    expect(summarize(transcript.project(view(ended, true), options))).toEqual([
+      ["task", "research", undefined],
+      ["subagent-step", "research", "Bob's notes found."],
+      ["assistant", undefined, "Bob found his notes."],
+      ["task", "research", "finished in 1min 12s"],
+    ]);
+    expect(transcript.tasks).toEqual([]);
 
+    // A later call continuing the task writes its own lines after everything so far.
     const continued = conversation(
       [
         toolCall("call_2", "research"),
-        event(
-          createTaskStartedEvent({
-            callId: "call_2",
-            kind: "agent",
-            name: "research",
-            taskId: "task_1",
-            turnId: "turn_1",
-          }),
-        ),
+        taskStarted("call_2", "research"),
         ...childReply("child_turn_2", "Bob's summary is attached."),
-      ],
-      ended,
-    );
-    expect(
-      transcript
-        .project(view(continued, true), options)
-        .map((block) => [block.kind, block.subtitle ?? block.body, block.live]),
-    ).toEqual([
-      ["subagent", "#1", false],
-      ["subagent-step", "Bob's notes found.", false],
-      ["subagent", "#2", true],
-      ["subagent-step", "Bob's summary is attached.", false],
-    ]);
-    const failed = conversation(
-      [
         event(
           createTaskSettledEvent({
             callId: "call_2",
@@ -387,14 +386,99 @@ describe("ConversationTranscript", () => {
           }),
         ]),
       ],
-      continued,
+      ended,
     );
-    expect(
-      byId(transcript.project(view(failed, true), options), "subagent:call_2:header"),
-    ).toMatchObject({
-      status: "error",
-      live: false,
-    });
+    expect(summarize(transcript.project(view(continued, true), options)).slice(3)).toEqual([
+      ["task", "research", "finished in 1min 12s"],
+      ["task", "research", undefined],
+      ["subagent-step", "research", "Bob's summary is attached."],
+      ["task", "research", "failed · The agent's session ended."],
+    ]);
+  });
+
+  it("names parallel calls apart, stops tasks a cancelled turn leaves working, and hides hidden ones", () => {
+    const state = conversation([
+      turn,
+      toolCall("call_1", "research"),
+      taskStarted("call_1", "research"),
+      toolCall("call_2", "research"),
+      taskStarted("call_2", "research", "task_2"),
+    ]);
+    const transcript = new ConversationTranscript();
+    transcript.project(view(state, true), options);
+    expect(transcript.tasks.map((task) => task.name)).toEqual(["research", "research #2"]);
+    // An input request names the task that asked as its lines do.
+    expect(transcript.taskLabel(state, "task_2")).toBe("research #2");
+
+    const cancelled = conversation(
+      [event(createTurnCancelledEvent({ sequence: 3, turnId: "turn_1" }))],
+      state,
+    );
+    const ends = transcript
+      .project(view(cancelled, false), options)
+      .filter((block) => block.id?.endsWith(":end"));
+    expect(ends.map((block) => [block.title, block.status, block.body])).toEqual([
+      ["research", "denied", "stopped"],
+      ["research #2", "denied", "stopped"],
+    ]);
+    expect(transcript.tasks).toEqual([]);
+
+    const hidden = new ConversationTranscript();
+    expect(hidden.project(view(state, true), { ...options, subagents: "hidden" })).toEqual([]);
+    expect(hidden.tasks).toEqual([]);
+  });
+
+  it("hides refused calls, shows authored labels, and holds a placeholder while input streams", () => {
+    const events = [
+      turn,
+      event(
+        createActionsRequestedEvent({
+          actions: [
+            { callId: "call_1", input: { city: "Paris" }, kind: "tool-call", toolName: "weather" },
+          ],
+          presentation: { call_1: { label: "Checking the weather" } },
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      ),
+      toolCall("call_2", "research"),
+      event(
+        createActionResultEvent({
+          result: {
+            callId: "call_2",
+            isError: true,
+            kind: "tool-result",
+            output: { code: "TOO_MANY_TASKS", message: "Wait for a task to finish." },
+            toolName: "research",
+          },
+          sequence: 2,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      ),
+      event(
+        createActionInputAppendedEvent({
+          callId: "call_3",
+          inputTextDelta: "{",
+          sequence: 3,
+          stepIndex: 1,
+          toolName: "read_file",
+          turnId: "turn_1",
+        }),
+      ),
+    ];
+    const state = conversation(events);
+    const data = events.reduce(tuiSessionReducer.reduce, tuiSessionReducer.initial());
+    const project = (working: boolean) =>
+      new ConversationTranscript()
+        .project({ conversation: state, working, data, failures: [] }, options)
+        .map((block) => [block.id, block.title]);
+    expect(project(true)).toEqual([
+      ["tool:call_1", "Checking the weather"],
+      ["tool:call_3", "Read …"],
+    ]);
+    expect(project(false)).toEqual([["tool:call_1", "Checking the weather"]]);
   });
 
   it("keeps same-name authorization attempts distinct and live until completed", () => {

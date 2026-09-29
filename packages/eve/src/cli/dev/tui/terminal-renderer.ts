@@ -3,6 +3,7 @@ import type { DevDiagnostics } from "../diagnostics.js";
 
 import type {
   AgentTUIInput,
+  AgentTUIInputContext,
   AgentTUIInputOption,
   AgentTUIInputQuestion,
   AgentTUIInputQuestionResponse,
@@ -13,7 +14,13 @@ import type {
   CommandPresentation,
 } from "./runner.js";
 import type { AgentTUIConversationView, TokenUsage } from "./conversation-view.js";
-import { ConversationTranscript, turnActivity } from "./transcript.js";
+import {
+  ConversationTranscript,
+  TASK_END_GRACE_MS,
+  turnActivity,
+  type TranscriptOptions,
+} from "./transcript.js";
+import { renderTaskPanelRows } from "./task-activity.js";
 import { interruptedError } from "./errors.js";
 import {
   argumentTypeaheadCompletion,
@@ -79,6 +86,7 @@ import {
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
+  SubagentDisplayMode,
   TerminalPartDisplayMode,
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
@@ -255,7 +263,7 @@ type TerminalRendererOptions = {
   output?: TerminalOutput;
   tools?: TerminalPartDisplayMode;
   reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
+  subagents?: SubagentDisplayMode;
   connectionAuth?: TerminalPartDisplayMode;
   assistantResponseStats?: AssistantResponseStatsMode;
   contextSize?: number;
@@ -316,7 +324,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #renderMarkdown: boolean;
   readonly #tools: TerminalPartDisplayMode;
   readonly #reasoning: TerminalPartDisplayMode;
-  readonly #subagents: TerminalPartDisplayMode;
+  readonly #subagents: SubagentDisplayMode;
   readonly #connectionAuth: TerminalPartDisplayMode;
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #captureForeignOutput: boolean;
@@ -345,6 +353,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #updateSequence = 0;
   /** Projects the current session's conversation; reset at every context cut. */
   readonly #transcript = new ConversationTranscript();
+  #taskEndGraceTimer?: ReturnType<typeof setTimeout>;
   #view?: AgentTUIConversationView;
   /** Live blocks whose content the conversation projection owns. */
   #conversationBlockIds = new Set<string>();
@@ -543,7 +552,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#renderMarkdown = options?.renderMarkdown ?? detectMarkdownRendering();
     this.#tools = options?.tools ?? "auto-collapsed";
     this.#reasoning = options?.reasoning ?? "auto-collapsed";
-    this.#subagents = options?.subagents ?? "auto-collapsed";
+    this.#subagents = options?.subagents ?? "collapsed";
     this.#connectionAuth = options?.connectionAuth ?? "full";
     this.#assistantResponseStats = options?.assistantResponseStats ?? defaultAssistantResponseStats;
     this.#contextSize = options?.contextSize;
@@ -1002,14 +1011,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (view.conversation.messages.some((message) => message.role === "user")) {
       this.#hasUserMessage = true;
     }
-    const projected = this.#transcript.project(view, {
-      tools: this.#tools,
-      reasoning: this.#reasoning,
-      subagents: this.#subagents,
-      connectionAuth: this.#connectionAuth,
-      subagentNames: this.#subagentNames,
-      diagnosticsPath: this.#diagnostics?.displayPath,
-    });
+    const projected = this.#transcript.project(view, this.#transcriptOptions());
+    this.#scheduleTaskEndGrace();
     const ids = new Set<string>();
     for (const [index, block] of projected.entries()) {
       const id = block.id!;
@@ -1047,16 +1050,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
-   * New conversation blocks go before the next transcript block still on screen: a section whose
-   * agent started after later tool rows appeared still renders above them. Without one, a
-   * section's rows join their section and anything else joins the live edge.
+   * New conversation blocks go before the next transcript block still on screen, or join the
+   * live edge.
    */
   #insertConversationBlock(block: Block, following: readonly Block[]): void {
     const next = following.find((candidate) => this.#blockById.has(candidate.id!));
-    const index =
-      next === undefined
-        ? this.#sectionEnd(block)
-        : this.#blocks.indexOf(this.#blockById.get(next.id!)!);
+    const index = next === undefined ? -1 : this.#blocks.indexOf(this.#blockById.get(next.id!)!);
     if (index === -1) {
       this.#pushBlock(block);
       return;
@@ -1066,12 +1065,32 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#blockById.set(block.id!, block);
   }
 
-  /** Where a section's new row joins the rows already on screen, or -1. */
-  #sectionEnd(block: Block): number {
-    const callId = block.subagentCallId;
-    if (callId === undefined || block.kind === "subagent") return -1;
-    const last = this.#blocks.findLastIndex((candidate) => candidate.subagentCallId === callId);
-    return last === -1 ? -1 : last + 1;
+  #transcriptOptions(): TranscriptOptions {
+    return {
+      tools: this.#tools,
+      reasoning: this.#reasoning,
+      subagents: this.#subagents,
+      connectionAuth: this.#connectionAuth,
+      subagentNames: this.#subagentNames,
+      diagnosticsPath: this.#diagnostics?.displayPath,
+      dot: this.#theme.glyph.dot,
+    };
+  }
+
+  /** Names the task that asked as its task lines do. */
+  #inputContextLabel(context: AgentTUIInputContext | undefined): string | undefined {
+    if (
+      context?.taskId === undefined ||
+      context.requester !== undefined ||
+      this.#view === undefined
+    ) {
+      return inputContextLabel(context, this.#theme);
+    }
+    const requester = this.#transcript.taskLabel(this.#view.conversation, context.taskId);
+    return inputContextLabel(
+      requester === undefined ? context : { ...context, requester },
+      this.#theme,
+    );
   }
 
   #syncInput(state: LineState): void {
@@ -1103,7 +1122,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         ["y yes · n no · Ctrl-C cancel"],
         this.#theme,
         width,
-        inputContextLabel(request.context, this.#theme),
+        this.#inputContextLabel(request.context),
       );
     this.#paint();
 
@@ -1209,7 +1228,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         ["↑/↓ move · enter to select · esc to dismiss"],
         this.#theme,
         width,
-        inputContextLabel(question.context, this.#theme),
+        this.#inputContextLabel(question.context),
       );
 
     const textPanel = (width: number) => {
@@ -1232,7 +1251,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         ["Enter submit · Esc dismiss"],
         this.#theme,
         width,
-        inputContextLabel(question.context, this.#theme),
+        this.#inputContextLabel(question.context),
       );
     };
 
@@ -1489,6 +1508,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The dying turn's stats coda closes before the boundary — it belongs
     // to the session that ended, not the fresh one.
     this.#commitTurnStats();
+    // Tasks die with the session; close their lines before the boundary.
+    const stopped = this.#transcript.stopWorking(this.#transcriptOptions());
     // The old conversation's blocks settle as they are; a fresh session may
     // reuse their ids, so they leave the projection anonymously.
     for (const id of this.#conversationBlockIds) {
@@ -1499,6 +1520,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const { id: _id, ...settled } = block;
       this.#blocks[index] = { ...settled, live: false };
     }
+    for (const { id: _id, ...line } of stopped) this.#pushBlock(line);
     this.#committedIds.clear();
     this.#clearConversationState();
 
@@ -1520,6 +1542,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #clearConversationState(): void {
     this.#transcript.reset();
+    this.#clearTaskEndGrace();
     this.#view = undefined;
     this.#conversationBlockIds = new Set();
     this.#steeredMessages.length = 0;
@@ -3082,12 +3105,42 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
-  /** Running work, or subagent sections still mutating after their parent turn settled. */
+  /** Running work, or tasks still working after their turn ended; the task panel ticks. */
   #hasLiveSessionActivity(): boolean {
-    return (
-      this.#view?.working === true ||
-      this.#blocks.some((block) => block.live && block.subagentCallId !== undefined)
-    );
+    return this.#view?.working === true || this.#transcript.tasks.length > 0;
+  }
+
+  /**
+   * A settled agent task waits for its own last events before writing its end line, but not past
+   * a short grace period; the next projection after it writes the line.
+   */
+  #scheduleTaskEndGrace(): void {
+    if (!this.#transcript.finishing || this.#taskEndGraceTimer !== undefined) return;
+    this.#taskEndGraceTimer = setTimeout(() => {
+      this.#taskEndGraceTimer = undefined;
+      if (this.#view !== undefined) this.renderConversation(this.#view);
+    }, TASK_END_GRACE_MS);
+    this.#taskEndGraceTimer.unref?.();
+  }
+
+  #clearTaskEndGrace(): void {
+    if (this.#taskEndGraceTimer === undefined) return;
+    clearTimeout(this.#taskEndGraceTimer);
+    this.#taskEndGraceTimer = undefined;
+  }
+
+  #taskPanelRows(width: number): string[] {
+    const working = this.#transcript.tasks;
+    if (working.length === 0) return [];
+    return renderTaskPanelRows(working, {
+      width,
+      theme: this.#theme,
+      nowMs: Date.now(),
+      pulse: this.#progressPulseGlyph(
+        this.#activityPulseStartedAtMs,
+        this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
+      ),
+    });
   }
 
   #syncActivityTicker(): void {
@@ -3557,6 +3610,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       rows.push(...renderAttentionRows(this.#setupAttention, width, this.#theme), "");
     }
 
+    // The task panel is the one region that redraws in place while tasks
+    // work, so it sits in the footer rather than the transcript.
+    const taskRows = this.#taskPanelRows(width);
+    if (taskRows.length > 0) {
+      rows.push(...taskRows);
+      if (this.#inputActive) rows.push("");
+    }
+
     // Messages typed while the agent starts wait in a panel directly above
     // the input because they hold the user's own undelivered words.
     const queueRows = renderMessageQueueRows({
@@ -3668,7 +3729,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const marker = elapsedMs % 1000 < 500 ? (this.#theme.unicode ? "•" : "*") : " ";
     const elapsed =
       elapsedMs < 1000 ? "0s" : formatTurnDuration(Math.floor(elapsedMs / 1000) * 1000);
-    const activity = this.#view === undefined ? "Thinking" : turnActivity(this.#view);
+    const activity =
+      this.#view === undefined ? "Thinking" : turnActivity(this.#view, this.#transcript.tasks);
     const label = `${activity} (${elapsed})`;
     const { inputTokens, outputTokens } = this.#turnClock.usage(this.#usage());
     const tokens =
@@ -4263,12 +4325,12 @@ function promptInputRows({
 }
 
 /** Kind + title of the previously rendered block, for gap / run decisions. */
-type PreviousBlock = { kind: BlockKind; title?: string; inSection?: boolean };
+type PreviousBlock = { kind: BlockKind; title?: string; subagentCallId?: string };
 
 function previousBlockOf(block: Block): PreviousBlock {
   const previous: PreviousBlock = { kind: block.kind };
   if (block.title !== undefined) previous.title = block.title;
-  if (block.subagentCallId !== undefined) previous.inSection = true;
+  if (block.subagentCallId !== undefined) previous.subagentCallId = block.subagentCallId;
   return previous;
 }
 
@@ -4284,11 +4346,8 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
   // A tool run breathes after whoever spoke last — the prompt, the agent's
   // own prose, or an answered question — and stays tight within the run.
   if (
-    block.kind === "tool" &&
-    (previous?.kind === "user" ||
-      previous?.kind === "assistant" ||
-      previous?.kind === "question" ||
-      (previous?.inSection === true && block.subagentCallId === undefined))
+    (block.kind === "tool" || block.kind === "task") &&
+    (previous?.kind === "user" || previous?.kind === "assistant" || previous?.kind === "question")
   ) {
     return true;
   }
@@ -4301,7 +4360,6 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
     case "user":
     case "assistant":
     case "reasoning":
-    case "subagent":
     case "error":
     case "notice":
     case "question":
