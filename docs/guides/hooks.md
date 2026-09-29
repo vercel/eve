@@ -191,7 +191,6 @@ Only `agent.started` is written while another step owns the session. eve writes 
 
 - The next step that owns the session dispatches it before its own work, in write order, against the state committed at its start. If the session would wait first, for a result or for input, a step of its own dispatches it.
 - If the session ends first, it is dispatched before `session.completed` or `session.failed`, or after a `session.failed` that a failing model step wrote.
-- Its channel adapter handler runs after the write, so it cannot change the event on the stream.
 - A retry of the dispatching step runs the handler and hooks again with the same `meta.id`. A retry of the writing step can write the event twice, but only the copy from the completed attempt is dispatched.
 
 Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
