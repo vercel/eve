@@ -2452,6 +2452,33 @@ describe("eveChannel — forwarded principal", () => {
     expect(handler.send).not.toHaveBeenCalled();
   });
 
+  it("attributes a trusted remote input response to the forwarded human", async () => {
+    const handler = createEveContinueHandler({
+      auth: () => ROUTER_CALLER,
+      trustedForwarders: (forwarder) => forwarder.principalId === ROUTER_CALLER.principalId,
+    });
+    const response = await handler.fetch(
+      new Request("https://example.com/eve/v1/session/test-session-id", {
+        body: JSON.stringify({
+          forwardedPrincipal: { current: FORWARDED_CURRENT },
+          inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(202);
+    expect(handler.respond).toHaveBeenCalledWith(
+      [{ requestId: "approval-1", optionId: "approve" }],
+      expect.objectContaining({
+        auth: expect.objectContaining({
+          principalId: FORWARDED_CURRENT.principalId,
+          attributes: expect.objectContaining({ "eve:forwarded-by": ROUTER_CALLER.principalId }),
+        }),
+      }),
+    );
+  });
+
   it("rejects a forwarded continuation when the channel has no trustedForwarders", async () => {
     const handler = createEveContinueHandler({ auth: () => ROUTER_CALLER });
 

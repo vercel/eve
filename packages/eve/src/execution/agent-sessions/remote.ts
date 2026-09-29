@@ -231,12 +231,19 @@ function buildForwardedTraceAssertion(input: {
 export async function respondToRemoteAgentSession(input: {
   readonly remote: RemoteAgentBinding & { readonly sessionId: string };
   readonly headers: Record<string, string>;
+  readonly auth: SessionAuthContext | null | undefined;
   readonly responses: readonly InputResponse[];
 }): Promise<void> {
   const response = await fetch(
     createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.remote.sessionId)),
     {
-      body: JSON.stringify({ inputResponses: input.responses }),
+      body: JSON.stringify({
+        inputResponses: input.responses,
+        ...(input.remote.forwardPrincipal === true &&
+          input.auth != null && {
+            forwardedPrincipal: { current: input.auth },
+          }),
+      }),
       headers: { "content-type": "application/json", ...input.headers },
       method: "POST",
       redirect: "error",

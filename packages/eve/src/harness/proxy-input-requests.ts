@@ -347,6 +347,7 @@ function parseRemoteAgentBinding(
   const name = Reflect.get(value, "name");
   const url = Reflect.get(value, "url");
   const resolverId = Reflect.get(value, "resolverId");
+  const forwardPrincipal = Reflect.get(value, "forwardPrincipal");
   const sessionId = Reflect.get(value, "sessionId");
   if (
     typeof name !== "string" ||
@@ -358,7 +359,14 @@ function parseRemoteAgentBinding(
   )
     return undefined;
   if (resolverId !== undefined && (typeof resolverId !== "string" || !resolverId)) return undefined;
-  return resolverId === undefined ? { name, url, sessionId } : { name, url, sessionId, resolverId };
+  if (forwardPrincipal !== undefined && typeof forwardPrincipal !== "boolean") return undefined;
+  return {
+    name,
+    url,
+    sessionId,
+    ...(resolverId !== undefined && { resolverId }),
+    ...(forwardPrincipal !== undefined && { forwardPrincipal }),
+  };
 }
 
 function parseProxyInputQuestion(value: unknown): ProxyInputQuestion | undefined {

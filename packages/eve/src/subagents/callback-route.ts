@@ -21,6 +21,7 @@ const sessionInputCallbackSchema = z.object({
     .object({
       name: z.string().min(1),
       url: z.string().url(),
+      forwardPrincipal: z.boolean().optional(),
       sessionId: z.string().min(1),
       resolverId: z.string().min(1).optional(),
     })

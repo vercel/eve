@@ -149,6 +149,7 @@ class RunAgentSession implements AgentSession {
                 : await this.#opened.then(({ address }) =>
                     address.kind === "remote"
                       ? {
+                          forwardPrincipal: address.forwardPrincipal,
                           name: address.name,
                           resolverId: address.resolverId,
                           url: address.url,

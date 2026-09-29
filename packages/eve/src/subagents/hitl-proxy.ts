@@ -80,6 +80,7 @@ async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSession): Pr
 export interface RoutedChildDelivery {
   readonly workflowAsk?: WorkflowAskRoute;
   readonly remote?: ProxyInputRequest["remote"];
+  readonly inputSource?: string;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
@@ -153,11 +154,15 @@ export function routeDeliverPayload(input: {
   let parentAction: RoutedDeliverPayload["parentAction"];
 
   const bucketFor = (route: ProxyInputRequest): ChildResponseBucket => {
-    const bucketKey = [
+    const bucketKey = JSON.stringify([
       route.childContinuationToken,
       route.childSessionInbox?.sessionId ?? "",
       route.remote?.sessionId ?? "",
-    ].join("\0");
+      route.event.sequence,
+      route.event.stepIndex,
+      route.event.turnId,
+      route.inputSource ?? null,
+    ]);
     const existing = responsesByChild.get(bucketKey);
     if (existing !== undefined) return existing;
     const bucket: ChildResponseBucket = {
@@ -234,6 +239,7 @@ export function routeDeliverPayload(input: {
         ...(childSessionInbox !== undefined && { childSessionInbox }),
         ...(workflowAsk !== undefined && { workflowAsk }),
         ...(remote !== undefined && { remote }),
+        ...(routes[0]?.inputSource !== undefined && { inputSource: routes[0].inputSource }),
       };
     },
   );

@@ -27,6 +27,7 @@ export function healthResponse(): Response {
 
 /** Where a remote child the parent session recorded runs, and its credential key. */
 export interface RemoteAgentBinding {
+  readonly forwardPrincipal?: boolean;
   readonly name: string;
   readonly resolverId?: string;
   readonly url: string;

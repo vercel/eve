@@ -807,6 +807,7 @@ describe("respondToRemoteAgentSession", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
     vi.stubGlobal("fetch", fetchMock);
     await respondToRemoteAgentSession({
+      auth: null,
       headers: { authorization: "Bearer remote-token" },
       remote: {
         name: "research",
@@ -823,6 +824,33 @@ describe("respondToRemoteAgentSession", () => {
         method: "POST",
       }),
     );
+  });
+
+  it("forwards the human responder only when the remote opts into principal forwarding", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const responder: SessionAuthContext = {
+      attributes: {},
+      authenticator: "fixture",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const input = {
+      auth: responder,
+      headers: { authorization: "Bearer remote-token" },
+      remote: { name: "research", sessionId: "remote-session", url: "https://remote.example.com" },
+      responses: [{ requestId: "approval-1", optionId: "approve" }],
+    };
+    await respondToRemoteAgentSession({
+      ...input,
+      remote: { ...input.remote, forwardPrincipal: true },
+    });
+    await respondToRemoteAgentSession({ ...input, remote: input.remote });
+    const bodies = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body as string));
+    expect(bodies).toEqual([
+      { inputResponses: input.responses, forwardedPrincipal: { current: responder } },
+      { inputResponses: input.responses },
+    ]);
   });
 });
 

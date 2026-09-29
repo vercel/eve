@@ -92,11 +92,15 @@ export async function routeProxiedDeliverStep(
       if (forChild.workflowAsk !== undefined) {
         for (const { requestId } of forChild.resolved.resolutions) resolvedQuestions.add(requestId);
       }
-      const key = [
+      const key = JSON.stringify([
         forChild.childContinuationToken,
         forChild.childSessionInbox?.sessionId ?? "",
         forChild.remote?.sessionId ?? "",
-      ].join("\0");
+        forChild.resolved.event.sequence,
+        forChild.resolved.event.stepIndex,
+        forChild.resolved.event.turnId,
+        forChild.inputSource ?? null,
+      ]);
       const child: ChildBucket = children.get(key) ?? {
         workflowAsk: forChild.workflowAsk,
         remote: forChild.remote,
@@ -153,6 +157,7 @@ export async function routeProxiedDeliverStep(
         await respondToRemoteAgentSession({
           remote,
           headers,
+          auth: sourceDelivery.auth,
           responses: coalesceDeliverPayloads(child.payloads).inputResponses ?? [],
         });
       } else {
