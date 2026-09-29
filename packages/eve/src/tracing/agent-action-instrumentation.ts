@@ -71,7 +71,6 @@ export function createAgentActionInstrumentation(input: {
       callId: event.callId,
       channelAudience: normalizeChannelAudience(event.scope.channelAudience),
       inputAttribute: input.recordInputs ? contentAttribute(event.input) : undefined,
-      isWorkflowTool: event.isWorkflowTool === true,
       kind: event.kind,
       name: event.name,
       parent: {

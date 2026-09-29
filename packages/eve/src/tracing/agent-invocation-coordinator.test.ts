@@ -64,7 +64,6 @@ function workflowAction() {
     attemptIndex: 0,
     callId: "workflow",
     channelAudience: "private" as const,
-    isWorkflowTool: true,
     kind: "tool-call" as const,
     name: "coordinate",
     parent: {
