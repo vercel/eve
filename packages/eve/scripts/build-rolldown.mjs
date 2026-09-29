@@ -237,6 +237,28 @@ function createVendoredZodPlugin() {
   };
 }
 
+/**
+ * The code extension imports `@vercel/connect`, whose `@vercel/oidc` tree is
+ * CommonJS. Resolve it to the standalone vendored bundle instead of inlining
+ * that CommonJS into `dist/src/node_modules`, where `polyfillRequire: false`
+ * would leave its `require` calls undefined.
+ */
+function createVendoredConnectPlugin() {
+  return {
+    name: "eve:vendored-connect",
+    resolveId(source, importer) {
+      if (source !== "@vercel/connect" && !source.startsWith("@vercel/connect/")) return null;
+      if (source !== "@vercel/connect") {
+        throw new Error(
+          `${importer ?? "eve"} imports "${source}", but eve vendors only the root ` +
+            `"@vercel/connect" entry. See scripts/vendor-compiled/@vercel/connect.mjs.`,
+        );
+      }
+      return { id: "#compiled/@vercel/connect/index.js", external: true };
+    },
+  };
+}
+
 async function collectSourceFiles(directory, relativeRoot = "") {
   const entries = await readdir(directory, { withFileTypes: true });
   const sourceFiles = [];
@@ -294,6 +316,7 @@ await buildWithNitroRolldown({
   platform: "node",
   plugins: [
     createVendoredZodPlugin(),
+    createVendoredConnectPlugin(),
     createStripUnusedRolldownRuntimeImportPlugin(),
     createDynamicToolTransformPlugin(),
     createWorkflowMetadataTransformPlugin(),
@@ -323,10 +346,14 @@ await buildWithNitroRolldown({
         toplevel: false,
       },
     },
-    // Bundled dependencies can still contain CommonJS `require` calls. Emit
-    // Rolldown's Node `createRequire` interop helper so those calls remain
-    // valid when the published ESM package evaluates them.
-    polyfillRequire: true,
+    // Skip rolldown's CJS-interop `__require` polyfill so the virtual
+    // runtime helper file doesn't import `node:module`. Without this
+    // every dist file would carry an `import "../_virtual/_rolldown/runtime.js"`
+    // side-effect import, and the workflow bundler (which runs under
+    // `platform: "neutral"`) would warn about the unresolved Node
+    // builtin every time it pulled an eve file into its graph. Dependencies
+    // with CommonJS code are vendored under `#compiled/*` instead.
+    polyfillRequire: false,
     preserveModules: true,
     preserveModulesRoot: SRC_ROOT,
     sourcemap: false,
