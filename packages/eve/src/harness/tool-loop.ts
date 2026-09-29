@@ -161,6 +161,7 @@ import {
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
+import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import {
   getPendingAuthorization,
   getSupersededAuthorizationChallenges,
@@ -739,12 +740,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           continue;
         await emit(
           createAuthorizationCompletedEvent({
-            attemptId: challenge.attemptId,
-            authorization: challenge.challenge,
-            candidateId: challenge.candidateId,
-            name: challenge.name,
+            ...authorizationEventFields(challenge),
             outcome: "failed",
-            principalId: challenge.principalId,
             reason: "The approval response expired. Please submit a new response.",
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
@@ -833,13 +830,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         for (const challenge of coordinated.challenges) {
           await emit(
             createAuthorizationRequiredEvent({
-              attemptId: challenge.attemptId,
-              authorization: challenge.challenge,
-              candidateId: challenge.candidateId,
+              ...authorizationEventFields(challenge),
               description:
                 challenge.challenge.instructions ?? `Authorization required for ${challenge.name}`,
-              name: challenge.name,
-              principalId: challenge.principalId,
               sequence: emissionState.sequence,
               stepIndex: emissionState.stepIndex,
               turnId: emissionState.turnId,
@@ -2771,11 +2764,8 @@ async function handleStepResult(input: {
       )) {
         await emit(
           createAuthorizationCompletedEvent({
-            attemptId: superseded.attemptId,
-            authorization: superseded.challenge,
-            name: superseded.name,
+            ...authorizationEventFields(superseded),
             outcome: "failed",
-            principalId: superseded.principalId,
             reason: "Superseded by a newer authorization attempt.",
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
@@ -2786,10 +2776,7 @@ async function handleStepResult(input: {
       for (const ch of challenges) {
         await emit(
           createAuthorizationRequiredEvent({
-            attemptId: ch.attemptId,
-            authorization: ch.challenge,
-            name: ch.name,
-            principalId: ch.principalId,
+            ...authorizationEventFields(ch),
             description: ch.challenge.instructions ?? `Authorization required for ${ch.name}`,
             webhookUrl: ch.hookUrl,
             sequence: emissionState.sequence,

@@ -1,12 +1,13 @@
 import type { DeliverPayload } from "#channel/types.js";
-import type { AuthorizationResult, PendingAuthorizationState } from "#harness/authorization.js";
-import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
+import type {
+  AuthorizationChallenge,
+  AuthorizationResult,
+  PendingAuthorizationState,
+} from "#harness/authorization.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 
 export interface MatchedAuthorizationCallback {
-  readonly authorization: ConnectionAuthorizationChallenge;
-  readonly candidateId?: string;
-  readonly principalId?: string;
+  readonly challenge: AuthorizationChallenge;
   readonly result: { readonly name: string; readonly attemptId: string } & AuthorizationResult;
 }
 
@@ -51,9 +52,7 @@ export function matchAuthorizationCallbacks(
 
     matchedAttemptKeys.add(attemptKey);
     matches.push({
-      authorization: challenge.challenge,
-      candidateId: challenge.candidateId,
-      principalId: challenge.principalId,
+      challenge,
       result: {
         attemptId: attemptKey,
         callback: callback.callback,

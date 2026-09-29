@@ -1,4 +1,5 @@
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 import type { ToolContext } from "#tools/definition.js";
@@ -221,14 +222,11 @@ async function reportAuthorization(
   outcome?: "authorized" | "failed",
 ): Promise<void> {
   const eventInput = {
-    attemptId: challenge.attemptId,
-    name: challenge.name,
-    principalId: challenge.principalId,
+    ...authorizationEventFields(challenge),
     sequence: run.from.sequence,
     stepIndex: run.from.stepIndex,
     taskId: run.from.taskId,
     turnId: run.from.turnId,
-    authorization: challenge.challenge,
   };
   const event =
     outcome === undefined
