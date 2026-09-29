@@ -44,7 +44,6 @@ import type {
   TurnOutcome,
   TurnStepPayload,
 } from "#execution/session/turn-step-types.js";
-import { StepAgentStarts } from "#execution/session/step-agent-starts.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceDeliveries } from "#harness/messages.js";
@@ -111,8 +110,9 @@ export class SessionExecution {
     });
     try {
       const outcome = await this.runTurnSteps(turn, delivery);
-      // Tasks run beside the turn, so their runs' messages still reach the session.
-      await this.handleAdmittedTaskEvents(turn);
+      // Tasks run beside the turn, and a run can open a session after its call
+      // returns, so these messages still reach the session.
+      await this.handleBoundaryMessages(turn);
       // The turn rule holds a turn while its tasks work, so a turn that ends
       // anyway, such as by failing, cancels them.
       if (outcome.kind === "park" && outcome.settled !== undefined) {
@@ -124,9 +124,9 @@ export class SessionExecution {
     }
   }
 
-  /** Applies what task runs reported while the model step ran, so the next step sees it. */
-  private async handleAdmittedTaskEvents(turn: ActiveTurn): Promise<void> {
-    for (const message of turn.takeTaskMessages()) await this.handleWorkflowMessage(message);
+  /** Applies what runs reported while the model step ran, so the next step sees it. */
+  private async handleBoundaryMessages(turn: ActiveTurn): Promise<void> {
+    for (const message of turn.takeBoundaryMessages()) await this.handleWorkflowMessage(message);
   }
 
   private async runTurnSteps(
@@ -138,21 +138,19 @@ export class SessionExecution {
     while (true) {
       const { cursor } = this.input;
       const result = await cursor.advance((state) =>
-        turn.agentStarts.publishWhile(
-          turnStep({
-            ...state,
-            abortSignal: turn.signal,
-            input: nextStepInput,
-            steeringSignal: turn.steeringSignal,
-          }),
-        ),
+        turnStep({
+          ...state,
+          abortSignal: turn.signal,
+          input: nextStepInput,
+          steeringSignal: turn.steeringSignal,
+        }),
       );
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const turnCompleted = result.action === "park" && result.settled !== undefined;
 
       await turn.admitBoundary();
-      await this.handleAdmittedTaskEvents(turn);
+      await this.handleBoundaryMessages(turn);
 
       if (result.action === "cancelled") return await this.finishCancelledTurn();
       if (!turnCompleted && turn.signal.aborted && pendingCallIds === undefined) {
@@ -475,7 +473,6 @@ class ActiveTurn {
   private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
-  readonly agentStarts: StepAgentStarts;
   private steeringController = new AbortController();
   /** The delegated caller of the latest message the turn read. */
   caller: TurnCaller | undefined;
@@ -492,7 +489,6 @@ class ActiveTurn {
       if (this.cancelsThisTurn(payload)) this.abort();
     });
     this.unsubscribeDelivery = input.inbox.onDelivery(this.signalSteering);
-    this.agentStarts = new StepAgentStarts(input.inbox, input.cursor);
   }
 
   private readonly signalSteering = (payload: SessionInboxPayload): void => {
@@ -563,12 +559,12 @@ class ActiveTurn {
     return delivery;
   }
 
-  /** Removes the admitted task run messages, which the session applies to the task table at once. */
-  takeTaskMessages(): WorkflowToolRunMessage[] {
+  /** Removes the admitted run messages the session applies at once instead of in a runtime wait. */
+  takeBoundaryMessages(): WorkflowToolRunMessage[] {
     const taken: WorkflowToolRunMessage[] = [];
     const kept: RuntimeEvent[] = [];
     for (const event of this.runtimeResults) {
-      const message = asTaskMessage(event);
+      const message = asBoundaryMessage(event);
       if (message === undefined) kept.push(event);
       else taken.push(message);
     }
@@ -614,7 +610,6 @@ class ActiveTurn {
   }
 
   private async admit(value: SessionInboxPayload): Promise<void> {
-    if (this.agentStarts.consume(value)) return;
     const admitted = await admitSessionInboxPayload(value, this.input);
     switch (admitted.kind) {
       case "delivery":
@@ -677,10 +672,13 @@ class ActiveTurn {
   }
 }
 
-function asTaskMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefined {
-  if (event === "cancelled") return undefined;
+function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefined {
+  if (event === "cancelled" || event.kind !== "workflow") return undefined;
   // Tasks run beside the turn, so everything their runs send, such as a
   // question, reaches the session at the next boundary rather than at turn end.
-  if (event.kind === "workflow" && event.message.from.taskId !== undefined) return event.message;
+  if (event.message.from.taskId !== undefined) return event.message;
+  // An `execute` run can open a session after its call returns, when the turn
+  // may have no wait left to take the message, and publishing it needs none.
+  if (event.message.kind === "agent-started") return event.message;
   return undefined;
 }

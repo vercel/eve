@@ -229,7 +229,6 @@ function createInbox(input: { released?: SessionInboxPayload[] } = {}): SessionI
     whenPending: () => new Promise<void>(() => {}),
     next: vi.fn(),
     onDelivery: vi.fn(() => () => {}),
-    onAgentStarted: () => () => {},
     onInterrupt: vi.fn(() => () => {}),
     release: vi.fn(async () => input.released ?? []),
     restore: vi.fn(),

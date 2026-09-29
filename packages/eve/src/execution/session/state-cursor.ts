@@ -61,7 +61,7 @@ export class SessionStateCursor {
   }
 
   /** The session's stream and current state, spread into a step's input. */
-  stepState(): SessionStepState {
+  private stepState(): SessionStepState {
     return { ...this.values, sessionWritable: this.sessionWritable };
   }
 }
