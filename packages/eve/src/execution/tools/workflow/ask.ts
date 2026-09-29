@@ -88,24 +88,41 @@ interface PendingAsk {
 export class WorkflowToolRunAsks {
   private opened = 0;
   private readonly pending = new Map<string, PendingAsk>();
+  /** How to ask the session to withdraw each pending question not yet withdrawn. */
+  private readonly withdrawals = new Map<string, () => void>();
   private readonly runId: string;
 
   constructor(runId: string) {
     this.runId = runId;
   }
 
-  /** Opens a question under a request ID that replays deterministically with the run. */
-  open(): { readonly answer: Promise<ToolInputResponse>; readonly requestId: string } {
+  /**
+   * Opens a question under a request ID that replays deterministically with
+   * the run. `withdraw` asks the session to withdraw it, at most once.
+   */
+  open(withdraw: (requestId: string) => void): {
+    readonly answer: Promise<ToolInputResponse>;
+    readonly requestId: string;
+  } {
     this.opened += 1;
     const requestId = `${this.runId}-ask-${String(this.opened)}`;
     const answer = new Promise<ToolInputResponse>((resolve, reject) => {
       this.pending.set(requestId, { reject, resolve });
     });
+    this.withdrawals.set(requestId, () => withdraw(requestId));
     return { answer, requestId };
   }
 
-  isPending(requestId: string): boolean {
-    return this.pending.has(requestId);
+  /** Asks the session to withdraw a pending question; it decides the question once. */
+  withdraw(requestId: string): void {
+    const withdraw = this.withdrawals.get(requestId);
+    this.withdrawals.delete(requestId);
+    withdraw?.();
+  }
+
+  /** Asks the session to withdraw every pending question. */
+  withdrawAll(): void {
+    for (const requestId of this.withdrawals.keys()) this.withdraw(requestId);
   }
 
   /** Applies the session's decision. The first one wins; a repeated one is dropped. */
@@ -128,6 +145,7 @@ export class WorkflowToolRunAsks {
   private take(requestId: string): PendingAsk | undefined {
     const pending = this.pending.get(requestId);
     this.pending.delete(requestId);
+    this.withdrawals.delete(requestId);
     return pending;
   }
 }
@@ -153,9 +171,15 @@ export function ask(
   if (signals.some((signal) => signal.aborted)) return Promise.resolve(CANCELLED);
 
   const { asks, control, owner } = context;
-  const { answer, requestId } = asks.open();
   // A `serve` task's current call changes; the question stays the call's that asked it.
   const from = context.from;
+  const { answer, requestId } = asks.open((withdrawnId) => {
+    // The withdrawal must not overtake the request it withdraws.
+    const withdrawal = sent.then(() =>
+      owner.send({ control, from, kind: "withdraw", replyTo: withdrawnId }),
+    );
+    withdrawal.catch((error: unknown) => asks.fail(withdrawnId, error));
+  });
   const sent = owner.send({
     kind: "request",
     from,
@@ -164,14 +188,7 @@ export function ask(
   });
   sent.catch((error: unknown) => asks.fail(requestId, error));
 
-  const requestWithdrawal = (): void => {
-    if (!asks.isPending(requestId)) return;
-    // The withdrawal must not overtake the request it withdraws.
-    const withdrawal = sent.then(() =>
-      owner.send({ control, from, kind: "withdraw", replyTo: requestId }),
-    );
-    withdrawal.catch((error: unknown) => asks.fail(requestId, error));
-  };
+  const requestWithdrawal = (): void => asks.withdraw(requestId);
   for (const signal of signals) {
     signal.addEventListener("abort", requestWithdrawal, { once: true });
   }

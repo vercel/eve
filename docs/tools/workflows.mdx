@@ -346,6 +346,8 @@ described in [Tasks](/docs/tools/tasks). What differs:
   Each settled call reports its own `task.settled`, and the model receives the reply once. The task
   then goes idle until its next call. A reply with
   no call left to settle is dropped, and `ctx.ask` throws while no call is waiting for a result.
+  A reply also withdraws the questions still pending for the calls it settles, but doesn't abort
+  their `abortSignal`, so work the body continues after replying keeps running.
   Returning settles the calls still waiting and ends the task; a throw fails them. `serve` is not
   a generator, so it can't `yield` progress.
 - **Working and idle:** a resumable task is working while one of its calls has no result, and idle
@@ -448,7 +450,8 @@ The answer's `status` tells the body what happened:
 
 - `answered`: the person picked an option (`optionId`) or typed a reply (`text`).
 - `cancelled`: the request was withdrawn before anyone answered it, because the `signal` passed to
-  `ctx.ask` or the call's `abortSignal` aborted. The session emits `input.resolved` with
+  `ctx.ask` or the call's `abortSignal` aborted, or because a `serve` body replied to the call. The
+  session emits `input.resolved` with
   `outcome: "cancelled"`, so clients stop offering the question.
 - `unavailable`: the session cannot request input, such as a scheduled run. `ctx.ask` returns this
   immediately instead of waiting for an answer no one can give.

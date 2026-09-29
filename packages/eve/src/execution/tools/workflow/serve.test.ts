@@ -13,6 +13,7 @@ import type {
 import { startServeBody } from "#execution/tools/workflow/serve.js";
 import { workflowToolRunWorkflow } from "#execution/tools/workflow/workflow.js";
 import type { JsonValue } from "#shared/json.js";
+import type { ToolInputResponse } from "#tools/definition.js";
 import type {
   WorkflowServeCall,
   WorkflowServeContext,
@@ -246,6 +247,45 @@ it("serves every call to its task, one stretch of work at a time, until the sess
   expect(fourth).not.toBe(third);
   expect(first?.aborted).toBe(false);
   expect(fourth?.aborted).toBe(true);
+});
+
+it("withdraws a question once its call has a reply, without aborting the stretch", async () => {
+  mocks.deliver.mockClear();
+  mocks.deliver.mockResolvedValue(undefined);
+  const replyNow = Promise.withResolvers<void>();
+  let stretch: AbortSignal | undefined;
+  let answer: PromiseLike<ToolInputResponse> | undefined;
+  mocks.serve.mockImplementation(
+    async (receive: WorkflowServeReceive<JsonValue>, ctx: WorkflowServeContext<JsonValue>) => {
+      stretch = (await receive()).abortSignal;
+      answer = ctx.ask({ prompt: "Should the plan include a rollback drill?" });
+      await replyNow.promise;
+      ctx.reply("plan without a rollback drill");
+      await answer;
+      return await receive();
+    },
+  );
+  const started = startServeBody(input);
+  const sent = (kind: WorkflowToolRunMessage["kind"]) =>
+    mocks.deliver.mock.calls.flatMap(([, message]) => (message.kind === kind ? [message] : []));
+
+  await vi.waitFor(() => expect(sent("request")).toHaveLength(1));
+  const requestId = sent("request").map((message) => "replyTo" in message && message.replyTo)[0];
+  // Bob's call arrives before the reply, so it joins the stretch and the reply leaves it working.
+  started.control.apply(call("call-2", "Add a rollback step."));
+  replyNow.resolve();
+  await vi.waitFor(() => expect(sent("withdraw")).toHaveLength(1));
+
+  expect(sent("withdraw")).toMatchObject([{ from: { callId: "call-1" }, replyTo: requestId }]);
+  expect(stretch?.aborted).toBe(false);
+  // The cancel of Bob's call aborts the stretch, and the question's withdrawal was already asked for.
+  started.control.apply({ kind: "cancel", reason: "The task was cancelled." });
+  expect(stretch?.aborted).toBe(true);
+  started.asks.settle({ kind: "withdrawn", requestId: String(requestId) });
+  await expect(answer).resolves.toEqual({ status: "cancelled" });
+  expect(sent("withdraw")).toHaveLength(1);
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  await started.outcome;
 });
 
 it.each([
