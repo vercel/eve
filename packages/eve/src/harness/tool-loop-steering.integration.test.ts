@@ -3,6 +3,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { getHarnessEmissionState } from "#harness/emission-state.js";
+import { TOOL_RESULT_BOUNDARY } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -321,6 +322,13 @@ describe("generation steering with the real AI SDK", () => {
     const prompt = JSON.stringify(doStream.mock.calls[1]?.[0].prompt);
     expect(prompt).toContain("saved");
     expect(prompt).toContain("Use the corrected year");
+    // The correction starts its own user turn instead of joining the tool result's.
+    const roles = (call: number) => doStream.mock.calls[call]![0].prompt.map(({ role }) => role);
+    expect(roles(0)).toEqual(["system", "user"]);
+    expect(roles(1)).toEqual(["system", "user", "assistant", "tool", "assistant", "user"]);
+    expect(doStream.mock.calls[1]![0].prompt.at(-2)).toMatchObject({
+      content: [{ text: TOOL_RESULT_BOUNDARY, type: "text" }],
+    });
   });
 
   it("does not interrupt after assistant text has been published", async () => {

@@ -214,6 +214,19 @@ export function normalizeUserContent(
   return parts.length === content.length ? content : parts;
 }
 
+/**
+ * Model-only assistant text between tool results and a person's next message.
+ * Without it, providers such as Anthropic fold the message into the user turn
+ * that carries the tool results, and the model reads it as tool output: it
+ * continues its plan instead of answering.
+ */
+export const TOOL_RESULT_BOUNDARY = "…";
+
+/** Whether a user message appended to `messages` would share a turn with tool results. */
+export function followsToolResults(messages: readonly ModelMessage[]): boolean {
+  return messages.findLast((message) => message.role !== "user")?.role === "tool";
+}
+
 export function createTurnInputMessages(input: StepInput | undefined): UserModelMessage[] {
   const messages = [...(readClientContext(input) ?? []), ...(input?.context ?? [])].map((content) =>
     createFrameworkUserMessage("context.instruction", content),
