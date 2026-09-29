@@ -153,7 +153,7 @@ export function routeDeliverPayload(input: {
   const unroutedResponses: InputResponse[] = [];
   let parentAction: RoutedDeliverPayload["parentAction"];
 
-  const bucketFor = (route: ProxyInputRequest): ChildResponseBucket => {
+  const bucketFor = (route: ProxyInputRequest, requestId: string): ChildResponseBucket => {
     const bucketKey = JSON.stringify([
       route.childContinuationToken,
       route.childSessionInbox?.sessionId ?? "",
@@ -162,6 +162,7 @@ export function routeDeliverPayload(input: {
       route.event.stepIndex,
       route.event.turnId,
       route.inputSource ?? null,
+      route.workflowAsk !== undefined ? requestId : null,
     ]);
     const existing = responsesByChild.get(bucketKey);
     if (existing !== undefined) return existing;
@@ -197,7 +198,7 @@ export function routeDeliverPayload(input: {
       parentAction = { kind: "cancel-turn" };
     }
 
-    const bucket = bucketFor(route);
+    const bucket = bucketFor(route, response.requestId);
     bucket.parentRequestIds.push(response.requestId);
     bucket.responses.push(response);
     bucket.routes.push(route);

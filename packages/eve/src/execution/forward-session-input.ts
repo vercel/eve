@@ -19,6 +19,8 @@ export async function forwardSessionInput(
   if (callback === undefined) return false;
   if (
     event.type !== "input.requested" &&
+    event.type !== "input.candidate" &&
+    event.type !== "input.resolved" &&
     event.type !== "authorization.required" &&
     event.type !== "authorization.completed" &&
     event.type !== "approval.candidate" &&

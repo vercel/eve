@@ -31,7 +31,7 @@ import { getPendingCoordinationBatch, setPendingCoordinationBatch } from "#harne
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepFn, StepResult } from "#harness/types.js";
@@ -86,6 +86,9 @@ function turnStep(input: Omit<TurnStepInput, "input"> & { readonly input?: Legac
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { runSessionStateStep } from "#internal/testing/session-state-step.js";
+import { applySessionStateDelta } from "#execution/session/state-delta.js";
+import { settleQuestionResponseStep } from "#execution/tools/workflow/question-response-step.js";
+import { withdrawWorkflowToolRunQuestionStep } from "#execution/tools/workflow/withdraw-step.js";
 
 const REQUEST_EVENT = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
 
@@ -432,6 +435,209 @@ describe("routeProxiedDeliverStep", () => {
       kind: "continue",
       remainder: { payloads: [{ message: "Also check the logs." }] },
     });
+  });
+
+  function questionPolicySession() {
+    const session = upsertProxyInputRequests({
+      entries: [
+        [
+          "ask-1",
+          {
+            childContinuationToken: "ask-1",
+            event: REQUEST_EVENT,
+            responsePolicy: true,
+            kind: "question",
+            workflowAsk: {
+              control: "control",
+              question: { allowFreeform: true },
+              responsePolicy: true,
+              runId: "run-1",
+            },
+          },
+        ],
+      ],
+      forChildContinuationToken: "ask-1",
+      session: createStubSession(),
+    });
+    vi.mocked(readDurableSession).mockImplementation((state) => state.snapshot.session);
+    return {
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState({ hasProxyInputRequests: true, snapshot: { session } }),
+    };
+  }
+
+  const questionActor = {
+    attributes: {},
+    authenticator: "test",
+    principalId: "user-1",
+    principalType: "user",
+  };
+  const questionRun = {
+    callId: "call-1",
+    input: {},
+    runId: "run-1",
+    sequence: 1,
+    stepIndex: 0,
+    toolName: "ask_question",
+    turnId: "turn-1",
+  };
+
+  async function submitCandidate(values: ReturnType<typeof questionPolicySession>, text: string) {
+    const result = await routeProxiedDeliverStep({
+      ...values,
+      sessionWritable: createTestWritable(),
+      delivery: { auth: questionActor, kind: "deliver", payloads: [{ message: text }] },
+    });
+    return applySessionStateDelta(values, result.stateDelta);
+  }
+
+  it("records a policy-protected answer as a candidate without resolving the question", async () => {
+    const next = await submitCandidate(questionPolicySession(), "candidate answer");
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "control",
+      expect.objectContaining({ kind: "question-candidate" }),
+    );
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "control",
+      expect.objectContaining({ kind: "answer" }),
+    );
+    expect(
+      getProxyInputRequests(next.sessionState.snapshot.session.state).get("ask-1")?.workflowAsk
+        ?.candidates,
+    ).toEqual({
+      "ask-1-candidate-1": expect.objectContaining({
+        response: { text: "candidate answer", requestId: "ask-1" },
+      }),
+    });
+    expect(
+      (workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).map((chunk) =>
+        JSON.parse(new TextDecoder().decode(chunk as Uint8Array)),
+      ),
+    ).toEqual([expect.objectContaining({ type: "input.candidate" })]);
+  });
+
+  it("keeps a rejected candidate pending until a later candidate is allowed", async () => {
+    const first = await submitCandidate(questionPolicySession(), "first");
+    const rejected = await settleQuestionResponseStep({
+      ...first,
+      sessionWritable: createTestWritable(),
+      message: {
+        candidateId: "ask-1-candidate-1",
+        decision: { reason: "not allowed", status: "rejected" },
+        from: questionRun,
+        requestId: "ask-1",
+      },
+    });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "control",
+      expect.objectContaining({ kind: "answer" }),
+    );
+    const afterReject = applySessionStateDelta(first, rejected.stateDelta);
+    expect(
+      getProxyInputRequests(afterReject.sessionState.snapshot.session.state).has("ask-1"),
+    ).toBe(true);
+    const second = await submitCandidate(afterReject, "second");
+    const allowed = await settleQuestionResponseStep({
+      ...second,
+      sessionWritable: createTestWritable(),
+      message: {
+        candidateId: "ask-1-candidate-2",
+        decision: { status: "allowed" },
+        from: questionRun,
+        requestId: "ask-1",
+      },
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "control",
+      expect.objectContaining({
+        kind: "answer",
+        requestId: "ask-1",
+        response: expect.objectContaining({ text: "second" }),
+      }),
+    );
+    const final = applySessionStateDelta(second, allowed.stateDelta);
+    expect(getProxyInputRequests(final.sessionState.snapshot.session.state).has("ask-1")).toBe(
+      false,
+    );
+  });
+
+  it("does not let an unrestricted question bypass a policy-protected question in one delivery", async () => {
+    const values = questionPolicySession();
+    const session = upsertProxyInputRequests({
+      entries: [
+        [
+          "open",
+          {
+            childContinuationToken: "ask-1",
+            event: REQUEST_EVENT,
+            kind: "question",
+            workflowAsk: { control: "control", question: { allowFreeform: true }, runId: "run-1" },
+          },
+        ],
+        ...getProxyInputRequests(values.sessionState.snapshot.session.state),
+      ],
+      forChildContinuationToken: "ask-1",
+      session: createStubSession(),
+    });
+    await routeProxiedDeliverStep({
+      ...values,
+      sessionState: { ...values.sessionState, snapshot: { session } },
+      sessionWritable: createTestWritable(),
+      delivery: {
+        auth: questionActor,
+        kind: "deliver",
+        payloads: [
+          {
+            inputResponses: [
+              { requestId: "open", text: "one answer" },
+              { requestId: "ask-1", text: "another answer" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "control",
+      expect.objectContaining({ kind: "answer", requestId: "open" }),
+    );
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "control",
+      expect.objectContaining({ kind: "question-candidate", requestId: "ask-1" }),
+    );
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "control",
+      expect.objectContaining({ kind: "answer", requestId: "ask-1" }),
+    );
+  });
+
+  it("makes a candidate stale when its question is withdrawn before settlement", async () => {
+    const candidate = await submitCandidate(questionPolicySession(), "candidate");
+    const withdrawn = await withdrawWorkflowToolRunQuestionStep({
+      ...candidate,
+      control: "control",
+      requestId: "ask-1",
+      runId: "run-1",
+      sessionWritable: createTestWritable(),
+    });
+    const afterWithdraw = applySessionStateDelta(candidate, withdrawn.stateDelta);
+    expect(
+      getProxyInputRequests(afterWithdraw.sessionState.snapshot.session.state).has("ask-1"),
+    ).toBe(false);
+    const stale = await settleQuestionResponseStep({
+      ...afterWithdraw,
+      sessionWritable: createTestWritable(),
+      message: {
+        candidateId: "ask-1-candidate-1",
+        decision: { status: "allowed" },
+        from: questionRun,
+        requestId: "ask-1",
+      },
+    });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "control",
+      expect.objectContaining({ kind: "answer" }),
+    );
+    expect(stale.stateDelta).toEqual({});
   });
 
   it.each([

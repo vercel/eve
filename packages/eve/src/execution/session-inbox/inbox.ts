@@ -246,6 +246,7 @@ export function isWorkflowMessage(value: SessionInboxPayload): value is Workflow
     value.kind === "report" ||
     value.kind === "reply" ||
     value.kind === "request" ||
+    value.kind === "question-response" ||
     value.kind === "withdraw" ||
     value.kind === "usage" ||
     value.kind === "outcome"

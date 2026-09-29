@@ -194,6 +194,7 @@ type ChannelSessionFailedHandler<TCtx> = (
  * and the channel context, with no `ctx`; its data includes `sessionId`.
  */
 export interface ChannelEvents<TCtx = void> {
+  readonly "input.candidate"?: ChannelEventHandler<"input.candidate", TCtx>;
   readonly "approval.candidate"?: ChannelEventHandler<"approval.candidate", TCtx>;
   readonly "approval.settled"?: ChannelEventHandler<"approval.settled", TCtx>;
   readonly "context.cleared"?: ChannelEventHandler<"context.cleared", TCtx>;
@@ -305,6 +306,7 @@ export function defineChannel<
 // The Record type fails to compile if this map drifts from the ChannelEvents
 // keys in either direction.
 const channelEventTypes: Record<keyof ChannelEvents, null> = {
+  "input.candidate": null,
   "approval.candidate": null,
   "approval.settled": null,
   "context.cleared": null,

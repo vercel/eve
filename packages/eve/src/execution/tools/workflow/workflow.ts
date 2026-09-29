@@ -159,6 +159,10 @@ async function reportTaskStarted(input: WorkflowToolRunInput): Promise<void> {
  */
 function applyControlMessage(started: StartedWorkflowBody, message: unknown): void {
   if (!isWorkflowToolRunControlMessage(message)) return;
+  if (message.kind === "question-candidate") {
+    started.asks.authorize(message);
+    return;
+  }
   if (isWorkflowToolRunAskDecision(message)) {
     started.asks.settle(message);
     return;

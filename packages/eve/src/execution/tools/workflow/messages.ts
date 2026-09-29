@@ -30,6 +30,7 @@ export interface WorkflowToolAuthorizationRequest {
 /** A question authored with `ask()` from `eve/workflow`, before owner normalization. */
 export interface WorkflowToolAskRequest {
   /** The run's control hook, where the session sends its decision on the question. */
+  readonly responsePolicy?: true;
   readonly control: string;
   readonly kind: "ask";
   readonly request: ToolInputRequest;
@@ -145,7 +146,23 @@ export interface WorkflowToolRunStartedMessage {
   readonly from: WorkflowToolRunRef;
 }
 
+export interface WorkflowQuestionCandidate {
+  readonly kind: "question-candidate";
+  readonly expiresAt: number;
+  readonly requestId: string;
+  readonly candidateId: string;
+  readonly response: import("#tools/definition.js").QuestionResponse;
+}
+
+export interface WorkflowQuestionResponseMessage {
+  readonly from: WorkflowToolRunRef;
+  readonly requestId: string;
+  readonly candidateId: string;
+  readonly decision: import("#tools/definition.js").QuestionResponseDecision;
+}
+
 export type WorkflowToolRunMessage =
+  | ({ readonly kind: "question-response" } & WorkflowQuestionResponseMessage)
   | ({ readonly kind: "agent-started" } & WorkflowToolRunAgentStartedMessage)
   | ({ readonly kind: "started" } & WorkflowToolRunStartedMessage)
   | ({ readonly kind: "report" } & WorkflowToolRunReport)
@@ -213,7 +230,10 @@ export type WorkflowBodyCommand =
  * inbox. Only the session writes to it, so the run receives commands and
  * decisions in the order the session made them.
  */
-export type WorkflowToolRunControlMessage = WorkflowBodyCommand | WorkflowToolRunAskDecision;
+export type WorkflowToolRunControlMessage =
+  | WorkflowBodyCommand
+  | WorkflowToolRunAskDecision
+  | WorkflowQuestionCandidate;
 
 export function isWorkflowToolRunControlMessage(
   value: unknown,
@@ -221,6 +241,25 @@ export function isWorkflowToolRunControlMessage(
   if (typeof value !== "object" || value === null) return false;
   const { call, kind, reason, requestId, response } = value as Record<string, unknown>;
   switch (kind) {
+    case "question-candidate": {
+      const expiresAt = Reflect.get(value, "expiresAt");
+      const candidate = response as
+        | Partial<import("#tools/definition.js").QuestionResponse>
+        | undefined;
+      const principal = candidate?.principal;
+      return (
+        typeof requestId === "string" &&
+        typeof Reflect.get(value, "candidateId") === "string" &&
+        typeof expiresAt === "number" &&
+        Number.isFinite(expiresAt) &&
+        principal != null &&
+        typeof principal.principalId === "string" &&
+        typeof principal.principalType === "string" &&
+        typeof principal.authenticator === "string" &&
+        (candidate?.optionId === undefined || typeof candidate.optionId === "string") &&
+        (candidate?.text === undefined || typeof candidate.text === "string")
+      );
+    }
     case "interrupt":
       return true;
     case "cancel":

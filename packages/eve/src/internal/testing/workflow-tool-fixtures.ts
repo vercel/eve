@@ -243,3 +243,52 @@ export async function receiveDelegatedResultWorkflow(token: string): Promise<unk
   using result = createHook<unknown>({ token });
   return await result;
 }
+
+export async function policyQuestionWorkflow(_input: DeployInput, ctx: WorkflowToolContext) {
+  "use workflow";
+  const answer = await ctx.ask(
+    { prompt: "Choose the release region.", allowFreeform: true },
+    { response: authorizeRegionAnswer },
+  );
+  return JSON.stringify(answer);
+}
+
+async function authorizeRegionAnswer(
+  ctx: import("#tools/definition.js").QuestionResponseContext,
+): Promise<import("#tools/definition.js").QuestionResponseDecision> {
+  "use step";
+  if (ctx.response.text === "fail")
+    throw Object.assign(new Error("private failure"), { fatal: true });
+  const token = await ctx.auth.getToken({
+    principalType: "user",
+    async getToken({ principal }) {
+      if (ctx.response.text === "sign-in")
+        throw new ConnectionAuthorizationRequiredError("release");
+      return { token: principal.type === "user" ? principal.id : "app" };
+    },
+    async startAuthorization({ principal, callbackUrl }) {
+      return {
+        challenge: {
+          url: `https://idp.example/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}`,
+        },
+        resume: { user: principal.type === "user" ? principal.id : "app" },
+      };
+    },
+    async completeAuthorization({ principal, callback, resume }) {
+      if (
+        principal.type !== "user" ||
+        (resume as { user: string }).user !== principal.id ||
+        callback.params.code !== "approved"
+      )
+        throw new ConnectionAuthorizationFailedError("release", {
+          message: "Wrong responder.",
+          retryable: false,
+        });
+      return { token: principal.id };
+    },
+  });
+  return ctx.request.principal?.principalId === ctx.response.principal.principalId &&
+    token.token === ctx.response.principal.principalId
+    ? { status: "allowed" }
+    : { status: "rejected", reason: "The requester must answer." };
+}

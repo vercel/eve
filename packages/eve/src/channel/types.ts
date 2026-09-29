@@ -324,6 +324,8 @@ export type SubagentAuthorizationEvent = Extract<
   UnstampedMessageStreamEvent,
   {
     type:
+      | "input.candidate"
+      | "input.resolved"
       | "approval.candidate"
       | "approval.settled"
       | "authorization.required"

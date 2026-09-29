@@ -40,6 +40,10 @@ export type InputRequest = z.infer<typeof inputRequestSchema>;
 export const inputRequestSchema = z
   .object({
     action: runtimeToolCallActionRequestSchema,
+    responsePolicy: z
+      .literal(true)
+      .describe("Answers require server-side response authorization.")
+      .optional(),
     allowFreeform: z
       .boolean()
       .describe(

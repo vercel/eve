@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { start } from "#internal/workflow/runtime.js";
 import {
   captureTurnEvents,
@@ -11,6 +12,7 @@ import { SLEEP_INPUT_SCHEMA } from "#tools/provided/sleep.js";
 import { executeSleepTool } from "#tools/provided/sleep-workflow.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
+  policyQuestionWorkflow,
   askThenRaceWorkflow,
   answerWithResponderWorkflow,
   confirmDeployWorkflow,
@@ -308,6 +310,97 @@ describe("workflow tools", () => {
             status: "answered",
           },
           runStartPrincipal: "alice",
+        });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  it("authorizes question candidates in a named step with responder-bound credentials", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "question-policy",
+      execute: policyQuestionWorkflow,
+      toolName: "confirm_deploy",
+    });
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: {
+            ...buildWorkflowToolSerializedContext({
+              continuationToken: "http:question-policy",
+              requestInput: true,
+            }),
+            "eve.auth": alice,
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const opened = await stream.nextTurn();
+        const request = filterEventsByType(opened, "input.requested")[0]!.data.requests[0]!;
+        expect(request.responsePolicy).toBe(true);
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          kind: "send",
+          auth: { ...alice, principalId: "bob" },
+          payload: { inputResponses: [{ requestId: request.requestId, text: "us-east-1" }] },
+        });
+        const rejected = await stream.nextUntil(
+          (event) => event.type === "input.candidate" && event.data.outcome === "rejected",
+        );
+        expect(filterEventsByType(rejected, "input.resolved")).toEqual([]);
+        expect(filterEventsByType(rejected, "input.candidate").at(-1)?.data).toMatchObject({
+          responderPrincipalId: "bob",
+          reason: "The requester must answer.",
+        });
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          kind: "send",
+          auth: alice,
+          payload: { inputResponses: [{ requestId: request.requestId, text: "sign-in" }] },
+        });
+        const challenged = await stream.nextUntil(
+          (event) => event.type === "authorization.required",
+        );
+        expect(filterEventsByType(challenged, "input.resolved")).toEqual([]);
+        const required = filterEventsByType(challenged, "authorization.required")[0]!;
+        expect(required.data.principalId).toBe("alice");
+        const url = new URL(required.data.webhookUrl!);
+        const callbackToken = decodeURIComponent(url.pathname.split("/").at(-1)!);
+        url.searchParams.set("code", "approved");
+        const callback = await handleConnectionCallbackRequest(new Request(url), {
+          params: {
+            token: callbackToken,
+            attemptId: required.data.attemptId!,
+            name: required.data.name,
+          },
+        } as never);
+        expect(callback.status).toBe(200);
+        const answered = await stream.nextUntil((event) => event.type === "session.waiting");
+        expect(
+          filterEventsByType(answered, "authorization.completed").map(
+            (event) => event.data.outcome,
+          ),
+        ).toEqual(["authorized"]);
+        expect(filterEventsByType(answered, "input.resolved")).toHaveLength(1);
+        const result = filterEventsByType(answered, "action.result").find(
+          (event) =>
+            event.data.result.kind === "tool-result" &&
+            event.data.result.toolName === "confirm_deploy",
+        );
+        expect(JSON.parse(String(result?.data.result.output))).toMatchObject({
+          status: "answered",
+          text: "sign-in",
+          responder: { principalId: "alice" },
         });
       } finally {
         stream.dispose();

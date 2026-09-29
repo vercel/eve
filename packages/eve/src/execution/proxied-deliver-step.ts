@@ -19,6 +19,7 @@ import {
   respondToRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
 import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   sendWorkflowAskAnswers,
@@ -31,7 +32,11 @@ import {
   type InputResolution,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import { retireProxyInputRequests } from "#harness/proxy-input-requests.js";
+import {
+  getProxyInputRequests,
+  upsertProxyInputRequestState,
+  retireProxyInputRequests,
+} from "#harness/proxy-input-requests.js";
 
 export type RoutedDeliverResult =
   | {
@@ -100,7 +105,10 @@ async function routeProxiedDeliver(
 
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
       if (forChild.workflowAsk !== undefined) {
-        for (const { requestId } of forChild.resolved.resolutions) resolvedQuestions.add(requestId);
+        for (const { requestId } of forChild.resolved.resolutions) {
+          if (getProxyInputRequests(durableSession.state).get(requestId)?.responsePolicy !== true)
+            resolvedQuestions.add(requestId);
+        }
       }
       const key = JSON.stringify([
         forChild.childContinuationToken,
@@ -110,6 +118,7 @@ async function routeProxiedDeliver(
         forChild.resolved.event.stepIndex,
         forChild.resolved.event.turnId,
         forChild.inputSource ?? null,
+        forChild.workflowAsk !== undefined ? forChild.resolved.resolutions[0]?.requestId : null,
       ]);
       const child: ChildBucket = children.get(key) ?? {
         workflowAsk: forChild.workflowAsk,
@@ -144,6 +153,91 @@ async function routeProxiedDeliver(
   for (const child of children.values()) {
     if (child.workflowAsk !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
+      if (child.workflowAsk.responsePolicy === true) {
+        const principal = sourceDelivery.auth;
+        for (const response of responses) {
+          const route = getProxyInputRequests(durableSession.state).get(response.requestId);
+          const ask = route?.workflowAsk;
+          if (route === undefined || ask === undefined) continue;
+          if (principal == null) {
+            resolvedEvents.push({
+              type: "input.candidate",
+              data: {
+                ...route.event,
+                requestId: response.requestId,
+                candidateId: `${response.requestId}-anonymous`,
+                responderPrincipalId: "",
+                outcome: "rejected",
+                reason: "Authentication is required to answer this question.",
+              },
+            });
+            continue;
+          }
+          const candidates = Object.fromEntries(
+            Object.entries(ask.candidates ?? {}).filter(
+              ([, entry]) => entry.expiresAt > Date.now(),
+            ),
+          );
+          if (
+            Object.keys(candidates).length >= 16 ||
+            Object.values(candidates).some(
+              (entry) =>
+                entry.principal.principalId === principal.principalId &&
+                entry.principal.authenticator === principal.authenticator &&
+                entry.principal.issuer === principal.issuer &&
+                entry.principal.principalType === principal.principalType,
+            )
+          )
+            continue;
+          const sequence = (ask.candidateSequence ?? 0) + 1;
+          const candidateId = `${response.requestId}-candidate-${String(sequence)}`;
+          const next = {
+            ...route,
+            workflowAsk: {
+              ...ask,
+              candidateSequence: sequence,
+              candidates: {
+                ...candidates,
+                [candidateId]: { response, principal, expiresAt: Date.now() + 10 * 60_000 },
+              },
+            },
+          };
+          durableSession = {
+            ...durableSession,
+            state: upsertProxyInputRequestState({
+              state: durableSession.state,
+              forChildContinuationToken: route.childContinuationToken,
+              inputSource: route.inputSource,
+              entries: [...getProxyInputRequests(durableSession.state)]
+                .filter(
+                  ([, entry]) =>
+                    entry.childContinuationToken === route.childContinuationToken &&
+                    entry.inputSource === route.inputSource,
+                )
+                .map(([id, entry]) => [id, id === response.requestId ? next : entry]),
+            }),
+          };
+          await resumeHook(child.workflowAsk.control, {
+            kind: "question-candidate",
+            requestId: response.requestId,
+            candidateId,
+            expiresAt: Date.now() + 10 * 60_000,
+            response: { principal, optionId: response.optionId, text: response.text },
+          });
+          resolvedEvents.push({
+            type: "input.candidate",
+            data: {
+              ...route.event,
+              requestId: response.requestId,
+              candidateId,
+              responderPrincipalId: principal.principalId,
+              outcome: "pending",
+            },
+          });
+        }
+        retired = true;
+        continue;
+      }
       await sendWorkflowAskAnswers(
         child.workflowAsk,
         responses,
@@ -176,6 +270,10 @@ async function routeProxiedDeliver(
           childDelivery,
         );
       }
+    }
+    for (const [requestId] of child.resolutions) {
+      if (getProxyInputRequests(durableSession.state).get(requestId)?.responsePolicy === true)
+        child.resolutions.delete(requestId);
     }
     if (child.resolutions.size > 0) {
       resolvedEvents.push(

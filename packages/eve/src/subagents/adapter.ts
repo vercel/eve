@@ -21,6 +21,12 @@ const log = createLogger("execution.subagent-adapter");
  */
 export const SUBAGENT_ADAPTER: ChannelAdapter = {
   kind: SUBAGENT_ADAPTER_KIND,
+  async "input.candidate"(data, ctx) {
+    await forwardSubagentAuthorizationEvent({ data, type: "input.candidate" }, ctx);
+  },
+  async "input.resolved"(data, ctx) {
+    await forwardSubagentAuthorizationEvent({ data, type: "input.resolved" }, ctx);
+  },
   async "approval.candidate"(data, ctx) {
     await forwardSubagentAuthorizationEvent({ data, type: "approval.candidate" }, ctx);
   },

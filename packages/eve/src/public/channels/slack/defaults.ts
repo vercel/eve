@@ -366,6 +366,16 @@ export async function postCompletedSlackReply(
  * which user overrides cannot express.
  */
 export const defaultEvents: SlackChannelInternalEvents = {
+  async "input.candidate"(event, channel) {
+    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
+    if (userId === undefined) return;
+    await channel.thread.postEphemeral(
+      userId,
+      event.outcome === "pending"
+        ? "Checking whether you can answer this question…"
+        : (event.reason ?? "We couldn’t verify your response. Please try again."),
+    );
+  },
   async "approval.candidate"(event, channel, _ctx) {
     const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
     if (event.outcome === "pending" && userId !== undefined) {

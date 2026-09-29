@@ -5,6 +5,7 @@ import type { AuthorizationCallback } from "#shared/connection-types.js";
 import type { ToolContext } from "#tools/definition.js";
 import {
   findWorkflowToolRunContext,
+  findQuestionPolicyContext,
   type WorkflowToolRunContext,
 } from "#execution/tools/workflow/ask.js";
 import { disposeHook } from "#execution/hook-ownership.js";
@@ -22,6 +23,8 @@ import type {
 type IdentifiedAuthorizationChallenge = AuthorizationChallenge & { readonly attemptId: string };
 
 interface WorkflowContextArgument {
+  readonly argument?: unknown;
+  readonly question?: WorkflowStepContext["question"];
   readonly ctx: ToolContext;
   readonly run: WorkflowToolRunContext;
 }
@@ -34,6 +37,10 @@ export function workflowToolStep(
   // Forward the SDK proxy's stepId, bind implementation, and serialization metadata.
   // A revived reference still calls the original registered function with native arguments.
   return new Proxy(original, {
+    get(target, property, receiver) {
+      if (property === Symbol.for("eve.workflow.authorized-step")) return true;
+      return Reflect.get(target, property, receiver);
+    },
     apply(target, receiver, args: unknown[]) {
       const contextArgument = findWorkflowContextArgument(args);
       if (contextArgument === undefined) {
@@ -48,6 +55,12 @@ function findWorkflowContextArgument(
   args: readonly unknown[],
 ): WorkflowContextArgument | undefined {
   for (const arg of args) {
+    const policy = findQuestionPolicyContext(arg);
+    if (policy !== undefined) {
+      const run = findWorkflowToolRunContext(policy.ctx);
+      if (run !== undefined)
+        return { ctx: policy.ctx, run, argument: arg, question: policy.question };
+    }
     const run = findWorkflowToolRunContext(arg);
     if (run !== undefined) {
       return { ctx: arg as ToolContext, run };
@@ -63,6 +76,7 @@ async function executeAuthorizedStep(
   contextArgument: WorkflowContextArgument,
 ): Promise<unknown> {
   const { ctx, run } = contextArgument;
+  const cleanupSignal = contextArgument.question?.runAbortSignal ?? ctx.abortSignal;
   const authorizationResults: WorkflowStepAuthorizationResult[] = [];
   const pending = new Map<string, IdentifiedAuthorizationChallenge>();
 
@@ -73,6 +87,8 @@ async function executeAuthorizedStep(
       try {
         result = await invokeAuthorizedStep({
           args,
+          argument: contextArgument.argument,
+          question: contextArgument.question,
           authorizationResults,
           callbackToken: callback.token,
           ctx,
@@ -80,8 +96,8 @@ async function executeAuthorizedStep(
           receiver,
         });
       } catch (error) {
-        if (!ctx.abortSignal.aborted) {
-          await reportPendingAsFailed(run, ctx.abortSignal, pending);
+        if (!cleanupSignal.aborted) {
+          await reportPendingAsFailed(run, cleanupSignal, pending);
         }
         throw error;
       }
@@ -103,6 +119,7 @@ async function executeAuthorizedStep(
         authorizationResults,
         callback,
         challenges: result.signal.challenges,
+        cleanupSignal,
         ctx,
         pending,
         run,
@@ -114,6 +131,8 @@ async function executeAuthorizedStep(
 }
 
 async function invokeAuthorizedStep(input: {
+  readonly argument?: unknown;
+  readonly question?: WorkflowStepContext["question"];
   readonly args: unknown[];
   readonly authorizationResults: readonly WorkflowStepAuthorizationResult[];
   readonly callbackToken: string;
@@ -122,7 +141,9 @@ async function invokeAuthorizedStep(input: {
   readonly receiver: unknown;
 }): Promise<WorkflowStepResult> {
   const { args, authorizationResults, callbackToken, ctx, execute, receiver } = input;
+  const argument = input.argument ?? ctx;
   const context: WorkflowStepContext = {
+    ...(input.question !== undefined && { question: input.question }),
     callId: ctx.callId,
     toolName: ctx.toolName,
     session: ctx.session,
@@ -132,9 +153,9 @@ async function invokeAuthorizedStep(input: {
     authorizationResults,
   };
   const invocation: WorkflowStepInvocation = {
-    args: args.map((arg) => (arg === ctx ? null : arg)),
+    args: args.map((arg) => (arg === argument ? null : arg)),
     context,
-    contextIndexes: args.flatMap((arg, index) => (arg === ctx ? [index] : [])),
+    contextIndexes: args.flatMap((arg, index) => (arg === argument ? [index] : [])),
   };
   return (await execute.call(receiver, invocation)) as WorkflowStepResult;
 }
@@ -166,6 +187,7 @@ async function reconcileCompletedAuthorizations(
 async function collectAuthorizationCallbacks(input: {
   readonly authorizationResults: WorkflowStepAuthorizationResult[];
   readonly callback: AsyncIterable<unknown>;
+  readonly cleanupSignal: AbortSignal;
   readonly challenges: readonly AuthorizationChallenge[];
   readonly ctx: ToolContext;
   readonly pending: Map<string, IdentifiedAuthorizationChallenge>;
@@ -190,8 +212,8 @@ async function collectAuthorizationCallbacks(input: {
       });
     } catch (error) {
       // Cancelled turns close their inbox; cancelled tasks discard further deliveries.
-      if (!ctx.abortSignal.aborted) {
-        await reportAuthorization(run, ctx.abortSignal, identified, "failed");
+      if (!input.cleanupSignal.aborted) {
+        await reportAuthorization(run, input.cleanupSignal, identified, "failed");
       }
       throw error;
     }

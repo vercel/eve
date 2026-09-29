@@ -92,6 +92,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     ["WORKFLOW-APPROVAL-DENIED-START", "gated_deploy", "review-only"],
     ["WORKFLOW-DEPLOY-START", "deploy_service"],
     ["WORKFLOW-CONFIRM-START", "confirm_deploy"],
+    ["WORKFLOW-SIGNOFF-START", "release_signoff"],
     ["WORKFLOW-ESCALATE-START", "escalate_deploy"],
     ["WORKFLOW-HOLD-START", "hold_deploy"],
     ["WORKFLOW-FANOUT-START", "fanout_deploy"],

@@ -156,6 +156,8 @@ export default defineTool({
 });
 ```
 
+For a question a workflow tool asks, pass a named response policy to [`ctx.ask`](/docs/tools/workflows#authorize-answers).
+
 When a response is refused without starting a turn, the session returns to `session.waiting`. The client finishes the submission and keeps the approval prompt answerable. Submitting an answer does not confirm approval: `approval.settled` or `input.resolved` records the server's decision. You can inspect `approval.candidate` events for the response policy's refusal reason.
 
 ### Skipping approval for schedule-dispatched turns

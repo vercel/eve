@@ -1,3 +1,4 @@
+import { settleQuestionResponseStep } from "#execution/tools/workflow/question-response-step.js";
 import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
 import {
   emitAgentStartedStep,
@@ -35,6 +36,9 @@ export async function handleWorkflowToolRunMessage(
 ): Promise<RuntimeActionResult | undefined> {
   const { message } = input;
   switch (message.kind) {
+    case "question-response":
+      await input.cursor.advance((state) => settleQuestionResponseStep({ ...state, message }));
+      return undefined;
     // Only task runs report started, reply, or usage, and the session applies those to the task table.
     case "started":
     case "reply":
@@ -134,6 +138,7 @@ function createWorkflowAskRoute(
 ): WorkflowAskRoute {
   const { allowFreeform, options } = ask.request;
   return {
+    ...(ask.responsePolicy === true && { responsePolicy: true }),
     control: ask.control,
     question: {
       ...(allowFreeform !== undefined && { allowFreeform }),

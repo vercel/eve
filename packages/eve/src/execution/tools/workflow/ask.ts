@@ -1,3 +1,4 @@
+import { sleep } from "#compiled/@workflow/core/index.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type {
@@ -10,6 +11,8 @@ import type {
   ToolInputRequest,
   ToolInputRequestOptions,
   ToolInputResponse,
+  QuestionResponseContext,
+  QuestionResponseDecision,
 } from "#tools/definition.js";
 import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
@@ -76,6 +79,9 @@ const CANCELLED: ToolInputResponse = { status: "cancelled" };
 const UNAVAILABLE: ToolInputResponse = { status: "unavailable" };
 
 interface PendingAsk {
+  readonly candidate?: (
+    candidate: import("#execution/tools/workflow/messages.js").WorkflowQuestionCandidate,
+  ) => Promise<void>;
   readonly resolve: (response: ToolInputResponse) => void;
   readonly reject: (error: unknown) => void;
   /** Sends the session the request to withdraw the question; unset once sent. */
@@ -102,7 +108,10 @@ export class WorkflowToolRunAsks {
    * Opens a question under a request ID that replays deterministically with
    * the run. `send` sends the request and returns how to send its withdrawal.
    */
-  open(send: (requestId: string) => () => Promise<void>): {
+  open(
+    send: (requestId: string) => () => Promise<void>,
+    candidate?: PendingAsk["candidate"],
+  ): {
     readonly answer: Promise<ToolInputResponse>;
     readonly requestId: string;
   } {
@@ -110,7 +119,7 @@ export class WorkflowToolRunAsks {
     const requestId = `${this.runId}-ask-${String(this.opened)}`;
     let entry!: PendingAsk;
     const answer = new Promise<ToolInputResponse>((resolve, reject) => {
-      entry = { reject, resolve, withdraw: undefined };
+      entry = { candidate, reject, resolve, withdraw: undefined };
     });
     this.pending.set(requestId, entry);
     entry.withdraw = send(requestId);
@@ -149,6 +158,15 @@ export class WorkflowToolRunAsks {
   settle(decision: WorkflowToolRunAskDecision): void {
     const response = decision.kind === "answer" ? decision.response : CANCELLED;
     this.take(decision.requestId)?.resolve(response);
+  }
+
+  /** Policy work must not block command intake or other candidates' sign-ins. */
+  authorize(
+    candidate: import("#execution/tools/workflow/messages.js").WorkflowQuestionCandidate,
+  ): void {
+    const handle = this.pending.get(candidate.requestId)?.candidate;
+    if (handle !== undefined)
+      void handle(candidate).catch((error: unknown) => this.fail(candidate.requestId, error));
   }
 
   fail(requestId: string, error: unknown): void {
@@ -192,23 +210,149 @@ export function ask(
   const { asks, control, owner } = context;
   // A `serve` task's current call changes; the question stays the call's that asked it.
   const from = context.from;
-  const { answer, requestId } = asks.open((replyTo) => {
-    const sent = owner.send({
-      kind: "request",
-      from,
-      replyTo,
-      request: { control, kind: "ask", request },
-    });
-    sent.catch((error: unknown) => asks.fail(replyTo, error));
-    // The withdrawal must not overtake the request it withdraws.
-    return () => sent.then(() => owner.send({ control, from, kind: "withdraw", replyTo }));
-  });
+  const requesterAuth = context.auth;
+  const session = ctx.session;
+  if (
+    options.response !== undefined &&
+    Reflect.get(options.response, Symbol.for("eve.workflow.authorized-step")) !== true
+  ) {
+    throw new TypeError(`ctx.ask response must be a named "use step" function.`);
+  }
+  const policy = options.response;
+  const activePolicies = new Set<AbortController>();
+  const { answer, requestId } = asks.open(
+    (replyTo) => {
+      const sent = owner.send({
+        kind: "request",
+        from,
+        replyTo,
+        request: {
+          ...(policy !== undefined && { responsePolicy: true }),
+          control,
+          kind: "ask",
+          request,
+        },
+      });
+      sent.catch((error: unknown) => asks.fail(replyTo, error));
+      // The withdrawal must not overtake the request it withdraws.
+      return () => sent.then(() => owner.send({ control, from, kind: "withdraw", replyTo }));
+    },
+    policy === undefined
+      ? undefined
+      : async (candidate) => {
+          const policyContext: QuestionResponseContext = {
+            request: {
+              callId: from.callId,
+              requestId: candidate.requestId,
+              toolName: from.toolName,
+              principal: requesterAuth.current,
+              question: request,
+            },
+            response: candidate.response,
+            session: {
+              id: session.id,
+              initiator: requesterAuth.initiator,
+              parent: session.parent,
+              turn: session.turn,
+            },
+            auth: {
+              getToken: () => {
+                throw new Error("Question authorization is only available inside its policy step.");
+              },
+              requireAuth: () => {
+                throw new Error("Question authorization is only available inside its policy step.");
+              },
+            },
+          };
+          const stepContext = {
+            ...ctx,
+            session: {
+              ...session,
+              auth: { ...requesterAuth, current: candidate.response.principal },
+            },
+          };
+          const controller = new AbortController();
+          activePolicies.add(controller);
+          const abort = () => controller.abort(ctx.abortSignal.reason);
+          ctx.abortSignal.addEventListener("abort", abort, { once: true });
+          if (ctx.abortSignal.aborted) abort();
+          const candidateContext = { ...stepContext, abortSignal: controller.signal };
+          attachWorkflowToolRunContext(candidateContext, { ...context, from });
+          attachQuestionPolicyContext(policyContext, candidateContext, {
+            runAbortSignal: ctx.abortSignal,
+            candidateId: candidate.candidateId,
+            request: policyContext.request,
+            response: policyContext.response,
+          });
+          let decision: QuestionResponseDecision;
+          try {
+            const timeout = sleep(Math.max(0, candidate.expiresAt - Date.now())).then(() => {
+              controller.abort(new Error("Question response authorization timed out."));
+              return {
+                status: "rejected",
+                reason: "Response authorization timed out. Please try again.",
+              } as const;
+            });
+            const outcome = await Promise.race([policy(policyContext), timeout]);
+            decision =
+              outcome?.status === "allowed" ||
+              (outcome?.status === "rejected" && typeof outcome.reason === "string")
+                ? outcome
+                : {
+                    status: "rejected",
+                    reason: "We couldn’t verify your response. Please try again.",
+                  };
+          } catch {
+            decision = {
+              status: "rejected",
+              reason: "We couldn’t verify your response. Please try again.",
+            };
+          }
+          activePolicies.delete(controller);
+          ctx.abortSignal.removeEventListener("abort", abort);
+          await owner.send({
+            kind: "question-response",
+            from,
+            requestId: candidate.requestId,
+            candidateId: candidate.candidateId,
+            decision,
+          });
+        },
+  );
 
   const requestWithdrawal = (): void => asks.withdraw(requestId);
   for (const signal of signals) {
     signal.addEventListener("abort", requestWithdrawal, { once: true });
   }
   return answer.finally(() => {
+    for (const controller of activePolicies)
+      controller.abort(new Error("Question is no longer pending."));
+    activePolicies.clear();
     for (const signal of signals) signal.removeEventListener("abort", requestWithdrawal);
   });
+}
+
+const QUESTION_POLICY_CONTEXT = Symbol.for("eve.question-policy.context");
+
+function attachQuestionPolicyContext(
+  value: QuestionResponseContext,
+  ctx: ToolContext,
+  question: NonNullable<
+    import("#execution/tools/workflow/step-context.js").WorkflowStepContext["question"]
+  >,
+): void {
+  Object.defineProperty(value, QUESTION_POLICY_CONTEXT, { value: { ctx, question } });
+}
+
+export function findQuestionPolicyContext(value: unknown):
+  | {
+      readonly ctx: ToolContext;
+      readonly question: NonNullable<
+        import("#execution/tools/workflow/step-context.js").WorkflowStepContext["question"]
+      >;
+    }
+  | undefined {
+  return typeof value === "object" && value !== null
+    ? Reflect.get(value, QUESTION_POLICY_CONTEXT)
+    : undefined;
 }

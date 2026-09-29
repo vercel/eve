@@ -296,6 +296,21 @@ export interface InputRequestedStreamEvent {
   type: "input.requested";
 }
 
+/** Responder-specific progress for an answer requiring a response policy. */
+export interface InputCandidateStreamEvent {
+  readonly type: "input.candidate";
+  readonly data: {
+    readonly requestId: string;
+    readonly candidateId: string;
+    readonly responderPrincipalId: string;
+    readonly outcome: "pending" | "rejected";
+    readonly reason?: string;
+    readonly sequence: number;
+    readonly stepIndex: number;
+    readonly turnId: string;
+  };
+}
+
 /** Authoritative terminal outcome for one human-input request. */
 export type InputResolutionOutcome =
   | "answered"
@@ -805,6 +820,7 @@ export type UnstampedMessageStreamEvent =
   | TaskStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
+  | InputCandidateStreamEvent
   | InputResolvedStreamEvent
   | ActionPartialStreamEvent
   | ActionResultStreamEvent

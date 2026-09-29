@@ -26,6 +26,7 @@ const HOOK_CANCELLABLE_EVENTS = {
   "action.result": true,
   "actions.requested": true,
   "agent.started": false,
+  "input.candidate": true,
   "approval.candidate": true,
   "approval.settled": true,
   "authorization.completed": true,

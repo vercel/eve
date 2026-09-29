@@ -148,8 +148,44 @@ export type ToolInputResponse =
   | { readonly status: "cancelled" }
   | { readonly status: "unavailable" };
 
+/** Captured question and caller, stable until the question settles. */
+export interface QuestionRequest {
+  readonly callId: string;
+  readonly requestId: string;
+  readonly toolName: string;
+  readonly principal: import("#channel/types.js").SessionAuthContext | null;
+  readonly question: ToolInputRequest;
+}
+
+/** Server-authenticated candidate answer to a question. */
+export interface QuestionResponse {
+  readonly principal: import("#channel/types.js").SessionAuthContext;
+  readonly optionId?: string;
+  readonly text?: string;
+}
+
+/** Context supplied to a named `"use step"` question response policy. */
+export interface QuestionResponseContext {
+  readonly request: QuestionRequest;
+  readonly response: QuestionResponse;
+  readonly session: import("#approval/definition.js").ApprovalResponseSession;
+  readonly auth: import("#approval/definition.js").ApprovalResponseAuth;
+}
+
+/** Rejection leaves the question pending for another answer. */
+export type QuestionResponseDecision =
+  | { readonly status: "allowed" }
+  | { readonly status: "rejected"; readonly reason: string };
+
+/** A named `"use step"` function authorizing one authenticated answer. */
+export type QuestionResponsePolicy = (
+  ctx: QuestionResponseContext,
+) => QuestionResponseDecision | Promise<QuestionResponseDecision>;
+
 /** Options for `ctx.ask` in a `defineWorkflowTool` executor. */
 export interface ToolInputRequestOptions {
+  /** Authorizes answers before settlement; must be a named `"use step"` function. */
+  readonly response?: QuestionResponsePolicy;
   /**
    * Withdraws the request when it aborts: the channel stops offering the
    * question and the ask resolves as `cancelled`, unless the session accepted

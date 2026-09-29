@@ -36,7 +36,8 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
 
     return contextStorage.run(context, async (): Promise<WorkflowStepResult> => {
       const auth = createAuthorizationContext({
-        scope: input.toolName,
+        scope: input.question?.candidateId ?? input.toolName,
+        boundResponder: input.question?.response.principal,
         completeAuthorization: completeWorkflowStepAuthorization,
       });
       const ctx = {
@@ -56,13 +57,46 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
             "Read ctx.agents in the workflow body and pass the required serializable metadata into the step.",
           ),
       });
+      const policyContext =
+        input.question === undefined
+          ? undefined
+          : {
+              request: input.question.request,
+              response: input.question.response,
+              session: {
+                id: input.session.id,
+                initiator: input.session.auth.initiator,
+                parent: input.session.parent,
+                turn: input.session.turn,
+              },
+              auth: {
+                getToken: (
+                  provider: import("#tools/auth.js").ToolAuthProvider,
+                  options?: import("#tools/auth.js").ToolAuthOptions,
+                ) =>
+                  auth.getToken(
+                    provider,
+                    questionAuthOptions(input.question!.candidateId, options),
+                  ),
+                requireAuth: (
+                  provider: import("#tools/auth.js").ToolAuthProvider,
+                  options?: import("#tools/auth.js").ToolAuthOptions,
+                ) =>
+                  auth.requireAuth(
+                    provider,
+                    questionAuthOptions(input.question!.candidateId, options),
+                  ),
+              },
+            };
       let output: unknown;
       try {
         output = await auth.run(() =>
           Reflect.apply(
             execute,
             this,
-            args.map((arg, index) => (invocation.contextIndexes.includes(index) ? ctx : arg)),
+            args.map((arg, index) =>
+              invocation.contextIndexes.includes(index) ? (policyContext ?? ctx) : arg,
+            ),
           ),
         );
       } catch (error) {
@@ -91,4 +125,13 @@ function unavailableInStep(capability: string, guidance: string): never {
     new Error(`${capability} is unavailable inside a "use step" function. ${guidance}`),
     { fatal: true },
   );
+}
+
+function questionAuthOptions(
+  scope: string,
+  options: import("#tools/auth.js").ToolAuthOptions | undefined,
+) {
+  return options?.authKey === undefined
+    ? options
+    : { ...options, authKey: `${scope}:${options.authKey}` };
 }

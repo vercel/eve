@@ -7,6 +7,12 @@ export type WorkflowStepAuthorizationResult = AuthorizationResult & {
 };
 
 export interface WorkflowStepContext {
+  readonly question?: {
+    readonly runAbortSignal: AbortSignal;
+    readonly candidateId: string;
+    readonly request: import("#tools/definition.js").QuestionRequest;
+    readonly response: import("#tools/definition.js").QuestionResponse;
+  };
   readonly callId: string;
   readonly toolName: string;
   readonly session: SessionContext["session"];

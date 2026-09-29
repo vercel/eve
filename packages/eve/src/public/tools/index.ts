@@ -54,5 +54,10 @@ export {
 export type {
   ToolInputRequest,
   ToolInputRequestOptions,
+  QuestionRequest,
+  QuestionResponse,
+  QuestionResponseContext,
+  QuestionResponseDecision,
+  QuestionResponsePolicy,
   ToolInputResponse,
 } from "#tools/definition.js";

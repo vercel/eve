@@ -442,7 +442,7 @@ const answer = await ctx.ask(
     options?: { id: string; label: string; description?: string; style?: "primary" | "danger" | "default" }[],
     allowFreeform?: boolean,
   },
-  { signal?: AbortSignal },
+  { signal?: AbortSignal, response?: QuestionResponsePolicy },
 );
 // | { status: "answered"; optionId?: string; text?: string }
 // | { status: "cancelled" }
@@ -467,6 +467,60 @@ A plain follow-up message answers the request when it is the only pending questi
 matches an option or the request allows free text. Answer a question from a subagent with a
 structured response.
 
+### Authorize answers
+
+By default, anyone in the conversation can answer. Pass a named `"use step"` function as
+`response` to authorize each submitted answer before the question resolves:
+
+```ts
+import type { QuestionResponseContext, QuestionResponseDecision } from "eve/tools";
+
+async function authorizeSignoff({
+  request,
+  response,
+}: QuestionResponseContext): Promise<QuestionResponseDecision> {
+  "use step";
+
+  const requester = request.principal;
+  const responder = response.principal;
+  return requester !== null &&
+    requester.authenticator === responder.authenticator &&
+    requester.issuer === responder.issuer &&
+    requester.principalId === responder.principalId &&
+    requester.principalType === responder.principalType
+    ? { status: "allowed" }
+    : { status: "rejected", reason: "The requester must answer." };
+}
+
+const answer = await ctx.ask(
+  { prompt: `Release ${service}?`, display: "confirmation", options: RELEASE_OR_CANCEL },
+  { response: authorizeSignoff },
+);
+```
+
+The policy receives the captured `request` (question, requester principal, request ID, call ID,
+and tool name), the submitted `response` (authenticated principal, option ID, and text),
+read-only `session` identity and lineage, and responder-bound `auth.getToken` / `auth.requireAuth`.
+The requester is captured when the question opens, even if a `serve` task later receives another call.
+The responder comes from server-side authentication, not client-supplied answer fields.
+
+Like [tool approval response policies](/docs/human-in-the-loop#authorizing-approval-responses),
+return `{ status: "allowed" }` or `{ status: "rejected", reason }`. Rejection leaves the question
+pending. A policy-protected question rejects unauthenticated answers without running the policy.
+Auth challenges belong to the person answering; another eligible person can still answer while
+that sign-in is pending. The first allowed answer the session accepts wins. Withdrawal and
+cancellation do not invoke the response policy. Candidate authorization expires after ten minutes;
+each question allows up to 16 pending candidates, with one pending candidate per principal.
+
+Policies must be named `"use step"` functions, not inline callbacks. They run in the asking
+workflow's server-side step, including when a local or remote parent relays the question.
+Remote agents must enable `forwardPrincipal: true` to receive authenticated responders; without
+principal forwarding, their policies reject answers as unauthenticated.
+
+The `input.requested` event carries `responsePolicy: true`; `input.candidate` reports pending or
+rejected authorization with the responder's principal ID. Only acceptance or withdrawal produces
+`input.resolved`.
+
 `ctx.ask` composes with the SDK's own constructs; race it against a deadline:
 
 ```ts
@@ -488,7 +542,7 @@ if (answer === undefined) return { deployed: false, reason: "timed out" };
   the turn waits on, which withdraws that call's questions, such as `ask_question`'s. A task's
   questions stay open.
 - An aborted `signal` asks the session to withdraw the question, and the session decides. If a
-  person's answer reached the session first, the ask resolves as `answered` even though the signal
+  person's answer was accepted by the session first, the ask resolves as `answered` even though the signal
   aborted, and the channel shows it answered. Branch on `status`, not on the signal.
 
 Compare the [`approval`](/docs/human-in-the-loop) policy, which gates the call before `execute` runs

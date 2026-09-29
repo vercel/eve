@@ -2,7 +2,7 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import { z } from "#compiled/zod/index.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { inputRequestSchema } from "#shared/input.js";
+import { inputResponseSchema, inputRequestSchema } from "#shared/input.js";
 import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 
@@ -44,6 +44,35 @@ const sessionAuthorizationCallbackSchema = z.object({
   kind: z.literal("subagent-authorization-event"),
   subagentName: z.string().min(1),
   event: z.discriminatedUnion("type", [
+    z.object({
+      type: z.literal("input.candidate"),
+      data: z.object({
+        requestId: z.string(),
+        candidateId: z.string(),
+        responderPrincipalId: z.string(),
+        outcome: z.enum(["pending", "rejected"]),
+        reason: z.string().optional(),
+        sequence: z.number(),
+        stepIndex: z.number(),
+        turnId: z.string(),
+      }),
+    }),
+    z.object({
+      type: z.literal("input.resolved"),
+      data: z.object({
+        resolutions: z.array(
+          z.object({
+            kind: z.enum(["question", "session-limit", "tool-approval"]),
+            outcome: z.enum(["answered", "approved", "cancelled", "denied", "ignored", "invalid"]),
+            requestId: z.string(),
+            response: inputResponseSchema.optional(),
+          }),
+        ),
+        sequence: z.number(),
+        stepIndex: z.number(),
+        turnId: z.string(),
+      }),
+    }),
     z.object({
       type: z.literal("approval.candidate"),
       data: z

@@ -241,6 +241,7 @@ export interface EveMessageToolMetadata {
  * {@link InputResponse}.
  */
 export interface EveMessageInputRequest {
+  readonly responsePolicy?: true;
   readonly allowFreeform?: boolean;
   readonly display?: "confirmation" | "select" | "text";
   readonly kind: InputRequest["kind"];

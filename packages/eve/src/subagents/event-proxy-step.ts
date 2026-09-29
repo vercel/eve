@@ -20,7 +20,11 @@ import {
 } from "#execution/session/state-delta.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { emitProxiedAuthorizationEvent, emitProxiedInputRequest } from "#subagents/hitl-proxy.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import {
+  getProxyInputRequests,
+  retireProxyInputRequests,
+  upsertProxyInputRequests,
+} from "#harness/proxy-input-requests.js";
 import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
 
 type SubagentEventHookPayload =
@@ -69,6 +73,25 @@ export async function emitProxiedSubagentEvent(input: {
     },
     async (emit, session) => {
       if (hookPayload.kind === "subagent-authorization-event") {
+        if (hookPayload.event.type === "input.resolved") {
+          const pending = getProxyInputRequests(session.state);
+          const resolutions = hookPayload.event.data.resolutions.filter(
+            (entry) => pending.get(entry.requestId)?.responsePolicy === true,
+          );
+          if (resolutions.length > 0) {
+            await emit({
+              type: "input.resolved",
+              data: { ...hookPayload.event.data, resolutions },
+            });
+          }
+          return {
+            result: undefined,
+            session: retireProxyInputRequests(
+              session,
+              resolutions.map((entry) => entry.requestId),
+            ),
+          };
+        }
         await emitProxiedAuthorizationEvent({ emit, hookPayload, session });
         return { result: undefined, session };
       }

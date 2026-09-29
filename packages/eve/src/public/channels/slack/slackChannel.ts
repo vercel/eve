@@ -596,6 +596,7 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
  * context and exposes the ID as `data.sessionId`.
  */
 export interface SlackChannelEvents {
+  readonly "input.candidate"?: SlackEventHandler<"input.candidate">;
   readonly "approval.candidate"?: SlackEventHandler<"approval.candidate">;
   readonly "approval.settled"?: SlackEventHandler<"approval.settled">;
   readonly "turn.started"?: SlackEventHandler<"turn.started">;
