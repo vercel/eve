@@ -41,7 +41,7 @@ export default defineEval({
       startIndex: conversation.state?.streamIndex,
     });
     await new Promise((resolve) => setTimeout(resolve, 250));
-    const callback = await fetch(callbackUrl);
+    const callback = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
     if (!callback.ok)
       throw new Error(`Fixture OAuth callback failed (${String(callback.status)}).`);
     const resumed = await callbackTurn.result();

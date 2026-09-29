@@ -27,7 +27,7 @@ export default defineEval({
     if (callbackUrl.origin !== new URL(t.target.url).origin) {
       throw new Error("Fixture OAuth callback targeted an unexpected origin.");
     }
-    const callback = await fetch(callbackUrl);
+    const callback = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
     if (!callback.ok) {
       throw new Error(
         `Fixture OAuth callback failed (${String(callback.status)}): ${await callback.text()}`,

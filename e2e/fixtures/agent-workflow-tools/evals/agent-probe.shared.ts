@@ -96,7 +96,7 @@ async function completeSignIn(
   const live = await session.start(message);
   const required = await live.waitForEvent("authorization.required");
   const callbackUrl = toCallbackUrl(required.data.authorization?.url);
-  const response = await fetch(callbackUrl);
+  const response = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
   if (!response.ok) {
     throw new Error(`Authorization callback failed (${response.status}).`);
   }
@@ -147,7 +147,7 @@ export async function runRejectedStepAuth(t: EveEvalContext): Promise<void> {
   );
   requireAuthorizationOutcome(turn, "failed");
 
-  const repeatedCallback = await fetch(callbackUrl);
+  const repeatedCallback = await t.target.fetch(`${callbackUrl.pathname}${callbackUrl.search}`);
   if (repeatedCallback.status !== 404) {
     throw new Error("The completed authorization callback must be disposed.");
   }
