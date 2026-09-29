@@ -72,6 +72,9 @@ export function workflowToolRunRequestToInputRequestPayload(
     callId: from.callId,
     childContinuationToken: replyTo,
     childSessionId: from.runId,
+    childSessionInbox: message.childSessionInbox,
+    remote: message.remote,
+    inputSource: message.inputSource,
     event: {
       requests: workflowToolRunInputRequests(message),
       sequence: requestCoordinates?.sequence ?? from.sequence,

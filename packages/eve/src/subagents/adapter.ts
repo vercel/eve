@@ -45,6 +45,7 @@ export const SUBAGENT_ADAPTER: ChannelAdapter = {
       childContinuationToken: ctx.ctx.require(ContinuationTokenKey),
       childSessionId: ctx.ctx.require(SessionIdKey),
       childSessionInbox: ctx.ctx.get(SessionInboxKey),
+      inputSource: ctx.inputSource,
       event: {
         requests: data.requests,
         sequence: data.sequence,

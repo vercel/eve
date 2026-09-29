@@ -305,6 +305,11 @@ export interface SubagentInputRequestEvent {
  * `input.requested` handler and the parent's runtime loop.
  */
 export interface SubagentInputRequestHookPayload {
+  readonly remote?: import("#eve-channel/support.js").RemoteAgentBinding & {
+    readonly sessionId: string;
+  };
+  /** Independent source when several requests share an answer destination. */
+  readonly inputSource?: string;
   readonly callId: string;
   readonly childContinuationToken: string;
   readonly childSessionId: string;
