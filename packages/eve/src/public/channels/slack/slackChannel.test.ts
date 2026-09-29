@@ -10,6 +10,7 @@ import {
   type CompiledChannel,
 } from "#channel/compiled-channel.js";
 import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SessionKey } from "#context/keys.js";
@@ -3857,6 +3858,102 @@ describe("slackChannel() HITL interaction pipeline", () => {
     await adapter.deliver!({ inputResponses: delivery.inputResponses, state: delivery.state }, ctx);
     expect(ctx.state.slackUsersByPrincipal).toEqual({ "employee:ada": "U_APPROVER" });
   });
+
+  it.each([
+    {
+      name: "onInteraction ctx.respond",
+      channel: (auth: SessionAuthContext) =>
+        slackChannel({
+          credentials: { botToken: "xoxb-test" },
+          async onInteraction(_action, ctx) {
+            await ctx.respond([{ optionId: "approve", requestId: "approval_abc123" }], { auth });
+          },
+        }),
+      request: () =>
+        buildSignedInteractionRequest({
+          type: "block_actions",
+          team: { id: "T01" },
+          user: { id: "U_APPROVER", username: "ada" },
+          channel: { id: "C01" },
+          message: { ts: "1700000000.000010", thread_ts: "1700000000.000001", blocks: [] },
+          actions: [{ action_id: "custom-approve", text: { type: "plain_text", text: "OK" } }],
+        }),
+    },
+    {
+      name: "onEvent ctx.respond",
+      channel: (auth: SessionAuthContext) =>
+        slackChannel({
+          credentials: { botToken: "xoxb-test" },
+          async onEvent(ctx) {
+            await ctx.respond([{ optionId: "approve", requestId: "approval_abc123" }], {
+              auth,
+              target: { channelId: "C01", threadTs: "1700000000.000001" },
+            });
+          },
+        }),
+      request: () =>
+        buildSignedRequest({
+          body: buildEventBody(
+            {
+              item: { channel: "C01", ts: "1700000000.000001", type: "message" },
+              reaction: "white_check_mark",
+              type: "reaction_added",
+              user: "U_APPROVER",
+            },
+            { eventId: "Ev_custom_approve", teamId: "T01" },
+          ),
+        }),
+    },
+  ])(
+    "sends a custom-auth responder's sign-in privately after $name",
+    async ({ channel: buildChannel, request }) => {
+      fetchMock.mockImplementation(
+        () =>
+          new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+            headers: { "content-type": "application/json" },
+          }),
+      );
+      const customAuth: SessionAuthContext = {
+        attributes: {},
+        authenticator: "employee-directory",
+        principalId: "employee:ada",
+        principalType: "user",
+      };
+      const channel = buildChannel(customAuth);
+      const { send } = await firePost(channel, request());
+      const delivery = send.mock.calls[0]?.[1] as Extract<
+        ObservedChannelDelivery<SlackChannelState>,
+        { readonly inputResponses: readonly unknown[] }
+      >;
+      const adapter = withState(getAdapter(channel), THREAD_STATE);
+      const ctx = buildAdapterContext(adapter, callerAccessor(delivery.auth));
+      await adapter.deliver!(
+        { inputResponses: delivery.inputResponses, state: delivery.state },
+        ctx,
+      );
+
+      await callEvent(
+        adapter,
+        makeEvent("authorization.required", {
+          attemptId: "attempt-1",
+          authorization: { url: "https://idp.example/sign-in" },
+          candidateId: "candidate-1",
+          description: "Sign in to approve.",
+          name: "approver-sign-in",
+          principalId: "employee:ada",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn-1",
+        }),
+        ctx,
+      );
+
+      const ephemeral = slackCalls(fetchMock, "chat.postEphemeral").map(([, init]) =>
+        parseSlackRequestBody(init),
+      );
+      expect(ephemeral).toEqual([expect.objectContaining({ channel: "C01", user: "U_APPROVER" })]);
+    },
+  );
 
   it("persists the responder principal mapping for later approval candidate feedback", async () => {
     fetchMock.mockImplementation(

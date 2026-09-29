@@ -77,6 +77,7 @@ import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
   bindSlackSessionOperations,
   sendAsSlackUser,
+  withSlackResponder,
   type SlackSendOptions,
   type SlackSessionOperations,
 } from "#public/channels/slack/session-operations.js";
@@ -1479,7 +1480,13 @@ async function dispatchSlackEvent(input: {
     resolveSession: ({ target }) =>
       input.resolveSession(slackContinuationToken(target.channelId, target.threadTs)),
     respond: (inputResponses, { auth, target }) =>
-      sourceFor(target).respond(inputResponses, { auth }),
+      sourceFor(target).respond(inputResponses, {
+        auth,
+        state: withSlackResponder(
+          undefined,
+          typeof input.envelope.event.user === "string" ? input.envelope.event.user : undefined,
+        ),
+      }),
     send: (message, { auth, target, title }) =>
       receiveOnSlack(
         { auth, message, target, title },
