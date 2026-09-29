@@ -2999,7 +2999,7 @@ async function finishTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, history);
+      emissionState = await emitTurnEpilogue(emit, emissionState, session.history);
       session = setHarnessEmissionState(session, emissionState);
     }
     const settledTurn = { output: stepOutput ?? "" } satisfies SettledTurn;

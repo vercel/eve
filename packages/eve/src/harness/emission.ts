@@ -667,7 +667,6 @@ async function consumeStreamContent(
     throw streamError;
   }
 
-  // Flush remaining reasoning.
   if (currentReasoning.trim().length > 0) {
     await emitFn(
       createReasoningCompletedEvent({

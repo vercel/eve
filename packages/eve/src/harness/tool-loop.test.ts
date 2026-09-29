@@ -910,6 +910,31 @@ describe("createToolLoopHarness", () => {
     expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
 
+  it("emits settled prose history with turn.completed", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const completedHistory: Array<readonly ModelMessage[]> = [];
+    const handleEvent: HarnessEmitFn = async (event, messages) => {
+      if (event.type === "turn.completed") completedHistory.push(messages ?? []);
+    };
+
+    await createToolLoopHarness(createTestConfig(handleEvent))(createTestSession(), {
+      message: "Hi",
+    });
+
+    expect(completedHistory).toEqual([
+      [
+        { content: "Hi", kind: "user", role: "user" },
+        { content: "Hello!", role: "assistant" },
+      ],
+    ]);
+  });
+
   it("parks when model finishes with stop", async () => {
     setupMockAgent({
       finishReason: "stop",
