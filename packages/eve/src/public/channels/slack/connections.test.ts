@@ -24,7 +24,7 @@ describe("formatConnectionDisplayName", () => {
 describe("buildAuthRequiredPublicText", () => {
   it("invites the triggering user to connect when one is known", () => {
     expect(buildAuthRequiredPublicText({ displayName: "Linear", hasUser: true })).toBe(
-      "Connect with Linear to continue",
+      "Connect with Linear to continue this agent session",
     );
   });
 
