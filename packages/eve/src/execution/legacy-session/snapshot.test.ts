@@ -9,7 +9,6 @@ describe("conversation import", () => {
       history: [{ role: "user", content: "Alice chose blue." }],
       agent: { system: "old prompt" },
       limits: { maxInputTokensPerSession: 40 },
-      sandboxState: { session: null },
       state: {
         "app.color": "blue",
         "eve.runtime.pendingCoordinationBatch": { callId: "old" },
@@ -27,7 +26,6 @@ describe("conversation import", () => {
     expect(result.snapshot.session).toMatchObject({
       sessionId: "old",
       limits: session.limits,
-      sandboxState: session.sandboxState,
       state: {
         "app.color": "blue",
         "eve.harness.turnUsage": session.state!["eve.harness.turnUsage"],

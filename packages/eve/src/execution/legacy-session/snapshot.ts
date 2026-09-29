@@ -39,7 +39,9 @@ export function importConversation(session: LegacySession): DurableSessionState 
   );
   const history = normalizeHistory(session.history);
   const emissionState = getHarnessEmissionState(state);
-  const imported = { ...session, history, state };
+  // Legacy drivers predate sandbox providers, so none can resume their sandbox record.
+  const { sandboxState: _legacySandbox, ...conversation } = session;
+  const imported = { ...conversation, history, state };
   return {
     version: 1,
     sessionId: session.sessionId,
