@@ -327,6 +327,7 @@ async function emitAttempt(input: {
 
 async function publishTurnStarted(input: {
   readonly channelAudience?: ChannelAudience;
+  readonly channelKind?: string;
   readonly currentPrincipal?: InstrumentationPrincipalSummary;
   readonly hooks: InstrumentationHooks;
   readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
@@ -344,7 +345,7 @@ async function publishTurnStarted(input: {
   await input.hooks.publish({
     agentName: "weather",
     channelAudience: input.channelAudience ?? "public",
-    channelKind: "http",
+    channelKind: input.channelKind ?? "http",
     idempotencyKey: sessionIdempotencyKey(input.sessionId),
     parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
@@ -398,6 +399,53 @@ function nanos(hrTime: readonly [number, number]): bigint {
 }
 
 describe("createAgentOtelInstrumentation", () => {
+  it.each([
+    { channelKind: "channel:eve", expectedKind: "channel:eve", expectedOrigin: "channel" },
+    { channelKind: "unknown", expectedKind: undefined, expectedOrigin: undefined },
+  ])("classifies a step before the invocation span exists ($channelKind)", async (input) => {
+    const runtime = createRuntime();
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-1:turn_0:0:0",
+      attemptIndex: 0,
+      functionId: "weather",
+      sessionId: "session-1",
+      stepIndex: 0,
+      turnId: "turn_0",
+    };
+    await publishTurnStarted({
+      channelKind: input.channelKind,
+      hooks: runtime.hooks,
+      sessionId: scope.sessionId,
+      turnId: scope.turnId,
+      turnSequence: 0,
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+      scope,
+      type: "step.attempt.started",
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      scope,
+      type: "step.attempt.completed",
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    expect(byName(spans, "invoke_agent weather")).toHaveLength(0);
+    const attributes = byName(spans, "agent.step")[0]?.attributes;
+    if (input.expectedKind === undefined) {
+      expect(attributes).not.toHaveProperty("agent.channel.kind");
+      expect(attributes).not.toHaveProperty("agent.session.origin");
+    } else {
+      expect(attributes).toMatchObject({
+        "agent.channel.kind": input.expectedKind,
+        "agent.session.origin": input.expectedOrigin,
+      });
+    }
+  });
+
   it.each(["public", "private"] as const)(
     "exports explicit names for %s spans across bounded activation traces",
     async (channelAudience) => {
@@ -736,6 +784,25 @@ describe("createAgentOtelInstrumentation", () => {
       turnId: "child-turn",
       turnSequence: 0,
     });
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "child-session:child-turn:0:0",
+      attemptIndex: 0,
+      functionId: "weather",
+      sessionId: "child-session",
+      stepIndex: 0,
+      turnId: "child-turn",
+    };
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+      scope,
+      type: "step.attempt.started",
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      scope,
+      type: "step.attempt.completed",
+    });
     await completeTurn(runtime.hooks, "child-session", "child-turn");
     await runtime.provider.forceFlush();
 
@@ -767,6 +834,9 @@ describe("createAgentOtelInstrumentation", () => {
     expect(invocation.attributes).not.toHaveProperty("agent.schedule.id");
     expect(invocation.attributes).not.toHaveProperty("agent.session.origin");
     expect(invocation.attributes).not.toHaveProperty("agent.session.title");
+    const step = byName(spans, "agent.step")[0]!;
+    expect(step.attributes).not.toHaveProperty("agent.channel.kind");
+    expect(step.attributes).not.toHaveProperty("agent.session.origin");
     expect(invocation.attributes).not.toHaveProperty("agent.principal.initiator.id");
     expect(invocation.attributes).not.toHaveProperty("agent.root_run.id");
     expect(invocation.attributes).not.toHaveProperty("agent.session.id");

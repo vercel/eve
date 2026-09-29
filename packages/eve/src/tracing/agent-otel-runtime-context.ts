@@ -20,21 +20,8 @@ export function agentActivationAttributes(input: {
   const recordsOutputs = recordsTrace && input.session?.decision?.recordOutputs === true;
   const parentLineage = input.turn.parentLineage ?? input.session?.parentLineage;
   const isSubagent = parentLineage !== undefined;
-  const channelKind =
-    input.turn.channelDelivery?.channelKind ??
-    (isSubagent
-      ? undefined
-      : (input.session?.channelKind ??
-        (input.session?.channelType === undefined
-          ? undefined
-          : normalizeInstrumentationChannelKind(input.session.channelType))));
+  const channelClassification = agentChannelClassificationAttributes(input.session, input.turn);
   const scheduleId = isSubagent ? undefined : input.session?.scheduleId;
-  const origin =
-    isSubagent || channelKind === undefined
-      ? undefined
-      : scheduleId !== undefined
-        ? "schedule"
-        : "channel";
   return {
     "agent.framework.name": "eve",
     "agent.framework.version": input.frameworkVersion,
@@ -43,14 +30,13 @@ export function agentActivationAttributes(input: {
     ...agentPrincipalAttributes(input.turn),
     "agent.channel.delivery.id": input.turn.channelDelivery?.deliveryId,
     "agent.channel.delivery.input": input.turn.channelDelivery?.inputAttribute,
-    "agent.channel.kind": channelKind,
+    ...channelClassification,
     "agent.channel.name": input.turn.channelDelivery?.channelName,
     "agent.channel.request.id": input.turn.channelDelivery?.requestId,
     "agent.parent_call.id": parentLineage?.callId,
     "agent.parent_run.id": parentLineage?.sessionId,
     "agent.run.type": isSubagent ? "subagent" : "session",
     "agent.schedule.id": scheduleId,
-    "agent.session.origin": origin,
     "agent.session.title": !isSubagent && recordsInputs ? input.session?.title : undefined,
     "agent.subagent.name": input.turn.subagentName,
     "agent.trace.content.input": recordsInputs,
@@ -64,6 +50,34 @@ export function agentActivationAttributes(input: {
       rootSessionId: input.turn.rootSessionId,
       sessionId: input.sessionId,
     }),
+  };
+}
+
+export function agentChannelClassificationAttributes(
+  session: AgentSessionTraceState | undefined,
+  turn: AgentTurnTraceState,
+): {
+  readonly "agent.channel.kind": string | undefined;
+  readonly "agent.session.origin": string | undefined;
+} {
+  const isSubagent = (turn.parentLineage ?? session?.parentLineage) !== undefined;
+  const channelKind =
+    turn.channelDelivery?.channelKind ??
+    (isSubagent
+      ? undefined
+      : (session?.channelKind ??
+        (session?.channelType === undefined
+          ? undefined
+          : normalizeInstrumentationChannelKind(session.channelType))));
+  const origin =
+    isSubagent || channelKind === undefined
+      ? undefined
+      : session?.scheduleId !== undefined
+        ? "schedule"
+        : "channel";
+  return {
+    "agent.channel.kind": channelKind,
+    "agent.session.origin": origin,
   };
 }
 

@@ -221,6 +221,11 @@ export function createAgentOtelInstrumentation(
   const onStepStarted = async (event: InstrumentationStepAttemptStartedEvent): Promise<void> => {
     const turn = await input.stateStore.getTurn(event.scope.sessionId, event.scope.turnId);
     if (turn === undefined || !isSampledTrace(turn.context)) return;
+    const session = await input.stateStore.getSession(event.scope.sessionId);
+    const channelClassification = runtimeAttributes.agentChannelClassificationAttributes(
+      session,
+      turn,
+    );
     const turnContext = withChannelAudience(
       contextFromSpanContext(turn.context),
       event.scope.channelAudience,
@@ -239,6 +244,10 @@ export function createAgentOtelInstrumentation(
               "agent.step.index": event.scope.stepIndex,
               "agent.turn.id": event.scope.turnId,
               "agent.name": event.scope.functionId,
+              // Leave an unresolved kind open for a later delivery to classify.
+              ...(channelClassification["agent.channel.kind"] === "unknown"
+                ? undefined
+                : channelClassification),
               ...agentSpanNamingAttributes("agent.step"),
               ...agentTraceIdentityAttributes({
                 rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
