@@ -373,6 +373,8 @@ describe("registryHandoffAddress", () => {
       }),
       suspendPromptForInput: () => promptSuspended.resolve(),
       subagents: {
+        begin: vi.fn(),
+        end: vi.fn(),
         upsertStep: vi.fn(),
         upsertTool: vi.fn(),
         removeTool: vi.fn(),
@@ -3625,6 +3627,8 @@ describe("EveTUIRunner renderer teardown", () => {
           for await (const event of result.events as AsyncIterable<unknown>) void event;
         }),
         subagents: {
+          begin: vi.fn(),
+          end: vi.fn(),
           upsertStep: (update) => {
             upsertStep(update);
             if (update.finalized) completed.resolve();
@@ -4815,6 +4819,8 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
       { type: "session.waiting" },
     ]);
     const view = {
+      begin: vi.fn(),
+      end: vi.fn(),
       upsertStep: vi.fn(),
       upsertTool: vi.fn(),
       removeTool: vi.fn(),
@@ -4977,6 +4983,7 @@ describe("EveTUIRunner task activity", () => {
               toolName: "deploy",
             },
             { callId: "retry-call", input: {}, kind: "tool-call", toolName: "report" },
+            { callId: "lookup-call", input: {}, kind: "tool-call", toolName: "lookup" },
             { callId: "wait-call", input: {}, kind: "tool-call", toolName: "task_wait" },
             {
               callId: "cancel-call",
@@ -5000,6 +5007,8 @@ describe("EveTUIRunner task activity", () => {
       },
       toolResult("deploy-call", "deploy", "receipt written for the model"),
       toolResult("retry-call", "report", { code: "TOO_MANY_TASKS", message: "wait" }, "failed"),
+      // An authored tool's own result can carry the same code; only a refusal fails.
+      toolResult("lookup-call", "lookup", { code: "UNKNOWN_TASK", ticket: "T-1" }),
       toolResult("cancel-call", "task_cancel", "t0 had no work to stop."),
       {
         type: "task.settled",
@@ -5037,8 +5046,14 @@ describe("EveTUIRunner task activity", () => {
         label: "Deploy to preview",
       },
       { type: "tool-call", toolCallId: "retry-call", toolName: "report", input: {} },
+      { type: "tool-call", toolCallId: "lookup-call", toolName: "lookup", input: {} },
       { type: "task-started", toolCallId: "deploy-call", kind: "tool", toolName: "deploy" },
       { type: "tool-withdrawn", toolCallId: "retry-call", reason: expect.any(String) },
+      {
+        type: "tool-result",
+        toolCallId: "lookup-call",
+        output: { code: "UNKNOWN_TASK", ticket: "T-1" },
+      },
       {
         type: "task-settled",
         toolCallId: "deploy-call",

@@ -27,7 +27,7 @@ import type { OnboardingScreenEvent } from "./setup-commands.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
-import { isTaskControlTool, isTaskRetryError } from "#protocol/task-tools.js";
+import { isTaskControlTool, isTaskRetryRefusal } from "#protocol/task-tools.js";
 import {
   createDevelopmentRuntimeArtifactRefresher,
   type DevelopmentRuntimeArtifactRefresher,
@@ -233,7 +233,6 @@ export type AgentTUISessionOptions = {
   continueSession?: boolean;
   tools?: TerminalPartDisplayMode;
   reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
   connectionAuth?: TerminalPartDisplayMode;
   assistantResponseStats?: AssistantResponseStatsMode;
   contextSize?: number;
@@ -550,7 +549,6 @@ export class EveTUIRunner {
   readonly #name: string;
   readonly #tools: TerminalPartDisplayMode;
   readonly #reasoning: TerminalPartDisplayMode;
-  readonly #subagents: TerminalPartDisplayMode;
   readonly #connectionAuth: TerminalPartDisplayMode;
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #contextSize?: number;
@@ -664,7 +662,6 @@ export class EveTUIRunner {
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
-    this.#subagents = options.subagents ?? "full";
     this.#connectionAuth = options.connectionAuth ?? "full";
     this.#assistantResponseStats = options.assistantResponseStats ?? defaultAssistantResponseStats;
     this.#contextSize = options.contextSize;
@@ -1098,7 +1095,6 @@ export class EveTUIRunner {
             continueSession: Boolean(this.#renderer.readPrompt),
             tools: this.#tools,
             reasoning: this.#reasoning,
-            subagents: this.#subagents,
             connectionAuth: this.#connectionAuth,
             assistantResponseStats: this.#assistantResponseStats,
             contextSize: this.#contextSize,
@@ -2484,7 +2480,7 @@ async function* eveEventsToTUIStream(
         // Results for calls this turn never announced (task control calls,
         // or a call first announced to another stream) have no tool block.
         if (!knownToolCalls.has(callId) || taskCallIds.has(callId)) break;
-        if (isTaskRetryError(resultEvent.data.result.output)) {
+        if (isTaskRetryRefusal(resultEvent)) {
           yield {
             type: "tool-withdrawn",
             toolCallId: callId,

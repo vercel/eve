@@ -15,7 +15,7 @@ import {
   type MessageStreamEvent,
   type TaskStartedStreamEvent,
 } from "#protocol/message.js";
-import { isTaskControlTool, isTaskRetryError } from "#protocol/task-tools.js";
+import { isTaskControlTool, isTaskRetryRefusal } from "#protocol/task-tools.js";
 
 /**
  * Pumps end on the child boundary or abort, never on a retry budget: a child
@@ -36,10 +36,20 @@ const childStreamReconnectPolicy = {
  * end reach the renderer on the parent stream, not through this view.
  */
 export interface SubagentView {
+  /**
+   * The pump follows the agent a call reaches. The agent's last events can
+   * trail the parent's `task.settled`, so the task's end waits for {@link end}.
+   */
+  begin(update: { callId: string }): void;
+  /** The followed agent's own stream ended, or the pump stopped following it. */
+  end(update: { callId: string }): void;
   upsertStep(update: SubagentStepUpdate): void;
   upsertTool(update: SubagentToolUpdate): void;
-  /** Drops a child tool call that never materialized or only the model sees. */
-  removeTool(update: { callId: string; childCallId: string }): void;
+  /**
+   * Drops a child tool call that never materialized, or one the session
+   * refused for the model to retry (`reason` says why).
+   */
+  removeTool(update: { callId: string; childCallId: string; reason?: string }): void;
   /** Suppresses the parent-level tool row for a child-owned call id. */
   markChildToolCallId(callId: string): void;
 }
@@ -221,6 +231,7 @@ export class SubagentPump {
     }
     this.#view?.markChildToolCallId(callId);
     if (existing !== undefined) return;
+    this.#view?.begin({ callId });
     this.#activateOrQueue(callId);
   }
 
@@ -304,8 +315,9 @@ export class SubagentPump {
           return;
         }
       } catch {
-        // Only a non-retryable failure ends the follower early; the call's
-        // `task.settled` on the parent stream still ends the task.
+        // Only a non-retryable failure ends the follower early; nothing more
+        // will come, so the task's end need not wait for it.
+        if (!controller.signal.aborted) this.#view?.end({ callId });
       } finally {
         controller.abort();
         if (this.#pumps.get(callId) === controller) this.#pumps.delete(callId);
@@ -406,6 +418,7 @@ export class SubagentPump {
     }
     run.currentSectionKey = null;
     this.#sweepPreparingTools(callId, run);
+    this.#view?.end({ callId });
     this.#releaseChildSession(callId, run.childSessionId);
   }
 
@@ -563,9 +576,13 @@ export class SubagentPump {
         if (run.taskCallIds.has(result.callId)) break;
         const tool = run.tools.get(result.callId);
         if (!tool) break;
-        if (isTaskRetryError(result.output)) {
+        if (isTaskRetryRefusal(event)) {
           run.tools.delete(result.callId);
-          view?.removeTool({ callId, childCallId: result.callId });
+          view?.removeTool({
+            callId,
+            childCallId: result.callId,
+            reason: this.#formatActionResultError(event),
+          });
           break;
         }
         const label = labelOf(event.data.presentation, result.callId).label;

@@ -1182,6 +1182,108 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(screen.snapshot()).toMatch(/✓ researcher {2}finished in \d+s · Fetched 1 URL/u);
     });
 
+    it("waits for an agent's own last events before writing its end line", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      const stream = taskStream();
+      const rendering = renderer.renderStream(stream.result, { continueSession: true });
+      stream.push(...delegate);
+      await screen.waitForText("Waiting for researcher");
+      renderer.subagents.begin({ callId: "call-r" });
+
+      stream.push({ type: "task-settled", toolCallId: "call-r", status: "completed" });
+      await screen.waitForText("Finishing");
+      expect(screen.snapshot()).not.toContain("✓ researcher");
+
+      // The agent's last call reaches the TUI after its parent settled the task.
+      renderer.upsertSubagentTool(childTool("done", { url: "https://ir.example" }));
+      renderer.subagents.end({ callId: "call-r" });
+      expect(screen.snapshot()).toMatch(/✓ researcher {2}finished in \d+s · Fetched 1 URL/u);
+
+      stream.close();
+      await rendering;
+      renderer.shutdown();
+    });
+
+    it("writes a waiting end line once the turn's stream ends", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      renderer.subagents.begin({ callId: "call-r" });
+      await renderer.renderStream(
+        streamOf([
+          ...delegate,
+          { type: "task-settled", toolCallId: "call-r", status: "completed" },
+          { type: "finish" },
+        ]),
+        { continueSession: true },
+      );
+      renderer.shutdown();
+
+      expect(screen.snapshot()).toMatch(/✓ researcher {2}finished in \d+s/u);
+      expect(screen.snapshot()).not.toContain("Finishing");
+    });
+
+    it("closes working tasks before a session restart", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      await renderer.renderStream(streamOf([...delegate, { type: "finish" }]), {
+        continueSession: true,
+      });
+      renderer.renderSessionBoundary();
+      renderer.shutdown();
+
+      const snapshot = screen.snapshot();
+      const stopped = snapshot.indexOf("▪ researcher  stopped");
+      expect(stopped).toBeGreaterThan(-1);
+      expect(stopped).toBeLessThan(snapshot.indexOf("Session restarted"));
+    });
+
+    it("names an agent task's request even when tool rows are hidden", async () => {
+      const screen = new MockScreen({ columns: 80, rows: 30 });
+      const renderer = new TerminalRenderer({
+        input: new MockUserInput(),
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+        tools: "hidden",
+      });
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      await renderer.renderStream(streamOf([...delegate, { type: "finish" }]), {
+        continueSession: true,
+      });
+      renderer.shutdown();
+
+      expect(screen.snapshot()).toContain("※ researcher  Find the Q3 revenue numbers");
+    });
+
+    it("logs why an agent's own call was refused for its model to retry", async () => {
+      const screen = new MockScreen({ columns: 80, rows: 30 });
+      const stub = stubDiagnostics();
+      const renderer = new TerminalRenderer({
+        input: new MockUserInput(),
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+        diagnostics: stub.diagnostics,
+      });
+      await renderer.renderStream(streamOf([...delegate, { type: "finish" }]), {
+        continueSession: true,
+      });
+      renderer.upsertSubagentTool(childTool("executing", { url: "https://ir.example" }));
+      renderer.removeSubagentTool({
+        callId: "call-r",
+        childCallId: "fetch-1",
+        reason: "8 tasks are already working",
+      });
+      renderer.shutdown();
+
+      expect(stub.append).toHaveBeenCalledWith({
+        source: "tool",
+        summary: "web_fetch was refused for the model to retry",
+        detail: "8 tasks are already working",
+      });
+    });
+
     it("ends a stopped or failed task with what happened, not Done", async () => {
       const { screen, renderer } = makeRenderer();
       renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });

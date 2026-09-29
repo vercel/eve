@@ -26,6 +26,8 @@ export interface TaskEntry {
   readonly startedAtMs: number;
   /** An agent's latest words or thinking, one line. */
   step?: string;
+  /** Settled, waiting only for the agent's own last events. */
+  finishing?: boolean;
   /** An agent's own tool calls, newest last, for its activity and summary. */
   readonly childTools: Map<string, Block>;
 }
@@ -99,6 +101,7 @@ export function waitingLabel(entries: readonly TaskEntry[]): string {
 
 /** What a working task is doing right now, in one short line. */
 function currentActivity(entry: TaskEntry): { text: string; attention: boolean } {
+  if (entry.finishing === true) return { text: "Finishing", attention: false };
   const tools = [...entry.childTools.values()];
   const awaiting = tools.findLast((tool) => tool.status === "approval");
   if (awaiting !== undefined) {

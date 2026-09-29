@@ -18,6 +18,8 @@ afterEach(() => {
 
 function fakeView(): SubagentView {
   return {
+    begin: vi.fn(),
+    end: vi.fn(),
     upsertStep: vi.fn(),
     upsertTool: vi.fn(),
     removeTool: vi.fn(),
@@ -344,8 +346,15 @@ describe("SubagentPump task bookkeeping", () => {
       { status: "executing", agentTask: true, output: undefined },
       { status: "done", agentTask: true, output: "Revenue grew 12%" },
     ]);
-    // A call refused for the model to retry leaves the activity.
-    expect(view.removeTool).toHaveBeenCalledWith({ callId: "call-1", childCallId: "deploy-call" });
+    // A call refused for the model to retry leaves the activity, with why.
+    expect(view.removeTool).toHaveBeenCalledWith({
+      callId: "call-1",
+      childCallId: "deploy-call",
+      reason: "failed",
+    });
+    // The task's end waits for the child's own boundary, which it reached.
+    expect(view.begin).toHaveBeenCalledWith({ callId: "call-1" });
+    await vi.waitFor(() => expect(view.end).toHaveBeenCalledWith({ callId: "call-1" }));
   });
 });
 
@@ -556,13 +565,15 @@ describe("SubagentPump child stream transport", () => {
 
   it("stops following when the child stream is refused", async () => {
     const requests = serveChildStreams(() => new Response("forbidden", { status: 403 }));
-    const { pump } = createPump();
+    const { pump, view } = createPump();
 
     startAgentTask(pump, "call-1");
     await vi.waitFor(() => expect(requests).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(requests).toHaveLength(1);
+    // Nothing more will come, so the task's end must not wait for it.
+    expect(view.end).toHaveBeenCalledWith({ callId: "call-1" });
   });
 
   it("uses the parent-authored child path and never the remote URL", async () => {

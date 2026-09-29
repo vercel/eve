@@ -83,6 +83,7 @@ import {
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
+  SubagentDisplayMode,
   TerminalPartDisplayMode,
 } from "./types.js";
 import type { AgentInfoResult } from "#client/index.js";
@@ -287,7 +288,7 @@ type TerminalRendererOptions = {
   output?: TerminalOutput;
   tools?: TerminalPartDisplayMode;
   reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
+  subagents?: SubagentDisplayMode;
   connectionAuth?: TerminalPartDisplayMode;
   assistantResponseStats?: AssistantResponseStatsMode;
   contextSize?: number;
@@ -433,7 +434,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #renderMarkdown: boolean;
   readonly #tools: TerminalPartDisplayMode;
   readonly #reasoning: TerminalPartDisplayMode;
-  readonly #subagents: TerminalPartDisplayMode;
+  readonly #subagents: SubagentDisplayMode;
   readonly #connectionAuth: TerminalPartDisplayMode;
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #captureForeignOutput: boolean;
@@ -468,6 +469,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #writtenAgentRows = new Set<string>();
   /** Calls whose start line is written; a replayed start must not write another. */
   readonly #startedTaskCallIds = new Set<string>();
+  /** Agent calls whose own stream the pump follows, and those whose stream ended. */
+  readonly #followedAgentCallIds = new Set<string>();
+  readonly #endedAgentCallIds = new Set<string>();
+  /** Settled agent tasks whose end line waits for the agent's own end. */
+  readonly #pendingTaskEnds = new Map<
+    string,
+    { event: TaskSettledEvent; endedAtMs: number; timer: ReturnType<typeof setTimeout> }
+  >();
   /** Session-local file contents, so write blocks can render real diffs. */
   readonly #fileContents = new FileContentCache();
   #agentHeader?: AgentHeaderOptions;
@@ -706,7 +715,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#renderMarkdown = options?.renderMarkdown ?? detectMarkdownRendering();
     this.#tools = options?.tools ?? "auto-collapsed";
     this.#reasoning = options?.reasoning ?? "auto-collapsed";
-    this.#subagents = options?.subagents ?? "auto-collapsed";
+    this.#subagents = options?.subagents ?? "collapsed";
     this.#connectionAuth = options?.connectionAuth ?? "full";
     this.#assistantResponseStats = options?.assistantResponseStats ?? defaultAssistantResponseStats;
     this.#contextSize = options?.contextSize;
@@ -1253,6 +1262,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // An interrupted or cancelled turn gets no terminal updates for its
       // in-flight calls; a block left `running` would keep the settled
       // prefix wedged and freeze scrollback for the rest of the session.
+      this.#flushTaskEnds();
       if (this.#interrupted || turnState.cancelled) {
         this.#settleCurrentTurnToolBlocks(turnState);
         this.#stopWorkingTasks();
@@ -1309,6 +1319,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
     } finally {
       this.#sweepPreparingToolBlocks(turnState);
+      this.#flushTaskEnds();
       if (turnState.cancelled) {
         this.#settleCurrentTurnToolBlocks(turnState);
         this.#stopWorkingTasks();
@@ -1804,8 +1815,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  removeSubagentTool(update: { callId: string; childCallId: string }): void {
-    this.#tasks.get(update.callId)?.childTools.delete(update.childCallId);
+  removeSubagentTool(update: { callId: string; childCallId: string; reason?: string }): void {
+    const childTools = this.#tasks.get(update.callId)?.childTools;
+    if (update.reason !== undefined) {
+      // The same record a refused top-level call leaves; see `tool-withdrawn`.
+      const toolName = childTools?.get(update.childCallId)?.toolName ?? update.childCallId;
+      this.#diagnostics?.append({
+        source: "tool",
+        summary: `${toolName} was refused for the model to retry`,
+        detail: update.reason,
+      });
+    }
+    childTools?.delete(update.childCallId);
     this.#paint();
   }
 
@@ -1814,6 +1835,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * public methods below are its implementation and the unit tests' seam.
    */
   readonly subagents: SubagentView = {
+    begin: ({ callId }) => {
+      this.#followedAgentCallIds.add(callId);
+    },
+    end: ({ callId }) => {
+      this.#endedAgentCallIds.add(callId);
+      this.#flushTaskEnd(callId);
+    },
     upsertStep: (update) => this.upsertSubagentStep(update),
     upsertTool: (update) => this.upsertSubagentTool(update),
     removeTool: (update) => this.removeSubagentTool(update),
@@ -1920,6 +1948,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The dying turn's stats coda closes before the boundary — it belongs
     // to the session that ended, not the fresh one.
     this.#commitTurnStats();
+    // Tasks die with the session; close their lines before the boundary.
+    this.#stopWorkingTasks();
     this.#clearConversationState();
 
     const c = this.#theme.colors;
@@ -1943,9 +1973,13 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#modelTurnId = undefined;
     this.#childToolCallIds.clear();
     this.#parentToolBlockIds.clear();
+    for (const pending of this.#pendingTaskEnds.values()) clearTimeout(pending.timer);
+    this.#pendingTaskEnds.clear();
     this.#tasks.clear();
     this.#writtenAgentRows.clear();
     this.#startedTaskCallIds.clear();
+    this.#followedAgentCallIds.clear();
+    this.#endedAgentCallIds.clear();
     this.#messageQueue.reset();
     this.#nextSubmittedPromptOrigin = undefined;
     this.#fileContents.clear();
@@ -3853,7 +3887,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
       case "tool-call":
         this.#diagnostics?.recordToolCall(event.toolName);
-        if (displayModes.tools === "hidden") break;
+        if (displayModes.tools === "hidden") {
+          // No row, but a call that becomes a task still names its request.
+          turnState.tools.set(event.toolCallId, {
+            input: event.input,
+            label: event.label,
+            status: "running",
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+          });
+          break;
+        }
         this.#upsertNativeTool(
           {
             input: event.input,
@@ -4089,12 +4133,51 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
+  /**
+   * A task settled. An agent's own last events can trail its parent's
+   * `task.settled` on a separate stream, so while the pump follows that
+   * agent, its end line waits for the agent's own end — or, if that never
+   * comes, for a short grace period or the end of the turn's stream — and
+   * counts all of its work.
+   */
+  #endTask(event: TaskSettledEvent): void {
+    const { toolCallId } = event;
+    const entry = this.#tasks.get(toolCallId);
+    if (entry === undefined || this.#pendingTaskEnds.has(toolCallId)) return;
+    const endedAtMs = Date.now();
+    const awaitsAgent =
+      entry.kind === "agent" &&
+      this.#followedAgentCallIds.has(toolCallId) &&
+      !this.#endedAgentCallIds.has(toolCallId);
+    if (!awaitsAgent) {
+      this.#writeTaskEnd(event, endedAtMs);
+      return;
+    }
+    entry.finishing = true;
+    const timer = setTimeout(() => this.#flushTaskEnd(toolCallId), TASK_END_GRACE_MS);
+    timer.unref?.();
+    this.#pendingTaskEnds.set(toolCallId, { event, endedAtMs, timer });
+    this.#paint();
+  }
+
+  #flushTaskEnd(callId: string): void {
+    const pending = this.#pendingTaskEnds.get(callId);
+    if (pending === undefined) return;
+    clearTimeout(pending.timer);
+    this.#pendingTaskEnds.delete(callId);
+    this.#writeTaskEnd(pending.event, pending.endedAtMs);
+  }
+
+  #flushTaskEnds(): void {
+    for (const callId of this.#pendingTaskEnds.keys()) this.#flushTaskEnd(callId);
+  }
+
   /** A task ended: it leaves the panel and writes its end line once. */
-  #endTask(event: Extract<AgentTUIStreamEvent, { type: "task-settled" }>): void {
+  #writeTaskEnd(event: TaskSettledEvent, endedAtMs: number): void {
     const entry = this.#tasks.finish(event.toolCallId);
     if (entry === undefined) return;
     const dot = ` ${this.#theme.glyph.dot} `;
-    const elapsed = `finished in ${formatTurnDuration(Date.now() - entry.startedAtMs)}`;
+    const elapsed = `finished in ${formatTurnDuration(endedAtMs - entry.startedAtMs)}`;
     const line: Block = {
       id: taskLineId(event.toolCallId, "end"),
       kind: "task",
@@ -4138,10 +4221,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  /** A cancelled or dropped turn gets no end for its tasks; they read as stopped. */
+  /**
+   * A cancelled, dropped, or failed session gets no end for its unsettled
+   * tasks; they read as stopped. Settled ones keep their real outcome.
+   */
   #stopWorkingTasks(): void {
+    this.#flushTaskEnds();
+    const endedAtMs = Date.now();
     for (const entry of this.#tasks.working()) {
-      this.#endTask({ type: "task-settled", toolCallId: entry.callId, status: "cancelled" });
+      this.#writeTaskEnd(
+        { type: "task-settled", toolCallId: entry.callId, status: "cancelled" },
+        endedAtMs,
+      );
     }
   }
 
@@ -5594,6 +5685,11 @@ function toolSectionId(toolCallId: string): string {
 function questionSectionId(requestId: string): string {
   return `question:${requestId}`;
 }
+
+type TaskSettledEvent = Extract<AgentTUIStreamEvent, { type: "task-settled" }>;
+
+/** How long a settled agent task waits for its own stream's end before writing its end line. */
+const TASK_END_GRACE_MS = 2_000;
 
 function taskLineId(callId: string, edge: "start" | "end"): string {
   return `task:${callId}:${edge}`;

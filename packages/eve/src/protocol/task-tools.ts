@@ -1,3 +1,5 @@
+import type { ActionResultStreamEvent } from "#protocol/message.js";
+
 export const TASK_WAIT_TOOL_NAME = "task_wait";
 export const TASK_CANCEL_TOOL_NAME = "task_cancel";
 
@@ -21,10 +23,14 @@ export const UNKNOWN_TASK_CODE = "UNKNOWN_TASK";
 const TASK_RETRY_ERROR_CODES: readonly string[] = [TOO_MANY_TASKS_CODE, UNKNOWN_TASK_CODE];
 
 /**
- * Whether a tool result is a refusal only the model acts on. Its message
- * tells the model how to recover, so activity surfaces keep it out of view.
+ * Whether a tool result is the session refusing a task call for the model
+ * to retry. Its message tells the model how to recover, so activity surfaces
+ * keep it out of view. Only a failed result counts: an authored tool can
+ * return the same `code` as ordinary output.
  */
-export function isTaskRetryError(output: unknown): boolean {
+export function isTaskRetryRefusal(event: ActionResultStreamEvent): boolean {
+  if (event.data.status !== "failed" || event.data.result.kind !== "tool-result") return false;
+  const output = event.data.result.output;
   if (typeof output !== "object" || output === null) return false;
   const code: unknown = Reflect.get(output, "code");
   return typeof code === "string" && TASK_RETRY_ERROR_CODES.includes(code);

@@ -128,7 +128,7 @@ Use `eve dev` flags to control tool calls, reasoning, subagents, connection auth
 eve dev --tools full --reasoning collapsed --logs all
 ```
 
-`--subagents full` also writes each subagent message and tool call to the transcript as it finishes, and `--subagents hidden` leaves subagent tasks out of the transcript and the task panel.
+`--subagents` accepts `collapsed` (the default), `full`, or `hidden`. `full` also writes each subagent message and tool call to the transcript as it finishes, and `hidden` leaves subagent tasks out of the transcript and the task panel.
 
 Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling; `1` (the default) enables Markdown rendering. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 
