@@ -2,10 +2,8 @@ import { SpanKind, SpanStatusCode, trace as apiTrace } from "@opentelemetry/api"
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
-  SamplingDecision,
   SimpleSpanProcessor,
   type ReadableSpan,
-  type Sampler,
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it, vi } from "vitest";
@@ -29,7 +27,6 @@ import {
   type AgentOtelInstrumentationInput,
 } from "#tracing/agent-otel-provider.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-trace-state-store.js";
@@ -99,13 +96,11 @@ function createRuntime(
   }),
   extraSpanProcessors: readonly SpanProcessor[] = [],
   samplesTrace?: AgentOtelInstrumentationInput["samplesTrace"],
-  sampler?: Sampler,
 ): TestRuntime {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
   const provider = new BasicTracerProvider({
     idGenerator,
-    sampler,
     spanProcessors: [new SimpleSpanProcessor(exporter), ...extraSpanProcessors],
   });
   const tracer = provider.getTracer("eve.agent");
@@ -1449,23 +1444,12 @@ describe("createAgentOtelInstrumentation", () => {
     });
   });
 
-  it("projects production workflow actions and classifies only GenAI composition", async () => {
-    const samplerCalls: {
-      readonly attributes: Readonly<Record<string, unknown>>;
-      readonly name: string;
-    }[] = [];
-    const sampler: Sampler = {
-      shouldSample(_context, _traceId, name, _kind, attributes) {
-        samplerCalls.push({ attributes, name });
-        return { decision: SamplingDecision.RECORD_AND_SAMPLED };
-      },
-      toString: () => "recording-sampler",
-    };
+  it("projects production workflow tool calls as agent.action spans", async () => {
     const context = new ContextContainer();
     let runtime: TestRuntime | undefined;
 
     await contextStorage.run(context, async () => {
-      runtime = createRuntime(new ContextAgentTraceStateStore(), undefined, [], undefined, sampler);
+      runtime = createRuntime(new ContextAgentTraceStateStore());
       const scope: InstrumentationAttemptScope = {
         attemptId: "session-workflow:turn-1:0:0",
         attemptIndex: 0,
@@ -1545,217 +1529,41 @@ describe("createAgentOtelInstrumentation", () => {
         }),
       );
 
-      const nested = prepareAgentInvocationTrace({
-        invocation: {
-          callId: "workflow:child",
-          kind: "subagent-call",
-          name: "research",
-        },
-        ownerId: "workflow-run",
-        serializedContext: serializeContext(context),
-        sessionId: scope.sessionId,
-        sessionState: {
-          "eve.workflowTool": {
-            version: 4,
-            runs: [
-              {
-                callId: "workflow",
-                toolName: "coordinate",
-                origin: { turnId: "turn-1", stepIndex: 0 },
-                address: { runId: "workflow-run", hookToken: "workflow-hook" },
-              },
-            ],
-          },
-        },
-        startTimeMs: 2,
-        turnId: scope.turnId,
+      for (const [callId, toolName] of [
+        ["workflow", "coordinate"],
+        ["wait", "wait"],
+      ] as const) {
+        await handleEvent(
+          createActionResultEvent({
+            result: {
+              callId,
+              kind: "tool-result",
+              output: { done: true },
+              toolName,
+            },
+            sequence: 0,
+            stepIndex: 0,
+            turnId: scope.turnId,
+          }),
+        );
+      }
+      await runtime.hooks.publish({
+        idempotencyKey: attemptIdempotencyKey(scope),
+        scope,
+        type: "step.attempt.completed",
       });
-      const settled = nested.fail({
-        callId: "workflow:child",
-        isError: true,
-        kind: "subagent-result",
-        origin: "dispatch",
-        output: "unavailable",
-        subagentName: "research",
-      });
-      const restored = await deserializeContext(settled);
-      await contextStorage.run(restored, async () => {
-        const terminal = createInstrumentationHandleEvent({
-          handleEvent: async () => {},
-          hooks: runtime!.hooks,
-          sessionId: scope.sessionId,
-        })!;
-        for (const [callId, toolName] of [
-          ["workflow", "coordinate"],
-          ["wait", "wait"],
-        ] as const) {
-          await terminal(
-            createActionResultEvent({
-              result: {
-                callId,
-                kind: "tool-result",
-                output: { done: true },
-                toolName,
-              },
-              sequence: 0,
-              stepIndex: 0,
-              turnId: scope.turnId,
-            }),
-          );
-        }
-        await runtime!.hooks.publish({
-          idempotencyKey: attemptIdempotencyKey(scope),
-          scope,
-          type: "step.attempt.completed",
-        });
-        await completeTurn(runtime!.hooks, scope.sessionId, scope.turnId);
-      });
+      await completeTurn(runtime.hooks, scope.sessionId, scope.turnId);
     });
 
     await runtime!.provider.forceFlush();
-    const spans = runtime!.exporter.getFinishedSpans();
-    const workflow = byName(spans, "invoke_workflow coordinate")[0]!;
-    const wait = spans.find((span) => span.attributes["agent.action.call_id"] === "wait")!;
-    const sampledWorkflow = samplerCalls.find(
-      ({ attributes }) => attributes["agent.action.call_id"] === "workflow",
-    )!;
-
-    expect(workflow.attributes).toMatchObject({
-      "gen_ai.operation.name": "invoke_workflow",
-      "gen_ai.workflow.name": "coordinate",
-    });
-    expect(wait.name).toBe("agent.action");
-    expect(wait.attributes).not.toHaveProperty("gen_ai.operation.name");
-    expect(sampledWorkflow).toMatchObject({
-      attributes: {
-        "gen_ai.operation.name": "invoke_workflow",
-        "gen_ai.workflow.name": "coordinate",
-      },
-      name: "agent.action",
-    });
-  });
-
-  it("keeps a composed workflow intact while emitting independent nested callers", async () => {
-    const stateStore = new InMemoryAgentTraceStateStore();
-    const runtime = createRuntime(stateStore);
-    const scope: InstrumentationAttemptScope = {
-      attemptId: "session-nested:turn-1:0:0",
-      attemptIndex: 0,
-      functionId: "weather",
-      sessionId: "session-nested",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
-    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "workflow");
-    const toolKey = `tool:${scope.attemptId}:workflow:0`;
-
-    await publishTurnStarted({
-      hooks: runtime.hooks,
-      sessionId: scope.sessionId,
-      turnId: scope.turnId,
-      turnSequence: 0,
-    });
-    await runtime.hooks.publish({
-      idempotencyKey: attemptIdempotencyKey(scope),
-      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
-      scope,
-      type: "step.attempt.started",
-    });
-    await runtime.hooks.publish({
-      callId: "workflow",
-      idempotencyKey: actionKey,
-      input: {},
-      isWorkflowTool: true,
-      kind: "tool-call",
-      name: "coordinate",
-      scope,
-      type: "action.started",
-    });
-    await runtime.hooks.publish({
-      callId: "workflow",
-      idempotencyKey: toolKey,
-      input: {},
-      scope,
-      toolName: "coordinate",
-      type: "tool.call.started",
-    });
-    await runtime.hooks.publish({
-      idempotencyKey: toolKey,
-      output: { output: "done", type: "result" },
-      scope,
-      type: "tool.call.completed",
-    });
-
-    const action = stateStore.getAction(actionKey)!;
-    const anchor = { ...action, workflowName: "coordinate" };
-    stateStore.setAction(actionKey, anchor);
-    stateStore.setActionAnchor(actionKey, anchor);
-    stateStore.setInvocation(
-      actionIdempotencyKey(scope.sessionId, scope.turnId, "workflow:first"),
-      {
-        ...anchor,
-        callId: "workflow:first",
-        kind: "subagent-call",
-        name: "research",
-        parent: { ...anchor.parent, spanId: anchor.spanId },
-        parentActionCallId: "workflow",
-        spanId: "b".repeat(16),
-        terminal: { outcome: "completed" },
-      },
-    );
-    stateStore.setInvocation(
-      actionIdempotencyKey(scope.sessionId, scope.turnId, "workflow:second"),
-      {
-        ...anchor,
-        callId: "workflow:second",
-        kind: "remote-agent-call",
-        name: "review",
-        parent: { ...anchor.parent, spanId: anchor.spanId },
-        parentActionCallId: "workflow",
-        spanId: "d".repeat(16),
-        terminal: { error: new Error("review failed"), outcome: "failed" },
-      },
-    );
-    await runtime.hooks.publish({
-      idempotencyKey: actionKey,
-      outcome: "completed",
-      output: { output: "done", type: "result" },
-      scope,
-      type: "action.completed",
-    });
-    await runtime.hooks.publish({
-      idempotencyKey: attemptIdempotencyKey(scope),
-      scope,
-      type: "step.attempt.completed",
-    });
-    await completeTurn(runtime.hooks, scope.sessionId, scope.turnId);
-    await runtime.provider.forceFlush();
-
-    const spans = runtime.exporter.getFinishedSpans();
-    const outer = byName(spans, "invoke_workflow coordinate")[0]!;
-    const tool = byName(spans, "execute_tool coordinate")[0]!;
-    const first = spans.find(
-      (span) => span.attributes["agent.action.call_id"] === "workflow:first",
-    )!;
-    const second = spans.find(
-      (span) => span.attributes["agent.action.call_id"] === "workflow:second",
-    )!;
-    expect(byName(spans, "agent.action")).toHaveLength(2);
-    expect(outer.attributes).toMatchObject({
-      "agent.action.call_id": "workflow",
-      "agent.action.kind": "tool-call",
-      "agent.action.name": "coordinate",
-      "gen_ai.operation.name": "invoke_workflow",
-      "gen_ai.workflow.name": "coordinate",
-      "operation.name": "invoke_workflow",
-      "resource.name": "invoke_workflow coordinate",
-    });
-    expect(first.attributes).not.toHaveProperty("gen_ai.operation.name");
-    expect(second.attributes).not.toHaveProperty("gen_ai.operation.name");
-    expect(tool.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
-    expect(first.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
-    expect(second.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
-    expect(second.status.code).toBe(SpanStatusCode.ERROR);
+    const actions = byName(runtime!.exporter.getFinishedSpans(), "agent.action");
+    expect(actions.map((span) => span.attributes["agent.action.call_id"]).sort()).toEqual([
+      "wait",
+      "workflow",
+    ]);
+    for (const action of actions) {
+      expect(action.attributes).toMatchObject({ "agent.action.kind": "tool-call" });
+    }
   });
 
   it.each(["private", "unknown"] as const)(

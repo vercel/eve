@@ -136,8 +136,6 @@ export interface BoundInstrumentationSession {
 
 /** Process-wide runtime consumed by every harness execution surface. */
 export interface InstrumentationRuntime {
-  /** Materializes settled invocation spans without draining the exporter pipeline. */
-  readonly flushSettledInvocations?: () => Promise<void>;
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
   readonly idGenerator?: AgentSpanIdGenerator;

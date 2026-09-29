@@ -2,13 +2,11 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
   InstrumentationActionKind,
-  InstrumentationActionOutcome,
   InstrumentationParentLineage,
   InstrumentationPrincipalSummary,
   InstrumentationTraceContext,
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,
-  InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -67,24 +65,6 @@ export interface AgentActionTraceState {
   readonly startTimeMs: number;
   readonly stepIndex: number;
   readonly turnId: string;
-  readonly workflowName?: string;
-}
-
-export interface AgentInvocationTraceState extends Omit<
-  AgentActionTraceState,
-  "inputAttribute" | "isWorkflowTool" | "kind" | "workflowName"
-> {
-  readonly kind: "remote-agent-call" | "subagent-call";
-  readonly parentActionCallId: string;
-  readonly recordOutputs?: boolean;
-  readonly terminal?: AgentActionTraceTerminalState;
-}
-
-export interface AgentActionTraceTerminalState {
-  readonly acceptedAtMs?: number;
-  readonly error?: unknown;
-  readonly outcome: InstrumentationActionOutcome;
-  readonly usage?: InstrumentationUsage;
 }
 
 /** Provider-owned serializable storage for durable agent trace state. */
@@ -92,8 +72,6 @@ export interface AgentTraceStateStore {
   deleteAction(idempotencyKey: string): void | PromiseLike<void>;
   deleteActionAnchors(sessionId: string): void | PromiseLike<void>;
   deleteActions(sessionId: string, turnId?: string): void | PromiseLike<void>;
-  deleteInvocation(idempotencyKey: string): void | PromiseLike<void>;
-  deleteInvocations(sessionId: string, turnId?: string): void | PromiseLike<void>;
   deleteSession(sessionId: string): void | PromiseLike<void>;
   deleteTurn(sessionId: string, turnId: string): void | PromiseLike<void>;
   findAction(
@@ -105,11 +83,6 @@ export interface AgentTraceStateStore {
     turnId: string,
     callId: string,
   ): AgentActionTraceState | undefined | PromiseLike<AgentActionTraceState | undefined>;
-  findInvocations(
-    sessionId?: string,
-    turnId?: string,
-    parentActionCallId?: string,
-  ): readonly AgentInvocationTraceState[] | PromiseLike<readonly AgentInvocationTraceState[]>;
   getAction(
     idempotencyKey: string,
   ): AgentActionTraceState | undefined | PromiseLike<AgentActionTraceState | undefined>;
@@ -122,7 +95,6 @@ export interface AgentTraceStateStore {
   ): AgentTurnTraceState | undefined | PromiseLike<AgentTurnTraceState | undefined>;
   setAction(idempotencyKey: string, state: AgentActionTraceState): void | PromiseLike<void>;
   setActionAnchor(idempotencyKey: string, state: AgentActionTraceState): void | PromiseLike<void>;
-  setInvocation(idempotencyKey: string, state: AgentInvocationTraceState): void | PromiseLike<void>;
   setSession(sessionId: string, state: AgentSessionTraceState): void | PromiseLike<void>;
   setTurn(sessionId: string, turnId: string, state: AgentTurnTraceState): void | PromiseLike<void>;
   /** Atomically updates an existing turn and does nothing after that turn is deleted. */

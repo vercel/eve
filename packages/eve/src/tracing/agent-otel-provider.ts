@@ -302,7 +302,6 @@ export function createAgentOtelInstrumentation(
   const onSessionTransition = async (
     event: InstrumentationSessionTransitionEvent,
   ): Promise<void> => {
-    await actions.flushForSessionTransition(event);
     if (event.type === "session.failed" && event.turnId !== undefined) {
       await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
         ...turn,
@@ -534,7 +533,6 @@ export function createAgentOtelInstrumentation(
 
   return {
     hook: {
-      flush: actions.flushSettledInvocations,
       events: {
         ...channelDeliveries,
         "action.completed": actions.events["action.completed"],
