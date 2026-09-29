@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 62,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 61, 62],
+    current: 63,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 63],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
       15: "TaskExec replaces stageEffect with send",
@@ -64,13 +64,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       58: "Workflow tools no longer accept execution or return background task receipts; every call blocks until it settles.",
       59: "Workflow tools no longer accept execution or return background task receipts, and every call blocks until it settles. ctx.ask() no longer accepts dismissible and reports a withdrawn request as cancelled, workflow tool contexts carry interruptSignal, and ctx.agent(name) returns a session handle whose send() delivers a message and whose result() resolves the turn; ctx.agent(name, { message, agentId }) and AgentInput were removed. A ctx.ask() question parks the open turn with turn.waiting instead of ending it.",
       60: "Workflow tools define exactly one of execute(input, ctx), task(input, ctx), or serve(receive, ctx): a task() call returns a receipt and runs as a task, a serve() call reaches a resumable task through receive() and its model input gains taskId, and stream events gained task.started and task.settled. Agent tools are serve() tools with taskId in place of agentId, and the subagent.* stream events were removed. ctx.interruptSignal and WorkflowTaskContext were removed: a steering message aborts the abortSignal of an execute call the turn waits on.",
+      61: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
+      62: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
     },
   },
   dynamicTool: {
-    current: 59,
+    current: 60,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
-      58, 59,
+      60,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -104,6 +106,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       55: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
       56: 'Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text. input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request, and stream events gained agent.started, published when a workflow run opens a ctx.agent session, and turn.waiting, which parks the open turn instead of emitting turn.completed and session.waiting.',
       57: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event stream events were removed; agent calls report task.started, task.settled, and agent.started.",
+      58: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
+      59: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
     },
   },
   channel: {
@@ -152,10 +156,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 31,
-    supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 30, 31,
-    ],
+    current: 32,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 24, 26, 32],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
@@ -164,6 +166,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       27: "Run mode was removed; sessions always park and ConversationContext no longer carries mode.",
       28: 'Background task execution was removed: subagent results no longer carry backgroundTask and message.completed always carries text. input.resolved reports outcome "cancelled" when a workflow tool withdraws a ctx.ask() request, and stream events gained agent.started, published when a workflow run opens a ctx.agent session, and turn.waiting, which parks the open turn instead of emitting turn.completed and session.waiting.',
       29: "Stream events gained task.started and task.settled, and input.requested, authorization events, and agent.started carry the taskId of the task they come from. The subagent.called, subagent.completed, subagent.started, and subagent.event stream events were removed; agent calls report task.started, task.settled, and agent.started.",
+      30: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
+      31: "Approval response policies now run for Cancel as well as Approve; a policy written for Approve only could reject every Cancel.",
     },
   },
   hook: {

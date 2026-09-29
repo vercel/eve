@@ -324,7 +324,7 @@ describe("defaultEvents approval lifecycle", () => {
 
     expect(postEphemeral).toHaveBeenCalledWith(
       "U777",
-      "Checking whether you can approve this action…",
+      "Checking whether you can respond to this approval…",
     );
   });
 
@@ -356,7 +356,7 @@ describe("defaultEvents approval lifecycle", () => {
 
     expect(postEphemeral).toHaveBeenCalledWith(
       "U777",
-      "Checking whether you can approve this action…",
+      "Checking whether you can respond to this approval…",
     );
     expect(channel.state.pendingApprovalCandidateUsers).toEqual({ "candidate-1": "U777" });
   });

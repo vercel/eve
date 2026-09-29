@@ -47,7 +47,7 @@ export interface ApprovalRequest<TInput = Record<string, unknown>> {
    * Who requested the tool call: the auth of the caller whose turn made it,
    * captured when the approval was requested. It stays the same while the
    * request is pending, however many people continue the session, and is
-   * `null` when that caller was unauthenticated or anonymous.
+   * `null` when that caller was unauthenticated.
    */
   readonly principal: SessionAuthContext | null;
   readonly toolInput?: ApprovalToolInput<TInput>;
@@ -70,7 +70,7 @@ export interface ApprovalResponseAuth {
 
 /** Submitted decision passed to an approval response policy. */
 export interface ApprovalResponse {
-  readonly decision: "approve";
+  readonly decision: "approve" | "cancel";
 }
 
 /** Context passed to an approval response policy. */
@@ -82,12 +82,15 @@ export interface ApprovalResponseContext<TInput = Record<string, unknown>> {
   readonly session: ApprovalResponseSession;
 }
 
-/** Response policy decision. Rejection keeps the shared request pending. */
+/**
+ * Response policy decision. Rejection keeps the shared request pending, so
+ * another responder can still settle it.
+ */
 export type ApprovalResponseDecision =
   | { readonly status: "allowed" }
   | { readonly reason: string; readonly status: "rejected" };
 
-/** Decides whether an authenticated responder may approve one request. */
+/** Decides whether an authenticated responder may approve or cancel one request. */
 export type ApprovalResponsePolicy<TInput = Record<string, unknown>> = (
   ctx: ApprovalResponseContext<TInput>,
 ) => ApprovalResponseDecision | Promise<ApprovalResponseDecision>;

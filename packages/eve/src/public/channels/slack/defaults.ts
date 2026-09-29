@@ -365,14 +365,17 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "approval.candidate"(event, channel, _ctx) {
     const userId = channel.state.pendingApprovalCandidateUsers?.[event.candidateId];
     if (event.outcome === "pending" && userId !== undefined) {
-      await channel.thread.postEphemeral(userId, "Checking whether you can approve this action…");
+      await channel.thread.postEphemeral(
+        userId,
+        "Checking whether you can respond to this approval…",
+      );
       return;
     }
     if (userId === undefined) return;
     if (event.outcome === "rejected" || event.outcome === "failed") {
       await channel.thread.postEphemeral(
         userId,
-        event.reason ?? "We couldn’t verify your approval. Please try again.",
+        event.reason ?? "We couldn’t verify your response. Please try again.",
       );
     }
   },

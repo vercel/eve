@@ -16,6 +16,7 @@ import {
   settleAllowedCandidate,
   settleDirectApprovalResponse,
   type ActiveApprovalCandidate,
+  type ApprovalCandidateDecision,
   type ApprovalSettlementAuditRecord,
 } from "#harness/approval-candidates.js";
 import {
@@ -52,17 +53,16 @@ interface ApprovalDeliveryResult {
  *
  * | State | Input | Transition |
  * | --- | --- | --- |
- * | pending request | Approve | create responder-bound candidate |
- * | pending request | Cancel | settle cancelled and stale candidates |
+ * | pending request | Approve or Cancel | create responder-bound candidate |
  * | pending candidate | coordinator pass | run current authorizer |
- * | pending candidate | allowed | settle approved and stale competitors |
+ * | pending candidate | allowed | settle with its decision; competitors go stale |
  * | pending candidate | rejected/error/expiry | append terminal history |
  * | pending candidate | authorization required | persist private challenge |
  * | authorization required | matching callback | re-run current authorizer |
  * | settled request | any later response | no state change |
  *
- * Delivery ingestion returns before authorizer work so Cancel and candidate
- * creation commit before long-running policy execution. Candidate results also
+ * Delivery ingestion returns before authorizer work so candidate creation
+ * commits before long-running policy execution. Candidate results also
  * commit before lifecycle events are projected by the next stack layer.
  */
 export async function coordinateApprovalDelivery(input: {
@@ -161,28 +161,10 @@ export async function coordinateApprovalDelivery(input: {
     }
     consumed.add(response.requestId);
 
-    if (response.optionId === "cancel") {
-      const responder =
-        attributedResponder !== undefined
-          ? attributedResponder
-          : buildCallbackContext().session.auth.current;
-      if (responder === null) {
-        feedback.push(UNAUTHENTICATED_APPROVAL_FEEDBACK);
-        continue;
-      }
-      const settled = settleDirectApprovalResponse({
-        actor: responder,
-        outcome: "cancelled",
-        requestId: response.requestId,
-        settledAt: now,
-        state: session.state,
-      });
-      session = { ...session, state: settled.state };
-      didCommit ||= settled.changed;
-      continue;
-    }
-
-    if (response.optionId !== "approve") continue;
+    // A response policy decides Cancel as well as Approve, so a responder it
+    // rejects can neither approve nor cancel someone else's request.
+    const decision = toCandidateDecision(response.optionId);
+    if (decision === undefined) continue;
     const responder =
       attributedResponder !== undefined
         ? attributedResponder
@@ -193,8 +175,9 @@ export async function coordinateApprovalDelivery(input: {
     }
 
     const created = createApprovalCandidate({
-      candidateIdPrefix: approvalCandidateIdPrefix(request.requestId, responder),
+      candidateIdPrefix: approvalCandidateIdPrefix(request.requestId, responder, decision),
       createdAt: now,
+      decision,
       expiresAt: now + APPROVAL_CANDIDATE_TTL_MS,
       requestId: request.requestId,
       responder,
@@ -246,6 +229,7 @@ export async function coordinateApprovalDelivery(input: {
     }
     const processed = await authorizeCandidate({
       candidateId: candidate.candidateId,
+      decision: candidate.decision,
       now,
       request,
       responder: candidate.responder,
@@ -285,6 +269,7 @@ export async function coordinateApprovalDelivery(input: {
 
 async function authorizeCandidate(input: {
   readonly candidateId: string;
+  readonly decision: ApprovalCandidateDecision;
   readonly now: number;
   readonly request: InputRequest;
   readonly responder: ActiveApprovalCandidate["responder"];
@@ -330,7 +315,7 @@ async function authorizeCandidate(input: {
           toolInput: input.request.action.input,
           toolName: input.request.action.toolName,
         },
-        response: { decision: "approve" },
+        response: { decision: input.decision },
         responder: input.responder,
         session: {
           id: context.session.id,
@@ -410,7 +395,7 @@ function failCandidate(input: {
   readonly didCommit: true;
   readonly session: HarnessSession;
 } {
-  const reason = input.reason ?? "We couldn’t verify your approval. Please try again.";
+  const reason = input.reason ?? "We couldn’t verify your response. Please try again.";
   return {
     challenges: [],
     didCommit: true,
@@ -502,14 +487,25 @@ function deliveryResult(
   return { challenges, feedback, kind, session, stepInput };
 }
 
-function approvalCandidateIdPrefix(requestId: string, responder: SessionAuthContext): string {
+function toCandidateDecision(optionId: string | undefined): ApprovalCandidateDecision | undefined {
+  if (optionId === "approve" || optionId === "cancel") return optionId;
+  return undefined;
+}
+
+function approvalCandidateIdPrefix(
+  requestId: string,
+  responder: SessionAuthContext,
+  decision: ApprovalCandidateDecision,
+): string {
   const principal = [
     responder.authenticator,
     responder.issuer ?? "",
     responder.principalType,
     responder.principalId,
   ].join(":");
-  return `${encodeCandidateIdPart(requestId)}.${encodeCandidateIdPart(principal)}`;
+  const prefix = `${encodeCandidateIdPart(requestId)}.${encodeCandidateIdPart(principal)}`;
+  // Approve keeps its established id; Cancel needs its own so both can be pending.
+  return decision === "approve" ? prefix : `${prefix}.${encodeCandidateIdPart(decision)}`;
 }
 
 function encodeCandidateIdPart(value: string): string {

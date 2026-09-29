@@ -13,8 +13,12 @@ type ApprovalCandidateStatus =
   | "timed-out"
   | "stale";
 
+/** What a responder submitted: a candidate settles its request this way once allowed. */
+export type ApprovalCandidateDecision = "approve" | "cancel";
+
 interface ApprovalCandidateAuditRecord {
   readonly candidateId: string;
+  readonly decision: ApprovalCandidateDecision;
   readonly requestId: string;
   readonly responder: ApprovalResponderIdentity;
   readonly status: ApprovalCandidateStatus;
@@ -43,6 +47,7 @@ export interface ApprovalSettlementAuditRecord {
 
 export interface ActiveApprovalCandidate {
   readonly candidateId: string;
+  readonly decision: ApprovalCandidateDecision;
   readonly requestId: string;
   readonly responder: SessionAuthContext;
   readonly status: "pending" | "authorization-required";
@@ -64,10 +69,11 @@ interface ApprovalStateTransition {
   readonly state: SessionStateMap | undefined;
 }
 
-/** Creates or deduplicates one responder's Allow candidate for a pending request. */
+/** Creates or deduplicates one responder's candidate decision for a pending request. */
 export function createApprovalCandidate(input: {
   readonly candidateIdPrefix: string;
   readonly createdAt: number;
+  readonly decision: ApprovalCandidateDecision;
   readonly expiresAt: number;
   readonly requestId: string;
   readonly responder: SessionAuthContext;
@@ -83,7 +89,9 @@ export function createApprovalCandidate(input: {
   const responder = input.responder;
   const duplicate = Object.values(approvalState.activeCandidates).find(
     (candidate) =>
-      candidate.requestId === input.requestId && sameResponder(candidate.responder, responder),
+      candidate.requestId === input.requestId &&
+      candidate.decision === input.decision &&
+      sameResponder(candidate.responder, responder),
   );
   if (duplicate !== undefined) {
     return { changed: false, state: expiredState };
@@ -107,6 +115,7 @@ export function createApprovalCandidate(input: {
   const candidate: ActiveApprovalCandidate = {
     candidateId,
     createdAt: input.createdAt,
+    decision: input.decision,
     expiresAt: input.expiresAt,
     requestId: input.requestId,
     responder,
@@ -242,7 +251,10 @@ export function expireApprovalCandidates(input: {
   return state;
 }
 
-/** Atomically settles an allowed candidate; every losing candidate becomes stale. */
+/**
+ * Atomically settles a request with an allowed candidate's decision; every
+ * losing candidate becomes stale.
+ */
 export function settleAllowedCandidate(input: {
   readonly candidateId: string;
   readonly settledAt: number;
@@ -264,7 +276,7 @@ export function settleAllowedCandidate(input: {
   return settleRequest({
     actor: projectResponder(candidate.responder),
     candidateId: candidate.candidateId,
-    outcome: "allowed",
+    outcome: candidate.decision === "cancel" ? "cancelled" : "allowed",
     requestId: candidate.requestId,
     settledAt: input.settledAt,
     state: expiredState,
@@ -397,6 +409,22 @@ function sameResponder(
   );
 }
 
+/**
+ * A candidate is an Approve unless it records Cancel: candidates persisted
+ * before Cancel was authorized carry no decision, and their responder pressed
+ * Approve.
+ */
+function readActiveCandidates(
+  candidates: Readonly<Record<string, ActiveApprovalCandidate>>,
+): Readonly<Record<string, ActiveApprovalCandidate>> {
+  return Object.fromEntries(
+    Object.entries(candidates).map(([candidateId, candidate]) => [
+      candidateId,
+      { ...candidate, decision: candidate.decision === "cancel" ? "cancel" : "approve" },
+    ]),
+  );
+}
+
 function readApprovalState(state: SessionStateMap | undefined): DurableApprovalState {
   const value = state?.[APPROVAL_STATE_KEY];
   if (typeof value !== "object" || value === null) {
@@ -411,7 +439,7 @@ function readApprovalState(state: SessionStateMap | undefined): DurableApprovalS
   return {
     activeCandidates:
       typeof candidate.activeCandidates === "object" && candidate.activeCandidates !== null
-        ? candidate.activeCandidates
+        ? readActiveCandidates(candidate.activeCandidates)
         : {},
     candidateHistory: Array.isArray(candidate.candidateHistory) ? candidate.candidateHistory : [],
     nextCandidateSequence:

@@ -3868,7 +3868,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(ephemeralBodies).toEqual([
       expect.objectContaining({
         channel: "C01",
-        markdown_text: "Checking whether you can approve this action…",
+        markdown_text: "Checking whether you can respond to this approval…",
         user: "U_APPROVER",
       }),
       expect.objectContaining({

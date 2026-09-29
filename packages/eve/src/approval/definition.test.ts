@@ -31,7 +31,7 @@ describe("approval definitions", () => {
         requireAuth: (...args: any[]) => never;
       };
       request: { callId: string; principal: unknown; requestId: string; toolName: string };
-      response: { decision: "approve" };
+      response: { decision: "approve" | "cancel" };
       responder: { principalId: string };
       session: { id: string; initiator: unknown; turn: unknown };
     }>();

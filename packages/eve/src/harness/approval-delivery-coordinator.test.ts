@@ -76,13 +76,13 @@ describe("coordinateApprovalDelivery", () => {
     );
   }
 
-  async function ingest(session = parkedSession()) {
+  async function ingest(session = parkedSession(), optionId: "approve" | "cancel" = "approve") {
     return coordinateApprovalDelivery({
       now: 100,
       session,
       stepInput: {
         attributedInputResponses: [
-          { auth: responder, response: { requestId: request.requestId, optionId: "approve" } },
+          { auth: responder, response: { requestId: request.requestId, optionId } },
         ],
       },
       tools: new Map(),
@@ -106,6 +106,40 @@ describe("coordinateApprovalDelivery", () => {
         responder,
       }),
     );
+  });
+
+  it("authorizes Cancel, leaving a rejected Cancel pending for the requester", async () => {
+    const requester: SessionAuthContext = { ...responder, principalId: "bob" };
+    const ingested = await ingest(parkedBy(requester), "cancel");
+    expect(ingested.kind).toBe("continue-coordination");
+
+    const onlyRequester: ApprovalResponsePolicy = ({ request, responder: who }) =>
+      who.principalId === request.principal?.principalId
+        ? { status: "allowed" }
+        : { reason: "Only the requester can respond.", status: "rejected" };
+    const response = vi.fn(onlyRequester);
+    const rejected = await authorize(ingested.session, response);
+    expect(response).toHaveBeenCalledWith(
+      expect.objectContaining({ response: { decision: "cancel" } }),
+    );
+    expect(rejected.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(getApprovalAuditState(rejected.session.state).settlements).toEqual([]);
+    expect(getPendingInputBatches(rejected.session.state)).toHaveLength(1);
+
+    const requesterCancel = await coordinateApprovalDelivery({
+      now: 102,
+      session: rejected.session,
+      stepInput: {
+        attributedInputResponses: [
+          { auth: requester, response: { optionId: "cancel", requestId: request.requestId } },
+        ],
+      },
+      tools: new Map(),
+    });
+    const settled = await authorize(requesterCancel.session, onlyRequester);
+    expect(settled.stepInput?.inputResponses).toEqual([
+      { optionId: "cancel", requestId: request.requestId },
+    ]);
   });
 
   it("records no requester for an anonymous caller", async () => {

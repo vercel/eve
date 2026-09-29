@@ -82,7 +82,7 @@ Gating a side effect on approval is also how you make non-idempotent work safe a
 
 ### Authorizing approval responses
 
-You may also define an approval response policy that decides whether the authenticated person who selects **Approve** may approve that specific call:
+You may also define an approval response policy that decides whether the authenticated person who selects **Approve** or **Cancel** may settle that specific call:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";
@@ -115,13 +115,13 @@ The `response` policy receives:
 
 - `responder`: the authenticated principal that submitted the response, including its `principalId`, `principalType`, `authenticator`, and `attributes`. Your route or channel supplies this identity.
 - `request`: the stable `requestId`, `callId`, `toolName`, and typed `toolInput` for the call being approved, plus `principal`: the authenticated principal whose turn requested the call, or `null` when that caller was unauthenticated or anonymous. eve captures `request.principal` when the approval is requested, so it stays the same while other people continue the session.
-- `response`: the submitted decision. Response policies run for approval, so its current value is `{ decision: "approve" }`.
+- `response`: the submitted decision, `{ decision: "approve" }` or `{ decision: "cancel" }`. The policy runs for both, so a responder it rejects can neither approve nor cancel the call.
 - `session`: read-only session identity and lineage: `id`, `initiator`, `parent`, and `turn`.
 - `auth`: narrow `getToken(provider, options?)` and `requireAuth(provider, options?)` capabilities bound to the responder. Use these when authorization depends on a provider identity or permission; an interactive provider flow parks durably and then retries the policy.
 
-Return `{ status: "allowed" }` to accept the approval. Return `{ status: "rejected", reason }` to leave the shared request pending so another eligible responder can approve it.
+Return `{ status: "allowed" }` to accept the decision. Return `{ status: "rejected", reason }` to leave the shared request pending so another eligible responder can settle it. When a policy only cares who approves, return `{ status: "allowed" }` for `cancel` so anyone can still dismiss the request.
 
-`session.initiator` is the person who started the session, and `request.principal` is the person who asked for this call. In a shared thread they can differ. Compare the full identity of `responder` with `request.principal` to let only the requester approve the call:
+`session.initiator` is the person who started the session, and `request.principal` is the person who asked for this call. In a shared thread they can differ. Compare the full identity of `responder` with `request.principal` to let only the requester settle the call:
 
 ```ts title="agent/tools/publish_release.ts"
 import { defineTool } from "eve/tools";
@@ -147,10 +147,7 @@ export default defineTool({
     response: ({ request, responder }) =>
       request.principal !== null && samePrincipal(responder, request.principal)
         ? { status: "allowed" }
-        : {
-            status: "rejected",
-            reason: "Only the person who asked for this release can approve it.",
-          },
+        : { status: "rejected", reason: "Only the person who asked for this release can respond." },
   },
   async execute(input) {
     return publish(input);
