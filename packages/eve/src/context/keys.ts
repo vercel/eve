@@ -105,6 +105,8 @@ export const TurnDeliveryIdsKey = new ContextKey<readonly string[]>("eve.turnDel
 /** Last framework announcements recorded in the retained session history. */
 export interface HistoryState {
   readonly availableSkills?: string;
+  /** Last announced value per keyed announcement (see `#harness/announcements.js`). */
+  readonly announcements?: Readonly<Record<string, string>>;
 }
 export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 export interface ActiveChannelDelivery {

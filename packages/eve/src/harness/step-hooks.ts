@@ -48,6 +48,7 @@ import {
 import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
+import { emitNestedToolActions } from "#harness/nested-actions.js";
 import { AuthKey } from "#context/keys.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 
@@ -328,6 +329,7 @@ export async function emitStepActions(
       continue;
     }
 
+    await emitNestedToolActions(emitFn, state, result.callId);
     await emitFn(
       createActionResultEvent({
         result,

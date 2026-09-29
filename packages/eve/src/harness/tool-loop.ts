@@ -53,6 +53,7 @@ import {
 } from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
+import { getPendingAnnouncements } from "#harness/announcements.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
   createActionResultEvent,
@@ -1280,6 +1281,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       );
       currentMessages.addAnnouncements({
         availableSkills: ctx?.get(PendingSkillAnnouncementKey),
+        keyed: getPendingAnnouncements(ctx),
       });
       const pendingApprovals = renderPendingApprovalsInstruction(
         getPendingInputBatches(session.state).flatMap((batch) => batch.requests),

@@ -2382,8 +2382,13 @@ async function* eveEventsToTUIStream(
 
       case "actions.requested": {
         const data = (event as ActionsRequestedStreamEvent).data;
+        // Nested actions render through their parent call's row and label.
         const actions = data.actions.flatMap((action) =>
-          action.kind === "tool-call" && !isTaskControlTool(action.toolName) ? [action] : [],
+          action.kind === "tool-call" &&
+          action.parentCallId === undefined &&
+          !isTaskControlTool(action.toolName)
+            ? [action]
+            : [],
         );
         if (actions.length === 0) break;
         partEpoch += 1;

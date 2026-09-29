@@ -541,6 +541,7 @@ export class SubagentPump {
         finalizeCurrent();
         for (const action of event.data.actions) {
           if (action.kind !== "tool-call" || isTaskControlTool(action.toolName)) continue;
+          if (action.parentCallId !== undefined) continue;
           this.#registerChildTool(callId, run, {
             childCallId: action.callId,
             toolName: action.toolName,
