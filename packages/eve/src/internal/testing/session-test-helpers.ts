@@ -3,7 +3,8 @@ import {
   hydrateStepArguments,
   hydrateStepReturnValue,
 } from "#compiled/@workflow/core/serialization.js";
-import { applySessionStateDelta, type SessionStateValues } from "#execution/session/state-delta.js";
+import { applySessionStateDelta } from "#execution/session/state-cursor.js";
+import type { SessionStateValues } from "#execution/session/state-delta.js";
 import type { TurnStepInput, TurnStepResult } from "#execution/session/turn-step-types.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 

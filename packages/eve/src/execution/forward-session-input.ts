@@ -9,6 +9,31 @@ import { postSessionCallbackRequest } from "#execution/session-callback-request.
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
+/** The input events a remote session sends its caller instead of presenting them on its own channel. */
+export type ForwardedSessionInputEvent = Extract<
+  UnstampedMessageStreamEvent,
+  {
+    readonly type:
+      | "input.requested"
+      | "authorization.required"
+      | "authorization.completed"
+      | "approval.candidate"
+      | "approval.settled";
+  }
+>;
+
+function isForwardedSessionInput(
+  event: UnstampedMessageStreamEvent,
+): event is ForwardedSessionInputEvent {
+  return (
+    event.type === "input.requested" ||
+    event.type === "authorization.required" ||
+    event.type === "authorization.completed" ||
+    event.type === "approval.candidate" ||
+    event.type === "approval.settled"
+  );
+}
+
 /** A remote session sends input to its caller instead of presenting it on its own channel. */
 export async function forwardSessionInput(
   ctx: ContextContainer,
@@ -17,14 +42,7 @@ export async function forwardSessionInput(
 ): Promise<boolean> {
   const callback = ctx.get(SessionCallbackKey);
   if (callback === undefined) return false;
-  if (
-    event.type !== "input.requested" &&
-    event.type !== "authorization.required" &&
-    event.type !== "authorization.completed" &&
-    event.type !== "approval.candidate" &&
-    event.type !== "approval.settled"
-  )
-    return false;
+  if (!isForwardedSessionInput(event)) return false;
 
   const body =
     event.type === "input.requested"

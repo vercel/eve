@@ -92,6 +92,7 @@ describe("settleCancelledTurnStep", () => {
     vi.mocked(deserializeContext).mockResolvedValueOnce(ctx);
 
     await settleCancelledTurnStep({
+      pendingDispatches: [],
       reportUsage: false,
       serializedContext: {},
       sessionState: { ...base, snapshot: { session: { ...base.snapshot.session, ...parked } } },
@@ -118,6 +119,7 @@ describe("settleCancelledTurnStep", () => {
 
       const result = await runSessionStateStep(
         {
+          pendingDispatches: [],
           reportUsage,
           serializedContext: {},
           sessionState: { ...base, snapshot: { session: cancelling } },

@@ -103,8 +103,14 @@ export async function runPreparedSession(
   let result: WorkflowEntryResult = { output: "", isError: true };
   let loop: SessionLoopOutcome | undefined;
   try {
+    // Pending dispatches run before the inbox releases the session's addresses,
+    // which a step the cursor adopts may claim.
     try {
       loop = await runSessionLoop(boot, { cursor, handoff, inbox, progress });
+      if (loop.kind === "terminal") await cursor.drainPendingDispatches();
+    } catch (error) {
+      await drainPendingDispatchesBeforeFailure(cursor);
+      throw error;
     } finally {
       await inbox.dispose();
     }
@@ -130,6 +136,17 @@ export async function runPreparedSession(
     throw createSafeOuterWorkflowError();
   } finally {
     await reportResultToAnchor(boot, result, handoff, loop);
+  }
+}
+
+/** Runs pending dispatches against the last committed state before `session.failed`. */
+async function drainPendingDispatchesBeforeFailure(cursor: SessionStateCursor): Promise<void> {
+  try {
+    await cursor.drainPendingDispatches();
+  } catch {
+    // The session ends either way, so this must not keep `session.failed` off
+    // the stream. The runtime records the failed step, and the dispatcher
+    // already logs failures of the hooks and channel handler it runs.
   }
 }
 
@@ -247,6 +264,7 @@ async function runSessionLoop(
   const runDeliveredTurn = async (
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
   ): Promise<SessionActionResult> => {
+    if (next.handoffEligible) cursor.assertReadyForHandoff();
     const transfer = await handoff.tryTransfer(next, {
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,

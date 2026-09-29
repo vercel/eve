@@ -1,5 +1,5 @@
 import type { DeliverHookPayload } from "#channel/types.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { SessionStepState } from "#execution/publish-session-events.js";
 import {
   routeProxiedDeliverStep,
   type RoutedDeliverResult,
@@ -16,12 +16,9 @@ import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
  * the owner and the active turn can share it (a `"use step"` module cannot
  * re-export plain helpers into a workflow body).
  */
-export async function routeDeliverToChildren(input: {
-  readonly delivery: DeliverHookPayload;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly sessionState: DurableSessionState;
-  readonly serializedContext: Record<string, unknown>;
-}): Promise<WithSessionStateDelta<RoutedDeliverResult>> {
+export async function routeDeliverToChildren(
+  input: SessionStepState & { readonly delivery: DeliverHookPayload },
+): Promise<WithSessionStateDelta<RoutedDeliverResult>> {
   if (!input.sessionState.hasProxyInputRequests) {
     return { kind: "continue", remainder: input.delivery, stateDelta: {} };
   }

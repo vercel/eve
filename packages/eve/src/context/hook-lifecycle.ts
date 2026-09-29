@@ -10,6 +10,17 @@ import { ContinuationTokenKey } from "./keys.js";
 
 const log = createLogger("hooks");
 
+/** Whether a typed or `*` stream-event hook subscribes to events of this type. */
+export function hasStreamEventHooks(
+  registry: RuntimeHookRegistry,
+  type: MessageStreamEvent["type"],
+): boolean {
+  return (
+    (registry.streamEventsByType.get(type)?.length ?? 0) > 0 ||
+    registry.streamEventsWildcard.length > 0
+  );
+}
+
 /**
  * Fans one runtime stream event out to every matching subscriber.
  * Authored handler failures are logged independently. Caller must hold an
@@ -22,12 +33,9 @@ export async function dispatchStreamEventHooks(input: {
   /** Stops the running turn for `ctx.cancel()`; `undefined` when this event cannot stop one. */
   readonly cancelTurn: (() => void) | undefined;
 }): Promise<void> {
+  if (!hasStreamEventHooks(input.registry, input.event.type)) return;
   const typed = input.registry.streamEventsByType.get(input.event.type) ?? [];
   const wildcard = input.registry.streamEventsWildcard;
-
-  if (typed.length === 0 && wildcard.length === 0) {
-    return;
-  }
 
   const baseCtx = buildHookContext(input.ctx);
   let dispatching = true;
