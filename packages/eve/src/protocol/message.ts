@@ -684,6 +684,11 @@ export interface AuthorizationRequiredStreamEvent {
     candidateId?: string;
     description: string;
     name: string;
+    /**
+     * Session principal that started this sign-in, matching `responderPrincipalId`
+     * on approval events. Channels use it to deliver the challenge privately.
+     */
+    principalId?: string;
     sequence: number;
     stepIndex: number;
     /** The task that needs the sign-in, when it comes from a task's run. */
@@ -726,6 +731,8 @@ export interface AuthorizationCompletedStreamEvent {
     authorization?: ConnectionAuthorizationChallenge;
     name: string;
     outcome: AuthorizationOutcome;
+    /** Session principal that started the matching sign-in. */
+    principalId?: string;
     reason?: string;
     sequence: number;
     stepIndex: number;
@@ -1187,6 +1194,7 @@ export function createAuthorizationRequiredEvent(input: {
   readonly candidateId?: string;
   readonly description: string;
   readonly name: string;
+  readonly principalId?: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly taskId?: string;
@@ -1208,6 +1216,9 @@ export function createAuthorizationRequiredEvent(input: {
   }
   if (input.candidateId !== undefined) {
     data.candidateId = input.candidateId;
+  }
+  if (input.principalId !== undefined) {
+    data.principalId = input.principalId;
   }
   if (input.webhookUrl !== undefined) {
     data.webhookUrl = input.webhookUrl;
@@ -1232,6 +1243,7 @@ export function createAuthorizationCompletedEvent(input: {
   readonly candidateId?: string;
   readonly name: string;
   readonly outcome: AuthorizationOutcome;
+  readonly principalId?: string;
   readonly reason?: string;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1253,6 +1265,9 @@ export function createAuthorizationCompletedEvent(input: {
   }
   if (input.candidateId !== undefined) {
     data.candidateId = input.candidateId;
+  }
+  if (input.principalId !== undefined) {
+    data.principalId = input.principalId;
   }
   if (input.reason !== undefined) {
     data.reason = input.reason;

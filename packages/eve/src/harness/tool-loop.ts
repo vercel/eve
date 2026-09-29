@@ -744,6 +744,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             candidateId: challenge.candidateId,
             name: challenge.name,
             outcome: "failed",
+            principalId: challenge.principalId,
             reason: "The approval response expired. Please submit a new response.",
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
@@ -832,11 +833,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         for (const challenge of coordinated.challenges) {
           await emit(
             createAuthorizationRequiredEvent({
+              attemptId: challenge.attemptId,
               authorization: challenge.challenge,
               candidateId: challenge.candidateId,
               description:
                 challenge.challenge.instructions ?? `Authorization required for ${challenge.name}`,
               name: challenge.name,
+              principalId: challenge.principalId,
               sequence: emissionState.sequence,
               stepIndex: emissionState.stepIndex,
               turnId: emissionState.turnId,
@@ -2772,6 +2775,7 @@ async function handleStepResult(input: {
             authorization: superseded.challenge,
             name: superseded.name,
             outcome: "failed",
+            principalId: superseded.principalId,
             reason: "Superseded by a newer authorization attempt.",
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
@@ -2785,6 +2789,7 @@ async function handleStepResult(input: {
             attemptId: ch.attemptId,
             authorization: ch.challenge,
             name: ch.name,
+            principalId: ch.principalId,
             description: ch.challenge.instructions ?? `Authorization required for ${ch.name}`,
             webhookUrl: ch.hookUrl,
             sequence: emissionState.sequence,

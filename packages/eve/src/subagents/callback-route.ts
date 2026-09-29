@@ -84,6 +84,7 @@ const sessionAuthorizationCallbackSchema = z.object({
           webhookUrl: z.string().optional(),
           attemptId: z.string().optional(),
           taskId: z.string().optional(),
+          principalId: z.string().optional(),
         })
         .passthrough(),
     }),
@@ -98,6 +99,7 @@ const sessionAuthorizationCallbackSchema = z.object({
           turnId: z.string(),
           attemptId: z.string().optional(),
           taskId: z.string().optional(),
+          principalId: z.string().optional(),
         })
         .passthrough(),
     }),

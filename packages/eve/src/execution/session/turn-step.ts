@@ -517,7 +517,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                 }
                 schemaSession = setHarnessEmissionState(schemaSession, emissionState);
               }
-              for (const { authorization, result, candidateId } of completedAuths) {
+              for (const { authorization, result, candidateId, principalId } of completedAuths) {
                 await handleEvent(
                   createAuthorizationCompletedEvent({
                     attemptId: result.attemptId,
@@ -525,6 +525,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                     candidateId,
                     name: result.name,
                     outcome: "authorized",
+                    principalId,
                     sequence: emissionState.sequence,
                     stepIndex: emissionState.stepIndex,
                     turnId: emissionState.turnId,

@@ -223,6 +223,7 @@ async function reportAuthorization(
   const eventInput = {
     attemptId: challenge.attemptId,
     name: challenge.name,
+    principalId: challenge.principalId,
     sequence: run.from.sequence,
     stepIndex: run.from.stepIndex,
     taskId: run.from.taskId,

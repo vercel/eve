@@ -246,9 +246,14 @@ describe("workflowEntry integration", () => {
         const completed = filterEventsByType(callbackTurn, "authorization.completed");
         expectSingleTurn(callbackTurn, "turn_2");
         expect(completed).toHaveLength(1);
+        // The attempt stays bound to user-1 even though user-2 spoke last.
+        expect(filterEventsByType(firstTurn, "authorization.required")[0]?.data.principalId).toBe(
+          "user-1",
+        );
         expect(completed[0]?.data).toMatchObject({
           name: "weather",
           outcome: "authorized",
+          principalId: "user-1",
         });
 
         // The granted authorization serves the next explicit tool request.

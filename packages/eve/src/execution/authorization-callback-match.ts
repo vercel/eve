@@ -6,6 +6,7 @@ import type { AuthorizationCallback } from "#shared/connection-types.js";
 export interface MatchedAuthorizationCallback {
   readonly authorization: ConnectionAuthorizationChallenge;
   readonly candidateId?: string;
+  readonly principalId?: string;
   readonly result: { readonly name: string; readonly attemptId: string } & AuthorizationResult;
 }
 
@@ -52,6 +53,7 @@ export function matchAuthorizationCallbacks(
     matches.push({
       authorization: challenge.challenge,
       candidateId: challenge.candidateId,
+      principalId: challenge.principalId,
       result: {
         attemptId: attemptKey,
         callback: callback.callback,
