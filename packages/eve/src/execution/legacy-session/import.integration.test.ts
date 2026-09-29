@@ -38,6 +38,7 @@ describe("legacy session import", () => {
               serializedContext: {
                 "eve.auth": null,
                 "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+                "eve.stateLayout": 1,
                 "eve.channel": { kind: "http", state: {} },
               },
             },
@@ -249,6 +250,7 @@ function legacyContext() {
   return {
     "eve.auth": null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+    "eve.stateLayout": 1,
     "eve.channel": { kind: "http", state: {} },
   };
 }

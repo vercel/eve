@@ -148,21 +148,6 @@ export function mountRefNamespace(logicalPath: string): string {
 }
 
 /**
- * Derives the namespace that scopes an extension's durable state keys and config
- * binding from its package name. Unlike the mount namespace, this stays keyed to
- * the package (e.g. `@acme/crm` → `acme-crm`) so renaming the consumer's mount
- * file never orphans persisted state.
- */
-export function packageStateNamespace(packageName: string): string {
-  return (
-    packageName
-      .replace(/^@/, "")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "extension"
-  );
-}
-
-/**
  * Resolves one extension mount to its package and agent-shaped source root
  * without importing the mount module. Reads the mount source text to extract
  * the package specifier, resolves the package, and reads

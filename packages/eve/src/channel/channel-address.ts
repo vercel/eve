@@ -146,6 +146,7 @@ export function createChannelAddress<TState = undefined>(input: {
           context: payload.context,
           message: serializeUrlFilePartsInMessage(payload.message) ?? "",
           outputSchema: payload.outputSchema,
+          state: payload.state,
         },
         requestId: metadata.requestId,
         title: options.title,

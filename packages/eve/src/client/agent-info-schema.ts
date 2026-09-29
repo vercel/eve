@@ -1,10 +1,16 @@
 import { z } from "#compiled/zod/index.js";
+import { mountIdSchema } from "#shared/extension-mount.js";
 
 const owner = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("application") }).strict(),
   z.object({ feature: z.string(), kind: z.literal("framework") }).strict(),
   z
-    .object({ kind: z.literal("extension"), namespace: z.string(), packageName: z.string() })
+    .object({
+      kind: z.literal("extension"),
+      mountId: mountIdSchema.optional(),
+      namespace: z.string(),
+      packageName: z.string(),
+    })
     .strict(),
 ]);
 
@@ -17,6 +23,7 @@ const moduleBacking = z.discriminatedUnion("kind", [
         .strict()
         .optional(),
       kind: z.literal("filesystem"),
+      mountId: z.string().optional(),
       sourcePath: z.string(),
     })
     .strict(),
@@ -24,6 +31,7 @@ const moduleBacking = z.discriminatedUnion("kind", [
     .object({
       dependencies: z.record(z.string(), z.string()).optional(),
       kind: z.literal("programmatic"),
+      mountId: z.string().optional(),
       moduleId: z.string(),
       parameters: z.record(z.string(), z.unknown()).optional(),
       registryId: z.string(),

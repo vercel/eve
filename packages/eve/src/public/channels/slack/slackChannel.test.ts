@@ -10,9 +10,10 @@ import {
   type CompiledChannel,
 } from "#channel/compiled-channel.js";
 import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import { AuthKey, SessionKey } from "#context/keys.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import {
   mockChannelContext,
@@ -190,6 +191,10 @@ function withState(
 
 function stubAccessor() {
   return { get: () => undefined, set: () => {} } as any;
+}
+
+function callerAccessor(auth: unknown) {
+  return { get: (key: unknown) => (key === AuthKey ? auth : undefined), set: () => {} } as any;
 }
 
 const stubAlsContext = (() => {
@@ -1238,6 +1243,23 @@ describe("slackChannel() default event handlers", () => {
       status: "Working...",
       loading_messages: ["Working..."],
     });
+  });
+
+  it("records the Slack user behind each delivered message's principal", async () => {
+    const adapter = withState(getAdapter(slackChannel()), THREAD_STATE);
+    const ctx = buildAdapterContext(
+      adapter,
+      callerAccessor({
+        attributes: { user_id: "U_ALICE" },
+        authenticator: "slack-webhook",
+        principalId: "slack:T01:U_ALICE",
+        principalType: "user",
+      }),
+    );
+
+    await adapter.deliver!({ message: "hello" }, ctx);
+
+    expect(ctx.state.slackUsersByPrincipal).toEqual({ "slack:T01:U_ALICE": "U_ALICE" });
   });
 
   it("refreshes triggeringUserId from the current Slack caller on every turn", async () => {
@@ -3128,6 +3150,31 @@ describe("slackChannel() inbound direct message pipeline", () => {
     expect(options.title).toBe("Private message");
   });
 
+  it("maps a custom-auth message sender to their Slack user when delivered", async () => {
+    const customAuth = {
+      attributes: {},
+      authenticator: "okta",
+      principalId: "okta|alice",
+      principalType: "user",
+    };
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage: () => ({ auth: customAuth }),
+    });
+
+    const { body } = buildDirectMessageBody();
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+    const delivery = send.mock.calls[0]?.[1] as ObservedChannelDelivery<SlackChannelState>;
+    const author = delivery.state?.triggeringUserId;
+    expect(author).toEqual(expect.any(String));
+
+    const adapter = withState(getAdapter(channel), THREAD_STATE);
+    const ctx = buildAdapterContext(adapter, callerAccessor(customAuth));
+    await adapter.deliver!({ message: "hello", state: { triggeringUserId: author } }, ctx);
+
+    expect(ctx.state.slackUsersByPrincipal).toEqual({ "okta|alice": author });
+  });
+
   it("uses an opaque run title for direct messages", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
@@ -3637,9 +3684,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
         principalType: "user",
       },
       inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
-      state: {
-        approvalResponderUsers: { "slack:T_ACTOR:U_APPROVER": "U_APPROVER" },
-      },
+      state: { triggeringUserId: "U_APPROVER" },
     });
   });
 
@@ -3802,13 +3847,115 @@ describe("slackChannel() HITL interaction pipeline", () => {
 
     expect(onInputResponse).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[1]).toMatchObject({
-      auth: customAuth,
-      state: { approvalResponderUsers: { "employee:ada": "U_APPROVER" } },
-    });
+    const delivery = send.mock.calls[0]?.[1] as Extract<
+      ObservedChannelDelivery<SlackChannelState>,
+      { readonly inputResponses: readonly unknown[] }
+    >;
+    expect(delivery).toMatchObject({ auth: customAuth, state: { triggeringUserId: "U_APPROVER" } });
+
+    const adapter = withState(getAdapter(channel), THREAD_STATE);
+    const ctx = buildAdapterContext(adapter, callerAccessor(customAuth));
+    await adapter.deliver!({ inputResponses: delivery.inputResponses, state: delivery.state }, ctx);
+    expect(ctx.state.slackUsersByPrincipal).toEqual({ "employee:ada": "U_APPROVER" });
   });
 
-  it("persists the responder mapping for later approval candidate feedback", async () => {
+  it.each([
+    {
+      name: "onInteraction ctx.respond",
+      channel: (auth: SessionAuthContext) =>
+        slackChannel({
+          credentials: { botToken: "xoxb-test" },
+          async onInteraction(_action, ctx) {
+            await ctx.respond([{ optionId: "approve", requestId: "approval_abc123" }], { auth });
+          },
+        }),
+      request: () =>
+        buildSignedInteractionRequest({
+          type: "block_actions",
+          team: { id: "T01" },
+          user: { id: "U_APPROVER", username: "ada" },
+          channel: { id: "C01" },
+          message: { ts: "1700000000.000010", thread_ts: "1700000000.000001", blocks: [] },
+          actions: [{ action_id: "custom-approve", text: { type: "plain_text", text: "OK" } }],
+        }),
+    },
+    {
+      name: "onEvent ctx.respond",
+      channel: (auth: SessionAuthContext) =>
+        slackChannel({
+          credentials: { botToken: "xoxb-test" },
+          async onEvent(ctx) {
+            await ctx.respond([{ optionId: "approve", requestId: "approval_abc123" }], {
+              auth,
+              target: { channelId: "C01", threadTs: "1700000000.000001" },
+            });
+          },
+        }),
+      request: () =>
+        buildSignedRequest({
+          body: buildEventBody(
+            {
+              item: { channel: "C01", ts: "1700000000.000001", type: "message" },
+              reaction: "white_check_mark",
+              type: "reaction_added",
+              user: "U_APPROVER",
+            },
+            { eventId: "Ev_custom_approve", teamId: "T01" },
+          ),
+        }),
+    },
+  ])(
+    "sends a custom-auth responder's sign-in privately after $name",
+    async ({ channel: buildChannel, request }) => {
+      fetchMock.mockImplementation(
+        () =>
+          new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+            headers: { "content-type": "application/json" },
+          }),
+      );
+      const customAuth: SessionAuthContext = {
+        attributes: {},
+        authenticator: "employee-directory",
+        principalId: "employee:ada",
+        principalType: "user",
+      };
+      const channel = buildChannel(customAuth);
+      const { send } = await firePost(channel, request());
+      const delivery = send.mock.calls[0]?.[1] as Extract<
+        ObservedChannelDelivery<SlackChannelState>,
+        { readonly inputResponses: readonly unknown[] }
+      >;
+      const adapter = withState(getAdapter(channel), THREAD_STATE);
+      const ctx = buildAdapterContext(adapter, callerAccessor(delivery.auth));
+      await adapter.deliver!(
+        { inputResponses: delivery.inputResponses, state: delivery.state },
+        ctx,
+      );
+
+      await callEvent(
+        adapter,
+        makeEvent("authorization.required", {
+          attemptId: "attempt-1",
+          authorization: { url: "https://idp.example/sign-in" },
+          candidateId: "candidate-1",
+          description: "Sign in to approve.",
+          name: "approver-sign-in",
+          principalId: "employee:ada",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn-1",
+        }),
+        ctx,
+      );
+
+      const ephemeral = slackCalls(fetchMock, "chat.postEphemeral").map(([, init]) =>
+        parseSlackRequestBody(init),
+      );
+      expect(ephemeral).toEqual([expect.objectContaining({ channel: "C01", user: "U_APPROVER" })]);
+    },
+  );
+
+  it("persists the responder principal mapping for later approval candidate feedback", async () => {
     fetchMock.mockImplementation(
       () =>
         new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
@@ -3822,7 +3969,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       { readonly inputResponses: readonly unknown[] }
     >;
     const adapter = withState(getAdapter(channel), THREAD_STATE);
-    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const ctx = buildAdapterContext(adapter, callerAccessor(delivery.auth));
 
     await adapter.deliver!(
       {
@@ -3832,7 +3979,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
       ctx,
     );
 
-    expect(ctx.state.approvalResponderUsers).toEqual({ "slack:T01:U_APPROVER": "U_APPROVER" });
+    expect(ctx.state.slackUsersByPrincipal).toEqual({ "slack:T01:U_APPROVER": "U_APPROVER" });
 
     await callEvent(
       adapter,

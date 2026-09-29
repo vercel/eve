@@ -17,9 +17,10 @@ import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.
  * Cross-deployment checkpoint contract. The successor may run a different eve
  * build than the owner that produced it; bump when any field changes shape so
  * an incompatible successor rejects the handoff instead of misreading state.
- * Dynamic skill manifests retain instruction bodies and package revisions.
+ * Mount-owned state requires a new version so older readers reject it rather
+ * than dropping unrecognized state keys during reverse handoff.
  */
-export const SESSION_CHECKPOINT_VERSION = 9;
+export const SESSION_CHECKPOINT_VERSION = 10;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {

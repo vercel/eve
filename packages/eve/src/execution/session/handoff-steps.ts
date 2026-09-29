@@ -55,7 +55,7 @@ export async function validateSessionCheckpointStep(input: {
   const { checkpoint } = input;
   if (checkpoint.version !== SESSION_CHECKPOINT_VERSION) {
     throw new Error(
-      `Unsupported session checkpoint version ${JSON.stringify(checkpoint.version)}; this deployment reads version ${SESSION_CHECKPOINT_VERSION}. Start a new session on this deployment.`,
+      `Unsupported session checkpoint version ${JSON.stringify(checkpoint.version)}; this deployment reads version ${SESSION_CHECKPOINT_VERSION}. Keep the session on its original deployment or start a new session here.`,
     );
   }
   const timeout = checkpoint.sessionTimeoutMs;
