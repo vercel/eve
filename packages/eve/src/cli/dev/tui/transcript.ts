@@ -1,6 +1,7 @@
 import {
   agentCallTurns,
   agentToolSession,
+  isAgentCallContentPending,
   type ConversationAgentSession,
   type ConversationState,
   type ConversationTask,
@@ -251,7 +252,7 @@ export class ConversationTranscript {
       call.status === "working" ||
       (agent.observation.status === "following" &&
         child !== undefined &&
-        isCallContentPending(section, child, turnIds));
+        isAgentCallContentPending(section.task, call, child));
     const name = stripTerminalControls(agent.name);
     const status = call.status === "working" ? undefined : CHILD_OUTCOME_STATUS[call.status];
     const header = this.#memoize(
@@ -598,18 +599,6 @@ export function agentCallLabel(
   const name = section.agent.name === "agent" ? "self" : stripTerminalControls(section.agent.name);
   const ordinal = section.subtitle.startsWith("#") ? `:${section.subtitle.slice(1)}` : "";
   return `subagent(${name}${ordinal})`;
-}
-
-/** A settled call's content may still be in flight on the agent's own stream. */
-function isCallContentPending(
-  section: AgentCallSection,
-  child: ConversationState,
-  turnIds: ReadonlySet<string>,
-): boolean {
-  if (child.activeTurnId !== undefined && turnIds.has(child.activeTurnId)) return true;
-  if (section.call.status !== "completed") return false;
-  const received = child.messages.filter((message) => message.role === "user").length;
-  return received <= Object.keys(section.task.calls).indexOf(section.call.callId);
 }
 
 function workingTaskCallIds(conversation: ConversationState): Set<string> {
