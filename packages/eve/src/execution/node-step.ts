@@ -24,7 +24,6 @@ import { workflowIdForHandling } from "#runtime/subagents/workflow-reference.js"
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { connectionToolReplayIdentity } from "#execution/tools/connection-search.js";
 import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
@@ -108,7 +107,6 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
     prepareApprovalTurn: input.prepareApprovalTurn,
-    toolReplayIdentity: connectionToolReplayIdentity,
     resolveStepDynamicTools: (resolveInput) =>
       preparePersistedStepDynamicToolMetadata({
         ...resolveInput,

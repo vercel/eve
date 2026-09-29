@@ -36,7 +36,6 @@ import { compileConnectionDefinition } from "#compiler/normalize-connection.js";
 import {
   applyAgentToolPolicy,
   applyDefaultToolPolicy,
-  assertFrameworkToolPolicy,
   canDisableToolWithoutSelectedSource,
 } from "#compiler/default-tool-policy.js";
 import {
@@ -600,7 +599,6 @@ class AgentGraphCompiler {
             binding: binding!,
             loadNamespace,
           });
-          assertFrameworkToolPolicy(candidate, result);
           if (result.kind === "disabled") {
             state.composed = disableComposedCandidate({
               allowUnmatched: canDisableToolWithoutSelectedSource(state, result.name),

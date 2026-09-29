@@ -2,7 +2,6 @@ import { defineJsonSchema } from "#tools/schema.js";
 
 import { loadContext } from "#context/container.js";
 import { DynamicSkillManifestKey } from "#context/keys.js";
-import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { stripSkillFrontmatter } from "#shared/skill-package.js";
 
@@ -33,17 +32,7 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
   const availableSkills = [
     ...new Set([...dynamicSkills, ...authoredSkills].map((entry) => entry.name)),
   ].sort();
-  const message = formatSkillNotFoundError(skill, availableSkills);
-  const connectionName = ctx
-    .get(ConnectionRegistryKey)
-    ?.getConnectionNames()
-    .find((name) => name.toLowerCase() === skill.toLowerCase());
-  if (connectionName === undefined) throw new Error(message);
-
-  throw new Error(
-    `${message} "${connectionName}" is an installed connection, not a skill. ` +
-      `Use connection_search with connection "${connectionName}" to find its tools.`,
-  );
+  throw new Error(formatSkillNotFoundError(skill, availableSkills));
 }
 
 function formatSkillNotFoundError(skill: string, availableSkills: readonly string[]): string {

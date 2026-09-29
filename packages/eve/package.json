@@ -182,11 +182,6 @@
       "import": "./dist/src/public/tools/load-skill.js",
       "default": "./dist/src/public/tools/load-skill.js"
     },
-    "./tools/connection_search": {
-      "types": "./dist/src/public/tools/connection-search.d.ts",
-      "import": "./dist/src/public/tools/connection-search.js",
-      "default": "./dist/src/public/tools/connection-search.js"
-    },
     "./tools/glob": {
       "types": "./dist/src/public/tools/glob.d.ts",
       "import": "./dist/src/public/tools/glob.js",

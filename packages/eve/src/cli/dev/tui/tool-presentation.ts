@@ -92,13 +92,6 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     singularNoun: "command",
     pluralNoun: "commands",
   },
-  connection_search: {
-    verb: "Discover",
-    pastVerb: "Discovered",
-    argKey: "keywords",
-    singularNoun: "tool search",
-    pluralNoun: "tool searches",
-  },
   glob: {
     verb: "Glob",
     pastVerb: "Globbed",

@@ -1,12 +1,7 @@
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
-import type {
-  ResolvedConnectionDefinition,
-  ResolvedInstructionsDefinition,
-  ResolvedSkillDefinition,
-} from "#runtime/types.js";
+import type { ResolvedInstructionsDefinition, ResolvedSkillDefinition } from "#runtime/types.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
-import { formatConnectionsSection } from "#runtime/prompt/connections.js";
 
 const PARALLEL_ACTION_INSTRUCTION =
   "Tool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other.";
@@ -16,7 +11,6 @@ const PARALLEL_ACTION_INSTRUCTION =
  * resolved agent.
  */
 interface ComposeRuntimeBasePromptInput {
-  connections?: readonly ResolvedConnectionDefinition[];
   instructions?: readonly ResolvedInstructionsDefinition[];
   skills?: readonly ResolvedSkillDefinition[];
   toolsAvailable?: boolean;
@@ -32,7 +26,6 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
     ...createInstructionsPromptBlocks(input.instructions),
     ...createWorkspacePromptBlocks(input.workspaceSpec),
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
-    ...createConnectionsPromptBlocks(input.connections),
     ...createSkillsPromptBlocks(input.skills),
   ];
 }
@@ -65,13 +58,6 @@ function createWorkspacePromptBlocks(
 
   const workspaceSection = createWorkspacePromptSection(workspaceSpec);
   return workspaceSection === undefined ? [] : [workspaceSection];
-}
-
-function createConnectionsPromptBlocks(
-  connections: readonly ResolvedConnectionDefinition[] | undefined,
-): readonly string[] {
-  if (!connections || connections.length === 0) return [];
-  return [formatConnectionsSection(connections)];
 }
 
 function createSkillsPromptBlocks(

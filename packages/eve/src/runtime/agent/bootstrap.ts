@@ -106,7 +106,6 @@ export function createResolvedRuntimeTurnAgent(input: {
       .filter((entry) => entry.role === "user" && entry.content.trim().length > 0)
       .map((entry) => createFrameworkUserMessage("context.instruction", entry.content.trim())),
     instructions: composeRuntimeBasePrompt({
-      connections: agent.connections,
       instructions: agent.instructions,
       toolsAvailable: input.tools.length > 0,
       workspaceSpec: agent.workspaceSpec,

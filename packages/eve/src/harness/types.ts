@@ -295,8 +295,6 @@ export interface ToolLoopHarnessConfig {
     readonly sequence: number;
     readonly turnId: string;
   }) => Promise<void>;
-  /** Opaque runtime identity retained by a pending approval batch. */
-  readonly toolReplayIdentity?: (toolName: string) => string | undefined;
   /** Resolves persisted step-scoped tools before an approval policy reads them. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

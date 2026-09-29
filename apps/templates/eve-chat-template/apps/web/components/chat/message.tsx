@@ -672,22 +672,12 @@ function needsInputResponse(part: EveDynamicToolPart) {
 }
 
 function hasToolDetails(part: EveDynamicToolPart) {
-  if (isConnectionSearchTool(part)) {
-    return false;
-  }
-
   const hasInput = part.input !== undefined && formatPayload(part.input).trim().length > 0;
   const hasOutput =
     part.state === "output-available" && formatPayload(part.output).trim().length > 0;
   const hasError = part.state === "output-error" && part.errorText.trim().length > 0;
 
   return hasInput || hasOutput || hasError || Boolean(part.toolMetadata?.eve?.inputRequest);
-}
-
-function isConnectionSearchTool(part: EveDynamicToolPart) {
-  const normalized = normalizeToolName(resolveToolName(part));
-
-  return normalized.includes("connection") && normalized.includes("search");
 }
 
 function getToolStatus(part: EveDynamicToolPart): ToolStatus {

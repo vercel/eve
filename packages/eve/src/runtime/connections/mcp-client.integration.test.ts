@@ -149,42 +149,6 @@ describe.each(["static", "dynamic"] as const)(
       ]);
     });
 
-    it("projects call results for the model with the SDK's MCP conversion", async () => {
-      await createClient(false);
-      const project = async (result: Record<string, unknown>) => {
-        callResult = result;
-        const output = await client.executeTool("getMyUser", {}, { callId: "read-user" });
-        return client.toModelOutput("getMyUser", output);
-      };
-
-      await expect(
-        project({
-          _meta: { "io.modelcontextprotocol/serverInfo": { name: "fixture", version: "1" } },
-          content: [{ type: "text", text: '{"seats":132}' }],
-          structuredContent: { seats: 132 },
-        }),
-      ).resolves.toEqual({ type: "content", value: [{ type: "text", text: '{"seats":132}' }] });
-      await expect(
-        project({ content: [{ type: "text", text: "no such user" }], isError: true }),
-      ).resolves.toEqual({
-        type: "content",
-        value: [
-          { type: "text", text: "Tool call failed:" },
-          { type: "text", text: "no such user" },
-        ],
-      });
-      await expect(
-        project({ isError: true, structuredContent: { code: "NOT_FOUND" } }),
-      ).resolves.toEqual({
-        type: "content",
-        value: [
-          { type: "text", text: "Tool call failed:" },
-          { type: "text", text: '{"code":"NOT_FOUND"}' },
-        ],
-      });
-      await expect(client.toModelOutput("missing", {})).resolves.toBeUndefined();
-    });
-
     it.each([undefined, true])("keeps discovery enabled when the option is %s", async (option) => {
       await createClient(option);
       discoveryError = undefined;

@@ -158,27 +158,6 @@ export class McpConnectionClient implements ConnectionClient {
     }
   }
 
-  /**
-   * Projects a `tools/call` result with the AI SDK tool's own
-   * `toModelOutput`: the result's `content` blocks as text and file parts,
-   * without the `_meta` envelope or the `structuredContent` copy. That
-   * conversion drops `isError`, so failed calls get a leading marker.
-   */
-  async toModelOutput(toolName: string, output: unknown): Promise<unknown> {
-    const { tools } = await this.#ensureTools();
-    const convert = tools[toolName]?.toModelOutput;
-    if (convert === undefined) return undefined;
-    // The SDK conversion reads only `output`.
-    const modelOutput = await convert({ input: undefined, output, toolCallId: "" });
-    if (!isObject(output) || output.isError !== true || modelOutput.type !== "content") {
-      return modelOutput;
-    }
-    return {
-      type: "content",
-      value: [{ type: "text", text: "Tool call failed:" }, ...modelOutput.value],
-    };
-  }
-
   async #ensureTools(): Promise<McpToolCache> {
     if (this.#tools !== undefined) {
       return this.#tools;
@@ -407,8 +386,7 @@ export function passesToolFilter(
  * {@link SessionContext}, then resolves the {@link ConnectionPrincipal}
  * and invokes `authorization.getToken({ principal })` to produce the bearer.
  * `getToken` may throw {@link ConnectionAuthorizationRequiredError};
- * callers (`connection_search`, wrapped connection tools) catch it
- * and it propagates as-is from here.
+ * callers catch it and it propagates as-is from here.
  */
 export async function resolveHeaders(
   connection: ResolvedConnectionDefinition,

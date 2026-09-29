@@ -3,26 +3,7 @@ import type {
   FinalizedNodeSourceState,
   PhaseOneNodeSourceState,
 } from "#compiler/node-source-state.js";
-import type { CompiledToolEntry } from "#compiler/normalize-tool.js";
-import {
-  canonicalSourceSlot,
-  composeAgentModuleCandidates,
-  type AgentSourceCandidate,
-} from "#compiler/source-graph.js";
-
-const REQUIRED_FRAMEWORK_TOOL_SLOTS = new Set(["tools/connection_search"]);
-
-export function assertFrameworkToolPolicy(
-  candidate: AgentSourceCandidate,
-  result: CompiledToolEntry,
-): void {
-  const slot = canonicalSourceSlot(candidate.logicalPath);
-  if (slot === "tools/connection_search" && result.kind === "disabled") {
-    throw new Error(
-      'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
-    );
-  }
-}
+import { canonicalSourceSlot, composeAgentModuleCandidates } from "#compiler/source-graph.js";
 
 export function applyAgentToolPolicy(
   phaseOne: PhaseOneNodeSourceState,
@@ -70,7 +51,6 @@ export function applyDefaultToolPolicy(
       return (
         candidate.layer !== "framework-default" ||
         !slot.startsWith("tools/") ||
-        REQUIRED_FRAMEWORK_TOOL_SLOTS.has(slot) ||
         overriddenSlots.has(slot)
       );
     }),
