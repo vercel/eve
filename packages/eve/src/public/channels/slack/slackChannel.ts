@@ -186,8 +186,8 @@ export interface SlackAuthorizationEventContext {
    */
   readonly postDirectMessage: SlackThread["postDirectMessage"];
   /**
-   * Hydrated per-session channel state — read `triggeringUserId` to
-   * target the delivery.
+   * Hydrated per-session channel state. Resolve the recipient with
+   * `slackUsersByPrincipal[eventData.principalId]`.
    */
   readonly state: SlackChannelState;
 }
@@ -236,9 +236,8 @@ export interface SlackChannelState {
   installationTeamId?: string | null;
   /**
    * Slack user id of the actor that triggered the current session/turn.
-   * Captured on every inbound mention so default handlers (e.g.
-   * `authorization.required`) can target ephemeral feedback at the right
-   * user without re-parsing the mention payload.
+   * A later message can change it, so sign-in and approval handlers address
+   * recipients through `slackUsersByPrincipal` instead.
    */
   triggeringUserId?: string | null;
   /**

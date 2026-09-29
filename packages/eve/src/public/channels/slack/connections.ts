@@ -7,9 +7,9 @@
  * posted sign-in link and bind their own identity to the session. The
  * default handler therefore posts a link-free public status while
  * delivering the actual challenge as an ephemeral "Sign in"
- * message visible only to the triggering user.
+ * message visible only to the Slack user behind the event's `principalId`.
  *
- * When no user can be targeted (no triggering user id, no challenge
+ * When no user can be targeted (no Slack user for the principal, no challenge
  * URL, or the ephemeral delivery fails), the public status still leaves
  * the shared thread with safe progress feedback. The matching
  * `authorization.completed` handler edits that status post in place to
@@ -34,16 +34,16 @@ export function formatConnectionDisplayName(connectionName: string): string {
 /**
  * Public status text for an authorization challenge. Deliberately
  * link-free: it must stay safe to post in a shared thread. When the
- * channel cannot identify a triggering user (rare — schedule-initiated
- * sessions or events that lack actor metadata) the text drops the
- * "Connect with" call-to-action since there's no one to act on it.
+ * principal has no Slack user in this thread (schedule-initiated sessions,
+ * or principals never seen here) the text drops the "Connect with"
+ * call-to-action since no one received the link.
  */
 export function buildAuthRequiredPublicText(input: {
   readonly displayName: string;
-  readonly hasUser: boolean;
+  readonly hasRecipient: boolean;
 }): string {
-  if (!input.hasUser) {
-    return `Authorization required for ${input.displayName} (no triggering user)`;
+  if (!input.hasRecipient) {
+    return `Authorization required for ${input.displayName} (couldn't send the sign-in link privately)`;
   }
   return `Connect with ${input.displayName} to continue`;
 }

@@ -558,7 +558,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
 
   async "authorization.required"(event, channel, _ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    const triggeringUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
+    const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
     const challengeUrl = event.authorization?.url;
 
     // Post a public, link-free status so everyone in the thread can see
@@ -568,7 +568,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (event.candidateId === undefined && pending[event.name] === undefined) {
       const publicText = buildAuthRequiredPublicText({
         displayName,
-        hasUser: triggeringUserId !== null,
+        hasRecipient: recipientUserId !== null,
       });
       try {
         const sent = await channel.thread.post(publicText);
@@ -587,12 +587,12 @@ export const defaultEvents: SlackChannelInternalEvents = {
     }
 
     // The challenge is user-specific: the sign-in link (and device code)
-    // must only ever be visible to the triggering user, never posted into
+    // must only ever be visible to the person who started the sign-in, never posted into
     // the shared thread.
-    if (triggeringUserId && challengeUrl) {
+    if (recipientUserId && challengeUrl) {
       const userCode = event.authorization?.userCode;
       try {
-        await channel.thread.postEphemeral(triggeringUserId, {
+        await channel.thread.postEphemeral(recipientUserId, {
           blocks: buildAuthEphemeralBlocks({
             displayName,
             url: challengeUrl,

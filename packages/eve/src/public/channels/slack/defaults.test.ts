@@ -519,7 +519,7 @@ describe("defaultEvents approval lifecycle", () => {
 });
 
 describe("defaultEvents authorization.required", () => {
-  it("posts a public status and delivers the challenge ephemerally to the triggering user", async () => {
+  it("posts a public status and delivers the challenge ephemerally to the event principal", async () => {
     const { channel, post, postEphemeral } = buildChannelStub(RECIPIENT);
 
     await defaultEvents["authorization.required"]!(authRequiredEvent(), channel, sessionCtx);
@@ -633,7 +633,9 @@ describe("defaultEvents authorization.required", () => {
     expect(postEphemeral).not.toHaveBeenCalled();
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Authorization required for Notion (no triggering user)");
+    expect(publicText).toBe(
+      "Authorization required for Notion (couldn't send the sign-in link privately)",
+    );
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
   });
