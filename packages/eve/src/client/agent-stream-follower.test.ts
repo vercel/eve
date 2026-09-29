@@ -116,8 +116,14 @@ function setup() {
   };
 }
 
-const call = (callId: string, name = "researcher") =>
-  createTaskStartedEvent({ callId, name, taskId: "task_1", turnId: "root-turn" });
+const call = (callId: string, kind: "agent" | "tool" = "agent") =>
+  createTaskStartedEvent({
+    callId,
+    kind,
+    name: kind === "agent" ? "researcher" : "triage",
+    taskId: "task_1",
+    turnId: "root-turn",
+  });
 const settle = (callId: string) =>
   createTaskSettledEvent({
     callId,
@@ -126,10 +132,10 @@ const settle = (callId: string) =>
     taskId: "task_1",
     turnId: "root-turn",
   });
-const agentStarted = (name = "researcher") =>
+const agentStarted = () =>
   createAgentStartedEvent({
     callId: "call_a",
-    name,
+    name: "researcher",
     parentSessionId: "root",
     sessionId: "child",
     taskId: "task_1",
@@ -189,8 +195,8 @@ describe("agent session following", () => {
   it("leaves sessions other tools open to the caller", () => {
     const child = serveChild([]);
     const owner = setup();
-    owner.root(call("call_a", "triage"));
-    owner.root(agentStarted("researcher"));
+    owner.root(call("call_a", "tool"));
+    owner.root(agentStarted());
     expect(child.requests).toHaveLength(0);
     expect(owner.state.agents.child?.observation.status).toBe("not-followed");
   });

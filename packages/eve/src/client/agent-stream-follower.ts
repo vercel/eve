@@ -1,6 +1,6 @@
 import {
+  agentToolTask,
   isAgentSessionCaughtUp,
-  isAgentToolSession,
   type ConversationState,
 } from "#client/conversation-state.js";
 import type { ClientSession } from "#client/session.js";
@@ -53,7 +53,7 @@ export class AgentStreamFollower {
     if (this.#disposed) return;
     const state = this.#options.getState();
     for (const agent of Object.values(state.agents)) {
-      if (!isAgentToolSession(state, agent)) continue;
+      if (agentToolTask(state, agent) === undefined) continue;
       const controller = this.#controllers.get(agent.sessionId);
       const caughtUp = isAgentSessionCaughtUp(state, agent);
       if (controller !== undefined && caughtUp) {

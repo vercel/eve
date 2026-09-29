@@ -59,7 +59,13 @@ const received = (turnId: string, message: string) =>
 const turnStarted = (turnId: string) => createTurnStartedEvent({ sequence: 0, turnId });
 const turnCompleted = (turnId: string) => createTurnCompletedEvent({ sequence: 0, turnId });
 const call = (callId: string) =>
-  createTaskStartedEvent({ callId, name: "researcher", taskId: "task_1", turnId: "root-turn" });
+  createTaskStartedEvent({
+    callId,
+    kind: "agent",
+    name: "researcher",
+    taskId: "task_1",
+    turnId: "root-turn",
+  });
 const settle = (callId: string) =>
   createTaskSettledEvent({
     callId,

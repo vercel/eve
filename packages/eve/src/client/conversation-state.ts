@@ -35,6 +35,11 @@ export interface ConversationTask {
   readonly taskId: string;
   /** The tool whose call started the task. */
   readonly name: string;
+  /**
+   * `"agent"` when a subagent's tool, local or remote, started the task; `"tool"` for an authored
+   * tool, including one that opens sessions with `ctx.agent`.
+   */
+  readonly kind: "agent" | "tool";
   /** Calls in the order they started or reached the task. */
   readonly calls: Readonly<Record<string, ConversationTaskCall>>;
 }
@@ -96,24 +101,26 @@ export function hasPendingAuthorizations(state: ConversationState): boolean {
 }
 
 /**
- * The session an agent tool forwards its task's calls to. eve's agent tools send each call as one
- * message, in call order, which is what lets a client attribute the session's turns to calls.
+ * The agent task whose calls a session receives, when the session is that agent's own. eve's agent
+ * tools send each call as one message, in call order, which is what lets a client attribute the
+ * session's turns to calls. A session an authored tool opens with `ctx.agent` has no such task.
  */
+export function agentToolTask(
+  state: ConversationState,
+  agent: ConversationAgentSession,
+): ConversationTask | undefined {
+  const task = agent.taskId === undefined ? undefined : state.tasks[agent.taskId];
+  return task?.kind === "agent" ? task : undefined;
+}
+
+/** The session an agent tool forwards its task's calls to. */
 export function agentToolSession(
   state: ConversationState,
   task: ConversationTask,
 ): ConversationAgentSession | undefined {
   return Object.values(state.agents).find(
-    (agent) => agent.taskId === task.taskId && agent.name === task.name,
+    (agent) => agentToolTask(state, agent)?.taskId === task.taskId,
   );
-}
-
-export function isAgentToolSession(
-  state: ConversationState,
-  agent: ConversationAgentSession,
-): boolean {
-  const task = agent.taskId === undefined ? undefined : state.tasks[agent.taskId];
-  return task !== undefined && task.name === agent.name;
 }
 
 /**
@@ -128,7 +135,7 @@ export function isAgentSessionCaughtUp(
   if (agent.observation.status !== "following" && agent.observation.status !== "idle") {
     return false;
   }
-  const task = agent.taskId === undefined ? undefined : state.tasks[agent.taskId];
+  const task = agentToolTask(state, agent);
   if (task === undefined) return false;
   const calls = Object.values(task.calls);
   if (calls.some((call) => call.status === "working")) return false;

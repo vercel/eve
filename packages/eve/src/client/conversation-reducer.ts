@@ -120,8 +120,8 @@ function reduceConversationLifecycle(
     case "session.failed":
       return state.activeTurnId === undefined ? state : { ...state, activeTurnId: undefined };
     case "task.started": {
-      const { callId, name, taskId, turnId } = event.data;
-      const task = state.tasks[taskId] ?? { taskId, name, calls: {} };
+      const { callId, kind, name, taskId, turnId } = event.data;
+      const task = state.tasks[taskId] ?? { taskId, name, kind, calls: {} };
       if (task.calls[callId] !== undefined) return state;
       return {
         ...state,

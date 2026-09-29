@@ -67,12 +67,14 @@ describe("conversation reducer tasks and agent sessions", () => {
     const state = reduce([
       createTaskStartedEvent({
         callId: "call_1",
+        kind: "agent",
         name: "researcher",
         taskId: "task_1",
         turnId: "t1",
       }),
       createTaskStartedEvent({
         callId: "call_2",
+        kind: "agent",
         name: "researcher",
         taskId: "task_1",
         turnId: "t2",
@@ -102,6 +104,7 @@ describe("conversation reducer tasks and agent sessions", () => {
     expect(state.tasks.task_1).toEqual({
       taskId: "task_1",
       name: "researcher",
+      kind: "agent",
       calls: {
         call_1: { callId: "call_1", turnId: "t1", status: "completed", output: "Bob's summary." },
         call_2: {

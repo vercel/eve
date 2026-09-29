@@ -437,6 +437,7 @@ describe("EveAgentStore held turns", () => {
       createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
       createTaskStartedEvent({
         callId: "call_1",
+        kind: "agent",
         name: "researcher",
         taskId: "task_1",
         turnId: "turn_1",
@@ -497,6 +498,7 @@ describe("EveAgentStore agent-session following", () => {
     stampTestEvents([
       createTaskStartedEvent({
         callId: "call_1",
+        kind: "agent",
         name: "research",
         taskId: "task_1",
         turnId: "turn_1",
