@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Approval response policies now receive `request.requester`, the person whose turn made the call, so a policy can let only that person approve it in a shared conversation. It is `null` when the caller was unauthenticated or anonymous.
+Approval response policies now receive `request.principal`, the person whose turn requested the call, so a policy can let only that person approve it in a shared conversation. It is `null` when the caller was unauthenticated or anonymous.

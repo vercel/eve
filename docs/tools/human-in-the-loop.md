@@ -114,14 +114,14 @@ export default defineTool({
 The `response` policy receives:
 
 - `responder`: the authenticated principal that submitted the response, including its `principalId`, `principalType`, `authenticator`, and `attributes`. Your route or channel supplies this identity.
-- `request`: the stable `requestId`, `callId`, `toolName`, and typed `toolInput` for the call being approved, plus `requester`: the authenticated principal whose turn made the call, or `null` when that caller was unauthenticated or anonymous. eve captures `requester` when the approval is requested, so it stays the same while other people continue the session.
+- `request`: the stable `requestId`, `callId`, `toolName`, and typed `toolInput` for the call being approved, plus `principal`: the authenticated principal whose turn requested the call, or `null` when that caller was unauthenticated or anonymous. eve captures `request.principal` when the approval is requested, so it stays the same while other people continue the session.
 - `response`: the submitted decision. Response policies run for approval, so its current value is `{ decision: "approve" }`.
 - `session`: read-only session identity and lineage: `id`, `initiator`, `parent`, and `turn`.
 - `auth`: narrow `getToken(provider, options?)` and `requireAuth(provider, options?)` capabilities bound to the responder. Use these when authorization depends on a provider identity or permission; an interactive provider flow parks durably and then retries the policy.
 
 Return `{ status: "allowed" }` to accept the approval. Return `{ status: "rejected", reason }` to leave the shared request pending so another eligible responder can approve it.
 
-`session.initiator` is the person who started the session, and `request.requester` is the person who asked for this call. In a shared thread they can differ. Compare the full identity of `responder` with `request.requester` to let only the requester approve the call:
+`session.initiator` is the person who started the session, and `request.principal` is the person who asked for this call. In a shared thread they can differ. Compare the full identity of `responder` with `request.principal` to let only the requester approve the call:
 
 ```ts title="agent/tools/publish_release.ts"
 import { defineTool } from "eve/tools";
@@ -143,9 +143,9 @@ export default defineTool({
   inputSchema: z.object({ version: z.string() }),
   approval: {
     request: always(),
-    // `requester` is null for an unauthenticated or anonymous caller, so no one matches it.
+    // `request.principal` is null for an unauthenticated or anonymous caller, so no one matches it.
     response: ({ request, responder }) =>
-      request.requester !== null && samePrincipal(responder, request.requester)
+      request.principal !== null && samePrincipal(responder, request.principal)
         ? { status: "allowed" }
         : {
             status: "rejected",

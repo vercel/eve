@@ -326,7 +326,7 @@ async function authorizeCandidate(input: {
         request: {
           callId: input.request.action.callId,
           requestId: input.request.requestId,
-          requester: pendingInputRequester(session.state, input.request.requestId),
+          principal: pendingInputRequester(session.state, input.request.requestId),
           toolInput: input.request.action.input,
           toolName: input.request.action.toolName,
         },

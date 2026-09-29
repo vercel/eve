@@ -101,7 +101,10 @@ describe("coordinateApprovalDelivery", () => {
     const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
     await authorize(ingested.session, response);
     expect(response).toHaveBeenCalledWith(
-      expect.objectContaining({ request: expect.objectContaining({ requester }), responder }),
+      expect.objectContaining({
+        request: expect.objectContaining({ principal: requester }),
+        responder,
+      }),
     );
   });
 
@@ -116,7 +119,7 @@ describe("coordinateApprovalDelivery", () => {
     const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
     await authorize(ingested.session, response);
     expect(response).toHaveBeenCalledWith(
-      expect.objectContaining({ request: expect.objectContaining({ requester: null }) }),
+      expect.objectContaining({ request: expect.objectContaining({ principal: null }) }),
     );
   });
 

@@ -49,7 +49,7 @@ export interface ApprovalRequest<TInput = Record<string, unknown>> {
    * request is pending, however many people continue the session, and is
    * `null` when that caller was unauthenticated or anonymous.
    */
-  readonly requester: SessionAuthContext | null;
+  readonly principal: SessionAuthContext | null;
   readonly toolInput?: ApprovalToolInput<TInput>;
   readonly toolName: string;
 }
