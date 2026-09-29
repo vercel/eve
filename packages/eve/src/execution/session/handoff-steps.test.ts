@@ -55,7 +55,7 @@ describe("validateSessionCheckpointStep", () => {
     );
   });
 
-  it.each([5, 6, 7, 8, 10, 11])(
+  it.each([5, 6, 7, 8, 9, 11])(
     "rejects checkpoint version %s before reading nested state",
     async (version) => {
       const checkpoint = createCheckpoint();

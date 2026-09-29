@@ -201,9 +201,8 @@ Extension state belongs to the logical mount path (for example, `extensions/crm`
 
 Deployments before this release stored extension state under package-prefixed keys. eve does not migrate that state to mount-owned keys or reset it during restore.
 
-- For agents with extensions, older session checkpoints and local context snapshots are incompatible. Keep the original deployment available to finish those sessions, or start new sessions on the updated deployment.
-- Checkpoints written before this release for agents without extensions can resume if they contain no unrecognized state keys.
-- Sessions written with mount-owned state cannot hand back to a pre-upgrade deployment.
+- Session handoffs across this upgrade boundary are rejected in both directions, including for agents without extensions. Keep each session's owning deployment available until the session finishes, or start a new session on the deployment you want to use.
+- Local context snapshots use a separate state-layout check. Older snapshots for agents with extensions are incompatible; snapshots for agents without extensions can restore if they contain no unrecognized state keys.
 
 ### Use an extension in a workspace
 

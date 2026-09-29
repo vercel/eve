@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Extension configuration and durable state now belong to each logical mount, so duplicate mounts can use independent config and state. eve rejects handoffs from older deployments instead of migrating them. Finish sessions that hold legacy extension state on their original deployment, or start new sessions on the updated one.
+Extension configuration and durable state now belong to each logical mount, so duplicate mounts can use independent config and state. Session handoffs across this upgrade boundary are rejected in both directions, including for agents without extensions; keep each session's owning deployment available until it finishes, or start a new session on the deployment you want to use.
