@@ -1,5 +1,3 @@
-import { hasRunUsage } from "#execution/agent-sessions/usage.js";
-import { applyRunUsageStep } from "#execution/agent-sessions/usage-step.js";
 import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
 import {
   emitAgentStartedStep,
@@ -37,16 +35,12 @@ export async function handleWorkflowToolRunMessage(
 ): Promise<RuntimeActionResult | undefined> {
   const { message } = input;
   switch (message.kind) {
-    // Only task runs report started or reply, and the session applies those to the task table.
+    // Only task runs report started, reply, or usage, and the session applies those to the task table.
     case "started":
     case "reply":
+    case "usage":
       return undefined;
     case "outcome":
-      if (hasRunUsage(input.cursor.sessionState.snapshot.session.state, message.from.runId)) {
-        await input.cursor.apply(
-          await applyRunUsageStep({ message, sessionState: input.cursor.sessionState }),
-        );
-      }
       return await handleWorkflowToolRunOutcome({ ...input, message });
     case "request":
       await handleWorkflowToolRunRequest({ ...input, message });
@@ -66,11 +60,6 @@ export async function handleWorkflowToolRunMessage(
     case "agent-started":
       await input.cursor.apply(
         await emitAgentStartedStep({ ...input.cursor.stepState(), message }),
-      );
-      return undefined;
-    case "usage":
-      await input.cursor.apply(
-        await applyRunUsageStep({ message, sessionState: input.cursor.sessionState }),
       );
       return undefined;
   }

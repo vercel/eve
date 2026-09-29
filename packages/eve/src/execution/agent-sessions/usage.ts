@@ -1,5 +1,3 @@
-import type { WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
-import type { WorkflowToolRunUsageMessage } from "#execution/tools/workflow/messages.js";
 import {
   accumulateSessionUsage,
   getTurnUsageState,
@@ -12,103 +10,61 @@ import type { SessionStateMap } from "#harness/types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 // A delegated agent's spend counts against the session that delegated to it.
-// Each turn of a `ctx.agent` session reports its usage to the run that opened
-// the session, and the run reports its running total to its calling session,
-// which folds it into its own session totals. A child's reported usage already
-// includes what its own children spent, so a chain of agents adds up at every
-// level.
+// A run tallies what its `ctx.agent` sessions spend, and its replies and
+// outcome carry the running total to its calling session, which counts it in
+// the step that applies them. A `serve` run sends the total on its own only for
+// a turn no reply will carry. A run's messages reach the session in the order
+// it sent them, so each total is at least the last one counted. A child's
+// usage already includes what its own children spent, so a chain of agents
+// adds up at every level.
 
-const RUN_USAGE_STATE_KEY = "eve.agentSessions.runUsage";
+/** What a run's `ctx.agent` sessions have spent, turn by turn. */
+export interface RunUsageTally {
+  /** Adds one ended turn's usage. */
+  record(turnUsage: TokenUsage): void;
+  /** The running total, or `undefined` before any turn ended. */
+  total(): TokenUsage | undefined;
+}
 
-/** The latest usage report the session applied from each run that sent one. */
-type RunUsageLedger = Readonly<
-  Record<string, Pick<WorkflowToolRunUsageMessage, "sequence" | "usage">>
->;
-
-/** Reports each ended turn of a run's sessions, as the run's running total, to its calling session. */
-export function createRunUsageReporter(
-  run: Pick<WorkflowToolRunContext, "from" | "owner">,
-): (turnUsage: TokenUsage) => Promise<void> {
-  let sequence = 0;
+/** `onRecord` runs after each recorded turn, so the run can send a total no reply will carry. */
+export function createRunUsageTally(onRecord?: () => void): RunUsageTally {
   let spent: TurnUsageState | undefined;
-  return async (turnUsage) => {
-    sequence += 1;
-    spent = accumulateSessionUsage({ previous: spent, usage: turnUsage });
-    await run.owner.send({
-      from: run.from,
-      kind: "usage",
-      sequence,
-      usage: toUsage(spent.session),
-    });
+  return {
+    record(turnUsage) {
+      spent = accumulateSessionUsage({ previous: spent, usage: turnUsage });
+      onRecord?.();
+    },
+    total() {
+      return spent === undefined ? undefined : toUsage(spent.session);
+    },
   };
 }
 
 /**
- * Adds what a run's report adds to the last one the session applied from that
- * run. A report no newer than that one adds nothing: it is a redelivery, or an
- * earlier report the applied one already includes.
+ * Adds a run's delegated spend to the session's totals: its running `total`,
+ * less the part of it `counted` earlier.
  */
-export function foldRunUsage<T extends { readonly state?: SessionStateMap }>(
+export function countRunUsage<T extends { readonly state?: SessionStateMap }>(
   session: T,
-  report: Pick<WorkflowToolRunUsageMessage, "from" | "sequence" | "usage">,
+  total: TokenUsage,
+  counted?: TokenUsage,
 ): T {
-  const ledger = readLedger(session.state);
-  const { runId } = report.from;
-  const applied = ledger[runId];
-  if (applied !== undefined && report.sequence <= applied.sequence) return session;
-  const folded = setTurnUsageState(
+  return setTurnUsageState(
     session,
     accumulateSessionUsage({
       previous: getTurnUsageState(session.state),
-      usage: usageSince(report.usage, applied?.usage),
+      usage: usageSince(total, counted),
     }),
   );
-  return writeLedger(folded, {
-    ...ledger,
-    [runId]: { sequence: report.sequence, usage: report.usage },
-  });
 }
 
-/** Whether the session applied a usage report from the run. */
-export function hasRunUsage(state: SessionStateMap | undefined, runId: string): boolean {
-  return readLedger(state)[runId] !== undefined;
-}
-
-/**
- * Drops a run's entry once the run has ended. A run sends its outcome only
- * after every other message, redeliveries included, so nothing from it follows.
- */
-export function forgetRunUsage<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  runId: string,
-): T {
-  const ledger = readLedger(session.state);
-  if (ledger[runId] === undefined) return session;
-  const { [runId]: _ended, ...rest } = ledger;
-  return writeLedger(session, rest);
-}
-
-function usageSince(total: TokenUsage, applied: TokenUsage | undefined): TokenUsageDelta {
-  if (applied === undefined) return total;
+function usageSince(total: TokenUsage, counted: TokenUsage | undefined): TokenUsageDelta {
+  if (counted === undefined) return total;
   return {
-    cacheReadTokens: total.cacheReadTokens - applied.cacheReadTokens,
-    cacheWriteTokens: total.cacheWriteTokens - applied.cacheWriteTokens,
-    costUsd: total.costUsd === undefined ? undefined : total.costUsd - (applied.costUsd ?? 0),
-    inputTokens: total.inputTokens - applied.inputTokens,
-    outputTokens: total.outputTokens - applied.outputTokens,
+    cacheReadTokens: total.cacheReadTokens - counted.cacheReadTokens,
+    cacheWriteTokens: total.cacheWriteTokens - counted.cacheWriteTokens,
+    costUsd: total.costUsd === undefined ? undefined : total.costUsd - (counted.costUsd ?? 0),
+    inputTokens: total.inputTokens - counted.inputTokens,
+    outputTokens: total.outputTokens - counted.outputTokens,
   };
-}
-
-function readLedger(state: SessionStateMap | undefined): RunUsageLedger {
-  return (state?.[RUN_USAGE_STATE_KEY] as RunUsageLedger | undefined) ?? {};
-}
-
-function writeLedger<T extends { readonly state?: SessionStateMap }>(
-  session: T,
-  ledger: RunUsageLedger,
-): T {
-  const state = { ...session.state };
-  if (Object.keys(ledger).length === 0) delete state[RUN_USAGE_STATE_KEY];
-  else state[RUN_USAGE_STATE_KEY] = ledger;
-  return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
 }

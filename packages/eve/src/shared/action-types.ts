@@ -244,12 +244,11 @@ const runtimeToolResultActionResultSchema = z
  *
  * `outcome` is the child engine's explicit lifecycle verdict for the settled
  * turn. The run that opened the child reads the turn's status from `outcome`
- * and reports `outcome.usageDelta` to its calling session, which folds it into
- * its session totals once; `output`/`isError` remain the tool-result
- * projection shown to the model. Every producer states the
- * envelope explicitly, so the parent never infers lifecycle from an absent
- * field. `usage`
- * carries the turn's token spend so the caller can attribute the
+ * and adds `outcome.usageDelta` to the running total it reports to its calling
+ * session, which counts it once; `output`/`isError` remain the tool-result
+ * projection shown to the model. Every producer states the envelope
+ * explicitly, so the parent never infers lifecycle from an absent field.
+ * `usage` carries the turn's token spend so the caller can attribute the
  * subagent's tokens.
  */
 export interface RuntimeSubagentChildResult {

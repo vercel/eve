@@ -11,7 +11,16 @@ import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#chann
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { publishTurnWaitingStep } from "#execution/session/turn-waiting-step.js";
-import { createTask, readTaskTable, writeTaskTable } from "#execution/tasks/table.js";
+import {
+  createTask,
+  readTaskTable,
+  recordTaskRun,
+  settleTaskCalls,
+  writeTaskTable,
+} from "#execution/tasks/table.js";
+import { getSessionTokenUsage } from "#harness/turn-tag-state.js";
+import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -774,6 +783,183 @@ describe("SessionExecution checkpoints", () => {
 
     expect(publishTurnWaitingStep).toHaveBeenCalledTimes(1);
     expect(publishTurnWaitingStep).toHaveBeenCalledWith(expect.objectContaining({ sessionState }));
+  });
+
+  it("admits an idle agent task's usage report while the turn waits and counts it", async () => {
+    const base = state("");
+    // Alice's reviewer task answered earlier and is idle; its run is still live.
+    const created = createTask(readTaskTable(undefined), {
+      callId: "review-call",
+      kind: "agent",
+      name: "reviewer",
+      resumable: true,
+      turnId: "turn_0",
+    });
+    const running = recordTaskRun(created.table, created.taskId, {
+      hookToken: "reviewer-control",
+      runId: "reviewer-run",
+    });
+    const idle = settleTaskCalls(running, {
+      callIds: ["review-call"],
+      outcome: { output: "The plan looks ready.", status: "completed" },
+      taskId: created.taskId,
+    }).table;
+    const sessionState: DurableSessionState = {
+      ...base,
+      snapshot: { session: writeTaskTable(base.snapshot.session, idle) },
+    };
+    // A turn of the reviewer that no reply answers ends while Alice's turn waits on a call.
+    const payloads: SessionInboxPayload[] = [
+      {
+        from: {
+          callId: "review-call",
+          input: {},
+          runId: "reviewer-run",
+          sequence: 0,
+          stepIndex: 0,
+          taskId: created.taskId,
+          toolName: "reviewer",
+          turnId: "turn_0",
+        },
+        kind: "usage",
+        usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 250, outputTokens: 25 },
+      },
+      { kind: "cancel" },
+    ];
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => []),
+      hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
+      next: vi.fn(async () => payloads.shift()),
+      onDelivery: vi.fn(() => () => {}),
+      onAgentStarted: () => () => {},
+      onInterrupt: vi.fn(() => () => {}),
+      restore: vi.fn(),
+    };
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValue({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["hold-call"],
+        serializedContext: {},
+        sessionState,
+      });
+    vi.mocked(dispatchCoordinationStep)
+      .mockReset()
+      .mockResolvedValue({ results: [], serializedContext: {}, sessionState });
+    const cursor = new SessionStateCursor({
+      inbox,
+      serializedContext: {},
+      sessionState,
+      sessionWritable: new WritableStream<Uint8Array>(),
+    });
+    const execution = new SessionExecution({
+      cursor,
+      inbox,
+      queue: new SessionInputQueue(),
+      sessionId: sessionState.sessionId,
+    });
+
+    await expect(
+      execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Hold the release." }] },
+      }),
+    ).resolves.toEqual({ cancelled: true, kind: "park" });
+
+    expect(getSessionTokenUsage(cursor.sessionState.snapshot.session)).toMatchObject({
+      inputTokens: 250,
+      outputTokens: 25,
+    });
+  });
+
+  it("hands the step each workflow run's delegated usage once, even when its outcome arrives twice", async () => {
+    const base = state("");
+    const tools = ["draft", "review"];
+    const sessionState: DurableSessionState = {
+      ...base,
+      snapshot: {
+        session: tools.reduce(
+          (session, name) =>
+            registerWorkflowToolRun(session, {
+              address: { hookToken: `${name}-control`, runId: `${name}-run` },
+              callId: `${name}-call`,
+              origin: { stepIndex: 0, turnId: "turn_0" },
+              toolName: name,
+            }),
+          base.snapshot.session,
+        ),
+      },
+    };
+    const spent = (inputTokens: number): TokenUsage => ({
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      inputTokens,
+      outputTokens: 0,
+    });
+    const outcome = (name: string, inputTokens: number): SessionInboxPayload => ({
+      from: {
+        callId: `${name}-call`,
+        input: {},
+        runId: `${name}-run`,
+        sequence: 0,
+        stepIndex: 0,
+        toolName: name,
+        turnId: "turn_0",
+      },
+      kind: "outcome",
+      result: { output: `${name} finished`, status: "completed" },
+      usage: spent(inputTokens),
+    });
+    // The draft's outcome is delivered twice before the review finishes.
+    const payloads = [outcome("draft", 300), outcome("draft", 300), outcome("review", 500)];
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => []),
+      hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
+      next: vi.fn(async () => payloads.shift() ?? new Promise<never>(() => {})),
+      onDelivery: vi.fn(() => () => {}),
+      onAgentStarted: () => () => {},
+      onInterrupt: vi.fn(() => () => {}),
+      restore: vi.fn(),
+    };
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: tools.map((name) => `${name}-call`),
+        serializedContext: {},
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: {},
+        sessionState,
+      });
+    vi.mocked(dispatchCoordinationStep)
+      .mockReset()
+      .mockResolvedValue({ results: [], serializedContext: {}, sessionState });
+
+    await expect(
+      createExecution({ inbox, sessionState }).runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Draft the plan and review it." }] },
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input?.runtimeResults?.delegatedUsage).toEqual([
+      spent(300),
+      spent(500),
+    ]);
   });
 });
 

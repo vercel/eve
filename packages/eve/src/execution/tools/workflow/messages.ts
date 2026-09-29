@@ -85,6 +85,8 @@ export interface WorkflowToolRunRequestMessage {
 export interface WorkflowToolRunOutcomeMessage {
   readonly from: WorkflowToolRunRef;
   readonly result: WorkflowToolRunOutcome;
+  /** What the run's `ctx.agent` sessions spent in all, once any of their turns ended. */
+  readonly usage?: TokenUsage;
 }
 
 /**
@@ -115,23 +117,27 @@ export interface WorkflowToolRunReplyMessage {
   /** The latest call the reply settles, which the body serves now. */
   readonly from: WorkflowToolRunRef;
   readonly output: JsonValue;
+  /**
+   * What the run's `ctx.agent` sessions spent so far, once any of their turns
+   * ended. A running total, so the session counts only what it adds to the
+   * last one it counted, and a redelivered reply adds nothing.
+   */
+  readonly usage?: TokenUsage;
+}
+
+/**
+ * A `serve` body's delegated spend that no reply carries: its `ctx.agent`
+ * sessions ended a turn while no call waited for a reply, such as a turn a
+ * cancel stopped. A running total, like a reply's.
+ */
+export interface WorkflowToolRunUsageMessage {
+  readonly from: WorkflowToolRunRef;
+  readonly usage: TokenUsage;
 }
 
 /** A task's run can take commands: its control hook is registered. */
 export interface WorkflowToolRunStartedMessage {
   readonly from: WorkflowToolRunRef;
-}
-
-/**
- * What the run's `ctx.agent` sessions have spent so far, sent after each of
- * their turns ends. `usage` is the run's running total and `sequence` numbers
- * the reports, so the session counts each turn once even when a report is
- * delivered twice or overtakes an earlier one.
- */
-export interface WorkflowToolRunUsageMessage {
-  readonly from: WorkflowToolRunRef;
-  readonly sequence: number;
-  readonly usage: TokenUsage;
 }
 
 export type WorkflowToolRunMessage =

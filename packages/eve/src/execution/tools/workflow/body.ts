@@ -3,6 +3,7 @@ import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 import type { SessionContext } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import { createAgentSessions } from "#execution/agent-sessions/session.js";
+import { createRunUsageTally, type RunUsageTally } from "#execution/agent-sessions/usage.js";
 import type {
   AgentSession,
   WorkflowSharedContext,
@@ -69,6 +70,8 @@ export interface StartedWorkflowBody {
   close(): Promise<void>;
   readonly control: WorkflowBodyControl;
   readonly outcome: Promise<WorkflowToolRunOutcome>;
+  /** What the body's `ctx.agent` sessions spent, which the run's outcome carries. */
+  readonly usage: RunUsageTally;
 }
 
 type WorkflowCallContext = ToolContext & WorkflowToolContext;
@@ -147,7 +150,8 @@ export function startCallBody(input: WorkflowBodyInput): StartedWorkflowBody {
     from,
     owner: input.owner,
   };
-  const agentSessions = createAgentSessions(run);
+  const usage = createRunUsageTally();
+  const agentSessions = createAgentSessions(run, usage);
   const ctx = createCallContext(input, signals, agentSessions.open);
   attachWorkflowToolRunContext(ctx, run);
   return {
@@ -155,6 +159,7 @@ export function startCallBody(input: WorkflowBodyInput): StartedWorkflowBody {
     close: agentSessions.close,
     control: signals,
     outcome: executeCallBody(input, ctx, signals, from),
+    usage,
   };
 }
 

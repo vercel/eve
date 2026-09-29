@@ -10,9 +10,9 @@ import type { HarnessSession } from "#harness/types.js";
  *
  * The split bounds children started together by the parent's remainder as a
  * group, not each by the whole of it. Children started later see the quota
- * net of earlier children's spend, because each child turn's usage folds back
- * into the parent's session totals. A granted continuation bumps the parent's
- * runtime limit, so children started after a grant draw from the fresh window.
+ * net of the spend earlier children reported, which counts in the parent's
+ * session totals. A granted continuation bumps the parent's runtime limit, so
+ * children started after a grant draw from the fresh window.
  */
 export function resolveRemainingSessionTokenLimits(
   session: Pick<HarnessSession, "limits" | "state">,

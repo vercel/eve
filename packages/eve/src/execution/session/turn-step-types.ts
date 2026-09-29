@@ -8,6 +8,8 @@ import type { TokenUsage } from "#shared/token-usage.js";
 /** Trusted runtime-action results collected by the session owner. */
 export interface RuntimeActionResultStepInput {
   readonly acceptedAtMsByCallId?: Readonly<Record<string, number>>;
+  /** What the `ctx.agent` sessions of the `execute` runs behind these results spent. */
+  readonly delegatedUsage?: readonly TokenUsage[];
   readonly results: readonly RuntimeActionResult[];
 }
 

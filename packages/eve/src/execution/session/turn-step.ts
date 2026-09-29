@@ -67,6 +67,7 @@ import {
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
+import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
@@ -106,6 +107,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   const runtimeResults = input.input?.runtimeResults;
 
   let durableSession = readDurableSession(input.sessionState);
+  // An `execute` run's delegated spend counts in the step that hands the model its result.
+  for (const usage of runtimeResults?.delegatedUsage ?? []) {
+    durableSession = countRunUsage(durableSession, usage);
+  }
   const ctx = await deserializeContext(input.serializedContext);
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);

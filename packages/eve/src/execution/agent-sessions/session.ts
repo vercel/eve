@@ -13,12 +13,11 @@ import {
   type AgentSessionMessage,
   type OpenedAgentSession,
 } from "#execution/agent-sessions/steps.js";
-import { createRunUsageReporter } from "#execution/agent-sessions/usage.js";
+import type { RunUsageTally } from "#execution/agent-sessions/usage.js";
 import { disposeHook } from "#execution/hook-ownership.js";
 import type { WorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import { toErrorMessage } from "#shared/errors.js";
-import type { TokenUsage } from "#shared/token-usage.js";
 import { normalizeRequestedOutputSchema } from "#subagents/invocation.js";
 import { serializeOutputSchema } from "#tools/schema-emission.js";
 import type {
@@ -39,12 +38,14 @@ type AgentTurnEnd =
  * run names its session, so replay reaches the same one, and `close` ends
  * every session the run opened, cancelling any turn still running.
  */
-export function createAgentSessions(run: WorkflowToolRunContext): {
+export function createAgentSessions(
+  run: WorkflowToolRunContext,
+  usage: RunUsageTally,
+): {
   readonly close: () => Promise<void>;
   readonly open: (name: string) => AgentSession;
 } {
   const sessions: OpenedAgentSession[] = [];
-  const reportUsage = createRunUsageReporter(run);
   let handles = 0;
   return {
     open: (name) => {
@@ -53,7 +54,7 @@ export function createAgentSessions(run: WorkflowToolRunContext): {
       }
       const key = `${run.from.runId}:${String(handles)}`;
       handles += 1;
-      return new RunAgentSession({ key, name, reportUsage, run, sessions });
+      return new RunAgentSession({ key, name, run, sessions, usage });
     },
     close: async () => {
       if (sessions.length === 0) return;
@@ -75,11 +76,11 @@ interface AwaitedReply {
 class RunAgentSession implements AgentSession {
   readonly #key: string;
   readonly #name: string;
-  /** Counts each ended turn's usage against the run's calling session. */
-  readonly #reportUsage: (turnUsage: TokenUsage) => Promise<void>;
   readonly #run: WorkflowToolRunContext;
   /** Every session the run opened, which it ends when it finishes. */
   readonly #sessions: OpenedAgentSession[];
+  /** What the run's sessions spent, which the run reports to its calling session. */
+  readonly #usage: RunUsageTally;
   #opened: Promise<OpenedAgentSession> | undefined;
   /** Oldest first. */
   readonly #awaited: AwaitedReply[] = [];
@@ -87,15 +88,15 @@ class RunAgentSession implements AgentSession {
   constructor(input: {
     readonly key: string;
     readonly name: string;
-    readonly reportUsage: (turnUsage: TokenUsage) => Promise<void>;
     readonly run: WorkflowToolRunContext;
     readonly sessions: OpenedAgentSession[];
+    readonly usage: RunUsageTally;
   }) {
     this.#key = input.key;
     this.#name = input.name;
-    this.#reportUsage = input.reportUsage;
     this.#run = input.run;
     this.#sessions = input.sessions;
+    this.#usage = input.usage;
   }
 
   async send<TOutput = unknown>(
@@ -142,8 +143,8 @@ class RunAgentSession implements AgentSession {
 
   /**
    * Forwards the turn's questions up to the session and returns its end. The
-   * turn's usage is reported before its end settles any reply, so the calling
-   * session counts it before it can see the turn's result.
+   * turn's usage is tallied before its end settles any reply, so the reply the
+   * body sends with the turn's result carries it.
    */
   async #readTurn(hook: Hook<AgentTurnReply>, expectsData: boolean): Promise<AgentTurnEnd> {
     try {
@@ -161,7 +162,7 @@ class RunAgentSession implements AgentSession {
           (candidate): candidate is RuntimeSubagentResult => candidate.kind === "subagent-result",
         );
         if (result !== undefined) {
-          if (result.origin === "child") await this.#reportUsage(result.outcome.usageDelta);
+          if (result.origin === "child") this.#usage.record(result.outcome.usageDelta);
           return { kind: "ended", result: toAgentMessageResult(result, expectsData) };
         }
       }

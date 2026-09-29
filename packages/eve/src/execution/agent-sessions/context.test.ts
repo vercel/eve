@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { captureAgentSessionContext } from "#execution/agent-sessions/context.js";
+import { resolveStepAgentLimits } from "#execution/agent-sessions/context.js";
 import {
   createTask,
   readTaskTable,
@@ -10,8 +10,6 @@ import {
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeWorkflowTaskRequest, WorkflowToolCallEntry } from "#shared/action-types.js";
-
-type Caller = Parameters<typeof captureAgentSessionContext>[0];
 
 /** Alice's session has spent 400 of 1,000 input tokens and $0.50 of $2.00. */
 function aliceSession(table: TaskTable): HarnessSession {
@@ -75,29 +73,20 @@ function stepCalls(input: { readonly startsAgents: boolean }): {
   };
 }
 
-describe("captureAgentSessionContext", () => {
+describe("resolveStepAgentLimits", () => {
   it.each([
     { expected: { input: 300, costUsd: 0.75 }, startsAgents: true },
     { expected: { input: 600, costUsd: 1.5 }, startsAgents: false },
   ])(
-    "grants every call of a step the remainder split across the agent tasks it starts (starts agents: $startsAgents)",
+    "splits the remainder across the agent tasks a step starts (starts agents: $startsAgents)",
     ({ expected, startsAgents }) => {
       const { plan, table } = stepCalls({ startsAgents });
-      const caller: Pick<Caller, "batch" | "bundle" | "plan" | "serializedContext" | "session"> = {
-        batch: { event: { sequence: 1, stepIndex: 0, turnId: "turn_1" }, requests: plan },
-        bundle: { compiledArtifactsSource: { kind: "bundled" } } as Caller["bundle"],
-        plan,
-        serializedContext: {},
-        session: aliceSession(table),
-      };
 
-      for (const { callId } of plan) {
-        expect(captureAgentSessionContext(caller as Caller, callId).limits, callId).toEqual({
-          maxInputTokensPerSession: expected.input,
-          maxOutputTokensPerSession: false,
-          maxTokenCostUsdPerSession: expected.costUsd,
-        });
-      }
+      expect(resolveStepAgentLimits({ plan, session: aliceSession(table) })).toEqual({
+        maxInputTokensPerSession: expected.input,
+        maxOutputTokensPerSession: false,
+        maxTokenCostUsdPerSession: expected.costUsd,
+      });
     },
   );
 });

@@ -1,11 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { hasRunUsage } from "#execution/agent-sessions/usage.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { SessionExecution } from "#execution/session/turn.js";
+import {
+  createTask,
+  readTaskTable,
+  recordTaskRun,
+  writeTaskTable,
+} from "#execution/tasks/table.js";
 import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
 import {
   getSessionTokenUsage,
@@ -18,20 +23,61 @@ import type { HarnessSession } from "#harness/types.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
+// The settled calls' stream events are not under test; the committed session is.
+vi.mock("#execution/publish-session-events.js", () => ({
+  publishSessionEvents: async ({
+    serializedContext,
+    sessionState,
+  }: {
+    readonly serializedContext: Record<string, unknown>;
+    readonly sessionState: unknown;
+  }) => ({ serializedContext, sessionState }),
+  relaySessionEvents: async ({
+    serializedContext,
+    sessionState,
+  }: {
+    readonly serializedContext: Record<string, unknown>;
+    readonly sessionState: unknown;
+  }) => ({ serializedContext, sessionState }),
+}));
+
 function usage(inputTokens: number, costUsd?: number): TokenUsage {
   return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens: 0 };
 }
 
-/** A session that has spent `ownInputTokens` itself, under `limits`. */
-function session(input: {
+/**
+ * A session that has spent `ownInputTokens` itself, under `limits`, with one
+ * agent task, `name`, whose run is working on a call.
+ */
+function sessionWithTask(input: {
   readonly limits?: HarnessSession["limits"];
+  readonly name: string;
   readonly ownInputTokens: number;
-}): { readonly cursor: SessionStateCursor; readonly execution: SessionExecution } {
-  const base = createTestSessionState({ sessionId: "alice-session" });
+}): {
+  readonly cursor: SessionStateCursor;
+  readonly execution: SessionExecution;
+  readonly from: WorkflowToolRunRef;
+} {
+  const base = createTestSessionState({ sessionId: `${input.name}-parent` });
   const own = { ...usage(input.ownInputTokens), costUsd: 0, sawCost: false };
-  const snapshot = setTurnUsageState(
-    { ...base.snapshot.session, limits: input.limits },
-    { ...own, session: own, turnId: "turn_1" },
+  const created = createTask(readTaskTable(undefined), {
+    callId: `${input.name}-call`,
+    kind: "agent",
+    name: input.name,
+    resumable: true,
+    turnId: "turn_1",
+  });
+  const runId = `${input.name}-run`;
+  const table = recordTaskRun(created.table, created.taskId, {
+    hookToken: `${runId}-control`,
+    runId,
+  });
+  const snapshot = writeTaskTable(
+    setTurnUsageState(
+      { ...base.snapshot.session, limits: input.limits },
+      { ...own, session: own, turnId: "turn_1" },
+    ),
+    table,
   );
   const inbox = {
     claimSessionHooks: vi.fn(),
@@ -51,7 +97,17 @@ function session(input: {
     queue: new SessionInputQueue(),
     sessionId: base.sessionId,
   });
-  return { cursor, execution };
+  const from: WorkflowToolRunRef = {
+    callId: `${input.name}-call`,
+    input: {},
+    runId,
+    sequence: 1,
+    stepIndex: 0,
+    taskId: created.taskId,
+    toolName: input.name,
+    turnId: "turn_1",
+  };
+  return { cursor, execution, from };
 }
 
 function committed(cursor: SessionStateCursor): DurableSession {
@@ -62,43 +118,44 @@ function spent(cursor: SessionStateCursor): TokenUsage {
   return toUsage(getSessionTokenUsage(committed(cursor)));
 }
 
-function run(runId: string, taskId?: string): WorkflowToolRunRef {
-  return {
-    callId: `${runId}-call`,
-    input: {},
-    runId,
-    sequence: 1,
-    stepIndex: 0,
-    taskId,
-    toolName: "reviewer",
-    turnId: "turn_1",
-  };
-}
-
 describe("delegated agent usage", () => {
-  it("counts each turn a run reports once, however its reports arrive, against the session's limits", async () => {
-    const alice = session({ limits: { maxInputTokensPerSession: 1_000 }, ownInputTokens: 100 });
-    const from = run("reviewer-run", "reviewer-7k2m9q");
-    // Turn 1 is redelivered, and turn 3's report overtakes turn 2's.
-    for (const [sequence, total] of [
-      [1, usage(300, 0.25)],
-      [1, usage(300, 0.25)],
-      [3, usage(700, 0.75)],
-      [2, usage(500, 0.5)],
-    ] as const) {
-      await alice.execution.handleWorkflowMessage({ from, kind: "usage", sequence, usage: total });
-    }
+  it("counts a task's usage once from its replies, usage reports, and outcome, however often they arrive, against the session's limits", async () => {
+    const alice = sessionWithTask({
+      limits: { maxInputTokensPerSession: 1_000 },
+      name: "reviewer",
+      ownInputTokens: 100,
+    });
+    const { from } = alice;
+    const reply = {
+      callIds: [from.callId],
+      from,
+      kind: "reply" as const,
+      output: "The plan looks ready.",
+      usage: usage(300, 0.25),
+    };
+    // The reply is delivered twice.
+    await alice.execution.handleWorkflowMessage(reply);
+    await alice.execution.handleWorkflowMessage(reply);
 
-    expect(spent(alice.cursor)).toEqual(usage(800, 0.75));
+    expect(spent(alice.cursor)).toEqual(usage(400, 0.25));
+
+    // Alice cancels the reviewer's next turn; no reply carries its usage.
+    await alice.execution.handleWorkflowMessage({ from, kind: "usage", usage: usage(600, 0.5) });
+
+    expect(spent(alice.cursor)).toEqual(usage(700, 0.5));
     expect(getSessionUsageLimitViolation(committed(alice.cursor))).toBeNull();
 
-    await alice.execution.handleWorkflowMessage({
+    const outcome = {
       from,
-      kind: "usage",
-      sequence: 4,
-      usage: usage(900),
-    });
+      kind: "outcome" as const,
+      result: { output: "Reviewed.", status: "completed" as const },
+      usage: usage(900, 0.75),
+    };
+    // The outcome is delivered twice too; the second arrives after the task's run finished.
+    await alice.execution.handleWorkflowMessage(outcome);
+    await alice.execution.handleWorkflowMessage(outcome);
 
+    expect(spent(alice.cursor)).toEqual(usage(1_000, 0.75));
     expect(getSessionUsageLimitViolation(committed(alice.cursor))).toEqual({
       kind: "input",
       limit: 1_000,
@@ -106,49 +163,28 @@ describe("delegated agent usage", () => {
     });
   });
 
-  it("counts a chain of agents at every level", async () => {
+  it("counts what a delegate's own delegates spent in the usage it reports", async () => {
     // Alice's session delegates to Bob's, which delegates to Carol's.
-    const alice = session({ ownInputTokens: 10 });
-    const bob = session({ ownInputTokens: 50 });
+    const alice = sessionWithTask({ name: "bob", ownInputTokens: 10 });
+    const bob = sessionWithTask({ name: "carol", ownInputTokens: 50 });
     await bob.execution.handleWorkflowMessage({
-      from: run("carol-run", "carol-4h8p2x"),
-      kind: "usage",
-      sequence: 1,
+      callIds: [bob.from.callId],
+      from: bob.from,
+      kind: "reply",
+      output: "Carol counted the stations.",
       usage: usage(200),
     });
     // Bob's turn reports what his session spent since his last report.
     const bobTurn = takeSessionUsageDelta(committed(bob.cursor)).delta;
 
     await alice.execution.handleWorkflowMessage({
-      from: run("bob-run", "bob-9t3v6w"),
-      kind: "usage",
-      sequence: 1,
+      callIds: [alice.from.callId],
+      from: alice.from,
+      kind: "reply",
+      output: "Bob relayed Carol's count.",
       usage: bobTurn,
     });
 
     expect(spent(alice.cursor)).toEqual(usage(260));
-  });
-
-  it.each([
-    { entry: "task", taskId: "reviewer-7k2m9q" },
-    { entry: "execute", taskId: undefined },
-  ])("keeps the usage and forgets the run once its $entry run ends", async ({ taskId }) => {
-    const alice = session({ ownInputTokens: 0 });
-    const from = run("reviewer-run", taskId);
-    await alice.execution.handleWorkflowMessage({
-      from,
-      kind: "usage",
-      sequence: 1,
-      usage: usage(300),
-    });
-
-    await alice.execution.handleWorkflowMessage({
-      from,
-      kind: "outcome",
-      result: { output: "Reviewed.", status: "completed" },
-    });
-
-    expect(spent(alice.cursor)).toEqual(usage(300));
-    expect(hasRunUsage(committed(alice.cursor).state, "reviewer-run")).toBe(false);
   });
 });

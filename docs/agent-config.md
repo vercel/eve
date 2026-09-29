@@ -219,10 +219,17 @@ remainder in the current budget window split evenly across the agent tasks
 that one model step starts. A session that a workflow tool opens with
 `ctx.agent` receives the share of the model step that called the tool, or the
 whole remainder when that step starts no agent tasks; eve does not divide that
-share among several sessions one call opens. A child keeps its grant for its whole
-session, including turns that later calls with `taskId` start. Each child turn's
-usage, including what the child's own subagents spent, counts against the
-parent's quota when the turn ends, so later children draw from what remains and
+share among several sessions one call opens. A child keeps its grant for its
+whole session, including turns that later calls with `taskId` start.
+
+A child's usage, including what the child's own subagents spent, counts
+against the parent's quota. An agent task's usage counts with each reply it
+sends. A turn it doesn't reply to, such as one a cancel stopped, counts with
+the next reply, or when the turn ends if no call waits for a reply. Sessions
+that any other `serve` workflow tool opens with `ctx.agent` count the same
+way; those of an `execute` or `task` tool count when the tool finishes. If the
+parent's turn is cancelled while it waits on an `execute` tool, that tool's
+`ctx.agent` usage doesn't count. Later children draw from what remains, and
 the parent's own limit and continuation prompt include delegated spend.
 Token-cost budgets follow the same rules, including splitting the remaining
 US-dollar budget and adding child cost back to the parent. Remote agents

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   deliver: vi.fn(),
   runBody: vi.fn(),
   applyCommand: vi.fn(),
+  usageTotal: vi.fn(),
   body: { runSignal: new AbortController().signal },
   openWorkflowToolRunOwnerInbox: vi.fn(),
 }));
@@ -50,6 +51,7 @@ vi.mock("#execution/tools/workflow/body.js", () => ({
       },
     },
     outcome: mocks.runBody(input),
+    usage: { record: () => {}, total: mocks.usageTotal },
   }),
 }));
 vi.mock("#execution/tools/workflow/owner.js", () => ({
@@ -121,6 +123,28 @@ it("emits every persisted report before the terminal outcome", async () => {
     { ifPresent: false },
   );
   expect(mocks.runBody).toHaveBeenCalledWith(expect.objectContaining({ owner: invocationOwner }));
+});
+
+it("carries what the body's agent sessions spent on the outcome", async () => {
+  const spent = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 1_500, outputTokens: 150 };
+  mocks.usageTotal.mockReturnValue(spent);
+  mocks.openWorkflowToolRunOwnerInbox.mockReturnValue({
+    owner: { send: vi.fn(), sent: 0 },
+    reader: createChannelReader("workflow", {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise<IteratorResult<never>>(() => {}),
+      }),
+    }),
+  });
+
+  await workflowToolRunWorkflow(input);
+
+  expect(mocks.deliver).toHaveBeenCalledTimes(1);
+  expect(mocks.deliver).toHaveBeenCalledWith(
+    "parent",
+    expect.objectContaining({ kind: "outcome", usage: spent }),
+    { ifPresent: false },
+  );
 });
 
 it.each(["completed", "failed", "cancelled", "throw", "blocked"] as const)(

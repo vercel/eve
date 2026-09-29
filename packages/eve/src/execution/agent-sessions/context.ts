@@ -68,7 +68,7 @@ export interface AgentSessionSandbox {
 }
 
 type CallerDispatch = Pick<
-  PreparedCoordinationDispatch,
+  PreparedCoordinationDispatch<unknown>,
   | "activityObserver"
   | "batch"
   | "bundle"
@@ -77,7 +77,6 @@ type CallerDispatch = Pick<
   | "dynamicSubagentSelections"
   | "inheritedConversation"
   | "localDevRequest"
-  | "plan"
   | "sandboxSessionId"
   | "serializedContext"
   | "session"
@@ -85,21 +84,28 @@ type CallerDispatch = Pick<
 >;
 
 /**
- * Captures the agent session context for one workflow tool call, in the step
- * that admits it. Every call a model step makes shares one grant: the caller's
- * remaining quota split evenly across the agent tasks the step starts, so
- * agents started together are bounded by the remainder together. A call to a
- * running agent task opens no session and takes no share.
+ * The token budget every session a model step's calls open inherits: the
+ * caller's remaining quota split evenly across the agent tasks the step
+ * starts, so agents started together are bounded by the remainder together.
+ * A call to a running task starts none, so it takes no share.
  */
-export function captureAgentSessionContext(
-  caller: CallerDispatch,
-  callId: string,
-): AgentSessionContext {
-  const { batch, session } = caller;
-  const table = readTaskTable(session.state);
+export function resolveStepAgentLimits(
+  caller: Pick<PreparedCoordinationDispatch, "plan" | "session">,
+): RunSessionLimits {
+  const table = readTaskTable(caller.session.state);
   const agentTasksStarted = caller.plan.filter(
     ({ entry }) => entry.entryPoint === "serve" && findTask(table, entry.taskId)?.kind === "agent",
   ).length;
+  return resolveRemainingSessionTokenLimits(caller.session, agentTasksStarted);
+}
+
+/** Captures the agent session context for one workflow tool call, in the step that admits it. */
+export function captureAgentSessionContext(
+  caller: CallerDispatch,
+  callId: string,
+  limits: RunSessionLimits,
+): AgentSessionContext {
+  const { batch, session } = caller;
   return {
     activityObserver: caller.activityObserver,
     agents: caller.workflowAgents,
@@ -111,7 +117,7 @@ export function captureAgentSessionContext(
     channelMetadata: caller.channelMetadata,
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,
-    limits: resolveRemainingSessionTokenLimits(session, agentTasksStarted),
+    limits,
     localDevRequest: caller.localDevRequest,
     parent: {
       callId,

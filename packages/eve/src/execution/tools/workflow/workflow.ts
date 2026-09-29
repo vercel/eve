@@ -129,10 +129,12 @@ export async function workflowToolRunWorkflow(input: WorkflowToolRunInput): Prom
     };
   }
   if (outcome !== undefined) {
+    const usage = started.usage.total();
     await owner.handleMessage({
       from: createWorkflowBodyRef(input),
       kind: "outcome",
       result: outcome,
+      ...(usage !== undefined && { usage }),
     });
   }
 }

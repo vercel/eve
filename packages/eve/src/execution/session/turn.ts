@@ -57,6 +57,7 @@ import {
 } from "#harness/workflow-tool-runs.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 /** True when a delegating parent (local or remote) receives this session's input requests. */
 export function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
@@ -286,6 +287,8 @@ export class SessionExecution {
     const results: RuntimeActionResult[] = [...input.initialResults];
     let interrupted = false;
     const acceptedAtMsByCallId = new Map<string, number>();
+    // By call id, so an outcome delivered twice counts once.
+    const delegatedUsageByCallId = new Map<string, TokenUsage>();
     if (input.initialAcceptedAtMs !== undefined) {
       for (const result of results)
         acceptedAtMsByCallId.set(result.callId, input.initialAcceptedAtMs);
@@ -303,10 +306,15 @@ export class SessionExecution {
         results,
       });
       if (ready !== undefined) {
+        const delegatedUsage = ready.flatMap((result) => {
+          const usage = delegatedUsageByCallId.get(result.callId);
+          return usage === undefined ? [] : [usage];
+        });
         return {
           acceptedAtMsByCallId: Object.fromEntries(
             ready.map((result) => [result.callId, acceptedAtMsByCallId.get(result.callId)!]),
           ),
+          ...(delegatedUsage.length > 0 && { delegatedUsage }),
           results: ready,
         };
       }
@@ -342,7 +350,11 @@ export class SessionExecution {
       }
 
       const result = await this.handleWorkflowMessage(next.message);
-      if (result !== undefined) accept(result);
+      if (result === undefined) continue;
+      accept(result);
+      if (next.message.kind === "outcome" && next.message.usage !== undefined) {
+        delegatedUsageByCallId.set(result.callId, next.message.usage);
+      }
     }
   }
 

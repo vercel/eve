@@ -144,13 +144,11 @@ const fridayCheck = {
   kind: "call",
 } as const;
 
-/** The usage reports and replies the task sent its session, in order. */
-function usageAndReplies(): unknown[] {
+/** The messages that carried the task's usage to its session, in order. */
+function usageMessages(): unknown[] {
   return agent.delivered.flatMap((message): unknown[] => {
-    if (message.kind === "usage") {
-      return [{ sequence: message.sequence, usage: message.usage }];
-    }
-    return message.kind === "reply" ? [{ reply: message.callIds }] : [];
+    if (message.kind === "reply") return [{ reply: message.callIds, usage: message.usage }];
+    return message.kind === "usage" ? [{ usage: message.usage }] : [];
   });
 }
 
@@ -235,7 +233,7 @@ it("fails the task with the reason the agent's turn failed and how to retry", as
   });
 });
 
-it("reports each turn's usage, as the task's running total, before the reply that turn settles", async () => {
+it("carries the task's running usage on each reply", async () => {
   const started = await startReview();
   agent.turns[0]?.(
     turnEnded({ kind: "succeeded", output: "The plan looks ready." }, usage(1_000, 100, 0.25)),
@@ -253,15 +251,13 @@ it("reports each turn's usage, as the task's running total, before the reply tha
   started.control.apply({ kind: "end", reason: "The session ended." });
   await started.outcome;
 
-  expect(usageAndReplies()).toEqual([
-    { sequence: 1, usage: usage(1_000, 100, 0.25) },
-    { reply: ["call-1"] },
-    { sequence: 2, usage: usage(1_500, 150, 0.75) },
-    { reply: ["call-2"] },
+  expect(usageMessages()).toEqual([
+    { reply: ["call-1"], usage: usage(1_000, 100, 0.25) },
+    { reply: ["call-2"], usage: usage(1_500, 150, 0.75) },
   ]);
 });
 
-it("reports a turn that messages joined once", async () => {
+it("counts a turn that messages joined once, on the reply that settles them all", async () => {
   const started = await startReview();
   started.control.apply(fridayCheck);
   await settle();
@@ -273,8 +269,36 @@ it("reports a turn that messages joined once", async () => {
   started.control.apply({ kind: "end", reason: "The session ended." });
   await started.outcome;
 
-  expect(usageAndReplies()).toEqual([
-    { sequence: 1, usage: usage(800, 80) },
-    { reply: ["call-1", "call-2"] },
+  expect(usageMessages()).toEqual([{ reply: ["call-1", "call-2"], usage: usage(800, 80) }]);
+});
+
+it("sends a cancelled turn's usage on its own, since no reply carries it", async () => {
+  const started = await startReview();
+  started.control.apply({ kind: "cancel", reason: "Alice cancelled the review." });
+  agent.turns[0]?.(turnEnded({ kind: "cancelled" }, usage(400, 40)));
+  await settle();
+  started.control.apply(fridayCheck);
+  await settle();
+  agent.turns[1]?.(
+    turnEnded({ kind: "succeeded", output: "The plan misses the Friday freeze." }, usage(100, 10)),
+  );
+  await settle();
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  await started.outcome;
+
+  expect(usageMessages()).toEqual([
+    { usage: usage(400, 40) },
+    { reply: ["call-2"], usage: usage(500, 50) },
   ]);
+});
+
+it("sends no usage once the session ended, since no one would count it", async () => {
+  const started = await startReview();
+  started.control.apply({ kind: "cancel", reason: "Alice cancelled the review." });
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  agent.turns[0]?.(turnEnded({ kind: "cancelled" }, usage(400, 40)));
+  await settle();
+  await started.outcome;
+
+  expect(usageMessages()).toEqual([]);
 });

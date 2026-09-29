@@ -10,6 +10,7 @@ import {
   finishTaskRun,
   markTaskRunStarted,
   readTaskTable,
+  recordTaskRunUsage,
   settleRemainingTaskCalls,
   settleTaskCalls,
   writeTaskTable,
@@ -20,7 +21,7 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
-import { forgetRunUsage } from "#execution/agent-sessions/usage.js";
+import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import {
   publishSessionEvents,
   relaySessionEvents,
@@ -41,12 +42,12 @@ import { createTaskSettledEvent, type TaskSettledStreamEvent } from "#protocol/m
 /** The messages a task's run sends that change its record. */
 export type TaskRunMessage = Extract<
   WorkflowToolRunMessage,
-  { readonly kind: "outcome" | "reply" | "started" }
+  { readonly kind: "outcome" | "reply" | "started" | "usage" }
 >;
 
 const TASK_CANCEL_REASON = "The task was cancelled.";
 
-/** Applies one message from a task's run: started, a reply, or the run's outcome. */
+/** Applies one message from a task's run: started, a reply, usage no reply carried, or the run's outcome. */
 export async function applyTaskRunMessageStep(
   input: SessionStepState & { readonly message: TaskRunMessage },
 ): Promise<PublishedSessionEvents> {
@@ -68,18 +69,23 @@ export async function applyTaskRunMessageStep(
       break;
     }
     case "reply": {
+      ({ session, table } = countTaskRunUsage(session, table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
       const settled = settleTaskCalls(table, { callIds: message.callIds, outcome, taskId });
       table = settled.table;
       events.push(...settled.settled.map((call) => taskSettledEvent(taskId, call, outcome)));
       break;
     }
+    case "usage":
+      ({ session, table } = countTaskRunUsage(session, table, taskId, message));
+      break;
     case "outcome": {
+      ({ session, table } = countTaskRunUsage(session, table, taskId, message));
       const outcome = toOutcome(message);
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
       events.push(...settled.settled.map((call) => taskSettledEvent(taskId, call, outcome)));
       table = finishTaskRun(settled.table, taskId, message.from.runId);
-      session = forgetRunUsage(forgetRunQuestions(session, message.from.runId), message.from.runId);
+      session = forgetRunQuestions(session, message.from.runId);
       break;
     }
   }
@@ -181,6 +187,26 @@ function failureMessage(message: WorkflowToolRunOutcomeMessage): string {
   const described =
     typeof output === "object" && output !== null ? Reflect.get(output, "message") : undefined;
   return typeof described === "string" ? described : JSON.stringify(output);
+}
+
+/**
+ * Counts what the delegated spend a reply, usage report, or outcome carries
+ * adds to what the session counted from its run. Only while that run is the
+ * task's run: a redelivered outcome arrives after the run finished, and adds
+ * nothing.
+ */
+function countTaskRunUsage(
+  session: DurableSession,
+  table: TaskTable,
+  taskId: string,
+  message: Extract<TaskRunMessage, { readonly kind: "outcome" | "reply" | "usage" }>,
+): { readonly session: DurableSession; readonly table: TaskTable } {
+  const run = findTask(table, taskId)?.run;
+  if (message.usage === undefined || run?.runId !== message.from.runId) return { session, table };
+  return {
+    session: countRunUsage(session, message.usage, run.usage),
+    table: recordTaskRunUsage(table, taskId, message.usage),
+  };
 }
 
 /** A finished run can no longer take answers, so its unanswered questions are dropped. */
