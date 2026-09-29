@@ -227,7 +227,7 @@ export function compileExtensionMounts(
         packageName: mount.packageName,
         specifier: mount.specifier,
         mountId: extensionMountId(nodePath, mount.namespace),
-            sourceRoot: mount.sourceRoot,
+        sourceRoot: mount.sourceRoot,
       },
     ];
   });
