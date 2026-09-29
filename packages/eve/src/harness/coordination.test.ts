@@ -59,7 +59,6 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         input: { service: "api" },
         toolCallId: "call-deploy",
         toolName: "deploy",
-        type: "tool-call",
       },
       tools: new Map([
         [

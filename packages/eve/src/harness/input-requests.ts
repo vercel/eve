@@ -16,7 +16,7 @@ import {
   getPendingInputBatches,
   queueDeferredStepInput,
 } from "#harness/pending-input-batches.js";
-import { compactStepInput } from "#harness/hitl/pending-input-resolution.js";
+import { compactStepInput, finishResolvedInput } from "#harness/hitl/pending-input-resolution.js";
 import type {
   ResolvePendingInputResult,
   ResolvedStepInput,
@@ -116,11 +116,21 @@ export function resolvePendingInput(input: {
 }): ResolvePendingInputResult {
   const baseHistory = [...(input.history ?? input.session.history)];
   const batches = getPendingInputBatches(input.session.state);
+  const route = routePendingInput(batches);
+  // Finish already-approved work before another batch or user message can hide
+  // the approval response from the SDK. Session-limit prompts still take priority.
+  if (route.kind === "approvals" && hasTailApprovalResponse(baseHistory)) {
+    return finishResolvedInput({
+      deferTurnInput: true,
+      leftoverResponses: input.stepInput?.inputResponses ?? [],
+      messages: baseHistory,
+      resolvedStepInput: input.stepInput,
+      session: input.session,
+    });
+  }
   if (batches.length === 0) {
     return { outcome: "continue", messages: baseHistory, session: input.session };
   }
-
-  const route = routePendingInput(batches);
   const deferTurnInput = hasTailApprovalResponse(baseHistory);
   const textResolutionBatch =
     route.kind === "session-limit" ? route.batch : batches.length === 1 ? batches[0] : undefined;

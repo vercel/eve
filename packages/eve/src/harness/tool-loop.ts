@@ -81,7 +81,8 @@ import {
   resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction.js";
-import { createCurrentMessages } from "#harness/current-messages.js";
+import { createCurrentMessages, hasTailApprovalResponse } from "#harness/current-messages.js";
+import { collectDeferredCalls, dispatchApprovedWorkflowCalls } from "#harness/workflow-dispatch.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import {
   accumulateTurnUsage,
@@ -136,7 +137,11 @@ import {
   selectApprovalReplayBatch,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
-import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
+import {
+  getPendingInputBatches,
+  queueDeferredStepInput,
+  type PendingInputBatchEvent,
+} from "#harness/pending-input-batches.js";
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
@@ -170,7 +175,6 @@ import {
 } from "#protocol/message.js";
 import {
   appendTaskContext,
-  commitCallEntry,
   isTaskTool,
   taskSystemMessages,
   withTaskTools,
@@ -200,13 +204,10 @@ import {
 } from "#harness/prompt-cache.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 import {
-  createCoordinationRequestFromToolCall,
   getPendingCoordinationBatch,
   resolvePendingCoordination,
-  resolveToolCallInputObject,
   setPendingCoordinationBatch,
 } from "#harness/coordination.js";
-import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
@@ -633,10 +634,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Resolve deferred input, task/control coordination, then HITL input; each stage
     // may park when its resume payload has not arrived.
 
-    const stepInput = consumeDeferredStepInput({ input, session });
-    session = stepInput.session;
-
     const pendingCoordination = getPendingCoordinationBatch(session.state);
+    // Queued input waits for the pending batch: coalescing would drop its
+    // runtimeActionResults, and input queued behind approved workflows must
+    // replay only after they finish.
+    const stepInput =
+      pendingCoordination === undefined
+        ? consumeDeferredStepInput({ input, session })
+        : { input, session };
+    session = stepInput.session;
     const resolvedCoordination = await resolvePendingCoordination({
       emit,
       session,
@@ -668,7 +674,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     const approvalContext = contextStorage.getStore();
     const prepareApprovalTools = async (
-      batch: ReturnType<typeof getPendingInputBatches>[number] | undefined,
+      batch: { readonly event?: PendingInputBatchEvent } | undefined,
     ) => {
       if (batch?.event !== undefined) await config.prepareApprovalTurn?.(batch.event);
       if (approvalContext !== undefined) {
@@ -854,7 +860,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       };
     }
 
-    const replayBatch = selectApprovalReplayBatch(session, coordinated.stepInput);
+    // Approved siblings of a finished workflow run with their approval turn's tools.
+    const replayBatch =
+      pendingCoordination !== undefined && hasTailApprovalResponse(resolvedCoordination.messages)
+        ? pendingCoordination
+        : selectApprovalReplayBatch(session, coordinated.stepInput);
     const responseAuthorizationTools =
       replayBatch === undefined ? config.tools : await prepareApprovalTools(replayBatch);
     const pending = resolvePendingInput({
@@ -1743,6 +1753,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         generation.signal,
       );
 
+    // Approved workflows start like ungated ones: session limits gate model calls.
+    const dispatchedSession = dispatchApprovedWorkflowCalls({
+      messages,
+      resolvedInputs: pending.resolvedInputs,
+      session,
+      tools: buildResponseAuthorizationTools({ authoredTools: config.tools, context: ctx }),
+    });
+    if (dispatchedSession !== undefined) {
+      return {
+        next: null,
+        session: setHarnessEmissionState(dispatchedSession, advanceStep(emissionState)),
+      };
+    }
+
     const limitResult = await enforceSessionUsageLimit({
       config,
       emit,
@@ -2298,7 +2322,7 @@ function getInvalidToolCallInputErrors(input: {
  * history normalization, which runs after the backfill paths), so a
  * tool-message-only scan would let a synthesized result duplicate them.
  */
-function extractToolResultCallIds(messages: readonly StepResponseMessage[]): ReadonlySet<string> {
+function extractToolResultCallIds(messages: readonly ModelMessage[]): ReadonlySet<string> {
   const callIds = new Set<string>();
 
   for (const message of messages) {
@@ -2596,8 +2620,14 @@ async function handleStepResult(input: {
     session: baseSession,
     tools: input.coordinationTools,
   });
+  // Only unanswered calls can dispatch: automatic denials already have results.
+  const blockedCallIds = new Set([
+    ...approvalRequests.map((request) => request.action.callId),
+    ...extractToolResultCallIds(responseMessages),
+  ]);
   const deferredToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
+    .filter((toolCall) => !blockedCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => isDeferredHarnessTool(input.coordinationTools.get(toolCall.toolName)))
     .filter((toolCall) => {
       if (isDeferredHarnessTool(advertisedCoordinationTools.get(toolCall.toolName))) {
@@ -2854,48 +2884,6 @@ async function handleStepResult(input: {
 
 function isDeferredHarnessTool(tool: HarnessToolDefinition | undefined): boolean {
   return tool?.workflowId !== undefined || isTaskTool(tool);
-}
-
-/**
- * Turns a step's deferred calls into workflow runs, committing a task record
- * for each call that starts a task. Task tool calls stay in the response
- * alone: the session reads them from there.
- */
-function collectDeferredCalls(input: {
-  readonly session: HarnessSession;
-  readonly toolCalls: readonly TypedToolCall<ToolSet>[];
-  readonly tools: HarnessToolMap;
-  readonly turnId: string;
-}): {
-  readonly session: HarnessSession;
-  readonly workflowRequests: readonly RuntimeWorkflowTaskRequest[];
-} {
-  let { session } = input;
-  const workflowRequests: RuntimeWorkflowTaskRequest[] = [];
-  for (const toolCall of input.toolCalls) {
-    const definition = input.tools.get(toolCall.toolName);
-    if (isTaskTool(definition)) continue;
-    const committed = commitCallEntry(session, {
-      callId: toolCall.toolCallId,
-      definition,
-      input: resolveToolCallInputObject(toolCall.input, {
-        callId: toolCall.toolCallId,
-        toolName: toolCall.toolName,
-      }),
-      toolName: toolCall.toolName,
-      turnId: input.turnId,
-    });
-    session = committed.session;
-    workflowRequests.push(
-      createCoordinationRequestFromToolCall({
-        entry: committed.entry,
-        input: committed.input,
-        toolCall,
-        tools: input.tools,
-      }),
-    );
-  }
-  return { session, workflowRequests };
 }
 
 /** Answers a `final_output` call made while tasks work with an error naming them. */

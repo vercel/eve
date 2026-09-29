@@ -87,7 +87,9 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     }
     return `WORKFLOW-PROBE-RESULT ${String(result.output)}`;
   }
-  for (const [directive, tool] of [
+  for (const [directive, tool, service = "api"] of [
+    ["WORKFLOW-APPROVAL-START", "gated_deploy"],
+    ["WORKFLOW-APPROVAL-DENIED-START", "gated_deploy", "review-only"],
     ["WORKFLOW-DEPLOY-START", "deploy_service"],
     ["WORKFLOW-CONFIRM-START", "confirm_deploy"],
     ["WORKFLOW-ESCALATE-START", "escalate_deploy"],
@@ -99,7 +101,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     if (!message.includes(directive)) continue;
     const result = [...request.toolResults].reverse().find((entry) => entry.name === tool);
     if (result === undefined) {
-      return { toolCalls: [{ input: { service: "api" }, name: tool }] };
+      return { toolCalls: [{ input: { service }, name: tool }] };
     }
     const output = result.output;
     return `${directive.replace("-START", "-RESULT")} ${

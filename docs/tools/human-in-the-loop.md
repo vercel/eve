@@ -13,7 +13,9 @@ An approval ends the turn and the session parks at `session.waiting`. A question
 
 ## Approvals
 
-Approval is a property of a [tool](/docs/tools) that gates it before it runs. The policy can decide automatically or pause for a person. Set `approval` with the helpers from `eve/tools/approval`:
+Approval is a property of a [tool](/docs/tools) that gates it before it runs. This includes [workflow tools](/docs/tools/workflows): a call waiting for approval does not start its workflow, and a call denied by a policy or person never runs. Other calls from the same model response that do not require approval can proceed while it waits.
+
+The policy can decide automatically or pause for a person. Set `approval` with the helpers from `eve/tools/approval`:
 
 ```ts title="agent/tools/refund_charge.ts"
 import { defineTool } from "eve/tools";

@@ -1,10 +1,16 @@
+import {
+  createApprovalContext,
+  textStreamResult,
+  toolCallStreamResult,
+  usage,
+} from "#internal/testing/approval-resume.js";
 import { setTurnClientContextState } from "#harness/turn-client-context.js";
 import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineMemory } from "#public/memory/index.js";
-import { jsonSchema, type LanguageModel, type ModelMessage, simulateReadableStream } from "ai";
+import { jsonSchema, type LanguageModel, type ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -42,61 +48,6 @@ import {
 // The harness runs outside a workflow body here, where run attributes cannot
 // be written; the attribute contract is covered by emit.test.ts.
 vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
-
-const usage = {
-  inputTokens: {
-    cacheRead: undefined,
-    cacheWrite: undefined,
-    noCache: 1,
-    total: 1,
-  },
-  outputTokens: {
-    reasoning: undefined,
-    text: 1,
-    total: 1,
-  },
-};
-
-type StreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
-type StreamPart = StreamResult["stream"] extends ReadableStream<infer Part> ? Part : never;
-
-function textStreamResult(text: string): StreamResult {
-  return {
-    stream: simulateReadableStream({
-      chunks: [
-        { type: "stream-start", warnings: [] },
-        { id: "answer", type: "text-start" },
-        { delta: text, id: "answer", type: "text-delta" },
-        { id: "answer", type: "text-end" },
-        {
-          finishReason: { raw: undefined, unified: "stop" },
-          type: "finish",
-          usage,
-        },
-      ] satisfies StreamPart[],
-    }),
-  };
-}
-
-function toolCallStreamResult(call: {
-  readonly input: string;
-  readonly toolCallId: string;
-  readonly toolName: string;
-}): StreamResult {
-  return {
-    stream: simulateReadableStream({
-      chunks: [
-        { type: "stream-start", warnings: [] },
-        { ...call, type: "tool-call" },
-        {
-          finishReason: { raw: undefined, unified: "tool-calls" },
-          type: "finish",
-          usage,
-        },
-      ] satisfies StreamPart[],
-    }),
-  };
-}
 
 const toolCall = {
   input: { command: "pwd" },
@@ -268,25 +219,6 @@ function createMemoryInstructionPreamble(
     });
   };
   return { handleEvent, instruction, recall };
-}
-
-function createApprovalContext(): ContextContainer {
-  const responder = {
-    attributes: {},
-    authenticator: "test",
-    issuer: "test",
-    principalId: "user-1",
-    principalType: "user" as const,
-  };
-  const ctx = new ContextContainer();
-  ctx.set(AuthKey, responder);
-  ctx.set(SessionIdKey, "generate-approval-resume-session");
-  ctx.set(SessionKey, {
-    auth: { current: responder, initiator: null },
-    sessionId: "generate-approval-resume-session",
-    turn: { id: "turn-1", sequence: 1 },
-  });
-  return ctx;
 }
 
 function createModel(): MockLanguageModelV4 {
