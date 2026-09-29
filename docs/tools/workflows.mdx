@@ -337,6 +337,11 @@ described in [Tasks](/docs/tools/tasks). What differs:
   different caller than the one that started the task. `getToken`, `requireAuth`, and connections
   in a step use the current call's auth. `ctx.agents` lists the
   agents the current call may open, including dynamic agents selected in its turn.
+- **Body state spans callers:** variables the body keeps between calls, such as `plan` in the
+  example, may hold what an earlier call from another caller produced. Key per-caller data on
+  `ctx.session.auth.current?.principalId` instead of reusing state from an earlier call. Any
+  caller in the session can continue or cancel the task; see
+  [Tasks](/docs/tools/tasks#ownership-and-limits).
 - **Agents belong to the call that opened them:** a session the body opens with `ctx.agent` while
   serving a call is that call's child. Its `session.parent` names the call's `callId` and turn, and
   its trace continues from the call's tool span. The session keeps that lineage for its later
