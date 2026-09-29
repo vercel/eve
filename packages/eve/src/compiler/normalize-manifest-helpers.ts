@@ -12,6 +12,7 @@ import type { ModuleSourceRef } from "#shared/source-ref.js";
 import { normalizeSubagentConfig } from "#compiler/normalize-subagent.js";
 import {
   canonicalSourceSlot,
+  extensionMountId,
   type AgentModuleCandidate,
   type AgentSourceOwner,
   type AgentSourceRegistry,
@@ -182,7 +183,7 @@ export function compileExtensionMounts(
         mountSourceId: mountRef.sourceId,
         namespace: mount.namespace,
         packageName: mount.packageName,
-        mountId: posix.join(nodePath, "extensions", mount.namespace),
+        mountId: extensionMountId(nodePath, mount.namespace),
         packageNamespace: packageStateNamespace(mount.packageName),
         sourceRoot: mount.sourceRoot,
       },

@@ -1,5 +1,7 @@
 import { join } from "node:path";
 
+import { extensionMountId } from "#compiler/source-graph.js";
+
 import {
   EXTENSION_CAPABILITY_VERSIONS,
   type ExtensionCapability,
@@ -117,7 +119,7 @@ function createLoadOptions(
 } {
   const owner = {
     kind: "extension" as const,
-    mountId: `extensions/${input.shortName}`,
+    mountId: extensionMountId("", input.shortName),
     namespace: input.shortName,
     packageName: input.packageName,
   };

@@ -244,6 +244,41 @@ describe("Client request policy", () => {
     expect(info.tools.static[0]).not.toHaveProperty("outputSchema");
   });
 
+  it.each(["extensions/crm", ""])(
+    "validates extension mount identity %j in agent info",
+    async (mountId) => {
+      const owner = {
+        kind: "extension" as const,
+        mountId,
+        namespace: "crm",
+        packageName: "@acme/crm",
+      };
+      const instructions = {
+        content: "Review customer requests.",
+        logicalPath: "instructions/crm.md",
+        name: "crm",
+        owner,
+        role: "system",
+        sourceId: "ext:crm:instructions.md",
+        sourceKind: "markdown",
+      };
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        Response.json({
+          ...AGENT_INFO,
+          instructions: { ...AGENT_INFO.instructions, static: [instructions] },
+        }),
+      );
+      const client = new Client({ host: "https://eve.test" });
+
+      if (mountId === "") {
+        await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
+      } else {
+        const info = await client.info();
+        expect(info.instructions.static[0]?.owner).toEqual(owner);
+      }
+    },
+  );
+
   it("accepts the legacy optional instrumentation field in v4 agent info", async () => {
     const owner = { kind: "application" as const };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

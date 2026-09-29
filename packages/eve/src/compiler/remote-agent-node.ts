@@ -1,4 +1,5 @@
 import { z } from "#compiled/zod/index.js";
+import { mountIdSchema } from "#shared/extension-mount.js";
 
 import type { Node } from "#shared/node.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -71,7 +72,7 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
           z
             .object({
               kind: z.literal("extension"),
-              mountId: z.string(),
+              mountId: mountIdSchema,
               namespace: z.string(),
               packageName: z.string(),
             })
@@ -92,7 +93,7 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
       z
         .object({
           kind: z.literal("extension"),
-          mountId: z.string(),
+          mountId: mountIdSchema,
           namespace: z.string(),
           packageName: z.string(),
         })

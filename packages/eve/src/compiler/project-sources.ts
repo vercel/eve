@@ -18,7 +18,7 @@ import type {
   AgentSourceLayer,
   AgentSourceOwner,
 } from "#compiler/source-graph.js";
-import { canonicalSourceSlot } from "#compiler/source-graph.js";
+import { canonicalSourceSlot, extensionMountId } from "#compiler/source-graph.js";
 
 export type ProjectedModuleSource =
   | {
@@ -111,7 +111,7 @@ export function projectAgentSources(input: {
     layer: input.layer ?? "application",
     manifest: input.manifest,
     nodeId: input.nodeId,
-    nodePath: posix.join(input.nodePath, "subagents"),
+    subagentsPath: posix.join(input.nodePath, "subagents"),
     owner,
     resources,
     subagents,
@@ -120,7 +120,7 @@ export function projectAgentSources(input: {
   for (const mount of [...input.manifest.resolvedExtensions].sort((left, right) =>
     left.namespace.localeCompare(right.namespace),
   )) {
-    const mountId = posix.join(input.nodePath, "extensions", mount.namespace);
+    const mountId = extensionMountId(input.nodePath, mount.namespace);
     const projection = createExtensionManifestSourceProjection(mount);
     const extensionOwner: AgentSourceOwner = {
       kind: "extension",
@@ -138,7 +138,7 @@ export function projectAgentSources(input: {
       layer: "extension-package",
       manifest: mount.manifest,
       nodeId: input.nodeId,
-      nodePath: posix.join(mountId, "subagents"),
+      subagentsPath: posix.join(mountId, "subagents"),
       owner: extensionOwner,
       resources,
       sourceIdPrefix: `ext:${mount.namespace}:`,
@@ -152,7 +152,7 @@ export function projectAgentSources(input: {
         layer: "extension-override",
         manifest: mount.overrides,
         nodeId: input.nodeId,
-        nodePath: posix.join(input.nodePath, "subagents"),
+        subagentsPath: posix.join(mountId, "subagents"),
         owner: { kind: "application" },
         resources,
         sourceIdPrefix: `ext-override:${mount.namespace}:`,
@@ -256,7 +256,7 @@ function projectManifest(input: {
   readonly layer: AgentSourceLayer;
   readonly manifest: AgentSourceManifest;
   readonly nodeId: string;
-  readonly nodePath: string;
+  readonly subagentsPath: string;
   readonly owner: AgentSourceOwner;
   readonly resources: ProjectedResourceSource[];
   readonly sourceIdPrefix?: string;
@@ -371,10 +371,7 @@ function projectManifest(input: {
     input.candidates.push(candidate);
     input.subagents.push({
       candidate,
-      nodePath: posix.join(
-        input.nodePath,
-        input.owner.kind === "extension" ? source.subagentId : name,
-      ),
+      nodePath: posix.join(input.subagentsPath, source.subagentId),
       ...(projection.extensionScope === undefined
         ? {}
         : { extensionScope: projection.extensionScope }),

@@ -1,4 +1,5 @@
 import { z } from "#compiled/zod/index.js";
+import { mountIdSchema } from "#shared/extension-mount.js";
 
 import {
   type DiscoverDiagnosticsSummary,
@@ -351,7 +352,7 @@ const agentSourceOwnerSchema: z.ZodType<AgentSourceOwner> = z.discriminatedUnion
   z
     .object({
       kind: z.literal("extension"),
-      mountId: z.string().min(1),
+      mountId: mountIdSchema,
       namespace: z.string().min(1),
       packageName: z.string().min(1),
     })
@@ -938,7 +939,7 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
     externalDependencies: z.array(z.string()).readonly(),
     namespace: z.string(),
     packageName: z.string(),
-    mountId: z.string(),
+    mountId: mountIdSchema,
     packageNamespace: z.string(),
     sourceRoot: z.string(),
     mountSourceId: z.string(),
@@ -1036,7 +1037,11 @@ export interface CompiledExtensionMount {
   readonly packageName: string;
   /** Canonical path of this mount in the root agent tree. */
   readonly mountId: string;
-  /** Package-derived namespace used by the current extension loader. */
+  /**
+   * Package-derived namespace that scopes durable state keys and config binding.
+   * Unlike the logical consumer path in {@link mountId}, this stays stable when
+   * the mount file is renamed, so persisted state is not orphaned.
+   */
   readonly packageNamespace: string;
   /**
    * Absolute path to the extension's source root on disk. The extension-scope

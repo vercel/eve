@@ -666,6 +666,13 @@ describe("compileAgentManifest source graph", () => {
     });
     const mount = compiled.extensionMounts[0]!;
     expect(mount.mountId).toBe("extensions/crm");
+    expect(compiledAgentManifestSchema.safeParse(compiled).success).toBe(true);
+    expect(
+      compiledAgentManifestSchema.safeParse({
+        ...compiled,
+        extensionMounts: [{ ...mount, mountId: "" }],
+      }).success,
+    ).toBe(false);
 
     expect(compiled.bindings[mount.mountSourceId]?.usage).toEqual({
       compile: false,

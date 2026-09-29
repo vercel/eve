@@ -136,6 +136,10 @@ export type AgentSourceOwner =
       readonly packageName: string;
     };
 
+export function extensionMountId(nodePath: string, namespace: string): string {
+  return posix.join(nodePath, "extensions", namespace);
+}
+
 export type AgentSourceLayer =
   | "framework-default"
   | "extension-package"
