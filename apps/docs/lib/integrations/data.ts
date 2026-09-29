@@ -1924,7 +1924,7 @@ The extension also supports inline screenshots, session naming, proxies, and pro
     logo: "link",
     docsHref: "https://github.com/stripe/link-cli/tree/main/packages/integrations/eve/README.md",
     keywords: ["stripe", "wallet", "payments", "checkout", "spend requests", "approval"],
-    install: `Install the Stripe Link extension for eve:
+    install: `Install the Link extension for eve:
 
 \`\`\`bash
 eve add extension/link
