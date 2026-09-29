@@ -15,12 +15,13 @@ import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
 import { clearAllProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
+import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  /** What the session spent since its caller's last report, which this report covers. */
   readonly usage?: TokenUsage;
 }
 
@@ -71,11 +72,12 @@ export async function settleCancelledTurnStep(input: {
       emissionState,
     ),
   );
-  const totals = getTurnUsageState(session.state)?.session;
-
-  const base = {
+  // Reported like a settled turn, as usage since the last report, so the
+  // caller counts each turn once whether it settled or was cancelled.
+  const reported = takeSessionUsageDelta(cancelledSession);
+  return {
     serializedContext: serializeContext(ctx),
-    sessionState: createDurableSessionState({ session: cancelledSession }),
+    sessionState: createDurableSessionState({ session: reported.session }),
+    ...(getTurnUsageState(session.state) !== undefined && { usage: reported.delta }),
   };
-  return totals === undefined ? base : { ...base, usage: toUsage(totals) };
 }
