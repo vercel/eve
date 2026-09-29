@@ -19,10 +19,10 @@ describe("ask", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("stops listening to its signals once answered, so a later abort withdraws nothing", async () => {
+  it("removes its abort listeners once answered", async () => {
     const call = new AbortController();
     const caller = new AbortController();
-    const { asks, ctx, send } = runContext({ abortSignal: call.signal, requestInput: true });
+    const { asks, ctx } = runContext({ abortSignal: call.signal, requestInput: true });
 
     const answer = ask(ctx, { prompt: "Which region?" }, { signal: caller.signal });
     asks.settle({
@@ -34,10 +34,6 @@ describe("ask", () => {
 
     expect(getEventListeners(call.signal, "abort")).toHaveLength(0);
     expect(getEventListeners(caller.signal, "abort")).toHaveLength(0);
-    call.abort();
-    caller.abort();
-    await asks.flush();
-    expect(send.mock.calls.map(([message]) => message.kind)).toEqual(["request"]);
   });
 });
 

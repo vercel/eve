@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DurableSession } from "#execution/durable-session-store.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
@@ -33,6 +33,10 @@ vi.mock("#execution/publish-session-events.js", () => {
 });
 
 const REQUEST_EVENT = { sequence: 3, stepIndex: 1, turnId: "turn_1" };
+
+beforeEach(() => {
+  published.length = 0;
+});
 
 describe("answerTaskCancel", () => {
   it("withdraws the questions of the task() run it cancels, and only those", async () => {
