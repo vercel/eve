@@ -4,12 +4,11 @@ import {
   taskToolResult,
   type TaskToolCall,
 } from "#execution/tasks/calls.js";
-import { renderUnknownTaskError } from "#execution/tasks/render.js";
+import { renderTaskCancelResult, renderUnknownCancelTaskError } from "#execution/tasks/render.js";
 import { cancelTasksStep, type TaskRunMessage } from "#execution/tasks/steps.js";
 import {
   readTaskTable,
   taskCancelResult,
-  taskToolName,
   workingTasks,
   type TaskTable,
 } from "#execution/tasks/table.js";
@@ -49,12 +48,16 @@ export async function answerTaskCancel(
   if (result === undefined) {
     const error = {
       code: "UNKNOWN_TASK",
-      message: renderUnknownTaskError(call.taskId, taskToolName(call.taskId)),
+      message: renderUnknownCancelTaskError(call.taskId),
     };
     return { ...taskToolResult(call.callId, TASK_CANCEL_TOOL_NAME, error), isError: true };
   }
   if (result.status === "cancelled") {
     await cursor.apply(await cancelTasksStep({ ...cursor.stepState(), taskIds: [call.taskId] }));
   }
-  return taskToolResult(call.callId, TASK_CANCEL_TOOL_NAME, result);
+  return taskToolResult(
+    call.callId,
+    TASK_CANCEL_TOOL_NAME,
+    renderTaskCancelResult(call.taskId, result),
+  );
 }

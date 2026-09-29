@@ -9,7 +9,7 @@ import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import { formatConnectionsSection } from "#runtime/prompt/connections.js";
 
 const PARALLEL_ACTION_INSTRUCTION =
-  "Tool execution\nA single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.";
+  "Tool execution\nTool calls in one response run in parallel, so batch only calls that don't depend on each other.";
 
 /**
  * Input for composing the base authored instructions prompt for one

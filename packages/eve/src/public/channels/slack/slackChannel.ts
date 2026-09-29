@@ -49,12 +49,6 @@ import {
   postCompletedSlackReply,
 } from "#public/channels/slack/defaults.js";
 import {
-  bufferToolCallMessage,
-  clearPendingStep,
-  recordStepActions,
-  takeTextBeforeTaskWait,
-} from "#public/channels/slack/step-text.js";
-import {
   parseMessageEvent,
   type SlackEvent,
   slackEventBotUserId,
@@ -246,21 +240,13 @@ export interface SlackChannelState {
    */
   triggeringUserId?: string | null;
   /**
-   * The step's text from `message.completed` events whose `finishReason`
-   * was `"tool-calls"`, joined by newlines and kept until the step
-   * completes. The default `actions.requested` handler shows its first
-   * non-empty line as typing status for the step's first actions. At
-   * `step.completed` the channel posts it when the step's only action was
-   * `task_wait`, outside a schedule's turn, whichever `actions.requested`
-   * and `message.completed` handlers are in use. Cleared at `turn.started`
-   * and `step.completed`.
+   * Buffered text from a `message.completed` event whose `finishReason`
+   * was `"tool-calls"`. The default `actions.requested` handler uses the
+   * first non-empty line as the next typing indicator, surfacing the
+   * model's pre-tool narration instead of the action label. Cleared at
+   * `turn.started` and after use.
    */
   pendingToolCallMessage?: string | null;
-  /**
-   * Names of the actions the current model step requested, collected across
-   * its `actions.requested` events until `step.completed`.
-   */
-  stepActionNames?: string[] | null;
   /**
    * Last reasoning-derived typing indicator sent by the default
    * `reasoning.appended` handler. Used to surface substantial progressive
@@ -601,10 +587,7 @@ export type SlackInboundResultOrPromise = SlackMentionResultOrPromise;
  * only that event's built-in default (see {@link defaultEvents}). Handlers
  * receive the event data, the {@link SlackEventContext}, and the session
  * {@link SessionContext}; `session.failed` receives only data and channel
- * context and exposes the ID as `data.sessionId`. Overriding
- * `actions.requested` or `message.completed` doesn't stop the channel from
- * posting a step's text at `step.completed` when the step's only action was
- * `task_wait`.
+ * context and exposes the ID as `data.sessionId`.
  */
 export interface SlackChannelEvents {
   readonly "approval.candidate"?: SlackEventHandler<"approval.candidate">;
@@ -644,9 +627,7 @@ export interface SlackChannelEvents {
  * handler keeps the full {@link SlackEventContext} because it owns the
  * public link-free status while user overrides remain private-only. The
  * factory adapts user overrides into this shape with
- * {@link constrainAuthorizationRequired}. `step.completed` has no default
- * and can't be overridden: the factory handles it to post a step's text
- * before a `task_wait`.
+ * {@link constrainAuthorizationRequired}.
  */
 export interface SlackChannelInternalEvents extends Omit<
   SlackChannelEvents,
@@ -654,7 +635,6 @@ export interface SlackChannelInternalEvents extends Omit<
 > {
   readonly "authorization.required"?: SlackEventHandler<"authorization.required">;
   readonly "input.requested"?: SlackEventHandler<"input.requested">;
-  readonly "step.completed"?: SlackEventHandler<"step.completed">;
 }
 
 export type SlackApprovalChannel = "direct-message" | "thread";
@@ -839,6 +819,7 @@ const activityOwnedMessageCompleted: NonNullable<SlackChannelEvents["message.com
   event,
   channel,
 ) => {
+  channel.state.pendingToolCallMessage = null;
   if (event.finishReason !== "tool-calls" && event.message) {
     await postCompletedSlackReply(channel, event.message);
   }
@@ -848,6 +829,7 @@ const clearSlackTurnState: NonNullable<SlackChannelEvents["turn.started"]> = asy
   _data,
   channel,
 ) => {
+  channel.state.pendingToolCallMessage = null;
   channel.state.lastReasoningTypingAtMs = null;
   channel.state.lastReasoningTypingStatus = null;
 };
@@ -959,26 +941,11 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       if (triggeringUserId !== undefined) {
         channel.state.triggeringUserId = triggeringUserId;
       }
-      clearPendingStep(channel.state);
       await turnStartedHandler(data, channel, ctx);
     },
     "reasoning.appended": reasoningHandler,
-    async "actions.requested"(data, channel, ctx) {
-      recordStepActions(channel.state, data.actions);
-      await actionsHandler(data, channel, ctx);
-    },
-    async "message.completed"(data, channel, ctx) {
-      if (data.finishReason === "tool-calls") {
-        bufferToolCallMessage(channel.state, data.message);
-      } else {
-        channel.state.pendingToolCallMessage = null;
-      }
-      await messageCompletedHandler(data, channel, ctx);
-    },
-    async "step.completed"(_data, channel) {
-      const text = takeTextBeforeTaskWait(channel.state);
-      if (text !== null) await postCompletedSlackReply(channel, text);
-    },
+    "actions.requested": actionsHandler,
+    "message.completed": messageCompletedHandler,
     "input.requested": inputRequestedHandler,
     "authorization.required":
       authorizationRequiredOverride === undefined

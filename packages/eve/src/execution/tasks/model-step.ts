@@ -2,6 +2,7 @@ import type { ModelMessage, SystemModelMessage } from "ai";
 
 import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#execution/tasks/calls.js";
 import {
+  FINAL_REPLY_TASK_SYSTEM_BLOCK,
   renderModelOutputText,
   renderTaskResults,
   renderTasksNote,
@@ -58,8 +59,18 @@ export function withTaskTools(tools: HarnessToolMap): HarnessToolMap {
   ]);
 }
 
-export function taskSystemMessages(tools: HarnessToolMap): SystemModelMessage[] {
-  return offersTasks(tools) ? [{ content: TASK_SYSTEM_BLOCK, role: "system" }] : [];
+/**
+ * The task block, when the agent can start tasks. `finalReplyOnly` is set for a
+ * child or schedule session, which hides a held turn's text, so a reply before
+ * a result would reach no one.
+ */
+export function taskSystemMessages(
+  tools: HarnessToolMap,
+  options: { readonly finalReplyOnly: boolean },
+): SystemModelMessage[] {
+  if (!offersTasks(tools)) return [];
+  const content = options.finalReplyOnly ? FINAL_REPLY_TASK_SYSTEM_BLOCK : TASK_SYSTEM_BLOCK;
+  return [{ content, role: "system" }];
 }
 
 /** A deferred call as the model made it, before the session knows what it enters. */

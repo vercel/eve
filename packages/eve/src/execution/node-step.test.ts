@@ -264,8 +264,8 @@ describe("createNodeHarnessTools", () => {
     const agentTool = createNodeHarnessTools({ node }).get("agent");
 
     expect(agentTool?.description).toContain("split a large task into independent pieces");
-    expect(agentTool?.description).toContain("multiple `agent` calls in one response");
-    expect(agentTool?.description).toContain("run a small fixed set in parallel");
+    expect(agentTool?.description).toContain("several agents can work at once");
+    expect(agentTool?.description).toContain("state the goal, what to return");
     expect(agentTool?.description).toContain("put everything it needs in message");
     expect(agentTool?.description).toContain("non-overlapping scopes");
     expect(agentTool?.description).not.toMatch(/\beve\b/);

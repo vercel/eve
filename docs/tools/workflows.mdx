@@ -264,8 +264,9 @@ steering message never aborts a task's `abortSignal`.
 
 Each call is a task with its own id, `<tool>-<6 characters>`:
 
-- **Receipt:** the call's tool result is a receipt, such as `Started task deploy-4hd8sa.`, and the
-  model continues at once.
+- **Receipt:** the call's tool result is a receipt, such as
+  `Started task deploy-4hd8sa. Its result will arrive in a <task_result> message.`, and the model
+  continues at once.
 - **Result:** the body's return value or its error arrives later as a `<task_result>` block in a
   `task.result` message, which eve appends at the next step boundary. `toModelOutput` projects the
   result, not the receipt.
@@ -320,9 +321,10 @@ described in [Tasks](/docs/tools/tasks). What differs:
   promise until you read the call instead of calling `receive()` again.
 - **`taskId` on the model input:** eve adds an optional `taskId` to the tool's model input and
   appends a sentence explaining it to the description. A call without `taskId` starts a new task,
-  whose receipt names it: `Started task release-plan-7k2m9q. Call release-plan again with taskId
-release-plan-7k2m9q to send it another message.` A call with `taskId` goes to that task and
-  returns `Sent to task release-plan-7k2m9q.` The build fails if `inputSchema` declares its own
+  whose receipt names it and ends with
+  `To send it another message, call release-plan again with taskId release-plan-7k2m9q.` A call
+  with `taskId` goes to that task and returns a receipt that starts
+  `Sent to task release-plan-7k2m9q.` The build fails if `inputSchema` declares its own
   `taskId`.
 - **Unknown tasks:** the id must name an unfinished task this tool started; otherwise the call
   fails with `UNKNOWN_TASK`. The call can come from any caller in the session.

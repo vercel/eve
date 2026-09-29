@@ -129,12 +129,6 @@ export function isTaskWorking(record: TaskRecord): boolean {
   return record.calls.length > 0;
 }
 
-/** The tool a task id names: ids are `<tool>-<6 base32>`. */
-export function taskToolName(taskId: string): string {
-  const separator = taskId.lastIndexOf("-");
-  return separator > 0 ? taskId.slice(0, separator) : taskId;
-}
-
 export function workingTasks(table: TaskTable): readonly TaskRecord[] {
   return table.tasks.filter(isTaskWorking);
 }
@@ -192,7 +186,11 @@ export function taskWaitResult(
 export function taskCancelResult(table: TaskTable, taskId: string): TaskCancelResult | undefined {
   const record = findTask(table, taskId);
   if (record === undefined) return undefined;
-  return { status: isTaskWorking(record) ? "cancelled" : "already_finished" };
+  return {
+    resumable: record.resumable,
+    status: isTaskWorking(record) ? "cancelled" : "already_finished",
+    tool: record.name,
+  };
 }
 
 /** Runs that may still be doing work, including cancelled runs that haven't confirmed yet. */

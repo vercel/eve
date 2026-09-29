@@ -109,7 +109,7 @@ function cancelAndContinueSleeper(request: MockModelRequest): MockModelResponse 
   const taskId = /Started task (\S+)\./u.exec(String(started.output))?.[1];
   if (taskId === undefined) throw new Error("The sleeper call returned no task receipt.");
   if (calls("task_wait").length === 0) {
-    return { toolCalls: [{ input: { timeout: 2_000 }, name: "task_wait" }] };
+    return { toolCalls: [{ input: { timeoutSeconds: 2 }, name: "task_wait" }] };
   }
   if (calls("task_cancel").length === 0) {
     return { toolCalls: [{ input: { taskId }, name: "task_cancel" }] };

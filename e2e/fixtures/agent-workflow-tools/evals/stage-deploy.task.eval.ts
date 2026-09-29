@@ -12,7 +12,10 @@ export default defineEval({
     const turn = await t.send("WORKFLOW-STAGE-WAIT");
     turn.expectOk();
 
-    turn.calledTool("stage_deploy", { count: 1, output: /^Started task stage_deploy-\w{6}\.$/u });
+    turn.calledTool("stage_deploy", {
+      count: 1,
+      output: /^Started task stage_deploy-\w{6}\. Its result will arrive/u,
+    });
     turn.event("task.started", { count: 1, data: { callId: "stage", name: "stage_deploy" } });
     turn.calledTool("task_wait", { count: 1, output: /stage_deploy-\w{6} completed/u });
     turn.event("task.settled", {

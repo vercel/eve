@@ -194,7 +194,7 @@ it("forwards a message that reaches the task at any point as the agent's turn en
   }
 });
 
-it("fails the task with the reason the agent's turn failed", async () => {
+it("fails the task with the reason the agent's turn failed and how to retry", async () => {
   const started = await startReview();
   agent.turns[0]?.(
     turnEnded({
@@ -207,7 +207,10 @@ it("fails the task with the reason the agent's turn failed", async () => {
   );
 
   await expect(started.outcome).resolves.toMatchObject({
-    error: { message: "The agent's turn failed: The model provider rejected the request." },
+    error: {
+      message:
+        "The agent's turn failed: The model provider rejected the request.\nThis task has ended; to retry, call reviewer without taskId.",
+    },
     status: "failed",
   });
 });

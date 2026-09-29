@@ -12,7 +12,7 @@ export default defineEval({
     turn.expectOk();
 
     turn.event("task.started", { count: 1, data: { callId: "canary", name: "canary_deploy" } });
-    turn.calledTool("task_cancel", { count: 1, output: { status: "cancelled" } });
+    turn.calledTool("task_cancel", { count: 1, output: /^Stopped \S+; it won't report back\.$/u });
     turn.event("task.settled", { count: 1, data: { callId: "canary", status: "cancelled" } });
     turn.notEvent("task.settled", { data: { status: "completed" } });
     turn.event("turn.completed", { count: 1 });

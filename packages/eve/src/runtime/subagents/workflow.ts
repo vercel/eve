@@ -51,8 +51,9 @@ export async function agentToolServeWorkflow(
     // A cancel already settled the turn's calls, and the task stays available.
     if (!turn.signal.aborted) {
       if (event.result.status === "failed") {
+        // The throw ends this task, so the model can only retry with a new one.
         throw new Error(
-          `The agent's turn failed: ${event.result.error?.message ?? "no reason given"}`,
+          `The agent's turn failed: ${event.result.error?.message ?? "no reason given"}\nThis task has ended; to retry, call ${ctx.toolName} without taskId.`,
         );
       }
       // `next` can take a call after the result wins the race, and the reply

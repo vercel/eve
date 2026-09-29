@@ -79,7 +79,7 @@ function parentTurn(
             input: (request) => ({ message: REVIEW_ENTRY, taskId: keeperTask(request) }),
             name: tool,
           },
-          { id: "notebook-review-wait", input: () => ({ timeout: 2_000 }), name: "task_wait" },
+          { id: "notebook-review-wait", input: () => ({ timeoutSeconds: 2 }), name: "task_wait" },
           {
             id: "notebook-cancel",
             input: (request) => ({ taskId: keeperTask(request) }),

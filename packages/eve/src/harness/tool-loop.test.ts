@@ -329,6 +329,29 @@ function createDelegationToolMap(): ToolLoopHarnessConfig["tools"] {
   ]);
 }
 
+/** A `task` workflow tool, so the agent can start tasks and gets the task tools. */
+function createTaskToolMap(): ToolLoopHarnessConfig["tools"] {
+  const workflowId = "workflow//./agent/tools/research//task";
+  return new Map([
+    [
+      "research",
+      {
+        behavior: {
+          availability: [],
+          handling: {
+            kind: "dispatch",
+            target: { entryPoint: "task", kind: "workflow-tool-call", workflowId },
+          },
+        },
+        description: "Research in the background.",
+        inputSchema: jsonSchema({ type: "object" }),
+        name: "research",
+        workflowId,
+      },
+    ],
+  ]);
+}
+
 function setDelegatedParent(ctx: ContextContainer): void {
   ctx.set(ParentSessionKey, {
     callId: "call-parent",
@@ -1570,25 +1593,9 @@ describe("createToolLoopHarness", () => {
       toolCalls: [gateToolCall, waitToolCall, invalidCancelToolCall],
       toolResults: [],
     });
-    const workflowId = "workflow//./agent/tools/research//task";
     const tools: ToolLoopHarnessConfig["tools"] = new Map([
       ...createDelegationToolMap(),
-      [
-        "research",
-        {
-          behavior: {
-            availability: [],
-            handling: {
-              kind: "dispatch",
-              target: { entryPoint: "task", kind: "workflow-tool-call", workflowId },
-            },
-          },
-          description: "Research in the background.",
-          inputSchema: jsonSchema({ type: "object" }),
-          name: "research",
-          workflowId,
-        },
-      ],
+      ...createTaskToolMap(),
     ]);
 
     const { emit } = createEventCollector();
@@ -4459,6 +4466,48 @@ describe("createToolLoopHarness", () => {
     });
     expect(events.map((event) => event.type)).not.toContain("session.waiting");
   });
+
+  const REPLY_BEFORE_RESULT = "If the person should hear from you now";
+  const WAIT_INSTEAD_OF_REPLYING = "Only your final reply reaches your caller.";
+
+  it.each([
+    {
+      absent: WAIT_INSTEAD_OF_REPLYING,
+      delegated: false,
+      guidance: REPLY_BEFORE_RESULT,
+      session: "a root session, where a person reads each reply",
+    },
+    {
+      absent: REPLY_BEFORE_RESULT,
+      delegated: true,
+      guidance: WAIT_INSTEAD_OF_REPLYING,
+      session: "a delegated session, whose caller reads only the final reply",
+    },
+  ])(
+    "tells the model how to wait on tasks in $session",
+    async ({ absent, delegated, guidance }) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Done.", role: "assistant" }] },
+        text: "Done.",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const runStep = createToolLoopHarness(
+        createTestConfig(undefined, { tools: createTaskToolMap() }),
+      );
+      const ctx = new ContextContainer();
+      if (delegated) setDelegatedParent(ctx);
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Research this." }),
+      );
+
+      const instructions = JSON.stringify(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].instructions);
+      expect(instructions).toContain(guidance);
+      expect(instructions).not.toContain(absent);
+    },
+  );
 
   it("emits the full terminal failure cascade on an explicit Gateway invalid-request error", async () => {
     const logs = captureLogRecords();

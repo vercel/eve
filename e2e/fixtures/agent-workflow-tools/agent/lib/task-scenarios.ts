@@ -74,7 +74,7 @@ const SCENARIOS: Readonly<Record<string, Scenario>> = {
       request,
       [
         { id: "plan-hold", input: revisionOf(HOLD_REQUEST), name: "revise_plan" },
-        { id: "plan-hold-wait", input: () => ({ timeout: 1_000 }), name: "task_wait" },
+        { id: "plan-hold-wait", input: () => ({ timeoutSeconds: 1 }), name: "task_wait" },
         { id: "plan-cancel", input: taskOf("plan-draft"), name: "task_cancel" },
         { id: "plan-final", input: revisionOf("final"), name: "revise_plan" },
         { id: "plan-final-wait", name: "task_wait" },

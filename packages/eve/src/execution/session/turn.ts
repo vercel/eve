@@ -417,15 +417,13 @@ interface TaskWait {
   readonly startedAtMs: number;
   /** Resolves with the call's id once the timeout passes; absent without a timeout. */
   readonly timer?: Promise<string>;
-  /** A timeout of 0 has passed already: the wait returns whatever is ready. */
   timedOut: boolean;
 }
 
 function startTaskWait(call: Extract<TaskToolCall, { readonly kind: "task_wait" }>): TaskWait {
   const { callId, timeoutMs } = call;
-  const timer =
-    timeoutMs !== undefined && timeoutMs > 0 ? sleep(timeoutMs).then(() => callId) : undefined;
-  return { callId, startedAtMs: Date.now(), timedOut: timeoutMs === 0, timer };
+  const timer = timeoutMs === undefined ? undefined : sleep(timeoutMs).then(() => callId);
+  return { callId, startedAtMs: Date.now(), timedOut: false, timer };
 }
 
 type RuntimeEvent =

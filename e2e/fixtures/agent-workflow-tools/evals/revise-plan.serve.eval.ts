@@ -16,15 +16,18 @@ export default defineEval({
     drafted.expectOk();
     drafted.calledTool("revise_plan", {
       count: 1,
-      output: /^Started task revise_plan-\w{6}\. Call revise_plan again with taskId/u,
+      output: /^Started task revise_plan-\w{6}\. .* call revise_plan again with taskId/u,
     });
     drafted.messageIncludes('WORKFLOW-PLAN-RESULT {"revisions":["draft"]}');
 
     const revised = await drafted.session.send("WORKFLOW-PLAN-REVISE");
     revised.expectOk();
-    revised.calledTool("revise_plan", { count: 2, output: /^Sent to task revise_plan-\w{6}\.$/u });
+    revised.calledTool("revise_plan", { count: 2, output: /^Sent to task revise_plan-\w{6}\. /u });
     revised.calledTool("task_wait", { output: /^Stopped waiting after/u });
-    revised.calledTool("task_cancel", { count: 1, output: { status: "cancelled" } });
+    revised.calledTool("task_cancel", {
+      count: 1,
+      output: /^Stopped revise_plan-\w{6}'s current work;/u,
+    });
     revised.event("task.settled", { count: 1, data: { callId: "plan-hold", status: "cancelled" } });
     revised.event("task.settled", {
       count: 1,

@@ -1266,7 +1266,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (ctx !== undefined) {
         currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
       }
-      currentMessages.addSystem(taskSystemMessages(modelCallCoordinationTools));
+      currentMessages.addSystem(
+        taskSystemMessages(modelCallCoordinationTools, { finalReplyOnly: hidesHeldText }),
+      );
       currentMessages.addAnnouncements({
         availableSkills: ctx?.get(PendingSkillAnnouncementKey),
       });

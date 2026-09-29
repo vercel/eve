@@ -4,7 +4,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 export interface TaskWaitInput {
-  readonly timeout?: number;
+  readonly timeoutSeconds?: number;
 }
 
 /**
@@ -17,7 +17,11 @@ export const taskWaitTool: HarnessToolDefinition = {
   inputSchema: defineJsonSchema<TaskWaitInput>({
     type: "object",
     properties: {
-      timeout: { type: "integer", minimum: 0, description: TASK_WAIT_TIMEOUT_DESCRIPTION },
+      timeoutSeconds: {
+        type: "integer",
+        minimum: 1,
+        description: TASK_WAIT_TIMEOUT_DESCRIPTION,
+      },
     },
     additionalProperties: false,
   }),

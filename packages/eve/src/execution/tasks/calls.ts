@@ -41,10 +41,11 @@ export function pendingTaskToolCalls(messages: readonly ModelMessage[]): TaskToo
         const taskId = String(Reflect.get(input, "taskId"));
         calls.push({ callId: part.toolCallId, kind: "task_cancel", taskId });
       } else if (part.toolName === TASK_WAIT_TOOL_NAME) {
-        const timeout: unknown = Reflect.get(input, "timeout");
+        // Seconds, to match `sleep`.
+        const timeoutSeconds: unknown = Reflect.get(input, "timeoutSeconds");
         calls.push(
-          typeof timeout === "number"
-            ? { callId: part.toolCallId, kind: "task_wait", timeoutMs: timeout }
+          typeof timeoutSeconds === "number"
+            ? { callId: part.toolCallId, kind: "task_wait", timeoutMs: timeoutSeconds * 1_000 }
             : { callId: part.toolCallId, kind: "task_wait" },
         );
       }
@@ -66,7 +67,11 @@ export type TaskWaitResult =
     }
   | { readonly status: "timeout" | "interrupt"; readonly working: readonly string[] };
 
-export type TaskCancelResult = { readonly status: "cancelled" | "already_finished" };
+export interface TaskCancelResult {
+  readonly resumable: boolean;
+  readonly status: "cancelled" | "already_finished";
+  readonly tool: string;
+}
 
 // Built directly: the workflow body can't import the harness's result helpers.
 export function taskToolResult(
