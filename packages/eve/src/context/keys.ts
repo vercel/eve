@@ -261,8 +261,8 @@ export interface PreparedMemoryPreamble {
 }
 
 export interface PendingMemoryCommit {
-  readonly history: readonly ModelMessage[];
-  readonly projectedMessages: readonly ModelMessage[];
+  /** Records recalled by this operation, to append after the prepared history. */
+  readonly recalledMessages: readonly ModelMessage[];
   readonly state: Readonly<Record<string, unknown>>;
 }
 

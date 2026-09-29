@@ -150,7 +150,11 @@ export function applyMemoryRecallBatches(input: {
   readonly batches: readonly MemoryRecallBatch[];
   readonly history: readonly ModelMessage[];
   readonly state: SessionStateMap | undefined;
-}): { readonly history: ModelMessage[]; readonly state: SessionStateMap } {
+}): {
+  readonly history: ModelMessage[];
+  readonly recalledMessages: ModelMessage[];
+  readonly state: SessionStateMap;
+} {
   const prior = readMemorySessionState(input.state);
   const operationDigests: Record<string, string> = { ...prior.operationDigests };
   const latest = latestKeyedRecords(input.history);
@@ -193,6 +197,7 @@ export function applyMemoryRecallBatches(input: {
   );
   return {
     history: [...input.history, ...appended],
+    recalledMessages: appended,
     state: writeMemorySessionState(input.state, {
       locks: Object.fromEntries(input.batches.map((batch) => [batch.lock.slot, batch.lock])),
       operationDigests: trimmedDigests,

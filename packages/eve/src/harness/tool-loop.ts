@@ -927,7 +927,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           parkedSession = {
             ...parkedSession,
             history: validateHarnessModelMessages([
-              ...(memoryCommit?.history ?? parkedSession.history),
+              ...parkedSession.history,
+              ...(memoryCommit?.recalledMessages ?? []),
               ...instructionMessages,
             ]),
             state: memoryCommit?.state ?? parkedSession.state,
@@ -945,7 +946,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         parkedSession = {
           ...parkedSession,
           history: validateHarnessModelMessages([
-            ...(memoryCommit?.history ?? parkedSession.history),
+            ...parkedSession.history,
+            ...(memoryCommit?.recalledMessages ?? []),
             ...instructionMessages,
           ]),
           state: memoryCommit?.state ?? parkedSession.state,
@@ -1088,7 +1090,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         session = {
           ...pending.session,
           history: validateHarnessModelMessages([
-            ...(memoryCommit?.history ?? pending.session.history),
+            ...pending.session.history,
+            ...(memoryCommit?.recalledMessages ?? []),
             ...instructionMessages,
           ]),
           state: memoryCommit?.state ?? pending.session.state,
@@ -1106,20 +1109,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInstrumentation?.setTurnId(emissionState.turnId);
     }
 
-    const committedHistory = memoryCommit?.history ?? pending.session.history;
     const historyLength = pending.session.history.length;
+    const preambleMessages = [...(memoryCommit?.recalledMessages ?? []), ...instructionMessages];
     session = setHarnessEmissionState(
       {
         ...pending.session,
-        history: validateHarnessModelMessages([...committedHistory, ...instructionMessages]),
+        history: validateHarnessModelMessages([...pending.session.history, ...preambleMessages]),
         state: memoryCommit?.state ?? pending.session.state,
       },
       emissionState,
     );
+    // Preamble messages go before the pending transcript so an approval
+    // response stays in the final tool message, where the AI SDK reads it.
     let messages: HarnessModelMessage[] = validateHarnessModelMessages([
-      ...(memoryCommit?.history ?? pending.messages.slice(0, historyLength)),
-      ...instructionMessages,
-      ...(memoryCommit === undefined ? pending.messages.slice(historyLength) : []),
+      ...pending.messages.slice(0, historyLength),
+      ...preambleMessages,
+      ...pending.messages.slice(historyLength),
     ]);
 
     // A resolved session-limit continuation prompt grants a fresh token
@@ -3223,7 +3228,7 @@ async function maybeCompact(input: {
     if (ctx !== undefined) {
       const commit = drainMemoryCommit(ctx);
       if (commit !== undefined) {
-        messages = validateHarnessModelMessages(commit.history);
+        messages = validateHarnessModelMessages([...messages, ...commit.recalledMessages]);
         session = { ...session, state: commit.state };
       }
     }
