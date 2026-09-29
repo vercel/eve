@@ -91,7 +91,12 @@ For `task.started`, `task.settled`, and `agent.started`, `ctx.session.id`
 identifies the session that started the task or opened the subagent session.
 Typed handlers and `*` handlers receive this context even when the event
 arrives between turns. These hooks can use `ctx.getSandbox()` against that
-session, and sandbox changes they make are kept for its next turn.
+session. For `task.started` and `task.settled`, sandbox changes they make are
+kept for its next turn. eve publishes `agent.started` as soon as the child
+session opens, even while the parent's model step is still running, and
+changes an `agent.started` hook makes to session state at that point are not
+kept. Use `agent.started` hooks to observe the event, not to change session
+state.
 
 ### Narrowing tool results
 

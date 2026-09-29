@@ -690,7 +690,7 @@ Use [`ctx.ask`](#ask-a-human-ctxask) when the workflow needs a human answer. See
 
 `ctx.abortSignal` aborts when the call is cancelled: by `session.cancel()`, or, for a task, by
 `task_cancel`, a failed turn, or the end of the session. A steering message also aborts it for an
-`execute` call; see [Stop early for a new message](#stop-early-for-a-new-message). It is durable —
+`execute` call; see [Stop early for a new message](#stop-early-for-a-new-message). It is durable:
 it survives replay, and a step that receives it observes the abort. Pass it into the steps that
 should stop, and clean up in `try/finally`:
 
