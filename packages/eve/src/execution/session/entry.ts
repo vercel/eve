@@ -15,6 +15,7 @@ import { hasDelegatedSessionContext } from "#execution/delegated-session-context
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
+import { startRunObservationStep } from "#execution/run-observation/start-step.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
   sessionCommandHookToken,
@@ -121,6 +122,19 @@ async function bootInitialOwner(
       }
       await inbox.dispose();
       return undefined;
+    }
+    if (input.runObservation !== undefined) {
+      try {
+        await startRunObservationStep({
+          expiresAt: input.runObservation.expiresAt,
+          rootSessionId: sessionId,
+          serializedContext,
+        });
+      } catch (error) {
+        throw new Error("Slack run observation failed to start; the session was not admitted.", {
+          cause: error,
+        });
+      }
     }
     return {
       inbox,

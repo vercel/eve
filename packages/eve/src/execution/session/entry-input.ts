@@ -13,6 +13,7 @@ export const SESSION_HANDOFF_VERSION = 2;
  */
 export interface InitialWorkflowEntryInput {
   readonly activityCollectorRunId?: string;
+  readonly runObservation?: { readonly expiresAt: string };
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   readonly input: RunInput["input"];
   readonly kind: "initial";

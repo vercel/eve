@@ -3,6 +3,10 @@ import type { UserContent } from "ai";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { copyChannelActivityPresentation } from "#channel/activity-renderer.js";
 import {
+  copySlackObservation,
+  getSlackObservation,
+} from "#public/channels/slack/observation/ownership.js";
+import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
 } from "#channel/delivery-metadata.js";
@@ -131,11 +135,14 @@ export function createChannelAddress<TState = undefined>(input: {
               ...input.adapter,
               state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
             };
-      if (adapter !== input.adapter) copyChannelActivityPresentation(input.adapter, adapter);
+      if (adapter !== input.adapter) {
+        copyChannelActivityPresentation(input.adapter, adapter);
+        copySlackObservation(input.adapter, adapter);
+      }
       const runInput: RunInput = {
         adapter,
         auth: options.auth,
-        capabilities: { requestInput: true },
+        capabilities: { requestInput: getSlackObservation(adapter) === undefined },
         callback: options.callback,
         channelName: input.channelName,
         continuationConflictCommand: command,

@@ -1,27 +1,79 @@
-import {
-  isTurnSegmentBoundary,
-  updatePendingAuthorizations,
-  updatePendingInputRequests,
-} from "#client/session-utils.js";
+import { hasPendingAuthorizations, type ConversationState } from "#client/conversation-state.js";
 import type { ActiveTurn } from "#client/eve-agent-store-state.js";
 import type { MessageResponse } from "#client/message-response.js";
+import { endsTurnSegment, TurnSegment } from "#client/session-utils.js";
 import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 
-export function isSettledSessionTail(events: readonly MessageStreamEvent[]): boolean {
-  const tail = events.at(-1);
-  if (tail === undefined) return false;
-  const pendingAuthorizations = new Set<string>();
-  const pendingInputRequests = new Set<string>();
-  for (const event of events) {
-    updatePendingAuthorizations(pendingAuthorizations, event);
-    updatePendingInputRequests(pendingInputRequests, event);
-  }
-  return (
-    isTurnSegmentBoundary(tail, pendingInputRequests) &&
-    (tail.type !== "session.waiting" || pendingAuthorizations.size === 0)
+export function activeTurnForOptimisticFollowUp(
+  events: readonly MessageStreamEvent[],
+): string | undefined {
+  const lastTurn = events.findLast(
+    (event) =>
+      event.type === "turn.started" ||
+      event.type === "turn.completed" ||
+      event.type === "turn.failed" ||
+      event.type === "turn.cancelled" ||
+      isCurrentTurnBoundaryEvent(event),
   );
+  return lastTurn?.type === "turn.started" ? lastTurn.data.turnId : undefined;
+}
+
+/**
+ * Where catch-up stops following and when an idle session counts as settled. These reads have no
+ * response to scope them, so the {@link endsTurnSegment} rule reads the whole conversation.
+ */
+export function isResponseBoundary(
+  event: MessageStreamEvent,
+  conversation: ConversationState,
+): boolean {
+  return endsTurnSegment(event, {
+    callbacks: hasPendingAuthorizations(conversation),
+    requests: Object.values(conversation.inputs).some((input) => input.status !== "settled"),
+  });
+}
+
+/** A turn parked on a question stays open, so its session is still streaming. */
+export function settledStatus(
+  error: Error | undefined,
+  conversation: ConversationState,
+): "error" | "ready" | "streaming" {
+  if (error !== undefined) return "error";
+  return conversation.activeTurnId === undefined ? "ready" : "streaming";
+}
+
+export function isSettledSessionTail(
+  events: readonly MessageStreamEvent[],
+  conversation: ConversationState,
+): boolean {
+  const tail = events.at(-1);
+  return tail !== undefined && isResponseBoundary(tail, conversation);
+}
+
+/** A server ignores answers to requests it already settled, so the store never sends them. */
+export function assertAnswerable(input: SendTurnPayload, conversation: ConversationState): void {
+  for (const { requestId } of input.inputResponses ?? []) {
+    const status = conversation.inputs[requestId]?.status;
+    if (status !== undefined && status !== "open") {
+      throw new Error(`Input request ${requestId} was already answered.`);
+    }
+  }
+}
+
+export function assertInFlightFollowUp(input: SendTurnPayload): void {
+  if (input.inputResponses !== undefined) return;
+  if (input.message === undefined || input.turnPolicy !== "steer") {
+    throw new Error(
+      'eve session is already processing a turn. Send a message with turnPolicy: "steer" to guide it at the next boundary, or answer an open input request.',
+    );
+  }
+}
+
+export function validateFollowUp<T extends SendTurnPayload>(input: T): T {
+  assertExclusiveTurnInput(input);
+  assertInFlightFollowUp(input);
+  return input;
 }
 
 export function assertExclusiveTurnInput(input: SendTurnPayload): void {
@@ -98,6 +150,28 @@ export function createActiveTurn(
   return turn;
 }
 
+/** Counts confirmed steered messages toward the active turn's accepted follow-ups. */
+export function countFollowUpDeliveries(
+  turn: ActiveTurn,
+  reconciliation: {
+    readonly alreadyProjected: boolean;
+    readonly event: MessageStreamEvent;
+    readonly ids: readonly string[];
+  },
+): void {
+  let followed = 0;
+  for (const id of reconciliation.ids) {
+    if (turn.followUpSubmissionIds.delete(id)) followed += 1;
+  }
+  if (followed === 0) return;
+  if (reconciliation.alreadyProjected) {
+    turn.receivedFollowUps += followed;
+  } else {
+    const previous = turn.receivedFollowUpEvents.get(reconciliation.event) ?? 0;
+    turn.receivedFollowUpEvents.set(reconciliation.event, previous + followed);
+  }
+}
+
 export async function followSteeredTurns(
   turn: ActiveTurn,
   events: AsyncIterable<MessageStreamEvent>,
@@ -107,13 +181,12 @@ export async function followSteeredTurns(
     await Promise.allSettled(turn.followUpDispatches);
   }
   if (turn.receivedFollowUps >= turn.acceptedFollowUps) return;
-  const pendingInputRequests = new Set<string>();
+  const segment = new TurnSegment({ followCallbacks: true });
   for await (const event of events) {
     if (!isActive()) return;
     turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
     turn.receivedFollowUpEvents.delete(event);
-    updatePendingInputRequests(pendingInputRequests, event);
-    if (isTurnSegmentBoundary(event, pendingInputRequests)) {
+    if (segment.observe(event)) {
       while (turn.followUpDispatches.size > 0) {
         await Promise.allSettled(turn.followUpDispatches);
       }

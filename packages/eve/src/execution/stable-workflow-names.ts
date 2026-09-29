@@ -8,6 +8,8 @@ export const WORKFLOW_ENTRY_NAME = "workflowEntry";
 export const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 export const WORKFLOW_TOOL_RUN_WORKFLOW_NAME = "workflowToolRunWorkflow";
 export const ACTIVITY_COLLECTOR_WORKFLOW_NAME = "activityCollectorWorkflow";
+export const RUN_OBSERVATION_WORKFLOW_NAME = "runObservationWorkflow";
+export const TASK_HARD_STOP_WORKFLOW_NAME = "taskHardStopWorkflow";
 
 export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   WORKFLOW_ENTRY_NAME,
@@ -15,4 +17,6 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   SESSION_TIMEOUT_WORKFLOW_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
   ACTIVITY_COLLECTOR_WORKFLOW_NAME,
+  RUN_OBSERVATION_WORKFLOW_NAME,
+  TASK_HARD_STOP_WORKFLOW_NAME,
 ]);

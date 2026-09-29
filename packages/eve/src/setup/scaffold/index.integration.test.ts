@@ -272,7 +272,9 @@ describe("ensureChannel", () => {
     expect(agentChatSource).toMatch(/<PromptInputTextarea\s+disabled=\{isResuming\}/);
     expect(agentChatSource).toContain('turnPolicy: "steer"');
     expect(agentChatSource).toContain('const isResuming = agent.status === "resuming"');
-    expect(agentChatSource).toContain("canRespond={!isBusy && !isResuming}");
+    expect(agentChatSource).toContain(
+      '!isResuming && agent.data.inputs[requestId]?.status === "open"',
+    );
     expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
     expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "app/icon.svg"), "utf8")).resolves.toContain(

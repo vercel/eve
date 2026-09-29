@@ -9,6 +9,7 @@ import {
 } from "#compiled/@workflow/errors/index.js";
 
 import { getChannelActivityPresentation } from "#channel/activity-renderer.js";
+import { getSlackObservation } from "#public/channels/slack/observation/ownership.js";
 import type {
   CancelTurnInput,
   CancelTurnResult,
@@ -84,6 +85,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
   ACTIVITY_COLLECTOR_WORKFLOW_NAME,
+  RUN_OBSERVATION_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
   WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
@@ -91,6 +93,8 @@ import {
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
+// Connection search cannot produce an action when fixture admission rejects connections.
+const INERT_FIXTURE_DYNAMIC_TOOL_SOURCE_ID = "eve:defaults:tools/connection_search.ts";
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
@@ -122,6 +126,10 @@ export const sessionTimeoutWorkflowReference = {
 /** Stable workflow reference for root-session activity collectors. */
 export const activityCollectorWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${ACTIVITY_COLLECTOR_WORKFLOW_NAME}`,
+};
+
+export const runObservationWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${RUN_OBSERVATION_WORKFLOW_NAME}`,
 };
 
 /** Stable workflow reference for authored workflow tool runs. */
@@ -160,6 +168,48 @@ export function createWorkflowRuntime(config: {
       const retention = bundle.resolvedAgent.config?.experimental?.workflow?.retention;
       let collectorRunId: string | undefined;
       let activityObserver = input.activityObserver;
+      const observesSlack = getSlackObservation(input.adapter) !== undefined;
+      if (observesSlack && (input.parent !== undefined || input.activityObserver !== undefined)) {
+        throw new Error(
+          "Slack run observation requires a new root session without another activity observer.",
+        );
+      }
+      if (observesSlack) {
+        const fixtureAgents = [...bundle.graph.nodesByNodeId.values()];
+        const hasUnsupportedDefinitions = fixtureAgents.some(
+          ({ agent }) =>
+            agent.tools.some((tool) => tool.owner.kind !== "framework") ||
+            agent.connections.length > 0 ||
+            agent.dynamicToolResolvers.some(
+              (resolver) => resolver.sourceId !== INERT_FIXTURE_DYNAMIC_TOOL_SOURCE_ID,
+            ) ||
+            (agent.dynamicConnectionResolvers?.length ?? 0) > 0,
+        );
+        const admissionFailures = [
+          input.capabilities?.requestInput !== false ? "requestInput was not disabled" : undefined,
+          hasUnsupportedDefinitions ? "authored tools or connections are present" : undefined,
+          input.input.message !== undefined && typeof input.input.message !== "string"
+            ? "input is not plain text"
+            : undefined,
+        ].filter((failure) => failure !== undefined);
+        if (admissionFailures.length > 0) {
+          throw new Error(
+            `Slack run observation fixture requires requestInput disabled, plain-text input, and no authored tools or connections (${admissionFailures.join(", ")}).`,
+          );
+        }
+        const channelId = input.adapter.state?.["channelId"];
+        const threadTs = input.adapter.state?.["threadTs"];
+        if (
+          typeof channelId !== "string" ||
+          !channelId ||
+          typeof threadTs !== "string" ||
+          !threadTs
+        ) {
+          throw new Error(
+            "Slack run observation requires an existing thread; proactive anchors are unsupported.",
+          );
+        }
+      }
       if (
         input.parent === undefined &&
         activityObserver === undefined &&
@@ -223,6 +273,11 @@ export function createWorkflowRuntime(config: {
       }
       if (retention !== undefined) {
         workflowInput.retention = retention;
+      }
+      if (observesSlack) {
+        workflowInput.runObservation = {
+          expiresAt: new Date(Date.now() + 60 * 60 * 1_000).toISOString(),
+        };
       }
       const sessionAttributes =
         parentLineage.sessionId === undefined

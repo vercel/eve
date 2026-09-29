@@ -10,6 +10,10 @@ import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
 import type { RuntimeRegistryEntryLocation } from "#internal/runtime-registry.js";
 import { RuntimeRegistryError } from "#internal/runtime-registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
+import {
+  copySlackObservation,
+  getSlackObservation,
+} from "#public/channels/slack/observation/ownership.js";
 
 /**
  * Runtime-owned registry of adapter configs keyed by adapter kind.
@@ -135,6 +139,7 @@ export function deserializeRuntimeAdapter(
 
   const rehydrated: ChannelAdapter = { ...adapterConfig, state: serialized.state };
   copyChannelActivityPresentation(adapterConfig, rehydrated);
+  copySlackObservation(adapterConfig, rehydrated);
   return rehydrated;
 }
 
@@ -160,7 +165,11 @@ function requireAdapterKind(
  * the bare `kind` discriminator (and initial `state`).
  */
 function carriesAdapterBehavior(adapter: ChannelAdapter): boolean {
-  if (getChannelActivityPresentation(adapter) !== undefined) return true;
+  if (
+    getChannelActivityPresentation(adapter) !== undefined ||
+    getSlackObservation(adapter) !== undefined
+  )
+    return true;
 
   if (adapter.deliver !== undefined) {
     return true;

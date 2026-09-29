@@ -9,7 +9,11 @@ import type {
 } from "#channel/channel-operations.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import { setChannelActivityRenderers, setChannelBuildMetadata } from "#channel/compiled-channel.js";
+import {
+  setChannelActivityRenderers,
+  setChannelBuildMetadata,
+  type CompiledChannel,
+} from "#channel/compiled-channel.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { CardElement } from "#compiled/chat/index.js";
@@ -45,6 +49,7 @@ import {
 import {
   defaultEvents,
   defaultInputRequestedHandler,
+  defaultSlackAuth,
   defaultOnAppMention,
   defaultOnDirectMessage,
   postCompletedSlackReply,
@@ -74,6 +79,7 @@ import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/chann
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
 import { defineSlackAppManifest } from "#public/channels/slack/app-manifest.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
+import { attachSlackObservation } from "#public/channels/slack/observation/ownership.js";
 import {
   bindSlackSessionOperations,
   sendAsSlackUser,
@@ -672,6 +678,9 @@ export interface SlackChannelConfig {
     readonly renderers: readonly SlackActivityRenderer[];
   };
 
+  /** Controlled fixture only: an independent observer owns thread replies and task activity. */
+  readonly experimental?: { readonly runObservation?: true };
+
   /** Override the default webhook route path (`/eve/v1/slack`). */
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
@@ -885,8 +894,28 @@ export interface SlackChannel extends Channel<
  * fields keep their defaults.
  */
 export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
+  const observes = config.experimental?.runObservation === true;
+  if (
+    observes &&
+    (config.events !== undefined ||
+      config.activity !== undefined ||
+      config.approvalChannel !== undefined ||
+      config.onMessage !== undefined ||
+      config.onAppMention !== undefined ||
+      config.onDirectMessage !== undefined ||
+      config.onEvent !== undefined ||
+      config.onInteraction !== undefined ||
+      config.onShortcut !== undefined ||
+      config.onSlashCommand !== undefined ||
+      config.onInputResponse !== undefined ||
+      (config.uploadPolicy !== undefined && config.uploadPolicy !== "disabled"))
+  ) {
+    throw new Error(
+      "Slack run observation is fixture-only: custom hooks, events, approvals, uploads, and activity renderers are unsupported.",
+    );
+  }
   const api = resolveSlackTransportOptions(config.api);
-  const uploadPolicy = mergeUploadPolicy(config.uploadPolicy);
+  const uploadPolicy = mergeUploadPolicy(observes ? "disabled" : config.uploadPolicy);
   const slackFetchFile = createSlackFetchFile({
     api,
     botToken: config.credentials?.botToken,
@@ -1031,8 +1060,13 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       return receiveOnSlack(input, { from, api, credentials: config.credentials });
     },
 
-    events: mergedEvents,
+    events: observes ? {} : mergedEvents,
   });
+  if (observes)
+    attachSlackObservation((channel as CompiledChannel).adapter, {
+      api,
+      botToken: config.credentials?.botToken,
+    });
   setChannelActivityRenderers(channel, {
     destination(state) {
       const slack = state as Partial<SlackChannelState> | undefined;
@@ -1268,7 +1302,11 @@ async function handleEventPost(input: {
           });
       } else {
         builtinDefault = dispatchMessageWith(
-          kind === "app_mention" ? defaultOnAppMention : defaultOnDirectMessage,
+          config.experimental?.runObservation === true
+            ? (ctx, message) => ({ auth: defaultSlackAuth(message, ctx) })
+            : kind === "app_mention"
+              ? defaultOnAppMention
+              : defaultOnDirectMessage,
         );
       }
     }
