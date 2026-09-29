@@ -92,15 +92,9 @@ identifies the session that started the task or opened the subagent session.
 Typed handlers and `*` handlers receive this context even when the event
 arrives between turns. These hooks can use `ctx.getSandbox()` against that
 session. Session state and sandbox changes they make are kept for the
-session's next turn. eve writes `agent.started` to the stream as soon as the
-child session opens, so clients can follow the child right away. If the
-parent's model step is running at that moment, the `agent.started` channel
-handler and hooks run once that step ends: first thing in the parent's next
-step, or in a step of their own before the parent waits. They see
-the session state the model step left. If the session ends instead, they run
-before its `session.completed` or `session.failed`, except when that model
-step fails the session itself: the step writes `session.failed`, and the hooks
-run after it.
+session's next turn. `agent.started` reaches the stream as soon as the child
+session opens, but its hooks can run later; see
+[Execution order](#execution-order).
 
 ### Narrowing tool results
 
@@ -182,7 +176,9 @@ See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envel
 
 ## Execution order
 
-Publishing a stream event has two parts: eve writes the event to the durable stream, and it dispatches the event to its channel adapter handler and stream-event hooks. Dispatch runs in the step that owns the session's state, so the session state and sandbox changes that handlers and hooks make are kept. The exception is the event that ends a session outside a model step: `session.completed`, or `session.failed` when the session fails outside a model step. eve runs its channel adapter handler without session scope and runs no stream-event hooks for it, so a `session.completed` hook never fires. A `session.failed` written by a failing model step is dispatched in that step, and its hooks run.
+Publishing a stream event writes it to the durable stream and dispatches it to its channel adapter handler and stream-event hooks. Dispatch runs in the step that owns the session's state, so state and sandbox changes that handlers and hooks make are kept.
+
+The exception is an event that ends the session outside a model step: `session.completed`, or `session.failed` for a failure outside one. Its channel adapter handler runs without session scope and no hooks run, so a `session.completed` hook never fires. A `session.failed` from a failing model step is dispatched in that step.
 
 When a step publishes an event it produced, such as a turn's `message.completed` or a workflow tool's `action.partial`, these things happen in order:
 
@@ -191,11 +187,16 @@ When a step publishes an event it produced, such as a turn's `message.completed`
 3. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
 4. Model preparation, for model lifecycle events. Dynamic resolvers subscribed to those events update the model context. Subagent notifications do not run model preparation.
 
-An event can also be written while another step owns the session. Only `agent.started` is written this way: when a child session opens during the parent's model step, eve writes the event right away so clients can follow the child, and dispatches it in the next step that owns the session. That step first runs the channel adapter handler and hooks of each event written this way, in write order, then does its own work. They see the session state as committed when the step starts, including the model step's changes. If no such step comes before the session waits, whether for a task's result or for input, eve dispatches them in a step of their own first. If the session ends first, they run before its `session.completed` or `session.failed`. The exception is a model step that fails the session: that step writes `session.failed` itself, so they run after it. The channel adapter handler of such an event runs after the write, so it cannot change what the stream holds. A retry of the step that dispatches the event runs the handler and hooks again with the same `meta.id` and does not write the event again. A retry of the step that writes it can write it twice; only the copy from the attempt that completed is dispatched.
+Only `agent.started` is written while another step owns the session. eve writes it as soon as the child session opens so clients can follow the child, then dispatches it later:
+
+- The next step that owns the session dispatches it before its own work, in write order, against the state committed at its start. If the session would wait first, for a result or for input, a step of its own dispatches it.
+- If the session ends first, it is dispatched before `session.completed` or `session.failed`, or after a `session.failed` that a failing model step wrote.
+- Its channel adapter handler runs after the write, so it cannot change the event on the stream.
+- A retry of the dispatching step runs the handler and hooks again with the same `meta.id`. A retry of the writing step can write the event twice, but only the copy from the completed attempt is dispatched.
 
 Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
 
-Hooks see the events one step writes in stream order, but not always in global stream order. An event written while another step owns the session is dispatched after the hooks of the events that step wrote later. If a child session opens during the model step that ends a turn, a `*` hook sees `turn.completed` and `session.waiting` before that `agent.started`. If that step fails the session, the hook sees `turn.failed` and `session.failed` first. To process events in stream order, sort them by `meta.id`.
+Hooks see each step's events in stream order, but an `agent.started` written during a model step is dispatched after the hooks of events that step wrote later. If the child opens during the model step that ends a turn, a `*` hook sees the turn end, such as `turn.completed` and `session.waiting`, before `agent.started`. To process events in stream order, sort them by `meta.id`.
 
 ## What happens when a hook throws
 
