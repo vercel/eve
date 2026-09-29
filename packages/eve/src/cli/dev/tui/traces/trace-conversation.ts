@@ -161,21 +161,14 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
       }
       continue;
     }
-    if (
-      span.name === "agent.action" ||
-      stringAttribute(span, "gen_ai.operation.name") === "invoke_workflow"
-    ) {
+    if (span.name === "agent.action") {
       entries.push({
         item: {
           kind: "tool",
           args: stringAttribute(span, "gen_ai.tool.call.arguments"),
           durationMs: spanDurationMs(span),
           error: span.statusCode === 2,
-          name: stripTerminalControls(
-            stringAttribute(span, "agent.action.name") ??
-              stringAttribute(span, "gen_ai.workflow.name") ??
-              "action",
-          ),
+          name: stripTerminalControls(stringAttribute(span, "agent.action.name") ?? "action"),
           result: unwrapJsonString(stringAttribute(span, "gen_ai.tool.call.result")),
           span,
           subagent,
