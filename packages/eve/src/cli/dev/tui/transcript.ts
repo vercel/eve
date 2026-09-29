@@ -78,7 +78,6 @@ export class ConversationTranscript {
     this.#aliasConfirmedMessages(conversation.messages);
     const childToolIds = childToolCallIds(conversation);
     const sections = agentCallSections(conversation);
-    const workingCalls = workingTaskCallIds(conversation);
     const emittedCalls = new Set<string>();
 
     for (const message of conversation.messages) {
@@ -96,12 +95,7 @@ export class ConversationTranscript {
           !childToolIds.has(part.toolCallId) &&
           !isPanelRoutedTool(part.toolName),
       );
-      const states = new Map(
-        tools.map((part) => [
-          part,
-          toolState(part, conversation, working, workingCalls.has(part.toolCallId)),
-        ]),
-      );
+      const states = new Map(tools.map((part) => [part, toolState(part, conversation, working)]));
       const activeSteps = activeToolSteps(states);
 
       for (const [index, part] of message.parts.entries()) {
@@ -297,12 +291,11 @@ export class ConversationTranscript {
         ),
       );
     }
-    const workingCalls = workingTaskCallIds(child);
     const states = new Map(
       messages
         .flatMap((message) => message.parts.filter(isTerminalToolCallPart))
         .filter((part) => part.state !== "input-streaming")
-        .map((part) => [part, toolState(part, child, pending, workingCalls.has(part.toolCallId))]),
+        .map((part) => [part, toolState(part, child, pending)]),
     );
     const activeSteps = activeToolSteps(states);
     for (const [part, state] of states) {
@@ -392,6 +385,8 @@ export function turnActivity(view: AgentTUIConversationView): string {
     message.parts.some(
       (part) =>
         isTerminalToolCallPart(part) &&
+        // A task works without holding the turn; a held turn names its tasks above.
+        part.toolMetadata?.eve?.taskId === undefined &&
         (part.state === "input-available" || part.state === "approval-responded"),
     )
   )
@@ -404,11 +399,11 @@ function toolState(
   part: EveDynamicToolPart,
   conversation: ConversationState,
   working: boolean,
-  taskWorking: boolean,
 ): ToolState {
-  // A task call's receipt closes the tool part; the call runs until its task.settled, even after
-  // its turn ends, as a root approval ends it.
-  if (taskWorking) return { status: "running" };
+  // A task call runs until its task.settled, even after its turn ends, as a root approval ends it.
+  const taskId = part.toolMetadata?.eve?.taskId;
+  const task = taskId === undefined ? undefined : conversation.tasks[taskId];
+  if (task?.calls[part.toolCallId]?.status === "working") return { status: "running" };
   const state = settledToolState(part, conversation);
   return state.status === "running" && !working
     ? { status: "error", errorText: "interrupted" }
@@ -599,16 +594,6 @@ export function agentCallLabel(
   const name = section.agent.name === "agent" ? "self" : stripTerminalControls(section.agent.name);
   const ordinal = section.subtitle.startsWith("#") ? `:${section.subtitle.slice(1)}` : "";
   return `subagent(${name}${ordinal})`;
-}
-
-function workingTaskCallIds(conversation: ConversationState): Set<string> {
-  const ids = new Set<string>();
-  for (const task of Object.values(conversation.tasks)) {
-    for (const call of Object.values(task.calls)) {
-      if (call.status === "working") ids.add(call.callId);
-    }
-  }
-  return ids;
 }
 
 /** Tools a step runs in parallel settle together, so a finished one waits for its siblings. */

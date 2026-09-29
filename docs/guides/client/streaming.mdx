@@ -155,7 +155,7 @@ For the complete event table, see [Sessions, runs & streaming](../../concepts/se
 
 For `action.input.appended`, the default message reducer accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. The matching `actions.requested` event upgrades the same `toolCallId` to `state: "input-available"` and puts the validated value in `input`.
 
-A call to a tool that runs as a [task](/docs/tools/workflows#run-calls-as-tasks-task) returns a receipt as its `action.result` and settles later with `task.settled`, matched by `callId`. The model receives the result as a message in its history, but the stream reports it only as `task.settled`, so render the result from that event.
+A call to a tool that runs as a [task](/docs/tools/workflows#run-calls-as-tasks-task) returns a receipt as its `action.result` and settles later with `task.settled`, matched by `callId`. The model receives the result as a message in its history, but the stream reports it only as `task.settled`, so render the result from that event. The default message reducer keeps the call's `dynamic-tool` part running past the receipt, records the task's ID in `part.toolMetadata.eve.taskId`, and settles the part from `task.settled`, including when `task.settled` arrives before the receipt.
 
 When a submitted message includes attachments, `message.received.data.message` stays the
 flattened compatibility summary, while `message.received.data.parts` carries renderable text and
