@@ -320,6 +320,16 @@ const similarwebLogo = (props: LogoProps) => <SiSimilarweb {...props} />;
 
 const stripeLogo = (props: LogoProps) => <SiStripe color="default" {...props} />;
 
+const linkLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path d="M0 0h32v32H0z" fill="#00D66F" />
+    <path
+      d="M15.144 6H10c1.001 4.18 3.923 7.753 7.58 10-3.664 2.247-6.579 5.82-7.58 10h5.144c1.275-3.867 4.804-7.227 9.142-7.913v-4.18c-4.344-.68-7.874-4.04-9.142-7.907Z"
+      fill="#011E0F"
+    />
+  </svg>
+);
+
 const supabaseLogo = (props: LogoProps) => <SiSupabase color="default" {...props} />;
 
 const ticktickLogo = (props: LogoProps) => <SiTicktick color="default" {...props} />;
