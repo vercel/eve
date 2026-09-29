@@ -1,4 +1,5 @@
 import type { AgentSessionTraceState, AgentTurnTraceState } from "#tracing/agent-trace-state.js";
+import type { InstrumentationStepAttemptStartedEvent } from "#instrumentation/lifecycle.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { agentInvocationSpanName } from "#tracing/agent-span-contract.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
@@ -78,6 +79,34 @@ export function agentChannelClassificationAttributes(
   return {
     "agent.channel.kind": channelKind,
     "agent.session.origin": origin,
+  };
+}
+
+export function agentStepAttributes(input: {
+  readonly event: InstrumentationStepAttemptStartedEvent;
+  readonly frameworkVersion: string;
+  readonly session?: AgentSessionTraceState;
+  readonly turn: AgentTurnTraceState;
+}) {
+  const { event, session, turn } = input;
+  const channelClassification = agentChannelClassificationAttributes(session, turn);
+  return {
+    "agent.framework.name": "eve",
+    "agent.framework.version": input.frameworkVersion,
+    "agent.step.attempt": event.scope.attemptIndex,
+    "agent.step.index": event.scope.stepIndex,
+    "agent.turn.id": event.scope.turnId,
+    "agent.name": event.scope.functionId,
+    // Leave an unresolved kind open for a later delivery to classify.
+    ...(channelClassification["agent.channel.kind"] === "unknown"
+      ? undefined
+      : channelClassification),
+    ...agentSpanNamingAttributes("agent.step"),
+    ...agentTraceIdentityAttributes({
+      rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+      sessionId: event.scope.sessionId,
+    }),
+    ...runtimeContextAttributes(event.runtimeContext),
   };
 }
 

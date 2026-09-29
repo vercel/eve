@@ -222,10 +222,6 @@ export function createAgentOtelInstrumentation(
     const turn = await input.stateStore.getTurn(event.scope.sessionId, event.scope.turnId);
     if (turn === undefined || !isSampledTrace(turn.context)) return;
     const session = await input.stateStore.getSession(event.scope.sessionId);
-    const channelClassification = runtimeAttributes.agentChannelClassificationAttributes(
-      session,
-      turn,
-    );
     const turnContext = withChannelAudience(
       contextFromSpanContext(turn.context),
       event.scope.channelAudience,
@@ -237,24 +233,12 @@ export function createAgentOtelInstrumentation(
         input.tracer.startSpan(
           AGENT_SPAN_NAMES.step,
           {
-            attributes: {
-              "agent.framework.name": "eve",
-              "agent.framework.version": input.frameworkVersion,
-              "agent.step.attempt": event.scope.attemptIndex,
-              "agent.step.index": event.scope.stepIndex,
-              "agent.turn.id": event.scope.turnId,
-              "agent.name": event.scope.functionId,
-              // Leave an unresolved kind open for a later delivery to classify.
-              ...(channelClassification["agent.channel.kind"] === "unknown"
-                ? undefined
-                : channelClassification),
-              ...agentSpanNamingAttributes("agent.step"),
-              ...agentTraceIdentityAttributes({
-                rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
-                sessionId: event.scope.sessionId,
-              }),
-              ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
-            },
+            attributes: runtimeAttributes.agentStepAttributes({
+              event,
+              frameworkVersion: input.frameworkVersion,
+              session,
+              turn,
+            }),
             links:
               activeSpanContext === undefined || activeSpanContext.traceId === turn.context.traceId
                 ? undefined
