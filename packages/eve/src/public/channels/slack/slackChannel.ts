@@ -5,6 +5,7 @@ import type {
   ChannelFrom,
   ChannelResolveSession,
   ChannelSource,
+  InternalChannelSource,
 } from "#channel/channel-operations.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
@@ -75,6 +76,7 @@ import { defineSlackAppManifest } from "#public/channels/slack/app-manifest.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
   bindSlackSessionOperations,
+  sendAsSlackUser,
   type SlackSendOptions,
   type SlackSessionOperations,
 } from "#public/channels/slack/session-operations.js";
@@ -1143,11 +1145,10 @@ async function receiveOnSlack(
     state.audience = audience;
   }
 
-  return deps.from(slackContinuationToken(channelId, continuationThreadTs)).send(input.message, {
-    auth: input.auth,
-    state,
-    title: input.title,
-  });
+  const source = deps.from(
+    slackContinuationToken(channelId, continuationThreadTs),
+  ) as InternalChannelSource<SlackChannelState>;
+  return sendAsSlackUser(source, input.message, { auth: input.auth, state, title: input.title });
 }
 
 /**
@@ -1599,8 +1600,8 @@ async function deliverSlackMessage(input: {
 
 /**
  * Records the Slack user behind a delivery's principal. Slack-authenticated
- * callers carry their user id; custom `onInputResponse` auth relies on the
- * clicking user the interaction stamped on the payload.
+ * callers carry their user id; custom auth relies on the message author or
+ * clicking user stamped on the payload.
  */
 function recordSlackPrincipal(
   state: SlackChannelState,

@@ -3149,6 +3149,31 @@ describe("slackChannel() inbound direct message pipeline", () => {
     expect(options.title).toBe("Private message");
   });
 
+  it("maps a custom-auth message sender to their Slack user when delivered", async () => {
+    const customAuth = {
+      attributes: {},
+      authenticator: "okta",
+      principalId: "okta|alice",
+      principalType: "user",
+    };
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage: () => ({ auth: customAuth }),
+    });
+
+    const { body } = buildDirectMessageBody();
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+    const delivery = send.mock.calls[0]?.[1] as ObservedChannelDelivery<SlackChannelState>;
+    const author = delivery.state?.triggeringUserId;
+    expect(author).toEqual(expect.any(String));
+
+    const adapter = withState(getAdapter(channel), THREAD_STATE);
+    const ctx = buildAdapterContext(adapter, callerAccessor(customAuth));
+    await adapter.deliver!({ message: "hello", state: { triggeringUserId: author } }, ctx);
+
+    expect(ctx.state.slackUsersByPrincipal).toEqual({ "okta|alice": author });
+  });
+
   it("uses an opaque run title for direct messages", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
