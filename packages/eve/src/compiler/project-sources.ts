@@ -395,10 +395,7 @@ function projectManifest(input: {
     input.subagents.push({
       candidate,
       mountId: input.mountId,
-      nodePath: posix.join(
-        input.subagentsPath,
-        input.owner.kind === "extension" ? source.subagentId : name,
-      ),
+      nodePath: posix.join(input.subagentsPath, source.subagentId),
       ...(projection.extensionScope === undefined
         ? {}
         : { extensionScope: projection.extensionScope }),
