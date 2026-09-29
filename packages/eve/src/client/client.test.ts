@@ -265,6 +265,34 @@ describe("Client request policy", () => {
     expect(info.instrumentation?.logicalPath).toBe("instrumentation.ts");
   });
 
+  it("marks legacy kernel effect options as unrecognized", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ...AGENT_INFO,
+        kernelEffects: [
+          {
+            action: "task-cancel",
+            audience: ["root-session", "delegated-task-child"],
+            kind: "background-task",
+            sourceId: "tools/task.ts",
+          },
+        ],
+      }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    const info = await client.info();
+
+    expect(info.kernelEffects).toEqual([
+      {
+        action: "unrecognized",
+        audience: ["root-session", "unrecognized"],
+        kind: "unrecognized",
+        sourceId: "tools/task.ts",
+      },
+    ]);
+  });
+
   it("rejects unknown fields in the agent info payload", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ ...AGENT_INFO, ignoredByClient: true }),

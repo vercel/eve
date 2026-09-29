@@ -250,11 +250,21 @@ const remoteAgent = entry
   })
   .strict();
 
+// Kernel effects are inspection metadata only. Deployments can retain removed
+// effects across framework versions, so preserve the response and identify an
+// option this client cannot interpret instead of rejecting agent info entirely.
 const kernelEffect = z
   .object({
-    action: z.enum(["subagent-call", "workflow-tool-call"]).optional(),
-    audience: z.array(z.literal("root-session")),
-    kind: z.enum(["dispatch", "provider-tool"]),
+    action: z
+      .union([z.enum(["subagent-call", "workflow-tool-call"]), z.literal("unrecognized")])
+      .catch("unrecognized")
+      .optional(),
+    audience: z.array(
+      z.union([z.literal("root-session"), z.literal("unrecognized")]).catch("unrecognized"),
+    ),
+    kind: z
+      .union([z.enum(["dispatch", "provider-tool"]), z.literal("unrecognized")])
+      .catch("unrecognized"),
     sourceId: z.string(),
   })
   .strict();
