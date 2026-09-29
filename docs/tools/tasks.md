@@ -287,11 +287,11 @@ task's start and end instead. See
   note cover every task in the session. Any later turn can continue an idle resumable task by its
   `taskId`, and that call runs with its own caller's auth. Only the turn's own caller steers it;
   anonymous callers share one identity.
-- **Callers share tasks.** eve doesn't check which caller started a task. In a session with several people,
-  such as a shared Slack thread, the model working for one person can continue or `task_cancel` a
-  task another person started. A continued `serve` task keeps the state its body built for earlier
-  calls, so [key per-caller data on the current call's auth](/docs/tools/workflows#resumable-tasks-serve).
-  Enforce per-person access inside the tool, as for any tool.
+  eve doesn't check which caller started a task: in a session with several people, such as a
+  shared Slack thread, the model working for one person can continue or `task_cancel` a task
+  another person started. A continued `serve` task keeps the state its body built for earlier
+  calls, so [key per-caller data on the principal](/docs/tools/workflows#resumable-tasks-serve)
+  and enforce per-person access inside the tool.
 - **Working tasks.** A session runs at most 32 working tasks at once. An idle resumable task doesn't
   count, and a call that makes it work again does.
 - **No time limits.** Tasks have no timeout of their own. The session lifetime,
