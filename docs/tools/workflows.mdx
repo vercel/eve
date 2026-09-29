@@ -357,8 +357,8 @@ described in [Tasks](/docs/tools/tasks). What differs:
   signal, and the next stretch gets a new one, so a task can be cancelled any number of times.
 - **Cancellation:** `task_cancel`, `session.cancel()`, and a failed turn settle the task's waiting
   calls as `cancelled` and abort the stretch's `abortSignal`. The run keeps waiting for more calls,
-  so the task becomes idle and stays available. `task_cancel` on an idle task returns
-  `{ status: "already_finished" }`. To stay available, a body must catch its stretch's abort and
+  so the task becomes idle and stays available. `task_cancel` on an idle task says the task had no
+  work to stop. To stay available, a body must catch its stretch's abort and
   return to `receive()`, as the example does; an abort that escapes the body finishes the task. A
   body that ignores the signal keeps working and its reply is dropped, but a body that doesn't
   return to `receive()` within 30 seconds of a cancel ends, and the task finishes.

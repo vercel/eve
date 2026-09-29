@@ -16,7 +16,9 @@ export default defineEval({
     turn.event("task.settled", { count: 1, data: { callId: "canary", status: "cancelled" } });
     turn.notEvent("task.settled", { data: { status: "completed" } });
     turn.event("turn.completed", { count: 1 });
-    turn.messageIncludes('WORKFLOW-CANARY-RESULT {"status":"cancelled"}');
+    turn.messageIncludes(
+      /WORKFLOW-CANARY-RESULT Stopped canary_deploy-\w{6}; it won't report back\./u,
+    );
     t.noFailedActions();
   },
 });
