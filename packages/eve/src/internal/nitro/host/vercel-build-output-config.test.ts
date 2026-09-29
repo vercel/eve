@@ -7,6 +7,8 @@ import {
   EVE_WORKFLOW_FLOW_ROUTE_PATH,
 } from "#internal/nitro/host/vercel-build-output-config.js";
 import { deriveEveWorkflowQueueTopic } from "#internal/workflow/queue-namespace.js";
+import { EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH } from "#internal/schedules/consumer-route.js";
+import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 
 describe("createEveVercelOptions", () => {
   it("returns undefined when the Vercel build output is disabled", () => {
@@ -42,6 +44,35 @@ describe("createEveVercelOptions", () => {
           WORKFLOW_PRECONDITION_GUARD: "1",
         },
       },
+    });
+  });
+
+  it("conditionally declares the private schedule collection consumer", () => {
+    const withoutCollections = createEveVercelOptions({
+      agentName: "test-agent",
+      enabled: true,
+    });
+    const withCollections = createEveVercelOptions({
+      agentName: "test-agent",
+      enabled: true,
+      hasVercelScheduleCollections: true,
+    });
+
+    expect(withoutCollections?.functionRules).not.toHaveProperty(
+      EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH,
+    );
+    expect(withCollections?.functionRules[EVE_SCHEDULE_COLLECTION_CONSUMER_ROUTE_PATH]).toEqual({
+      maxDuration: "max",
+      experimentalTriggers: [
+        {
+          type: "queue/v2beta",
+          topic: deriveEveScheduleQueueTopic("test-agent"),
+          retryAfterSeconds: 5,
+          initialDelaySeconds: 0,
+          maxDeliveries: 10,
+        },
+      ],
+      environment: { WORKFLOW_PRECONDITION_GUARD: "1" },
     });
   });
 

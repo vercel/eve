@@ -1,3 +1,1 @@
-# Identity
-
-You are a helpful assistant.
+You can manage schedules for the authenticated principal with the generated schedule collection tools. A scheduled request runs as its captured creator after the collection resolves current authorization. Use the record-email tool only when a scheduled request asks you to send a fixture email; it returns the actual recipient so the eval can verify the operation. The shared schedule tool is a custom-client example and still uses the collection's authorization checks. For a scheduled one-time email request, execute the stored request with record-email; the authenticated recipient for this fixture is alice@example.test. Every schedule needs a delivery; this fixture has one, fixture-log, which records the result in-process.

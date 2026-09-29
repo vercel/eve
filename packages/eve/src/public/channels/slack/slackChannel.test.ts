@@ -549,6 +549,83 @@ describe("slackChannel()", () => {
   });
 });
 
+describe("Slack personal schedule targets", () => {
+  it("captures either the current Slack thread or a top-level channel destination", () => {
+    const channel = slackChannel();
+    const capture = channel.captureScheduleTarget;
+    if (capture === undefined) throw new Error("Slack channel has no target capture capability.");
+    expect(
+      capture({
+        mode: "thread",
+        state: {
+          channelId: "C123",
+          installationTeamId: "T456",
+          teamId: "T_OTHER",
+          threadTs: "1700000000.1",
+          triggeringMessageTs: "1700000000.2",
+        } as never,
+      }),
+    ).toEqual({
+      channel: "slack",
+      continuationToken: "C123:1700000000.1",
+      delivery: "channel",
+      target: { channelId: "C123", installationTeamId: "T456", threadTs: "1700000000.1" },
+    });
+    expect(
+      capture({
+        mode: "channel",
+        state: { channelId: "C123", installationTeamId: "T456", threadTs: "1700000000.1" } as never,
+      }),
+    ).toEqual({
+      channel: "slack",
+      continuationToken: "C123:",
+      delivery: "channel",
+      target: { channelId: "C123", installationTeamId: "T456" },
+    });
+    expect(() => capture({ state: {} as never })).toThrow("requires a current channel destination");
+  });
+
+  it("opens the caller's DM using the configured bot token", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      void input;
+      void init;
+      return Response.json({ ok: true, channel: { id: "D123" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const channel = slackChannel({ credentials: { botToken: "xoxb-test" } }) as ReturnType<
+        typeof slackChannel
+      > & {
+        mintPersonalTarget(auth: {
+          attributes: Readonly<Record<string, string>>;
+          authenticator: string;
+          principalId: string;
+          principalType: string;
+        }): Promise<unknown>;
+      };
+      const target = await channel.mintPersonalTarget({
+        attributes: { user_id: "U123", team_id: "T456" },
+        authenticator: "slack-webhook",
+        principalId: "slack:T456:U123",
+        principalType: "user",
+      });
+      expect(target).toMatchObject({
+        channel: "slack",
+        continuationToken: "D123:",
+        delivery: "personal",
+        recipient: { user_id: "U123", team_id: "T456" },
+        target: { channelId: "D123", installationTeamId: "T456" },
+      });
+      expect(String(fetchMock.mock.calls[0]![0])).toBe("https://slack.com/api/conversations.open");
+      expect(parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit)).toEqual({
+        users: "U123",
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("slackChannel() default event handlers", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
