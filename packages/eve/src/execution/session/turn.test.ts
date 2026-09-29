@@ -837,29 +837,37 @@ describe("SessionExecution checkpoints", () => {
     };
     vi.mocked(turnStep)
       .mockReset()
-      .mockResolvedValue({
-        action: "park",
-        hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
-        pendingCoordinationCallIds: ["deploy-call"],
-        serializedContext: {},
-        sessionState,
-      });
-    vi.mocked(dispatchCoordinationStep).mockReset().mockResolvedValue({
-      results: [],
-      serializedContext: {},
-      sessionState,
-    });
+      .mockImplementation(
+        turnStepWork(async () => ({
+          action: "park",
+          hasPendingAuthorization: false,
+          hasPendingInputBatch: false,
+          pendingCoordinationCallIds: ["deploy-call"],
+          serializedContext: {},
+          sessionState,
+        })),
+      );
+    vi.mocked(dispatchCoordinationStep)
+      .mockReset()
+      .mockImplementation(
+        dispatchWork(async () => ({
+          results: [],
+          serializedContext: {},
+          sessionState,
+        })),
+      );
     const order: string[] = [];
-    vi.mocked(routeDeliverToChildren).mockImplementation(async (input) => {
-      order.push("route");
-      return {
-        kind: "continue",
-        remainder: correction,
-        serializedContext: input.serializedContext,
-        sessionState: input.sessionState,
-      };
-    });
+    vi.mocked(routeDeliverToChildren).mockImplementation(
+      routeWork(async (input) => {
+        order.push("route");
+        return {
+          kind: "continue",
+          remainder: correction,
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        };
+      }),
+    );
     vi.mocked(interruptWorkflowToolRun)
       .mockReset()
       .mockImplementation(async () => {
