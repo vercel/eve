@@ -74,8 +74,6 @@ export async function writeEarlyRunMessageEventStep(input: {
   return await writeSessionEventBeforeDispatch({
     ctx,
     event: earlyRunMessageEvent(input.message, ctx.require(SessionIdKey)),
-    // A run reports on one of this session's own tool calls.
-    origin: "own",
     sessionWritable: input.sessionWritable,
   });
 }

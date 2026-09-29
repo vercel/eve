@@ -9,29 +9,27 @@ import { postSessionCallbackRequest } from "#execution/session-callback-request.
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
+type StreamEventType = UnstampedMessageStreamEvent["type"];
+
 /** The input events a remote session sends its caller instead of presenting them on its own channel. */
+const FORWARDED_SESSION_INPUT_TYPES = [
+  "input.requested",
+  "authorization.required",
+  "authorization.completed",
+  "approval.candidate",
+  "approval.settled",
+] as const satisfies readonly StreamEventType[];
+
 export type ForwardedSessionInputEvent = Extract<
   UnstampedMessageStreamEvent,
-  {
-    readonly type:
-      | "input.requested"
-      | "authorization.required"
-      | "authorization.completed"
-      | "approval.candidate"
-      | "approval.settled";
-  }
+  { readonly type: (typeof FORWARDED_SESSION_INPUT_TYPES)[number] }
 >;
 
 function isForwardedSessionInput(
   event: UnstampedMessageStreamEvent,
 ): event is ForwardedSessionInputEvent {
-  return (
-    event.type === "input.requested" ||
-    event.type === "authorization.required" ||
-    event.type === "authorization.completed" ||
-    event.type === "approval.candidate" ||
-    event.type === "approval.settled"
-  );
+  const forwarded: readonly StreamEventType[] = FORWARDED_SESSION_INPUT_TYPES;
+  return forwarded.includes(event.type);
 }
 
 /** A remote session sends input to its caller instead of presenting it on its own channel. */

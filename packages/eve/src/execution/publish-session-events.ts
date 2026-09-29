@@ -72,10 +72,12 @@ export interface SessionStepState extends SessionPublicationTarget {
  * An event written without being dispatched, because another step owned the
  * session when it was written. The session's state cursor carries it to the
  * next step that owns the session; see `SessionStateCursor`.
+ *
+ * It is always the session's own event. Delivering a relayed one needs the
+ * input source of its exchange, which a pending dispatch does not keep.
  */
 export interface PendingSessionEventDispatch {
   readonly event: WrittenBeforeDispatchEvent;
-  readonly origin: SessionEventOrigin;
 }
 
 /**
@@ -206,12 +208,12 @@ export async function dispatchPendingSessionEvents(
     durableSession: readDurableSession(state.sessionState),
   });
   const scoped = await withContextScope(ctx, session, async (enrichedSession) => {
-    for (const { event, origin } of pending) {
+    for (const { event } of pending) {
       // Built per event because a dispatcher reads the channel state when it
       // is built, and each delivery can change it for the next.
       const dispatcher = createSessionEventDispatcher({
         ctx,
-        origin,
+        origin: "own",
         sessionId: enrichedSession.sessionId,
       });
       await dispatcher.dispatch(event);
@@ -222,20 +224,19 @@ export async function dispatchPendingSessionEvents(
 }
 
 /**
- * Writes an event while another step owns the session, leaving its dispatch
- * to the next step that owns it. Returns that pending dispatch, or `undefined`
- * when neither the channel adapter nor a hook subscribes to the event, so
- * dispatching it would do nothing.
+ * Writes the session's own event while another step owns the session, leaving
+ * its dispatch to the next step that owns it. Returns that pending dispatch, or
+ * `undefined` when neither the channel adapter nor a hook subscribes to the
+ * event, so dispatching it would do nothing.
  */
 export async function writeSessionEventBeforeDispatch(input: {
   readonly ctx: ContextContainer;
   readonly event: WritableBeforeDispatchEvent;
-  readonly origin: SessionEventOrigin;
   readonly sessionWritable: WritableStream<Uint8Array>;
 }): Promise<PendingSessionEventDispatch | undefined> {
-  const { ctx, event, origin } = input;
+  const { ctx, event } = input;
   const writer = openSessionEventWriter({
-    deliveryIds: () => turnDeliveryIds(ctx, origin),
+    deliveryIds: () => turnDeliveryIds(ctx, "own"),
     sessionWritable: input.sessionWritable,
   });
   let meta: MessageStreamEventMeta;
@@ -245,7 +246,7 @@ export async function writeSessionEventBeforeDispatch(input: {
     writer.release();
   }
   if (!hasSessionEventSubscribers(ctx, event.type)) return undefined;
-  return { event: { ...event, meta }, origin };
+  return { event: { ...event, meta } };
 }
 
 /** Whether dispatch would reach anything: the channel adapter's handler for the event, or a hook. */
