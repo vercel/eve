@@ -32,6 +32,10 @@ function parseDataset(value) {
   return value;
 }
 
+function splitNames(value) {
+  return value.split(/[ ,]+/u).filter(Boolean);
+}
+
 function parseHarnesses(names) {
   const harnesses = [...new Set(names)];
   const unknown = harnesses.filter((harness) => !BENCHMARK_HARNESSES.includes(harness));
@@ -43,7 +47,7 @@ function parseHarnesses(names) {
 
 /** `[<dataset>] [<harness>...]`, in any order; a dataset or the harness list may be omitted. */
 function parseSelection(value) {
-  const names = value.split(/[ ,]+/u).filter(Boolean);
+  const names = splitNames(value);
   const datasets = names.filter((name) => Object.hasOwn(BENCHMARK_DATASETS, name));
   if (datasets.length > 1) throw new Error("Name at most one benchmark dataset.");
   const harnesses = names.filter((name) => !datasets.includes(name));
@@ -86,7 +90,7 @@ export async function resolveBenchmarkRequest({ github, context }) {
     selection = {
       dataset: parseDataset(payload.inputs?.dataset || DEFAULT_DATASET),
       harnesses: payload.inputs?.harness
-        ? parseHarnesses(payload.inputs.harness.split(/[ ,]+/u).filter(Boolean))
+        ? parseHarnesses(splitNames(payload.inputs.harness))
         : DEFAULT_HARNESSES,
     };
   } else if (eventName !== "pull_request" && eventName !== "push") {

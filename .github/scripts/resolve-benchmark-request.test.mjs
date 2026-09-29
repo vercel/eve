@@ -105,12 +105,15 @@ test("a comment can select several harnesses, comma- or space-separated, dedupli
   }
 });
 
-test("datasets keep the reasoning and attempts they were calibrated for", () => {
-  assert.equal(DEFAULT_DATASET, "swe-lean");
-  assert.deepEqual(BENCHMARK_DATASETS, {
-    "swe-lean": { reasoning: "low", attempts: "5" },
-    "deepswe-lean": { reasoning: "high", attempts: "3" },
-  });
+test("manual dispatch offers exactly the datasets the resolver accepts", async () => {
+  const workflow = await readFile(
+    new URL("../workflows/eve-code-benchmark.yml", import.meta.url),
+    "utf8",
+  );
+  const input = /\n {6}dataset:\n(?: {8}.*\n)+/u.exec(workflow)?.[0] ?? "";
+  const options = /^ {8}options: \[(.*)\]$/mu.exec(input)?.[1].split(/, */u);
+  assert.deepEqual(options, Object.keys(BENCHMARK_DATASETS));
+  assert.equal(/^ {8}default: (\S+)$/mu.exec(input)?.[1], DEFAULT_DATASET);
 });
 
 test("a comment can select a dataset, with the default harnesses or its own list", async () => {
@@ -290,7 +293,6 @@ test("workflow names and concurrency preserve independent authorized harness run
     /artifact-name: \$\{\{ needs\.request\.outputs\.dataset \}\}-\$\{\{ needs\.request\.outputs\.slug \}\}/u,
   );
   assert.match(workflow, /push:\n\s+branches: \[main\]/u);
-  assert.match(workflow, /options: \[swe-lean, deepswe-lean\]/u);
   // Each dataset's attempts run in waves of the action's maximum of 16 sandboxes.
   assert.match(workflow, /attempts: \$\{\{ needs\.request\.outputs\.attempts \}\}/u);
   assert.match(workflow, /concurrency: "16"/u);

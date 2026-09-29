@@ -6,8 +6,10 @@ on:
       - ".github/workflows/eve-code-benchmark.yml"
       - ".github/scripts/resolve-benchmark-request*"
       - "packages/eve-code/**"
-  # Every eve-code change on main publishes a fresh result per harness, so PRs
-  # compare their HEAD against the latest main as the baseline.
+  # Every eve-code change on main publishes a fresh swe-lean result per harness,
+  # so PRs compare their HEAD against the latest main as the baseline. Pushes do
+  # not run deepswe-lean: its baseline is only as fresh as the last manual
+  # dispatch, so a PR's delta there also includes eve-code changes merged since.
   push:
     branches: [main]
     paths:
