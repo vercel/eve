@@ -71,6 +71,7 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
           z
             .object({
               kind: z.literal("extension"),
+              mountId: z.string(),
               namespace: z.string(),
               packageName: z.string(),
             })
@@ -89,7 +90,12 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
       z.object({ kind: z.literal("application") }).strict(),
       z.object({ feature: z.string(), kind: z.literal("framework") }).strict(),
       z
-        .object({ kind: z.literal("extension"), namespace: z.string(), packageName: z.string() })
+        .object({
+          kind: z.literal("extension"),
+          mountId: z.string(),
+          namespace: z.string(),
+          packageName: z.string(),
+        })
         .strict(),
     ]),
     parentNodeId: z.string(),

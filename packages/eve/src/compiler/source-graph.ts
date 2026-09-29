@@ -131,6 +131,7 @@ export type AgentSourceOwner =
   | { readonly feature: string; readonly kind: "framework" }
   | {
       readonly kind: "extension";
+      readonly mountId: string;
       readonly namespace: string;
       readonly packageName: string;
     };

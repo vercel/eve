@@ -22,6 +22,7 @@ export interface NodeCompileInput {
   readonly layer: AgentSourceLayer;
   readonly manifest: AgentSourceManifest;
   readonly nodeId: string;
+  readonly nodePath: string;
   readonly owner: AgentSourceOwner;
   readonly parentNodeId?: string;
 }

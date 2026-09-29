@@ -367,6 +367,9 @@ describe("mounted extension subagent resources", () => {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm.mjs": 'export { default } from "@acme/crm";\n',
+        "agent/subagents/research/agent.mjs":
+          'export default { model: "openai/gpt-5.4", description: "Research." };\n',
+        "agent/subagents/research/extensions/crm.mjs": 'export { default } from "@acme/crm";\n',
         "node_modules/@acme/crm/package.json": `${JSON.stringify({
           name: "@acme/crm",
           type: "module",
@@ -389,6 +392,11 @@ describe("mounted extension subagent resources", () => {
           "};",
           "",
         ].join("\n"),
+        "node_modules/@acme/crm/extension/subagents/reviewer/tools/review.mjs": [
+          'import { defineTool } from "eve/tools";',
+          'export default defineTool({ description: "Review notes.", inputSchema: { type: "object" }, execute: async () => ({ ok: true }) });',
+          "",
+        ].join("\n"),
       },
     });
 
@@ -397,7 +405,21 @@ describe("mounted extension subagent resources", () => {
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
     });
 
-    const [subagent] = manifest.subagents;
+    const rootReviewer = manifest.subagents.find(
+      (entry) => entry.name === "crm__reviewer" && entry.parentNodeId === "__root__",
+    );
+    const research = manifest.subagents.find((entry) => entry.name === "research");
+    const researchReviewer = manifest.subagents.find(
+      (entry) => entry.parentNodeId === research?.nodeId && entry.name === "crm__reviewer",
+    );
+    expect(manifest.extensionMounts[0]?.mountId).toBe("extensions/crm");
+    expect(research?.agent.extensionMounts[0]?.mountId).toBe("subagents/research/extensions/crm");
+    expect(rootReviewer?.owner).toMatchObject({ mountId: "extensions/crm" });
+    expect(researchReviewer?.owner).toMatchObject({ mountId: "subagents/research/extensions/crm" });
+    expect(rootReviewer?.agent.bindings["tools/review.mjs"]?.owner).toMatchObject({
+      mountId: "extensions/crm",
+    });
+    const subagent = rootReviewer;
     expect(subagent?.nodeId).toContain(":");
     const logicalPath = subagent?.agent.workspaceResourceRoot.logicalPath ?? "";
     const [resourcesDirectory, nodeDirectory, ...nested] = logicalPath.split("/");

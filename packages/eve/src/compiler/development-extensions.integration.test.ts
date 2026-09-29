@@ -35,10 +35,12 @@ describe("development extensions", () => {
     expect(compiled.extensionMounts).toMatchObject([
       {
         mountLogicalPath: "extensions/self-modification.ts",
+        mountId: "extensions/self-modification",
         namespace: "self-modification",
         packageName: "eve",
       },
     ]);
+    expect(subagent.owner).toMatchObject({ mountId: "extensions/self-modification" });
     expect(subagent.agent.tools.map((tool) => tool.name)).toEqual(
       expect.arrayContaining(["edit_file", "search_models", "search_registry"]),
     );

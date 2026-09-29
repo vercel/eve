@@ -30,6 +30,46 @@ describe("qualifyExtensionContributionLogicalPath", () => {
     },
   );
 
+  it("derives extension identity from the owning node and mount name", () => {
+    for (const mountPath of ["extensions/crm.ts", "extensions/crm/extension.ts"]) {
+      const extensionManifest = createAgentSourceManifest({
+        agentRoot: "/extension",
+        appRoot: "/package",
+        tools: [createModuleSourceRef({ logicalPath: "tools/search.ts" })],
+      });
+      const manifest = createAgentSourceManifest({
+        agentRoot: "/app/agent/subagents/research",
+        appRoot: "/app",
+        extensions: [createModuleSourceRef({ logicalPath: mountPath })],
+        resolvedExtensions: [
+          {
+            namespace: "crm",
+            specifier: "@acme/crm",
+            packageName: "@acme/crm",
+            packageRoot: "/package",
+            sourceRoot: "/extension",
+            manifest: extensionManifest,
+            externalDependencies: [],
+          },
+        ],
+      });
+      const projected = projectAgentSources({
+        externalDependencies: [],
+        manifest,
+        nodeId: "research",
+        nodePath: "subagents/research",
+      });
+      expect(projected.candidates.find((entry) => entry.owner.kind === "extension")?.owner).toEqual(
+        {
+          kind: "extension",
+          mountId: "subagents/research/extensions/crm",
+          namespace: "crm",
+          packageName: "@acme/crm",
+        },
+      );
+    }
+  });
+
   it("applies the selected extension projector to canonical path overrides", () => {
     const extensionManifest = createAgentSourceManifest({
       agentRoot: "/extension",
@@ -53,7 +93,7 @@ describe("qualifyExtensionContributionLogicalPath", () => {
     });
 
     expect(() =>
-      projectAgentSources({ externalDependencies: [], manifest, nodeId: "root" }),
+      projectAgentSources({ externalDependencies: [], manifest, nodeId: "root", nodePath: "" }),
     ).toThrow('Extension source slot "agent.ts" cannot be namespace-scoped.');
   });
 });

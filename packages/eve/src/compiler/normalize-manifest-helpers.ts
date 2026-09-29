@@ -167,6 +167,7 @@ export function createCompiledRemoteAgent(input: {
 export function compileExtensionMounts(
   manifest: AgentSourceManifest,
   composed: ComposedAgentModuleCandidates,
+  nodePath: string,
 ): CompiledExtensionMount[] {
   const selected = collectSelectedSourceIds(composed);
   return manifest.resolvedExtensions.flatMap((mount) => {
@@ -181,6 +182,7 @@ export function compileExtensionMounts(
         mountSourceId: mountRef.sourceId,
         namespace: mount.namespace,
         packageName: mount.packageName,
+        mountId: posix.join(nodePath, "extensions", mount.namespace),
         packageNamespace: packageStateNamespace(mount.packageName),
         sourceRoot: mount.sourceRoot,
       },

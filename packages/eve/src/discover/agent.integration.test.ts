@@ -849,6 +849,7 @@ describe("discoverAgent (memory)", () => {
       externalDependencies: [],
       manifest: result.manifest,
       nodeId: "root",
+      nodePath: "",
     });
     const composed = composeAgentModuleCandidates(projected.candidates);
 
@@ -1240,6 +1241,7 @@ describe("discoverAgent (memory)", () => {
       externalDependencies: [],
       manifest: result.manifest,
       nodeId: "root",
+      nodePath: "",
     });
     const composed = composeAgentModuleCandidates(projected.candidates);
     expect(composed.selected.get("tools/crm__search")).toMatchObject({
@@ -1421,6 +1423,7 @@ describe("discoverAgent (memory)", () => {
         externalDependencies: [],
         manifest: result.manifest,
         nodeId: "root",
+        nodePath: "",
       }),
     ).not.toThrow();
   });

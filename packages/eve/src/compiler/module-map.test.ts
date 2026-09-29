@@ -91,7 +91,12 @@ describe("compiled module maps", () => {
         sourcePath: "/extension/tool.ts",
       },
       logicalPath: "tools/renamed-mount__tool.ts",
-      owner: { kind: "extension", namespace: "renamed-mount", packageName: "@acme/crm" },
+      owner: {
+        kind: "extension",
+        mountId: "extensions/renamed-mount",
+        namespace: "renamed-mount",
+        packageName: "@acme/crm",
+      },
       usage: { compile: true, runtimeEntry: true },
     };
     for (const sourceId of applicationSourceIds) {

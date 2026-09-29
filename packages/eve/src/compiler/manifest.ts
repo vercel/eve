@@ -57,7 +57,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 52;
+export const COMPILED_AGENT_MANIFEST_VERSION = 53;
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.
@@ -351,6 +351,7 @@ const agentSourceOwnerSchema: z.ZodType<AgentSourceOwner> = z.discriminatedUnion
   z
     .object({
       kind: z.literal("extension"),
+      mountId: z.string().min(1),
       namespace: z.string().min(1),
       packageName: z.string().min(1),
     })
@@ -937,6 +938,7 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
     externalDependencies: z.array(z.string()).readonly(),
     namespace: z.string(),
     packageName: z.string(),
+    mountId: z.string(),
     packageNamespace: z.string(),
     sourceRoot: z.string(),
     mountSourceId: z.string(),
@@ -1032,11 +1034,9 @@ export interface CompiledExtensionMount {
   /** Mount-derived namespace that prefixes the extension's tool/skill names. */
   readonly namespace: string;
   readonly packageName: string;
-  /**
-   * Package-derived namespace that scopes the extension's durable state keys and
-   * config binding. Distinct from {@link namespace}: state stays keyed to the
-   * package so a consumer renaming the mount file cannot orphan persisted state.
-   */
+  /** Canonical path of this mount in the root agent tree. */
+  readonly mountId: string;
+  /** Package-derived namespace used by the current extension loader. */
   readonly packageNamespace: string;
   /**
    * Absolute path to the extension's source root on disk. The extension-scope

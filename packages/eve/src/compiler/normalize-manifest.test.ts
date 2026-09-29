@@ -665,6 +665,7 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistries: [sourceRegistry],
     });
     const mount = compiled.extensionMounts[0]!;
+    expect(mount.mountId).toBe("extensions/crm");
 
     expect(compiled.bindings[mount.mountSourceId]?.usage).toEqual({
       compile: false,

@@ -137,6 +137,7 @@ export async function compileAgentManifest(
     layer: "application",
     manifest: developmentExtensions.manifest,
     nodeId: ROOT_COMPILED_AGENT_NODE_ID,
+    nodePath: "",
     owner: { kind: "application" },
   });
 
@@ -228,6 +229,7 @@ class AgentGraphCompiler {
         layer: projected.candidate.layer,
         manifest: source.manifest,
         nodeId,
+        nodePath: projected.nodePath,
         owner: projected.owner,
         parentNodeId: input.nodeId,
       };
@@ -360,6 +362,7 @@ class AgentGraphCompiler {
       layer: input.layer,
       manifest: input.manifest,
       nodeId: input.nodeId,
+      nodePath: input.nodePath,
       owner: input.owner,
     });
     const frameworkCandidates: AgentModuleCandidate[] = [];
@@ -650,7 +653,7 @@ class AgentGraphCompiler {
     for (const channel of channelRoutes.effective) {
       state.evaluation.requireRuntimeEntry(channel.sourceId);
     }
-    const extensionMounts = compileExtensionMounts(input.manifest, state.composed);
+    const extensionMounts = compileExtensionMounts(input.manifest, state.composed, input.nodePath);
     for (const mount of extensionMounts) {
       state.evaluation.requireRuntimeEntry(mount.mountSourceId);
     }

@@ -117,6 +117,7 @@ function createLoadOptions(
 } {
   const owner = {
     kind: "extension" as const,
+    mountId: `extensions/${input.shortName}`,
     namespace: input.shortName,
     packageName: input.packageName,
   };

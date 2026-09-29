@@ -649,6 +649,7 @@ describe("application Nitro creation", () => {
         mountSourceId: "extensions/layout.ts",
         namespace: "layout",
         packageName: "layout-extension",
+        mountId: "extensions/layout",
         packageNamespace: "layout-extension",
         sourceRoot,
       },
