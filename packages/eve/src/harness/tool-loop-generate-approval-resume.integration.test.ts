@@ -1,5 +1,5 @@
 import { setTurnClientContextState } from "#harness/turn-client-context.js";
-import { BoundaryHookError } from "#shared/boundary-hook-error.js";
+import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
@@ -1106,7 +1106,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       handleEvent: async (event, messages) => {
         await preamble.handleEvent(event, messages);
         if (event.type === "turn.started") {
-          throw new BoundaryHookError(new Error("turn.started hook failed"));
+          throw new DynamicModelSelectionError(new Error("model selection failed"));
         }
       },
     });
@@ -1130,7 +1130,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
 
     expect(preamble.recall).toHaveBeenCalledOnce();
     expect(preamble.instruction).toHaveBeenCalledOnce();
-    expect(result.next).toBeNull();
+    expect(result.next).toEqual({ done: true, output: "" });
     expect(execute).not.toHaveBeenCalled();
     expect(model.doStreamCalls).toHaveLength(0);
     expect(result.session.history.slice(0, session.history.length)).toEqual(session.history);
