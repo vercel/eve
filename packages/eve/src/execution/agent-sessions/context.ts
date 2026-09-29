@@ -14,6 +14,7 @@ import {
   type DurableCompiledArtifactsSource,
 } from "#runtime/durable-compiled-artifacts-source.js";
 import type { SandboxState } from "#sandbox/state.js";
+import { findTask, readTaskTable } from "#execution/tasks/table.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { WorkflowAgentMetadata } from "#tools/workflow-definition.js";
@@ -45,7 +46,7 @@ export interface AgentSessionContext {
   readonly conversation?: ConversationContext;
   /** Dynamic agents the calling turn selected, by node id. */
   readonly dynamicSelections: DynamicSubagentSelections;
-  /** The token budget each session inherits: the caller's remaining quota. */
+  /** The token budget each session inherits: its share of the caller's remaining quota. */
   readonly limits: RunSessionLimits;
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** The calling session, turn, and tool call, recorded as each session's lineage. */
@@ -67,7 +68,7 @@ export interface AgentSessionSandbox {
 }
 
 type CallerDispatch = Pick<
-  PreparedCoordinationDispatch<unknown>,
+  PreparedCoordinationDispatch,
   | "activityObserver"
   | "batch"
   | "bundle"
@@ -76,18 +77,29 @@ type CallerDispatch = Pick<
   | "dynamicSubagentSelections"
   | "inheritedConversation"
   | "localDevRequest"
+  | "plan"
   | "sandboxSessionId"
   | "serializedContext"
   | "session"
   | "workflowAgents"
 >;
 
-/** Captures the agent session context for one workflow tool call, in the step that admits it. */
+/**
+ * Captures the agent session context for one workflow tool call, in the step
+ * that admits it. Every call a model step makes shares one grant: the caller's
+ * remaining quota split evenly across the agent tasks the step starts, so
+ * agents started together are bounded by the remainder together. A call to a
+ * running agent task opens no session and takes no share.
+ */
 export function captureAgentSessionContext(
   caller: CallerDispatch,
   callId: string,
 ): AgentSessionContext {
   const { batch, session } = caller;
+  const table = readTaskTable(session.state);
+  const agentTasksStarted = caller.plan.filter(
+    ({ entry }) => entry.entryPoint === "serve" && findTask(table, entry.taskId)?.kind === "agent",
+  ).length;
   return {
     activityObserver: caller.activityObserver,
     agents: caller.workflowAgents,
@@ -99,7 +111,7 @@ export function captureAgentSessionContext(
     channelMetadata: caller.channelMetadata,
     conversation: caller.inheritedConversation,
     dynamicSelections: caller.dynamicSubagentSelections,
-    limits: resolveRemainingSessionTokenLimits(session),
+    limits: resolveRemainingSessionTokenLimits(session, agentTasksStarted),
     localDevRequest: caller.localDevRequest,
     parent: {
       callId,

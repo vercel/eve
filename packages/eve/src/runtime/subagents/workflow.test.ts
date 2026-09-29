@@ -7,6 +7,7 @@ import type { WorkflowBodyInput } from "#execution/tools/workflow/body.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { startServeBody } from "#execution/tools/workflow/serve.js";
 import type { AgentTurnResult } from "#shared/agent-turn-outcome.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 /** The agent's side of the task: the messages it read and the turns it owes a reply. */
 const agent = vi.hoisted(() => ({
@@ -83,8 +84,14 @@ const input: WorkflowBodyInput = {
   workflowId: "workflow//eve//agentToolServeWorkflow",
 };
 
-function turnEnded(result: AgentTurnResult): RuntimeActionResultHookPayload {
-  const usageDelta = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
+function usage(inputTokens: number, outputTokens: number, costUsd?: number): TokenUsage {
+  return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens };
+}
+
+function turnEnded(
+  result: AgentTurnResult,
+  usageDelta: TokenUsage = usage(0, 0),
+): RuntimeActionResultHookPayload {
   return {
     kind: "runtime-action-result",
     results: [
@@ -123,6 +130,30 @@ async function startReview(): Promise<ReturnType<typeof startServeBody>> {
   return started;
 }
 
+/** Alice's next message: check the plan against the Friday freeze. */
+const fridayCheck = {
+  call: {
+    agentContext,
+    auth: alice,
+    callId: "call-2",
+    input: { message: "Check it against the Friday freeze." },
+    sequence: 1,
+    stepIndex: 1,
+    turnId: "turn",
+  },
+  kind: "call",
+} as const;
+
+/** The usage reports and replies the task sent its session, in order. */
+function usageAndReplies(): unknown[] {
+  return agent.delivered.flatMap((message): unknown[] => {
+    if (message.kind === "usage") {
+      return [{ sequence: message.sequence, usage: message.usage }];
+    }
+    return message.kind === "reply" ? [{ reply: message.callIds }] : [];
+  });
+}
+
 /**
  * Alice asks the reviewer for a review, and her next message reaches the task
  * `offset` microtasks after the reviewer's first turn ends. If `cancelled`,
@@ -138,18 +169,7 @@ async function sendAsTheTurnEnds(offset: number, { cancelled }: { readonly cance
   );
   for (let tick = 0; tick < offset; tick += 1) await Promise.resolve();
   const repliedFirst = replies().length > 0;
-  started.control.apply({
-    call: {
-      agentContext,
-      auth: alice,
-      callId: "call-2",
-      input: { message: "Check it against the Friday freeze." },
-      sequence: 1,
-      stepIndex: 1,
-      turnId: "turn",
-    },
-    kind: "call",
-  });
+  started.control.apply(fridayCheck);
   await settle();
   agent.turns[1]?.(turnEnded({ kind: "succeeded", output: "The plan misses the Friday freeze." }));
   await settle();
@@ -213,4 +233,48 @@ it("fails the task with the reason the agent's turn failed and how to retry", as
     },
     status: "failed",
   });
+});
+
+it("reports each turn's usage, as the task's running total, before the reply that turn settles", async () => {
+  const started = await startReview();
+  agent.turns[0]?.(
+    turnEnded({ kind: "succeeded", output: "The plan looks ready." }, usage(1_000, 100, 0.25)),
+  );
+  await settle();
+  started.control.apply(fridayCheck);
+  await settle();
+  agent.turns[1]?.(
+    turnEnded(
+      { kind: "succeeded", output: "The plan misses the Friday freeze." },
+      usage(500, 50, 0.5),
+    ),
+  );
+  await settle();
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  await started.outcome;
+
+  expect(usageAndReplies()).toEqual([
+    { sequence: 1, usage: usage(1_000, 100, 0.25) },
+    { reply: ["call-1"] },
+    { sequence: 2, usage: usage(1_500, 150, 0.75) },
+    { reply: ["call-2"] },
+  ]);
+});
+
+it("reports a turn that messages joined once", async () => {
+  const started = await startReview();
+  started.control.apply(fridayCheck);
+  await settle();
+  // The turn reports to the latest message it read, which settles both calls.
+  agent.turns[1]?.(
+    turnEnded({ kind: "succeeded", output: "Ready, and clear of the freeze." }, usage(800, 80)),
+  );
+  await settle();
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  await started.outcome;
+
+  expect(usageAndReplies()).toEqual([
+    { sequence: 1, usage: usage(800, 80) },
+    { reply: ["call-1", "call-2"] },
+  ]);
 });

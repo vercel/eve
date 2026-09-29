@@ -1,3 +1,5 @@
+import { hasRunUsage } from "#execution/agent-sessions/usage.js";
+import { applyRunUsageStep } from "#execution/agent-sessions/usage-step.js";
 import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
 import {
   emitAgentStartedStep,
@@ -40,6 +42,11 @@ export async function handleWorkflowToolRunMessage(
     case "reply":
       return undefined;
     case "outcome":
+      if (hasRunUsage(input.cursor.sessionState.snapshot.session.state, message.from.runId)) {
+        await input.cursor.apply(
+          await applyRunUsageStep({ message, sessionState: input.cursor.sessionState }),
+        );
+      }
       return await handleWorkflowToolRunOutcome({ ...input, message });
     case "request":
       await handleWorkflowToolRunRequest({ ...input, message });
@@ -59,6 +66,11 @@ export async function handleWorkflowToolRunMessage(
     case "agent-started":
       await input.cursor.apply(
         await emitAgentStartedStep({ ...input.cursor.stepState(), message }),
+      );
+      return undefined;
+    case "usage":
+      await input.cursor.apply(
+        await applyRunUsageStep({ message, sessionState: input.cursor.sessionState }),
       );
       return undefined;
   }

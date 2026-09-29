@@ -20,6 +20,7 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import { ignoreGoneTarget } from "#execution/tasks/workflow-target.js";
+import { forgetRunUsage } from "#execution/agent-sessions/usage.js";
 import {
   publishSessionEvents,
   relaySessionEvents,
@@ -78,7 +79,7 @@ export async function applyTaskRunMessageStep(
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
       events.push(...settled.settled.map((call) => taskSettledEvent(taskId, call, outcome)));
       table = finishTaskRun(settled.table, taskId, message.from.runId);
-      session = forgetRunQuestions(session, message.from.runId);
+      session = forgetRunUsage(forgetRunQuestions(session, message.from.runId), message.from.runId);
       break;
     }
   }

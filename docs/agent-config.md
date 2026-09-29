@@ -214,15 +214,23 @@ step; AI Gateway supplies this value, while model steps without reported cost
 do not add to the limit. Set any usage limit to `false` to uncap that axis.
 
 Delegated subagent sessions have no fixed default. Each child receives a
-share of the delegating parent's remaining quota at dispatch time — the
-remainder in the current budget window split evenly across the batch's local
-subagent calls — and a completed child's usage counts against the parent's
-quota. Token-cost budgets follow the same rules, including splitting the
-remaining US-dollar budget across a batch and adding completed child cost back
-to the parent. Approving a continuation opens a fresh parent window for later
-child grants without erasing lifetime usage. An authored child limit applies
-only when it is tighter than the parent's grant; an uncapped parent delegates
-uncapped children.
+share of the delegating parent's remaining quota when it starts: the
+remainder in the current budget window split evenly across the agent tasks
+that one model step starts. A session that a workflow tool opens with
+`ctx.agent` receives the share of the model step that called the tool, or the
+whole remainder when that step starts no agent tasks; eve does not divide that
+share among several sessions one call opens. A child keeps its grant for its whole
+session, including turns that later calls with `taskId` start. Each child turn's
+usage, including what the child's own subagents spent, counts against the
+parent's quota when the turn ends, so later children draw from what remains and
+the parent's own limit and continuation prompt include delegated spend.
+Token-cost budgets follow the same rules, including splitting the remaining
+US-dollar budget and adding child cost back to the parent. Remote agents
+receive no grant and run under their own deployment's limits, but the usage
+they report still counts against the parent. Approving a continuation opens a
+fresh parent window for later child grants without erasing lifetime usage. An
+authored child limit applies only when it is tighter than the parent's grant;
+an uncapped parent delegates uncapped children.
 
 ## Workflow world
 

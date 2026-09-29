@@ -247,6 +247,7 @@ export function isWorkflowMessage(value: SessionInboxPayload): value is Workflow
     value.kind === "reply" ||
     value.kind === "request" ||
     value.kind === "withdraw" ||
+    value.kind === "usage" ||
     value.kind === "outcome"
   );
 }

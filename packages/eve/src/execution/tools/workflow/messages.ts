@@ -4,6 +4,7 @@ import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { AgentSessionAddress } from "#execution/agent-sessions/steps.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import type {
   ToolInputRequest,
   ToolInputResponse,
@@ -121,6 +122,18 @@ export interface WorkflowToolRunStartedMessage {
   readonly from: WorkflowToolRunRef;
 }
 
+/**
+ * What the run's `ctx.agent` sessions have spent so far, sent after each of
+ * their turns ends. `usage` is the run's running total and `sequence` numbers
+ * the reports, so the session counts each turn once even when a report is
+ * delivered twice or overtakes an earlier one.
+ */
+export interface WorkflowToolRunUsageMessage {
+  readonly from: WorkflowToolRunRef;
+  readonly sequence: number;
+  readonly usage: TokenUsage;
+}
+
 export type WorkflowToolRunMessage =
   | ({ readonly kind: "agent-started" } & WorkflowToolRunAgentStartedMessage)
   | ({ readonly kind: "started" } & WorkflowToolRunStartedMessage)
@@ -128,6 +141,7 @@ export type WorkflowToolRunMessage =
   | ({ readonly kind: "reply" } & WorkflowToolRunReplyMessage)
   | ({ readonly kind: "request" } & WorkflowToolRunRequestMessage)
   | ({ readonly kind: "withdraw" } & WorkflowToolRunWithdrawMessage)
+  | ({ readonly kind: "usage" } & WorkflowToolRunUsageMessage)
   | ({ readonly kind: "outcome" } & WorkflowToolRunOutcomeMessage);
 
 /**

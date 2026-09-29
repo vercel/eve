@@ -100,6 +100,39 @@ describe("resolveRemainingSessionTokenLimits", () => {
     });
   });
 
+  it("splits the remaining tokens across children started together, flooring each share", () => {
+    const session = createSessionWithUsage({
+      limits: { maxInputTokensPerSession: 1_000_000, maxOutputTokensPerSession: 50_000 },
+      usedInputTokens: 100_001,
+      usedOutputTokens: 20_000,
+    });
+
+    expect(resolveRemainingSessionTokenLimits(session, 3)).toEqual({
+      maxInputTokensPerSession: 299_999,
+      maxOutputTokensPerSession: 10_000,
+    });
+  });
+
+  it("splits the remaining model token-cost budget across children started together", () => {
+    const session = createSessionWithUsage({
+      limits: { maxTokenCostUsdPerSession: 1.5 },
+      usedCostUsd: 0.5,
+    });
+
+    expect(resolveRemainingSessionTokenLimits(session, 4)).toEqual({
+      maxInputTokensPerSession: false,
+      maxOutputTokensPerSession: false,
+      maxTokenCostUsdPerSession: 0.25,
+    });
+  });
+
+  it("keeps uncapped axes uncapped however many children start together", () => {
+    expect(resolveRemainingSessionTokenLimits(createSessionWithUsage({}), 5)).toEqual({
+      maxInputTokensPerSession: false,
+      maxOutputTokensPerSession: false,
+    });
+  });
+
   it("marks uncapped axes as false", () => {
     const session = createSessionWithUsage({
       limits: { maxOutputTokensPerSession: 50_000 },
