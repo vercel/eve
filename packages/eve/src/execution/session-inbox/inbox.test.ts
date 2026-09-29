@@ -212,6 +212,120 @@ describe("createSessionInbox", () => {
     await inbox.dispose();
   });
 
+  it("force-claims tokens and reads from them once each claim registers", async () => {
+    const registration = createDeferred<null>();
+    installHooks(
+      createMockHook({
+        registration: registration.promise,
+        reads: [Promise.resolve(resolved(send("after takeover")))],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+
+    let claimed = false;
+    const claim = inbox.claim(["stable"]).then(() => (claimed = true));
+    expect(createHookMock).toHaveBeenCalledWith({
+      experimental_force: true,
+      metadata: { sessionId: "session-1" },
+      token: sessionInboxHookToken("stable"),
+    });
+    await Promise.resolve();
+    expect(claimed).toBe(false);
+    registration.resolve(null);
+    await claim;
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("after takeover")));
+    await inbox.dispose();
+  });
+
+  it("rejects a refused takeover after every claim settles", async () => {
+    const accepted = createMockHook({ token: "stable" });
+    installHooks(
+      accepted,
+      createMockHook({ conflict: { runId: "wrun_holder" }, token: "channel:current" }),
+    );
+    const inbox = createSessionInbox("session-1");
+
+    await expect(inbox.claim(["stable", "channel:current"])).rejects.toThrow("already in use");
+    expect(hookTokens(inbox)).toEqual(["stable"]);
+    await inbox.release();
+    expect(accepted.dispose).toHaveBeenCalled();
+  });
+
+  it("guards forced claims like ordinary claims", async () => {
+    const tokens = Array.from({ length: 256 }, (_, index) => `token-${index}`);
+    installHooks(...tokens.map((token) => createMockHook({ token })));
+    const inbox = createSessionInbox("session-1");
+
+    await expect(inbox.claim([""])).rejects.toThrow("nonempty");
+    await inbox.claim(tokens);
+    await expect(inbox.claim([tokens[0]!])).rejects.toThrow("already claimed");
+    await expect(inbox.claim(["one-too-many"])).rejects.toThrow("at most 256");
+    expect(hookTokens(inbox)).toEqual(tokens);
+  });
+
+  it("ends a reader taken during a handoff quietly after it delivers what it accepted first", async () => {
+    const taken = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({
+        reads: [Promise.resolve(resolved(send("before takeover"))), taken.promise],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    inbox.allowTakeover(true);
+    taken.reject(forceClaimed());
+
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("before takeover")));
+    await expect(readResult(inbox)).resolves.toEqual({ done: true, value: undefined });
+    expect(inbox.takenTokens).toEqual(["stable"]);
+    await inbox.dispose();
+  });
+
+  it("fails the owner when a hook is taken outside a handoff", async () => {
+    const taken = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(createMockHook({ reads: [taken.promise], token: "stable" }));
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    const read = expect(readResult(inbox)).rejects.toThrow("force-claimed");
+    taken.reject(forceClaimed());
+
+    await read;
+    expect(inbox.takenTokens).toEqual([]);
+    await inbox.dispose();
+  });
+
+  it("takes back a token lost to a failed handoff, keeping arrival order", async () => {
+    const taken = createDeferred<IteratorResult<SessionInboxPayload>>();
+    installHooks(
+      createMockHook({
+        reads: [Promise.resolve(resolved(send("before takeover"))), taken.promise],
+        token: "stable",
+      }),
+      createMockHook({
+        reads: [Promise.resolve(resolved(send("after taking back")))],
+        token: "stable",
+      }),
+    );
+    const inbox = createSessionInbox("session-1");
+    await inbox.claimSessionHook("stable");
+    inbox.allowTakeover(true);
+    taken.reject(forceClaimed());
+    await vi.waitFor(() => expect(inbox.takenTokens).toEqual(["stable"]));
+
+    inbox.enqueue([send("accepted by the failed successor")]);
+    await inbox.claim(inbox.takenTokens);
+    expect(inbox.takenTokens).toEqual([]);
+    expect(hookTokens(inbox)).toEqual(["stable"]);
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("before takeover")));
+    await expect(readResult(inbox)).resolves.toEqual(
+      resolved(send("accepted by the failed successor")),
+    );
+    await expect(readResult(inbox)).resolves.toEqual(resolved(send("after taking back")));
+    await inbox.dispose();
+  });
+
   it("accounts for an accepted unread command before releasing ownership", async () => {
     installHooks(
       createMockHook({
@@ -470,6 +584,12 @@ function installHooks(...hooks: readonly MockHook[]): void {
 
 function send(message: string): SessionInboxPayload {
   return { kind: "send", payload: { message } };
+}
+
+function forceClaimed(): Error {
+  return Object.assign(new Error("Hook token was force-claimed by another run"), {
+    name: "HookForceClaimedError",
+  });
 }
 
 function resolved(value: SessionInboxPayload): IteratorResult<SessionInboxPayload> {

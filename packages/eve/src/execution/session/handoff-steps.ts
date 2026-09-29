@@ -1,3 +1,4 @@
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { getBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { deserializeContext } from "#context/serialize.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
@@ -6,7 +7,13 @@ import {
   type SessionCheckpoint,
   type SessionOwnerActivation,
 } from "#execution/session/handoff.js";
-import { resumeHook } from "#internal/workflow/runtime.js";
+import {
+  sessionCommandHookToken,
+  sessionInboxHookToken,
+} from "#execution/session-inbox/address.js";
+import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
+import { createLogger, formatError } from "#internal/logging.js";
+import { getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import { getResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
@@ -87,6 +94,54 @@ export async function validateSessionCheckpointStep(input: {
   if (!isSessionStateIdleForHandoff(checkpoint.sessionState)) {
     throw new Error("Session checkpoint contains pending work and cannot be handed off.");
   }
+}
+
+const log = createLogger("execution.session.handoff");
+
+/**
+ * Takeover handoffs need forced hook claims to move each address and hook
+ * retention to fence each attempt. Any other World hands off release-first.
+ */
+export async function supportsSessionTakeoverStep(): Promise<boolean> {
+  "use step";
+  const { capabilities } = await getWorld();
+  return capabilities?.hookForceClaim === true && capabilities.hookRetention?.active === true;
+}
+
+/**
+ * Delivers one payload the previous owner accepted before a successor took its
+ * hooks. One payload per step keeps a retry from repeating earlier ones.
+ * Returns false once the session has ended and no one can receive it.
+ */
+export async function forwardSessionInputStep(input: {
+  readonly payload: SessionInboxPayload;
+  readonly sessionId: string;
+}): Promise<boolean> {
+  "use step";
+  try {
+    await resumeHook(
+      sessionInboxHookToken(sessionCommandHookToken(input.sessionId)),
+      input.payload,
+    );
+    return true;
+  } catch (error) {
+    if (HookNotFoundError.is(error)) return false;
+    throw error;
+  }
+}
+
+/** Handoffs run in workflow code, which cannot reach the logger directly. */
+export async function logSessionHandoffStep(input: {
+  readonly level: "info" | "warn";
+  readonly message: string;
+  readonly fields: Readonly<Record<string, unknown>>;
+}): Promise<void> {
+  "use step";
+  const { error, ...fields } = input.fields;
+  log[input.level](
+    input.message,
+    error === undefined ? fields : { ...fields, error: formatError(error) },
+  );
 }
 
 export async function signalSessionOwnerActivationStep(input: {

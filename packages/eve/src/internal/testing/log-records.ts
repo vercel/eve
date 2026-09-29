@@ -26,6 +26,10 @@ export const workflowSdkNotice = {
     "[workflow-sdk] Queue message was delivered to a deployment it was not pinned to",
 } as const;
 
+/** Logged when a deployment handoff fails and the current owner keeps the session. */
+export const sessionHandoffFailedNotice =
+  "[eve:execution.session.handoff] session handoff failed; the current owner kept the session";
+
 // The workflow SDK reports a duplicate in-process delivery of the same step
 // whenever redelivery races a slow step, so its presence depends on load.
 const WORKFLOW_STEP_SINGLE_FLIGHT_NOTICE =

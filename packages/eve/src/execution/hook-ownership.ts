@@ -40,6 +40,16 @@ export function isHookConflictError(error: unknown): error is {
   );
 }
 
+/** Another run took this hook's token with a forced claim; the hook will receive nothing more. */
+export function isHookForceClaimedError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "HookForceClaimedError"
+  );
+}
+
 function createHookConflictError(
   token: string,
   conflictingRunId: string,
