@@ -1,4 +1,4 @@
-import { TASK_WAIT_TOOL_NAME } from "#execution/tasks/calls.js";
+import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { TASK_WAIT_DESCRIPTION, TASK_WAIT_TIMEOUT_DESCRIPTION } from "#execution/tasks/render.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { defineJsonSchema } from "#tools/schema.js";

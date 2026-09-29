@@ -1,4 +1,4 @@
-import { TASK_CANCEL_TOOL_NAME } from "#execution/tasks/calls.js";
+import { TASK_CANCEL_TOOL_NAME } from "#protocol/task-tools.js";
 import {
   TASK_CANCEL_DESCRIPTION,
   TASK_CANCEL_TASK_ID_DESCRIPTION,

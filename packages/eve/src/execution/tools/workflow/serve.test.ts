@@ -13,6 +13,7 @@ import type {
 import { startServeBody } from "#execution/tools/workflow/serve.js";
 import { workflowToolRunWorkflow } from "#execution/tools/workflow/workflow.js";
 import type { JsonValue } from "#shared/json.js";
+import type { ToolInputResponse } from "#tools/definition.js";
 import type {
   WorkflowServeCall,
   WorkflowServeContext,
@@ -125,6 +126,13 @@ function call(callId: string, request: string): WorkflowBodyCommand {
 
 function aborted(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => signal.addEventListener("abort", () => resolve()));
+}
+
+/** The messages of one kind the run sent its inbox, oldest first. */
+function sent<K extends WorkflowToolRunMessage["kind"]>(kind: K) {
+  return mocks.deliver.mock.calls.flatMap(([, message]) =>
+    message.kind === kind ? [message as Extract<WorkflowToolRunMessage, { readonly kind: K }>] : [],
+  );
 }
 
 it("serves every call to its task, one stretch of work at a time, until the session ends", async () => {
@@ -246,6 +254,67 @@ it("serves every call to its task, one stretch of work at a time, until the sess
   expect(fourth).not.toBe(third);
   expect(first?.aborted).toBe(false);
   expect(fourth?.aborted).toBe(true);
+});
+
+it("withdraws a question once its call has a reply, without aborting the stretch", async () => {
+  mocks.deliver.mockClear();
+  mocks.deliver.mockResolvedValue(undefined);
+  const replyNow = Promise.withResolvers<void>();
+  let stretch: AbortSignal | undefined;
+  let answer: PromiseLike<ToolInputResponse> | undefined;
+  mocks.serve.mockImplementation(
+    async (receive: WorkflowServeReceive<JsonValue>, ctx: WorkflowServeContext<JsonValue>) => {
+      stretch = (await receive()).abortSignal;
+      answer = ctx.ask({ prompt: "Should the plan include a rollback drill?" });
+      await replyNow.promise;
+      ctx.reply("plan without a rollback drill");
+      await answer;
+      return await receive();
+    },
+  );
+  const started = startServeBody(input);
+
+  await vi.waitFor(() => expect(sent("request")).toHaveLength(1));
+  const requestId = sent("request")[0]?.replyTo ?? "";
+  // Alice's second call arrives before the reply, so it joins the stretch and the reply leaves it working.
+  started.control.apply(call("call-2", "Add a rollback step."));
+  replyNow.resolve();
+  await vi.waitFor(() => expect(sent("withdraw")).toHaveLength(1));
+
+  expect(sent("withdraw")).toMatchObject([{ from: { callId: "call-1" }, replyTo: requestId }]);
+  expect(stretch?.aborted).toBe(false);
+  // Cancelling the second call aborts the stretch, and the question's withdrawal was already asked for.
+  started.control.apply({ kind: "cancel", reason: "The task was cancelled." });
+  expect(stretch?.aborted).toBe(true);
+  started.asks.settle({ kind: "withdrawn", requestId });
+  await expect(answer).resolves.toEqual({ status: "cancelled" });
+  expect(sent("withdraw")).toHaveLength(1);
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  await started.outcome;
+});
+
+it("holds the outcome of a body that returns right after replying until its withdrawals reach the run", async () => {
+  mocks.deliver.mockClear();
+  const withdrawalLands = Promise.withResolvers<void>();
+  mocks.deliver.mockImplementation(async (_inbox, message) => {
+    if (message.kind === "withdraw") await withdrawalLands.promise;
+  });
+  mocks.serve.mockImplementation(
+    async (receive: WorkflowServeReceive<JsonValue>, ctx: WorkflowServeContext<JsonValue>) => {
+      await receive();
+      void ctx.ask({ prompt: "Should the plan include a rollback drill?" });
+      ctx.reply("plan without a rollback drill");
+      return null;
+    },
+  );
+  const started = startServeBody(input);
+  let finished = false;
+  void started.outcome.then(() => (finished = true));
+
+  await vi.waitFor(() => expect(sent("withdraw")).toHaveLength(1));
+  expect(finished).toBe(false);
+  withdrawalLands.resolve();
+  await expect(started.outcome).resolves.toEqual({ output: null, status: "completed" });
 });
 
 it.each([

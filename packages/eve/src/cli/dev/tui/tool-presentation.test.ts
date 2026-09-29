@@ -11,10 +11,10 @@ describe("presentPreparingTool", () => {
     expect(presentPreparingTool("final_output").title).toBe("Return final output");
   });
 
-  it("keeps unknown tools on their name with a quiet hint", () => {
+  it("leads unknown tools with their name", () => {
     const presentation = presentPreparingTool("linear__list_issues");
-    expect(presentation.title).toBe("linear__list_issues");
-    expect(presentation.subtitle).toBe("preparing…");
+    expect(presentation.title).toBe("linear__list_issues …");
+    expect(presentation.subtitle).toBe("");
   });
 });
 
@@ -189,9 +189,16 @@ describe("presentTool", () => {
     expect(presentation.group).toBeUndefined();
     expect(presentation.doneTitle).toBeUndefined();
     expect(presentPreparingTool("task_update")).toMatchObject({
-      title: "task_update",
-      subtitle: "preparing…",
+      title: "task_update …",
+      subtitle: "",
     });
+  });
+
+  it("keeps eve's own copy for builtin tools over their provided labels", () => {
+    // Provided tools define labels too; eve's copy keeps them groupable.
+    const presentation = presentTool("bash", { command: "ls" }, { label: "bash ls" });
+    expect(presentation.title).toBe("Run ls");
+    expect(presentation.group?.verb).toBe("Run");
   });
 
   it("presents a named subagent dispatch as a delegation", () => {

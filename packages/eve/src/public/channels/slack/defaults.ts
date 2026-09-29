@@ -2,6 +2,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
 import { describeActionRequests } from "#public/channels/slack/action-status.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -473,7 +474,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await channel.thread.startTyping(truncateTypingStatus(buffered));
       return;
     }
-    await channel.thread.startTyping(truncateTypingStatus(describeActionRequests(event.actions)));
+    const actions = event.actions.filter(
+      (action) => action.kind !== "tool-call" || !isTaskControlTool(action.toolName),
+    );
+    if (actions.length === 0) return;
+    await channel.thread.startTyping(truncateTypingStatus(describeActionRequests(actions)));
   },
 
   async "message.completed"(event, channel, _ctx) {

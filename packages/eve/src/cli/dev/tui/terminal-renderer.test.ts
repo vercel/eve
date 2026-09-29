@@ -14,6 +14,7 @@ import {
 import type { AgentTUIStreamEvent, AgentTUIStreamResult, SubagentToolUpdate } from "./runner.js";
 import { PROMPT_COMMANDS, promptCommandsFor } from "./prompt-commands.js";
 import { TerminalRenderer } from "./terminal-renderer.js";
+import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { MockScreen, MockUserInput } from "./test/mock-terminal.js";
 
 function streamOf(events: AgentTUIStreamEvent[]): AgentTUIStreamResult {
@@ -570,33 +571,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("renders a preparing subagent tool row and upgrades it with the full call", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "researcher",
-      childCallId: "cc1",
-      toolName: "web_fetch",
-      input: undefined,
-      status: "preparing",
-    });
-    expect(screen.snapshot()).toContain("Fetch …");
-
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "researcher",
-      childCallId: "cc1",
-      toolName: "web_fetch",
-      input: { url: "https://example.com" },
-      status: "executing",
-    });
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Fetch https://example.com");
-    expect(snapshot).not.toContain("Fetch …");
-    renderer.shutdown();
-  });
-
   it("omits the interrupt hint while waiting for the first stream event", async () => {
     const { screen, renderer } = makeRenderer();
     let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
@@ -993,7 +967,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
   it("settles an authorization block when its callback arrives in a later stream pass", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "research", name: "researcher" });
     renderer.upsertConnectionAuth({
       name: "linear",
       description: "Authorization required for linear",
@@ -1088,6 +1061,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         { type: "tool-result", toolCallId: "c1", output: { text: `done ${c1Osc}` } },
         { type: "assistant-delta", id: "t1", delta: `safe assistant ${osc}` },
         { type: "assistant-complete", id: "t1" },
+        { type: "task-started", toolCallId: "s1", kind: "agent", toolName: `researcher${osc}` },
         { type: "error", errorText: `session failed ${dcs}`, detail: `detail ${osc}` },
         { type: "finish" },
       ]),
@@ -1128,239 +1102,343 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("nests subagent steps and tools under a subagent header", async () => {
-    const { screen, renderer } = makeRenderer();
-    // The runner makes the renderer interactive via the startup header before
-    // any subagent activity arrives.
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.upsertSubagentStep({
-      callId: "s1",
-      subagentName: "researcher",
-      sectionKey: 0,
-      reasoning: "comparing cities",
-      message: "Looking into NYC.",
-      finalized: true,
-    });
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "researcher",
-      childCallId: "cc1",
-      toolName: "get_weather",
-      input: { city: "NYC" },
-      status: "done",
-      output: { tempF: 61 },
-    });
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("※ subagent(researcher)");
-    expect(snapshot).toContain("get_weather");
-    renderer.shutdown();
-  });
-
-  it("swaps a dispatch's preparing placeholder for the section header", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-
-    let streamController: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
-    const rendering = renderer.renderStream(
-      {
+  describe("tasks", () => {
+    function taskStream() {
+      let controller: ReadableStreamDefaultController<AgentTUIStreamEvent> | undefined;
+      const result: AgentTUIStreamResult = {
         events: new ReadableStream<AgentTUIStreamEvent>({
-          start(controller) {
-            streamController = controller;
+          start(next) {
+            controller = next;
           },
         }),
+      };
+      return {
+        result,
+        push: (...events: AgentTUIStreamEvent[]) => {
+          for (const event of events) controller?.enqueue(event);
+        },
+        close: () => controller?.close(),
+      };
+    }
+
+    const delegate: AgentTUIStreamEvent[] = [
+      { type: "step-start" },
+      {
+        type: "tool-call",
+        toolCallId: "call-r",
+        toolName: "researcher",
+        input: { message: "Find the Q3 revenue numbers\nand cite sources" },
       },
-      { continueSession: true },
-    );
+      { type: "task-started", toolCallId: "call-r", kind: "agent", toolName: "researcher" },
+      { type: "assistant-delta", id: "t1", delta: "I asked the researcher to dig in." },
+      { type: "assistant-complete", id: "t1" },
+      { type: "step-finish" },
+    ];
 
-    // The model commits to the `agent` tool; its input streams.
-    streamController?.enqueue({
-      type: "tool-call-preparing",
-      toolCallId: "sub1",
-      toolName: "agent",
-    });
-    await screen.waitForText("Delegate");
-
-    // The agent's section supersedes the tool-call placeholder once agent.started arrives.
-    renderer.markChildToolCallId("sub1");
-    renderer.beginSubagent({ callId: "sub1", name: "agent" });
-    await screen.waitForText("※ subagent(self)");
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("※ subagent(self)");
-    expect(snapshot).not.toContain("Delegate");
-
-    streamController?.close();
-    await rendering;
-    renderer.shutdown();
-
-    // The step-boundary ghost sweep must not take the section with it.
-    expect(screen.snapshot()).toContain("※ subagent(self)");
-  });
-
-  it("windows subagent children by latest activity, not announce order", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-
-    // A parallel batch: every call announced up front…
-    const names = ["web_fetch", "web_search", "bash", "read_file"];
-    const upsert = (i: number, status: "executing" | "done") => {
+    const childTool = (status: SubagentToolUpdate["status"], input?: unknown) => {
       const update: SubagentToolUpdate = {
-        callId: "s1",
-        subagentName: "agent",
-        childCallId: `c${i}`,
-        toolName: names[i % names.length]!,
-        input: { url: `u${i}`, query: `q${i}`, command: `cmd${i}`, filePath: `f${i}` },
+        callId: "call-r",
+        subagentName: "researcher",
+        childCallId: "fetch-1",
+        toolName: "web_fetch",
+        input,
         status,
       };
-      if (status === "done") update.output = { ok: true };
-      renderer.upsertSubagentTool(update);
+      if (status === "done") update.output = "<html>";
+      return update;
     };
-    for (let i = 1; i <= 8; i += 1) upsert(i, "executing");
-    // …then the FIRST two settle: they are the most recent activity and
-    // must enter the window, displacing later-announced idle calls.
-    upsert(1, "done");
-    upsert(2, "done");
 
-    const snapshot = screen.snapshot();
-    // The window is the single most recently active call — c2 settled last.
-    expect(snapshot).toContain("Ran cmd2");
-    expect(snapshot).toContain("(7 more)");
-    expect(snapshot).not.toContain("cmd6");
-    renderer.shutdown();
-  });
+    it("writes the transcript once while the panel shows what each task is doing", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      const stream = taskStream();
+      const rendering = renderer.renderStream(stream.result, { continueSession: true });
 
-  it("collapses a completed section to its Done header and activity footnote", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.upsertSubagentStep({
-      callId: "s1",
-      subagentName: "echo-marker",
-      sectionKey: 0,
-      reasoning: "",
-      message: "SUBAGENT_TOKEN=echo-marker-9F2X",
-      finalized: true,
-    });
-    renderer.upsertSubagentTool({
-      callId: "s1",
-      subagentName: "echo-marker",
-      childCallId: "cc1",
-      toolName: "web_fetch",
-      input: { url: "https://one.example" },
-      status: "done",
-      output: { ok: true },
-    });
+      stream.push(...delegate);
+      await screen.waitForText("Waiting for researcher");
+      // The call row became the start line in place; the model-facing
+      // delegation row is gone.
+      expect(screen.snapshot()).toContain("※ researcher  Find the Q3 revenue numbers");
+      expect(screen.snapshot()).not.toContain("Delegate");
+      const writtenBeforeActivity = screen.rawOutput().length;
 
-    // Mid-flight the section shows its newest child and closes on a bare
-    // corner (the tool arrived after the message, so it holds the window).
-    expect(screen.snapshot()).toContain("Fetched https://one.example");
-    expect(screen.snapshot()).not.toContain("Done");
+      renderer.upsertSubagentTool(childTool("preparing"));
+      expect(screen.snapshot()).toMatch(/※ researcher\s+Fetch …/u);
+      renderer.upsertSubagentTool(childTool("executing", { url: "https://ir.example" }));
+      expect(screen.snapshot()).toMatch(/※ researcher\s+Fetch https:\/\/ir\.example/u);
+      renderer.upsertSubagentTool(childTool("done", { url: "https://ir.example" }));
 
-    renderer.completeSubagent({ authoritative: true, callId: "s1" });
-    const snapshot = screen.snapshot();
-    // Completed: the corner reports Done with the counted footnote and the
-    // children fold away — the parent's reply carries the conclusion.
-    expect(snapshot).toContain("※ subagent(echo-marker)");
-    expect(snapshot).toContain("  └ Done. Fetched 1 URL");
-    expect(snapshot).not.toContain("SUBAGENT_TOKEN=echo-marker-9F2X");
-    renderer.shutdown();
-  });
+      stream.push({ type: "task-settled", toolCallId: "call-r", status: "completed" });
+      await screen.waitForText("✓ researcher");
+      stream.close();
+      await rendering;
+      renderer.shutdown();
 
-  it("keeps parent completion provisional until delayed child output reaches its boundary", async () => {
-    const { screen, input, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.beginSubagent({ callId: "s1", name: "researcher" });
-    renderer.upsertSubagentStep({
-      callId: "s1",
-      subagentName: "researcher",
-      sectionKey: 0,
-      reasoning: "",
-      message: "parent-visible output",
-      finalized: true,
-    });
-    renderer.completeSubagent({ authoritative: false, callId: "s1" });
-    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
-
-    renderer.beginSubagent({ callId: "s1", name: "researcher" });
-    renderer.upsertSubagentStep({
-      callId: "s1",
-      subagentName: "researcher",
-      sectionKey: 1,
-      reasoning: "",
-      message: "delayed child output",
-      finalized: true,
+      // The start line and the reply were already in scrollback: live rows
+      // repaint on every update, but nothing the agent did rewrote them.
+      const writtenSince = stripAnsi(screen.rawOutput().slice(writtenBeforeActivity));
+      expect(writtenSince).not.toContain("Find the Q3 revenue numbers");
+      expect(writtenSince).not.toContain("I asked the researcher to dig in.");
+      expect(screen.snapshot()).toMatch(/✓ researcher {2}finished in \d+s · Fetched 1 URL/u);
     });
 
-    expect(screen.snapshot()).toContain("delayed child output");
-    expect(screen.snapshot()).not.toContain("└ Done");
+    it("waits for an agent's own last events before writing its end line", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      const stream = taskStream();
+      const rendering = renderer.renderStream(stream.result, { continueSession: true });
+      stream.push(...delegate);
+      await screen.waitForText("Waiting for researcher");
+      renderer.subagents.begin({ callId: "call-r" });
 
-    renderer.completeSubagent({ authoritative: true, callId: "s1" });
-    const outputAfterCommit = screen.rawOutput().length;
-    const prompt = renderer.readPrompt();
-    input.type("next");
-    expect(screen.rawOutput().slice(outputAfterCommit)).not.toContain("subagent(researcher)");
-    input.enter();
-    await prompt;
-    renderer.shutdown();
-  });
+      stream.push({ type: "task-settled", toolCallId: "call-r", status: "completed" });
+      await screen.waitForText("Finishing");
+      expect(screen.snapshot()).not.toContain("✓ researcher");
 
-  it("renders parallel calls to the same subagent as ordinal-numbered sections", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    const calls = [
-      ["s1", "echo-marker-1"],
-      ["s2", "echo-marker-2"],
-      ["s3", "echo-marker-3"],
-    ] as const;
-    for (const finalized of [false, true]) {
-      for (const [callId, token] of calls) {
-        renderer.upsertSubagentStep({
-          callId,
-          subagentName: "echo-marker",
-          sectionKey: 0,
-          reasoning: "",
-          message: `SUBAGENT_TOKEN=${token}`,
-          finalized,
-        });
-      }
-    }
-    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
-    renderer.shutdown();
+      // The agent's last call reaches the TUI after its parent settled the task.
+      renderer.upsertSubagentTool(childTool("done", { url: "https://ir.example" }));
+      renderer.subagents.end({ callId: "call-r" });
+      expect(screen.snapshot()).toMatch(/✓ researcher {2}finished in \d+s · Fetched 1 URL/u);
 
-    const snapshot = screen.snapshot();
-    // Each call keeps its own persistent section, told apart by ordinal.
-    expect(countOccurrences(snapshot, "※ subagent(echo-marker:")).toBe(3);
-    expect(snapshot).toContain("※ subagent(echo-marker:1)");
-    expect(snapshot).toContain("※ subagent(echo-marker:2)");
-    expect(snapshot).toContain("※ subagent(echo-marker:3)");
-    expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-1");
-    expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-2");
-    expect(snapshot).toContain("SUBAGENT_TOKEN=echo-marker-3");
-  });
+      stream.close();
+      await rendering;
+      renderer.shutdown();
+    });
 
-  it("windows one subagent's children to the most recent row", async () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    for (let step = 1; step <= 8; step += 1) {
-      renderer.upsertSubagentStep({
-        callId: "s1",
-        subagentName: "echo-marker",
-        sectionKey: step,
-        reasoning: "",
-        message: `SUBAGENT_TOKEN=token-${step}`,
-        finalized: true,
+    it("writes a waiting end line once the turn's stream ends", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      renderer.subagents.begin({ callId: "call-r" });
+      await renderer.renderStream(
+        streamOf([
+          ...delegate,
+          { type: "task-settled", toolCallId: "call-r", status: "completed" },
+          { type: "finish" },
+        ]),
+        { continueSession: true },
+      );
+      renderer.shutdown();
+
+      expect(screen.snapshot()).toMatch(/✓ researcher {2}finished in \d+s/u);
+      expect(screen.snapshot()).not.toContain("Finishing");
+    });
+
+    it("closes working tasks before a session restart", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      await renderer.renderStream(streamOf([...delegate, { type: "finish" }]), {
+        continueSession: true,
       });
-    }
-    await renderer.renderStream(streamOf([{ type: "finish" }]), { continueSession: true });
-    renderer.shutdown();
+      renderer.renderSessionBoundary();
+      renderer.shutdown();
 
-    const snapshot = screen.snapshot();
-    expect(countOccurrences(snapshot, "※ subagent(echo-marker)")).toBe(1);
-    // A lone call carries no ordinal; only the newest child row shows.
-    expect(snapshot).not.toContain("#1");
-    expect(snapshot).toContain("(7 more)");
-    expect(snapshot).not.toContain("SUBAGENT_TOKEN=token-7");
-    expect(snapshot).toContain("SUBAGENT_TOKEN=token-8");
+      const snapshot = screen.snapshot();
+      const stopped = snapshot.indexOf("▪ researcher  stopped");
+      expect(stopped).toBeGreaterThan(-1);
+      expect(stopped).toBeLessThan(snapshot.indexOf("Session restarted"));
+    });
+
+    it("names an agent task's request even when tool rows are hidden", async () => {
+      const screen = new MockScreen({ columns: 80, rows: 30 });
+      const renderer = new TerminalRenderer({
+        input: new MockUserInput(),
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+        tools: "hidden",
+      });
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      await renderer.renderStream(streamOf([...delegate, { type: "finish" }]), {
+        continueSession: true,
+      });
+      renderer.shutdown();
+
+      expect(screen.snapshot()).toContain("※ researcher  Find the Q3 revenue numbers");
+    });
+
+    it("logs why an agent's own call was refused for its model to retry", async () => {
+      const screen = new MockScreen({ columns: 80, rows: 30 });
+      const stub = stubDiagnostics();
+      const renderer = new TerminalRenderer({
+        input: new MockUserInput(),
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+        diagnostics: stub.diagnostics,
+      });
+      await renderer.renderStream(streamOf([...delegate, { type: "finish" }]), {
+        continueSession: true,
+      });
+      renderer.upsertSubagentTool(childTool("executing", { url: "https://ir.example" }));
+      renderer.removeSubagentTool({
+        callId: "call-r",
+        childCallId: "fetch-1",
+        reason: "8 tasks are already working",
+      });
+      renderer.shutdown();
+
+      expect(stub.append).toHaveBeenCalledWith({
+        source: "tool",
+        summary: "web_fetch was refused for the model to retry",
+        detail: "8 tasks are already working",
+      });
+    });
+
+    it("ends a stopped or failed task with what happened, not Done", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      await renderer.renderStream(
+        streamOf([
+          ...delegate,
+          { type: "task-started", toolCallId: "call-d", kind: "tool", toolName: "deploy" },
+          { type: "task-settled", toolCallId: "call-r", status: "cancelled" },
+          {
+            type: "task-settled",
+            toolCallId: "call-d",
+            status: "failed",
+            errorText: "Preview build failed\nstack…",
+          },
+          { type: "finish" },
+        ]),
+        { continueSession: true },
+      );
+      renderer.shutdown();
+
+      const snapshot = screen.snapshot();
+      expect(snapshot).toContain("▪ researcher  stopped");
+      expect(snapshot).toContain("⨯ deploy  failed · Preview build failed");
+      expect(snapshot).not.toContain("stack…");
+    });
+
+    it("reads a cancelled turn's unfinished tasks as stopped", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      await renderer.renderStream(
+        streamOf([...delegate, { type: "turn-cancelled" }, { type: "finish" }]),
+        { continueSession: true },
+      );
+      renderer.shutdown();
+
+      expect(screen.snapshot()).toContain("▪ researcher  stopped");
+      expect(screen.snapshot()).not.toContain("Waiting for researcher");
+    });
+
+    it("tells parallel calls to one agent apart without renaming the first", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      const stream = taskStream();
+      const rendering = renderer.renderStream(stream.result, { continueSession: true });
+      stream.push(...delegate, {
+        type: "task-started",
+        toolCallId: "call-r2",
+        kind: "agent",
+        toolName: "researcher",
+      });
+      await screen.waitForText("Waiting for researcher and researcher #2");
+      stream.close();
+      await rendering;
+      renderer.shutdown();
+
+      expect(screen.snapshot()).toContain("※ researcher  Find the Q3 revenue numbers");
+      expect(screen.snapshot()).toContain("※ researcher #2");
+    });
+
+    it("writes an agent's finished messages under --subagents full", async () => {
+      const screen = new MockScreen({ columns: 80, rows: 30 });
+      const renderer = new TerminalRenderer({
+        input: new MockUserInput(),
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+        subagents: "full",
+      });
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      const stream = taskStream();
+      const rendering = renderer.renderStream(stream.result, { continueSession: true });
+      stream.push(...delegate);
+      await screen.waitForText("Waiting for researcher");
+
+      const step = {
+        callId: "call-r",
+        subagentName: "researcher",
+        sectionKey: 0,
+        reasoning: "",
+        message: "Revenue grew 12% year over year.",
+      };
+      renderer.upsertSubagentStep({ ...step, finalized: false });
+      renderer.upsertSubagentStep({ ...step, finalized: true });
+      renderer.upsertSubagentStep({ ...step, finalized: true });
+      stream.close();
+      await rendering;
+      renderer.shutdown();
+
+      expect(screen.snapshot()).toContain("※ researcher\n  │ Revenue grew 12% year over year.");
+      expect(countOccurrences(stripAnsi(screen.rawOutput()), "│ Revenue grew 12%")).toBe(1);
+    });
+
+    it("shows neither lines nor panel rows for agents under --subagents hidden", async () => {
+      const screen = new MockScreen({ columns: 80, rows: 30 });
+      const renderer = new TerminalRenderer({
+        input: new MockUserInput(),
+        output: screen,
+        captureForeignOutput: false,
+        unicode: true,
+        subagents: "hidden",
+      });
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      await renderer.renderStream(streamOf([...delegate, { type: "finish" }]), {
+        continueSession: true,
+      });
+      renderer.shutdown();
+
+      expect(screen.snapshot()).not.toContain("※");
+      expect(screen.snapshot()).not.toContain("Find the Q3");
+    });
+
+    it("leaves no trace of a call refused for the model to retry", async () => {
+      const { screen, renderer } = makeRenderer();
+      await renderer.renderStream(
+        streamOf([
+          { type: "tool-call", toolCallId: "c1", toolName: "deploy", input: { env: "preview" } },
+          { type: "tool-withdrawn", toolCallId: "c1", reason: "8 tasks are already working" },
+          { type: "assistant-delta", id: "t1", delta: "Queued the deploy." },
+          { type: "assistant-complete", id: "t1" },
+          { type: "finish" },
+        ]),
+        { submittedPrompt: "deploy", continueSession: true },
+      );
+      renderer.shutdown();
+
+      expect(screen.snapshot()).not.toContain("deploy ");
+      expect(screen.snapshot()).not.toContain("already working");
+    });
+
+    it("titles a tool by its own label instead of its raw arguments", async () => {
+      const { screen, renderer } = makeRenderer();
+      await renderer.renderStream(
+        streamOf([
+          {
+            type: "tool-call",
+            toolCallId: "c1",
+            toolName: "deploy",
+            input: { project: "storefront", environment: "production" },
+            label: "Deploy storefront to production",
+          },
+          {
+            type: "tool-result",
+            toolCallId: "c1",
+            output: { url: "https://storefront.example" },
+            label: "Deployed storefront",
+          },
+          { type: "finish" },
+        ]),
+        { submittedPrompt: "ship it", continueSession: true },
+      );
+      renderer.shutdown();
+
+      expect(screen.snapshot()).toContain("Deployed storefront");
+      expect(screen.snapshot()).not.toContain("environment=");
+    });
   });
 
   it("commits the one-line session boundary", () => {
@@ -4437,7 +4515,6 @@ describe("TerminalRenderer setup flow session", () => {
     try {
       const { screen, renderer } = makeRenderer();
       renderer.setupFlow.begin("Add integration");
-      renderer.beginSubagent({ callId: "research", name: "researcher" });
       let release!: () => void;
       const inherited = renderer.setupFlow.withInheritedStdio(
         () => new Promise<void>((resolve) => (release = resolve)),

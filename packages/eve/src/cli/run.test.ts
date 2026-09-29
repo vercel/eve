@@ -1247,7 +1247,7 @@ describe("resolveTuiDisplayOptions", () => {
       resolveTuiDisplayOptions({
         tools: "hidden",
         reasoning: "collapsed",
-        subagents: "auto-collapsed",
+        subagents: "collapsed",
         connectionAuth: "full",
         assistantResponseStats: "tokens",
         contextSize: 200_000,
@@ -1256,7 +1256,7 @@ describe("resolveTuiDisplayOptions", () => {
     ).toEqual({
       tools: "hidden",
       reasoning: "collapsed",
-      subagents: "auto-collapsed",
+      subagents: "collapsed",
       connectionAuth: "full",
       assistantResponseStats: "tokens",
       contextSize: 200_000,

@@ -78,6 +78,8 @@ class WorkflowServeCalls implements WorkflowBodyControl {
   /**
    * The body's questions. A cancel keeps the run, so it withdraws them
    * through the stretch's `abortSignal`, and the session decides each one.
+   * A reply withdraws them too, but leaves the signal alone: it means
+   * cancelled, and the body may keep working after it replies.
    */
   readonly asks: WorkflowToolRunAsks;
   private readonly run = new AbortController();
@@ -188,6 +190,10 @@ class WorkflowServeCalls implements WorkflowBodyControl {
     if (settled.length === 0) return;
     this.waiting = [];
     if (this.arrived.length === 0) this.stretch = undefined;
+    // `ctx.ask()` needs a waiting call, and a cancel already withdrew the
+    // questions of the calls it settled, so every question not yet withdrawn
+    // was asked for a call this settles.
+    this.asks.withdrawAll();
     const previous = this.replies;
     this.replies = previous.then(() => this.deliverReply(settled, output));
   }
@@ -199,8 +205,9 @@ class WorkflowServeCalls implements WorkflowBodyControl {
     );
   }
 
-  /** Waits for in-flight replies, so the outcome can never overtake them. */
+  /** Waits for in-flight replies and withdrawals, so the outcome can never overtake them. */
   async flush(): Promise<void> {
+    await this.asks.flush();
     await this.replies;
   }
 

@@ -1,6 +1,6 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
-import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#execution/tasks/calls.js";
+import { TASK_CANCEL_TOOL_NAME, TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import {
   FINAL_REPLY_TASK_SYSTEM_BLOCK,
   renderModelOutputText,

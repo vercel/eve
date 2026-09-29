@@ -1,19 +1,21 @@
 /**
  * The subagent child-stream subsystem: for every call to an agent task on
  * the parent stream, a parallel pump over the agent's session folds its
- * events into the renderer's nested subagent view. Extracted from the runner —
- * the subsystem touches nothing but its own run state, the client, and the
- * {@link SubagentView} seam.
+ * events into the renderer's view of what that agent is doing. Extracted
+ * from the runner — the subsystem touches nothing but its own run state, the
+ * client, and the {@link SubagentView} seam.
  */
 
 import type { Client, StreamReconnectPolicy } from "#client/index.js";
 import {
   isCurrentTurnBoundaryEvent,
+  type ActionPresentationByCallId,
   type ActionResultStreamEvent,
   type AgentStartedStreamEvent,
   type MessageStreamEvent,
   type TaskStartedStreamEvent,
 } from "#protocol/message.js";
+import { isTaskControlTool, isTaskRetryRefusal } from "#protocol/task-tools.js";
 
 /**
  * Pumps end on the child boundary or abort, never on a retry budget: a child
@@ -26,22 +28,28 @@ const childStreamReconnectPolicy = {
 } as const satisfies StreamReconnectPolicy;
 
 /**
- * The renderer's subagent surface. One cohesive capability: a renderer that
- * implements it renders whole sections — header, nested steps and tools,
- * ghost sweeps, completion — and a renderer without it simply has no
- * subagent view. Individually-optional methods would let a renderer
- * implement a type-legal subset that ghosts placeholders or duplicates
- * parent tool rows.
+ * The renderer's view of each agent task's own activity. One cohesive
+ * capability: a renderer that implements it shows what every working agent
+ * is doing, and a renderer without it simply shows none. Individually
+ * optional methods would let a renderer implement a type-legal subset that
+ * ghosts placeholders or duplicates parent tool rows. The task's start and
+ * end reach the renderer on the parent stream, not through this view.
  */
 export interface SubagentView {
-  /** Opens a call's section the moment its dispatch is announced. */
-  begin(update: { callId: string; name: string }): void;
+  /**
+   * The pump follows the agent a call reaches. The agent's last events can
+   * trail the parent's `task.settled`, so the task's end waits for {@link end}.
+   */
+  begin(update: { callId: string }): void;
+  /** The followed agent's own stream ended, or the pump stopped following it. */
+  end(update: { callId: string }): void;
   upsertStep(update: SubagentStepUpdate): void;
   upsertTool(update: SubagentToolUpdate): void;
-  /** Drops a child tool row whose call never materialized. */
-  removeTool(update: { callId: string; childCallId: string }): void;
-  /** Marks a call complete so its section collapses on `└ Done…`. */
-  complete(update: { authoritative: boolean; callId: string }): void;
+  /**
+   * Drops a child tool call that never materialized, or one the session
+   * refused for the model to retry (`reason` says why).
+   */
+  removeTool(update: { callId: string; childCallId: string; reason?: string }): void;
   /** Suppresses the parent-level tool row for a child-owned call id. */
   markChildToolCallId(callId: string): void;
 }
@@ -66,6 +74,9 @@ type SubagentToolState = {
   status: SubagentToolStatus;
   output?: unknown;
   errorText?: string;
+  label?: string;
+  /** The child's call started an agent task of its own. */
+  agentTask?: boolean;
 };
 
 export type SubagentRun = {
@@ -73,8 +84,8 @@ export type SubagentRun = {
   childSessionId: string;
   /** Parent turn that originated this dispatch; cancellation is scoped to it. */
   parentTurnId: string;
-  /** Parent completion is provisional; only a child boundary is authoritative. */
-  status: "open" | "provisional" | "authoritative";
+  /** Only the child's own boundary ends the run: its last events can trail the parent's. */
+  done: boolean;
   /** The parent session, whose client follows the child stream. */
   parentSessionId: string;
   /** The agent task's session, whose stream this run follows. */
@@ -96,6 +107,8 @@ export type SubagentRun = {
   /** Monotonic counter for new section keys. */
   nextSectionKey: number;
   tools: Map<string, SubagentToolState>;
+  /** Child calls that started tasks: their `action.result` is only a receipt. */
+  taskCallIds: Set<string>;
 };
 
 export type SubagentStepUpdate = {
@@ -116,6 +129,10 @@ export type SubagentToolUpdate = {
   status: SubagentToolStatus;
   output?: unknown;
   errorText?: string;
+  /** The tool's own label copy, when it defines one. */
+  label?: string;
+  /** The call started an agent task, so it reads as a delegation. */
+  agentTask?: boolean;
 };
 
 export interface SubagentPumpOptions {
@@ -154,7 +171,7 @@ export class SubagentPump {
     this.#onToolCompleted = options.onToolCompleted;
   }
 
-  /** A call started or reached a task. A call to an agent task opens a section at once. */
+  /** A call started or reached a task. A call to an agent task starts following it at once. */
   taskStarted(event: TaskStartedStreamEvent, parentSessionId: string | undefined): void {
     const { callId, kind, taskId, turnId } = event.data;
     if (kind !== "agent") return;
@@ -170,7 +187,7 @@ export class SubagentPump {
 
   /**
    * A run opened a session. The session an agent task opens is its agent's;
-   * sessions other tools open have no section.
+   * sessions other tools open are not followed.
    */
   agentStarted(started: AgentStartedStreamEvent, parentSessionId: string | undefined): void {
     const { callId, taskId, turnId } = started.data;
@@ -182,12 +199,10 @@ export class SubagentPump {
   }
 
   /**
-   * The moment a call is known to reach an agent, its section header
-   * replaces the parent-level tool row (or its still-preparing
-   * placeholder). Without this the placeholder is swept at the step boundary
-   * and nothing shows until the child's first content arrives. A later
-   * parent-stream translator may replay the call; re-entry only refreshes
-   * the name.
+   * The moment a call is known to reach an agent, the pump follows the
+   * agent's session and claims the call id, so no parent-level tool row
+   * duplicates it. A later parent-stream translator may replay the call;
+   * re-entry only refreshes the name.
    */
   #begin(input: {
     readonly callId: string;
@@ -203,30 +218,21 @@ export class SubagentPump {
         childSessionId: started.data.sessionId,
         parentSessionId: input.parentSessionId,
         parentTurnId: input.parentTurnId,
-        status: "open",
+        done: false,
         started,
         steps: new Map(),
         currentSectionKey: null,
         nextSectionKey: 0,
         tools: new Map(),
+        taskCallIds: new Set(),
       });
     } else {
       existing.name = started.data.name;
     }
     this.#view?.markChildToolCallId(callId);
-    if (existing !== undefined && existing.status !== "open") return;
-    this.#view?.begin({ callId, name: started.data.name });
     if (existing !== undefined) return;
+    this.#view?.begin({ callId });
     this.#activateOrQueue(callId);
-  }
-
-  /**
-   * Parent completion is provisional because the child's final events can be
-   * in flight on an independent connection. The pump remains open until the
-   * child boundary supplies authoritative completion.
-   */
-  settle(callId: string): void {
-    this.#finalizeRun(callId, false);
   }
 
   abortAll(): void {
@@ -245,7 +251,7 @@ export class SubagentPump {
   settleCancelledTurn(turnId: string): void {
     for (const [callId, run] of this.#runs) {
       if (run.parentTurnId !== turnId) continue;
-      this.#finalizeRun(callId, true);
+      this.#finalizeRun(callId);
       this.#pumps.get(callId)?.abort();
       this.#pumps.delete(callId);
     }
@@ -263,7 +269,7 @@ export class SubagentPump {
    */
   #activateOrQueue(callId: string): void {
     const run = this.#runs.get(callId);
-    if (run === undefined || run.status === "authoritative") return;
+    if (run === undefined || run.done) return;
     const activeCallId = this.#activeChildCalls.get(run.childSessionId);
     if (activeCallId === undefined) {
       this.#activeChildCalls.set(run.childSessionId, callId);
@@ -281,7 +287,7 @@ export class SubagentPump {
     const client = this.#client;
     if (!client) return;
     const run = this.#runs.get(callId);
-    if (run === undefined || run.status === "authoritative") return;
+    if (run === undefined || run.done) return;
 
     const controller = new AbortController();
     this.#pumps.set(callId, controller);
@@ -305,12 +311,13 @@ export class SubagentPump {
           // `session.waiting`. Keep following so the approved tool result
           // can still update the nested view.
           if (event.type === "session.waiting" && hasPendingChildApproval(run)) continue;
-          this.#finalizeRun(callId, true);
+          this.#finalizeRun(callId);
           return;
         }
       } catch {
-        // Only a non-retryable failure ends the follower early; the call's
-        // `task.settled` still settles the section.
+        // Only a non-retryable failure ends the follower early; nothing more
+        // will come, so the task's end need not wait for it.
+        if (!controller.signal.aborted) this.#view?.end({ callId });
       } finally {
         controller.abort();
         if (this.#pumps.get(callId) === controller) this.#pumps.delete(callId);
@@ -326,6 +333,7 @@ export class SubagentPump {
       toolName: string;
       input: unknown;
       status: SubagentToolState["status"];
+      label?: string;
     },
   ): void {
     const existing = run.tools.get(request.childCallId);
@@ -334,6 +342,7 @@ export class SubagentPump {
       input: request.input,
       status: request.status,
     };
+    if (request.label !== undefined) tool.label = request.label;
     if (existing) {
       const terminal =
         existing.status === "done" ||
@@ -365,28 +374,35 @@ export class SubagentPump {
       run.tools.set(request.childCallId, tool);
     }
     this.#view?.markChildToolCallId(request.childCallId);
-    this.#view?.upsertTool({
+    this.#emitTool(callId, run, request.childCallId, tool);
+  }
+
+  #emitTool(callId: string, run: SubagentRun, childCallId: string, tool: SubagentToolState): void {
+    const update: SubagentToolUpdate = {
       callId,
       subagentName: run.name,
-      childCallId: request.childCallId,
+      childCallId,
       toolName: tool.toolName,
       input: tool.input,
       status: tool.status,
-    });
+    };
+    if (tool.output !== undefined) update.output = tool.output;
+    if (tool.errorText !== undefined) update.errorText = tool.errorText;
+    if (tool.label !== undefined) update.label = tool.label;
+    if (tool.agentTask === true) update.agentTask = true;
+    this.#view?.upsertTool(update);
   }
 
   /**
-   * Settles a subagent section: re-emits a finalized snapshot for any
-   * still-streaming step (flipping its right-title off `streaming`), sweeps
-   * preparing ghosts, and marks the section Done. The run's status field is
-   * the idempotency authority — the child's turn boundary and the call's
-   * `task.settled` can both land here.
+   * Ends a run on the child's own boundary: re-emits a finalized snapshot
+   * for any still-streaming step, sweeps preparing ghosts, and releases the
+   * child session to the next queued call. `done` is the idempotency
+   * authority.
    */
-  #finalizeRun(callId: string, authoritative: boolean): void {
+  #finalizeRun(callId: string): void {
     const run = this.#runs.get(callId);
-    if (!run || run.status === "authoritative") return;
-    if (!authoritative && run.status === "provisional") return;
-    run.status = authoritative ? "authoritative" : "provisional";
+    if (!run || run.done) return;
+    run.done = true;
     for (const [sectionKey, step] of run.steps) {
       if (!step.finalized) {
         step.finalized = true;
@@ -402,8 +418,8 @@ export class SubagentPump {
     }
     run.currentSectionKey = null;
     this.#sweepPreparingTools(callId, run);
-    this.#view?.complete({ authoritative, callId });
-    if (authoritative) this.#releaseChildSession(callId, run.childSessionId);
+    this.#view?.end({ callId });
+    this.#releaseChildSession(callId, run.childSessionId);
   }
 
   #releaseChildSession(callId: string, childSessionId: string): void {
@@ -419,7 +435,7 @@ export class SubagentPump {
     while (remaining.length > 0) {
       const nextCallId = remaining.shift()!;
       const nextRun = this.#runs.get(nextCallId);
-      if (nextRun === undefined || nextRun.status === "authoritative") continue;
+      if (nextRun === undefined || nextRun.done) continue;
       if (remaining.length === 0) this.#queuedChildCalls.delete(childSessionId);
       else this.#queuedChildCalls.set(childSessionId, remaining);
       this.#activeChildCalls.set(childSessionId, nextCallId);
@@ -446,12 +462,6 @@ export class SubagentPump {
   #applyChildEvent(callId: string, event: MessageStreamEvent): Promise<void> | undefined {
     const run = this.#runs.get(callId);
     if (!run) return;
-    // Parent completion is provisional. Any delayed child event reopens the
-    // mutable cohort until the child stream supplies its own boundary.
-    if (run.status === "provisional") {
-      run.status = "open";
-      this.#view?.begin({ callId, name: run.name });
-    }
     const view = this.#view;
 
     const emit = (key: number, step: SubagentChildStep) => {
@@ -513,18 +523,30 @@ export class SubagentPump {
         // as a placeholder ghost in the section.
         this.#sweepPreparingTools(callId, run);
         break;
+      case "action.input.appended": {
+        const { callId: childCallId, toolName } = event.data;
+        if (run.tools.has(childCallId) || isTaskControlTool(toolName)) break;
+        this.#registerChildTool(callId, run, {
+          childCallId,
+          toolName,
+          input: undefined,
+          status: "preparing",
+        });
+        break;
+      }
       case "actions.requested": {
         // Close any pending text section before the tool call so the
         // tool box renders below it — and the next post-tool message
         // opens a fresh section.
         finalizeCurrent();
         for (const action of event.data.actions) {
-          if (action.kind !== "tool-call") continue;
+          if (action.kind !== "tool-call" || isTaskControlTool(action.toolName)) continue;
           this.#registerChildTool(callId, run, {
             childCallId: action.callId,
             toolName: action.toolName,
             input: action.input,
             status: "executing",
+            ...labelOf(event.data.presentation, action.callId),
           });
         }
         break;
@@ -538,6 +560,7 @@ export class SubagentPump {
         finalizeCurrent();
         for (const request of event.data.requests) {
           if (request.action.kind !== "tool-call") continue;
+          if (isTaskControlTool(request.action.toolName)) continue;
           this.#registerChildTool(callId, run, {
             childCallId: request.action.callId,
             toolName: request.action.toolName,
@@ -550,8 +573,20 @@ export class SubagentPump {
       case "action.result": {
         const result = event.data.result;
         if (result.kind !== "tool-result") break;
+        if (run.taskCallIds.has(result.callId)) break;
         const tool = run.tools.get(result.callId);
         if (!tool) break;
+        if (isTaskRetryRefusal(event)) {
+          run.tools.delete(result.callId);
+          view?.removeTool({
+            callId,
+            childCallId: result.callId,
+            reason: this.#formatActionResultError(event),
+          });
+          break;
+        }
+        const label = labelOf(event.data.presentation, result.callId).label;
+        if (label !== undefined) tool.label = label;
         switch (event.data.status) {
           case "completed":
             tool.status = "done";
@@ -566,20 +601,40 @@ export class SubagentPump {
             tool.errorText = this.#formatActionResultError(event);
             break;
         }
-        const update: SubagentToolUpdate = {
-          callId,
-          subagentName: run.name,
-          childCallId: result.callId,
-          toolName: tool.toolName,
-          input: tool.input,
-          status: tool.status,
-        };
-        if (tool.output !== undefined) update.output = tool.output;
-        if (tool.errorText !== undefined) update.errorText = tool.errorText;
-        view?.upsertTool(update);
+        this.#emitTool(callId, run, result.callId, tool);
         if (event.data.status === "completed") {
           return this.#onToolCompleted?.(run.name, tool.toolName, result.output);
         }
+        break;
+      }
+      case "task.started": {
+        // The child's call started a task of its own: its result arrives
+        // with `task.settled`, and an agent task reads as a delegation.
+        run.taskCallIds.add(event.data.callId);
+        const tool = run.tools.get(event.data.callId);
+        if (tool === undefined || event.data.kind !== "agent") break;
+        tool.agentTask = true;
+        this.#emitTool(callId, run, event.data.callId, tool);
+        break;
+      }
+      case "task.settled": {
+        const tool = run.tools.get(event.data.callId);
+        if (tool === undefined) break;
+        switch (event.data.status) {
+          case "completed":
+            tool.status = "done";
+            if (event.data.output !== undefined) tool.output = event.data.output;
+            break;
+          case "failed":
+            tool.status = "failed";
+            tool.errorText = event.data.error?.message ?? "Failed.";
+            break;
+          case "cancelled":
+            tool.status = "rejected";
+            tool.errorText = "Stopped.";
+            break;
+        }
+        this.#emitTool(callId, run, event.data.callId, tool);
         break;
       }
       default:
@@ -588,6 +643,14 @@ export class SubagentPump {
         break;
     }
   }
+}
+
+function labelOf(
+  presentation: ActionPresentationByCallId | undefined,
+  callId: string,
+): { label?: string } {
+  const label = presentation?.[callId]?.label;
+  return label === undefined ? {} : { label };
 }
 
 function hasPendingChildApproval(run: SubagentRun): boolean {

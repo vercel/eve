@@ -16,7 +16,8 @@ import {
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
 import { AuthKey } from "#context/keys.js";
-import { TASK_WAIT_TOOL_NAME, taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
+import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
+import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { principalOf } from "#execution/session/principal.js";
 import { renderTaskWaitResult } from "#execution/tasks/render.js";
 import {

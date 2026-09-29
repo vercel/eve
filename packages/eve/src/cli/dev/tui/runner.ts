@@ -27,6 +27,7 @@ import type { OnboardingScreenEvent } from "./setup-commands.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
+import { isTaskControlTool, isTaskRetryRefusal } from "#protocol/task-tools.js";
 import {
   createDevelopmentRuntimeArtifactRefresher,
   type DevelopmentRuntimeArtifactRefresher,
@@ -176,11 +177,35 @@ export type AgentTUIStreamEvent =
   | { type: "reasoning-delta"; id: string; delta: string }
   | { type: "reasoning-complete"; id: string }
   | { type: "tool-call-preparing"; toolCallId: string; toolName: string }
-  | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
+  | {
+      type: "tool-call";
+      toolCallId: string;
+      toolName: string;
+      input: unknown;
+      /** The tool's own `label.start` copy, when it defines one. */
+      label?: string;
+    }
   | { type: "tool-approval-request"; approvalId: string; toolCallId: string }
-  | { type: "tool-result"; toolCallId: string; output: unknown }
+  | {
+      type: "tool-result";
+      toolCallId: string;
+      output: unknown;
+      /** The tool's own `label.complete` copy, when it defines one. */
+      label?: string;
+    }
   | { type: "tool-error"; toolCallId: string; errorText: string }
   | { type: "tool-rejected"; toolCallId: string; reason: string }
+  /** A call the session refused for the model to retry; it leaves no trace in the transcript. */
+  | { type: "tool-withdrawn"; toolCallId: string; reason: string }
+  /** A call became a task that keeps working while the turn goes on. */
+  | { type: "task-started"; toolCallId: string; kind: "agent" | "tool"; toolName: string }
+  | {
+      type: "task-settled";
+      toolCallId: string;
+      status: "completed" | "failed" | "cancelled";
+      output?: unknown;
+      errorText?: string;
+    }
   | { type: "error"; errorText: string; hint?: string; detail?: string }
   | { type: "turn-cancelled" }
   | { type: "finish"; usage?: AgentTUIStreamUsage };
@@ -208,7 +233,6 @@ export type AgentTUISessionOptions = {
   continueSession?: boolean;
   tools?: TerminalPartDisplayMode;
   reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
   connectionAuth?: TerminalPartDisplayMode;
   assistantResponseStats?: AssistantResponseStatsMode;
   contextSize?: number;
@@ -525,7 +549,6 @@ export class EveTUIRunner {
   readonly #name: string;
   readonly #tools: TerminalPartDisplayMode;
   readonly #reasoning: TerminalPartDisplayMode;
-  readonly #subagents: TerminalPartDisplayMode;
   readonly #connectionAuth: TerminalPartDisplayMode;
   readonly #assistantResponseStats: AssistantResponseStatsMode;
   readonly #contextSize?: number;
@@ -639,7 +662,6 @@ export class EveTUIRunner {
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
-    this.#subagents = options.subagents ?? "full";
     this.#connectionAuth = options.connectionAuth ?? "full";
     this.#assistantResponseStats = options.assistantResponseStats ?? defaultAssistantResponseStats;
     this.#contextSize = options.contextSize;
@@ -1073,7 +1095,6 @@ export class EveTUIRunner {
             continueSession: Boolean(this.#renderer.readPrompt),
             tools: this.#tools,
             reasoning: this.#reasoning,
-            subagents: this.#subagents,
             connectionAuth: this.#connectionAuth,
             assistantResponseStats: this.#assistantResponseStats,
             contextSize: this.#contextSize,
@@ -1626,7 +1647,6 @@ export class EveTUIRunner {
           this.#subagentPump.taskStarted(event, sourceSession?.state.sessionId),
         onAgentStarted: (event) =>
           this.#subagentPump.agentStarted(event, sourceSession?.state.sessionId),
-        onTaskSettled: (callId) => this.#subagentPump.settle(callId),
         onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
@@ -2106,7 +2126,6 @@ type EveStreamTranslatorInput = {
   turnState: AgentTUITurnState;
   onTaskStarted?: (event: TaskStartedStreamEvent) => void;
   onAgentStarted?: (event: AgentStartedStreamEvent) => void;
-  onTaskSettled?: (callId: string) => void;
   onTurnCancelled?: (turnId: string) => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
@@ -2153,7 +2172,6 @@ async function* eveEventsToTUIStream(
     turnState,
     onTaskStarted,
     onAgentStarted,
-    onTaskSettled,
     onTurnCancelled,
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
@@ -2173,6 +2191,10 @@ async function* eveEventsToTUIStream(
   // completed is the discriminator.
   let stepEpoch = 0;
   const knownToolCalls = new Set<string>();
+  const preparingToolCalls = new Set<string>();
+  // A task's `action.result` is only its start receipt, written for the
+  // model; the call settles with `task.settled`.
+  const taskCallIds = new Set<string>();
   const seenInputRequestIds = new Set<string>();
   // The harness reports one underlying failure as a cascade (`step.failed` →
   // `turn.failed` → `session.failed`) with an identical payload on each
@@ -2347,28 +2369,45 @@ async function* eveEventsToTUIStream(
         break;
       }
 
+      case "action.input.appended": {
+        const { callId, toolName } = event.data;
+        if (knownToolCalls.has(callId) || preparingToolCalls.has(callId)) break;
+        if (isTaskControlTool(toolName)) break;
+        preparingToolCalls.add(callId);
+        yield { type: "tool-call-preparing", toolCallId: callId, toolName };
+        break;
+      }
+
       case "actions.requested": {
         const data = (event as ActionsRequestedStreamEvent).data;
-        const actions = data.actions.filter((action) => action.kind === "tool-call");
+        const actions = data.actions.flatMap((action) =>
+          action.kind === "tool-call" && !isTaskControlTool(action.toolName) ? [action] : [],
+        );
         if (actions.length === 0) break;
 
         for (const action of actions) {
           toolNames.set(action.callId, action.toolName);
           if (knownToolCalls.has(action.callId)) continue;
           knownToolCalls.add(action.callId);
-          yield {
+          const toolCall: Extract<AgentTUIStreamEvent, { type: "tool-call" }> = {
             type: "tool-call",
             toolCallId: action.callId,
             toolName: action.toolName,
             input: action.input,
           };
+          const label = data.presentation?.[action.callId]?.label;
+          if (label !== undefined) toolCall.label = label;
+          yield toolCall;
         }
         break;
       }
 
       case "input.requested": {
         const data = (event as InputRequestedStreamEvent).data;
-        const requests = data.requests.filter((request) => request.action.kind === "tool-call");
+        const requests = data.requests.filter(
+          (request) =>
+            request.action.kind === "tool-call" && !isTaskControlTool(request.action.toolName),
+        );
         if (requests.length === 0) break;
 
         for (const request of requests) {
@@ -2438,20 +2477,28 @@ async function* eveEventsToTUIStream(
           break;
         }
         const callId = resultEvent.data.result.callId;
-        if (!knownToolCalls.has(callId)) {
-          // Results for calls this turn never announced (e.g. subagent
-          // dispatches, which surface through the subagent section instead)
-          // have no tool block to attach to.
+        // Results for calls this turn never announced (task control calls,
+        // or a call first announced to another stream) have no tool block.
+        if (!knownToolCalls.has(callId) || taskCallIds.has(callId)) break;
+        if (isTaskRetryRefusal(resultEvent)) {
+          yield {
+            type: "tool-withdrawn",
+            toolCallId: callId,
+            reason: formatActionResultError(resultEvent),
+          };
           break;
         }
         switch (resultEvent.data.status) {
           case "completed": {
             const output = resultEvent.data.result.output;
-            yield {
+            const toolResult: Extract<AgentTUIStreamEvent, { type: "tool-result" }> = {
               type: "tool-result",
               toolCallId: callId,
               output,
             };
+            const label = resultEvent.data.presentation?.[callId]?.label;
+            if (label !== undefined) toolResult.label = label;
+            yield toolResult;
             const address = registryHandoffAddress(undefined, toolNames.get(callId), output);
             if (address !== undefined) await onRegistryHandoff?.(address);
             break;
@@ -2546,16 +2593,32 @@ async function* eveEventsToTUIStream(
       // and re-entry from a later translator live in the pump. The agent's
       // content is observed through its session's stream.
       case "task.started":
+        taskCallIds.add(event.data.callId);
         onTaskStarted?.(event);
+        yield {
+          type: "task-started",
+          toolCallId: event.data.callId,
+          kind: event.data.kind,
+          toolName: event.data.name,
+        };
         break;
 
       case "agent.started":
         onAgentStarted?.(event);
         break;
 
-      case "task.settled":
-        onTaskSettled?.(event.data.callId);
+      case "task.settled": {
+        const { callId, error, output, status } = event.data;
+        const settled: Extract<AgentTUIStreamEvent, { type: "task-settled" }> = {
+          type: "task-settled",
+          toolCallId: callId,
+          status,
+        };
+        if (output !== undefined) settled.output = output;
+        if (error !== undefined) settled.errorText = error.message;
+        yield settled;
         break;
+      }
 
       case "authorization.required":
         onConnectionAuthRequired?.(event as AuthorizationRequiredStreamEvent);

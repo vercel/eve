@@ -28,6 +28,7 @@ import {
   parseLogsMode,
   parsePortOption,
   parseStatsMode,
+  parseSubagentDisplayMode,
 } from "../option-parsers.js";
 
 interface DevelopmentCommandLogger {
@@ -120,8 +121,8 @@ export function registerRemoteCommands(input: {
     )
     .option(
       "--subagents <mode>",
-      "How subagent sections render: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
+      "How subagent tasks render: full | collapsed | hidden",
+      parseSubagentDisplayMode,
     )
     .option(
       "--connection-auth <mode>",
@@ -205,8 +206,8 @@ export function registerDevelopmentCommand(input: {
     )
     .option(
       "--subagents <mode>",
-      "How subagent sections render: full | collapsed | auto-collapsed | hidden",
-      parseDisplayMode,
+      "How subagent tasks render: full | collapsed | hidden",
+      parseSubagentDisplayMode,
     )
     .option(
       "--connection-auth <mode>",

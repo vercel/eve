@@ -6,7 +6,7 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import { TASK_TOOL_NAMES } from "#execution/tasks/calls.js";
+import { TASK_TOOL_NAMES } from "#protocol/task-tools.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.

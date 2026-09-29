@@ -1,6 +1,7 @@
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
+  SubagentDisplayMode,
   TerminalPartDisplayMode,
   TuiDisplayOptions,
 } from "#cli/dev/tui/types.js";
@@ -12,7 +13,7 @@ interface DevelopmentTuiOptions {
   readonly contextSize?: number;
   readonly logs?: LogDisplayMode;
   readonly reasoning?: TerminalPartDisplayMode;
-  readonly subagents?: TerminalPartDisplayMode;
+  readonly subagents?: SubagentDisplayMode;
   readonly tools?: TerminalPartDisplayMode;
   readonly ui?: boolean;
 }

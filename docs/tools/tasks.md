@@ -104,7 +104,8 @@ A workflow tool body receives its signals from its context or, in a `serve` body
   every call in one stretch of work shares one signal, and the next stretch gets a new one. Pass it
   to the steps and `ctx.agent` sends that should stop.
 - **`ctx.ask(request)`** withdraws the question when the call's `abortSignal` aborts, and
-  `ctx.ask(request, { signal })` also when `signal` does. The answer resolves as
+  `ctx.ask(request, { signal })` also when `signal` does. In a `serve` body, `ctx.reply()` also
+  withdraws the questions still pending for the calls it settles. The answer resolves as
   `{ status: "cancelled" }`, and the stream reports `input.resolved` with `outcome: "cancelled"` so
   channels stop offering the question. A person's answer that reached the session first still wins:
   the ask resolves as `answered`, so branch on `status`, not on the signal.
@@ -272,7 +273,10 @@ otherwise. `status` is `"completed"`, `"failed"`, or `"cancelled"`. A completed 
 when an `execute` call opened it. Results reach the model as a message in its history, not as a
 stream event, so read outcomes from `task.settled`. An `input.requested`,
 `authorization.required`, or `authorization.completed` event from a task's run carries its
-`taskId`. Hooks subscribe to the same events. See
+`taskId`. Hooks subscribe to the same events. The stream also carries the model's `task_wait` and
+`task_cancel` calls as ordinary `actions.requested` tool calls, so evals can assert on them. The
+`eve dev` terminal UI and Slack typing indicators leave those calls out; the terminal UI shows each
+task's start and end instead. See
 [Sessions, runs, and streaming](/docs/concepts/sessions-runs-and-streaming#task-events) and
 [Follow a subagent](/docs/guides/client/streaming#follow-a-subagent).
 

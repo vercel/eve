@@ -30,6 +30,10 @@ export interface ToolPresentationContext {
    * `Delegate stock-price` — instead of a generic tool call.
    */
   readonly isSubagent?: boolean;
+  /** The tool's own `label.start` copy, used when eve has no copy of its own for the tool. */
+  readonly label?: string;
+  /** The tool's own `label.complete` copy, shown once the call succeeds. */
+  readonly completeLabel?: string;
 }
 
 /** Copy needed to aggregate equivalent calls without merging their state. */
@@ -215,11 +219,12 @@ export function presentTool(
   if (baseName === "write_file") return presentWriteFileTool(toolName, input, context);
   if (context?.isSubagent === true) {
     // Named subagent dispatch: the tool name is the delegation target; the
-    // message rides as the quiet subtitle. The block is transient — the
-    // nested subagent section replaces it once the child registers.
+    // message rides as the quiet subtitle. The row is transient — the
+    // task's start line replaces it once the call becomes a task.
+    const name = agentDisplayName(toolName);
     return {
-      title: `${DELEGATE_VERB} ${baseName}`,
-      doneTitle: `Delegated ${baseName}`,
+      title: `${DELEGATE_VERB} ${name}`,
+      doneTitle: `Delegated ${name}`,
       subtitle: salientArg(input, "message") ?? "",
       summarizeResult: () => undefined,
     };
@@ -252,6 +257,18 @@ export function presentTool(
     }
   }
 
+  if (context?.label !== undefined) {
+    // Authored activity copy replaces the raw name and argument dump.
+    const presentation = {
+      title: context.label,
+      subtitle: "",
+      summarizeResult: summarizeToolResult,
+    };
+    return context.completeLabel === undefined
+      ? presentation
+      : { ...presentation, doneTitle: context.completeLabel };
+  }
+
   return {
     title: toolName,
     subtitle: summarizeToolArgs(input),
@@ -260,10 +277,19 @@ export function presentTool(
 }
 
 /**
+ * The name an agent task goes by. The generic self-delegation tool is
+ * literally named `agent`, which reads as `subagent` to a person.
+ */
+export function agentDisplayName(toolName: string): string {
+  const baseName = toolBaseName(toolName);
+  return baseName === "agent" ? "subagent" : baseName;
+}
+
+/**
  * Placeholder copy for a call whose input is still streaming from the model
- * (`action.preparing`). Known tools lead with their activity verb so the row
- * already reads as intent (`Fetch …`); unknown tools keep their name with a
- * quiet hint. The full presentation replaces this once the input arrives.
+ * (`action.input.appended`). Known tools lead with their activity verb so the
+ * row already reads as intent (`Fetch …`); unknown tools lead with their name.
+ * The full presentation replaces this once the input arrives.
  */
 export function presentPreparingTool(
   toolName: string,
@@ -277,15 +303,15 @@ export function presentPreparingTool(
     // A named subagent's tool carries the delegation target in its name —
     // showable before the message finishes streaming.
     return {
-      title: `${DELEGATE_VERB} ${baseName} …`,
+      title: `${DELEGATE_VERB} ${agentDisplayName(toolName)} …`,
       subtitle: "",
       summarizeResult: () => undefined,
     };
   }
   const verb = baseName === "write_file" ? WRITE_FILE_VERB : BUILTIN_TOOL_COPY[baseName]?.verb;
   return {
-    title: verb === undefined ? toolName : `${verb} …`,
-    subtitle: verb === undefined ? "preparing…" : "",
+    title: `${verb ?? toolName} …`,
+    subtitle: "",
     summarizeResult: () => undefined,
   };
 }

@@ -144,7 +144,8 @@ describe("memory lifecycle", () => {
       { content: "bravo memory", kind: "memory.load", role: "user" },
       input[0],
     ]);
-    expect(JSON.stringify(commit.history)).toContain("eve.memory");
+    expect(commit.recalledMessages).toHaveLength(2);
+    expect(JSON.stringify(commit.recalledMessages)).toContain("eve.memory");
   });
 
   it("commits no slot when one turn-wide recall batch is invalid", async () => {
@@ -207,7 +208,7 @@ describe("memory lifecycle", () => {
 
     expect(namespace).not.toHaveBeenCalled();
     expect(recall).not.toHaveBeenCalled();
-    expect(drainMemoryCommit(ctx)?.history).toEqual([]);
+    expect(drainMemoryCommit(ctx)?.recalledMessages).toEqual([]);
   });
 
   it("instruments recalls as memory searches with validated result records", async () => {
@@ -295,7 +296,7 @@ describe("memory lifecycle", () => {
     );
     const commit = drainMemoryCommit(ctx)!;
     const settled = [
-      ...commit.history,
+      ...commit.recalledMessages,
       { content: "hello", role: "user" as const },
       { content: "hi", role: "assistant" as const },
     ];
@@ -521,7 +522,7 @@ describe("memory lifecycle", () => {
       { content: "ordinary", role: "user" },
       { content: "new profile", kind: "memory.load", role: "user" },
     ]);
-    expect(drainMemoryCommit(ctx)?.history).toHaveLength(3);
+    expect(drainMemoryCommit(ctx)?.recalledMessages).toHaveLength(1);
   });
 
   it("gives each completed compaction within one turn a distinct recall operation id", async () => {
@@ -575,7 +576,7 @@ describe("memory lifecycle", () => {
           }),
       );
       const commit = drainMemoryCommit(ctx)!;
-      history = [...commit.history];
+      history = [...history, ...commit.recalledMessages];
       state = commit.state;
       return projected;
     };
