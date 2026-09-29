@@ -178,7 +178,7 @@ See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envel
 
 Publishing a stream event writes it to the durable stream and dispatches it to its channel adapter handler and stream-event hooks. Dispatch runs in the step that owns the session's state, so state and sandbox changes that handlers and hooks make are kept.
 
-The exception is an event that ends the session outside a model step: `session.completed`, or `session.failed` for a failure outside one. Its channel adapter handler runs without session scope and no hooks run, so a `session.completed` hook never fires. A `session.failed` from a failing model step is dispatched in that step.
+The exception is an event that ends the session outside a model step: `session.completed`, or `session.failed` for a failure outside a model step. Its channel adapter handler runs without session scope and no hooks run, so a `session.completed` hook never fires. A `session.failed` from a failing model step is dispatched in that step, and its hooks run.
 
 When a step publishes an event it produced, such as a turn's `message.completed` or a workflow tool's `action.partial`, these things happen in order:
 
@@ -189,9 +189,9 @@ When a step publishes an event it produced, such as a turn's `message.completed`
 
 Only `agent.started` is written while another step owns the session. eve writes it as soon as the child session opens so clients can follow the child, then dispatches it later:
 
-- The next step that owns the session dispatches it before its own work, in write order, against the state committed at its start. If the session would wait first, for a result or for input, a step of its own dispatches it.
+- The next step that owns the session dispatches it before its own work, against the state committed at its start. If the session would wait first, for a result or for input, eve dispatches it in a step of its own.
 - If the session ends first, it is dispatched before `session.completed` or `session.failed`, or after a `session.failed` that a failing model step wrote.
-- A retry of the dispatching step runs the handler and hooks again with the same `meta.id`. A retry of the writing step can write the event twice, but only the copy from the completed attempt is dispatched.
+- A retry of the dispatching step runs its hooks again with the same `meta.id` and does not write the event again. A retry of the writing step can write the event twice, but only the copy from the completed attempt is dispatched.
 
 Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
 
