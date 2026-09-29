@@ -204,6 +204,7 @@ function setup(
         sandboxRegistry: sandboxRegistry as CompiledBundle["graph"]["root"]["sandboxRegistry"],
         turnAgent,
         channels: [],
+        extensionConfigs: new Map(),
         hookRegistry: createRuntimeHookRegistry([]),
         nodeId: "__root__",
         subagentRegistry: {
