@@ -192,6 +192,69 @@ describe("routeDeliverPayload", () => {
   });
 });
 
+describe("routeDeliverPayload source coordinates", () => {
+  it("keeps distinct input batches for one remote session separate", () => {
+    let session = createSession();
+    for (const [index, name] of ["alice", "bob"].entries()) {
+      session = upsertProxyInputRequests({
+        entries: [
+          [
+            `ask-${name}`,
+            {
+              childContinuationToken: "remote-inbox",
+              remote: {
+                name: "remote-child",
+                url: "https://remote.example",
+                sessionId: "remote-session",
+              },
+              inputSource: `workflow-${name}`,
+              event: { sequence: index, stepIndex: index + 1, turnId: `turn-${name}` },
+              kind: "question",
+            },
+          ],
+        ],
+        forChildContinuationToken: "remote-inbox",
+        inputSource: `workflow-${name}`,
+        session,
+      });
+    }
+    const routed = routeDeliverPayload({
+      payload: {
+        inputResponses: [
+          { requestId: "ask-alice", text: "lantern" },
+          { requestId: "ask-bob", text: "comet" },
+        ],
+      },
+      state: session.state,
+    });
+    expect(routed.forChildren).toHaveLength(2);
+    expect(routed.forChildren.map(({ resolved }) => resolved)).toEqual([
+      {
+        event: { sequence: 0, stepIndex: 1, turnId: "turn-alice" },
+        resolutions: [
+          {
+            kind: "question",
+            outcome: "answered",
+            requestId: "ask-alice",
+            response: { requestId: "ask-alice", text: "lantern" },
+          },
+        ],
+      },
+      {
+        event: { sequence: 1, stepIndex: 2, turnId: "turn-bob" },
+        resolutions: [
+          {
+            kind: "question",
+            outcome: "answered",
+            requestId: "ask-bob",
+            response: { requestId: "ask-bob", text: "comet" },
+          },
+        ],
+      },
+    ]);
+  });
+});
+
 describe("routeDeliverPayload message resolution", () => {
   function askSession(
     questions: ReadonlyArray<readonly [requestId: string, question: { allowFreeform?: boolean }]>,

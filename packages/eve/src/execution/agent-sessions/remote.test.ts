@@ -8,6 +8,7 @@ import {
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
   resolveRemoteAgentStreamHeaders,
+  respondToRemoteAgentSession,
   startRemoteAgentSession,
 } from "#execution/agent-sessions/remote.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
@@ -427,6 +428,32 @@ describe("startRemoteAgentSession", () => {
     expect(body.capabilities).toEqual({});
   });
 
+  it("passes an input-capable parent's capability to a remote child", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          protocolVersion: 2,
+          sessionId: "remote-session",
+          status: "accepted",
+        }),
+        { status: 202 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      capabilities: { requestInput: true },
+      remote: createRemoteAgent(),
+      session: { continuationToken: "eve:parent-token" },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body.capabilities).toEqual({ requestInput: true });
+  });
+
   it("targets an active turn inbox when a callback token is supplied", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -770,6 +797,60 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       "forwardedPrincipal",
     );
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ baggage: "vendor=value" });
+  });
+});
+
+describe("respondToRemoteAgentSession", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sends an answer to the child's authenticated session route, not a parent-local hook", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await respondToRemoteAgentSession({
+      auth: null,
+      headers: { authorization: "Bearer remote-token" },
+      remote: {
+        name: "research",
+        sessionId: "remote-session",
+        url: "https://remote.example.com/prefix",
+      },
+      responses: [{ requestId: "ask-1", text: "approved" }],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://remote.example.com/prefix/eve/v1/session/remote-session",
+      expect.objectContaining({
+        body: JSON.stringify({ inputResponses: [{ requestId: "ask-1", text: "approved" }] }),
+        headers: { authorization: "Bearer remote-token", "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+  });
+
+  it("forwards the human responder only when the remote opts into principal forwarding", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const responder: SessionAuthContext = {
+      attributes: {},
+      authenticator: "fixture",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const input = {
+      auth: responder,
+      headers: { authorization: "Bearer remote-token" },
+      remote: { name: "research", sessionId: "remote-session", url: "https://remote.example.com" },
+      responses: [{ requestId: "approval-1", optionId: "approve" }],
+    };
+    await respondToRemoteAgentSession({
+      ...input,
+      remote: { ...input.remote, forwardPrincipal: true },
+    });
+    await respondToRemoteAgentSession({ ...input, remote: input.remote });
+    const bodies = fetchMock.mock.calls.map(([, options]) => JSON.parse(options.body as string));
+    expect(bodies).toEqual([
+      { inputResponses: input.responses, forwardedPrincipal: { current: responder } },
+      { inputResponses: input.responses },
+    ]);
   });
 });
 

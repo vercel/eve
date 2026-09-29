@@ -53,6 +53,7 @@ export type AgentSessionAddress =
   | {
       readonly callbackBaseUrl: string;
       readonly kind: "remote";
+      readonly forwardPrincipal?: boolean;
       readonly name: string;
       readonly nodeId: string;
       /** Keys the authored credential functions, as on `agent.started`. */
@@ -290,6 +291,7 @@ async function startRemoteSession(
     }),
     auth: auth.current,
     callbackBaseUrl,
+    capabilities: context.capabilities,
     initiatorAuth: auth.initiator,
     operationId: `agent-session:${input.key}`,
     originAudience: context.trace.originAudience,
@@ -300,6 +302,7 @@ async function startRemoteSession(
   return {
     callbackBaseUrl,
     kind: "remote",
+    forwardPrincipal: remote.forwardPrincipal,
     name: action.remoteAgentName,
     nodeId: action.nodeId,
     resolverId: target.dynamicRemoteAgent?.credentialsStepId ?? action.nodeId,

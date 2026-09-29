@@ -4,6 +4,12 @@ import { mockModel } from "eve/evals";
 
 import { WORKSPACE_FORWARDING_MARKER, WORKSPACE_LOOKUP_MESSAGE } from "../constants";
 import {
+  REMOTE_QUESTION_DIRECTIVE,
+  respondToRemoteQuestion,
+} from "./lib/remote-question-script.js";
+import { isNestedDirective, respondToNestedRequest } from "./lib/remote-nested-script.js";
+import { isDirectHitlDirective, respondToDirectHitl } from "./lib/remote-direct-hitl-script.js";
+import {
   isNotebookDirective,
   isNotebookEntry,
   respondAsNotebookKeeper,
@@ -93,6 +99,15 @@ const workspaceDispatcher = mockModel({
     };
   },
 });
+const remoteQuestionModel = mockModel({
+  modelId: "remote-question",
+  respond: respondToRemoteQuestion,
+});
+const remoteNestedModel = mockModel({ modelId: "remote-nested", respond: respondToNestedRequest });
+const remoteDirectHitlModel = mockModel({
+  modelId: "remote-direct-hitl",
+  respond: respondToDirectHitl,
+});
 const notebookParent = mockModel({ modelId: "notebook-parent", respond: respondAsNotebookParent });
 const surveyParent = mockModel({ modelId: "survey-parent", respond: respondAsSurveyParent });
 const surveyToolParent = mockModel({
@@ -140,6 +155,15 @@ export default defineAgent({
         }
         if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
           return { model: workspaceDispatcher, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some((message) => message.includes(REMOTE_QUESTION_DIRECTIVE))) {
+          return { model: remoteQuestionModel, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isNestedDirective)) {
+          return { model: remoteNestedModel, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isDirectHitlDirective)) {
+          return { model: remoteDirectHitlModel, modelContextWindowTokens: 1_000_000 };
         }
         if (messages.some(isNotebookEntry)) {
           return { model: notebookKeeper, modelContextWindowTokens: 1_000_000 };

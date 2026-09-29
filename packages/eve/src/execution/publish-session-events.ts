@@ -7,6 +7,7 @@ import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import * as activityCohort from "#execution/activity-cohort.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { forwardSessionInput } from "#execution/forward-session-input.js";
 import {
   createDurableSessionState,
   readDurableSession,
@@ -119,6 +120,7 @@ export async function withSessionEventEmitter<T>(
     readonly durableSession: DurableSession;
     readonly origin: SessionEventOrigin;
     readonly sessionWritable: WritableStream<Uint8Array>;
+    readonly inputSource?: string;
   },
   emitEvents: (
     emit: HandleEventFn,
@@ -148,6 +150,7 @@ export async function withSessionEventEmitter<T>(
     origin: input.origin,
     sessionId: session.sessionId,
     sessionWritable: input.sessionWritable,
+    inputSource: input.inputSource,
   });
   try {
     return await withContextScope(ctx, session, async (enrichedSession) => {
@@ -206,6 +209,7 @@ function openSessionEventStream(input: {
   readonly origin: SessionEventOrigin;
   readonly sessionId: string;
   readonly sessionWritable: WritableStream<Uint8Array>;
+  readonly inputSource?: string;
 }): SessionEventSink {
   const { ctx, origin } = input;
   const adapter = ctx.require(ChannelKey);
@@ -222,7 +226,16 @@ function openSessionEventStream(input: {
     adapterCtx,
     async emit(event) {
       if (origin === "own") activityCohort.updateActivityState(ctx, event);
-      const routed = await callAdapterEventHandler(adapter, event, adapterCtx);
+      const forwarded = await forwardSessionInput(ctx, event, input.inputSource);
+      const routed = forwarded
+        ? event
+        : await callAdapterEventHandler(
+            adapter,
+            event,
+            input.inputSource === undefined
+              ? adapterCtx
+              : { ...adapterCtx, inputSource: input.inputSource },
+          );
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
       const stamped = stampMessageStreamEvent(
         routed,

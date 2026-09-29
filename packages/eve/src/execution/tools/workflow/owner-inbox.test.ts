@@ -46,6 +46,23 @@ describe("workflow-tool task input", () => {
     });
   });
 
+  it("keeps the producer identity when forwarding a child request", () => {
+    const request = {
+      action: { callId: "child-call", input: {}, kind: "tool-call" as const, toolName: "ask" },
+      kind: "question" as const,
+      prompt: "What is Alice's answer?",
+      requestId: "alice-ask",
+    };
+    expect(
+      workflowToolRunRequestToInputRequestPayload({
+        from,
+        inputSource: "child:alice",
+        replyTo: "child-inbox",
+        request,
+      }),
+    ).toMatchObject({ inputSource: "child:alice", event: { requests: [request] } });
+  });
+
   it("uses child event coordinates for repeated forwarded requests", () => {
     const request = {
       action: {

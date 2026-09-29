@@ -18,6 +18,7 @@ import type {
   ActivityObserverConfig,
   CancelTurnResult,
   SessionAuthContext,
+  SessionCapabilities,
   SessionTraceContext,
 } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -32,6 +33,8 @@ import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js"
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import type { RemoteAgentBinding } from "#eve-channel/support.js";
+import type { InputResponse } from "#shared/input.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
@@ -58,6 +61,7 @@ export async function startRemoteAgentSession(input: {
   /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
+  readonly capabilities?: SessionCapabilities;
   readonly originAudience?: ChannelAudience;
   readonly activityObserver?: ActivityObserverConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
@@ -84,7 +88,7 @@ export async function startRemoteAgentSession(input: {
 
   const forwardedPrincipal = buildForwardedPrincipalField(input);
   const requestBody: {
-    capabilities: {};
+    capabilities: SessionCapabilities;
     callback: {
       callId: string;
       subagentName: string;
@@ -98,7 +102,7 @@ export async function startRemoteAgentSession(input: {
     outputSchema?: object;
     protocolVersion: number;
   } = {
-    capabilities: {},
+    capabilities: input.capabilities ?? {},
     callback: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
@@ -222,6 +226,33 @@ function buildForwardedTraceAssertion(input: {
     ceiling,
     originAudience: input.originAudience ?? "unknown",
   };
+}
+
+export async function respondToRemoteAgentSession(input: {
+  readonly remote: RemoteAgentBinding & { readonly sessionId: string };
+  readonly headers: Record<string, string>;
+  readonly auth: SessionAuthContext | null | undefined;
+  readonly responses: readonly InputResponse[];
+}): Promise<void> {
+  const response = await fetch(
+    createRemoteAgentRouteUrl(input.remote.url, createEveSessionRoutePath(input.remote.sessionId)),
+    {
+      body: JSON.stringify({
+        inputResponses: input.responses,
+        ...(input.remote.forwardPrincipal === true &&
+          input.auth != null && {
+            forwardedPrincipal: { current: input.auth },
+          }),
+      }),
+      headers: { "content-type": "application/json", ...input.headers },
+      method: "POST",
+      redirect: "error",
+    },
+  );
+  if (!response.ok)
+    throw new Error(
+      `Remote agent "${input.remote.name}" input answer failed with HTTP ${response.status}.`,
+    );
 }
 
 /** Continues one remote-agent session by its immutable session ID. */

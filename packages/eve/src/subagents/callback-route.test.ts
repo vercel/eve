@@ -54,6 +54,136 @@ describe("session callback route", () => {
     });
   });
 
+  it("relays a remote child's question to the waiting parent", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const input = {
+      callId: "call-2",
+      childContinuationToken: "child-inbox",
+      childSessionId: "remote-session",
+      event: {
+        requests: [
+          {
+            action: { callId: "ask-1", input: {}, kind: "tool-call", toolName: "ask_question" },
+            kind: "question",
+            prompt: "What should Alice do?",
+            requestId: "alice-1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "child-turn",
+      },
+      inputSource: "alice-run",
+      kind: "subagent-input-request",
+      subagentName: "research",
+    };
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/tok123", {
+        body: JSON.stringify(input),
+        method: "POST",
+      }),
+      createRouteContext({ token: "tok123" }),
+    );
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith("tok123", input);
+  });
+
+  it("relays remote authorization lifecycle without settling the turn", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const event = {
+      type: "authorization.required",
+      data: {
+        attemptId: "auth-1",
+        description: "Sign in to Linear",
+        name: "linear",
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "child-turn",
+        webhookUrl: "https://remote.example/connections/linear/callback/child",
+      },
+    };
+    const payload = {
+      callId: "call-2",
+      childSessionId: "remote-session",
+      event,
+      kind: "subagent-authorization-event",
+      subagentName: "research",
+    };
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/tok123", {
+        body: JSON.stringify(payload),
+        method: "POST",
+      }),
+      createRouteContext({ token: "tok123" }),
+    );
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith("tok123", payload);
+  });
+
+  it.each(["approval.candidate", "approval.settled"])(
+    "rejects a malformed %s callback before it reaches the parent channel",
+    async (type) => {
+      const response = await handleSessionCallbackRequest(
+        new Request("https://app.example.com/eve/v1/callback/tok123", {
+          body: JSON.stringify({
+            callId: "call-2",
+            childSessionId: "remote-session",
+            event: { type, data: {} },
+            kind: "subagent-authorization-event",
+            subagentName: "research",
+          }),
+          method: "POST",
+        }),
+        createRouteContext({ token: "tok123" }),
+      );
+      expect(response.status).toBe(400);
+      expect(resumeHookMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("relays a well-formed approval settlement", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const event = {
+      type: "approval.settled",
+      data: {
+        outcome: "approved",
+        requestId: "approval-1",
+        responderPrincipalId: "alice",
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "child-turn",
+      },
+    };
+    const payload = {
+      callId: "call-2",
+      childSessionId: "remote-session",
+      event,
+      kind: "subagent-authorization-event",
+      subagentName: "research",
+    };
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/tok123", {
+        body: JSON.stringify(payload),
+        method: "POST",
+      }),
+      createRouteContext({ token: "tok123" }),
+    );
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith("tok123", payload);
+  });
+
+  it("rejects malformed remote input without resuming the parent", async () => {
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/tok123", {
+        body: JSON.stringify({ kind: "subagent-input-request", childContinuationToken: "child" }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "tok123" }),
+    );
+    expect(response.status).toBe(400);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("rejects a turn callback without an outcome envelope", async () => {
     const response = await handleSessionCallbackRequest(
       new Request("https://app.example.com/eve/v1/callback/tok123", {

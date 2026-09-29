@@ -49,6 +49,9 @@ export interface ChannelAdapterContext<TState = Record<string, unknown>> {
    * Live handle to the current session.
    */
   readonly session: SessionHandle;
+
+  /** @internal Independent source of a relayed child input batch. */
+  readonly inputSource?: string;
 }
 
 /**

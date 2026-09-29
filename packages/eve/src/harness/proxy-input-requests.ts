@@ -6,6 +6,7 @@ import {
   isSessionInboxAddress,
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
+import type { RemoteAgentBinding } from "#eve-channel/support.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
@@ -35,6 +36,8 @@ export interface ProxyInputQuestion {
 
 /** Routing and control metadata for one descendant-owned input request. */
 export interface ProxyInputRequest {
+  readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
+  readonly inputSource?: string;
   readonly workflowAsk?: WorkflowAskRoute;
   /** Batch semantics are optional so sessions written before this field remain routable. */
   readonly batch?: ProxyInputRequestBatch;
@@ -80,12 +83,13 @@ export function hasProxyInputRequests(state: SessionStateMap | undefined): boole
 }
 
 /**
- * Replaces prior entries for `forChildContinuationToken` with the provided
+ * Replaces prior entries for the destination and input source with the provided
  * ones. A child raising a fresh batch overwrites its prior batch so the
- * parent never keeps stale request metadata. Other children's routes stay
+ * parent never keeps stale request metadata. Other sources' routes stay
  * independently answerable.
  */
 export function upsertProxyInputRequests(input: {
+  readonly inputSource?: string;
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
   readonly forChildContinuationToken: string;
   readonly session: HarnessSession;
@@ -95,6 +99,7 @@ export function upsertProxyInputRequests(input: {
     state: upsertProxyInputRequestState({
       entries: input.entries,
       forChildContinuationToken: input.forChildContinuationToken,
+      inputSource: input.inputSource,
       state: input.session.state,
     }),
   };
@@ -102,6 +107,7 @@ export function upsertProxyInputRequests(input: {
 
 /** State-only variant for control-plane steps that already hold a durable projection. */
 export function upsertProxyInputRequestState(input: {
+  readonly inputSource?: string;
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
   readonly forChildContinuationToken: string;
   readonly state: SessionStateMap | undefined;
@@ -109,7 +115,10 @@ export function upsertProxyInputRequestState(input: {
   const next: Record<string, ProxyInputRequest> = {};
 
   for (const [requestId, route] of Object.entries(readMap(input.state))) {
-    if (route.childContinuationToken !== input.forChildContinuationToken) {
+    if (
+      route.childContinuationToken !== input.forChildContinuationToken ||
+      route.inputSource !== input.inputSource
+    ) {
       next[requestId] = route;
     }
   }
@@ -198,6 +207,8 @@ export function toProxyInputRequestEntries(
   return payload.event.requests.map((request) => {
     const route: {
       readonly childContinuationToken: string;
+      readonly inputSource?: string;
+      readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
       childSessionInbox?: SessionInboxAddress;
       readonly event: PendingInputBatchEvent;
       readonly kind: InputRequestKind;
@@ -205,6 +216,8 @@ export function toProxyInputRequestEntries(
     } & { readonly batch: ProxyInputRequestBatch } = {
       batch,
       childContinuationToken: payload.childContinuationToken,
+      ...(payload.inputSource !== undefined && { inputSource: payload.inputSource }),
+      ...(payload.remote !== undefined && { remote: payload.remote }),
       event,
       kind: request.kind,
     };
@@ -267,6 +280,11 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   if (typeof value.childContinuationToken !== "string" || !isInputRequestKind(value.kind)) {
     return undefined;
   }
+  const remote = "remote" in value ? parseRemoteAgentBinding(value.remote) : undefined;
+  if ("remote" in value && remote === undefined) return undefined;
+  const inputSource = "inputSource" in value ? value.inputSource : undefined;
+  if (inputSource !== undefined && (typeof inputSource !== "string" || inputSource.length === 0))
+    return undefined;
   const event = "event" in value ? parseInputRequestEvent(value.event) : undefined;
   if (event === undefined) return undefined;
   const batch = "batch" in value ? parseProxyInputRequestBatch(value.batch) : undefined;
@@ -281,6 +299,8 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     workflowAsk?: WorkflowAskRoute;
     batch?: ProxyInputRequestBatch;
     readonly childContinuationToken: string;
+    inputSource?: string;
+    remote?: RemoteAgentBinding & { readonly sessionId: string };
     childSessionInbox?: SessionInboxAddress;
     readonly event: PendingInputBatchEvent;
     readonly kind: InputRequestKind;
@@ -290,6 +310,8 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     event,
     kind: value.kind,
   };
+  if (typeof inputSource === "string") request.inputSource = inputSource;
+  if (remote !== undefined) request.remote = remote;
   if (workflowAsk !== undefined) request.workflowAsk = workflowAsk;
   if (childSessionInbox !== undefined) request.childSessionInbox = childSessionInbox;
   if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;
@@ -316,6 +338,35 @@ function parseWorkflowAskRoute(value: unknown): WorkflowAskRoute | undefined {
   const question = parseProxyInputQuestion(Reflect.get(value, "question"));
   if (question === undefined) return undefined;
   return { control, question, runId };
+}
+
+function parseRemoteAgentBinding(
+  value: unknown,
+): (RemoteAgentBinding & { readonly sessionId: string }) | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const name = Reflect.get(value, "name");
+  const url = Reflect.get(value, "url");
+  const resolverId = Reflect.get(value, "resolverId");
+  const forwardPrincipal = Reflect.get(value, "forwardPrincipal");
+  const sessionId = Reflect.get(value, "sessionId");
+  if (
+    typeof name !== "string" ||
+    !name ||
+    typeof url !== "string" ||
+    !url ||
+    typeof sessionId !== "string" ||
+    !sessionId
+  )
+    return undefined;
+  if (resolverId !== undefined && (typeof resolverId !== "string" || !resolverId)) return undefined;
+  if (forwardPrincipal !== undefined && typeof forwardPrincipal !== "boolean") return undefined;
+  return {
+    name,
+    url,
+    sessionId,
+    ...(resolverId !== undefined && { resolverId }),
+    ...(forwardPrincipal !== undefined && { forwardPrincipal }),
+  };
 }
 
 function parseProxyInputQuestion(value: unknown): ProxyInputQuestion | undefined {
