@@ -426,9 +426,7 @@ async function consumeStreamContent(
   };
 
   const emitActionResult = async (result: RuntimeToolResultActionResult): Promise<void> => {
-    if (emittedActionResultCallIds.has(result.callId)) {
-      return;
-    }
+    if (emittedActionResultCallIds.has(result.callId)) return;
     emittedActionResultCallIds.add(result.callId);
     await emitNestedToolActions(emitFn, state, result.callId);
     const resultPresentation =
