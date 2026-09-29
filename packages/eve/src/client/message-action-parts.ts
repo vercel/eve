@@ -35,13 +35,14 @@ export function toMessageInputRequest(request: InputRequest): EveMessageInputReq
 /** Builds tool metadata for a freshly projected tool part. */
 export function createToolMetadata(
   descriptor: ActionDescriptor,
-  extra?: { readonly inputRequest?: EveMessageInputRequest },
+  extra?: { readonly inputRequest?: EveMessageInputRequest; readonly taskId?: string },
 ): EveMessageToolMetadata {
   return {
     eve: {
       inputRequest: extra?.inputRequest,
       kind: descriptor.kind,
       name: descriptor.name,
+      ...(extra?.taskId !== undefined && { taskId: extra.taskId }),
     },
   };
 }

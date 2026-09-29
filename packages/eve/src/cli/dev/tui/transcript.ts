@@ -176,9 +176,7 @@ export class ConversationTranscript {
           !childToolIds.has(part.toolCallId) &&
           !isPanelRoutedTool(part.toolName),
       );
-      const states = new Map(
-        tools.map((part) => [part, toolState(part, conversation, working, false)]),
-      );
+      const states = new Map(tools.map((part) => [part, toolState(part, conversation, working)]));
       const activeSteps = activeToolSteps(states);
 
       for (const [index, part] of message.parts.entries()) {
@@ -402,7 +400,7 @@ export class ConversationTranscript {
         order += 1;
         if (!isToolCallRow(part) || isTaskControlTool(part.toolName)) continue;
         const childTask = childTasks.get(part.toolCallId);
-        const state = toolState(part, child, running, childTask?.call.status === "working");
+        const state = toolState(part, child, running);
         const id = `subagent:${record.callId}:tool:${part.toolCallId}`;
         const block = this.#memoize(id, [part, state.status, record.name], () => {
           const context = this.#presentationContext(part.toolCallId, part, state, options, {
@@ -626,13 +624,13 @@ export function turnActivity(view: AgentTUIConversationView, tasks: readonly Tas
   const message = view.conversation.messages.findLast(
     (candidate) => candidate.role === "assistant",
   );
-  const taskCalls = taskCallsById(conversation);
   if (
     message?.parts.some(
       (part) =>
         isTerminalToolCallPart(part) &&
         !isTaskControlTool(part.toolName) &&
-        !taskCalls.has(part.toolCallId) &&
+        // A task works without holding the turn; a held turn names its tasks below.
+        part.toolMetadata?.eve?.taskId === undefined &&
         (part.state === "input-available" || part.state === "approval-responded"),
     ) === true
   )

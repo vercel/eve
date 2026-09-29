@@ -45,11 +45,11 @@ export function toolState(
   part: EveDynamicToolPart,
   conversation: ConversationState,
   working: boolean,
-  taskWorking: boolean,
 ): ToolState {
-  // A task call's receipt closes the tool part; the call runs until its task.settled, even after
-  // its turn ends, as a root approval ends it.
-  if (taskWorking) return { status: "running" };
+  // A task call runs until its task.settled, even after its turn ends, as a root approval ends it.
+  const taskId = part.toolMetadata?.eve?.taskId;
+  const task = taskId === undefined ? undefined : conversation.tasks[taskId];
+  if (task?.calls[part.toolCallId]?.status === "working") return { status: "running" };
   const state = settledToolState(part, conversation);
   return state.status === "running" && !working
     ? { status: "error", errorText: "interrupted" }

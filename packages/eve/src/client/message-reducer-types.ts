@@ -227,7 +227,9 @@ export type EveDynamicToolPart = {
  * classifies the action (`"tool-call"`, `"subagent-call"`, `"load-skill"`, or
  * `"unknown"`), `eve.name` is the resolved action name, and `eve.inputRequest`
  * and `eve.inputResponse` store the HITL prompt and submitted response when the
- * call required approval.
+ * call required approval. `eve.taskId` names the task the call started or
+ * reached; such a part keeps running after the call's start receipt and
+ * settles when the task's `task.settled` arrives.
  */
 export interface EveMessageToolMetadata {
   readonly eve?: {
@@ -235,6 +237,7 @@ export interface EveMessageToolMetadata {
     readonly inputResponse?: InputResponse;
     readonly kind: "load-skill" | "subagent-call" | "tool-call" | "unknown";
     readonly name: string;
+    readonly taskId?: string;
   };
 }
 

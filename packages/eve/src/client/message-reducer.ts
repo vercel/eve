@@ -218,6 +218,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
             toolCallId: request.action.callId,
             toolMetadata: createToolMetadata(descriptor, {
               inputRequest: toMessageInputRequest(request),
+              taskId: existing?.toolMetadata?.eve?.taskId,
             }),
             toolName: descriptor.toolName,
             type: "dynamic-tool",
@@ -258,8 +259,10 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     }
 
     case "action.result": {
-      const descriptor = normalizeActionResult(event.data.result);
       const existing = findToolPart(data, event.data.result.callId);
+      // A task call's result is only its start receipt, which can arrive after the task settled.
+      if (existing?.toolMetadata?.eve?.taskId !== undefined) return data;
+      const descriptor = normalizeActionResult(event.data.result);
       const denied =
         event.data.status === "rejected" || event.data.error?.code === "TOOL_EXECUTION_DENIED";
       const failed = event.data.status === "failed" && !denied;
@@ -328,6 +331,21 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       };
 
       return upsertToolPart(data, event.data.turnId, event.data.stepIndex, nextPart);
+    }
+
+    case "task.started": {
+      const existing = findToolPart(data, event.data.callId);
+      if (existing === undefined) return data;
+      return updateToolPart(data, existing.toolCallId, {
+        ...existing,
+        toolMetadata: mergeToolMetadata(existing.toolMetadata, {
+          eve: {
+            kind: existing.toolMetadata?.eve?.kind ?? "unknown",
+            name: existing.toolMetadata?.eve?.name ?? existing.toolName,
+            taskId: event.data.taskId,
+          },
+        }),
+      });
     }
 
     case "task.settled": {

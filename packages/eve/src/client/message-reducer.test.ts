@@ -19,6 +19,8 @@ import {
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
+  createTaskSettledEvent,
+  createTaskStartedEvent,
   createTurnCancelledEvent,
   createTurnCompletedEvent,
   createTurnFailedEvent,
@@ -1652,61 +1654,89 @@ describe("defaultMessageReducer", () => {
   });
 
   describe("task tool parts", () => {
-    // Built without `name` and `kind`, as events recorded by older eve versions are.
-    function settleResearchTask(settled: TaskSettledStreamEvent["data"]) {
+    const requested = createActionsRequestedEvent({
+      actions: [
+        {
+          callId: "call_1",
+          input: { topic: "Alice's notes" },
+          kind: "tool-call",
+          toolName: "research",
+        },
+      ],
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn_1",
+    });
+    const started = createTaskStartedEvent({
+      callId: "call_1",
+      kind: "tool",
+      name: "research",
+      taskId: "task_1",
+      turnId: "turn_1",
+    });
+    const receipt = createActionResultEvent({
+      result: {
+        callId: "call_1",
+        kind: "tool-result",
+        output: "Started task task_1.",
+        toolName: "research",
+      },
+      sequence: 1,
+      stepIndex: 0,
+      turnId: "turn_1",
+    });
+    const turnCompleted = createTurnCompletedEvent({ sequence: 2, turnId: "turn_1" });
+    const settled = (
+      outcome: Omit<TaskSettledStreamEvent["data"], "callId" | "taskId" | "turnId">,
+    ) =>
+      createTaskSettledEvent({ callId: "call_1", taskId: "task_1", turnId: "turn_1", ...outcome });
+
+    function reduceResearchTask(events: readonly UnstampedMessageStreamEvent[]) {
       const reducer = defaultMessageReducer();
-      const data = reduceServerEvents(reducer, reducer.initial(), [
-        createActionResultEvent({
-          result: {
-            callId: "call_1",
-            kind: "tool-result",
-            output: "Started task task_1.",
-            toolName: "research",
-          },
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "turn_1",
-        }),
-        createTurnCompletedEvent({ sequence: 0, turnId: "turn_1" }),
-        { data: settled, type: "task.settled" },
-      ]);
-      const [message] = data.messages;
+      const [message] = reduceServerEvents(reducer, reducer.initial(), events).messages;
       return { status: message?.metadata?.status, toolPart: message?.parts[1] };
     }
 
-    it("replaces the receipt with the output of a completed task", () => {
-      expect(
-        settleResearchTask({
-          callId: "call_1",
-          output: { summary: "done" },
-          status: "completed",
-          taskId: "task_1",
-          turnId: "turn_1",
-        }),
-      ).toMatchObject({
+    it("keeps a task call running past its receipt and its turn until the task settles", () => {
+      expect(reduceResearchTask([requested, started, receipt, turnCompleted])).toMatchObject({
         status: "complete",
-        toolPart: { output: { summary: "done" }, state: "output-available" },
+        toolPart: { state: "input-available", toolMetadata: { eve: { taskId: "task_1" } } },
       });
     });
 
+    it("replaces the running part with the output of a completed task", () => {
+      expect(
+        reduceResearchTask([
+          requested,
+          started,
+          receipt,
+          turnCompleted,
+          settled({ output: { summary: "done" }, status: "completed" }),
+        ]).toolPart,
+      ).toMatchObject({ output: { summary: "done" }, state: "output-available" });
+    });
+
     it("shows a failed or cancelled task as a tool error", () => {
+      const settledAfter = (outcome: Parameters<typeof settled>[0]) =>
+        reduceResearchTask([requested, started, receipt, turnCompleted, settled(outcome)]).toolPart;
       expect(
-        settleResearchTask({
-          callId: "call_1",
-          error: { message: "Remote agent unavailable." },
-          status: "failed",
-          taskId: "task_1",
-          turnId: "turn_1",
-        }).toolPart,
+        settledAfter({ error: { message: "Remote agent unavailable." }, status: "failed" }),
       ).toMatchObject({ errorText: "Remote agent unavailable.", state: "output-error" });
-      expect(
-        settleResearchTask({
-          callId: "call_1",
-          status: "cancelled",
-          taskId: "task_1",
-          turnId: "turn_1",
-        }).toolPart,
-      ).toMatchObject({ errorText: "Task was cancelled.", state: "output-error" });
+      expect(settledAfter({ status: "cancelled" })).toMatchObject({
+        errorText: "Task was cancelled.",
+        state: "output-error",
+      });
+    });
+
+    it("keeps a task's outcome when its receipt arrives after the task settled", () => {
+      const failed = settled({
+        error: { message: "Alice's notes are unavailable." },
+        status: "failed",
+      });
+      expect(reduceResearchTask([requested, started, failed, receipt]).toolPart).toMatchObject({
+        errorText: "Alice's notes are unavailable.",
+        state: "output-error",
+      });
     });
   });
 
