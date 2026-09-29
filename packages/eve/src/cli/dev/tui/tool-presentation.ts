@@ -92,6 +92,26 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     singularNoun: "command",
     pluralNoun: "commands",
   },
+  connection_execute: {
+    verb: "Call",
+    pastVerb: "Called",
+    argKey: "",
+    extractItem: (input) => {
+      const connection = salientArg(input, "connection");
+      const tool = salientArg(input, "tool");
+      return connection === undefined || tool === undefined ? undefined : `${connection}.${tool}`;
+    },
+    singularNoun: "connection tool",
+    pluralNoun: "connection tools",
+  },
+  connection_search: {
+    verb: "Search",
+    pastVerb: "Searched",
+    argKey: "query",
+    extractItem: (input) => salientArg(input, "connection"),
+    singularNoun: "tool search",
+    pluralNoun: "tool searches",
+  },
   glob: {
     verb: "Glob",
     pastVerb: "Globbed",

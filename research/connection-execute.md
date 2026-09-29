@@ -103,17 +103,20 @@ connection_execute({ connection, tool, input })   ← model-visible action
 
 **`connection_search`**
 
-- **Input:** `{ query: string, connection?: string, limit?: number }`.
-  `limit` defaults to 10 and is capped at 50.
-- **Result:** ranked entries of `{ connection, tool, description, signature }`.
+- **Input:** `{ query?: string, connection?: string, limit?: number, offset?: number }`.
+  `limit` defaults to 10 and is capped at 50. Omitting `query` lists every
+  tool, which pairs with `connection` to list one connection's tools.
+- **Result:** `{ tools, total, unavailable? }`, where `tools` holds ranked
+  entries of `{ connection, tool, description, signature }` and `total`
+  counts matches across pages.
   - `signature` is TypeScript rendered from the input and output schemas,
     with JSDoc from the schema descriptions. It keeps constraints such as
     `minimum`, `maximum`, and `pattern` as comments.
   - An output with no schema renders as `Promise<unknown>`.
   - The raw JSON Schema is not repeated, so each schema is paid for once.
 - **Connection failures.** A connection that needs sign-in starts
-  authorization, as today. A connection that fails is returned as an entry
-  with `error`.
+  authorization, as today. A connection that fails is returned in
+  `unavailable` with its `error`.
 - **Ranking.** Word matching over tool names, descriptions, and input
   property names. The ranking can change later with no change to the
   result shape.
@@ -130,14 +133,19 @@ connection_execute({ connection, tool, input })   ← model-visible action
 
 - **Presence.** Both are present for the whole session when the agent has a
   static connection or a dynamic connection resolver. Otherwise neither
-  exists. This is decided at build time, not per step, so the `tools` array
-  never flips.
+  exists. The connection registry exists under exactly that condition, so
+  the `tools` array never flips.
 - **Closed.** They cannot be replaced or disabled. An authored
-  `agent/tools/connection_search.ts` or `agent/tools/connection_execute.ts`
-  is a compile error. Removing every connection is how an agent goes
+  `agent/tools/connection_search.ts`, `agent/tools/connection_execute.ts`,
+  or `agent/tools/connection_tools.ts` (the framework module that provides
+  them) is a compile error. Removing every connection is how an agent goes
   without them.
-- **Static definitions.** They are framework tools, not `defineDynamic`
-  resolvers. They read the connection registry when they run.
+- **Built on the public tool API.** A framework `defineDynamic` module
+  rebuilds both tools on each `step.started` with `defineTool` and
+  `defineDurableCallback`. Their descriptions and input schemas are
+  constants, so the provider request is identical every step. Rebuilding
+  per step is what lets `connection_execute` carry the approval phases of
+  the connections currently registered without a harness change.
 
 ### Connection listing
 
@@ -183,15 +191,14 @@ No longer available, do not call: petstore
 | ----------------------------------------- | ------------------------------------------------------------------------------- |
 | MCP result with `structuredContent`       | `structuredContent`                                                             |
 | MCP result with text content only         | The text. Parsed as JSON when the tool declares no `outputSchema` and it parses |
-| MCP result with image or resource content | The value above, plus the non-text blocks as file parts in the model output     |
+| MCP result with image or resource content | Its MCP `content` blocks; the model sees them as text and file parts            |
 | MCP result with `isError: true`           | A tool error carrying the text                                                  |
 | OpenAPI                                   | `{ status, statusText, body }`, unchanged                                       |
 
-- **File parts.** The model output keeps images and resources as file parts
-  through the MCP client's existing `toModelOutput`. The AI SDK passes the
-  call input to `toModelOutput`, so eve's internal definition for
-  `connection_execute` forwards it and can find the right connection. The
-  value in `action.result` stays JSON.
+- **File parts.** `toModelOutput` receives only the output, so a result
+  with non-text content keeps its MCP `content` blocks in the value.
+  `connection_execute`'s `toModelOutput` turns image, audio, and blob
+  resource blocks into file parts. The value in `action.result` stays JSON.
 - **Errors are data the model can act on.**
   - An unknown connection lists the available connections.
   - An unknown tool names the closest tools.
@@ -212,6 +219,11 @@ not from a discovery record.
     the inner input, so existing policies behave the same.
   - `approvalKey` returns `<connection>__<tool>`, so an "always approve"
     decision still applies per tool.
+  - `connection_execute` has approval phases only when a registered
+    connection defines them. When any connection defines a response
+    policy, every connection approval in that agent uses the
+    authenticated response flow; connections without one allow any
+    authenticated responder.
 - **Authorization.** This is unchanged: interactive sign-in parks the call
   through `input.requested`. A server `401` evicts the cached token and
   starts authorization again. Completion is rejected if the connection
@@ -219,10 +231,11 @@ not from a discovery record.
 - **Tool filters and provided arguments.** `tools: { allow | block }` and
   `toolCall.providedArguments` are already enforced by the MCP and OpenAPI
   clients. They apply to search and execution with no change.
-- **Replay identity.** The harness hook becomes
-  `toolReplayIdentity(toolName, input)`. The connection instance is looked
-  up from `input.connection` when the call runs, so a call approved against
-  one instance cannot replay against another.
+- **Approved instance.** The approval request records the connection's
+  instance id for the call in durable session context. The approved call is
+  rejected, and must be requested again, if its connection resolves to a
+  different instance when it runs. This replaces the harness-level replay
+  identity that discovered tools needed.
 
 ### Nested actions on the protocol
 
@@ -239,11 +252,20 @@ uses the same shape now.
   - its own call id, derived from the parent's, so a re-run step emits the
     same id,
   - a new optional `parentCallId` set to the `connection_execute` call id.
+
+  eve emits the pair when the connection call settles, right before the
+  `connection_execute` result. A call that parks for sign-in reports no
+  nested action until it runs.
+
+- **Generic.** A tool reports a nested action through an internal harness
+  API that stashes it for the current step; the harness drains it before
+  the parent's `action.result`. Code mode reuses the same path.
 - **Unchanged consumers.** Labels, hooks, channel audience policy, tracing,
   and eval assertions such as `t.calledTool("linear__list_issues")` see the
   nested action as they see a direct call today.
-- **Rendering.** Built-in channels show a `connection_execute` action as its
-  nested action. Clients that ignore `parentCallId` render both flat.
+- **Rendering.** The dev TUI shows a `connection_execute` call as
+  `Call <connection>.<tool>` and hides its nested action. Other channels and
+  clients that ignore `parentCallId` render both.
 - **Protocol change.** `parentCallId` is an additive public change. It ships
   with protocol docs.
 - **Approval prompts** are the one difference from code mode. The approval
