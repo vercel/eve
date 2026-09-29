@@ -109,7 +109,7 @@ export async function dispatchChannelRequest(
         config,
         event.req,
         async () =>
-          await withExtensionConfigs(bundle.extensionConfigs ?? new Map(), async () => {
+          await withExtensionConfigs(bundle.extensionConfigs, async () => {
             if (matchedChannel.handler) {
               // Authored CompiledChannel route — build RouteHandlerArgs.
               return await matchedChannel.handler(event.req, routeArgs.args);
@@ -185,12 +185,12 @@ export async function dispatchChannelWebSocketRequest(
       event.req,
       async () =>
         await withExtensionConfigs(
-          bundle.extensionConfigs ?? new Map(),
+          bundle.extensionConfigs,
           async () => await websocket(event.req, routeArgs.args),
         ),
     );
     flushBackgroundTasks(event, routeArgs.backgroundTasks, routeKey, matchedChannel.name);
-    return withScopedWebSocketHooks(hooks, bundle.extensionConfigs ?? new Map());
+    return withScopedWebSocketHooks(hooks, bundle.extensionConfigs);
   } catch (error) {
     const errorId = logError(log, "channel websocket handler threw", error, {
       routeKey,
@@ -208,15 +208,12 @@ function withScopedWebSocketHooks(
   hooks: WebSocketRouteHooks,
   extensionConfigs: ReadonlyMap<string, Record<string, unknown>>,
 ): WebSocketRouteHooks {
-  const scoped = <Args extends unknown[], Result>(
-    callback: (...args: Args) => Result | Promise<Result>,
-  ) =>
-    async function (this: unknown, ...args: Args): Promise<Awaited<Result>> {
-      return await withExtensionConfigs(
-        extensionConfigs,
-        async () => await callback.apply(this, args),
-      );
-    };
+  // Hooks may be a class instance relying on its prototype or private fields,
+  // so they run bound to the authored object, not to this wrapper.
+  const scoped =
+    <Args extends unknown[], Result>(callback: (...args: Args) => Result) =>
+    (...args: Args): Result =>
+      withExtensionConfigs(extensionConfigs, () => callback.apply(hooks, args));
 
   return {
     ...hooks,

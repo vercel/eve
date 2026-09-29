@@ -22,7 +22,7 @@ interface NitroChannelRuntimeBundle {
   readonly agentName: string;
   readonly channels: readonly ResolvedChannelDefinition[];
   /** Root extension configs; channel routes serve the root agent. */
-  readonly extensionConfigs?: ReadonlyMap<string, Record<string, unknown>>;
+  readonly extensionConfigs: ReadonlyMap<string, Record<string, unknown>>;
   readonly resolveRemoteAgentStreamHeaders?: RemoteAgentStreamHeadersResolver;
   readonly runtime: Runtime;
 }

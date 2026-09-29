@@ -89,12 +89,12 @@ export interface ScheduleCollectionDispatchInput {
 export class ScheduleDispatcher {
   private readonly runtime: Runtime;
   private readonly channels: readonly ResolvedChannelDefinition[];
-  private readonly extensionConfigs: ReadonlyMap<string, Record<string, unknown>> | undefined;
+  private readonly extensionConfigs: ReadonlyMap<string, Record<string, unknown>>;
   constructor(config: {
     readonly runtime: Runtime;
     readonly channels: readonly ResolvedChannelDefinition[];
     /** Root extension configs the schedule's `run` reads through `extension.config`. */
-    readonly extensionConfigs?: ReadonlyMap<string, Record<string, unknown>>;
+    readonly extensionConfigs: ReadonlyMap<string, Record<string, unknown>>;
   }) {
     this.runtime = config.runtime;
     this.channels = config.channels;
@@ -104,9 +104,7 @@ export class ScheduleDispatcher {
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
     const scope = new ContextContainer();
     scope.set(ScheduleIdKey, input.scheduleId);
-    if (this.extensionConfigs !== undefined) {
-      scope.setVirtualContext(ExtensionConfigsKey, this.extensionConfigs);
-    }
+    scope.setVirtualContext(ExtensionConfigsKey, this.extensionConfigs);
     return await contextStorage.run(scope, () => this.triggerInScope(input));
   }
 

@@ -16,12 +16,16 @@ import {
   dispatchChannelRequest,
   dispatchChannelWebSocketRequest,
 } from "../../src/internal/nitro/routes/channel-dispatch.js";
+import { dispatchScheduleTaskFromArtifacts } from "../../src/internal/nitro/routes/schedule-task.js";
+import { createScheduleRegistrations } from "../../src/runtime/schedules/register.js";
+import { loadResolvedCompiledSchedules } from "../../src/runtime/schedules/resolve-schedule.js";
 import type { ResolvedAgentGraphBundle } from "../../src/runtime/graph.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
 import { BundleKey, type CompiledBundle } from "../../src/runtime/sessions/runtime-context-keys.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 
 const scenarioApp = useScenarioApp();
+const SCHEDULE_API_KEY_SLOT = "eve.scenario.crm-schedule-api-key";
 const compatibilityManifest = JSON.stringify({
   kind: "eve-extension",
   formatVersion: 1,
@@ -40,48 +44,12 @@ describe("mounted extension via authored-source loader", () => {
       name: "mounted-extension-authored-source",
       installDependencies: true,
       files: {
+        ...crmExtensionPackageFiles(),
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
         "agent/instructions.md": "You are a precise assistant.\n",
         "agent/extensions/crm.mjs": [
           'import crm from "@acme/crm";',
           'export default crm({ apiKey: "sk-authored" });',
-          "",
-        ].join("\n"),
-        "node_modules/@acme/crm/package.json": `${JSON.stringify({
-          name: "@acme/crm",
-          type: "module",
-          eve: { extension: { source: "source", dist: "extension" } },
-          exports: { ".": "./extension/extension.mjs" },
-        })}\n`,
-        "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest,
-        "node_modules/@acme/crm/extension/extension.mjs": [
-          'import { defineExtension } from "eve/extension";',
-          // Minimal pass-through Standard Schema — this scenario tests binding, not validation.
-          "const config = { '~standard': { version: 1, vendor: 'scenario', validate: (value) => ({ value }) } };",
-          "export default defineExtension({ config });",
-          "",
-        ].join("\n"),
-        "node_modules/@acme/crm/extension/channels/status.mjs": [
-          'import { defineChannel, GET, WS } from "eve/channels";',
-          'import extension from "../extension.mjs";',
-          "export default defineChannel({",
-          "  routes: [",
-          '    GET("/crm/status", async () => new Response(extension.config.apiKey)),',
-          '    WS("/crm/socket", async () => ({ open(peer) { peer.context.apiKey = extension.config.apiKey; } })),',
-          "  ],",
-          "});",
-          "",
-        ].join("\n"),
-        "node_modules/@acme/crm/extension/tools/crm_echo.mjs": [
-          'import { defineTool } from "eve/tools";',
-          'import extension from "../extension.mjs";',
-          "export default defineTool({",
-          '  description: "Echo the configured API key.",',
-          "  inputSchema: { type: 'object', properties: {}, additionalProperties: false },",
-          "  async execute() {",
-          "    return { apiKey: extension.config.apiKey };",
-          "  },",
-          "});",
           "",
         ].join("\n"),
       },
@@ -172,6 +140,22 @@ describe("mounted extension via authored-source loader", () => {
 
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe("sk-root");
+  });
+
+  it("gives an extension schedule run the root mount's config", async () => {
+    const { appRoot } = await createMultiMountApp("mounted-extension-authored-source-schedule");
+    const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
+    const schedules = await loadResolvedCompiledSchedules({ compiledArtifactsSource });
+    const sync = createScheduleRegistrations(schedules).find(
+      (registration) => registration.scheduleId === "crm__sync",
+    );
+    expect(sync).toBeDefined();
+
+    await dispatchScheduleTaskFromArtifacts(sync!.taskName, compiledArtifactsSource);
+
+    expect((globalThis as Record<symbol, unknown>)[Symbol.for(SCHEDULE_API_KEY_SLOT)]).toBe(
+      "sk-root",
+    );
   });
 });
 
@@ -283,6 +267,7 @@ function crmExtensionPackageFiles(): Record<string, string> {
     "node_modules/@acme/crm/extension/_manifest.json": compatibilityManifest,
     "node_modules/@acme/crm/extension/extension.mjs": [
       'import { defineExtension } from "eve/extension";',
+      // Minimal pass-through Standard Schema — these scenarios test binding, not validation.
       "const config = { '~standard': { version: 1, vendor: 'scenario', validate: (value) => ({ value }) } };",
       "export default defineExtension({ config });",
       "",
@@ -290,11 +275,27 @@ function crmExtensionPackageFiles(): Record<string, string> {
     "node_modules/@acme/crm/extension/channels/status.mjs": [
       'import { defineChannel, GET, WS } from "eve/channels";',
       'import extension from "../extension.mjs";',
+      // A class instance with a private method: hooks must run bound to it.
+      "class CrmSocket {",
+      "  #apiKey() { return extension.config.apiKey; }",
+      "  open(peer) { peer.context.apiKey = this.#apiKey(); }",
+      "}",
       "export default defineChannel({",
       "  routes: [",
       '    GET("/crm/status", async () => new Response(extension.config.apiKey)),',
-      '    WS("/crm/socket", async () => ({ open(peer) { peer.context.apiKey = extension.config.apiKey; } })),',
+      '    WS("/crm/socket", async () => new CrmSocket()),',
       "  ],",
+      "});",
+      "",
+    ].join("\n"),
+    "node_modules/@acme/crm/extension/schedules/sync.mjs": [
+      'import { defineSchedule } from "eve/schedules";',
+      'import extension from "../extension.mjs";',
+      "export default defineSchedule({",
+      '  cron: "0 9 * * *",',
+      "  run() {",
+      `    globalThis[Symbol.for(${JSON.stringify(SCHEDULE_API_KEY_SLOT)})] = extension.config.apiKey;`,
+      "  },",
       "});",
       "",
     ].join("\n"),

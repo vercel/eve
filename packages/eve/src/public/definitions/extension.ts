@@ -9,10 +9,11 @@ const MOUNTED_CONFIG = Symbol.for("eve.mounted-extension-config");
 const CONFIG_REGISTRY = Symbol.for("eve.extension-config-registry");
 
 /**
- * Returns the config the active runtime scope (session, channel request, or
- * schedule run) binds for an extension namespace. Installed by the runtime.
+ * Returns the extension configs the active runtime scope (session, channel
+ * request, or schedule run) binds, or `undefined` outside one. Installed by the
+ * runtime.
  */
-const SCOPED_CONFIG_RESOLVER = Symbol.for("eve.extension-scoped-config-resolver");
+const SCOPED_CONFIGS_RESOLVER = Symbol.for("eve.extension-scoped-configs-resolver");
 
 /**
  * Ambient namespace set by the dev/eval loader around a mount module's
@@ -38,11 +39,11 @@ function configRegistry(): Map<string, Record<string, unknown>> {
   return registry;
 }
 
-type ScopedConfigResolver = (namespace: string) => Record<string, unknown> | undefined;
+type ScopedConfigsResolver = () => ReadonlyMap<string, Record<string, unknown>> | undefined;
 
-function scopedConfig(namespace: string): Record<string, unknown> | undefined {
-  const resolve = (globalThis as Record<symbol, unknown>)[SCOPED_CONFIG_RESOLVER];
-  return typeof resolve === "function" ? (resolve as ScopedConfigResolver)(namespace) : undefined;
+function scopedConfigs(): ReadonlyMap<string, Record<string, unknown>> | undefined {
+  const resolve = (globalThis as Record<symbol, unknown>)[SCOPED_CONFIGS_RESOLVER];
+  return typeof resolve === "function" ? (resolve as ScopedConfigsResolver)() : undefined;
 }
 
 /**
@@ -61,8 +62,8 @@ export function readMountedExtensionConfig(value: unknown): Record<string, unkno
  * read resolves against the agent node and graph of the active scope instead
  * of the last mount evaluated. The resolver holds no graph state itself.
  */
-export function installScopedExtensionConfigResolver(resolve: ScopedConfigResolver): void {
-  (globalThis as Record<symbol, unknown>)[SCOPED_CONFIG_RESOLVER] = resolve;
+export function installScopedExtensionConfigsResolver(resolve: ScopedConfigsResolver): void {
+  (globalThis as Record<symbol, unknown>)[SCOPED_CONFIGS_RESOLVER] = resolve;
 }
 
 /**
@@ -85,7 +86,11 @@ export interface MountedExtension {
 export interface ExtensionHandle<S extends StandardSchemaV1 = StandardSchemaV1> {
   /** Consumer mount factory: validates `values` against the schema and binds them. */
   (values: StandardSchemaV1.InferInput<S>): MountedExtension;
-  /** The bound configuration, typed from the schema (defaults applied). */
+  /**
+   * The configuration of the mount serving the current agent, typed from the
+   * schema (defaults applied). Read it inside handlers such as a tool's
+   * `execute`; a module top-level read cannot tell which agent is asking.
+   */
   readonly config: StandardSchemaV1.InferOutput<S>;
   /** The declared config schema; read by `eve extension build`. */
   readonly schema: S;
@@ -142,7 +147,8 @@ function validateConfig(
  * handle. A consuming agent mounts it, calling the handle to bind config
  * (`export default crm({ apiKey })`) or re-exporting it directly when there is no
  * config (`export { default } from "@acme/gizmo"`). The extension's own tools,
- * hooks, and connections read the bound config through the handle:
+ * hooks, and connections read the config of the mount serving the current
+ * agent through the handle, inside their handlers:
  *
  * ```ts
  * // extension/extension.ts
@@ -151,8 +157,15 @@ function validateConfig(
  * export default defineExtension({ config: z.object({ apiKey: z.string() }) });
  *
  * // extension/tools/search.ts
+ * import { defineTool } from "eve/tools";
  * import extension from "../extension.js";
- * const { apiKey } = extension.config;
+ * export default defineTool({
+ *   // ...
+ *   async execute() {
+ *     const { apiKey } = extension.config;
+ *     // ...
+ *   },
+ * });
  * ```
  *
  * The `namespace` argument is supplied by the bundler shim and is not part of the
@@ -192,9 +205,13 @@ export function defineExtension(
         return validateConfig(schema, {});
       }
       // Inside a runtime scope, read the config of the mount serving that
-      // agent node. Outside one (e.g. module top level) fall back to the last
-      // mount bound.
-      const bound = scopedConfig(resolvedNamespace) ?? configRegistry().get(resolvedNamespace);
+      // agent node, never another agent's. Outside one (e.g. module top level)
+      // fall back to the last mount bound.
+      const scoped = scopedConfigs();
+      const bound =
+        scoped === undefined
+          ? configRegistry().get(resolvedNamespace)
+          : scoped.get(resolvedNamespace);
       return bound ?? validateConfig(schema, {});
     },
   });

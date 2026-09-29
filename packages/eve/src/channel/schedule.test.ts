@@ -134,6 +134,7 @@ describe("ScheduleDispatcher", () => {
             fetch: async () => new Response(),
           },
         ],
+        extensionConfigs: new Map(),
       });
       const input = {
         collectionId: "requests",
@@ -200,7 +201,11 @@ describe("ScheduleDispatcher", () => {
   describe("markdown form", () => {
     it("starts a Session via runtime.createSession with the SCHEDULE_ADAPTER", async () => {
       const runtime = createMockRuntime();
-      const dispatcher = new ScheduleDispatcher({ runtime, channels: [] });
+      const dispatcher = new ScheduleDispatcher({
+        runtime,
+        channels: [],
+        extensionConfigs: new Map(),
+      });
       const result = await dispatcher.trigger({
         scheduleId: "heartbeat",
         markdown: "Run heartbeat task.",
@@ -221,7 +226,7 @@ describe("ScheduleDispatcher", () => {
       const runtime = createMockRuntime();
       runtime.createSession = vi.fn().mockRejectedValue(new Error("boom"));
       await expect(
-        new ScheduleDispatcher({ runtime, channels: [] }).trigger({
+        new ScheduleDispatcher({ runtime, channels: [], extensionConfigs: new Map() }).trigger({
           scheduleId: "heartbeat",
           markdown: "x",
         }),
@@ -236,7 +241,11 @@ describe("ScheduleDispatcher", () => {
       vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
       try {
         const { definition, resolved } = makeSlackChannelEntry();
-        const dispatcher = new ScheduleDispatcher({ runtime, channels: [resolved] });
+        const dispatcher = new ScheduleDispatcher({
+          runtime,
+          channels: [resolved],
+          extensionConfigs: new Map(),
+        });
         let observed = false;
         const result = await dispatcher.trigger({
           scheduleId: "daily-digest",
@@ -262,7 +271,11 @@ describe("ScheduleDispatcher", () => {
     });
     it("collects waitUntil promises", async () => {
       const runtime = createMockRuntime();
-      const result = await new ScheduleDispatcher({ runtime, channels: [] }).trigger({
+      const result = await new ScheduleDispatcher({
+        runtime,
+        channels: [],
+        extensionConfigs: new Map(),
+      }).trigger({
         scheduleId: "background-job",
         async run({ waitUntil }) {
           waitUntil(Promise.resolve("done"));
@@ -284,7 +297,11 @@ describe("ScheduleDispatcher", () => {
       vi.stubEnv("SLACK_SIGNING_SECRET", "test-secret");
       try {
         const { definition, resolved } = makeSlackChannelEntry();
-        const result = await new ScheduleDispatcher({ runtime, channels: [resolved] }).trigger({
+        const result = await new ScheduleDispatcher({
+          runtime,
+          channels: [resolved],
+          extensionConfigs: new Map(),
+        }).trigger({
           scheduleId: "dynamic-tasks",
           run({ to, waitUntil }) {
             waitUntil(
@@ -315,7 +332,11 @@ describe("ScheduleDispatcher", () => {
         adapter: { kind: "x" },
       } satisfies CompiledChannel;
       await expect(
-        new ScheduleDispatcher({ runtime: createMockRuntime(), channels: [] }).trigger({
+        new ScheduleDispatcher({
+          runtime: createMockRuntime(),
+          channels: [],
+          extensionConfigs: new Map(),
+        }).trigger({
           scheduleId: "stranger",
           async run({ to }) {
             await to(stranger, {}).send("x", { auth: null });
@@ -327,7 +348,11 @@ describe("ScheduleDispatcher", () => {
 
   it("isScheduleAuth recognizes the app principal schedules dispatch with, and only it", async () => {
     const runtime = createMockRuntime();
-    const dispatcher = new ScheduleDispatcher({ runtime, channels: [] });
+    const dispatcher = new ScheduleDispatcher({
+      runtime,
+      channels: [],
+      extensionConfigs: new Map(),
+    });
     let appAuth: SessionAuthContext | undefined;
 
     await dispatcher.trigger({ scheduleId: "heartbeat", markdown: "Run heartbeat task." });
@@ -372,7 +397,11 @@ describe("ScheduleDispatcher", () => {
 
   it("throws when neither run nor markdown is provided", async () => {
     await expect(
-      new ScheduleDispatcher({ runtime: createMockRuntime(), channels: [] }).trigger({
+      new ScheduleDispatcher({
+        runtime: createMockRuntime(),
+        channels: [],
+        extensionConfigs: new Map(),
+      }).trigger({
         scheduleId: "empty",
       }),
     ).rejects.toThrow(/has neither "run" nor "markdown"/);
