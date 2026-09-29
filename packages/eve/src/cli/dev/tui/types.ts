@@ -32,10 +32,11 @@ export type TuiDisplayOptions = {
   reasoning?: TerminalPartDisplayMode;
 
   /**
-   * How subagent sections should render. `full` shows every nested child
-   * event line and the subagent's output; `auto-collapsed` collapses the
-   * section once the subagent reaches `done`; `collapsed` always shows
-   * only the header; `hidden` skips the section entirely.
+   * How subagent tasks render. Every mode but `hidden` writes a line when a
+   * subagent task starts and when it ends, and shows its current activity in
+   * the task panel above the prompt; `full` also writes each finished child
+   * message and tool call. `collapsed` and `auto-collapsed` are the same.
+   * `hidden` shows neither lines nor panel rows.
    */
   subagents?: TerminalPartDisplayMode;
 

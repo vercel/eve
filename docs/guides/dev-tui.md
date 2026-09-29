@@ -94,7 +94,9 @@ Required authorization or deployment setup still runs for the selected item. Pre
 
 Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
 
-The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, and **Running** while tools execute. A blinking dot and elapsed time indicate progress, with token counts shown when available. The activity line disappears when the turn finishes or needs your input.
+The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, **Running** while tools execute, and **Waiting for** followed by task names while the turn waits on [tasks](../tools/tasks). A blinking dot and elapsed time indicate progress, with token counts shown when available. The activity line disappears when the turn finishes or needs your input.
+
+A task, such as a call to a subagent, writes one line to the transcript when it starts and one when it finishes, fails, or is stopped. The finished line names how long the task took and, for a subagent, what it did, such as `Read 3 files, Ran 2 commands`. While tasks work, a panel above the prompt shows each task's current activity and elapsed time. The UI does not show the model's own `task_wait` and `task_cancel` calls; their effect appears as the waiting activity line and a stopped task's line.
 
 While a turn is running, `Enter` sends your message immediately as steering. Before assistant output begins, the runtime interrupts pending model generation and continues the same turn with your correction. Executing tools finish safely. After output begins, steering applies at the next workflow boundary and preserves streamed text.
 
@@ -125,6 +127,8 @@ Use `eve dev` flags to control tool calls, reasoning, subagents, connection auth
 ```bash
 eve dev --tools full --reasoning collapsed --logs all
 ```
+
+`--subagents full` also writes each subagent message and tool call to the transcript as it finishes, and `--subagents hidden` leaves subagent tasks out of the transcript and the task panel.
 
 Use `--host` and `--port` to bind the local server, or `--no-ui` to run without the terminal UI. Set `EVE_TUI_RENDER_MARKDOWN=0` to show assistant and subagent responses without Markdown parsing or styling; `1` (the default) enables Markdown rendering. See the [`eve dev` CLI reference](../reference/cli#eve-dev) for the complete option list, accepted values, and defaults.
 

@@ -120,7 +120,7 @@ export function registerRemoteCommands(input: {
     )
     .option(
       "--subagents <mode>",
-      "How subagent sections render: full | collapsed | auto-collapsed | hidden",
+      "How subagent tasks render: full | collapsed | auto-collapsed | hidden",
       parseDisplayMode,
     )
     .option(
@@ -205,7 +205,7 @@ export function registerDevelopmentCommand(input: {
     )
     .option(
       "--subagents <mode>",
-      "How subagent sections render: full | collapsed | auto-collapsed | hidden",
+      "How subagent tasks render: full | collapsed | auto-collapsed | hidden",
       parseDisplayMode,
     )
     .option(

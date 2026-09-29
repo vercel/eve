@@ -141,6 +141,7 @@ import {
 import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { RemoteConnectionSnapshot } from "./remote-connection.js";
 import {
+  agentDisplayName,
   isPanelRoutedTool,
   presentPreparingTool,
   presentTool,
@@ -149,7 +150,13 @@ import {
   type ToolPresentationContext,
 } from "./tool-presentation.js";
 import { FileContentCache } from "./file-content-cache.js";
-import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
+import { groupToolBlocksForDisplay, summarizeChildTools } from "./tool-block-groups.js";
+import {
+  renderTaskPanelRows,
+  TaskActivity,
+  waitingLabel,
+  type TaskEntry,
+} from "./task-activity.js";
 import { renderQuestionChoices, renderQuestionPanel } from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
@@ -318,20 +325,37 @@ type RenderTurnState = {
   reasoning: Map<string, string>;
   tools: Map<string, NativeToolState>;
   modelActivity: "Thinking" | "Generating";
+  /** True between a model step's start and finish. */
+  inStep: boolean;
   runningTools: Set<string>;
   cancelled: boolean;
   restoreCancelledPrompt: boolean;
 };
 
-function turnActivityLabel(state: RenderTurnState | undefined): string {
+/**
+ * Between model steps with tasks working, the turn is waiting on them — the
+ * model called `task_wait` or ended its reply — so the bar names the tasks.
+ */
+function turnActivityLabel(
+  state: RenderTurnState | undefined,
+  tasks: readonly TaskEntry[],
+): string {
   if (state === undefined) return "Thinking";
-  return state.runningTools.size > 0 ? "Running" : state.modelActivity;
+  if (state.runningTools.size > 0) return "Running";
+  if (!state.inStep && tasks.length > 0) return waitingLabel(tasks);
+  return state.modelActivity;
 }
 
 function updateTurnActivity(state: RenderTurnState, event: AgentTUIStreamEvent): void {
   switch (event.type) {
-    case "turn-start":
     case "step-start":
+      state.inStep = true;
+      state.modelActivity = "Thinking";
+      break;
+    case "step-finish":
+      state.inStep = false;
+      break;
+    case "turn-start":
     case "reasoning-delta":
       state.modelActivity = "Thinking";
       break;
@@ -349,6 +373,9 @@ function updateTurnActivity(state: RenderTurnState, event: AgentTUIStreamEvent):
     case "tool-result":
     case "tool-error":
     case "tool-rejected":
+    case "tool-withdrawn":
+    // A task keeps working past its call; the task panel tracks it instead.
+    case "task-started":
       state.runningTools.delete(event.toolCallId);
       break;
   }
@@ -363,6 +390,8 @@ type NativeToolState = {
   preparing?: boolean;
   output?: unknown;
   errorText?: string;
+  label?: string | undefined;
+  completeLabel?: string | undefined;
 };
 
 const caretBlinkMs = 500;
@@ -433,13 +462,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #parentToolBlockIds = new Map<string, string>();
   /** Monotonic counter behind every block's `updateSeq` activity stamp. */
   #updateSequence = 0;
-  /** Call ids per subagent name, for the sections' ordinal subtitles. */
-  readonly #subagentCallsByName = new Map<string, string[]>();
-  /** Parent-completed sections retained as mutable until the child boundary. */
-  readonly #provisionalSubagentCallIds = new Set<string>();
+  /** Working tasks, shown in the task panel between their start and end lines. */
+  readonly #tasks = new TaskActivity();
+  /** An agent's own rows already written under `--subagents full`. */
+  readonly #writtenAgentRows = new Set<string>();
+  /** Calls whose start line is written; a replayed start must not write another. */
+  readonly #startedTaskCallIds = new Set<string>();
   /** Session-local file contents, so write blocks can render real diffs. */
   readonly #fileContents = new FileContentCache();
-  readonly #subagentHeaders = new Set<string>();
   #agentHeader?: AgentHeaderOptions;
   #initialPromptPlaceholder = "Send a message…";
   #startupPhase?: "starting" | "connecting" | "updating";
@@ -868,7 +898,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
     this.#start(options);
-    this.#syncProvisionalSubagentTicker();
+    this.#syncTaskTicker();
     this.#commitTurnStats();
     this.#inputActive = true;
     this.#promptPlaceholderActive = true;
@@ -1162,6 +1192,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       reasoning: new Map(),
       tools: new Map(),
       modelActivity: "Thinking",
+      inStep: false,
       runningTools: new Set(),
       cancelled: false,
       restoreCancelledPrompt: true,
@@ -1210,7 +1241,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       if (this.#turnIndicator.kind === "waiting") {
         this.#turnIndicator = { kind: "idle" };
       }
-      this.#syncProvisionalSubagentTicker();
+      this.#syncTaskTicker();
       this.#status = completedTurnStatus({
         interrupted: this.#interrupted,
         cancelled: this.#turnCancelled,
@@ -1222,9 +1253,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // An interrupted or cancelled turn gets no terminal updates for its
       // in-flight calls; a block left `running` would keep the settled
       // prefix wedged and freeze scrollback for the rest of the session.
-      if (this.#interrupted || turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
+      if (this.#interrupted || turnState.cancelled) {
+        this.#settleCurrentTurnToolBlocks(turnState);
+        this.#stopWorkingTasks();
+      }
       this.#finalizeAllBlocks();
-      this.#syncProvisionalSubagentTicker();
+      this.#syncTaskTicker();
       this.#diagnostics?.reportStats();
       this.#paint();
 
@@ -1253,6 +1287,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       reasoning: new Map(),
       tools: new Map(),
       modelActivity: "Thinking",
+      inStep: false,
       runningTools: new Set(),
       cancelled: false,
       restoreCancelledPrompt: false,
@@ -1274,9 +1309,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
     } finally {
       this.#sweepPreparingToolBlocks(turnState);
-      if (turnState.cancelled) this.#settleCurrentTurnToolBlocks(turnState);
+      if (turnState.cancelled) {
+        this.#settleCurrentTurnToolBlocks(turnState);
+        this.#stopWorkingTasks();
+      }
       this.#finalizeAllBlocks();
-      this.#syncProvisionalSubagentTicker();
+      this.#syncTaskTicker();
       this.#diagnostics?.reportStats();
       this.#paint();
     }
@@ -1661,6 +1699,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
     });
   }
 
+  /**
+   * An agent's words or thinking. The task panel shows the latest line;
+   * `--subagents full` also writes each finished message, in order.
+   */
   upsertSubagentStep(update: SubagentStepUpdate): void {
     this.#diagnostics?.recordSubagentDispatch(update.callId);
     if (this.#subagents === "hidden") return;
@@ -1668,32 +1710,39 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const messageText = stripTerminalControls(update.message ?? "").trim();
     if (reasoningText.length === 0 && messageText.length === 0) return;
 
-    this.#ensureSubagentHeader(update.callId, update.subagentName);
-    if (this.#subagents === "collapsed") {
-      this.#paint();
-      return;
+    const entry = this.#tasks.get(update.callId);
+    if (entry !== undefined) {
+      entry.step = firstLine(messageText) ?? "Thinking";
     }
-
-    this.#upsertSubagentBlock({
-      id: subagentStepSectionId(update.callId, update.sectionKey),
-      kind: "subagent-step",
-      subagentCallId: update.callId,
-      depth: 1,
-      reasoning: reasoningText,
-      body: messageText,
-      // Child prose collapses to one activity row; the parent's reply is
-      // the conclusion. `--subagents full` keeps the verbatim text.
-      collapsed: this.#subagents !== "full",
-      live: !update.finalized,
-    });
+    if (this.#subagents === "full" && update.finalized) {
+      const id = subagentStepRowId(update.callId, update.sectionKey);
+      if (!this.#writtenAgentRows.has(id)) {
+        this.#writtenAgentRows.add(id);
+        const block: Block = {
+          kind: "subagent-step",
+          subagentCallId: update.callId,
+          agentName: entry?.name ?? agentDisplayName(stripTerminalControls(update.subagentName)),
+          depth: 1,
+          body: messageText,
+          live: false,
+        };
+        if (reasoningText.length > 0) block.reasoning = reasoningText;
+        this.#pushBlock(block);
+      }
+    }
     this.#paint();
   }
 
+  /**
+   * An agent's own tool call. The task panel shows what is running and counts
+   * finished calls for the task's end line; `--subagents full` also writes each
+   * finished call, in order.
+   */
   upsertSubagentTool(update: SubagentToolUpdate): void {
     this.#diagnostics?.recordSubagentDispatch(update.callId);
     if (update.status === "failed" && update.errorText !== undefined) {
-      // Captured before the display guards: hidden or collapsed subagent
-      // views must not keep tool failures out of the diagnostic log.
+      // Captured before the display guards: a hidden agent view must not
+      // keep tool failures out of the diagnostic log.
       this.#diagnostics?.append({
         source: "tool",
         summary: `${update.toolName} failed (subagent ${update.subagentName})`,
@@ -1701,38 +1750,32 @@ export class TerminalRenderer implements AgentTUIRenderer {
       });
     }
     if (this.#subagents === "hidden") return;
-    this.#ensureSubagentHeader(update.callId, update.subagentName);
-    if (this.#subagents === "collapsed") {
-      this.#paint();
-      return;
-    }
 
     const status = subagentToolStatus(update.status);
     // Subagents reuse the session's sandbox, so their reads and writes feed
     // the same file-content cache and their write blocks diff the same way.
+    const context = this.#toolPresentationContext({
+      input: update.input,
+      output: update.output,
+      toolCallId: update.childCallId,
+      toolName: update.toolName,
+      label: update.label,
+      agentTask: update.agentTask,
+    });
     const presentation =
       update.status === "preparing"
-        ? presentPreparingTool(update.toolName)
-        : presentTool(
-            update.toolName,
-            update.input,
-            this.#toolPresentationContext({
-              input: update.input,
-              output: update.output,
-              toolCallId: update.childCallId,
-              toolName: update.toolName,
-            }),
-          );
+        ? presentPreparingTool(update.toolName, context)
+        : presentTool(update.toolName, update.input, context);
+    const entry = this.#tasks.get(update.callId);
     const block: Block = {
-      id: subagentToolSectionId(update.callId, update.childCallId),
       kind: "subagent-tool",
       subagentCallId: update.callId,
+      agentName: entry?.name ?? agentDisplayName(stripTerminalControls(update.subagentName)),
       depth: 1,
       title: stripTerminalControls(presentation.title),
       subtitle: stripTerminalControls(presentation.subtitle),
       status,
-      live: status === "running" || status === "approval",
-      expanded: this.#subagents === "full",
+      live: false,
       toolName: update.toolName,
       toolGroup: presentation.group,
       toolInput: update.input,
@@ -1750,27 +1793,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
     } else if (update.errorText !== undefined) {
       block.result = stripTerminalControls(update.errorText);
     }
-    this.#upsertSubagentBlock(block);
-    this.#syncSubagentChildLiveness(update.callId);
+    entry?.childTools.set(update.childCallId, block);
+
+    const settled = status === "done" || status === "error" || status === "denied";
+    const id = subagentToolRowId(update.callId, update.childCallId);
+    if (this.#subagents === "full" && settled && !this.#writtenAgentRows.has(id)) {
+      this.#writtenAgentRows.add(id);
+      this.#pushBlock(block);
+    }
     this.#paint();
   }
 
-  /**
-   * Cohort liveness for one section's child tools, mirroring the top-level
-   * `#syncNativeToolBlockLiveness`: while any of a call's children still
-   * runs, settled siblings stay live so an in-flight batch accumulates as
-   * one group instead of fragmenting on every status flip.
-   */
-  #syncSubagentChildLiveness(callId: string): void {
-    applyCohortLiveness(
-      this.#blocks
-        .filter((block) => block.kind === "subagent-tool" && block.subagentCallId === callId)
-        .map((block) => ({ block, active: isActiveToolStatus(block.status) })),
-    );
-  }
-
   removeSubagentTool(update: { callId: string; childCallId: string }): void {
-    this.#removeBlock(subagentToolSectionId(update.callId, update.childCallId));
+    this.#tasks.get(update.callId)?.childTools.delete(update.childCallId);
     this.#paint();
   }
 
@@ -1779,56 +1814,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * public methods below are its implementation and the unit tests' seam.
    */
   readonly subagents: SubagentView = {
-    begin: (update) => this.beginSubagent(update),
     upsertStep: (update) => this.upsertSubagentStep(update),
     upsertTool: (update) => this.upsertSubagentTool(update),
     removeTool: (update) => this.removeSubagentTool(update),
-    complete: (update) => this.completeSubagent(update),
     markChildToolCallId: (callId) => this.markChildToolCallId(callId),
   };
-
-  /**
-   * Opens a subagent's section as soon as the dispatch is announced, so the
-   * transcript flows from the `Delegate …` placeholder straight into the
-   * `※ subagent(<name>)` header instead of going blank until the child's
-   * first content streams in. Re-opening a completed section (a HITL-parked
-   * child resuming) clears its Done mark.
-   */
-  beginSubagent(update: { callId: string; name: string }): void {
-    if (this.#subagents === "hidden") return;
-    this.#ensureSubagentHeader(update.callId, update.name);
-    const header = this.#blockById.get(subagentHeaderId(update.callId));
-    if (header !== undefined) {
-      if (header.status === "done") delete header.status;
-      header.live = true;
-    }
-    this.#provisionalSubagentCallIds.delete(update.callId);
-    this.#paint();
-  }
-
-  /**
-   * Marks a subagent call complete — its final message has arrived — so the
-   * section's closing corner reports `Done`. The header stays live until the
-   * turn finalizes (committing mid-turn would freeze its child window).
-   */
-  completeSubagent(update: { authoritative: boolean; callId: string }): void {
-    const header = this.#blockById.get(subagentHeaderId(update.callId));
-    if (header === undefined) return;
-    header.status = "done";
-    if (update.authoritative) {
-      this.#provisionalSubagentCallIds.delete(update.callId);
-      for (const block of this.#blocks) {
-        if (block.subagentCallId === update.callId) block.live = false;
-      }
-    } else {
-      this.#provisionalSubagentCallIds.add(update.callId);
-      for (const block of this.#blocks) {
-        if (block.subagentCallId === update.callId) block.live = true;
-      }
-    }
-    this.#syncProvisionalSubagentTicker();
-    this.#paint();
-  }
 
   markChildToolCallId(callId: string): void {
     this.#childToolCallIds.add(callId);
@@ -1953,14 +1943,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#modelTurnId = undefined;
     this.#childToolCallIds.clear();
     this.#parentToolBlockIds.clear();
-    this.#subagentHeaders.clear();
-    this.#provisionalSubagentCallIds.clear();
-    this.#subagentCallsByName.clear();
+    this.#tasks.clear();
+    this.#writtenAgentRows.clear();
+    this.#startedTaskCallIds.clear();
     this.#messageQueue.reset();
     this.#nextSubmittedPromptOrigin = undefined;
     this.#fileContents.clear();
     this.#turnClock.reset();
-    this.#syncProvisionalSubagentTicker();
+    this.#syncTaskTicker();
   }
 
   /**
@@ -3133,7 +3123,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#startTicker();
         this.#armFlowIdleTrap();
       } else {
-        this.#syncProvisionalSubagentTicker();
+        this.#syncTaskTicker();
       }
       this.#live.reset();
       this.#paint();
@@ -3605,7 +3595,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #stopTicker() {
-    if (this.#hasLiveProvisionalSubagents()) return;
+    if (this.#tasks.working().length > 0) return;
     this.#clearTicker();
   }
 
@@ -3616,18 +3606,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
   }
 
-  #hasLiveProvisionalSubagents(): boolean {
-    return this.#blocks.some(
-      (block) =>
-        block.live &&
-        block.subagentCallId !== undefined &&
-        this.#provisionalSubagentCallIds.has(block.subagentCallId),
-    );
-  }
-
-  /** Keeps mutable subagent sections visibly active after their parent turn settles. */
-  #syncProvisionalSubagentTicker(): void {
-    if (this.#hasLiveProvisionalSubagents()) {
+  /** Keeps the task panel's elapsed times ticking while any task works, even between streams. */
+  #syncTaskTicker(): void {
+    if (this.#tasks.working().length > 0) {
       this.#startTicker();
     } else if (!this.#streamDraftActive && this.#turnIndicator.kind === "idle") {
       this.#clearTicker();
@@ -3735,35 +3716,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
-  #ensureSubagentHeader(callId: string, name: string) {
-    if (this.#subagentHeaders.has(callId)) return;
-    this.#subagentHeaders.add(callId);
-
-    // Parallel calls to the same subagent are individual sections; ordinal
-    // subtitles (`#1`, `#2`) tell them apart. The first call gains its `#1`
-    // retroactively the moment a sibling appears.
-    const cleanName = stripTerminalControls(name);
-    const siblings = this.#subagentCallsByName.get(cleanName) ?? [];
-    siblings.push(callId);
-    this.#subagentCallsByName.set(cleanName, siblings);
-    if (siblings.length === 2) {
-      const firstHeader = this.#blockById.get(subagentHeaderId(siblings[0]!));
-      if (firstHeader !== undefined) firstHeader.subtitle = "#1";
-    }
-
-    const block: Block = {
-      id: subagentHeaderId(callId),
-      kind: "subagent",
-      subagentCallId: callId,
-      title: cleanName,
-      // Live until the turn's #finalizeAllBlocks: committing a section
-      // mid-turn would freeze its child window in scrollback.
-      live: true,
-    };
-    if (siblings.length > 1) block.subtitle = `#${siblings.length}`;
-    this.#pushBlock(block);
-  }
-
   #upsertBlock(block: Block) {
     if (block.id && this.#committedIds.has(block.id)) {
       return;
@@ -3779,35 +3731,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#pushBlock(block);
   }
 
-  /**
-   * Inserts a new child beside the rest of its call's cohort instead of at
-   * the transcript's live edge. A child's final events can arrive after later
-   * parent blocks; arrival order must not split its section.
-   */
-  #upsertSubagentBlock(block: Block) {
-    if (block.id && this.#committedIds.has(block.id)) return;
-    const existing = block.id ? this.#blockById.get(block.id) : undefined;
-    if (existing !== undefined) {
-      Object.assign(existing, block);
-      existing.updateSeq = ++this.#updateSequence;
-      return;
-    }
-
-    const callId = block.subagentCallId;
-    if (callId === undefined) {
-      this.#pushBlock(block);
-      return;
-    }
-    if (block.id !== this.#devRebuild?.id) this.#settleDevRebuildStatus();
-    block.updateSeq = ++this.#updateSequence;
-    let anchor = -1;
-    for (let index = 0; index < this.#blocks.length; index += 1) {
-      if (this.#blocks[index]?.subagentCallId === callId) anchor = index;
-    }
-    this.#blocks.splice(anchor < 0 ? this.#blocks.length : anchor + 1, 0, block);
-    if (block.id !== undefined) this.#blockById.set(block.id, block);
-  }
-
   #removeBlock(id: string) {
     this.#blocks = this.#blocks.filter((candidate) => candidate.id !== id);
     this.#blockById.delete(id);
@@ -3819,8 +3742,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
       // stay live past this stream boundary so their later terminal update can
       // replace the same transcript block.
       if (
-        (block.subagentCallId !== undefined &&
-          this.#provisionalSubagentCallIds.has(block.subagentCallId)) ||
         block.status === "approval" ||
         block.status === "running" ||
         (block.kind === "connection-auth" && block.live) ||
@@ -3838,7 +3759,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     displayModes: DisplayModes,
     turnState: RenderTurnState,
   ): void {
-    const previousActivity = turnActivityLabel(turnState);
+    const previousActivity = turnActivityLabel(turnState, this.#tasks.working());
     updateTurnActivity(turnState, event);
     switch (event.type) {
       case "turn-start":
@@ -3939,6 +3860,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
             status: "running",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
+            label: event.label,
           },
           displayModes,
           turnState,
@@ -3958,7 +3880,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const existing = this.#resolveNativeToolState(event.toolCallId, turnState);
         if (existing === undefined) break;
         this.#upsertNativeTool(
-          { ...existing, output: event.output, status: "done" },
+          {
+            ...existing,
+            output: event.output,
+            status: "done",
+            completeLabel: event.label,
+          },
           displayModes,
           turnState,
         );
@@ -3995,6 +3922,31 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
       }
 
+      case "tool-withdrawn": {
+        // The model reads why and retries; the person only sees the retry.
+        const withdrawn = turnState.tools.get(event.toolCallId);
+        this.#diagnostics?.append({
+          source: "tool",
+          summary: `${withdrawn?.toolName ?? event.toolCallId} was refused for the model to retry`,
+          detail: event.reason,
+        });
+        turnState.tools.delete(event.toolCallId);
+        this.#removeBlock(
+          this.#parentToolBlockIds.get(event.toolCallId) ?? toolSectionId(event.toolCallId),
+        );
+        this.#parentToolBlockIds.delete(event.toolCallId);
+        this.#paint();
+        break;
+      }
+
+      case "task-started":
+        this.#startTask(event, displayModes, turnState);
+        break;
+
+      case "task-settled":
+        this.#endTask(event);
+        break;
+
       case "error":
         this.#addErrorBlock("Error", event.errorText, { detail: event.detail, hint: event.hint });
         break;
@@ -4028,7 +3980,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
         break;
     }
     // Activity is independent of transcript visibility and idle streams.
-    if (turnState === this.#activeTurnState && turnActivityLabel(turnState) !== previousActivity) {
+    if (
+      turnState === this.#activeTurnState &&
+      turnActivityLabel(turnState, this.#tasks.working()) !== previousActivity
+    ) {
       this.#paint();
     }
   }
@@ -4074,6 +4029,150 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /**
+   * A call became a task: its row turns into the task's start line, in
+   * place, and the task joins the panel above the prompt. The line is
+   * written once and never changes, so nothing in the transcript moves while
+   * the task works.
+   */
+  #startTask(
+    event: Extract<AgentTUIStreamEvent, { type: "task-started" }>,
+    displayModes: DisplayModes,
+    turnState: RenderTurnState,
+  ): void {
+    const { kind, toolCallId, toolName } = event;
+    const rowId = this.#parentToolBlockIds.get(toolCallId) ?? toolSectionId(toolCallId);
+    const tool = turnState.tools.get(toolCallId);
+    turnState.tools.delete(toolCallId);
+    this.#parentToolBlockIds.delete(toolCallId);
+    const visible =
+      kind === "agent" ? this.#subagents !== "hidden" : displayModes.tools !== "hidden";
+    if (!visible || this.#startedTaskCallIds.has(toolCallId)) {
+      this.#removeBlock(rowId);
+      this.#syncNativeToolBlockLiveness(turnState);
+      this.#paint();
+      return;
+    }
+    this.#startedTaskCallIds.add(toolCallId);
+
+    const input = tool?.input;
+    const label = tool?.label;
+    let baseName = agentDisplayName(stripTerminalControls(toolName));
+    let summary = agentTaskSummary(input);
+    if (kind === "tool") {
+      const presentation = presentTool(
+        toolName,
+        input,
+        this.#toolPresentationContext({ input, toolCallId, toolName, label }),
+      );
+      baseName = stripTerminalControls(presentation.title);
+      summary = stripTerminalControls(presentation.subtitle);
+    }
+    const entry = this.#tasks.start({
+      callId: toolCallId,
+      kind,
+      baseName,
+      toolName,
+      input,
+      label,
+      nowMs: Date.now(),
+    });
+    this.#replaceBlock(rowId, {
+      id: taskLineId(toolCallId, "start"),
+      kind: "task",
+      taskKind: kind,
+      title: entry.name,
+      subtitle: summary,
+      live: false,
+    });
+    this.#syncNativeToolBlockLiveness(turnState);
+    this.#syncTaskTicker();
+    this.#paint();
+  }
+
+  /** A task ended: it leaves the panel and writes its end line once. */
+  #endTask(event: Extract<AgentTUIStreamEvent, { type: "task-settled" }>): void {
+    const entry = this.#tasks.finish(event.toolCallId);
+    if (entry === undefined) return;
+    const dot = ` ${this.#theme.glyph.dot} `;
+    const elapsed = `finished in ${formatTurnDuration(Date.now() - entry.startedAtMs)}`;
+    const line: Block = {
+      id: taskLineId(event.toolCallId, "end"),
+      kind: "task",
+      taskKind: entry.kind,
+      title: entry.name,
+      live: false,
+    };
+    switch (event.status) {
+      case "completed": {
+        const outcome =
+          entry.kind === "agent"
+            ? summarizeChildTools([...entry.childTools.values()])
+            : presentTool(
+                entry.toolName,
+                entry.input,
+                this.#toolPresentationContext({
+                  input: entry.input,
+                  toolCallId: event.toolCallId,
+                  toolName: entry.toolName,
+                  label: entry.label,
+                }),
+              ).summarizeResult(event.output);
+        line.status = "done";
+        line.body =
+          outcome === undefined || outcome.length === 0 ? elapsed : `${elapsed}${dot}${outcome}`;
+        break;
+      }
+      case "failed": {
+        const reason = firstLine(stripTerminalControls(event.errorText ?? ""));
+        line.status = "error";
+        line.body = reason === undefined ? "failed" : `failed${dot}${reason}`;
+        break;
+      }
+      case "cancelled":
+        line.status = "denied";
+        line.body = "stopped";
+        break;
+    }
+    this.#pushBlock(line);
+    this.#syncTaskTicker();
+    this.#paint();
+  }
+
+  /** A cancelled or dropped turn gets no end for its tasks; they read as stopped. */
+  #stopWorkingTasks(): void {
+    for (const entry of this.#tasks.working()) {
+      this.#endTask({ type: "task-settled", toolCallId: entry.callId, status: "cancelled" });
+    }
+  }
+
+  /** Swaps a live row for its successor at the same position, so nothing below it moves. */
+  #replaceBlock(id: string, block: Block): void {
+    const index = this.#blocks.findIndex((candidate) => candidate.id === id);
+    if (index === -1) {
+      this.#pushBlock(block);
+      return;
+    }
+    this.#blockById.delete(id);
+    block.updateSeq = ++this.#updateSequence;
+    this.#blocks[index] = block;
+    if (block.id !== undefined) this.#blockById.set(block.id, block);
+  }
+
+  #taskPanelRows(width: number): string[] {
+    const working = this.#tasks.working();
+    if (working.length === 0) return [];
+    return renderTaskPanelRows(working, {
+      width,
+      theme: this.#theme,
+      nowMs: Date.now(),
+      pulse: this.#progressPulseGlyph(
+        this.#activityPulseStartedAtMs,
+        this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
+      ),
+    });
+  }
+
+  /**
    * Feeds the file-content cache from the call and derives the presentation
    * context a write needs for its diff. Read results (full-file only) and
    * write inputs are the two exact sources the session has.
@@ -4083,15 +4182,29 @@ export class TerminalRenderer implements AgentTUIRenderer {
     readonly output?: unknown;
     readonly toolCallId: string;
     readonly toolName: string;
+    readonly label?: string | undefined;
+    readonly completeLabel?: string | undefined;
+    /** The call started an agent task of its own. */
+    readonly agentTask?: boolean | undefined;
   }): ToolPresentationContext | undefined {
     if (tool.output !== undefined) this.#fileContents.observeRead(tool.output);
 
-    const context: { previousContent?: string; existed?: boolean; isSubagent?: boolean } = {};
-    if (this.#isSubagentToolName(tool.toolName)) context.isSubagent = true;
+    const context: {
+      previousContent?: string;
+      existed?: boolean;
+      isSubagent?: boolean;
+      label?: string;
+      completeLabel?: string;
+    } = {};
+    if (tool.agentTask === true || this.#isSubagentToolName(tool.toolName)) {
+      context.isSubagent = true;
+    }
+    if (tool.label !== undefined) context.label = tool.label;
+    if (tool.completeLabel !== undefined) context.completeLabel = tool.completeLabel;
 
     const write = readWriteFileInput(tool.toolName, tool.input);
     if (write === undefined) {
-      return context.isSubagent === true ? context : undefined;
+      return Object.keys(context).length > 0 ? context : undefined;
     }
     const previous = this.#fileContents.observeWrite({
       path: write.path,
@@ -4542,6 +4655,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
       rows.push(...renderAttentionRows(this.#setupAttention, width, this.#theme), "");
     }
 
+    // The task panel is the one region that redraws in place while tasks
+    // work, so it sits in the footer rather than the transcript.
+    const taskRows = this.#taskPanelRows(width);
+    if (taskRows.length > 0) {
+      rows.push(...taskRows);
+      if (this.#inputActive) rows.push("");
+    }
+
     // The message-queue panel takes the slot directly above the input
     // because it holds the user's own undelivered words and carries the
     // steering/cancel affordance.
@@ -4663,7 +4784,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const marker = elapsedMs % 1000 < 500 ? (this.#theme.unicode ? "•" : "*") : " ";
     const elapsed =
       elapsedMs < 1000 ? "0s" : formatTurnDuration(Math.floor(elapsedMs / 1000) * 1000);
-    const label = `${turnActivityLabel(this.#activeTurnState)} (${elapsed})`;
+    const label = `${turnActivityLabel(this.#activeTurnState, this.#tasks.working())} (${elapsed})`;
     const { inputTokens, outputTokens } = this.#turnClock.usage;
     const tokens =
       inputTokens > 0 || outputTokens > 0
@@ -5264,11 +5385,12 @@ function promptInputRows({
 }
 
 /** Kind + title of the previously rendered block, for gap / run decisions. */
-type PreviousBlock = { kind: BlockKind; title?: string };
+type PreviousBlock = { kind: BlockKind; title?: string; subagentCallId?: string };
 
 function previousBlockOf(block: Block): PreviousBlock {
   const previous: PreviousBlock = { kind: block.kind };
   if (block.title !== undefined) previous.title = block.title;
+  if (block.subagentCallId !== undefined) previous.subagentCallId = block.subagentCallId;
   return previous;
 }
 
@@ -5289,7 +5411,7 @@ function isActiveToolStatus(status: ToolStatus | undefined): boolean {
  * One parallel cohort stays mutable until every independent call settles:
  * while any member is active, settled siblings stay live so an in-flight
  * batch accumulates as one group instead of fragmenting per status flip.
- * Shared by the top-level tool cohort and each subagent section's children.
+ * Used by the top-level tool cohort.
  */
 function applyCohortLiveness(entries: ReadonlyArray<{ block: Block; active: boolean }>): void {
   const cohortActive = entries.some((entry) => entry.active);
@@ -5302,7 +5424,7 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
   // A tool run breathes after whoever spoke last — the prompt, the agent's
   // own prose, or an answered question — and stays tight within the run.
   if (
-    block.kind === "tool" &&
+    (block.kind === "tool" || block.kind === "task") &&
     (previous?.kind === "user" || previous?.kind === "assistant" || previous?.kind === "question")
   ) {
     return true;
@@ -5316,7 +5438,6 @@ function leadsWithGap(block: Block, previous: PreviousBlock | undefined): boolea
     case "user":
     case "assistant":
     case "reasoning":
-    case "subagent":
     case "error":
     case "notice":
     case "question":
@@ -5474,16 +5595,28 @@ function questionSectionId(requestId: string): string {
   return `question:${requestId}`;
 }
 
-function subagentHeaderId(callId: string): string {
-  return `subagent:${callId}:header`;
+function taskLineId(callId: string, edge: "start" | "end"): string {
+  return `task:${callId}:${edge}`;
 }
 
-function subagentStepSectionId(callId: string, sectionKey: number): string {
+function subagentStepRowId(callId: string, sectionKey: number): string {
   return `subagent:${callId}:step:${sectionKey}`;
 }
 
-function subagentToolSectionId(callId: string, childCallId: string): string {
+function subagentToolRowId(callId: string, childCallId: string): string {
   return `subagent:${callId}:tool:${childCallId}`;
+}
+
+/** The first line of an agent call's message: what the agent was asked to do. */
+function agentTaskSummary(input: unknown): string {
+  if (input === null || typeof input !== "object") return "";
+  const message: unknown = Reflect.get(input, "message");
+  return typeof message === "string" ? (firstLine(stripTerminalControls(message)) ?? "") : "";
+}
+
+function firstLine(text: string): string | undefined {
+  const line = text.split(/\r?\n/u).find((candidate) => candidate.trim().length > 0);
+  return line?.trim();
 }
 
 function connectionAuthSectionId(connectionName: string): string {

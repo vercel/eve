@@ -768,6 +768,35 @@ describe("slackChannel() default event handlers", () => {
     expect(ctx.state.pendingToolCallMessage).toBeNull();
   });
 
+  it("keeps the model's own task calls out of the typing status", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const requested = (toolNames: readonly string[]) =>
+      makeEvent("actions.requested", {
+        actions: toolNames.map((toolName, index) => ({
+          callId: `call_${String(index)}`,
+          input: {},
+          kind: "tool-call" as const,
+          toolName,
+        })),
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      });
+
+    await callEvent(adapter, requested(["task_wait"]), ctx);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await callEvent(adapter, requested(["task_cancel", "search"]), ctx);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit)).toMatchObject({
+      status: "search",
+    });
+  });
+
   it("message.completed clears typing without posting for empty delivery", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),

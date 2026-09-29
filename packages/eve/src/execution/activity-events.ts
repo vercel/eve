@@ -6,6 +6,7 @@ import type {
   ActivityWorkIdentityV1,
 } from "#protocol/activity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
 
 export function projectActivityEvents(input: {
   readonly at: string;
@@ -19,6 +20,7 @@ export function projectActivityEvents(input: {
   if (event.type === "actions.requested") {
     return event.data.actions.flatMap((action) => {
       if (action.kind === "subagent-call" || action.kind === "remote-agent-call") return [];
+      if (action.kind === "tool-call" && isTaskControlTool(action.toolName)) return [];
       const kind = action.kind === "load-skill" ? ("skill" as const) : ("tool" as const);
       const rawName = action.kind === "load-skill" ? "load_skill" : action.toolName;
       const name = normalizePresentationText(rawName) || (kind === "skill" ? "Skill" : "Tool");
@@ -91,6 +93,7 @@ export function projectActivityEvents(input: {
         },
       ];
     }
+    if (result.kind === "tool-result" && isTaskControlTool(result.toolName)) return [];
     const id = actionId(lineage.id, result.callId);
     const label = activityLabel(event.data.presentation?.[result.callId]?.label);
     const labelUpdates =

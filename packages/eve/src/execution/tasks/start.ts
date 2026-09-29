@@ -28,6 +28,7 @@ import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers
 import { createLogger, logError } from "#internal/logging.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createTaskStartedEvent, type TaskStartedStreamEvent } from "#protocol/message.js";
+import { TOO_MANY_TASKS_CODE, UNKNOWN_TASK_CODE } from "#protocol/task-tools.js";
 import type { RuntimeToolResultActionResult, WorkflowToolRunEntry } from "#shared/action-types.js";
 
 const log = createLogger("execution.tasks");
@@ -136,7 +137,7 @@ function tooManyTasks(
     callId: input.task.callId,
     isError: true,
     output: {
-      code: "TOO_MANY_TASKS",
+      code: TOO_MANY_TASKS_CODE,
       message: renderTooManyTasksError(MAX_WORKING_TASKS, runningIds),
     },
     toolName: input.task.toolName,
@@ -148,7 +149,7 @@ function unknownTaskResult(input: TaskDispatchInput): RuntimeToolResultActionRes
     callId: input.task.callId,
     isError: true,
     output: {
-      code: "UNKNOWN_TASK",
+      code: UNKNOWN_TASK_CODE,
       message: renderUnknownTaskError(input.taskId, input.task.toolName),
     },
     toolName: input.task.toolName,

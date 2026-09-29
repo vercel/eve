@@ -373,11 +373,9 @@ describe("registryHandoffAddress", () => {
       }),
       suspendPromptForInput: () => promptSuspended.resolve(),
       subagents: {
-        begin: vi.fn(),
         upsertStep: vi.fn(),
         upsertTool: vi.fn(),
         removeTool: vi.fn(),
-        complete: vi.fn(),
         markChildToolCallId: vi.fn(),
       },
     });
@@ -3578,7 +3576,7 @@ describe("EveTUIRunner renderer teardown", () => {
     expect(requestStop).toHaveBeenCalledOnce();
   });
 
-  it("finishes the section on the child's own turn boundary, before task.settled", async () => {
+  it("follows the child to its own turn boundary, before task.settled", async () => {
     const client = stubClient();
     vi.stubGlobal(
       "fetch",
@@ -3608,14 +3606,14 @@ describe("EveTUIRunner renderer teardown", () => {
       ),
     );
 
-    const completeSubagent = vi.fn();
+    const upsertStep = vi.fn();
     const completed = createDeferred<void>();
     const runner = new EveTUIRunner({
       client,
       name: "Weather Agent",
       renderer: fakeRenderer({
-        // Hold the second prompt open until the child boundary finishes the
-        // section — exiting the run loop aborts the child pump.
+        // Hold the second prompt open until the child's final message lands
+        // — exiting the run loop aborts the child pump.
         readPrompt: vi
           .fn()
           .mockResolvedValueOnce("delegate")
@@ -3627,15 +3625,13 @@ describe("EveTUIRunner renderer teardown", () => {
           for await (const event of result.events as AsyncIterable<unknown>) void event;
         }),
         subagents: {
-          begin: vi.fn(),
-          upsertStep: vi.fn(),
+          upsertStep: (update) => {
+            upsertStep(update);
+            if (update.finalized) completed.resolve();
+          },
           upsertTool: vi.fn(),
           removeTool: vi.fn(),
           markChildToolCallId: vi.fn(),
-          complete: (update: { authoritative: boolean; callId: string }) => {
-            completeSubagent(update);
-            completed.resolve();
-          },
         },
       }),
       session: sessionYielding([
@@ -3661,7 +3657,7 @@ describe("EveTUIRunner renderer teardown", () => {
           },
         },
         // The parent stream never reports task.settled — the child's own
-        // boundary must finish the section.
+        // stream still delivers its final message.
         { type: "turn.completed", data: { sequence: 0, turnId: "turn-parent" } },
         {
           type: "session.waiting",
@@ -3673,7 +3669,9 @@ describe("EveTUIRunner renderer teardown", () => {
     await runner.run();
     await completed.promise;
 
-    expect(completeSubagent).toHaveBeenCalledWith({ authoritative: true, callId: "call-child" });
+    expect(upsertStep).toHaveBeenCalledWith(
+      expect.objectContaining({ callId: "call-child", message: "final answer", finalized: true }),
+    );
   });
 
   it("aborts child-session streams when Ctrl-C exits the runner", async () => {
@@ -4744,29 +4742,30 @@ describe("EveTUIRunner session id reporting", () => {
 });
 
 describe("EveTUIRunner cancelled-turn subagent settling", () => {
-  it("settles subagent sections when the turn is explicitly cancelled", async () => {
+  it("stops following only the cancelled turn's agents", async () => {
     // A child stream that never ends on its own — it only stops when the
     // pump aborts it (the scoped cancellation path under test).
     const client = stubClient();
+    const childSignals = new Map<string, AbortSignal | undefined>();
     vi.stubGlobal(
       "fetch",
-      vi.fn<typeof fetch>(
-        async (_input, init) =>
-          new Response(
-            new ReadableStream<Uint8Array>({
-              start(controller) {
-                init?.signal?.addEventListener(
-                  "abort",
-                  () => controller.error(new DOMException("Aborted", "AbortError")),
-                  { once: true },
-                );
-              },
-            }),
-            {
-              headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      vi.fn<typeof fetch>(async (input, init) => {
+        childSignals.set(new URL(String(input)).pathname, init?.signal ?? undefined);
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              init?.signal?.addEventListener(
+                "abort",
+                () => controller.error(new DOMException("Aborted", "AbortError")),
+                { once: true },
+              );
             },
-          ),
-      ),
+          }),
+          {
+            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+          },
+        );
+      }),
     );
 
     const session = sessionYielding([
@@ -4816,16 +4815,23 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
       { type: "session.waiting" },
     ]);
     const view = {
-      begin: vi.fn(),
       upsertStep: vi.fn(),
       upsertTool: vi.fn(),
       removeTool: vi.fn(),
-      complete: vi.fn(),
       markChildToolCallId: vi.fn(),
     };
     const prompts: Array<string | undefined> = ["hello", undefined];
+    let abortedAtNextPrompt: Record<string, boolean | undefined> = {};
     const renderer = fakeRenderer({
-      readPrompt: vi.fn(async () => prompts.shift()),
+      readPrompt: vi.fn(async () => {
+        if (prompts.length === 1) {
+          await vi.waitFor(() => expect(childSignals.size).toBe(2));
+          abortedAtNextPrompt = Object.fromEntries(
+            [...childSignals].map(([path, signal]) => [path, signal?.aborted]),
+          );
+        }
+        return prompts.shift();
+      }),
       renderStream: vi.fn(async (result) => {
         for await (const event of result.events as AsyncIterable<unknown>) {
           void event;
@@ -4837,12 +4843,12 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
     const runner = new EveTUIRunner({ session, client, renderer, name: "Weather Agent" });
     await runner.run();
 
-    expect(view.begin).toHaveBeenCalledWith({ callId: "call-a", name: "researcher" });
-    expect(view.begin).toHaveBeenCalledWith({ callId: "call-1", name: "researcher" });
-    // A cancelled call's section closes with the cancelled turn, not a
-    // later `task.settled`.
-    expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" });
-    expect(view.complete).not.toHaveBeenCalledWith({ authoritative: true, callId: "call-a" });
+    // A cancelled turn stops following its own agents without waiting for a
+    // later `task.settled`; another turn's agent keeps streaming.
+    expect(abortedAtNextPrompt).toEqual({
+      "/eve/v1/session/child-1/stream": true,
+      "/eve/v1/session/child-a/stream": false,
+    });
   });
 });
 
@@ -4935,5 +4941,110 @@ it("keeps the result of an explicit login command after onboarding", async () =>
     kind: "result",
     message: "Connected.",
     summary: undefined,
+  });
+});
+
+describe("EveTUIRunner task activity", () => {
+  it("shows people their tasks and keeps the model's task bookkeeping out of view", async () => {
+    const turn = { sequence: 1, stepIndex: 0, turnId: "turn-1" };
+    const inputDelta = (callId: string, toolName: string) => ({
+      type: "action.input.appended",
+      data: { ...turn, callId, inputTextDelta: "{}", toolName },
+    });
+    const toolResult = (
+      callId: string,
+      toolName: string,
+      output: unknown,
+      status = "completed",
+    ) => ({
+      type: "action.result",
+      data: { ...turn, result: { callId, kind: "tool-result", output, toolName }, status },
+    });
+    const session = sessionYielding([
+      { type: "turn.started", data: { sequence: 0, turnId: "turn-1" } },
+      inputDelta("deploy-call", "deploy"),
+      inputDelta("deploy-call", "deploy"),
+      inputDelta("wait-call", "task_wait"),
+      {
+        type: "actions.requested",
+        data: {
+          ...turn,
+          actions: [
+            {
+              callId: "deploy-call",
+              input: { env: "preview" },
+              kind: "tool-call",
+              toolName: "deploy",
+            },
+            { callId: "retry-call", input: {}, kind: "tool-call", toolName: "report" },
+            { callId: "wait-call", input: {}, kind: "tool-call", toolName: "task_wait" },
+            {
+              callId: "cancel-call",
+              input: { taskId: "t0" },
+              kind: "tool-call",
+              toolName: "task_cancel",
+            },
+          ],
+          presentation: { "deploy-call": { label: "Deploy to preview" } },
+        },
+      },
+      {
+        type: "task.started",
+        data: {
+          callId: "deploy-call",
+          kind: "tool",
+          name: "deploy",
+          taskId: "t1",
+          turnId: "turn-1",
+        },
+      },
+      toolResult("deploy-call", "deploy", "receipt written for the model"),
+      toolResult("retry-call", "report", { code: "TOO_MANY_TASKS", message: "wait" }, "failed"),
+      toolResult("cancel-call", "task_cancel", "t0 had no work to stop."),
+      {
+        type: "task.settled",
+        data: {
+          callId: "deploy-call",
+          output: { url: "https://preview.example" },
+          status: "completed",
+          taskId: "t1",
+          turnId: "turn-1",
+        },
+      },
+      toolResult("wait-call", "task_wait", "t1 completed; its result follows."),
+      { type: "session.waiting", data: { continuationToken: "c", wait: "next-user-message" } },
+    ]);
+    const seen: AgentTUIStreamEvent[] = [];
+    const prompts: Array<string | undefined> = ["deploy it", undefined];
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          seen.push(event);
+        }
+      }),
+    });
+
+    await new EveTUIRunner({ session, renderer, name: "Weather Agent" }).run();
+
+    expect(seen.filter((event) => event.type !== "turn-start" && event.type !== "finish")).toEqual([
+      { type: "tool-call-preparing", toolCallId: "deploy-call", toolName: "deploy" },
+      {
+        type: "tool-call",
+        toolCallId: "deploy-call",
+        toolName: "deploy",
+        input: { env: "preview" },
+        label: "Deploy to preview",
+      },
+      { type: "tool-call", toolCallId: "retry-call", toolName: "report", input: {} },
+      { type: "task-started", toolCallId: "deploy-call", kind: "tool", toolName: "deploy" },
+      { type: "tool-withdrawn", toolCallId: "retry-call", reason: expect.any(String) },
+      {
+        type: "task-settled",
+        toolCallId: "deploy-call",
+        status: "completed",
+        output: { url: "https://preview.example" },
+      },
+    ]);
   });
 });

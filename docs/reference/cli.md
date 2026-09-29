@@ -219,7 +219,7 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 | `--input <text>`                    | string | none               | Pre-fill the prompt input                                       |
 | `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering                                             |
 | `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering                                             |
-| `--subagents <mode>`                | enum   | `auto-collapsed`   | Subagent-section rendering                                      |
+| `--subagents <mode>`                | enum   | `auto-collapsed`   | Subagent task rendering                                         |
 | `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering                              |
 | `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                                      |
 | `--context-size <tokens>`           | number | none               | Model context window size                                       |
