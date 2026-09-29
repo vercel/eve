@@ -215,7 +215,13 @@ describe("eve dev conversation", () => {
 
     await tui.input({ type: "submit", text: "Ask the researcher for Alice's region." });
     await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
-    const task = { callId: "call_1", name: "researcher", taskId: "task_1", turnId: "turn_1" };
+    const task = {
+      callId: "call_1",
+      kind: "agent" as const,
+      name: "researcher",
+      taskId: "task_1",
+      turnId: "turn_1",
+    };
     server.emit(
       [
         createMessageReceivedEvent({
@@ -305,6 +311,7 @@ describe("eve dev conversation", () => {
     await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
     const calls = ["task_1", "task_2"].map((taskId) => ({
       callId: `pick_${taskId}`,
+      kind: "agent" as const,
       name: "number_picker",
       taskId,
       turnId: "turn_1",

@@ -250,6 +250,7 @@ describe("ConversationTranscript", () => {
       event(
         createTaskStartedEvent({
           callId: "call_1",
+          kind: "agent",
           name: "summarize",
           taskId: "task_1",
           turnId: "turn_1",
@@ -299,6 +300,7 @@ describe("ConversationTranscript", () => {
       event(
         createTaskStartedEvent({
           callId: "call_1",
+          kind: "agent",
           name: "research",
           taskId: "task_1",
           turnId: "turn_1",
@@ -345,6 +347,7 @@ describe("ConversationTranscript", () => {
         event(
           createTaskStartedEvent({
             callId: "call_2",
+            kind: "agent",
             name: "research",
             taskId: "task_1",
             turnId: "turn_1",

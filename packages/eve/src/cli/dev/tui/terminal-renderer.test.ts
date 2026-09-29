@@ -3803,7 +3803,13 @@ describe("TerminalRenderer conversation", () => {
   it("places an agent call's section above tool rows that arrived before its agent started", async () => {
     const { screen, renderer } = makeRenderer(100, 30);
     const prompt = readPrompt(renderer);
-    const call = { callId: "pick_1", name: "number_picker", taskId: "task_1", turnId: "turn_1" };
+    const call = {
+      callId: "pick_1",
+      kind: "agent" as const,
+      name: "number_picker",
+      taskId: "task_1",
+      turnId: "turn_1",
+    };
     const beforeAgent = [
       stamped(createTurnStartedEvent({ sequence: 0, turnId: "turn_1" })),
       stamped(
