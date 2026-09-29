@@ -258,9 +258,10 @@ async function runSessionLoop(
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
-  const settleCancelledTurn = async () => {
+  const settleCancelledTurn = async (reportUsage: boolean) => {
     const settled = await settleCancelledTurnStep({
       ...cursor.stepState(),
+      reportUsage,
     });
     await cursor.apply(settled);
     progress.caller = undefined;
@@ -311,7 +312,7 @@ async function runSessionLoop(
 
       if (action.cancelled === true) {
         const cancelledCaller = { caller: progress.caller, sessionId: boot.sessionId };
-        const settled = await settleCancelledTurn();
+        const settled = await settleCancelledTurn(progress.caller !== undefined);
         await notifyCancelledTaskCallerStep(
           settled.usage === undefined
             ? cancelledCaller
@@ -353,7 +354,7 @@ async function runSessionLoop(
             sessionState: cursor.sessionState,
           });
           await cancelWorkingTasks(cursor);
-          await settleCancelledTurn();
+          await settleCancelledTurn(false);
           // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };
           continue;

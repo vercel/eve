@@ -16,9 +16,9 @@ import type { HarnessSession } from "#harness/types.js";
  */
 export function resolveRemainingSessionTokenLimits(
   session: Pick<HarnessSession, "limits" | "state">,
-  fanoutSize = 1,
+  fanoutSize: number,
 ): RunSessionLimits {
-  const shares = Math.max(1, Math.floor(fanoutSize));
+  const shares = Math.max(1, fanoutSize);
   const remaining = getSessionRemainingUsageQuota(session);
   const limits: {
     maxInputTokensPerSession: number | false;

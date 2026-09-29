@@ -96,8 +96,8 @@ function projectSessionCallbackResult(value: unknown): RuntimeSubagentChildResul
       outcome: payload.outcome,
       output: payload.output ?? "",
       subagentName: payload.subagentName,
-      // Per-result usage projection (usage spans); the parent folds
-      // `outcome.usageDelta`, never this field, when an outcome is present.
+      // Per-result usage projection (usage spans); the run that opened the
+      // child tallies `outcome.usageDelta`, never this field, when present.
       usage: payload.outcome.usageDelta,
     };
   }

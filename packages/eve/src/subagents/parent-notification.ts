@@ -160,8 +160,8 @@ function createSettledTurnResult(input: {
     output,
     subagentName: input.caller.subagentName,
   };
-  // Legacy per-result usage projection (usage spans); the parent folds
-  // `outcome.usageDelta`, never this field, when an outcome is present.
+  // Legacy per-result usage projection (usage spans); the run that opened the
+  // child tallies `outcome.usageDelta`, never this field, when present.
   return input.settled.usage === undefined ? result : { ...result, usage: input.settled.usage };
 }
 

@@ -86,8 +86,10 @@ type CallerDispatch = Pick<
 /**
  * The token budget every session a model step's calls open inherits: the
  * caller's remaining quota split evenly across the agent tasks the step
- * starts, so agents started together are bounded by the remainder together.
- * A call to a running task starts none, so it takes no share.
+ * starts, local or remote, so those tasks are bounded by the remainder
+ * together. Sessions a workflow tool opens with `ctx.agent` get the same
+ * share without dividing it further. A call to a running task starts none,
+ * so it takes no share.
  */
 export function resolveStepAgentLimits(
   caller: Pick<PreparedCoordinationDispatch, "plan" | "session">,

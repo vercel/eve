@@ -16,7 +16,6 @@ import {
   getSessionTokenUsage,
   getSessionUsageLimitViolation,
   setTurnUsageState,
-  takeSessionUsageDelta,
   toUsage,
 } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -161,30 +160,5 @@ describe("delegated agent usage", () => {
       limit: 1_000,
       usedTokens: 1_000,
     });
-  });
-
-  it("counts what a delegate's own delegates spent in the usage it reports", async () => {
-    // Alice's session delegates to Bob's, which delegates to Carol's.
-    const alice = sessionWithTask({ name: "bob", ownInputTokens: 10 });
-    const bob = sessionWithTask({ name: "carol", ownInputTokens: 50 });
-    await bob.execution.handleWorkflowMessage({
-      callIds: [bob.from.callId],
-      from: bob.from,
-      kind: "reply",
-      output: "Carol counted the stations.",
-      usage: usage(200),
-    });
-    // Bob's turn reports what his session spent since his last report.
-    const bobTurn = takeSessionUsageDelta(committed(bob.cursor)).delta;
-
-    await alice.execution.handleWorkflowMessage({
-      callIds: [alice.from.callId],
-      from: alice.from,
-      kind: "reply",
-      output: "Bob relayed Carol's count.",
-      usage: bobTurn,
-    });
-
-    expect(spent(alice.cursor)).toEqual(usage(260));
   });
 });

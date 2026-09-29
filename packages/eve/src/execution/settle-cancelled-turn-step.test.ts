@@ -45,27 +45,33 @@ function spend<T extends { readonly state?: SessionStateMap }>(
 }
 
 describe("settleCancelledTurnStep", () => {
-  it("reports only what the session spent since its caller's last report", async () => {
-    const base = createTestSessionState({
-      emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn_2" },
-      sessionId: "reviewer-session",
-    });
-    // The reviewer's first turn spent 100 tokens and settled, reporting them.
-    const settled = takeSessionUsageDelta(spend(base.snapshot.session, 100, "turn_1")).session;
-    // Its next turn spent 50 more before Alice cancelled it.
-    const cancelling = spend(settled, 50, "turn_2");
+  it.each([
+    { reportUsage: true, reported: 50, nextSettled: 0 },
+    { reportUsage: false, reported: undefined, nextSettled: 50 },
+  ])(
+    "reports only what the session spent since its caller's last report (reports usage: $reportUsage)",
+    async ({ reportUsage, reported, nextSettled }) => {
+      const base = createTestSessionState({
+        emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn_2" },
+        sessionId: "reviewer-session",
+      });
+      // The reviewer's first turn spent 100 tokens and settled, reporting them.
+      const settled = takeSessionUsageDelta(spend(base.snapshot.session, 100, "turn_1")).session;
+      // Its next turn spent 50 more before Alice cancelled it.
+      const cancelling = spend(settled, 50, "turn_2");
 
-    const result = await settleCancelledTurnStep({
-      serializedContext: {},
-      sessionState: { ...base, snapshot: { session: cancelling } },
-      sessionWritable: new WritableStream<Uint8Array>(),
-    });
+      const result = await settleCancelledTurnStep({
+        reportUsage,
+        serializedContext: {},
+        sessionState: { ...base, snapshot: { session: cancelling } },
+        sessionWritable: new WritableStream<Uint8Array>(),
+      });
 
-    expect(result.usage).toMatchObject({ inputTokens: 50, outputTokens: 0 });
-    // The next settled turn reports nothing the cancel already reported.
-    expect(takeSessionUsageDelta(readDurableSession(result.sessionState)).delta).toMatchObject({
-      inputTokens: 0,
-      outputTokens: 0,
-    });
-  });
+      expect(result.usage?.inputTokens).toBe(reported);
+      // The next settled turn reports whatever the cancel didn't.
+      expect(takeSessionUsageDelta(readDurableSession(result.sessionState)).delta.inputTokens).toBe(
+        nextSettled,
+      );
+    },
+  );
 });

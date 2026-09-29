@@ -21,7 +21,7 @@ import type { TokenUsage } from "#shared/token-usage.js";
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-  /** What the session spent since its caller's last report, which this report covers. */
+  /** What the session spent since its caller's last report, when asked to report it. */
   readonly usage?: TokenUsage;
 }
 
@@ -32,6 +32,11 @@ export interface CancelledTurnSettleResult {
  * cancel hook, so a queued cancel wake cannot re-dispatch it.
  */
 export async function settleCancelledTurnStep(input: {
+  /**
+   * Whether a caller receives the turn's usage. Only then is it marked
+   * reported; otherwise the next settled turn reports it.
+   */
+  readonly reportUsage: boolean;
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -72,12 +77,16 @@ export async function settleCancelledTurnStep(input: {
       emissionState,
     ),
   );
+  const base = { serializedContext: serializeContext(ctx) };
+  if (!input.reportUsage || getTurnUsageState(session.state) === undefined) {
+    return { ...base, sessionState: createDurableSessionState({ session: cancelledSession }) };
+  }
   // Reported like a settled turn, as usage since the last report, so the
   // caller counts each turn once whether it settled or was cancelled.
   const reported = takeSessionUsageDelta(cancelledSession);
   return {
-    serializedContext: serializeContext(ctx),
+    ...base,
     sessionState: createDurableSessionState({ session: reported.session }),
-    ...(getTurnUsageState(session.state) !== undefined && { usage: reported.delta }),
+    usage: reported.delta,
   };
 }

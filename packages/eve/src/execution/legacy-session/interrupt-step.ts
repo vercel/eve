@@ -82,6 +82,7 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
       serializedContext: prepared.serializedContext,
     };
   return await settleCancelledTurnStep({
+    reportUsage: false,
     sessionWritable: prepared.input.sessionWritable,
     serializedContext: prepared.serializedContext,
     sessionState: prepared.sessionState,

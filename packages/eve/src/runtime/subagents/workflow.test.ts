@@ -292,6 +292,24 @@ it("sends a cancelled turn's usage on its own, since no reply carries it", async
   ]);
 });
 
+it("sends nothing for a cancelled turn that spent nothing since the last reply", async () => {
+  const started = await startReview();
+  agent.turns[0]?.(
+    turnEnded({ kind: "succeeded", output: "The plan looks ready." }, usage(300, 30)),
+  );
+  await settle();
+  started.control.apply(fridayCheck);
+  await settle();
+  // Alice cancels the check before the reviewer's model spends anything on it.
+  started.control.apply({ kind: "cancel", reason: "Alice cancelled the check." });
+  agent.turns[1]?.(turnEnded({ kind: "cancelled" }, usage(0, 0)));
+  await settle();
+  started.control.apply({ kind: "end", reason: "The session ended." });
+  await started.outcome;
+
+  expect(usageMessages()).toEqual([{ reply: ["call-1"], usage: usage(300, 30) }]);
+});
+
 it("sends no usage once the session ended, since no one would count it", async () => {
   const started = await startReview();
   started.control.apply({ kind: "cancel", reason: "Alice cancelled the review." });

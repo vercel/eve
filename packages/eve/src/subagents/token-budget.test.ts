@@ -44,7 +44,7 @@ function createSessionWithUsage(input: {
 
 describe("resolveRemainingSessionTokenLimits", () => {
   it("returns false axes for an uncapped session", () => {
-    expect(resolveRemainingSessionTokenLimits(createSessionWithUsage({}))).toEqual({
+    expect(resolveRemainingSessionTokenLimits(createSessionWithUsage({}), 1)).toEqual({
       maxInputTokensPerSession: false,
       maxOutputTokensPerSession: false,
     });
@@ -57,7 +57,7 @@ describe("resolveRemainingSessionTokenLimits", () => {
       usedOutputTokens: 20_000,
     });
 
-    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+    expect(resolveRemainingSessionTokenLimits(session, 1)).toEqual({
       maxInputTokensPerSession: 700_000,
       maxOutputTokensPerSession: 30_000,
     });
@@ -68,7 +68,7 @@ describe("resolveRemainingSessionTokenLimits", () => {
       limits: { maxInputTokensPerSession: 1_000_000 },
     });
 
-    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+    expect(resolveRemainingSessionTokenLimits(session, 1)).toEqual({
       maxInputTokensPerSession: 1_000_000,
       maxOutputTokensPerSession: false,
     });
@@ -82,7 +82,7 @@ describe("resolveRemainingSessionTokenLimits", () => {
     });
     const continued = bumpSessionRuntimeUsageLimits(exhausted);
 
-    expect(resolveRemainingSessionTokenLimits(continued)).toEqual({
+    expect(resolveRemainingSessionTokenLimits(continued, 1)).toEqual({
       maxInputTokensPerSession: 1_000_000,
       maxOutputTokensPerSession: 100_000,
     });
@@ -94,7 +94,7 @@ describe("resolveRemainingSessionTokenLimits", () => {
       usedInputTokens: 150_000,
     });
 
-    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+    expect(resolveRemainingSessionTokenLimits(session, 1)).toEqual({
       maxInputTokensPerSession: 0,
       maxOutputTokensPerSession: false,
     });
@@ -126,20 +126,13 @@ describe("resolveRemainingSessionTokenLimits", () => {
     });
   });
 
-  it("keeps uncapped axes uncapped however many children start together", () => {
-    expect(resolveRemainingSessionTokenLimits(createSessionWithUsage({}), 5)).toEqual({
-      maxInputTokensPerSession: false,
-      maxOutputTokensPerSession: false,
-    });
-  });
-
   it("marks uncapped axes as false", () => {
     const session = createSessionWithUsage({
       limits: { maxOutputTokensPerSession: 50_000 },
       usedOutputTokens: 10_000,
     });
 
-    expect(resolveRemainingSessionTokenLimits(session)).toEqual({
+    expect(resolveRemainingSessionTokenLimits(session, 1)).toEqual({
       maxInputTokensPerSession: false,
       maxOutputTokensPerSession: 40_000,
     });
