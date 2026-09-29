@@ -1,16 +1,13 @@
-/**
- * The one-line model summary grammar shared by the dev TUI's status line and
- * the /model menu's Change model hint: `slug@level ↯`. One implementation so
- * the two surfaces cannot drift.
- */
+/** Compact display label for the dev TUI: `model · reasoning · ⚡︎`. */
 export function formatModelSummary(input: {
   model: string;
   /** Authored reasoning level; omitted renders the bare slug. */
   reasoning?: string;
-  /** The Fast mode marker glyph, present only when the priority tier is on. */
+  /** Speed marker glyph, present for intrinsic speed or the priority tier. */
   fastGlyph?: string;
 }): string {
-  const level = input.reasoning === undefined ? "" : `@${input.reasoning}`;
-  const fast = input.fastGlyph === undefined ? "" : ` ${input.fastGlyph}`;
-  return `${input.model}${level}${fast}`;
+  const model = input.model.slice(input.model.lastIndexOf("/") + 1).replace(/-fast$/u, "");
+  return [model, input.reasoning, input.fastGlyph]
+    .filter((segment) => segment !== undefined)
+    .join(" · ");
 }

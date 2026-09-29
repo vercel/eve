@@ -5,7 +5,7 @@ import pc from "#compiled/picocolors/index.js";
 
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { findEveProjectContext } from "#internal/project-context.js";
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { formatNodeEngineOverrideWarning } from "#setup/node-engine.js";
 import type { WorkspaceRootMutation } from "#setup/scaffold/workspace-root.js";
@@ -61,7 +61,10 @@ async function writeWorkspaceAgent(
       `Cannot create agent ${JSON.stringify(name)} because ${appRoot} already exists.`,
     );
   }
-  const files = agentTemplateFiles(options.model ?? DEFAULT_AGENT_MODEL_ID, options.reasoning);
+  const files = agentTemplateFiles(
+    options.model ?? DEFAULT_AGENT_MODEL_ID,
+    options.reasoning ?? (options.model === undefined ? DEFAULT_AGENT_REASONING : undefined),
+  );
   await Promise.all(
     Object.entries(files).map(([path, content]) => writeTextFile(join(appRoot, path), content)),
   );

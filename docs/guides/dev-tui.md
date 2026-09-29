@@ -9,7 +9,9 @@ description: "Use eve locally or connect to a deployed agent from an interactive
 eve dev
 ```
 
-The footer shows the active model and connection separated by dots. Vercel account connections show the team slug once it resolves; the local server port is omitted.
+The footer shows the active model, reasoning level when set, speed indicator, and connection separated by dots, such as `gpt-6-luna · high · ⚡︎`. The model label omits the provider prefix and removes `-fast` only at the end. A single `⚡︎` marks a model with that suffix or explicit **Fast** mode; terminals without Unicode support use an ASCII marker.
+
+Vercel account connections show the team slug once it resolves; the local server port is omitted.
 
 The transcript remains in your terminal scrollback after you exit. Run `/help` in the UI to see the commands available in the current session.
 
@@ -73,7 +75,7 @@ Changes apply together after the final choice, then the picker returns to chat. 
 
 A successful login or model change takes effect on the next prompt.
 
-Gateway connections default to `spacexai/grok-4.7`; OpenAI and ChatGPT default to `gpt-6-luna-fast`; Anthropic defaults to `claude-sonnet-5`. An explicitly authored compatible model stays selected. If a new default is unavailable, eve offers the connection's available models. Dynamic or custom model expressions must be edited in `agent.ts`.
+Gateway connections default to `openai/gpt-6-luna-fast`; OpenAI and ChatGPT default to `gpt-6-luna-fast`; Anthropic defaults to `claude-sonnet-5`. An explicitly authored compatible model stays selected. If a new default is unavailable, eve offers the connection's available models. Dynamic or custom model expressions must be edited in `agent.ts`.
 
 ## Add an integration
 
