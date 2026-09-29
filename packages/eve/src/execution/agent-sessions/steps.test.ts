@@ -22,6 +22,12 @@ const researcher = {
   name: "researcher",
   nodeId: "agents/researcher",
 };
+const writer = {
+  description: "Writes a summary.",
+  kind: "subagent",
+  name: "writer",
+  nodeId: "agents/writer",
+};
 const remoteResearcher = {
   description: "Researches a topic remotely.",
   kind: "remote",
@@ -36,7 +42,7 @@ const remoteResearcher = {
 
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: async () => {
-    const definitions = [researcher, remoteResearcher];
+    const definitions = [researcher, writer, remoteResearcher];
     return {
       compiledArtifactsSource: { kind: "test" },
       subagentRegistry: {
@@ -113,6 +119,35 @@ function childTurn(turnId: string): MessageStreamEvent[] {
   ];
 }
 
+function rootTurnStarted() {
+  return projectSessionActivity({
+    event: {
+      data: { sequence: 0, turnId: "turn-1" },
+      meta: { at, id: "parent:started" },
+      type: "turn.started",
+    },
+    sessionId: "parent",
+  });
+}
+
+function childSessionActivity(
+  sessionId: string,
+  observer: ActivityObserverConfig | undefined,
+  events: readonly MessageStreamEvent[],
+) {
+  return events.flatMap((event) =>
+    projectSessionActivity({ event, sessionId, workIdentity: observer?.workIdentity }),
+  );
+}
+
+function localChildRuntime() {
+  const createSession = vi.fn(async (_input: { activityObserver?: ActivityObserverConfig }) => ({
+    sessionId: "child",
+  }));
+  vi.mocked(createWorkflowRuntime).mockReturnValue({ createSession } as never);
+  return createSession;
+}
+
 afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
@@ -120,10 +155,7 @@ afterEach(() => {
 
 describe("agent session activity", () => {
   it("reports a local agent's turns as its own work that settles when the turn ends", async () => {
-    const createSession = vi.fn(async (_input: { activityObserver?: ActivityObserverConfig }) => ({
-      sessionId: "child",
-    }));
-    vi.mocked(createWorkflowRuntime).mockReturnValue({ createSession } as never);
+    const createSession = localChildRuntime();
     const context = callerContext();
 
     const address = await openAgentSessionStep({
@@ -138,6 +170,7 @@ describe("agent session activity", () => {
       address,
       auth,
       context,
+      key: "run-1:0",
       message: "Go deeper.",
       replyTo: "reply-2",
     });
@@ -146,20 +179,11 @@ describe("agent session activity", () => {
     const sent = vi.mocked(dispatchWorkflowSessionCommand).mock.calls[0]?.[0].command;
     expect(sent).toMatchObject({ caller: { activityObserver: opened } });
     const events = [
-      ...projectSessionActivity({
-        event: {
-          data: { sequence: 0, turnId: "turn-1" },
-          meta: { at, id: "parent:started" },
-          type: "turn.started",
-        },
-        sessionId: "parent",
-      }),
-      ...[
-        { data: {}, meta: { at, id: "child:session" }, type: "session.started" } as const,
+      ...rootTurnStarted(),
+      ...childSessionActivity("child", opened, [
+        { data: {}, meta: { at, id: "child:session" }, type: "session.started" },
         ...childTurn("turn_0"),
-      ].flatMap((event) =>
-        projectSessionActivity({ event, sessionId: "child", workIdentity: opened?.workIdentity }),
-      ),
+      ]),
     ];
     const snapshot = reduceActivityBatch(createActivitySnapshot(), { events, version: 1 });
 
@@ -179,6 +203,59 @@ describe("agent session activity", () => {
     ]);
   });
 
+  it("reports each session one call opens as its own work that settles with its own turn", async () => {
+    const createSession = localChildRuntime();
+    const context = callerContext();
+    for (const [index, name] of ["researcher", "writer"].entries()) {
+      await openAgentSessionStep({
+        auth,
+        context,
+        key: `run-1:${String(index)}`,
+        message: "Work on the topic.",
+        name,
+        replyTo: `reply-${String(index)}`,
+      });
+    }
+    const [research, write] = createSession.mock.calls.map(([input]) => input.activityObserver);
+    const researchId = research?.workIdentity?.id ?? "";
+    const writeId = write?.workIdentity?.id ?? "";
+    const started: MessageStreamEvent = {
+      data: {},
+      meta: { at, id: "session" },
+      type: "session.started",
+    };
+
+    const researchDone = reduceActivityBatch(createActivitySnapshot(), {
+      events: [
+        ...rootTurnStarted(),
+        ...childSessionActivity("research-child", research, [started, ...childTurn("turn_0")]),
+        ...childSessionActivity("write-child", write, [started, childTurn("turn_0")[0]!]),
+      ],
+      version: 1,
+    });
+    expect(researchDone.work).toEqual({
+      [rootWorkId]: expect.objectContaining({ phase: "running" }),
+      [researchId]: expect.objectContaining({ name: "researcher", phase: "completed" }),
+      [writeId]: expect.objectContaining({ name: "writer", phase: "running" }),
+    });
+
+    const [, writeActions, writeEnd] = childTurn("turn_0");
+    const writing = reduceActivityBatch(researchDone, {
+      events: childSessionActivity("write-child", write, [writeActions!]),
+      version: 1,
+    });
+    expect(Object.values(writing.actions)).toContainEqual(
+      expect.objectContaining({ parentWorkId: writeId, phase: "running" }),
+    );
+
+    const bothDone = reduceActivityBatch(writing, {
+      events: childSessionActivity("write-child", write, [writeEnd!]),
+      version: 1,
+    });
+    expect(bothDone.work[writeId]).toMatchObject({ phase: "completed" });
+    expect(bothDone.work[rootWorkId]).toMatchObject({ phase: "running" });
+  });
+
   it("continues a remote agent with an activity observer the remote accepts", async () => {
     const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(null));
     vi.stubGlobal("fetch", fetchMock);
@@ -194,6 +271,7 @@ describe("agent session activity", () => {
       },
       auth,
       context: callerContext(),
+      key: "run-1:0",
       message: "Go deeper.",
       replyTo: "reply-2",
     });

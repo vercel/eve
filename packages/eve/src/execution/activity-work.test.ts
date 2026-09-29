@@ -36,6 +36,7 @@ describe("activity work identity", () => {
       parentSessionId: "root",
       parentTurnId: "turn-1",
       parentWork: root,
+      sessionKey: "run-1:0",
     });
     const grandchild = deriveChildWorkIdentity({
       callId: "call-b",
@@ -44,6 +45,7 @@ describe("activity work identity", () => {
       parentSessionId: "child-a",
       parentTurnId: "child-turn",
       parentWork: child,
+      sessionKey: "run-2:0",
     });
 
     expect(grandchild).toMatchObject({
@@ -83,6 +85,7 @@ describe("activity work identity", () => {
       parentSessionId: "a:b",
       parentTurnId: "c",
       parentWork,
+      sessionKey: "run-1:0",
     });
     const second = deriveChildWorkIdentity({
       callId: "d",
@@ -91,6 +94,7 @@ describe("activity work identity", () => {
       parentSessionId: "a",
       parentTurnId: "b:c",
       parentWork,
+      sessionKey: "run-1:0",
     });
 
     expect(first.id).not.toBe(second.id);

@@ -65,6 +65,8 @@ export type AgentSessionAddress =
 export interface OpenedAgentSession {
   readonly address: AgentSessionAddress;
   readonly context: AgentSessionContext;
+  /** Names the session within its run, as when it opened. */
+  readonly key: string;
 }
 
 /**
@@ -127,7 +129,7 @@ export async function sendAgentSessionMessageStep(
   if (address.kind === "remote") {
     const remote = await resolveSessionRemote(context, address);
     await continueRemoteAgentSession({
-      activityObserver: sessionActivityObserver(context, address),
+      activityObserver: sessionActivityObserver(context, { ...address, key: input.key }),
       auth: input.auth.current,
       callback: {
         callId: context.parent.callId,
@@ -149,7 +151,7 @@ export async function sendAgentSessionMessageStep(
     command: {
       auth: input.auth.current,
       caller: {
-        activityObserver: sessionActivityObserver(context, address),
+        activityObserver: sessionActivityObserver(context, { ...address, key: input.key }),
         callId: context.parent.callId,
         replyTo: { kind: "hook", token: input.replyTo },
         subagentName: address.name,
@@ -232,7 +234,11 @@ async function startLocalSession(
   const { action } = target;
   const { childContinuationToken, runInput } = buildSubagentRunInput({
     action,
-    activityObserver: sessionActivityObserver(context, { kind: "local", name: action.name }),
+    activityObserver: sessionActivityObserver(context, {
+      key: input.key,
+      kind: "local",
+      name: action.name,
+    }),
     auth: auth.current,
     capabilities: context.capabilities,
     channelMetadata: context.channelMetadata,
@@ -278,6 +284,7 @@ async function startRemoteSession(
   const child = await startRemoteAgentSession({
     action,
     activityObserver: sessionActivityObserver(context, {
+      key: input.key,
       kind: "remote",
       name: action.remoteAgentName,
     }),
@@ -302,13 +309,14 @@ async function startRemoteSession(
 }
 
 /**
- * The session's turns report their activity as the opening call's own work,
- * beneath the calling turn, never as the caller's. Every message carries the
- * same identity: its call id is the one steering and remote binding check.
+ * The session's turns report their activity as its own work, beneath the
+ * opening call's turn, never as the caller's. Every message carries the same
+ * identity: its call id is the one steering and remote binding check, and the
+ * session's key tells apart the sessions one call opens.
  */
 function sessionActivityObserver(
   context: AgentSessionContext,
-  session: Pick<AgentSessionAddress, "kind" | "name">,
+  session: Pick<AgentSessionAddress, "kind" | "name"> & { readonly key: string },
 ): ActivityObserverConfig | undefined {
   return deriveChildActivityObserverConfig({
     activityObserver: context.activityObserver,
@@ -317,6 +325,7 @@ function sessionActivityObserver(
     name: session.name,
     parentSessionId: context.parent.sessionId,
     parentTurnId: context.parent.turn.id,
+    sessionKey: session.key,
   });
 }
 

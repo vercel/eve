@@ -58,6 +58,49 @@ function reduceProjection(input: {
   }, createActivitySnapshot());
 }
 
+const delegatedWork: ActivityWorkIdentityV1 = {
+  callId: "call-1",
+  id: "work:parent:turn-1:call-1",
+  kind: "subagent",
+  name: "researcher",
+  parentId: "root:parent:turn-1",
+  rootSessionId: "parent",
+  rootTurnId: "turn-1",
+};
+const questionBlockerId = `input:${delegatedWork.id}:request-1`;
+
+/** A delegated session whose turn asked a question and parked awaiting the answer. */
+const parkedOnQuestion: readonly MessageStreamEvent[] = [
+  { data: {}, meta: { at, id: "session-started" }, type: "session.started" },
+  {
+    data: {
+      requests: [
+        {
+          action: { callId: "tool-1", input: {}, kind: "tool-call", toolName: "search" },
+          kind: "question",
+          prompt: "Which region?",
+          requestId: "request-1",
+        },
+      ],
+      sequence: 1,
+      stepIndex: 0,
+      turnId: "child-turn",
+    },
+    meta: { at, id: "input-requested" },
+    type: "input.requested",
+  },
+  turnEvent("turn.completed", "child-turn"),
+  {
+    data: { continuationToken: "child-token", wait: "next-user-message" },
+    meta: { at, id: "session-waiting" },
+    type: "session.waiting",
+  },
+];
+
+function projectDelegated(events: readonly MessageStreamEvent[]): ActivitySnapshotV1 {
+  return reduceProjection({ events, sessionId: "child-session", workIdentity: delegatedWork });
+}
+
 describe("projectSessionActivity", () => {
   it("maps turn.started and turn.completed to root work lifecycle", () => {
     const sessionId = "session-1";
@@ -259,41 +302,6 @@ describe("projectSessionActivity", () => {
   });
 
   it("keeps delegated work open while its turn waits on a person, then settles it with the resumed turn", () => {
-    const workIdentity: ActivityWorkIdentityV1 = {
-      callId: "call-1",
-      id: "work:parent:turn-1:call-1",
-      kind: "subagent",
-      name: "researcher",
-      parentId: "root:parent:turn-1",
-      rootSessionId: "parent",
-      rootTurnId: "turn-1",
-    };
-    const parked: MessageStreamEvent[] = [
-      { data: {}, meta: { at, id: "session-started" }, type: "session.started" },
-      {
-        data: {
-          requests: [
-            {
-              action: { callId: "tool-1", input: {}, kind: "tool-call", toolName: "search" },
-              kind: "question",
-              prompt: "Which region?",
-              requestId: "request-1",
-            },
-          ],
-          sequence: 1,
-          stepIndex: 0,
-          turnId: "child-turn",
-        },
-        meta: { at, id: "input-requested" },
-        type: "input.requested",
-      },
-      turnEvent("turn.completed", "child-turn"),
-      {
-        data: { continuationToken: "child-token", wait: "next-user-message" },
-        meta: { at, id: "session-waiting" },
-        type: "session.waiting",
-      },
-    ];
     const resumed: MessageStreamEvent[] = [
       {
         data: {
@@ -306,24 +314,30 @@ describe("projectSessionActivity", () => {
         type: "input.resolved",
       },
       turnEvent("turn.started", "child-turn-2"),
+      turnEvent("turn.completed", "child-turn-2"),
+    ];
+
+    const whileParked = projectDelegated(parkedOnQuestion);
+    expect(whileParked.work[delegatedWork.id]).toMatchObject({ phase: "running" });
+    expect(whileParked.blockers[questionBlockerId]).toMatchObject({ phase: "blocked" });
+
+    expect(
+      projectDelegated([...parkedOnQuestion, ...resumed]).work[delegatedWork.id],
+    ).toMatchObject({ phase: "completed" });
+  });
+
+  it("settles work and its question when a turn parked on the question is cancelled", () => {
+    const snapshot = projectDelegated([
+      ...parkedOnQuestion,
       {
-        data: { sequence: 2, turnId: "child-turn-2" },
-        meta: { at, id: "turn.cancelled:child-turn-2" },
+        data: { sequence: 1, turnId: "child-turn" },
+        meta: { at, id: "turn.cancelled:child-turn" },
         type: "turn.cancelled",
       },
-    ];
-    const project = (events: readonly MessageStreamEvent[]) =>
-      reduceProjection({ events, sessionId: "child-session", workIdentity });
+    ]);
 
-    const whileParked = project(parked);
-    expect(whileParked.work[workIdentity.id]).toMatchObject({ phase: "running" });
-    expect(whileParked.blockers[`input:${workIdentity.id}:request-1`]).toMatchObject({
-      phase: "blocked",
-    });
-
-    expect(project([...parked, ...resumed]).work[workIdentity.id]).toMatchObject({
-      phase: "cancelled",
-    });
+    expect(snapshot.work[delegatedWork.id]).toMatchObject({ phase: "cancelled" });
+    expect(snapshot.blockers[questionBlockerId]).toMatchObject({ phase: "cancelled" });
   });
 });
 

@@ -214,7 +214,7 @@ class RunAgentSession implements AgentSession {
         key: this.#key,
         name: this.#name,
       });
-      const opened = { address, context };
+      const opened = { address, context, key: this.#key };
       this.#sessions.push(opened);
       await this.#run.owner.send({ from, kind: "agent-started", session: address });
       return opened;

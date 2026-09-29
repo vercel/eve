@@ -26,6 +26,7 @@ export function deriveChildActivityObserverConfig(input: {
   readonly name: string;
   readonly parentSessionId: string;
   readonly parentTurnId: string;
+  readonly sessionKey: string;
   readonly activityObserver: ActivityObserverConfig | undefined;
 }): ActivityObserverConfig | undefined {
   if (input.activityObserver?.workIdentity === undefined) return undefined;
@@ -46,6 +47,7 @@ export function deriveChildWorkIdentity(input: {
   readonly parentSessionId: string;
   readonly parentTurnId: string;
   readonly parentWork: ActivityWorkIdentityV1;
+  readonly sessionKey: string;
 }): ActivityWorkIdentityV1 {
   return {
     callId: input.callId,

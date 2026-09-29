@@ -82,6 +82,8 @@ export function updateActivityState(
   ) {
     // Every receipt of the turn's task calls is published before the turn ends.
     ctx.delete(ActivityTaskCallsKey);
+    // A cancel drops the turn's pending questions, so none holds its work open.
+    if (event.type === "turn.cancelled") ctx.delete(ActivityPendingBlockersKey);
   } else if (event.type === "input.requested") {
     addActivityBlockers(
       ctx,
