@@ -775,6 +775,75 @@ describe("SessionExecution checkpoints", () => {
     expect(publishTurnWaitingStep).toHaveBeenCalledTimes(1);
     expect(publishTurnWaitingStep).toHaveBeenCalledWith(expect.objectContaining({ sessionState }));
   });
+
+  it("does not let steering that woke a wait interrupt the step that reads it", async () => {
+    const base = state("");
+    const working = createTask(readTaskTable(undefined), {
+      callId: "task-call",
+      kind: "tool",
+      name: "research",
+      resumable: false,
+      turnId: "turn_0",
+    });
+    const sessionState: DurableSessionState = {
+      ...base,
+      snapshot: { session: writeTaskTable(base.snapshot.session, working.table) },
+    };
+    const steering: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ message: "Also check Bob's notes." }],
+    };
+    let signalDelivery: (payload: SessionInboxPayload) => void = () => {};
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn(() => []),
+      hasPending: vi.fn(() => false),
+      whenPending: () => new Promise<void>(() => {}),
+      // The pump signals a delivery as it arrives, then the wait reads it.
+      next: vi.fn(async () => {
+        signalDelivery(steering);
+        return steering;
+      }),
+      onDelivery: vi.fn((handler) => {
+        signalDelivery = handler;
+        return () => {};
+      }),
+      onAgentStarted: () => () => {},
+      onInterrupt: vi.fn(() => () => {}),
+      restore: vi.fn(),
+    };
+    vi.mocked(dispatchCoordinationStep).mockReset().mockResolvedValue({
+      results: [],
+      serializedContext: {},
+      sessionState,
+    });
+    let continuation: { delivery?: DeliverHookPayload; steered?: boolean } = {};
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["wait-call"],
+        pendingTaskToolCalls: [{ callId: "wait-call", kind: "task_wait" }],
+        serializedContext: {},
+        sessionState,
+      })
+      .mockImplementationOnce(async (input) => {
+        continuation = { delivery: input.input?.delivery, steered: input.steeringSignal?.aborted };
+        return { action: "done", output: "done", serializedContext: {}, sessionState };
+      });
+
+    await expect(
+      createExecution({ inbox, sessionState }).runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Wait for the research." }] },
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(continuation).toEqual({ delivery: steering, steered: false });
+  });
 });
 
 function createExecution(input: {

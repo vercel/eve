@@ -153,7 +153,6 @@ export class SessionExecution {
         sessionState: result.sessionState,
       });
       await turn.admitBoundary();
-      turn.resetSteering();
       await this.handleAdmittedTaskEvents(turn);
 
       if (result.action === "cancelled") return await this.finishCancelledTurn();
@@ -517,7 +516,7 @@ class ActiveTurn {
     return this.steeringController.signal;
   }
 
-  resetSteering(): void {
+  private resetSteering(): void {
     if (!this.steeringController.signal.aborted) return;
     this.unsubscribeDelivery();
     this.steeringController = new AbortController();
@@ -532,7 +531,11 @@ class ActiveTurn {
     for (const payload of pending) await this.admit(payload);
   }
 
-  /** Steering admitted during this turn, routed to children first and coalesced. */
+  /**
+   * Steering admitted during this turn, routed to children first and coalesced.
+   * The next step reads it as input, so its signal must not interrupt that
+   * step; only deliveries still unread re-signal the next generation.
+   */
   async takeSteering(): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
@@ -546,6 +549,7 @@ class ActiveTurn {
       }
       if (routed.kind === "turn") steering.push(routed.delivery);
     }
+    this.resetSteering();
     if (steering.length === 0) return undefined;
     const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
     if (delivery.caller !== undefined) this.caller = delivery.caller;
