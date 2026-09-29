@@ -27,6 +27,8 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
     return next === undefined
       ? JSON.stringify(request.toolResults.map((result) => result.output))
       : { toolCalls: [next] };
+  }
+
   if (message.includes("Call toolkit__toolkit_lookup")) {
     const calls = [
       "toolkit__toolkit_lookup",

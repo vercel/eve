@@ -171,16 +171,15 @@ describe("mounted extension via authored-source loader", () => {
       default: typeof first.moduleMap;
     };
     expect(read(generated.default, "two")).toEqual(accountResult);
-    expect(read(generated.default, "two")).toBe("two");
     for (const name of ["research", "support"]) {
       const subagent = first.manifest.subagents.find((entry) => entry.name === name)!;
       const tool = subagent.agent.tools.find((entry) => entry.name === "crm__account")!;
       expect(tool.description).toBe(name);
       for (const map of [first.moduleMap, second, generated.default]) {
         const definition = map.nodes[subagent.nodeId]!.modules[tool.sourceId]!.default as {
-          execute: () => string;
+          execute: () => { account: string; asset: string; prompt: string };
         };
-        expect(definition.execute()).toBe(name);
+        expect(definition.execute()).toEqual({ ...accountResult, account: name });
       }
     }
   });
