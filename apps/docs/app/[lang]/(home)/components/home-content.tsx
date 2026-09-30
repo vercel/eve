@@ -9,7 +9,8 @@ import { FileTree } from "./file-tree";
 import { HeroAudience } from "./hero-audience";
 import { NextjsInterop } from "./nextjs-interop";
 
-const tagline = "Like Next.js for agents. Build agents that you own.";
+const tagline =
+  "Like Next.js for agents. Define your agent in one folder, then deploy on Vercel or your own infrastructure.";
 const titleMetadata = pageTitleMetadata(siteTitle);
 
 export const homeMetadata: Metadata = {
