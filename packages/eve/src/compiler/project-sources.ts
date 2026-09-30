@@ -347,7 +347,12 @@ function projectManifest(input: {
       canonicalSourceSlot(logicalPath) === "agent" ? undefined : "agent.ts",
     );
   }
+  const resolvedNamespaces = new Set(
+    input.manifest.resolvedExtensions.map((mount) => mount.namespace),
+  );
   for (const source of input.manifest.extensions) {
+    // An unresolved mount already failed discovery; binding its declaration would mask that error.
+    if (!resolvedNamespaces.has(mountRefNamespace(source.logicalPath))) continue;
     pushModule(source, undefined, input.declarationMountIds?.get(source.sourceId));
   }
   for (const source of input.manifest.channels) pushModule(source);
