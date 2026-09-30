@@ -47,16 +47,23 @@ export async function isSessionIdleForHandoffStep(input: {
   return isSessionStateIdleForHandoff(input.sessionState);
 }
 
-/** Validates a checkpoint and resolves the target deployment's compiled bundle. */
+export type SessionCheckpointValidation =
+  | { readonly kind: "valid" }
+  | { readonly kind: "incompatible"; readonly reason: "checkpoint-version" };
+
+/**
+ * Validates a checkpoint and resolves the target deployment's compiled bundle.
+ *
+ * A version mismatch is a settled answer about this deployment, not a fault, so
+ * it returns rather than throws: retrying the step can never change it.
+ */
 export async function validateSessionCheckpointStep(input: {
   readonly checkpoint: SessionCheckpoint;
-}): Promise<void> {
+}): Promise<SessionCheckpointValidation> {
   "use step";
   const { checkpoint } = input;
   if (checkpoint.version !== SESSION_CHECKPOINT_VERSION) {
-    throw new Error(
-      `Unsupported session checkpoint version ${JSON.stringify(checkpoint.version)}; this deployment reads version ${SESSION_CHECKPOINT_VERSION}. Keep the session on its original deployment or start a new session here.`,
-    );
+    return { kind: "incompatible", reason: "checkpoint-version" };
   }
   const timeout = checkpoint.sessionTimeoutMs;
   if (
@@ -87,6 +94,7 @@ export async function validateSessionCheckpointStep(input: {
   if (!isSessionStateIdleForHandoff(checkpoint.sessionState)) {
     throw new Error("Session checkpoint contains pending work and cannot be handed off.");
   }
+  return { kind: "valid" };
 }
 
 export async function signalSessionOwnerActivationStep(input: {

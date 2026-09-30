@@ -165,7 +165,15 @@ async function bootHandoffOwner(
   const serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
   const inbox = createSessionInbox(sessionId);
   try {
-    await validateSessionCheckpointStep({ checkpoint });
+    const validation = await validateSessionCheckpointStep({ checkpoint });
+    if (validation.kind === "incompatible") {
+      const payloads = await inbox.release();
+      await signalSessionOwnerActivationStep({
+        activation: { kind: "incompatible", payloads, reason: validation.reason },
+        token: input.activationToken,
+      });
+      return undefined;
+    }
     await inbox.claimSessionHooks(
       sessionHookTokens({ serializedContext, sessionState: checkpoint.sessionState }),
     );
