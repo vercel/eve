@@ -3449,7 +3449,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const body = this.#delayedDevBuildError;
     if (body === undefined) return;
     this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stderr", logLevel: "error", body, live: true });
+    this.#pushBlock({ kind: "log", title: "stderr", logLevel: "error", body, live: false });
     this.#paint();
   }
 
@@ -4045,7 +4045,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const body = pending.join("\n");
       pending = [];
       if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stdout", logLevel, body, live: true });
+      this.#pushBlock({ kind: "log", title: "stdout", logLevel, body, live: false });
     };
 
     for (const line of content.split("\n")) {
@@ -4074,7 +4074,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     });
     if (failedIndex === -1) {
       if (this.#diagnostics === undefined) {
-        this.#pushBlock({ kind: "log", title: "stderr", logLevel, body: content, live: true });
+        this.#pushBlock({ kind: "log", title: "stderr", logLevel, body: content, live: false });
         return;
       }
       const presentation = presentDiagnostic(content, this.#diagnostics.displayPath);
@@ -4084,7 +4084,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           title: "stderr",
           logLevel,
           body: presentation.text,
-          live: true,
+          live: false,
         });
         return;
       }
@@ -4094,7 +4094,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         body: formatStoredDiagnostic(presentation),
         logVisibility: "summary",
         logLevel,
-        live: true,
+        live: false,
       });
       this.#pushBlock({
         kind: "log",
@@ -4102,14 +4102,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
         body: content,
         logVisibility: "all-only",
         logLevel,
-        live: true,
+        live: false,
       });
       return;
     }
 
     const previous = lines.slice(0, failedIndex).join("\n");
     if (previous.trim().length > 0) {
-      this.#pushBlock({ kind: "log", title: "stderr", body: previous, live: true });
+      this.#pushBlock({ kind: "log", title: "stderr", logLevel, body: previous, live: false });
     }
     const failedBody = lines.slice(failedIndex).join("\n");
     this.#handleDevRebuildFailure(failedBody);
@@ -4119,7 +4119,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#clearDevBuildStatus();
     if (this.#logs === "all") {
       if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
+      this.#pushBlock({ kind: "log", title: "stderr", logLevel: "error", body, live: false });
       return;
     }
     this.#delayedDevBuildError = body;
@@ -4170,7 +4170,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
     if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stdout", body: line, live: true });
+    this.#pushBlock({ kind: "log", title: "stdout", body: line, live: false });
   }
 
   #setDevBuildStatus(status: DevBuildStatus): void {

@@ -1232,7 +1232,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("coalesces a source's writes into one section showing the newest write", () => {
+  it("commits complete writes in arrival order across transcript boundaries", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
@@ -1251,15 +1251,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    // A stream is continuous: every stdout write — the notice interleaving
-    // included — merges into ONE section anchored at the newest write,
-    // showing only that write with the rest behind the elided count.
-    expect(countOccurrences(snapshot, "○ stdout")).toBe(1);
-    expect(snapshot).toContain("│ … (2 more)");
+    expect(snapshot).toContain("city: 'NY'");
+    expect(snapshot).toContain("city: 'LA'");
     expect(snapshot).toContain("│ post-turn line");
-    expect(snapshot).not.toContain("city: 'NY'");
-    // The section sits at the last write's position — after the notice.
-    expect(snapshot.indexOf("○ stdout")).toBeGreaterThan(snapshot.indexOf("turn boundary"));
+    expect(snapshot.indexOf("city: 'NY'")).toBeLessThan(snapshot.indexOf("city: 'LA'"));
+    expect(snapshot.indexOf("city: 'LA'")).toBeLessThan(snapshot.indexOf("turn boundary"));
+    expect(snapshot.indexOf("turn boundary")).toBeLessThan(snapshot.indexOf("post-turn line"));
   });
 
   it("retroactively hides and restores buffered logs when the level changes", () => {
@@ -1507,9 +1504,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     process.stdout.write("interleaved stdout line\n");
     console.error("second stderr line");
 
-    // Both stderr writes merge into one stream section; the hidden stdout
-    // write contributes no section of its own.
-    expect(countOccurrences(screen.snapshot(), "○ error")).toBe(1);
+    expect(screen.snapshot()).toContain("first stderr line");
+    expect(screen.snapshot()).toContain("second stderr line");
     expect(screen.snapshot()).not.toContain("○ stdout");
 
     renderer.setLogDisplayMode("all");
@@ -1589,8 +1585,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain('sandbox · built sandbox template "root" on backend "docker".');
-    expect(snapshot).not.toContain("initializing 3 sandbox templates");
-    expect(snapshot).not.toContain("checking Docker daemon");
+    expect(snapshot).toContain("initializing 3 sandbox templates");
+    expect(snapshot).toContain("checking Docker daemon");
     expect(snapshot).toContain("ordinary stdout log");
     expect(snapshot).toContain("○ stdout");
   });
@@ -3916,8 +3912,14 @@ describe("TerminalRenderer conversation", () => {
   const completed = (turnId: string, message: string) =>
     stamped(createMessageCompletedEvent({ message, sequence: 2, stepIndex: 0, turnId }));
 
-  it("streams prose in the live region and commits it whole once it settles", async () => {
-    const { screen, renderer } = makeRenderer(34, 8);
+  it("commits settled prose past hidden logs and reveals those logs without clipping", async () => {
+    const screen = new MockScreen({ columns: 34, rows: 8 });
+    const renderer = new TerminalRenderer({
+      input: new MockUserInput(),
+      output: screen,
+      captureForeignOutput: true,
+      unicode: true,
+    });
     const prompt = readPrompt(renderer);
     const words = Array.from(
       { length: 44 },
@@ -3925,7 +3927,11 @@ describe("TerminalRenderer conversation", () => {
     );
     const streaming = [turn("turn_1"), ...words.map((word) => appended("turn_1", `${word} `))];
 
+    console.warn("Workflow is awaiting settlement");
+    process.stdout.write("Raw progress\n");
+    process.stderr.write("Raw diagnostic\n");
     renderer.renderConversation(conversationOf(streaming, { working: true }));
+    expect(screen.snapshot()).not.toContain("Workflow is awaiting settlement");
     expect(screen.snapshot()).toContain("earlier rows hidden");
     expect(screen.snapshot()).not.toContain("word-01");
 
@@ -3936,6 +3942,14 @@ describe("TerminalRenderer conversation", () => {
     expect(countOccurrences(snapshot, "word-01")).toBe(1);
     expect(countOccurrences(snapshot, "word-44")).toBe(1);
     expect(snapshot).not.toContain("earlier rows hidden");
+    renderer.setLogDisplayMode("all");
+    const revealed = screen.snapshot();
+    expect(revealed).toContain("Workflow is awaiting settlement");
+    expect(revealed).toContain("Raw progress");
+    expect(revealed).toContain("Raw diagnostic");
+    expect(revealed).not.toContain("earlier rows hidden");
+    expect(countOccurrences(revealed, "word-01")).toBe(1);
+    expect(countOccurrences(revealed, "word-44")).toBe(1);
     renderer.requestInterrupt();
     await prompt.catch(() => {});
   });
