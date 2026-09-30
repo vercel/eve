@@ -46,6 +46,11 @@ import { defineJsonSchema } from "#tools/schema.js";
 
 import { connectionExecuteApproval, releaseApprovalPin } from "./connection-approval.js";
 import {
+  closestToolNames,
+  rankConnectionTools,
+  type RankCandidate,
+} from "./connection-search-rank.js";
+import {
   CONNECTION_EXECUTE_TOOL_NAME,
   findConnection,
   qualifiedToolName,
@@ -196,14 +201,13 @@ async function searchConnectionTools(
 
   const challenges: AuthorizationChallenge[] = [];
   const unavailable: UnavailableConnection[] = [];
-  const candidates: { readonly connection: string; readonly tool: ConnectionToolMetadata }[] = [];
+  const candidates: RankCandidate[] = [];
   for (const connection of targets) {
     const listed = await listConnectionTools(registry, connection, auth);
     if ("challenges" in listed) challenges.push(...listed.challenges);
     else if ("unavailable" in listed) unavailable.push(listed.unavailable);
     else {
-      for (const tool of listed.tools)
-        candidates.push({ connection: connection.connectionName, tool });
+      for (const tool of listed.tools) candidates.push({ connection, tool });
     }
   }
 
@@ -213,22 +217,13 @@ async function searchConnectionTools(
     throw new Error(terminal.map((entry) => entry.error).join("\n"));
   }
 
-  const queryTokens = tokenize(input.query ?? "");
-  const ranked = candidates
-    .map((candidate) => ({ ...candidate, score: scoreTool(queryTokens, candidate.tool) }))
-    .filter((candidate) => candidate.score > 0)
-    .sort(
-      (a, b) =>
-        b.score - a.score ||
-        a.connection.localeCompare(b.connection) ||
-        a.tool.name.localeCompare(b.tool.name),
-    );
+  const ranked = rankConnectionTools(input.query ?? "", candidates);
   const limit = clampInteger(input.limit, 1, MAX_SEARCH_LIMIT, DEFAULT_SEARCH_LIMIT);
   const offset = clampInteger(input.offset, 0, Number.MAX_SAFE_INTEGER, 0);
 
   const output: { -readonly [K in keyof ConnectionSearchOutput]: ConnectionSearchOutput[K] } = {
     tools: ranked.slice(offset, offset + limit).map(({ connection, tool }) => ({
-      connection,
+      connection: connection.connectionName,
       description: tool.description,
       signature: renderToolSignature({
         inputSchema: tool.inputSchema,
@@ -296,38 +291,6 @@ async function listConnectionTools(
       },
     };
   }
-}
-
-function tokenize(text: string): string[] {
-  return text
-    .replaceAll(/([a-z0-9])([A-Z])/gu, "$1 $2")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/u)
-    .filter((token) => token.length > 1);
-}
-
-/** Word overlap weighted by where the word appears. Every tool matches an empty query. */
-function scoreTool(queryTokens: readonly string[], tool: ConnectionToolMetadata): number {
-  if (queryTokens.length === 0) return 1;
-  const properties = isObject(tool.inputSchema.properties)
-    ? Object.keys(tool.inputSchema.properties)
-    : [];
-  const fields: readonly (readonly [readonly string[], number])[] = [
-    [tokenize(tool.name), 3],
-    [properties.flatMap(tokenize), 2],
-    [tokenize(tool.description), 1],
-  ];
-  let score = 0;
-  for (const query of queryTokens) {
-    for (const [tokens, weight] of fields) {
-      if (tokens.some((token) => matchesToken(token, query))) score += weight;
-    }
-  }
-  return score;
-}
-
-function matchesToken(token: string, query: string): boolean {
-  return token.startsWith(query) || (token.length >= 3 && query.startsWith(token));
 }
 
 function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
@@ -429,13 +392,7 @@ function unknownToolMessage(
   toolName: string,
   tools: readonly ConnectionToolMetadata[],
 ): string {
-  const queryTokens = tokenize(toolName);
-  const suggestions = tools
-    .map((tool) => ({ name: tool.name, score: scoreTool(queryTokens, tool) }))
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
-    .slice(0, MAX_SUGGESTIONS)
-    .map((entry) => entry.name);
+  const suggestions = closestToolNames(toolName, tools, MAX_SUGGESTIONS);
   const hint =
     suggestions.length > 0
       ? ` Closest tools: ${suggestions.join(", ")}.`

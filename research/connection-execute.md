@@ -138,9 +138,10 @@ connection_execute({ connection, tool, input })   ← model-visible action
 - **Connection failures.** A connection that needs sign-in starts
   authorization, as today. A connection that fails is returned in
   `unavailable` with its `error`.
-- **Ranking.** Word matching over tool names, descriptions, and input
-  property names. The ranking can change later with no change to the
-  result shape.
+- **Ranking.** Prefix word matching, weighted by field: tool name, then
+  connection name, input property names, tool description, and last
+  property descriptions and the connection description. The ranking can
+  change later with no change to the result shape.
 
 **`connection_execute`**
 
