@@ -92,9 +92,8 @@ identifies the session that started the task or opened the subagent session.
 Typed handlers and `*` handlers receive this context even when the event
 arrives between turns. These hooks can use `ctx.getSandbox()` against that
 session. Session state and sandbox changes they make are kept for the
-session's next turn. `agent.started` reaches the stream as soon as the child
-session opens, but its hooks can run later; see
-[Execution order](#execution-order).
+session's next turn. `agent.started` appears when the child session opens, or
+when the parent's current model step ends if one is running.
 
 ### Narrowing tool results
 
@@ -176,32 +175,20 @@ See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envel
 
 ## Execution order
 
-Publishing a stream event writes it to the durable stream and dispatches it to its channel adapter handler and stream-event hooks. Dispatch runs in the step that owns the session's state, so state and sandbox changes that handlers and hooks make are kept.
+When a stream event fires, the step that owns the session does four things in order:
 
-The exception is an event that ends the session outside a model step: `session.completed`, or `session.failed` for a failure outside a model step. Its channel adapter handler runs without session scope and no hooks run, so a `session.completed` hook never fires. A `session.failed` from a failing model step is dispatched in that step, and its hooks run.
-
-When a step publishes an event it produced, such as a turn's `message.completed` or a workflow tool's `action.partial`, these things happen in order:
-
-1. Channel delivery. The channel adapter handler runs and can shape the event before it is written.
+1. Channel delivery. The channel adapter handler runs.
 2. Write. The event is stamped with its `meta` envelope, then written to the durable stream.
 3. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
 4. Model preparation, for model lifecycle events. Dynamic resolvers subscribed to those events update the model context. Subagent notifications do not run model preparation.
 
-Only `agent.started` is written while another step owns the session. eve writes it as soon as the child session opens so clients can follow the child, then dispatches it later:
-
-- The next step that owns the session dispatches it before its own work, against the state committed at its start. If the session would wait first, for a result or for input, eve dispatches it in a step of its own.
-- If the session ends first, it is dispatched before `session.completed` or `session.failed`, or after a `session.failed` that a failing model step wrote.
-- A retry of the dispatching step runs its hooks again with the same `meta.id` and does not write the event again. A retry of the writing step can write the event twice, but only the copy from the completed attempt is dispatched.
-
 Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
-
-Hooks see each step's events in stream order, but an `agent.started` written during a model step is dispatched after the hooks of events that step wrote later. If the child opens during the model step that ends a turn, a `*` hook sees the turn end, such as `turn.completed` and `session.waiting`, before `agent.started`. To process events in stream order, sort them by `meta.id`.
 
 ## What happens when a hook throws
 
 eve logs a thrown or rejected handler with the hook slug, subscription, event type, event ID, and session ID, then runs the remaining subscribers in order. The current turn, subagent notification, and session continue. This applies to every stream-event hook, including `turn.started`, `step.started`, and failure events. Throwing from a hook does not reject work or veto a turn. To stop the running turn, call [`ctx.cancel()`](#cancel-the-running-turn-from-a-hook).
 
-A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate. If persisting state after a `task.started`, `task.settled`, or `agent.started` event fails, the workflow runtime retries the publishing step, which can publish the event again. For an `agent.started` written while the parent's model step ran, see [Execution order](#execution-order) for what a retry repeats.
+A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate. If persisting state after a `task.started`, `task.settled`, or `agent.started` event fails, the workflow runtime retries the publishing step, which can publish the event again.
 
 ## Cancel the running turn from a hook
 
