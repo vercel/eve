@@ -250,7 +250,14 @@ export default defineChannel({
       ctx.waitUntil(
         ctx
           .to(slack, { channelId: "C0123ABC" })
-          .send(`Investigate ${event.reference}: ${event.summary}`, { auth: null }),
+          .send(`Investigate ${event.reference}: ${event.summary}`, {
+            auth: {
+              authenticator: "intake",
+              principalType: "service",
+              principalId: event.source,
+              attributes: {},
+            },
+          }),
       );
       return new Response("ok");
     }),
@@ -258,16 +265,15 @@ export default defineChannel({
 });
 ```
 
-`verifyAndParseEvent` represents application code, not an eve API: verify the provider's signature before trusting its fields, validate and bound the payload, and select only events that should start work. The route never calls `from(...).send(...)`, so it creates no session on `intake` and sends no reply to the event source. The destination channel owns the conversation and its replies; configure its inbound handlers to accept any follow-up messages you want to reach that session. `ctx.to(...)` belongs to authored route handlers; platform-specific inbound callbacks do not necessarily expose it.
-
-A webhook may be retried. Make the event-to-destination hand-off idempotent in application storage when duplicate sessions or provider posts matter; `to(...).send(...)` does not deduplicate source events for you. To post a notification without starting an agent turn, call the destination provider's API instead. If that notification must survive process failures, use an application-owned outbox; see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
+`verifyAndParseEvent` represents application code, not an eve API: verify the provider's signature, validate and bound the payload, and derive `event.source` from the verified sender rather than an arbitrary payload field. Filter events before dispatching. For retried webhooks, make the hand-off idempotent in application storage when duplicate sessions or provider posts matter; `to(...).send(...)` does not deduplicate source events for you.
 
 Semantics:
 
 - The target channel's authored `receive(input, { from })` hook owns the continuation-token format and initial state. Callers supply the target to `to(...)`, then the message and auth to `send(...)`.
 - `auth` flows through to `session.auth.initiator` so the target's event handlers and the agent's tools can read who started the session.
-- Calling `ctx.to(...).send(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
-- `send(...)` is not a direct provider-message API. It supplies input to the agent on the destination channel.
+- Calling `ctx.to(...).send(...)` does not also start a session on the current channel. The destination owns the session and its replies; configure its inbound handlers to accept follow-up messages. The source receives only the route handler's HTTP response.
+- `ctx.to(...)` belongs to authored route handlers; platform-specific inbound callbacks do not necessarily expose it. [Handler-form schedules](../schedules#handler-form-run) expose the same destination-selection contract as `to(...)`.
+- `send(...)` invokes the agent; it is not a direct provider-message API. To post without an agent turn, use the provider API. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) for an application-owned outbox.
 - The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
 
 ## Channel metadata
