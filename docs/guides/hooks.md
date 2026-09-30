@@ -175,7 +175,7 @@ See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envel
 
 ## Execution order
 
-When a stream event fires, the step that owns the session does four things in order:
+When a session publishes a stream event while it runs, the step that owns the session does four things in order:
 
 1. Channel delivery. The channel adapter handler runs.
 2. Write. The event is stamped with its `meta` envelope, then written to the durable stream.
@@ -219,7 +219,7 @@ The remaining subscribers for the event still run. Then eve cancels the turn the
 
 `ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: eve ignores a call from work the handler does not await and logs a warning.
 
-`ctx.cancel()` only stops a running turn. eve logs a warning and ignores the call on `step.failed`, `turn.completed`, `turn.failed`, `turn.cancelled`, `turn.waiting`, `session.waiting`, `session.completed`, `session.failed`, `context.cleared`, `task.started`, `task.settled`, and `agent.started`, and during clear or compact requests.
+`ctx.cancel()` only stops a running turn. eve logs a warning and ignores the call on `step.failed`, `turn.completed`, `turn.failed`, `turn.cancelled`, `turn.waiting`, `session.waiting`, `session.failed`, `context.cleared`, `task.started`, `task.settled`, and `agent.started`, and during clear or compact requests.
 
 ## Subagent isolation
 
