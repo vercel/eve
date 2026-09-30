@@ -20,9 +20,10 @@ export function firstSentence(text: string): string | undefined {
   for (const line of text.split(/\r?\n/u)) {
     const normalized = normalizePresentationText(line);
     if (normalized === "") continue;
-    // A sentence ends at `.`, `!`, or `?` before a capital, digit, or quote, so
-    // `e.g. the` and `eve@0.58.1` stay whole.
-    return normalized.split(/(?<=[.!?])\s+(?=[\p{Lu}\d"'`(])/u, 1)[0];
+    // A sentence ends at `.`, `!`, or `?` before a capital or quote, so
+    // `e.g. the`, `No. 4035`, and `eve@0.58.1` stay whole. A list marker such
+    // as `1.` never ends one.
+    return normalized.split(/(?<=[.!?])(?<!(?:^|\s)\d{1,2}\.)\s+(?=[\p{Lu}"'`(])/u, 1)[0];
   }
   return undefined;
 }

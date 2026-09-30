@@ -3,8 +3,8 @@
  * the same text its task card row shows, so both surfaces name a call the same
  * way: `Run pnpm test`, `researcher: Find the March incidents`.
  */
-import { actionName } from "#channel/task-card.js";
 import type { ActionPresentationByCallId } from "#protocol/message.js";
+import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 
@@ -18,7 +18,7 @@ export function describeActionRequests(
 ): string {
   const [first] = actions;
   if (first === undefined) return "Working...";
-  const label = presentation?.[first.callId]?.label ?? actionName(first);
+  const label = presentation?.[first.callId]?.label ?? actionRequestName(first);
   return actions.length === 1 ? label : `${label} +${String(actions.length - 1)} more`;
 }
 

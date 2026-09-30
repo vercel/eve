@@ -1,5 +1,6 @@
 import { isTaskControlTool } from "#protocol/task-tools.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -308,7 +309,7 @@ function requestedCall(
   label: string | undefined,
   at: string,
 ): TrackedCall {
-  const name = actionName(action);
+  const name = actionRequestName(action);
   const call: { -readonly [K in keyof TrackedCall]: TrackedCall[K] } = {
     callId: action.callId,
     name,
@@ -382,20 +383,6 @@ function bounded(calls: readonly TrackedCall[]): readonly TrackedCall[] {
     }
     return true;
   });
-}
-
-/** The tool, skill loader, or agent a call targets. */
-export function actionName(action: RuntimeActionRequest): string {
-  switch (action.kind) {
-    case "load-skill":
-      return "load_skill";
-    case "subagent-call":
-      return action.subagentName;
-    case "remote-agent-call":
-      return action.remoteAgentName;
-    default:
-      return action.toolName;
-  }
 }
 
 function actionStatus(status: string): TaskCardStatus {

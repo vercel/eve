@@ -43,6 +43,18 @@ describe("agent call label", () => {
       "On eve@0.58.1 the build fails, e.g. with an extension mounted. Reproduce it.",
       "On eve@0.58.1 the build fails, e.g. with an extension mounted.",
     ],
+    [
+      "keeps a leading list marker with its sentence",
+      "agent",
+      "1. Reproduce the build failure on main. Then bisect.",
+      "1. Reproduce the build failure on main.",
+    ],
+    [
+      "keeps a number after an abbreviation inside one sentence",
+      "agent",
+      "See PR No. 4035 for details. Then review it.",
+      "See PR No. 4035 for details.",
+    ],
     ["falls back to the agent's name for an empty brief", "agent", "  \n", "agent"],
   ])("%s", (_name, tool, message, expected) => {
     expect(withTaskIdInput(agentTool(tool)).label?.start?.({ message })).toBe(expected);
