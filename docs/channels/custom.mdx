@@ -3,7 +3,7 @@ title: "Custom Channels"
 description: "Author custom HTTP and WebSocket channels with routes, events, metadata, continuation tokens, and file uploads."
 ---
 
-When eve doesn't ship a channel for your surface, you build one. Custom channels expose HTTP or WebSocket endpoints, parse incoming requests, start or resume sessions, observe runtime events, and own delivery back to your platform.
+When eve doesn't ship a channel for your surface, you build one. A custom channel can receive HTTP or WebSocket events and start or resume a session on that channel. It can also act only as ingress: verify an event, then start or resume a session on another channel without delivering a reply to the source.
 
 ## File location and identity
 
@@ -232,37 +232,35 @@ The bridge server does not listen on its own port. It receives only upgrade even
 
 ## Cross-channel hand-off
 
-Route handlers can start or resume an agent session on a different channel via `ctx.to(channel, target).send(message, options)`. This is an agent hand-off: the message becomes turn input and invokes the model on the destination channel. Use it when an inbound request should pivot the conversation, such as an incident webhook that opens an investigation thread in Slack.
+A custom channel can receive an event without hosting an agent session. Its route verifies the source, filters the event, and calls `ctx.to(channel, target).send(message, options)` to start or resume the session on the destination channel. For example, an event webhook can open an investigation in Slack:
 
-To post a provider notification without starting an agent turn, call the destination provider's API instead. If that notification must survive process failures, use an application-owned outbox; see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
-
-```ts
+```ts title="agent/channels/intake.ts"
 import { defineChannel, POST } from "eve/channels";
+
+import { verifyAndParseEvent } from "../lib/inbound-events";
 import slack from "./slack";
 
 export default defineChannel({
   routes: [
-    POST("/incident", async (req, ctx) => {
-      const incident = await req.json();
+    POST("/intake/events", async (req, ctx) => {
+      const event = await verifyAndParseEvent(req);
+      if (!event) return new Response("unauthorized", { status: 401 });
+      if (event.kind !== "actionable") return new Response("ok");
 
       ctx.waitUntil(
         ctx
           .to(slack, { channelId: "C0123ABC" })
-          .send(`Investigate ${incident.reference}: ${incident.title}`, {
-            auth: {
-              authenticator: "incidentio",
-              principalType: "service",
-              principalId: incident.actor.id,
-              attributes: { reference: incident.reference, severity: incident.severity },
-            },
-          }),
+          .send(`Investigate ${event.reference}: ${event.summary}`, { auth: null }),
       );
-
       return new Response("ok");
     }),
   ],
 });
 ```
+
+`verifyAndParseEvent` represents application code, not an eve API: verify the provider's signature before trusting its fields, validate and bound the payload, and select only events that should start work. The route never calls `from(...).send(...)`, so it creates no session on `intake` and sends no reply to the event source. The destination channel owns the conversation and its replies; configure its inbound handlers to accept any follow-up messages you want to reach that session. `ctx.to(...)` belongs to authored route handlers; platform-specific inbound callbacks do not necessarily expose it.
+
+A webhook may be retried. Make the event-to-destination hand-off idempotent in application storage when duplicate sessions or provider posts matter; `to(...).send(...)` does not deduplicate source events for you. To post a notification without starting an agent turn, call the destination provider's API instead. If that notification must survive process failures, use an application-owned outbox; see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
 Semantics:
 
