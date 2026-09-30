@@ -101,10 +101,10 @@ async function applyTaskRunMessage(
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
       events.push(...taskSettledEvents(record, settled.settled, outcome));
       table = finishTaskRun(settled.table, taskId, message.from.runId);
-      // A finished run can no longer take answers, so channels must stop offering its questions.
+      // Nobody can answer what a finished run relayed, so channels must stop offering it.
       ({ events: withdrawn, session } = withdrawProxyInputRequests(
         session,
-        (_requestId, route) => route.workflowAsk?.runId === message.from.runId,
+        (_requestId, route) => route.runId === message.from.runId,
       ));
       break;
     }
@@ -119,9 +119,9 @@ async function applyTaskRunMessage(
 /**
  * Cancels tasks: their calls settle as cancelled and their runs are told to
  * stop. A run ends itself within its cleanup deadline and reports cancelled.
- * A `task()` run's cancel settles its questions, so the session withdraws
- * them in the same step and accepts no answer after it. A `serve()` run
- * withdraws its stretch's questions itself, and the session decides each one.
+ * A `task()` run's cancel settles every request it relayed, so the session
+ * withdraws them in the same step and accepts no answer after it. A `serve()`
+ * run withdraws its stretch's questions itself, and the session decides each one.
  */
 export async function cancelTasksStep(
   input: SessionStepState & { readonly taskIds: readonly string[] },
@@ -148,8 +148,7 @@ async function cancelTasks(
   }
   const withdrawn = withdrawProxyInputRequests(
     session,
-    (_requestId, route) =>
-      route.workflowAsk !== undefined && stoppedRunIds.has(route.workflowAsk.runId),
+    (_requestId, route) => route.runId !== undefined && stoppedRunIds.has(route.runId),
   );
   const relayed = await relaySessionEvents(
     { ...input, sessionState: saveTable(input.sessionState, withdrawn.session, table) },

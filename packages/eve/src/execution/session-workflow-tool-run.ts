@@ -8,7 +8,6 @@ import type {
   WorkflowToolRunAgentStartedMessage,
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
-  WorkflowToolRunRef,
   WorkflowToolRunRequestMessage,
   WorkflowToolRunWithdrawMessage,
 } from "#execution/tools/workflow/messages.js";
@@ -85,8 +84,8 @@ export function batchAgentStarts(messages: readonly WorkflowToolRunMessage[]): B
 /**
  * Settles a workflow tool run outcome against the turn's recorded runs and
  * returns the runtime action result the turn should accept, or `undefined`
- * when the outcome does not bind to a run this turn owns. Questions the run
- * left open are withdrawn first, since it can no longer take their answers.
+ * when the outcome does not bind to a run this turn owns. Requests the run
+ * relayed are withdrawn first, since nobody can answer them anymore.
  */
 async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
@@ -122,9 +121,10 @@ async function handleWorkflowToolRunRequest(
   await cursor.advance((state) =>
     runProxySubagentEventStep({
       ...(message.request.kind === "ask" && {
-        workflowAsk: createWorkflowAskRoute(message.from, message.request),
+        workflowAsk: createWorkflowAskRoute(message.request),
       }),
       hookPayload: workflowToolRunRequestToInputRequestPayload(message),
+      runId: message.from.runId,
       ...state,
     }),
   );
@@ -149,10 +149,7 @@ async function handleWorkflowToolRunWithdraw(
   );
 }
 
-function createWorkflowAskRoute(
-  from: WorkflowToolRunRef,
-  ask: WorkflowToolAskRequest,
-): WorkflowAskRoute {
+function createWorkflowAskRoute(ask: WorkflowToolAskRequest): WorkflowAskRoute {
   const { allowFreeform, options } = ask.request;
   return {
     control: ask.control,
@@ -160,6 +157,5 @@ function createWorkflowAskRoute(
       ...(allowFreeform !== undefined && { allowFreeform }),
       ...(options !== undefined && { options: [...options] }),
     },
-    runId: from.runId,
   };
 }

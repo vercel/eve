@@ -105,7 +105,8 @@ describe("settleCancelledTurnStep", () => {
     const state = relay(
       relay(base.snapshot.session.state, "deploy-run-ask-1", {
         kind: "question",
-        workflowAsk: { control: "deploy-run-control", question: {}, runId: "deploy-run" },
+        runId: "deploy-run",
+        workflowAsk: { control: "deploy-run-control", question: {} },
       }),
       "reviewer-approval-1",
       { kind: "tool-approval" },
@@ -136,7 +137,7 @@ describe("settleCancelledTurnStep", () => {
 function relay(
   state: SessionStateMap | undefined,
   requestId: string,
-  route: Pick<ProxyInputRequest, "kind" | "workflowAsk">,
+  route: Pick<ProxyInputRequest, "kind" | "runId" | "workflowAsk">,
 ): SessionStateMap | undefined {
   return upsertProxyInputRequestState({
     entries: [

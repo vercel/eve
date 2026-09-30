@@ -88,7 +88,8 @@ it("relays a withdrawn workflow question's input.resolved to the stream and its 
       [
         "ask-1",
         {
-          workflowAsk: { control: "control", question: {}, runId: "run-1" },
+          workflowAsk: { control: "control", question: {} },
+          runId: "run-1",
           childContinuationToken: "ask-1",
           event: { sequence: 1, stepIndex: 0, turnId: "turn-1" },
           kind: "question",

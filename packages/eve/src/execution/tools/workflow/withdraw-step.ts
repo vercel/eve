@@ -50,23 +50,24 @@ async function withdrawWorkflowToolRunQuestion(
   await ignoreGoneTarget(resumeHook(input.control, decision));
   return await relayWithdrawnRequests(
     input,
-    (requestId, route) => requestId === input.requestId && route.workflowAsk?.runId === input.runId,
+    (requestId, route) =>
+      requestId === input.requestId &&
+      route.workflowAsk !== undefined &&
+      route.runId === input.runId,
   );
 }
 
 /**
- * Withdraws the questions a finished run left open. The run can no longer take
- * their answers, so each is relayed `cancelled`.
+ * Withdraws the requests a finished run left open: its own questions and those
+ * of the sessions it opened, which ended with it. Nobody can answer them now,
+ * so each is relayed `cancelled`.
  */
 export async function withdrawFinishedRunQuestionsStep(
   input: SessionStepState & { readonly runId: string },
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, (target) =>
-    relayWithdrawnRequests(
-      target,
-      (_requestId, route) => route.workflowAsk?.runId === target.runId,
-    ),
+    relayWithdrawnRequests(target, (_requestId, route) => route.runId === target.runId),
   );
 }
 

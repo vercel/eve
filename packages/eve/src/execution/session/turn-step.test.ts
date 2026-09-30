@@ -400,7 +400,8 @@ describe("routeProxiedDeliverStep", () => {
         [
           "ask-1",
           {
-            workflowAsk: { control: "control", question: { allowFreeform: true }, runId: "run-1" },
+            workflowAsk: { control: "control", question: { allowFreeform: true } },
+            runId: "run-1",
             childContinuationToken: "ask-1",
             event: REQUEST_EVENT,
             kind: "question",
@@ -459,8 +460,8 @@ describe("routeProxiedDeliverStep", () => {
                 allowFreeform: false,
                 options: [{ id: "approve", label: "Approve" }],
               },
-              runId: "run-1",
             },
+            runId: "run-1",
             childContinuationToken: "ask-1",
             event: REQUEST_EVENT,
             kind: "question",

@@ -25,6 +25,7 @@ type SubagentEventHookPayload =
 export async function runProxySubagentEventStep(
   input: SessionStepState & {
     readonly workflowAsk?: WorkflowAskRoute;
+    readonly runId?: string;
     readonly hookPayload: SubagentEventHookPayload;
   },
 ): Promise<SessionStateTransition> {
@@ -34,19 +35,25 @@ export async function runProxySubagentEventStep(
     emitProxiedSubagentEvent({
       ...(await restoreSessionStep(target)),
       workflowAsk: target.workflowAsk,
+      runId: target.runId,
       hookPayload: target.hookPayload,
     }),
   );
 }
 
-/** Relays one child event through the parent session's channel. */
+/**
+ * Relays one child event through the parent session's channel. `runId` names
+ * the workflow tool run that relayed an input request, so the session can
+ * withdraw it when that run ends.
+ */
 export async function emitProxiedSubagentEvent(
   input: RestoredSessionStep & {
     readonly workflowAsk?: WorkflowAskRoute;
+    readonly runId?: string;
     readonly hookPayload: SubagentEventHookPayload;
   },
 ): Promise<PublishedSessionEvents> {
-  const { hookPayload, workflowAsk } = input;
+  const { hookPayload, runId, workflowAsk } = input;
   const { published } = await publishFromSessionStep(input, {
     origin: "relayed",
     inputSource:
@@ -66,10 +73,14 @@ export async function emitProxiedSubagentEvent(
       }
       return {
         session: upsertProxyInputRequests({
-          entries:
-            workflowAsk === undefined
-              ? entries
-              : entries.map(([requestId, route]) => [requestId, { ...route, workflowAsk }]),
+          entries: entries.map(([requestId, route]) => [
+            requestId,
+            {
+              ...route,
+              ...(workflowAsk !== undefined && { workflowAsk }),
+              ...(runId !== undefined && { runId }),
+            },
+          ]),
           forChildContinuationToken: hookPayload.childContinuationToken,
           inputSource: hookPayload.inputSource,
           session,

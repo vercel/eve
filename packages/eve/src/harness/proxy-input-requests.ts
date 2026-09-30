@@ -26,7 +26,6 @@ export interface WorkflowAskRoute {
   readonly control: string;
   /** What a plain-text message may answer. */
   readonly question: ProxyInputQuestion;
-  readonly runId: string;
 }
 
 /** The parts of a `ctx.ask()` request a plain-text message is resolved against. */
@@ -40,6 +39,12 @@ export interface ProxyInputRequest {
   readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
   readonly inputSource?: string;
   readonly workflowAsk?: WorkflowAskRoute;
+  /**
+   * The workflow tool run that relayed the request: its own `ctx.ask()`
+   * question, or a request from a session it opened with `ctx.agent`. Nobody
+   * can answer the request once that run ends.
+   */
+  readonly runId?: string;
   /** Batch semantics are optional so sessions written before this field remain routable. */
   readonly batch?: ProxyInputRequestBatch;
   readonly childContinuationToken: string;
@@ -284,6 +289,8 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   const batch = "batch" in value ? parseProxyInputRequestBatch(value.batch) : undefined;
   const workflowAsk = "workflowAsk" in value ? parseWorkflowAskRoute(value.workflowAsk) : undefined;
   if ("workflowAsk" in value && workflowAsk === undefined) return undefined;
+  const runId = "runId" in value ? value.runId : undefined;
+  if (runId !== undefined && (typeof runId !== "string" || runId.length === 0)) return undefined;
   const question = "question" in value ? parseProxyInputQuestion(value.question) : undefined;
   if ("question" in value && question === undefined) return undefined;
   const childSessionInbox = "childSessionInbox" in value ? value.childSessionInbox : undefined;
@@ -291,6 +298,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
     return undefined;
   const request: {
     workflowAsk?: WorkflowAskRoute;
+    runId?: string;
     batch?: ProxyInputRequestBatch;
     readonly childContinuationToken: string;
     inputSource?: string;
@@ -307,6 +315,7 @@ function parseProxyInputRequest(value: unknown, requestId: string): ProxyInputRe
   if (typeof inputSource === "string") request.inputSource = inputSource;
   if (remote !== undefined) request.remote = remote;
   if (workflowAsk !== undefined) request.workflowAsk = workflowAsk;
+  if (typeof runId === "string") request.runId = runId;
   if (childSessionInbox !== undefined) request.childSessionInbox = childSessionInbox;
   if (batch !== undefined && batch.requestIds.includes(requestId)) request.batch = batch;
   if (question !== undefined) request.question = question;
@@ -326,12 +335,10 @@ function parseInputRequestEvent(value: unknown): PendingInputBatchEvent | undefi
 function parseWorkflowAskRoute(value: unknown): WorkflowAskRoute | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const control = Reflect.get(value, "control");
-  const runId = Reflect.get(value, "runId");
   if (typeof control !== "string" || control.length === 0) return undefined;
-  if (typeof runId !== "string" || runId.length === 0) return undefined;
   const question = parseProxyInputQuestion(Reflect.get(value, "question"));
   if (question === undefined) return undefined;
-  return { control, question, runId };
+  return { control, question };
 }
 
 function parseRemoteAgentBinding(

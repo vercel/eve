@@ -76,11 +76,12 @@ its event data contains `sessionId` directly.
 
 A channel that renders questions and approvals from `input.requested` can handle
 `input.resolved` to learn when each request ends, however it ended: answered from
-the channel, answered by a plain-text reply, or withdrawn. A workflow tool's
-`ctx.ask()` question also resolves as `cancelled` when the run that asked ends
-before anyone answers, and every request relayed from a task, workflow tool call,
-or subagent does when the turn is cancelled. Each resolution carries the
-`requestId` and an `outcome` such as `answered`, `approved`, or `cancelled`.
+the channel, answered by a plain-text reply, or withdrawn. A request that a
+workflow tool run relays, from its own `ctx.ask()` or from a session it opened
+with `ctx.agent`, also resolves as `cancelled` when that run ends before anyone
+answers. Every request relayed from a task, workflow tool call, or subagent does
+the same when the turn is cancelled. Each resolution carries the `requestId` and
+an `outcome` such as `answered`, `approved`, or `cancelled`.
 
 `channel.continuation.token` is always the channel-local address accepted by
 `from()`, `resolveSession()`, and `alias()`. Framework namespace prefixes are not
