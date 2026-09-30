@@ -10,11 +10,21 @@ import { auto } from "./auto.js";
 
 const runtime = vi.hoisted(() => ({
   localEvaluationModel: vi.fn(),
+  logWarn: vi.fn(),
   state: undefined as ContextContainer | undefined,
 }));
 vi.mock("#context/container.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#context/container.js")>()),
   loadContext: () => runtime.state!,
+}));
+vi.mock("#internal/logging.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/logging.js")>()),
+  createLogger: () => ({
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: runtime.logWarn,
+  }),
 }));
 vi.mock("#internal/model-auth/transport.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#internal/model-auth/transport.js")>()),
@@ -59,6 +69,7 @@ function evaluationModel(choice = "openai/small", modelId = "fixture-evaluator")
 beforeEach(() => {
   runtime.state = new ContextContainer();
   runtime.localEvaluationModel.mockReset();
+  runtime.logWarn.mockReset();
 });
 
 describe("auto", () => {
@@ -173,18 +184,37 @@ describe("auto", () => {
     await expect(handler(event(), context())).resolves.toBe("anthropic/claude-sonnet-5");
     await expect(handler(event(), context())).resolves.toBe("anthropic/claude-sonnet-5");
     expect(doEvaluate).toHaveBeenCalledOnce();
+    expect(runtime.logWarn).toHaveBeenCalledOnce();
+    expect(runtime.logWarn).toHaveBeenCalledWith("model evaluation failed; using fallback", {
+      error: expect.objectContaining({
+        message: expect.stringContaining("evaluation unavailable"),
+      }),
+      fallback: "anthropic/claude-sonnet-5",
+      turnId: "turn_1",
+    });
   });
 
-  it("supports a provider model as the fallback", async () => {
+  it("supports a provider model and reasoning as the fallback", async () => {
     const fallback = anthropic("sonnet-5");
     const failed = new Experimental_EvaluationMockModelV4({
       doEvaluate: async () => {
         throw new Error("evaluation unavailable");
       },
     });
-    const handler = auto({ model: failed, fallback, options }).events["step.started"]!;
+    const handler = auto({
+      model: failed,
+      fallback: { model: fallback, reasoning: "low" },
+      options,
+    }).events["step.started"]!;
 
-    await expect(handler(event(), context())).resolves.toBe(fallback);
+    await expect(handler(event(), context())).resolves.toEqual({
+      model: fallback,
+      reasoning: "low",
+    });
+    expect(runtime.logWarn).toHaveBeenCalledWith(
+      "model evaluation failed; using fallback",
+      expect.objectContaining({ fallback: "anthropic.messages/sonnet-5" }),
+    );
   });
 
   it("propagates provider errors without a fallback and always propagates cancellation", async () => {

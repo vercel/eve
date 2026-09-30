@@ -42,8 +42,8 @@ agent uses `auto`, then adds the resolved model for the current turn, such as
 `dynamic model · openai/gpt-6-luna`.
 
 Set `fallback` to keep the turn running when the evaluator is unavailable or
-returns an error. The fallback can be a Gateway model ID or an AI SDK language
-model instance:
+returns an error. The fallback can be a Gateway model ID, an AI SDK language
+model instance, or an object with `model` and a `reasoning` override:
 
 ```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
@@ -60,10 +60,11 @@ export default defineAgent({
 });
 ```
 
-The fallback applies only to evaluator failures. Invalid prompts, including
-requests without user text or with a latest message over the routing limit,
-still fail before evaluator I/O. Cancelling the turn also aborts routing instead
-of selecting the fallback.
+The fallback applies only to evaluator failures. eve logs a warning with the
+evaluator error and fallback identity when it switches models. Invalid prompts,
+including requests without user text or with a latest message over the routing
+limit, still fail before evaluator I/O. Cancelling the turn also aborts routing
+instead of selecting the fallback.
 
 ## Use a provider directly
 

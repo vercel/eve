@@ -9,6 +9,7 @@ import {
   type DynamicResolveContext,
   type DynamicSentinel,
 } from "#dynamic/definition.js";
+import { createLogger, formatError } from "#internal/logging.js";
 import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
 import type {
   AgentReasoningDefinition,
@@ -17,6 +18,13 @@ import type {
 } from "#shared/agent-definition.js";
 
 import { DEFAULT_EVALUATION_MODEL, evaluate } from "#ai/evaluate.js";
+
+type AutoModelSelection =
+  | PublicAgentStaticModelDefinition
+  | {
+      readonly model: PublicAgentStaticModelDefinition;
+      readonly reasoning?: AgentReasoningDefinition;
+    };
 
 type AutoOption =
   | string
@@ -31,13 +39,68 @@ interface AutoConfig<
 > {
   /** Evaluation model instance or ID. Defaults to TypeSafe Jev through AI SDK model resolution. */
   readonly model?: EvaluationModel;
-  /** Language model to use when evaluation fails. */
-  readonly fallback?: PublicAgentStaticModelDefinition;
+  /** Model selection to use when evaluation fails. */
+  readonly fallback?: AutoModelSelection;
   readonly options: T;
 }
 
+const log = createLogger("models.auto");
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isStaticModel(value: unknown): value is PublicAgentStaticModelDefinition {
+  return typeof value === "string" ? value.trim().length > 0 : isRuntimeLanguageModel(value);
+}
+
+function isModelSelection(value: unknown): value is AutoModelSelection {
+  return (
+    isStaticModel(value) ||
+    (isRecord(value) &&
+      isStaticModel(value.model) &&
+      (value.reasoning === undefined || isAgentReasoningDefinition(value.reasoning)))
+  );
+}
+
+function normalizeSelection(selection: AutoModelSelection): PublicAgentDynamicModelResult {
+  return typeof selection === "string" || isRuntimeLanguageModel(selection)
+    ? selection
+    : selection.reasoning === undefined
+      ? selection.model
+      : selection;
+}
+
+function modelIdentity(
+  model:
+    | {
+        readonly provider: string;
+        readonly modelId: string;
+        readonly specificationVersion: string;
+      }
+    | string,
+) {
+  return typeof model === "string"
+    ? model
+    : {
+        provider: model.provider,
+        modelId: model.modelId,
+        specificationVersion: model.specificationVersion,
+      };
+}
+
+function selectionIdentity(selection: AutoModelSelection) {
+  return typeof selection === "string" || isRuntimeLanguageModel(selection)
+    ? modelIdentity(selection)
+    : { model: modelIdentity(selection.model), reasoning: selection.reasoning ?? null };
+}
+
+function selectionLogIdentity(selection: AutoModelSelection): string {
+  const model =
+    typeof selection === "string" || isRuntimeLanguageModel(selection)
+      ? selection
+      : selection.model;
+  return typeof model === "string" ? model : `${model.provider}/${model.modelId}`;
 }
 
 function turnId(event: unknown): string {
@@ -92,10 +155,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
     (config.model !== undefined &&
       !isRecord(config.model) &&
       (typeof config.model !== "string" || !config.model.trim())) ||
-    (config.fallback !== undefined &&
-      !(typeof config.fallback === "string"
-        ? config.fallback.trim().length > 0
-        : isRuntimeLanguageModel(config.fallback))) ||
+    (config.fallback !== undefined && !isModelSelection(config.fallback)) ||
     !isRecord(config.options) ||
     Object.values(config.options).some((option) =>
       typeof option === "string"
@@ -104,9 +164,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
           typeof option.description !== "string" ||
           !option.description.trim() ||
           (option.reasoning !== undefined && !isAgentReasoningDefinition(option.reasoning)) ||
-          !(typeof option.model === "string"
-            ? option.model.trim().length > 0
-            : isRuntimeLanguageModel(option.model)),
+          !isStaticModel(option.model),
     )
   ) {
     throw new Error(
@@ -129,47 +187,29 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
       reasoning === undefined ? model : { model, reasoning },
     ]),
   );
+  let fallbackKey = "eve:auto:fallback";
+  while (models.has(fallbackKey)) fallbackKey += ":fallback";
+  if (config.fallback !== undefined) {
+    models.set(fallbackKey, normalizeSelection(config.fallback));
+  }
   const criteria = Object.fromEntries(options.map(({ key, description }) => [key, description]));
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
-        evaluationModel:
-          typeof evaluationModel === "string"
-            ? evaluationModel
-            : {
-                provider: evaluationModel.provider,
-                modelId: evaluationModel.modelId,
-                specificationVersion: evaluationModel.specificationVersion,
-              },
-        fallback:
-          config.fallback === undefined
-            ? null
-            : typeof config.fallback === "string"
-              ? config.fallback
-              : {
-                  provider: config.fallback.provider,
-                  modelId: config.fallback.modelId,
-                  specificationVersion: config.fallback.specificationVersion,
-                },
+        evaluationModel: modelIdentity(evaluationModel),
+        fallback: config.fallback === undefined ? null : selectionIdentity(config.fallback),
         options: options.map(({ key, model, description, reasoning }) => ({
           key,
           description,
           reasoning: reasoning ?? null,
-          model:
-            typeof model === "string"
-              ? model
-              : {
-                  provider: model.provider,
-                  modelId: model.modelId,
-                  specificationVersion: model.specificationVersion,
-                },
+          model: modelIdentity(model),
         })),
       }),
     )
     .digest("hex");
-  const selection = new ContextKey<
-    { turnId: string; model: string } | { turnId: string; fallback: true }
-  >(`eve.experimental.evaluate.model.${fingerprint}`);
+  const selection = new ContextKey<{ turnId: string; model: string }>(
+    `eve.experimental.evaluate.model.${fingerprint}`,
+  );
 
   return defineDynamic({
     events: {
@@ -178,9 +218,7 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
         const currentTurnId = turnId(event);
         const state = loadContext();
         const previous = state.get(selection);
-        if (previous?.turnId === currentTurnId) {
-          return "fallback" in previous ? config.fallback! : models.get(previous.model)!;
-        }
+        if (previous?.turnId === currentTurnId) return models.get(previous.model)!;
 
         const stateForEvaluation = routingState(ctx);
         try {
@@ -205,8 +243,13 @@ export function auto<const T extends Readonly<Record<string, AutoOption>>>(
         } catch (error) {
           ctx.abortSignal?.throwIfAborted();
           if (config.fallback === undefined) throw error;
-          state.set(selection, { turnId: currentTurnId, fallback: true });
-          return config.fallback;
+          log.warn("model evaluation failed; using fallback", {
+            error: formatError(error),
+            fallback: selectionLogIdentity(config.fallback),
+            turnId: currentTurnId,
+          });
+          state.set(selection, { turnId: currentTurnId, model: fallbackKey });
+          return models.get(fallbackKey)!;
         }
       },
     },
