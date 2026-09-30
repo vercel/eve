@@ -161,7 +161,11 @@ import {
 import { renderQuestionChoices, renderQuestionPanel } from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
-import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
+import {
+  formatStoredDiagnostic,
+  presentDiagnostic,
+  splitWorkflowLogs,
+} from "./diagnostic-presentation.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
 import {
   isProgressPulseVisible,
@@ -5164,7 +5168,28 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flushPending();
   }
 
+  /**
+   * Workflow SDK output is framework-internal and not actionable for users, so
+   * it shows only under `/loglevel all`; the diagnostic log keeps every line.
+   */
   #handleCapturedStderr(content: string): void {
+    for (const segment of splitWorkflowLogs(content)) {
+      if (segment.text.trim().length === 0) continue;
+      if (!segment.workflow) {
+        this.#presentCapturedStderr(segment.text);
+        continue;
+      }
+      this.#pushBlock({
+        kind: "log",
+        title: "stderr",
+        body: segment.text,
+        logVisibility: "all-only",
+        live: true,
+      });
+    }
+  }
+
+  #presentCapturedStderr(content: string): void {
     const lines = content.split("\n");
     const failedIndex = lines.findIndex((line) => {
       return parseDevRebuildLogLine(line.trimEnd())?.kind === "failed";

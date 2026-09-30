@@ -9,6 +9,12 @@ const DIAGNOSTIC_SUMMARY_MAX_CHARACTERS = 240;
  */
 const ERROR_HEADLINE_PATTERN = /^\s*(?:message|name):\s*\S|^\s*[A-Z][\w$]*Error\b/u;
 
+/** A bracket-tagged line such as `[eve:dev] …`, which starts a new log record. */
+const TAGGED_LOG_LINE_PATTERN = /^\[[^\]\s]+\]/u;
+
+/** Tags the vendored Workflow SDK packages put on their console output. */
+const WORKFLOW_LOG_LINE_PATTERN = /^\[(?:workflow(?:-sdk|:[\w:-]+)?|world-[\w-]+)\]/u;
+
 type DiagnosticPresentation =
   | { readonly kind: "inline"; readonly text: string }
   | {
@@ -19,6 +25,23 @@ type DiagnosticPresentation =
       readonly omittedLines: number;
       readonly path: string;
     };
+
+/**
+ * Splits captured output into ordered Workflow SDK and other segments. A
+ * Workflow SDK record runs until the next tagged line, so its field rows and
+ * stack stay with it.
+ */
+export function splitWorkflowLogs(text: string): { text: string; workflow: boolean }[] {
+  const segments: { text: string; workflow: boolean }[] = [];
+  let workflow = false;
+  for (const line of text.split("\n")) {
+    if (TAGGED_LOG_LINE_PATTERN.test(line)) workflow = WORKFLOW_LOG_LINE_PATTERN.test(line);
+    const last = segments.at(-1);
+    if (last?.workflow === workflow) last.text += `\n${line}`;
+    else segments.push({ text: line, workflow });
+  }
+  return segments;
+}
 
 /** Chooses whether process diagnostics stay inline or collapse to the local sink. */
 export function presentDiagnostic(text: string, path: string): DiagnosticPresentation {

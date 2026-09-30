@@ -11,6 +11,32 @@ const executed = s.lazyStepInput === undefined &&
 return executed;
 `;
 
+const beta57StepSingleFlight = `
+const singleFlight = globalSingleton('@workflow/core//stepSingleFlight', 1, () => ({ inFlight: new Map() }));
+async function runStepSingleFlight(runId, correlationId, execute, logLevel = 'warn') {
+    const key = \`\${runId}:\${correlationId}\`;
+    const existing = singleFlight.inFlight.get(key);
+    if (existing) {
+        runtimeLogger[logLevel]('Step execution already in flight in this process', { workflowRunId: runId, stepId: correlationId });
+        try {
+            await existing;
+        }
+        catch {
+        }
+        return { type: 'skipped' };
+    }
+    const promise = execute();
+    singleFlight.inFlight.set(key, promise);
+    try {
+        return await promise;
+    }
+    finally {
+        singleFlight.inFlight.delete(key);
+    }
+}
+return runStepSingleFlight;
+`;
+
 type StepResult = { type: "completed" | "skipped" };
 
 type VendorPlugin = {
@@ -29,6 +55,30 @@ function transformInlineStepExecution(source: string) {
   );
   if (!transformed) throw new Error("Failed to transform the inline step call site.");
   return transformed.code;
+}
+
+function loadStepSingleFlight() {
+  const transformed = inlineStepPlugin?.transform?.(
+    beta57StepSingleFlight,
+    "/workspace/node_modules/@workflow/core/dist/runtime/step-single-flight.js",
+  );
+  if (!transformed) throw new Error("Failed to transform the step single-flight module.");
+  const logLevels: string[] = [];
+  const runtimeLogger = {
+    debug: () => logLevels.push("debug"),
+    warn: () => logLevels.push("warn"),
+  };
+  const globalSingleton = (_name: string, _version: number, create: () => unknown) => create();
+  const runStepSingleFlight = new Function("globalSingleton", "runtimeLogger", transformed.code)(
+    globalSingleton,
+    runtimeLogger,
+  ) as (
+    runId: string,
+    correlationId: string,
+    execute: () => Promise<StepResult>,
+    logLevel?: string,
+  ) => Promise<StepResult>;
+  return { logLevels, runStepSingleFlight };
 }
 
 function deferred() {
@@ -176,5 +226,38 @@ describe("inline step single-flight vendoring patch", () => {
     await expect(loser).resolves.toEqual({ type: "skipped" });
     expect(executions).toBe(1);
     expect(singleFlight.logLevels).toEqual([]);
+  });
+
+  it("quiets queued deliveries that lose to a fresh claim and keeps recovery warnings", async () => {
+    const { logLevels, runStepSingleFlight } = loadStepSingleFlight();
+
+    async function contend(winnerLogLevel: string) {
+      const release = deferred();
+      let executions = 0;
+      const winner = runStepSingleFlight(
+        "run",
+        "step",
+        async () => {
+          executions += 1;
+          await release.promise;
+          return { type: "completed" };
+        },
+        winnerLogLevel,
+      );
+      // Queued step deliveries call single-flight without a log level.
+      const queued = runStepSingleFlight("run", "step", async () => {
+        executions += 1;
+        return { type: "completed" };
+      });
+      release.resolve();
+      await expect(winner).resolves.toEqual({ type: "completed" });
+      await expect(queued).resolves.toEqual({ type: "skipped" });
+      expect(executions).toBe(1);
+    }
+
+    await contend("debug");
+    await contend("warn");
+
+    expect(logLevels).toEqual(["debug", "warn"]);
   });
 });
