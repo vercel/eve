@@ -244,9 +244,12 @@ export interface SessionEventPublisher {
   readonly dispatcher: SessionEventDispatcher;
   readonly writer: SessionEventWriter;
   /**
-   * Publishes one event the step produced: deliver, write, then observe.
-   * Delivery comes first so the channel adapter's handler shapes what is written.
+   * Delivers, writes, and projects one event the step produced, and returns it
+   * as written for its hooks. Delivery comes first so the channel adapter's
+   * handler shapes what is written.
    */
+  emit(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
+  /** `emit`, then the event's stream-event hooks. */
   publish(event: UnstampedMessageStreamEvent): Promise<void>;
 }
 
@@ -265,14 +268,17 @@ export function openSessionEventPublisher(input: {
     deliveryIds: () => (origin === "own" ? ctx.get(TurnDeliveryIdsKey) : undefined),
     sessionWritable: input.sessionWritable,
   });
+  const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
+    const written = await writer.write(await dispatcher.deliver(event));
+    dispatcher.projectActivity(written);
+    return written;
+  };
   return {
     dispatcher,
     writer,
+    emit,
     async publish(event) {
-      const routed = await dispatcher.deliver(event);
-      const written = await writer.write(routed);
-      dispatcher.projectActivity(written);
-      await dispatcher.runHooks(written);
+      await dispatcher.runHooks(await emit(event));
     },
   };
 }
@@ -392,11 +398,9 @@ export async function publishTerminalSessionEvent(input: {
     return;
   }
 
-  // `publisher.publish` without its hooks; see above.
+  // Emitted without its hooks; see above.
   const publish: HandleEventFn = async (event) => {
-    const routed = await publisher.dispatcher.deliver(event);
-    const written = await publisher.writer.write(routed);
-    publisher.dispatcher.projectActivity(written);
+    await publisher.emit(event);
   };
   let instrumentation: ReturnType<typeof bindSessionInstrumentation>;
   try {

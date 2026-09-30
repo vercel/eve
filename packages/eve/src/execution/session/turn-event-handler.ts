@@ -80,13 +80,11 @@ export function createTurnEventHandler(input: {
   readonly publisher: SessionEventPublisher;
 }): HandleEventFn {
   const { abortSignal, bundle, ctx, effectiveAgent, effectiveNode } = input;
-  const { dispatcher, writer } = input.publisher;
+  const { publisher } = input;
   return async (event, messages) => {
     // An event's memory lifecycle runs after its write and before its hooks, so
-    // a turn composes the publisher's operations instead of calling `publish`.
-    const routed = await dispatcher.deliver(event);
-    const emitted = await writer.write(routed);
-    dispatcher.projectActivity(emitted);
+    // a turn emits the event and runs its hooks itself instead of calling `publish`.
+    const emitted = await publisher.emit(event);
     const lifecycleMessages = await dispatchMemoryLifecycleEvent({
       abortSignal,
       appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
@@ -101,7 +99,7 @@ export function createTurnEventHandler(input: {
       input.canCancelTurn && isHookCancellableEvent(emitted.type)
         ? () => input.hookCancellation.abort(new TurnCancelledError())
         : undefined;
-    await dispatcher.runHooks(emitted, cancelTurn);
+    await publisher.dispatcher.runHooks(emitted, cancelTurn);
     if (emitted.type !== "step.started") {
       await dispatchDynamicModelEvent({
         abortSignal,
