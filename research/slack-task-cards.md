@@ -180,19 +180,28 @@ status is short-lived by design: the task card is the long-lived signal during a
 - **Block choice.** One task renders as a standalone `task_card`, and a second task turns the
   message into a `plan`. More than 50 calls in one turn collapse the oldest settled ones into a
   single `N tasks finished earlier` row.
-- **Plan title:** `Working on N tasks`, or `D of N tasks done` once some have settled;
-  `Finished N tasks`, or
+- **Plan title**, first match wins: `Waiting for approval`, `Waiting for a response`, or
+  `Waiting for sign-in` while any task is blocked on a person; `Working on N tasks`, or
+  `D of N tasks done` once some have settled; `Finished N tasks`, or
   `Finished N tasks: F failed, S stopped`, naming only the counts that aren't zero.
 - **Rows:**
 
 | Field    | Tool task                                                                                    | Agent task                                       |
 | -------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------ |
 | `title`  | `label.start(input)`, else the tool name                                                     | `name: first line of message`                    |
-| `status` | `in_progress` while working; `complete`; `error` for failed or cancelled                     | Same                                             |
+| `status` | `in_progress` while working or blocked; `complete`; `error` for failed or cancelled          | Same                                             |
 | `output` | First line of a string result; `Failed`, with the error's first line when private; `Stopped` | First line of the agent's reply; same for errors |
 
-Titles are capped at 80 characters and `output` at 200. A task waiting on a question or approval
-stays `in_progress`; the request itself posts wherever `approvalChannel` sends it.
+Titles are capped at 80 characters and `output` at 200.
+
+- **Blocked rows.** A request or sign-in a task's run relays through the root carries the task's
+  `taskId`, so its row shows `Waiting for approval`, `Waiting for a response`, or `Waiting for
+sign-in` in `details`. The row goes back to working on the request's `input.resolved`, the
+  sign-in's `authorization.completed`, or the task's `task.settled`. The request itself posts
+  wherever `approvalChannel` sends it.
+- **Requests stay where `approvalChannel` sends them.** A blocked row names the request's prompt
+  only in a DM or private channel. Elsewhere `blockedOn` carries only its kind, since a request
+  sent to one person by DM would otherwise show in the shared thread.
 
 - **Failure text stays private.** In a DM or private channel, a failed row shows `Failed: ` and
   the first line of `task.settled.error.message`. Error text can carry internal hostnames or
@@ -269,8 +278,10 @@ export default slackChannel({
   started no tasks.
   eve compares the result with what it last wrote and posts or updates the message. A `taskCard`
   that throws leaves that turn's card as it was.
-- **New channel events.** `ChannelEvents` gains `task.started`, `task.settled`, and
-  `turn.waiting`, so every channel can observe tasks inline.
+- **New channel events.** `ChannelEvents` gains `task.started`, `task.settled`, `turn.waiting`,
+  and `input.resolved`, so every channel can observe tasks inline and learn when each request
+  ends, however it ended. `input.resolved` already existed for clients and hooks; channels
+  couldn't handle it.
 
 ### The task card view
 
@@ -280,7 +291,7 @@ export default slackChannel({
 ```ts
 interface TaskCardView {
   readonly turnId: string;
-  readonly state: "working" | "finished";
+  readonly state: "working" | "blocked" | "finished";
   readonly tasks: readonly TaskCardTask[]; // in call order
   readonly actions: readonly TaskCardAction[]; // the turn's other tool calls, in call order
 }
@@ -293,7 +304,11 @@ interface TaskCardTask {
   readonly kind: "agent" | "tool";
   readonly name: string;
   readonly title: string;
-  readonly status: TaskCardStatus;
+  readonly status: TaskCardStatus | "blocked";
+  readonly blockedOn?: {
+    readonly kind: "approval" | "input" | "authorization";
+    readonly label?: string; // only in a private conversation
+  };
   readonly summary?: string; // a failure's only in a private conversation
   readonly startedAt: string;
   readonly settledAt?: string;
@@ -310,7 +325,8 @@ interface TaskCardAction {
 }
 ```
 
-A card is `working` while its turn or any of its tasks works, then `finished`.
+A card is `blocked` while any task waits on a person, `working` while its turn or any other task
+works, then `finished`.
 
 ## Architecture
 
@@ -324,7 +340,8 @@ Slack webhook ─┬─► renderers.received ─► status: Thinking... (right 
 root session ─ own events ─► renderers.events ─► replies, questions, sign-ins, errors, status
               │
               └─► task card tracking (actions.requested, action.result, task.started,
-                   task.settled, turn end) ─► renderers.taskCard(view) ─► post, then update
+                   task.settled, relayed requests and their resolutions, turn end)
+                   ─► renderers.taskCard(view) ─► post, then update
 ```
 
 **Invariants:**
@@ -351,7 +368,7 @@ root session ─ own events ─► renderers.events ─► replies, questions, s
   short turns, but tasks outlive streams, and a stopped stream leaves a permanent error pill.
 - **Render the card in the activity collector,** a separate durable workflow per root session that
   child and remote sessions report to over HTTP. It is the only way to show an agent task's own
-  steps and blocked requests, and to refresh the status during a long wait. It also runs a second
+  steps and to refresh the status during a long wait. It also runs a second
   workflow per session, stays pinned to the deployment that started it for up to the session
   timeout (30 days by default), and has to accept activity from newer code after a handoff. The
   first versions of this change used it; rendering from the root's own events keeps what people
@@ -378,7 +395,8 @@ Everything below is breaking, which is allowed before 1.0.
   same behavior. `input.requested`'s `defaultDeliver` becomes `next`.
 - **Message hooks:** the default mention and DM hooks no longer post `Thinking...`. The default
   renderer's `received` does, right away for mentions and DMs, whichever hook handles them.
-- **Channel core:** `ChannelEvents` gains `task.started`, `task.settled`, and `turn.waiting`.
+- **Channel core:** `ChannelEvents` gains `task.started`, `task.settled`, `turn.waiting`, and
+  `input.resolved`.
 - **Removed: the activity collector** and everything that fed it: the `/eve/v1/activity` route,
   the activity protocol and reducer, the per-step activity posting, and the `activityObserver`
   field on delegated and remote-agent sessions. A remote-agent request from an older eve that still
@@ -390,10 +408,12 @@ Everything below is breaking, which is allowed before 1.0.
 - **Settlement labels.** `label.complete(input, output)` runs on a task's receipt today, not its
   result. Running it at settlement needs the tool definition where the call settles; until then,
   summaries come from the result text.
-- **What only other sessions see.** An agent task's own steps, a blocked row that clears when its
-  question is answered, and a status that stays up during a long wait all need something besides
-  the root session. Channels also receive no `input.resolved` today, which a blocked row would
-  need. Revisit a collector, or another mechanism, designed from scratch for these.
+- **What only other sessions see.** An agent task's own steps and a status that stays up during a
+  long wait need something besides the root session. Revisit a collector, or another mechanism,
+  designed from scratch for these.
+- **Answered cards from `input.resolved`.** Slack marks a question card answered when someone
+  clicks it. A plain-text answer or a withdrawn question leaves its buttons; the default handler
+  could mark the card from `input.resolved` instead.
 - **Tool task progress.** A task run's `action.partial` carries no `label.delta`, so a tool task
   row shows no progress.
 - **Agent sessions.** Move status to `agents.sessions.setStatus`, which keeps `processing` for an

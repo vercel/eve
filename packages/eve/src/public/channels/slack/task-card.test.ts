@@ -8,6 +8,8 @@ import { ScheduleIdKey, SessionKey } from "#context/keys.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 import {
   createActionsRequestedEvent,
+  createInputRequestedEvent,
+  createInputResolvedEvent,
   createTaskSettledEvent,
   createTaskStartedEvent,
   createTurnCompletedEvent,
@@ -25,7 +27,6 @@ const THREAD = {
   channelId: "C01",
   threadTs: "1700000000.000001",
 };
-const CARD_OPERATIONS = new Set(["chat.postMessage", "chat.update"]);
 
 /** Records each Slack call; `reply` answers one call, defaulting to success. */
 function slackApi(
@@ -82,7 +83,9 @@ function slackThread(
       await contextStorage.run(session, () => callAdapterEventHandler(adapter, event, adapterCtx));
     }
   };
-  const cardCalls = () => calls.filter((call) => CARD_OPERATIONS.has(call.operation));
+  // Card writes carry a task card or plan block; other posts, such as an approval, don't.
+  const cardCalls = () =>
+    calls.filter((call) => /"type":"(task_card|plan)"/.test(JSON.stringify(call.body["blocks"])));
   return { calls, cardCalls, emit };
 }
 
@@ -227,6 +230,58 @@ describe("Slack task card", () => {
         ],
       },
     ]);
+  });
+
+  it("shows a task blocked on a person until its request resolves", async () => {
+    const approval = createInputRequestedEvent({
+      requests: [
+        {
+          action: { callId: "child_deploy", input: {}, kind: "tool-call", toolName: "promote" },
+          kind: "tool-approval",
+          prompt: "Promote storefront to production?",
+          requestId: "approval-1",
+        },
+      ],
+      sequence: 3,
+      stepIndex: 0,
+      taskId: "deploy-4hd8sa",
+      turnId: TURN_ID,
+    });
+    const approved = createInputResolvedEvent({
+      resolutions: [{ kind: "tool-approval", outcome: "approved", requestId: "approval-1" }],
+      sequence: 3,
+      stepIndex: 0,
+      turnId: TURN_ID,
+    });
+    const card = async (audience: string) => {
+      const thread = slackThread({ state: { ...THREAD, audience } });
+      await thread.emit(...TWO_TASKS_STARTED, approval);
+      const blocked = thread.cardCalls().at(-1)!.body["blocks"];
+      await thread.emit(approved);
+      return { blocked, resolved: thread.cardCalls().at(-1)!.body["blocks"] };
+    };
+
+    const shared = await card("public");
+    expect(shared.blocked).toMatchObject([
+      {
+        tasks: [
+          {
+            details: { elements: [{ elements: [{ text: "Waiting for approval" }] }] },
+            status: "in_progress",
+            title: "Deploy storefront",
+          },
+          { status: "in_progress" },
+        ],
+        title: "Waiting for approval",
+      },
+    ]);
+    expect(shared.resolved).toMatchObject([{ title: "Working on 2 tasks" }]);
+    expect(JSON.stringify(shared.resolved)).not.toContain("Waiting for approval");
+
+    const direct = await card("private");
+    expect(JSON.stringify(direct.blocked)).toContain(
+      "Waiting for approval: Promote storefront to production?",
+    );
   });
 
   it("posts the card again when someone deleted it", async () => {

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import {
   taskCardView,
   trackTaskCardEvent,
+  type TaskCardBlocker,
   type TaskCardTask,
   type TaskCardTurn,
   type TaskCardView,
@@ -35,6 +36,7 @@ const WRITE_RETRY_MS = 1_000;
 type SlackTaskStatus = "in_progress" | "complete" | "error";
 
 interface SlackTaskObject {
+  details?: BlockKitBlock;
   output?: BlockKitBlock;
   readonly status: SlackTaskStatus;
   readonly task_id: string;
@@ -60,10 +62,14 @@ export function renderDefaultSlackTaskCard(view: TaskCardView): SlackTaskCard | 
 }
 
 function planTitle(view: TaskCardView): string {
+  if (view.state === "blocked") {
+    const blocker = view.tasks.find((task) => task.blockedOn !== undefined)?.blockedOn;
+    return waitingText(blocker?.kind ?? "input");
+  }
   const statuses = view.tasks.map((task) => task.status);
   const total = statuses.length;
   if (view.state === "working") {
-    const done = statuses.filter((status) => status !== "working").length;
+    const done = statuses.filter((status) => status !== "working" && status !== "blocked").length;
     return done === 0
       ? `Working on ${countTasks(total)}`
       : `${String(done)} of ${countTasks(total)} done`;
@@ -114,6 +120,7 @@ function toSlackTask(task: TaskCardTask): SlackTaskObject {
     task_id: slackTaskId(task.id),
     title: truncate(task.title, MAX_TITLE_LENGTH),
   };
+  if (task.blockedOn !== undefined) slackTask.details = richText(blockerLine(task.blockedOn));
   const output = outputLine(task);
   if (output !== undefined) slackTask.output = richText(output);
   return slackTask;
@@ -122,6 +129,7 @@ function toSlackTask(task: TaskCardTask): SlackTaskObject {
 function slackStatus(task: TaskCardTask): SlackTaskStatus {
   switch (task.status) {
     case "working":
+    case "blocked":
       return "in_progress";
     case "completed":
       return "complete";
@@ -141,6 +149,22 @@ function outputLine(task: TaskCardTask): string | undefined {
       return "Stopped";
     default:
       return undefined;
+  }
+}
+
+function blockerLine(blocker: TaskCardBlocker): string {
+  const waiting = waitingText(blocker.kind);
+  return blocker.label === undefined ? waiting : `${waiting}: ${blocker.label}`;
+}
+
+function waitingText(kind: TaskCardBlocker["kind"]): string {
+  switch (kind) {
+    case "approval":
+      return "Waiting for approval";
+    case "authorization":
+      return "Waiting for sign-in";
+    case "input":
+      return "Waiting for a response";
   }
 }
 
@@ -177,6 +201,10 @@ const TRACKED_EVENTS = [
   "action.result",
   "task.started",
   "task.settled",
+  "input.requested",
+  "input.resolved",
+  "authorization.required",
+  "authorization.completed",
   "turn.completed",
   "turn.failed",
   "turn.cancelled",
@@ -204,14 +232,18 @@ export function withTaskCards(
     const handler = events[type] as TrackedHandler | undefined;
     wrapped[type] = async (data, channel, ctx) => {
       const event = { data, type } as UnstampedMessageStreamEvent;
-      const tracked = trackTaskCardEvent(
+      const changed = trackTaskCardEvent(
         trackedTurns(channel.state),
         event,
         new Date().toISOString(),
       );
-      if (tracked !== undefined) rememberTurn(channel.state, tracked.turnId, tracked.turn);
-      await handler?.(data, channel, ctx);
-      if (tracked !== undefined) await writeTaskCard(channel, tracked.turnId, taskCard);
+      for (const [turnId, turn] of Object.entries(changed))
+        rememberTurn(channel.state, turnId, turn);
+      try {
+        await handler?.(data, channel, ctx);
+      } finally {
+        for (const turnId of Object.keys(changed)) await writeTaskCard(channel, turnId, taskCard);
+      }
     };
   }
   return { ...events, ...wrapped } as SlackChannelInternalEvents;

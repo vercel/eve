@@ -23,6 +23,7 @@ const SLACK_RENDERED_EVENTS = [
   "authorization.completed",
   "authorization.required",
   "input.requested",
+  "input.resolved",
   "message.appended",
   "message.completed",
   "reasoning.appended",

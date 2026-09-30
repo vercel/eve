@@ -74,6 +74,11 @@ the exact session, while `channel.continuation` exposes the current address and
 receives only `(eventData, channel)` because it runs outside session context;
 its event data contains `sessionId` directly.
 
+A channel that renders questions and approvals from `input.requested` can handle
+`input.resolved` to learn when each request ends, however it ended: answered from
+the channel, answered by a plain-text reply, or withdrawn. Each resolution carries
+the `requestId` and an `outcome` such as `answered`, `approved`, or `cancelled`.
+
 `channel.continuation.token` is always the channel-local address accepted by
 `from()`, `resolveSession()`, and `alias()`. Framework namespace prefixes are not
 part of the authored channel API.

@@ -9,9 +9,20 @@ import { normalizePresentationText } from "#shared/presentation-text.js";
 const MAX_ACTION_INPUT_LENGTH = 4_096;
 /** Calls kept per turn; the oldest settled ones drop first. */
 const MAX_CALLS_PER_TURN = 100;
+const MAX_BLOCKER_LABEL_LENGTH = 200;
 
 /** How one of the turn's calls stands. */
 export type TaskCardStatus = "working" | "completed" | "failed" | "cancelled";
+
+/** What a blocked task waits on: a person's approval, answer, or sign-in. */
+export interface TaskCardBlocker {
+  readonly kind: "approval" | "authorization" | "input";
+  /**
+   * The request's prompt or the connection's name. Only in a private
+   * conversation, since a request can be sent to one person alone.
+   */
+  readonly label?: string;
+}
 
 /** One task call in a turn's task card. */
 export interface TaskCardTask {
@@ -23,7 +34,9 @@ export interface TaskCardTask {
   readonly name: string;
   /** The tool's start label, `agent: brief` for an agent, or the name. */
   readonly title: string;
-  readonly status: TaskCardStatus;
+  /** `blocked` while the task waits on a person; see {@link TaskCardTask.blockedOn}. */
+  readonly status: TaskCardStatus | "blocked";
+  readonly blockedOn?: TaskCardBlocker;
   /**
    * One line describing the result once settled. A failure's line appears
    * only in a private conversation, since error text can carry internals.
@@ -53,12 +66,12 @@ export interface TaskCardAction {
 
 /**
  * One turn's own tool calls: the tasks it started, and its other actions,
- * each in call order. `working` while the turn or any of its tasks works,
- * then `finished`.
+ * each in call order. `blocked` while any task waits on a person, `working`
+ * while the turn or any other task works, then `finished`.
  */
 export interface TaskCardView {
   readonly turnId: string;
-  readonly state: "working" | "finished";
+  readonly state: "working" | "blocked" | "finished";
   readonly tasks: readonly TaskCardTask[];
   readonly actions: readonly TaskCardAction[];
 }
@@ -76,6 +89,8 @@ interface TrackedCall {
     readonly id: string;
     readonly kind: "agent" | "tool";
     readonly summary?: string;
+    /** Open requests and sign-ins the task waits on, oldest first. */
+    readonly blockers?: readonly (TaskCardBlocker & { readonly id: string })[];
   };
 }
 
@@ -85,11 +100,99 @@ export interface TaskCardTurn {
   readonly ended: boolean;
 }
 
+type TurnChanges = Readonly<Record<string, TaskCardTurn>>;
+
 /**
- * Folds one of the session's own events into its turn's tracked calls.
- * Returns the turn it changed, or undefined when the event changes no card.
+ * Folds one of the session's events into the turns' tracked calls, including
+ * the requests a task's run relays through the session. Returns each turn it
+ * changed, by turn id; none when the event changes no card.
  */
 export function trackTaskCardEvent(
+  turns: Readonly<Record<string, TaskCardTurn>>,
+  event: UnstampedMessageStreamEvent,
+  at: string,
+): TurnChanges {
+  switch (event.type) {
+    case "input.requested": {
+      const { requests, taskId } = event.data;
+      if (taskId === undefined) return {};
+      const requested = requests.map((request) =>
+        blocker(
+          request.requestId,
+          request.kind === "question" ? "input" : "approval",
+          request.prompt,
+        ),
+      );
+      return updateBlockers(turns, taskId, (open) => [...open, ...requested]);
+    }
+    case "input.resolved": {
+      const resolved = new Set(event.data.resolutions.map((resolution) => resolution.requestId));
+      return updateBlockers(turns, undefined, (open) =>
+        open.filter((item) => !resolved.has(item.id)),
+      );
+    }
+    case "authorization.required": {
+      const { taskId } = event.data;
+      if (taskId === undefined) return {};
+      const id = authorizationId(event.data);
+      const label = event.data.authorization?.displayName ?? event.data.name;
+      return updateBlockers(turns, taskId, (open) => [
+        ...open.filter((item) => item.id !== id),
+        blocker(id, "authorization", label),
+      ]);
+    }
+    case "authorization.completed": {
+      const id = authorizationId(event.data);
+      return updateBlockers(turns, event.data.taskId, (open) =>
+        open.filter((item) => item.id !== id),
+      );
+    }
+    default: {
+      const changed = trackTurnEvent(turns, event, at);
+      return changed === undefined ? {} : { [changed.turnId]: changed.turn };
+    }
+  }
+}
+
+type TrackedBlocker = NonNullable<NonNullable<TrackedCall["task"]>["blockers"]>[number];
+
+function blocker(id: string, kind: TaskCardBlocker["kind"], text: string): TrackedBlocker {
+  const label = presentationText(text)?.slice(0, MAX_BLOCKER_LABEL_LENGTH);
+  return label === undefined ? { id, kind } : { id, kind, label };
+}
+
+function authorizationId(data: {
+  readonly attemptId?: string;
+  readonly candidateId?: string;
+  readonly name: string;
+}): string {
+  return data.attemptId ?? data.candidateId ?? data.name;
+}
+
+/** Applies `update` to the open blockers of each working task call, or only `taskId`'s. */
+function updateBlockers(
+  turns: Readonly<Record<string, TaskCardTurn>>,
+  taskId: string | undefined,
+  update: (open: readonly TrackedBlocker[]) => readonly TrackedBlocker[],
+): TurnChanges {
+  const changes: Record<string, TaskCardTurn> = {};
+  for (const [turnId, turn] of Object.entries(turns)) {
+    for (const call of turn.calls) {
+      if (call.task === undefined || call.status !== "working") continue;
+      if (taskId !== undefined && call.task.id !== taskId) continue;
+      const open = call.task.blockers ?? [];
+      const next = update(open);
+      if (next.length === open.length && next.every((item, index) => item.id === open[index]!.id)) {
+        continue;
+      }
+      const task = { ...call.task, blockers: next };
+      changes[turnId] = replaceCall(changes[turnId] ?? turn, { ...call, task });
+    }
+  }
+  return changes;
+}
+
+function trackTurnEvent(
   turns: Readonly<Record<string, TaskCardTurn>>,
   event: UnstampedMessageStreamEvent,
   at: string,
@@ -182,8 +285,12 @@ export function taskCardView(
     if (call.task === undefined) actions.push(toAction(call));
     else tasks.push(toTask(call, call.task, options.audience));
   }
-  const working = !turn.ended || tasks.some((task) => task.status === "working");
-  return { actions, state: working ? "working" : "finished", tasks, turnId };
+  const state = tasks.some((task) => task.status === "blocked")
+    ? "blocked"
+    : !turn.ended || tasks.some((task) => task.status === "working")
+      ? "working"
+      : "finished";
+  return { actions, state, tasks, turnId };
 }
 
 /** The names of a turn's working tasks, for a status such as `Waiting on researcher...`. */
@@ -238,7 +345,16 @@ function toTask(
     taskId: task.id,
     title: call.title,
   };
-  const shown = call.status !== "failed" || audience === "private";
+  const shareable = audience === "private";
+  const waitingOn = call.status === "working" ? task.blockers?.at(-1) : undefined;
+  if (waitingOn !== undefined) {
+    row.status = "blocked";
+    row.blockedOn =
+      shareable && waitingOn.label !== undefined
+        ? { kind: waitingOn.kind, label: waitingOn.label }
+        : { kind: waitingOn.kind };
+  }
+  const shown = call.status !== "failed" || shareable;
   if (task.summary !== undefined && shown) row.summary = task.summary;
   if (call.settledAt !== undefined) row.settledAt = call.settledAt;
   return row;
