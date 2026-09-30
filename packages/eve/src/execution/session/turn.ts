@@ -36,11 +36,11 @@ import type { SessionInboxPayload, SessionInboxReader } from "#execution/session
 import { publishTurnWaitingStep } from "#execution/session/turn-waiting-step.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import {
   batchAgentStarts,
-  emitAgentStartedStep,
-} from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+  handleWorkflowToolRunMessage,
+} from "#execution/session-workflow-tool-run.js";
+import { emitAgentStartedStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type {

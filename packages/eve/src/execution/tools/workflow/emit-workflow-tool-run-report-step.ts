@@ -5,7 +5,6 @@ import {
 } from "#execution/session/state-delta.js";
 import type {
   WorkflowToolRunAgentStartedMessage,
-  WorkflowToolRunMessage,
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
@@ -60,21 +59,4 @@ export async function emitAgentStartedStep(
     }),
   );
   return await withSessionStateDelta(input, (target) => publishSessionEvents(target, events));
-}
-
-/**
- * Groups consecutive `agent-started` messages so one `emitAgentStartedStep`
- * publishes each group, keeping every message in admission order.
- */
-export function batchAgentStarts(
-  messages: readonly WorkflowToolRunMessage[],
-): (WorkflowToolRunMessage | WorkflowToolRunAgentStartedMessage[])[] {
-  const batches: (WorkflowToolRunMessage | WorkflowToolRunAgentStartedMessage[])[] = [];
-  for (const message of messages) {
-    const last = batches.at(-1);
-    if (message.kind !== "agent-started") batches.push(message);
-    else if (Array.isArray(last)) last.push(message);
-    else batches.push([message]);
-  }
-  return batches;
 }
