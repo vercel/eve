@@ -9,7 +9,7 @@ import { FileTree } from "./file-tree";
 import { HeroAudience } from "./hero-audience";
 import { NextjsInterop } from "./nextjs-interop";
 
-const tagline = "Like Next.js for agents. Build durable agents with one folder.";
+const tagline = "Like Next.js for agents. Build agents that you own.";
 const titleMetadata = pageTitleMetadata(siteTitle);
 
 export const homeMetadata: Metadata = {
