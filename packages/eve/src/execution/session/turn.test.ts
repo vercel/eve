@@ -1213,7 +1213,7 @@ describe("SessionExecution checkpoints", () => {
     expect(continuation).toEqual({ delivery: steering, steered: false });
   });
 
-  it("adopts a settled step's boundary agent-started messages in one step each run, in admission order", async () => {
+  it("publishes and adopts consecutive boundary agent-started messages in one step, keeping admission order", async () => {
     const { inbox, planner, progress, reviewer, writer } = boundaryRunMessages();
     const cursor = createCursor({ inbox, sessionState: state("") });
     publishIntoContext();
@@ -1248,6 +1248,7 @@ describe("SessionExecution checkpoints", () => {
   it("announces no child when the step ends the session, whose stream it closed", async () => {
     const { inbox, planner, progress } = boundaryRunMessages();
     const sessionState = state("");
+    const cursor = createCursor({ inbox, sessionState });
     publishIntoContext();
     inbox.drain = vi.fn().mockReturnValueOnce([planner, progress]).mockReturnValue([]);
     vi.mocked(turnStep)
@@ -1257,9 +1258,11 @@ describe("SessionExecution checkpoints", () => {
       );
 
     await expect(
-      createExecution({ inbox, sessionState }).runTurn(undefined),
+      createExecution({ cursor, inbox, sessionState }).runTurn(undefined),
     ).resolves.toMatchObject({ kind: "done" });
 
+    // The boundary still ran: it handled the task's report and dropped only the child.
+    expect(cursor.serializedContext[PUBLISHED]).toEqual(["Halfway through the sources."]);
     expect(emitAgentStartedStep).not.toHaveBeenCalled();
   });
 

@@ -44,8 +44,10 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
         : JSON.stringify(audit.output);
     }
     const { name: tool, input } = HOOK_SCENARIO_CALLS[mode];
-    if (!request.toolResults.some((entry) => entry.name === tool)) {
-      return { toolCalls: [{ name: tool, input }] };
+    const call = request.toolResults.find((entry) => entry.name === tool);
+    if (call === undefined) {
+      // A call id no other run shares keys the background helper handshake.
+      return { toolCalls: [{ id: `${tool}-${crypto.randomUUID()}`, name: tool, input }] };
     }
     // An agent call or task returned a receipt; its result arrives in a <task_result> message.
     if (mode === "direct") {
@@ -56,11 +58,10 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     if (mode === "background") {
       const result = latestTaskResult(request, tool);
       if (result !== undefined) return result;
-      await generateWhileHelperOpens(HOOK_SCENARIO_CALLS.background.input.topic);
+      await generateWhileHelperOpens(call.id);
       return RESEARCH_INTERIM_MESSAGE;
     }
-    const result = request.toolResults.find((entry) => entry.name === tool);
-    return typeof result?.output === "string" ? result.output : JSON.stringify(result?.output);
+    return typeof call.output === "string" ? call.output : JSON.stringify(call.output);
   }
 
   const message =

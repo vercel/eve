@@ -191,9 +191,7 @@ describe("proxied stream hooks", () => {
       sessionWritable: f.sessionWritable,
     });
     try {
-      await publisher.writer.write(
-        await publisher.dispatcher.deliver({ type: "input.requested", data: f.hookPayload.event }),
-      );
+      await publisher.emit({ type: "input.requested", data: f.hookPayload.event });
       expect(fetchMock).toHaveBeenCalledOnce();
       const forwarded = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
       expect(forwarded).toMatchObject({
@@ -231,9 +229,7 @@ describe("proxied stream hooks", () => {
       sessionWritable: f.sessionWritable,
     });
     try {
-      await publisher.writer.write(
-        await publisher.dispatcher.deliver({ type: "input.requested", data: f.hookPayload.event }),
-      );
+      await publisher.emit({ type: "input.requested", data: f.hookPayload.event });
       const forwarded = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
       expect(forwarded).toMatchObject({
         childContinuationToken: "eve:session:parent-session:inbox",

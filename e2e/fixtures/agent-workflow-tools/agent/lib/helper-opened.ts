@@ -2,8 +2,10 @@
  * A handshake that opens a background task's helper session while the parent's
  * model step is generating: the parent's model marks that it is generating and
  * waits for the helper, and the task waits for that mark before it opens the
- * helper. The task's steps and the parent's model call share this process in a
- * local dev server; where they do not, each side only waits out its bound.
+ * helper. Marks are keyed by the task's call id, which both sides see and no
+ * other run shares. The task's steps and the parent's model call share this
+ * process in a local dev server; where they do not, each side only waits out
+ * its bound.
  */
 const WAIT_MS = 5_000;
 
@@ -21,20 +23,20 @@ async function consumeMark(mark: string): Promise<void> {
   marks().delete(mark);
 }
 
-/** The parent's model step for `topic` is generating; waits until the helper opened. */
-export async function generateWhileHelperOpens(topic: string): Promise<void> {
-  marks().add(`generating:${topic}`);
-  await consumeMark(`opened:${topic}`);
+/** The parent's model step after task call `callId` is generating; waits until its helper opened. */
+export async function generateWhileHelperOpens(callId: string): Promise<void> {
+  marks().add(`generating:${callId}`);
+  await consumeMark(`opened:${callId}`);
 }
 
-/** Holds the task until the parent's model step for `topic` is generating. */
-export async function waitForParentGenerating(topic: string): Promise<void> {
+/** Holds task call `callId` until the parent's next model step is generating. */
+export async function waitForParentGenerating(callId: string): Promise<void> {
   "use step";
-  await consumeMark(`generating:${topic}`);
+  await consumeMark(`generating:${callId}`);
 }
 
-/** Records that the helper for `topic` opened; its session has already announced it. */
-export async function markHelperOpened(topic: string): Promise<void> {
+/** Records that the helper of task call `callId` opened; its session already announced it. */
+export async function markHelperOpened(callId: string): Promise<void> {
   "use step";
-  marks().add(`opened:${topic}`);
+  marks().add(`opened:${callId}`);
 }

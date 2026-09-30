@@ -18,10 +18,10 @@ export default defineWorkflowTool({
   async task({ topic }, ctx) {
     "use workflow";
 
-    await waitForParentGenerating(topic);
+    await waitForParentGenerating(ctx.callId);
     // `send` returns once the helper's session opened and announced itself.
     const helper = await ctx.agent("workflow-marker").send(topic);
-    await markHelperOpened(topic);
+    await markHelperOpened(ctx.callId);
     const result = await helper.result();
     if (result.status === "failed") throw new Error('Agent "workflow-marker" failed.');
     await sleep("3s");

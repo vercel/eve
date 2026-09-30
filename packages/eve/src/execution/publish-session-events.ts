@@ -205,25 +205,33 @@ async function publishInSessionScope<T>(
 }
 
 /**
- * Writes a session's events to its stream. The step that opens it holds the
- * stream's writer lock until it releases it.
+ * Holds a session's stream for one step, which keeps its writer lock until it
+ * releases it. Events reach the stream through `SessionEventPublisher.emit`.
  */
 export interface SessionEventWriter {
-  /** Stamps the event, then writes it; returns the event as written. */
-  write(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
   /** Closes the session stream; only a terminal `done` step does this. */
   close(): Promise<void>;
   /** Releases the writer lock so the next step can acquire it. Safe after `close()`. */
   release(): void;
 }
 
-/**
- * Dispatches a session's events: delivery to its channel and observation by
- * its activity and stream-event hooks. Observation needs the written event.
- */
+interface StreamWriter extends SessionEventWriter {
+  /** Stamps the event, then writes it; returns the event as written. */
+  write(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
+}
+
+/** Dispatches a session's events to its channel, activity, and stream-event hooks. */
 export interface SessionEventDispatcher {
   /** The context delivery hands the channel adapter; a turn step also hands it to `adapter.deliver`. */
   readonly adapterCtx: ChannelAdapterContext;
+  /**
+   * Runs the stream-event hooks for a written event. Only a turn step passes
+   * `cancelTurn`; see `turn-event-handler.ts`.
+   */
+  runHooks(event: MessageStreamEvent, cancelTurn?: () => void): Promise<void>;
+}
+
+interface EventDispatcher extends SessionEventDispatcher {
   /**
    * Channel delivery: the activity state update, then `forwardSessionInput` or
    * the channel adapter's handler, then the channel context. Returns the event
@@ -232,11 +240,6 @@ export interface SessionEventDispatcher {
   deliver(event: UnstampedMessageStreamEvent): Promise<UnstampedMessageStreamEvent>;
   /** Projects a written event onto the session's activity. */
   projectActivity(event: MessageStreamEvent): void;
-  /**
-   * Runs the stream-event hooks for a written event. Only a turn step passes
-   * `cancelTurn`; see `turn-event-handler.ts`.
-   */
-  runHooks(event: MessageStreamEvent, cancelTurn?: () => void): Promise<void>;
 }
 
 /** A session's stream held by one step, with the dispatch of the events that step publishes. */
@@ -288,7 +291,7 @@ function createSessionEventDispatcher(input: {
   readonly origin: SessionEventOrigin;
   readonly sessionId: string;
   readonly inputSource?: string;
-}): SessionEventDispatcher {
+}): EventDispatcher {
   const { ctx, inputSource, origin } = input;
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
@@ -331,7 +334,7 @@ function openSessionEventWriter(input: {
    */
   readonly deliveryIds: () => readonly string[] | undefined;
   readonly sessionWritable: WritableStream<Uint8Array>;
-}): SessionEventWriter {
+}): StreamWriter {
   const streamWriter = input.sessionWritable.getWriter();
 
   let released = false;
