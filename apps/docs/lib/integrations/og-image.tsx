@@ -64,6 +64,7 @@ const fitLogo = (node: ReactNode, maxWidth: number, maxHeight: number): ReactNod
 };
 
 interface RasterizedLogo {
+  darkSilhouette: boolean;
   height: number;
   inkCoverage: number;
   src: string;
@@ -150,6 +151,38 @@ const contrastLogo = (node: ReactNode): ReactNode => {
   );
 };
 
+// A logo whose outer edge is dark disappears on the black OG canvas. Logos with
+// dark details inside their own colored shape are fine as drawn.
+const hasDarkSilhouette = (image: PNG): boolean => {
+  const alphaAt = (x: number, y: number): number =>
+    x < 0 || y < 0 || x >= image.width || y >= image.height
+      ? 0
+      : image.data[(y * image.width + x) * 4 + 3]!;
+  let edge = 0;
+  let darkEdge = 0;
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      if (alphaAt(x, y) < 200) continue;
+      if (
+        alphaAt(x - 1, y) > 50 &&
+        alphaAt(x + 1, y) > 50 &&
+        alphaAt(x, y - 1) > 50 &&
+        alphaAt(x, y + 1) > 50
+      ) {
+        continue;
+      }
+      edge += 1;
+      const offset = (y * image.width + x) * 4;
+      const luminance =
+        0.2126 * image.data[offset]! +
+        0.7152 * image.data[offset + 1]! +
+        0.0722 * image.data[offset + 2]!;
+      if (luminance < 60) darkEdge += 1;
+    }
+  }
+  return edge > 0 && darkEdge / edge > 0.5;
+};
+
 const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
   const response = new ImageResponse(
     <div
@@ -167,6 +200,7 @@ const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
     { height: 512, width: 512 },
   );
   const image = PNG.sync.read(Buffer.from(await response.arrayBuffer()));
+  const darkSilhouette = hasDarkSilhouette(image);
   const cropped = cropLogo(image);
   let ink = 0;
   for (let offset = 0; offset < cropped.data.length; offset += 4) {
@@ -174,6 +208,7 @@ const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
   }
 
   return {
+    darkSilhouette,
     height: cropped.height,
     inkCoverage: ink / (cropped.width * cropped.height),
     src: `data:image/png;base64,${PNG.sync.write(cropped).toString("base64")}`,
@@ -214,7 +249,9 @@ const getRasterizedLogo = (integration: Integration): Promise<RasterizedLogo> =>
 
   const Logo = logos[integration.logo];
   const resolvedLogo = resolveLogo(<Logo aria-hidden />);
-  const rasterized = rasterizeLogo(contrastLogo(resolvedLogo));
+  const rasterized = rasterizeLogo(resolvedLogo).then((logo) =>
+    logo.darkSilhouette ? rasterizeLogo(contrastLogo(resolvedLogo)) : logo,
+  );
   rasterizedLogos.set(integration.logo, rasterized);
   return rasterized;
 };
