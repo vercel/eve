@@ -139,7 +139,7 @@ export class WorkflowToolRunAsks {
 
   /**
    * Waits until every withdrawal asked for has reached the run's inbox, so the
-   * run's outcome, which drops its questions silently, cannot overtake one.
+   * session decides each one before the run's outcome withdraws the rest.
    */
   async flush(): Promise<void> {
     while (this.withdrawing.size > 0) await Promise.all(this.withdrawing);

@@ -19,18 +19,25 @@ import {
 } from "#harness/proxy-input-requests.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 
-// No workflow runtime runs here: the run's cancel hook is a stub, and the stream is recorded.
+// No workflow runtime runs here: the run's cancel hook is a stub, and the
+// stream is recorded with each event's origin, since relayed input must not
+// reach the session's own instrumentation.
 vi.mock("#internal/workflow/runtime.js", () => ({ resumeHook: vi.fn(async () => {}) }));
 const { published } = vi.hoisted(() => ({ published: [] as unknown[] }));
 vi.mock("#execution/publish-session-events.js", () => {
-  const publish = async (
-    target: { readonly serializedContext: Record<string, unknown>; readonly sessionState: unknown },
-    events: readonly unknown[],
-  ) => {
-    published.push(...events);
-    return { serializedContext: target.serializedContext, sessionState: target.sessionState };
-  };
-  return { publishSessionEvents: publish, relaySessionEvents: publish };
+  const publisher =
+    (origin: "own" | "relayed") =>
+    async (
+      target: {
+        readonly serializedContext: Record<string, unknown>;
+        readonly sessionState: unknown;
+      },
+      events: readonly unknown[],
+    ) => {
+      published.push(...events.map((event) => ({ event, origin })));
+      return { serializedContext: target.serializedContext, sessionState: target.sessionState };
+    };
+  return { publishSessionEvents: publisher("own"), relaySessionEvents: publisher("relayed") };
 });
 
 const REQUEST_EVENT = { sequence: 3, stepIndex: 1, turnId: "turn_1" };
@@ -61,24 +68,30 @@ describe("answerTaskCancel", () => {
     expect([...getProxyInputRequests(committed.state).keys()]).toEqual(["summarize-run-ask-1"]);
     expect(published).toEqual([
       {
-        data: {
-          ...REQUEST_EVENT,
-          resolutions: [
-            { kind: "question", outcome: "cancelled", requestId: "research-run-ask-1" },
-          ],
+        event: {
+          data: {
+            ...REQUEST_EVENT,
+            resolutions: [
+              { kind: "question", outcome: "cancelled", requestId: "research-run-ask-1" },
+            ],
+          },
+          type: "input.resolved",
         },
-        type: "input.resolved",
+        origin: "relayed",
       },
       {
-        data: {
-          callId: "research-call",
-          kind: "tool",
-          name: "research",
-          status: "cancelled",
-          taskId: research.taskId,
-          turnId: "turn_1",
+        event: {
+          data: {
+            callId: "research-call",
+            kind: "tool",
+            name: "research",
+            status: "cancelled",
+            taskId: research.taskId,
+            turnId: "turn_1",
+          },
+          type: "task.settled",
         },
-        type: "task.settled",
+        origin: "own",
       },
     ]);
   });
@@ -120,25 +133,31 @@ describe("applyTaskRunMessageStep", () => {
     expect([...getProxyInputRequests(committed.state).keys()]).toEqual(["summarize-run-ask-1"]);
     expect(published).toEqual([
       {
-        data: {
-          ...REQUEST_EVENT,
-          resolutions: [
-            { kind: "question", outcome: "cancelled", requestId: "research-run-ask-1" },
-          ],
+        event: {
+          data: {
+            ...REQUEST_EVENT,
+            resolutions: [
+              { kind: "question", outcome: "cancelled", requestId: "research-run-ask-1" },
+            ],
+          },
+          type: "input.resolved",
         },
-        type: "input.resolved",
+        origin: "relayed",
       },
       {
-        data: {
-          callId: "research-call",
-          error: { message: "The research service is unavailable." },
-          kind: "tool",
-          name: "research",
-          status: "failed",
-          taskId: research.taskId,
-          turnId: "turn_1",
+        event: {
+          data: {
+            callId: "research-call",
+            error: { message: "The research service is unavailable." },
+            kind: "tool",
+            name: "research",
+            status: "failed",
+            taskId: research.taskId,
+            turnId: "turn_1",
+          },
+          type: "task.settled",
         },
-        type: "task.settled",
+        origin: "own",
       },
     ]);
   });

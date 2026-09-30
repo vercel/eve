@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-A relayed question or approval that can no longer be answered now emits `input.resolved` with `outcome: "cancelled"`. This applies when a task run or workflow tool call finishes while its `ctx.ask()` question is pending, and when a turn is cancelled while the session relays a request from a task, workflow tool call, or subagent. Previously the request was dropped silently, so channels and `useEveAgent` UIs kept offering it even though an answer could no longer reach anyone.
+A workflow tool's `ctx.ask()` question now emits `input.resolved` with `outcome: "cancelled"` when the task run or workflow tool call that asked finishes before anyone answers, and every question or approval a session relays does when the turn is cancelled. Previously these requests were dropped silently, so channels and `useEveAgent` UIs kept offering them even though no answer could reach the work that asked.
