@@ -7,6 +7,7 @@
  */
 
 import type { Block } from "./blocks.js";
+import { agentTaskLabel } from "./tool-presentation.js";
 import type { Theme } from "./theme.js";
 import { formatTurnDuration } from "./stream-format.js";
 import { renderTransientDrawer } from "./flow-drawer.js";
@@ -134,8 +135,7 @@ function currentActivity(entry: TaskEntry): { text: string; attention: boolean }
 /** Stable ownership order, with only one visible level of indentation. */
 function taskLabel(entry: TaskEntry): string {
   if (entry.kind !== "agent") return entry.name;
-  const name = entry.name.replace(/__agent(?= #\d+$|$)/u, "");
-  return name === "subagent" ? name : `subagent(${name})`;
+  return agentTaskLabel(entry.name);
 }
 
 function panelEntries(

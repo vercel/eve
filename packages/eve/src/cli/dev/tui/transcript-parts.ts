@@ -20,6 +20,7 @@ import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import { summarizeChildTools } from "./tool-block-groups.js";
 import {
   agentDisplayName,
+  agentTaskLabel,
   presentPreparingTool,
   presentTool,
   type ToolPresentationContext,
@@ -98,7 +99,7 @@ export function startLine(record: TaskRecord): Block {
   return {
     kind: "task",
     taskKind: record.kind,
-    title: record.kind === "agent" ? `Delegate ${record.name}` : record.name,
+    title: record.kind === "agent" ? `Delegate ${agentTaskLabel(record.name)}` : record.name,
     subtitle: stripTerminalControls(presentation.subtitle),
     live: false,
   };
@@ -224,7 +225,7 @@ export function endLine(
     id: `task:${record.callId}:end`,
     kind: "task",
     taskKind: record.kind,
-    title: record.name,
+    title: record.kind === "agent" ? agentTaskLabel(record.name) : record.name,
     live: false,
   };
   switch (call.status) {

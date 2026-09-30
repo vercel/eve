@@ -234,7 +234,7 @@ export function presentTool(
     // Named subagent dispatch: the tool name is the delegation target; the
     // message rides as the quiet subtitle. The row is transient — the
     // task's start line replaces it once the call becomes a task.
-    const name = agentDisplayName(toolName);
+    const name = agentTaskLabel(agentDisplayName(toolName));
     return {
       title: `${DELEGATE_VERB} ${name}`,
       doneTitle: `Delegated ${name}`,
@@ -311,6 +311,10 @@ export function isSelfModificationAgent(toolName: string): boolean {
 }
 
 /** The name an agent task goes by in the delegate row, task line, and task panel. */
+export function agentTaskLabel(name: string): string {
+  const readable = name.replace(/__agent(?= #\d+$|$)/u, "");
+  return readable === "subagent" ? readable : `subagent(${readable})`;
+}
 export function agentDisplayName(toolName: string): string {
   const baseName = toolBaseName(toolName);
   return AGENT_DISPLAY_NAMES.get(baseName) ?? baseName;
@@ -334,7 +338,7 @@ export function presentPreparingTool(
     // A named subagent's tool carries the delegation target in its name —
     // showable before the message finishes streaming.
     return {
-      title: `${DELEGATE_VERB} ${agentDisplayName(toolName)} …`,
+      title: `${DELEGATE_VERB} ${agentTaskLabel(agentDisplayName(toolName))} …`,
       subtitle: "",
       summarizeResult: () => undefined,
     };

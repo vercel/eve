@@ -210,14 +210,21 @@ describe("presentTool", () => {
       { message: "Look up GOOG.\nDetails…" },
       { isSubagent: true },
     );
-    expect(parsed.title).toBe("Delegate stock-price");
-    expect(parsed.doneTitle).toBe("Delegated stock-price");
+    expect(parsed.title).toBe("Delegate subagent(stock-price)");
+    expect(parsed.doneTitle).toBe("Delegated subagent(stock-price)");
     expect(parsed.subtitle).toBe("Look up GOOG.");
 
     // The tool's name carries the target, so it shows before args parse.
     expect(presentPreparingTool("stock-price", { isSubagent: true }).title).toBe(
-      "Delegate stock-price …",
+      "Delegate subagent(stock-price) …",
     );
+    const selfModification = presentTool(
+      "self-modification__agent",
+      { message: "Edit Alice's agent" },
+      { isSubagent: true },
+    );
+    expect(selfModification.title).toBe("Delegate subagent(self-modification)");
+    expect(selfModification.doneTitle).toBe("Delegated subagent(self-modification)");
     // Without roster knowledge the generic formatter keeps its shape.
     expect(presentTool("stock-price", { message: "x" }).title).toBe("stock-price");
   });

@@ -22,6 +22,7 @@ import { signInLabel, waitingLabel, type TaskEntry } from "./task-activity.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import {
   agentDisplayName,
+  agentTaskLabel,
   isPanelRoutedTool,
   presentTool,
   readWriteFileInput,
@@ -137,9 +138,10 @@ export class ConversationTranscript {
     const calls = Object.values(task.calls);
     const call = calls.findLast((candidate) => candidate.status === "working") ?? calls.at(-1);
     const record = call === undefined ? undefined : this.#tasks.get(call.callId);
-    if (record !== undefined) return record.name;
+    if (record !== undefined)
+      return record.kind === "agent" ? agentTaskLabel(record.name) : record.name;
     return task.kind === "agent"
-      ? agentDisplayName(stripTerminalControls(task.name))
+      ? agentTaskLabel(agentDisplayName(stripTerminalControls(task.name)))
       : stripTerminalControls(task.name);
   }
 
