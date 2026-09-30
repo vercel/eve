@@ -4,6 +4,7 @@ import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 import { RESEARCH_INTERIM_MESSAGE } from "../task-scenario-text.ts";
+import { generateWhileHelperOpens } from "./lib/helper-opened.ts";
 import { respondToTaskScenario } from "./lib/task-scenarios.ts";
 
 /**
@@ -21,7 +22,7 @@ const HOOK_SCENARIO_CALLS = {
  * Deterministic script: each directive names the workflow tool to call with
  * service "api"; once the turn holds a tool result the reply echoes it.
  */
-function respond(request: MockModelRequest): MockModelResponse | string {
+async function respond(request: MockModelRequest): Promise<MockModelResponse | string> {
   const hookScenario = request.userMessages.find((entry) => entry.includes("SUBAGENT-HOOKS:"));
   if (hookScenario !== undefined) {
     const auditing = request.lastUserMessage?.includes("SUBAGENT-HOOKS:AUDIT");
@@ -50,9 +51,13 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     if (mode === "direct") {
       return latestTaskResult(request, tool) ?? { toolCalls: [{ name: "task_wait", input: {} }] };
     }
-    // Ends the step with text while the task works, which holds the turn.
+    // Ends the step with text while the task works, which holds the turn. The
+    // task's helper opens while this step generates.
     if (mode === "background") {
-      return latestTaskResult(request, tool) ?? RESEARCH_INTERIM_MESSAGE;
+      const result = latestTaskResult(request, tool);
+      if (result !== undefined) return result;
+      await generateWhileHelperOpens(HOOK_SCENARIO_CALLS.background.input.topic);
+      return RESEARCH_INTERIM_MESSAGE;
     }
     const result = request.toolResults.find((entry) => entry.name === tool);
     return typeof result?.output === "string" ? result.output : JSON.stringify(result?.output);

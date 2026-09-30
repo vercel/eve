@@ -2,15 +2,15 @@ import { defineWorkflowTool } from "eve/tools";
 import { sleep } from "workflow";
 import { z } from "zod";
 
-import { replyFrom } from "../lib/agent-reply.ts";
+import { markHelperOpened, waitForParentGenerating } from "../lib/helper-opened.ts";
 
 /**
- * A task whose run opens a helper agent, then waits a few seconds before it
- * settles. The helper's `agent.started` hooks keep their writes whether it
- * opens during a model step or between steps. The sleep only keeps the turn
- * held: the session admits a task's result after each model step, so the task
- * must still be working when the step that started it ends for the model's
- * next step to write its interim reply first.
+ * A task whose run opens a helper agent while the parent's next model step is
+ * generating, then waits a few seconds before it settles. The helper's
+ * `agent.started` arrives mid-step, and its hooks must still keep their
+ * writes. The sleep only keeps the turn held: the session admits a task's
+ * result after each model step, so the task must still be working when that
+ * step ends for its interim reply to come first.
  */
 export default defineWorkflowTool({
   description: "Research a topic in the background with a helper agent and report its findings.",
@@ -18,8 +18,13 @@ export default defineWorkflowTool({
   async task({ topic }, ctx) {
     "use workflow";
 
-    const findings = await replyFrom(ctx, "workflow-marker", topic);
+    await waitForParentGenerating(topic);
+    // `send` returns once the helper's session opened and announced itself.
+    const helper = await ctx.agent("workflow-marker").send(topic);
+    await markHelperOpened(topic);
+    const result = await helper.result();
+    if (result.status === "failed") throw new Error('Agent "workflow-marker" failed.');
     await sleep("3s");
-    return findings;
+    return result.message ?? null;
   },
 });

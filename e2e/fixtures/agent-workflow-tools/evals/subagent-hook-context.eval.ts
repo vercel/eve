@@ -15,8 +15,8 @@ const SCENARIOS = {
       "Alice reviews the recorded hook observations for Bob's completed report. SUBAGENT-HOOKS:AUDIT",
   },
   // A task whose run opens a helper agent while the parent keeps answering.
-  // The helper can open during a model step or while the turn is held; either
-  // way its hooks' state and sandbox writes must reach Alice's next turn.
+  // The helper opens while the parent's model step runs, and its hooks' state
+  // and sandbox writes must still reach Alice's next turn.
   background: {
     description:
       "agent.started hooks keep the parent state and sandbox writes they make for a helper a background task opens.",
