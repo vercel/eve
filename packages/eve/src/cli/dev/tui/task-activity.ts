@@ -27,6 +27,8 @@ export interface TaskEntry {
   readonly startedAtMs: number;
   readonly purpose?: string;
   readonly children?: readonly TaskEntry[];
+  readonly omittedTasks?: number;
+  readonly omittedAttention?: boolean;
   /** An agent's latest words or thinking, one line. */
   step?: string;
   /** Settled, waiting only for the agent's own last events. */
@@ -136,17 +138,17 @@ function taskLabel(entry: TaskEntry): string {
   return name === "subagent" ? name : `subagent(${name})`;
 }
 
-function panelEntries(entries: readonly TaskEntry[]): Array<{ entry: TaskEntry; path: string[] }> {
-  const rows: Array<{ entry: TaskEntry; path: string[] }> = [];
-  const visit = (tasks: readonly TaskEntry[], path: string[], depth: number): void => {
-    if (depth > 8 || rows.length >= 128) return;
+function panelEntries(
+  entries: readonly TaskEntry[],
+): Array<{ entry: TaskEntry; path: TaskEntry[] }> {
+  const rows: Array<{ entry: TaskEntry; path: TaskEntry[] }> = [];
+  const visit = (tasks: readonly TaskEntry[], path: TaskEntry[]): void => {
     for (const entry of tasks) {
-      if (rows.length >= 128) break;
       rows.push({ entry, path });
-      visit(entry.children ?? [], [...path, taskLabel(entry)], depth + 1);
+      visit(entry.children ?? [], [...path, entry]);
     }
   };
-  visit(entries, [], 0);
+  visit(entries, []);
   return rows;
 }
 
@@ -165,10 +167,13 @@ export function renderTaskPanelRows(
   const { width, theme, nowMs } = options;
   const c = theme.colors;
   const tasks = panelEntries(entries);
+  const omitted = tasks.reduce((count, { entry }) => count + (entry.omittedTasks ?? 0), 0);
+  const omittedAttention = tasks.some(({ entry }) => entry.omittedAttention);
+  const total = tasks.length + omitted;
   const budget = Math.max(2, Math.min(maxPanelRows, options.maxRows ?? maxPanelRows));
   const padded = budget >= 5;
   const contentBudget = Math.max(0, budget - (padded ? 4 : 2));
-  const overflow = tasks.length * 2 > contentBudget;
+  const overflow = omitted > 0 || tasks.length * 2 > contentBudget;
   const capacity = Math.max(0, Math.floor((contentBudget - (overflow ? 1 : 0)) / 2));
   // Approval requests must not disappear behind a busy branch's overflow summary.
   const attention = tasks.filter(({ entry }) => currentActivity(entry).attention);
@@ -180,10 +185,12 @@ export function renderTaskPanelRows(
   for (const { entry, path } of shown) {
     const nested = path.length > 0;
     const lead = `  ${nested ? `${theme.glyph.corner} ` : ""}`;
-    const parentShown = shown.some((task) => taskLabel(task.entry) === path.at(-1));
+    const parentShown = shown.some((task) => task.entry === path.at(-1));
     const owners = parentShown ? path.slice(1) : path;
     const ownership =
-      owners.length > 0 ? `${owners.join(` ${theme.glyph.arrow} `)} ${theme.glyph.arrow} ` : "";
+      owners.length > 0
+        ? `${owners.map(taskLabel).join(` ${theme.glyph.arrow} `)} ${theme.glyph.arrow} `
+        : "";
     const elapsed = formatTurnDuration(nowMs - entry.startedAtMs);
     rows.push(
       clipVisible(`${lead}${c.bold(`${ownership}${taskLabel(entry)}`)} ${c.dim(elapsed)}`, width),
@@ -194,16 +201,17 @@ export function renderTaskPanelRows(
     const color = activity.attention ? c.yellow : c.dim;
     if (text.length > 0) rows.push(clipVisible(`${detailLead}${color(text)}`, width));
   }
-  const hidden = tasks.length - shown.length;
+  const hidden = total - shown.length;
   if (hidden > 0 && rows.length < contentBudget) {
-    rows.push(clipVisible(`  ${c.dim(`${theme.glyph.ellipsis} ${hidden} more working`)}`, width));
+    const summary = `${theme.glyph.ellipsis} ${omitted > 0 ? "at least " : ""}${hidden} more working${omittedAttention ? " · Approval needed" : ""}`;
+    rows.push(clipVisible(`  ${omittedAttention ? c.yellow(summary) : c.dim(summary)}`, width));
   }
   return renderTransientDrawer(
     rows,
     [],
     theme,
     width,
-    `${options.activity ?? "Working"} ${theme.glyph.dot} ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}${options.turnElapsedMs === undefined ? "" : ` ${theme.glyph.dot} ${formatTurnDuration(options.turnElapsedMs)}`}`,
+    `${options.activity ?? "Working"} ${theme.glyph.dot} ${total}${omitted > 0 ? "+" : ""} ${total === 1 ? "task" : "tasks"}${options.turnElapsedMs === undefined ? "" : ` ${theme.glyph.dot} ${formatTurnDuration(options.turnElapsedMs)}`}`,
     !padded,
     "left",
   ).rows;

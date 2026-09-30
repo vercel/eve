@@ -16,7 +16,7 @@ import type { TaskKind } from "./task-activity.js";
 import type { Theme } from "./theme.js";
 import type { ToolGroupPresentation } from "./tool-presentation.js";
 import { isPromptControlCommand } from "./prompt-commands.js";
-import { renderTool } from "./tool-rows.js";
+import { renderTool, renderToolHeader } from "./tool-rows.js";
 import { truncate } from "./tool-format.js";
 import { elisionText, TOOL_COLUMN_LEAD } from "./rail.js";
 import {
@@ -237,7 +237,7 @@ function renderBody(
     case "log":
       return renderLog(block, width, theme);
     case "task":
-      return renderTask(block, width, theme, context);
+      return renderTask(block, width, theme);
     case "turn-stats":
       return renderTurnStats(block, width, theme);
     case "session-boundary":
@@ -549,14 +549,11 @@ function renderTurnStats(block: Block, width: number, theme: Theme): string[] {
  * as it ends. Each is written once; what the task does in between lives in
  * the task panel above the prompt.
  */
-function renderTask(
-  block: DisplayBlock,
-  width: number,
-  theme: Theme,
-  context: RenderBlockContext,
-): string[] {
+function renderTask(block: DisplayBlock, width: number, theme: Theme): string[] {
   if (block.status === undefined) {
-    return renderTool({ ...block, status: "done" }, width, theme, context).slice(0, 1);
+    return [
+      ` ${renderToolHeader(block.title ?? "task", block.subtitle ?? "", theme.colors.gray(theme.glyph.square), width - 1, theme)}`,
+    ];
   }
   const c = theme.colors;
   const { mark, detail, color } = taskLineStyle(block, theme);

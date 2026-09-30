@@ -486,6 +486,90 @@ describe("ConversationTranscript", () => {
     expect(transcript.tasks[0]!.children).toEqual([]);
   });
 
+  it("shares one nested projection budget across roots and reports omitted work", () => {
+    const root = conversation([
+      turn,
+      toolCall("call_1", "research"),
+      taskStarted("call_1", "research"),
+      agentStarted("call_1"),
+      toolCall("call_2", "review"),
+      taskStarted("call_2", "review", "task_2"),
+      event(
+        createAgentStartedEvent({
+          callId: "call_2",
+          name: "review",
+          parentSessionId: "session_1",
+          sessionId: "child_2",
+          taskId: "task_2",
+          turnId: "turn_1",
+        }),
+      ),
+    ]);
+    const child = conversation([
+      turn,
+      event(
+        createMessageReceivedEvent({
+          message: "Process Alice's files",
+          sequence: 0,
+          turnId: "turn_1",
+        }),
+      ),
+      ...Array.from({ length: 80 }, (_, i) => [
+        toolCall(`call_${i}`, "download"),
+        event(
+          createTaskStartedEvent({
+            callId: `call_${i}`,
+            taskId: `task_${i}`,
+            kind: "tool",
+            name: "download",
+            turnId: "turn_1",
+          }),
+        ),
+      ]).flat(),
+    ]);
+    const withApproval = conversation(
+      [
+        event(
+          createInputRequestedEvent({
+            requests: [
+              {
+                requestId: "approve_download",
+                kind: "tool-approval",
+                prompt: "Approve download?",
+                action: { callId: "call_79", toolName: "download", input: {}, kind: "tool-call" },
+              },
+            ],
+            turnId: "turn_1",
+            sequence: 2,
+            stepIndex: 0,
+          }),
+        ),
+      ],
+      child,
+    );
+    const observed = {
+      ...withApproval,
+      inputs: {
+        ...withApproval.inputs,
+        approve_download: { ...withApproval.inputs.approve_download!, taskId: "task_79" },
+      },
+    };
+    const state: ConversationState = {
+      ...root,
+      agents: Object.fromEntries(
+        Object.entries(root.agents).map(([id, agent]) => [
+          id,
+          { ...agent, observation: { status: "following", conversation: observed } },
+        ]),
+      ),
+    };
+    const transcript = new ConversationTranscript();
+    transcript.project(view(state, true), options);
+    expect(transcript.tasks.map((task) => task.children?.length)).toEqual([80, 48]);
+    expect(transcript.tasks.map((task) => task.omittedTasks)).toEqual([0, 32]);
+    expect(transcript.tasks[1]!.omittedAttention).toBe(true);
+  });
+
   it("names parallel calls apart, stops tasks a cancelled turn leaves working, and hides hidden ones", () => {
     const state = conversation([
       turn,
@@ -495,7 +579,11 @@ describe("ConversationTranscript", () => {
       taskStarted("call_2", "research", "task_2"),
     ]);
     const transcript = new ConversationTranscript();
-    transcript.project(view(state, true), options);
+    const starts = transcript.project(view(state, true), options);
+    expect(starts.map((block) => block.title)).toEqual([
+      "Delegate research",
+      "Delegate research #2",
+    ]);
     expect(transcript.tasks.map((task) => task.name)).toEqual(["research", "research #2"]);
     // An input request names the task that asked as its lines do.
     expect(transcript.taskLabel(state, "task_2")).toBe("research #2");

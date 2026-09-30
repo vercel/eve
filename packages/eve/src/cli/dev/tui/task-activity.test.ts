@@ -57,6 +57,27 @@ describe("live task panel", () => {
     expect(rows.join("\n")).not.toContain("download ·");
   });
 
+  it("keeps ownership when a hidden parent shares a name with an unrelated visible task", () => {
+    const child = task("child");
+    child.childTools.set("approval", {
+      kind: "tool",
+      title: "read",
+      status: "approval",
+      live: false,
+    });
+    const unrelated = { ...task("same"), callId: "unrelated" };
+    const parent = { ...task("same", [child]), callId: "owner" };
+    const rows = render([unrelated, parent], 100, 9).join("\n");
+    expect(rows).toContain("└ subagent(same) → subagent(child)");
+  });
+
+  it("reports truncated work and attention instead of silently counting only projected entries", () => {
+    const entry = { ...task("researcher"), omittedTasks: 32, omittedAttention: true };
+    const rows = render([entry], 100, 7).join("\n");
+    expect(rows).toContain("33+ tasks");
+    expect(rows).toContain("at least 32 more working · Approval needed");
+  });
+
   it("puts parent state and turn time in the header with breathing room around tasks", () => {
     const rows = renderTaskPanelRows([task("self-modification__agent")], {
       width: 80,

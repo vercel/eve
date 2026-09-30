@@ -30,6 +30,9 @@ import {
 } from "./tool-presentation.js";
 import {
   activeToolSteps,
+  taskNeedsApproval,
+  uniqueTaskName,
+  type AgentActivity,
   agentTaskSummary,
   authorizationTerminalMessage,
   childToolCallIds,
@@ -274,7 +277,7 @@ export class ConversationTranscript {
       record = {
         callId,
         kind: task.kind,
-        name: this.#uniqueName(baseName),
+        name: uniqueTaskName(baseName, this.#tasks.values()),
         toolName: part.toolName,
         input: part.input,
         label,
@@ -285,18 +288,6 @@ export class ConversationTranscript {
       this.#tasks.set(callId, record);
     }
     return this.#memoize(`task:${callId}:start`, [record], () => startLine(record));
-  }
-
-  /** Parallel calls to one agent read `researcher`, `researcher #2`, …; a name is never renamed. */
-  #uniqueName(baseName: string): string {
-    const taken = new Set(
-      [...this.#tasks.values()].filter((record) => !record.ended).map((record) => record.name),
-    );
-    if (!taken.has(baseName)) return baseName;
-    for (let ordinal = 2; ; ordinal += 1) {
-      const candidate = `${baseName} #${String(ordinal)}`;
-      if (!taken.has(candidate)) return candidate;
-    }
   }
 
   /**
@@ -319,12 +310,13 @@ export class ConversationTranscript {
         lastTurn?.status === "failed");
     const arrivals: Block[] = [];
     const entries: TaskEntry[] = [];
+    const traversal = { remaining: 128 };
     for (const record of this.#tasks.values()) {
       if (record.ended) continue;
       const taskCall = taskCalls.get(record.callId);
       if (taskCall === undefined) continue;
       const { task, call } = taskCall;
-      const activity = this.#agentActivity(record, task, call, conversation, options);
+      const activity = this.#agentActivity(record, task, call, conversation, options, traversal);
       if (options.subagents === "full") {
         for (const row of activity.rows) {
           if (!this.#placedIds.has(row.id!)) arrivals.push(row);
@@ -358,6 +350,8 @@ export class ConversationTranscript {
         label: record.label,
         purpose: record.purpose,
         children: activity.children,
+        omittedTasks: activity.omittedTasks,
+        omittedAttention: activity.omittedAttention,
         startedAtMs: record.startedAtMs,
         childTools: new Map(activity.tools.map((block) => [block.id!, block])),
       };
@@ -376,9 +370,9 @@ export class ConversationTranscript {
     call: ConversationTaskCall,
     conversation: ConversationState,
     options: TranscriptOptions,
+    traversal: { remaining: number },
     depth = 0,
-    traversal = { remaining: 128 },
-  ): { tools: Block[]; rows: Block[]; children?: TaskEntry[]; step?: string; pending: boolean } {
+  ): AgentActivity {
     const agent = task.kind === "agent" ? agentToolSession(conversation, task) : undefined;
     const child =
       agent === undefined || agent.observation.status === "not-followed"
@@ -399,6 +393,8 @@ export class ConversationTranscript {
     const ordered: Array<{ order: number; block: Block; settled: boolean }> = [];
     const tools: Block[] = [];
     const children: TaskEntry[] = [];
+    let omittedTasks = 0;
+    let omittedAttention = false;
     let order = 0;
     for (const message of messages) {
       for (const part of message.parts) {
@@ -424,12 +420,13 @@ export class ConversationTranscript {
           childTask?.task.kind === "agent"
             ? options.subagents !== "hidden"
             : options.tools !== "hidden";
-        if (
-          childTask?.call.status === "working" &&
-          childVisible &&
-          depth < 8 &&
-          traversal.remaining > 0
-        ) {
+        if (childTask?.call.status === "working" && childVisible) {
+          if (depth >= 8 || traversal.remaining <= 0) {
+            omittedTasks += 1;
+            omittedAttention ||=
+              state.status === "approval" || taskNeedsApproval(child, childTask.task);
+            continue;
+          }
           traversal.remaining -= 1;
           const key = `${record.callId}/${part.toolCallId}`;
           let nested = this.#nestedTasks.get(key);
@@ -443,13 +440,15 @@ export class ConversationTranscript {
             childTask.call,
             child,
             options,
-            depth + 1,
             traversal,
+            depth + 1,
           );
           children.push({
             ...nested,
             step: activity.step,
             children: activity.children,
+            omittedTasks: activity.omittedTasks,
+            omittedAttention: activity.omittedAttention,
             childTools: new Map(activity.tools.map((tool) => [tool.id!, tool])),
           });
         } else {
@@ -481,16 +480,12 @@ export class ConversationTranscript {
       .sort((left, right) => left.order - right.order)
       .map((row) => row.block);
     const latest = steps.at(-1);
-    const result: {
-      tools: Block[];
-      rows: Block[];
-      children: TaskEntry[];
-      step?: string;
-      pending: boolean;
-    } = {
+    const result: AgentActivity = {
       tools,
       rows,
       children,
+      omittedTasks,
+      omittedAttention,
       pending,
     };
     if (latest !== undefined) result.step = firstLine(latest.message) ?? "Thinking";

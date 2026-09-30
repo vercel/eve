@@ -1,5 +1,7 @@
 /** Pure pieces of the transcript projection: tool rows, task lines, and agent steps. */
 
+import { agentToolSession } from "#client/conversation-state.js";
+import type { TaskEntry } from "./task-activity.js";
 import type {
   ConversationState,
   ConversationTaskCall,
@@ -43,6 +45,51 @@ export interface TaskRecord {
   ended: boolean;
 }
 
+export interface AgentActivity {
+  tools: Block[];
+  rows: Block[];
+  children?: TaskEntry[];
+  omittedTasks?: number;
+  omittedAttention?: boolean;
+  step?: string;
+  pending: boolean;
+}
+
+export function taskNeedsApproval(
+  conversation: ConversationState,
+  task: ConversationTask,
+): boolean {
+  if (
+    Object.values(conversation.inputs).some(
+      (input) =>
+        input.taskId === task.taskId &&
+        input.status === "open" &&
+        input.request.kind === "tool-approval",
+    )
+  )
+    return true;
+  const agent = agentToolSession(conversation, task);
+  const child =
+    agent?.observation.status === "not-followed" ? undefined : agent?.observation.conversation;
+  return (
+    child !== undefined &&
+    Object.values(child.inputs).some(
+      (input) => input.status === "open" && input.request.kind === "tool-approval",
+    )
+  );
+}
+
+export function uniqueTaskName(baseName: string, records: Iterable<TaskRecord>): string {
+  const taken = new Set(
+    [...records].filter((record) => !record.ended).map((record) => record.name),
+  );
+  if (!taken.has(baseName)) return baseName;
+  for (let ordinal = 2; ; ordinal += 1) {
+    const candidate = `${baseName} #${ordinal}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
 export function startLine(record: TaskRecord): Block {
   const presentation = presentTool(record.toolName, record.input, {
     ...labelContext(record.label),
@@ -51,7 +98,7 @@ export function startLine(record: TaskRecord): Block {
   return {
     kind: "task",
     taskKind: record.kind,
-    title: stripTerminalControls(presentation.title),
+    title: record.kind === "agent" ? `Delegate ${record.name}` : record.name,
     subtitle: stripTerminalControls(presentation.subtitle),
     live: false,
   };
