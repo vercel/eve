@@ -13,6 +13,12 @@ import { isObject } from "#shared/guards.js";
 type Schema = Record<string, unknown>;
 
 const MAX_DEPTH = 6;
+/**
+ * Bounds rendering work, not just output: shared `$ref` targets can otherwise
+ * expand exponentially within {@link MAX_DEPTH}. Anything past this many
+ * schema nodes would exceed {@link MAX_SIGNATURE_LENGTH} anyway.
+ */
+const MAX_NODES = 1_000;
 /** Bounds what one remote schema can add to model context. */
 const MAX_SIGNATURE_LENGTH = 4_000;
 const MAX_DESCRIPTION_LENGTH = 120;
@@ -32,6 +38,8 @@ const CONSTRAINT_KEYS = [
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/u;
 
 interface RenderContext {
+  /** Shared across one schema's render; counts down to zero. */
+  readonly budget: { remaining: number };
   readonly depth: number;
   readonly refs: ReadonlySet<string>;
   readonly root: Schema;
@@ -51,12 +59,18 @@ export function renderToolSignature(input: {
 }
 
 function renderRoot(schema: Schema): string {
-  return renderType(schema, { depth: 0, refs: new Set(), root: schema });
+  return renderType(schema, {
+    budget: { remaining: MAX_NODES },
+    depth: 0,
+    refs: new Set(),
+    root: schema,
+  });
 }
 
 function renderType(schema: unknown, context: RenderContext): string {
   if (schema === true || !isObject(schema)) return "unknown";
-  if (context.depth > MAX_DEPTH) return "unknown";
+  if (context.depth > MAX_DEPTH || context.budget.remaining <= 0) return "unknown";
+  context.budget.remaining -= 1;
 
   if (typeof schema.$ref === "string") {
     const target = resolveRef(schema.$ref, context);
