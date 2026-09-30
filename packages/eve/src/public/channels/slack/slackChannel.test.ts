@@ -38,7 +38,7 @@ import {
 import { defaultSlackAuth } from "#public/channels/slack/index.js";
 import {
   composeSlackRenderers,
-  type SlackDefaultRenderer,
+  type SlackRenderChain,
   type SlackRenderer,
 } from "#public/channels/slack/renderers.js";
 import {
@@ -735,6 +735,55 @@ describe("slackChannel() default event handlers", () => {
       "Waiting on researcher and 2 more tasks...",
       "Waiting on reviewer...",
     ]);
+  });
+
+  it("forgets a failed turn's tasks even when a renderer replaces its failure reply", async () => {
+    const adapter = withState(
+      getAdapter(
+        slackChannel({
+          credentials: { botToken: "xoxb-test" },
+          renderers: [{ events: { async "turn.failed"() {} } }],
+        }),
+      ),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("task.started", {
+        callId: "c1",
+        kind: "agent",
+        name: "researcher",
+        taskId: "researcher-1",
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    await callEvent(
+      adapter,
+      makeEvent("turn.failed", {
+        code: "MODEL_CALL_FAILED",
+        message: "x",
+        sequence: 1,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    await callEvent(
+      adapter,
+      makeEvent("task.started", {
+        callId: "c2",
+        kind: "agent",
+        name: "reviewer",
+        taskId: "reviewer-1",
+        turnId: "t2",
+      }),
+      ctx,
+    );
+    await callEvent(adapter, makeEvent("turn.waiting", { sequence: 1, turnId: "t2" }), ctx);
+
+    expect(slackStatuses(fetchMock)).toEqual(["Waiting on reviewer..."]);
   });
 
   it("message.completed skips post when finishReason is tool-calls", async () => {
@@ -4960,7 +5009,7 @@ describe("slackChannel().receive", () => {
 describe("Slack renderer chain", () => {
   function chainWith(
     renderers: readonly SlackRenderer[],
-    defaults: Partial<SlackDefaultRenderer["events"]>,
+    defaults: Partial<SlackRenderChain["events"]>,
   ) {
     return composeSlackRenderers(renderers, {
       events: defaults,

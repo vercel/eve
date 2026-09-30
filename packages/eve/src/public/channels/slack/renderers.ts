@@ -45,6 +45,7 @@ type SlackSessionEvent = Exclude<SlackRenderedEvent, "authorization.required" | 
 /**
  * Runs the rest of the chain, ending with eve's default. Pass changed data to
  * hand it on instead of the event; the rest of the chain runs at most once.
+ * Await it, so the rest of the chain finishes before the event does.
  */
 export type SlackRenderNext<T extends SlackRenderedEvent> = (data?: EventData<T>) => Promise<void>;
 
@@ -91,7 +92,8 @@ export interface SlackTaskCard {
 export interface SlackRenderer {
   /**
    * Acknowledges a mention or DM as soon as it arrives, while the message hook
-   * is still deciding. eve's default sets the `Thinking...` status. If the hook
+   * is still deciding, and another channel message once `onMessage`
+   * dispatches it. eve's default sets the `Thinking...` status. If the hook
    * drops the message, eve clears the thread status.
    */
   readonly received?: (
@@ -119,14 +121,10 @@ export function defineSlackRenderer(renderer: SlackRenderer): SlackRenderer {
   return renderer;
 }
 
-/** eve's default renderer: the innermost link, whose event handlers take no `next`. */
-export interface SlackDefaultRenderer {
-  readonly events: SlackChannelInternalEvents;
-  readonly received: (message: SlackMessage, channel: SlackContext) => Promise<void>;
-  readonly taskCard: (view: TaskCardView) => SlackTaskCard | null;
-}
-
-/** The composed chain a channel runs. */
+/**
+ * A complete chain, whose handlers take no `next`: eve's default renderer,
+ * which is the innermost link, and the composed chain a channel runs.
+ */
 export interface SlackRenderChain {
   readonly events: SlackChannelInternalEvents;
   readonly received: (message: SlackMessage, channel: SlackContext) => Promise<void>;
@@ -137,7 +135,7 @@ type AnyHandler = (...args: unknown[]) => void | Promise<void>;
 
 export function composeSlackRenderers(
   renderers: readonly SlackRenderer[],
-  defaults: SlackDefaultRenderer,
+  defaults: SlackRenderChain,
 ): SlackRenderChain {
   return {
     events: composeEvents(renderers, defaults.events),
@@ -221,7 +219,7 @@ function userChannel(
 
 async function composeReceived(
   renderers: readonly SlackRenderer[],
-  defaults: SlackDefaultRenderer,
+  defaults: SlackRenderChain,
   message: SlackMessage,
   channel: SlackContext,
   index: number,
@@ -244,7 +242,7 @@ async function composeReceived(
 
 function composeTaskCard(
   renderers: readonly SlackRenderer[],
-  defaults: SlackDefaultRenderer,
+  defaults: SlackRenderChain,
   view: TaskCardView,
   index: number,
 ): SlackTaskCard | null {

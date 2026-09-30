@@ -14,7 +14,10 @@ export type TaskCardTaskStatus = "working" | "blocked" | "completed" | "failed" 
 /** What a blocked task waits on: a person's approval, answer, or sign-in. */
 export interface TaskCardBlocker {
   readonly kind: "approval" | "authorization" | "input";
-  /** The request's prompt or the connection's name, when there is one. */
+  /**
+   * The request's prompt or the connection's name, when there is one. Only in
+   * a private conversation, since a request can be sent to one person alone.
+   */
   readonly label?: string;
 }
 
@@ -39,6 +42,7 @@ export interface TaskCardAction {
   /** The call's input, when its JSON is at most 4,096 characters. */
   readonly input?: Readonly<Record<string, unknown>>;
   readonly startedAt: string;
+  readonly settledAt?: string;
 }
 
 /** One task call in a turn's task card. */
@@ -112,6 +116,7 @@ function projectAction(action: ActivityActionStateV1): TaskCardAction {
     title: action.label ?? action.name,
   };
   if (action.input !== undefined) projected.input = action.input;
+  if (action.settledAt !== undefined) projected.settledAt = action.settledAt;
   return projected;
 }
 
@@ -142,9 +147,10 @@ function projectRow(
     taskId: task.id,
     title: task.title,
   };
-  if (blocker !== undefined && status === "blocked") row.blockedOn = toBlocker(blocker);
+  const shareable = audience === "private";
+  if (blocker !== undefined && status === "blocked") row.blockedOn = toBlocker(blocker, shareable);
   const settled = status !== "working" && status !== "blocked";
-  const shown = status !== "failed" || audience === "private";
+  const shown = status !== "failed" || shareable;
   if (task.summary !== undefined && settled && shown) row.summary = task.summary;
   if (action.settledAt !== undefined) row.settledAt = action.settledAt;
   return row;
@@ -219,10 +225,12 @@ function stepStatus(action: ActivityActionStateV1): TaskCardStep["status"] {
   }
 }
 
-function toBlocker(blocker: ActivityBlockerStateV1): TaskCardBlocker {
-  return blocker.label === undefined
-    ? { kind: blocker.kind }
-    : { kind: blocker.kind, label: blocker.label };
+function toBlocker(blocker: ActivityBlockerStateV1, shareable: boolean): TaskCardBlocker {
+  const projected: { -readonly [K in keyof TaskCardBlocker]: TaskCardBlocker[K] } = {
+    kind: blocker.kind,
+  };
+  if (shareable && blocker.label !== undefined) projected.label = blocker.label;
+  return projected;
 }
 
 function cardState(

@@ -1,5 +1,5 @@
 ---
-issue: TBD
+issue: https://github.com/vercel/eve/pull/4028
 status: implemented
 last_updated: "2026-09-30"
 ---
@@ -28,7 +28,7 @@ wraps eve's defaults. Paths are relative to `packages/eve/src/`.
    calls.
 4. **eve's default message hooks don't render.** A message hook decides whether to start a turn
    and with what auth, and eve's rendering no longer depends on which hook ran. A custom hook can
-   still post through its context, but it no longer has to recreate eve's rendering. The `Thinking…` acknowledgement moves from `defaultOnAppMention` into eve's default
+   still post through its context, but it no longer has to recreate eve's rendering. The `Thinking...` acknowledgement moves from `defaultOnAppMention` into eve's default
    renderer, so a custom `onAppMention` keeps it. It is optimistic: it appears the moment a
    mention or DM arrives, while the hook is still deciding, and eve clears it if the hook drops the
    message.
@@ -52,7 +52,7 @@ Three separate mechanisms write to a Slack thread, and nothing in the default se
 | `events` handlers (`defaults.ts`)                               | Inline, while the root session publishes each event | The root session's events, but no `task.*` events | Yes     |
 | Activity collector plus renderers (`execution/activity-*.ts`)   | Separate durable workflow for each root session     | Root, child, and remote agent activity, debounced | No      |
 
-**The default experience.** eve posts `Thinking…` from the default mention and DM hooks. Then
+**The default experience.** eve posts `Thinking...` from the default mention and DM hooks. Then
 `turn.started`, `reasoning.appended`, and `actions.requested` update the thread status through
 `assistant.threads.setStatus`, and `message.completed` posts replies. `ChannelEvents`
 (`public/definitions/channel.ts`) has no `task.started`, `task.settled`, or `turn.waiting`. A turn
@@ -82,7 +82,7 @@ Child and remote agent sessions send it activity batches over HTTP, and it re-re
 **Coupling problems.**
 
 1. **Routing decides rendering.** The default mention and DM hooks both derive auth and post
-   `Thinking…`. A custom `onAppMention` for gating or auth drops the acknowledgement. The
+   `Thinking...`. A custom `onAppMention` for gating or auth drops the acknowledgement. The
    doc comment even says "replacing this replaces both". An authored `onMessage` catches mentions
    and DMs too, so it drops the acknowledgement for them as well.
 2. **Overriding means replacing.** `events["message.completed"]` replaces reply posting. To add a
@@ -166,9 +166,11 @@ The status line shows work that finishes within a step. The default renderer own
 | A reply posts                          | Cleared by Slack                                       |
 
 The status lists tasks by tool or agent name, from `task.started` and `task.settled`. Slack clears
-a status after two minutes without a message, so while a task works the collector renders about
-every 90 seconds with nothing new, and the Slack presenter sets the same waiting status again once
-the last one is 80 seconds old. When a task's
+a status after two minutes without a message, and whenever the app posts. So the Slack presenter
+sets the waiting status right after it posts a card, and the collector renders about every 90
+seconds with nothing new while a task works, so the presenter can set it again once it is 80
+seconds old. It skips that refresh while the turn's own calls ran in the last 80 seconds, since a
+working turn sets its own status. The refresh uses eve's wording, not the renderer chain's. When a task's
 question posts, the status still names the task: the question card is the call to action, and the
 task row says what it is waiting for.
 
@@ -202,11 +204,15 @@ the task works: `Reading the postmortem...` while running, then `✓`, `✗`, or
   the first line of `task.settled.error.message`. Error text can carry internal hostnames or
   identifiers, so other channels show `Failed` alone. The view leaves a failed task's `summary`
   out there too, so a custom `taskCard` can't leak it by accident.
+- **Requests stay where `approvalChannel` sends them.** A blocked row names the request's prompt
+  only in a DM or private channel. Elsewhere `blockedOn` carries only its kind, since a request
+  sent to one person by DM would otherwise show in the shared thread.
 - **Stopped is not success.** Slack has no cancelled status. A cancelled row uses `error` with the
   output `Stopped`, so it never shows a success check. The plan title counts stopped tasks
   separately from failed ones.
-- **Writes are per card.** A failed post or update keeps that card's previous state, so the next
-  render writes it again without posting the cards that landed a second time. An update that
+- **Writes are per card.** A failed post or update is tried once more after a second. If that
+  fails too, the card keeps its previous state, so a later render writes it again without posting
+  the cards that landed a second time. An update that
   fails with `message_not_found`, because someone deleted the card, posts it again. Posts set
   `unfurl_links` and `unfurl_media` to `false`.
 - **Where it doesn't appear:** schedule turns, which post only their final reply, and sessions
@@ -216,7 +222,7 @@ the task works: `Reading the postmortem...` while running, then `✓`, `✗`, or
 
 ### Inbound handlers route; renderers render
 
-Message hooks keep their signatures and return values, and they post nothing. `defaultOnMessage`
+Message hooks keep their signatures and return values, and eve's default hooks post nothing. `defaultOnMessage`
 only derives auth. Acknowledging a message is rendering, so it belongs to the renderer chain's
 `received` handler:
 

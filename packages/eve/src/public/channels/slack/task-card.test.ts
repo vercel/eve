@@ -220,7 +220,10 @@ describe("Slack task card", () => {
 
     const posted = await presenter.render({ destination, snapshot: working, state: undefined });
 
-    expect(calls.map((call) => call.operation)).toEqual(["chat.postMessage"]);
+    expect(calls.map((call) => call.operation)).toEqual([
+      "chat.postMessage",
+      "assistant.threads.setStatus",
+    ]);
     expect(calls[0]!.body).toMatchObject({
       unfurl_links: "false",
       unfurl_media: "false",
@@ -248,8 +251,12 @@ describe("Slack task card", () => {
     const settled = settleBothTasks(working);
     const updated = await presenter.render({ destination, snapshot: settled, state: posted });
 
-    expect(calls.map((call) => call.operation)).toEqual(["chat.postMessage", "chat.update"]);
-    expect(calls[1]!.body).toMatchObject({
+    expect(calls.map((call) => call.operation)).toEqual([
+      "chat.postMessage",
+      "assistant.threads.setStatus",
+      "chat.update",
+    ]);
+    expect(calls[2]!.body).toMatchObject({
       blocks: [
         {
           tasks: [
@@ -273,7 +280,7 @@ describe("Slack task card", () => {
     });
 
     await presenter.render({ destination, snapshot: settled, state: updated });
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
   });
 
   it("builds an authored task card on eve's default card", async () => {
@@ -329,8 +336,10 @@ describe("Slack task card", () => {
   });
 
   it("writes each turn's card on its own, so a failed write never posts the others twice", async () => {
+    vi.useFakeTimers();
+    // The lint card's post and its one retry both fail.
     const { calls, fetch } = slackApi((operation, index) =>
-      operation === "chat.postMessage" && index === 1
+      operation === "chat.postMessage" && (index === 1 || index === 2)
         ? { error: "ratelimited", ok: false }
         : undefined,
     );
@@ -338,12 +347,14 @@ describe("Slack task card", () => {
     const destination = presenter.destination(THREAD);
     const snapshot = startLint(startTwoTasks());
 
-    const first = await presenter.render({ destination, snapshot, state: undefined });
-    await presenter.render({ destination, snapshot, state: first });
+    const rendering = presenter.render({ destination, snapshot, state: undefined });
+    await vi.runAllTimersAsync();
+    await presenter.render({ destination, snapshot, state: await rendering });
 
     const posts = calls.filter((call) => call.operation === "chat.postMessage");
     expect(posts.map((post) => post.body["text"])).toEqual([
       expect.stringContaining("Deploy storefront"),
+      expect.stringContaining("lint"),
       expect.stringContaining("lint"),
       expect.stringContaining("lint"),
     ]);
@@ -366,10 +377,11 @@ describe("Slack task card", () => {
 
     expect(calls.map((call) => call.operation)).toEqual([
       "chat.postMessage",
+      "assistant.threads.setStatus",
       "chat.update",
       "chat.postMessage",
     ]);
-    expect(reposted).toMatchObject({ cards: { [TURN_ID]: { ts: "1700000009.000103" } } });
+    expect(reposted).toMatchObject({ cards: { [TURN_ID]: { ts: "1700000009.000104" } } });
   });
 
   it("lets an app show its own plan tool's checklist ahead of eve's task rows", async () => {
@@ -494,7 +506,7 @@ describe("Slack task card", () => {
     expect(calls).toEqual([]);
   });
 
-  it("sets the waiting status again before Slack expires it while tasks work", async () => {
+  it("sets the waiting status after posting a card, and again before Slack expires it", async () => {
     vi.useFakeTimers({ now: Date.UTC(2026, 8, 30, 12) });
     const { calls, fetch } = slackApi();
     const presenter = defaultPresenter(fetch);
@@ -508,10 +520,74 @@ describe("Slack task card", () => {
     expect(calls.map((call) => call.operation)).toEqual([
       "chat.postMessage",
       "assistant.threads.setStatus",
+      "assistant.threads.setStatus",
     ]);
-    expect(calls[1]!.body).toMatchObject({
+    expect(calls[2]!.body).toMatchObject({
       status: "Waiting on lint...",
       thread_ts: THREAD.threadTs,
     });
+  });
+
+  it("leaves the status to a turn that is still calling tools", async () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 8, 30, 12) });
+    const { calls, fetch } = slackApi();
+    const presenter = defaultPresenter(fetch);
+    const destination = presenter.destination(THREAD);
+    const snapshot = observe(startLint(createActivitySnapshot()), [
+      createActionsRequestedEvent({
+        actions: [{ callId: "call_logs", input: {}, kind: "tool-call", toolName: "logs" }],
+        sequence: 4,
+        stepIndex: 1,
+        turnId: "turn_2",
+      }),
+    ]);
+
+    const posted = await presenter.render({ destination, snapshot, state: undefined });
+    vi.setSystemTime(Date.UTC(2026, 8, 30, 12, 1, 30));
+    await presenter.render({ destination, snapshot, state: posted });
+
+    expect(calls.map((call) => call.operation)).toEqual([
+      "chat.postMessage",
+      "assistant.threads.setStatus",
+    ]);
+  });
+
+  it("keeps a blocked task's request out of the card outside private conversations", async () => {
+    const working = startTwoTasks();
+    const deploy = Object.values(working.actions).find((action) => action.name === "deploy")!;
+    const blocked = reduceActivityBatch(working, {
+      events: [
+        {
+          blocker: {
+            id: "blocker:deploy",
+            kind: "approval",
+            label: "Deploy storefront to production?",
+            parentActionId: deploy.id,
+            parentWorkId: deploy.parentWorkId,
+            rootTurnId: TURN_ID,
+          },
+          eventId: "blocker:deploy:started",
+          kind: "blocker.started",
+          startedAt: "2026-09-30T12:05:00.000Z",
+        },
+      ],
+      version: 1,
+    });
+    const details = async (audience: string) => {
+      const { calls, fetch } = slackApi();
+      const presenter = defaultPresenter(fetch);
+      await presenter.render({
+        destination: presenter.destination({ ...THREAD, audience }),
+        snapshot: blocked,
+        state: undefined,
+      });
+      return JSON.stringify(calls[0]!.body["blocks"]);
+    };
+
+    expect(await details("public")).not.toContain("Deploy storefront to production?");
+    expect(await details("public")).toContain("Waiting for approval");
+    expect(await details("private")).toContain(
+      "Waiting for approval: Deploy storefront to production?",
+    );
   });
 });

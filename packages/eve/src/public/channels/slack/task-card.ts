@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { ChannelActivityPresenter } from "#channel/activity-presenter.js";
 import {
   projectTaskCards,
@@ -27,6 +29,7 @@ const MAX_LINE_LENGTH = 200;
  * about every 90 seconds while a task works.
  */
 const STATUS_REFRESH_MS = 80_000;
+const WRITE_RETRY_MS = 1_000;
 
 type SlackTaskStatus = "in_progress" | "complete" | "error";
 
@@ -40,9 +43,9 @@ interface SlackTaskObject {
 
 /**
  * eve's default task card: a `task_card` block for one task, or a `plan` block
- * for several, and no card for a turn that started none. A working task shows
- * its latest steps, then one line about how it ended. A stopped task shows as
- * an error, never as a success.
+ * for several, and no card for a turn that started none. A task shows its
+ * latest steps while it works and one line about how it ended once it settles.
+ * A stopped task shows as an error, never as a success.
  */
 export function renderDefaultSlackTaskCard(view: TaskCardView): SlackTaskCard | null {
   if (view.tasks.length === 0) return null;
@@ -97,12 +100,15 @@ function collapseEarlierRows(
   );
   const kept = tasks.filter((task) => !folded.has(task.id));
   if (folded.size === 0) return kept.slice(-limit);
+  const foldedFailure = tasks.some(
+    (task) => folded.has(task.id) && (task.status === "failed" || task.status === "cancelled"),
+  );
   const earlier: TaskCardTask = {
     id: "earlier",
     kind: "tool",
     name: "earlier",
     startedAt: tasks[0]!.startedAt,
-    status: "completed",
+    status: foldedFailure ? "failed" : "completed",
     steps: [],
     taskId: "earlier",
     title: `${countTasks(folded.size)} finished earlier`,
@@ -266,26 +272,30 @@ export function createSlackTaskCardPresenter(input: {
         audience: normalizeChannelAudience(destination["audience"]),
       });
       const cards: Record<string, PostedCard> = {};
+      let posted = false;
       for (const view of views) {
         const current = previous.cards[view.turnId];
         const card = renderCard(input.taskCard, view);
-        const fingerprint = card === null ? undefined : JSON.stringify(card);
+        const fingerprint = card === null ? undefined : fingerprintOf(card);
         if (card === null || current?.fingerprint === fingerprint) {
           if (current !== undefined) cards[view.turnId] = current;
           continue;
         }
-        try {
-          const ts = await writeCard(slack, card, current?.ts);
-          cards[view.turnId] = { fingerprint: fingerprint!, ts };
-        } catch (error) {
-          // Keep the card as it was, so the next render writes it again
+        const ts = await writeCardWithRetry(slack, card, current?.ts, view.turnId);
+        if (ts === undefined) {
+          // Keep the card as it was, so a later render writes it again
           // without posting the cards that did land a second time.
-          logError(log, "task card write failed", error, { turnId: view.turnId });
           if (current !== undefined) cards[view.turnId] = current;
+          continue;
         }
+        cards[view.turnId] = { fingerprint: fingerprint!, ts };
+        if (ts !== current?.ts) posted = true;
       }
       const next: { cards: Record<string, PostedCard>; statusAt?: number } = { cards };
-      const statusAt = await refreshWaitingStatus(slack, views, previous.statusAt);
+      const statusAt = await refreshWaitingStatus(slack, views, {
+        posted,
+        statusAt: previous.statusAt,
+      });
       if (statusAt !== undefined) next.statusAt = statusAt;
       return next satisfies TaskCardPresenterState;
     },
@@ -305,14 +315,39 @@ function renderCard(
   }
 }
 
+/** A short, stable digest of a card, so presenter state stays small. */
+function fingerprintOf(card: SlackTaskCard): string {
+  return createHash("sha256").update(JSON.stringify(card)).digest("base64url");
+}
+
+/** Writes a card, trying once more after a second; undefined when both fail. */
+async function writeCardWithRetry(
+  slack: SlackDestination,
+  card: SlackTaskCard,
+  ts: string | undefined,
+  turnId: string,
+): Promise<string | undefined> {
+  for (const attempt of [1, 2]) {
+    try {
+      return await writeCard(slack, card, ts);
+    } catch (error) {
+      logError(log, "task card write failed", error, { attempt, turnId });
+      if (attempt === 1) await new Promise((resolve) => setTimeout(resolve, WRITE_RETRY_MS));
+    }
+  }
+  return undefined;
+}
+
 /**
- * Sets the waiting status again once it is about to expire. The session sets
- * it first when the turn waits; this only keeps it from lapsing.
+ * Keeps the waiting status up while tasks work. The session sets it when the
+ * turn waits; Slack clears it after two minutes and whenever the app posts, so
+ * it is set right after a new card and again once it is about to lapse. A
+ * turn whose own calls ran recently is still working and sets its own status.
  */
 async function refreshWaitingStatus(
   slack: SlackDestination,
   views: readonly TaskCardView[],
-  statusAt: number | undefined,
+  input: { readonly posted: boolean; readonly statusAt: number | undefined },
 ): Promise<number | undefined> {
   const working = views
     .filter((view) => view.state === "working")
@@ -320,8 +355,11 @@ async function refreshWaitingStatus(
     .map((task) => task.name);
   if (working.length === 0) return undefined;
   const now = Date.now();
-  if (statusAt === undefined) return now;
-  if (now - statusAt < STATUS_REFRESH_MS) return statusAt;
+  if (!input.posted) {
+    if (input.statusAt === undefined) return now;
+    if (now - input.statusAt < STATUS_REFRESH_MS) return input.statusAt;
+    if (views.some((view) => turnActedSince(view, now - STATUS_REFRESH_MS))) return input.statusAt;
+  }
   const status = truncateTypingStatus(waitingOnTasks(working));
   const response = await callSlack(slack, "assistant.threads.setStatus", {
     channel_id: slack.channelId,
@@ -336,6 +374,13 @@ async function refreshWaitingStatus(
     log.warn("assistant.threads.setStatus returned not-ok", { error: response.error });
   }
   return now;
+}
+
+function turnActedSince(view: TaskCardView, since: number): boolean {
+  return view.actions.some(
+    (action) =>
+      action.status === "working" || Date.parse(action.settledAt ?? action.startedAt) > since,
+  );
 }
 
 /** Updates the card in place, or posts it again when someone deleted it. */

@@ -47,6 +47,7 @@ import {
   defaultInputRequestedHandler,
   defaultOnMessage,
   defaultReceived,
+  withWorkingTasks,
 } from "#public/channels/slack/defaults.js";
 import {
   composeSlackRenderers,
@@ -816,7 +817,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     taskCard: renderDefaultSlackTaskCard,
   });
   const renderTurnStarted = rendering.events["turn.started"];
-  const events: SlackChannelInternalEvents = {
+  const events = withWorkingTasks({
     ...rendering.events,
     async "turn.started"(data, channel, ctx) {
       const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
@@ -825,7 +826,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       }
       await renderTurnStarted?.(data, channel, ctx);
     },
-  };
+  });
 
   // Set of events we've already handled on this process.
   // Light weight dedup mechanism - not reliable across multiple invocations.
@@ -1298,7 +1299,7 @@ async function dispatchSlackMessage(input: {
   });
 }
 
-/** Runs the renderer chain's `received`; an acknowledgement never blocks or fails dispatch. */
+/** Runs the renderer chain's `received`; an acknowledgement that fails never fails dispatch. */
 async function acknowledgeMessage(
   received: SlackRenderChain["received"],
   message: SlackMessage,
