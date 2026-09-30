@@ -2607,10 +2607,13 @@ describe("createToolLoopHarness", () => {
       expect(agentTools?.add?.description).toBe("Adds numbers");
     });
 
-    it.each([true, false])(
-      "passes the execute output to an endsTurn function, which returns %s",
+    it.each([true, false, "throws"] as const)(
+      "passes the execute output to an endsTurn function, which %s",
       async (decision) => {
-        const endsTurn = vi.fn().mockResolvedValue(decision);
+        const endsTurn = vi.fn(async () => {
+          if (decision === "throws") throw new Error("lookup failed");
+          return decision;
+        });
         setupMockAgent(
           stepCalling([{ executeOutput: { emoji: "tada" }, name: "react", output: reacted }]),
         );
@@ -2621,7 +2624,7 @@ describe("createToolLoopHarness", () => {
         const result = await runStep(createTestSession(), { message: "Thanks, that fixed it!" });
 
         expect(endsTurn).toHaveBeenCalledExactlyOnceWith({ emoji: "tada" });
-        expect(result.next).toBe(decision ? null : runStep);
+        expect(result.next).toBe(decision === true ? null : runStep);
       },
     );
   });

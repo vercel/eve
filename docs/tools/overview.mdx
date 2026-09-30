@@ -84,7 +84,7 @@ Calling this tool ends your turn once it succeeds: do not write a reply or call 
 
 Write `description` for what the tool does and when to use it, and leave the turn-ending rule to eve. The appended sentence is not part of the tool definition, so `eve info` shows the description as you wrote it.
 
-To decide from the result instead, pass a function. eve calls it with the output of `execute` after each successful call, and the call ends the turn only when the function returns `true` or resolves to `true`:
+To decide from the result instead, pass a function. eve calls it with the output of `execute` after each successful call, and the call ends the turn only when the function returns `true` or resolves to `true`. If the function throws or rejects, eve logs a warning and the turn continues as though it returned `false`:
 
 ```ts title="agent/tools/react.ts"
 export default defineTool({

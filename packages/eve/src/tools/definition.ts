@@ -238,7 +238,8 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    *
    * Pass a function to decide from the result. eve calls it with the output
    * of `execute` after each successful call, and the call ends the turn only
-   * when it returns `true`. The model sees no appended sentence, so describe
+   * when it returns `true`; if it throws, the turn continues as though it
+   * returned `false`. The model sees no appended sentence, so describe
    * when the call ends the turn in `description` if the model needs to know.
    * Defaults to `false`.
    */

@@ -2919,14 +2919,30 @@ async function stepEndsTurn(
   );
   for (const toolCall of toolCalls) {
     const endsTurn = endsTurnTools.get(toolCall.toolName);
-    if (
-      typeof endsTurn === "function" &&
-      (await endsTurn(executeOutputs.get(toolCall.toolCallId))) !== true
-    ) {
+    if (typeof endsTurn !== "function") continue;
+    if (!(await callEndsTurn(endsTurn, executeOutputs.get(toolCall.toolCallId), toolCall))) {
       return false;
     }
   }
   return true;
+}
+
+/** A throwing `endsTurn` function keeps the turn going rather than failing it. */
+async function callEndsTurn(
+  endsTurn: (output: unknown) => boolean | Promise<boolean>,
+  output: unknown,
+  toolCall: { readonly toolCallId: string; readonly toolName: string },
+): Promise<boolean> {
+  try {
+    return (await endsTurn(output)) === true;
+  } catch (error) {
+    log.warn("endsTurn threw; continuing the turn", {
+      callId: toolCall.toolCallId,
+      error,
+      toolName: toolCall.toolName,
+    });
+    return false;
+  }
 }
 
 function isDeferredHarnessTool(tool: HarnessToolDefinition | undefined): boolean {
