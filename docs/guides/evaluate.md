@@ -41,6 +41,30 @@ resolution during development. The TUI footer displays `dynamic model` when the
 agent uses `auto`, then adds the resolved model for the current turn, such as
 `dynamic model · openai/gpt-6-luna`.
 
+Set `fallback` to keep the turn running when the evaluator is unavailable or
+returns an error. The fallback can be a Gateway model ID or an AI SDK language
+model instance:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { auto } from "eve/models";
+
+export default defineAgent({
+  model: auto({
+    fallback: "anthropic/claude-sonnet-5",
+    options: {
+      "openai/gpt-6-sol": "Difficult reasoning and engineering tasks",
+      "openai/gpt-6-luna": "Routine tasks where fast completion matters",
+    },
+  }),
+});
+```
+
+The fallback applies only to evaluator failures. Invalid prompts, including
+requests without user text or with a latest message over the routing limit,
+still fail before evaluator I/O. Cancelling the turn also aborts routing instead
+of selecting the fallback.
+
 ## Use a provider directly
 
 Install the provider package yourself and pass its evaluation model. The provider
@@ -195,5 +219,7 @@ capped at 16,000 characters. Requests without user text and latest messages over
 the limit fail before provider I/O.
 
 Evaluation validation, retries, provider errors, and model resolution follow AI
-SDK semantics. Cancelling the active turn aborts evaluation and prevents the
-choice from being retained.
+SDK semantics. Without `fallback`, an evaluator error fails the turn. With
+`fallback`, eve uses and retains that model for the rest of the turn. Cancelling
+the active turn aborts evaluation and prevents a routed or fallback choice from
+being retained.
