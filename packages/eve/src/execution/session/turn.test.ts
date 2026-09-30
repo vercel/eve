@@ -29,6 +29,14 @@ import {
 import { getSessionTokenUsage } from "#harness/turn-tag-state.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
+import {
+  emitAgentStartedStep,
+  emitWorkflowToolRunReportStep,
+} from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import type {
+  WorkflowToolRunMessage,
+  WorkflowToolRunRef,
+} from "#execution/tools/workflow/messages.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
@@ -51,6 +59,10 @@ vi.mock("#execution/tools/workflow/interrupt.js", () => ({
 }));
 vi.mock("#execution/session/turn-waiting-step.js", () => ({
   publishTurnWaitingStep: vi.fn(async () => ({ stateDelta: {} })),
+}));
+vi.mock("#execution/tools/workflow/emit-workflow-tool-run-report-step.js", () => ({
+  emitAgentStartedStep: vi.fn(),
+  emitWorkflowToolRunReportStep: vi.fn(),
 }));
 
 beforeEach(() => {
@@ -92,7 +104,6 @@ describe("SessionExecution checkpoints", () => {
       next: vi.fn(),
       restore: vi.fn(),
       onDelivery: () => () => {},
-      onAgentStarted: () => () => {},
       onInterrupt: () => () => {},
     };
     let signal: AbortSignal | undefined;
@@ -140,7 +151,6 @@ describe("SessionExecution checkpoints", () => {
           deliver = handler;
           return () => {};
         },
-        onAgentStarted: () => () => {},
         onInterrupt: (handler) => {
           interrupt = handler;
           return () => {};
@@ -200,7 +210,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(),
       restore: vi.fn(),
-      onAgentStarted: () => () => {},
       onInterrupt: () => () => {},
       onDelivery: (handler) => {
         notify = handler;
@@ -258,7 +267,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(),
       restore: vi.fn(),
-      onAgentStarted: () => () => {},
       onInterrupt: () => () => {},
       onDelivery: (handler) => {
         notify = handler;
@@ -330,7 +338,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(),
       restore: vi.fn(),
-      onAgentStarted: () => () => {},
       onInterrupt: () => () => {},
       onDelivery: (handler) => {
         notify = handler;
@@ -391,7 +398,6 @@ describe("SessionExecution checkpoints", () => {
         whenPending: () => new Promise<void>(() => {}),
         next: vi.fn(),
         restore: vi.fn(),
-        onAgentStarted: () => () => {},
         onInterrupt: () => () => {},
         onDelivery: (handler) => {
           notify = handler;
@@ -428,7 +434,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
-      onAgentStarted: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -484,7 +489,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
-      onAgentStarted: () => () => {},
       onInterrupt: vi.fn((handler) => {
         interrupt = handler;
         return () => {};
@@ -535,7 +539,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
-      onAgentStarted: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -600,7 +603,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
-      onAgentStarted: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -651,7 +653,6 @@ describe("SessionExecution checkpoints", () => {
         whenPending: () => new Promise<void>(() => {}),
         next: vi.fn(() => new Promise<never>(() => {})),
         onDelivery: vi.fn(() => () => {}),
-        onAgentStarted: () => () => {},
         onInterrupt: vi.fn(() => () => {}),
         restore: vi.fn(),
       };
@@ -703,7 +704,6 @@ describe("SessionExecution checkpoints", () => {
       next: vi.fn(),
       restore: vi.fn(),
       onDelivery: () => () => {},
-      onAgentStarted: () => () => {},
       onInterrupt: (handler) => {
         interrupt = handler;
         return () => {};
@@ -754,7 +754,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => runtimePayloads.shift()),
       onDelivery: vi.fn(() => () => {}),
-      onAgentStarted: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -831,7 +830,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => runtimePayloads.shift()),
       onDelivery: vi.fn(() => () => {}),
-      onAgentStarted: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -917,7 +915,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => runtimePayloads.shift()),
       onDelivery: vi.fn(() => () => {}),
-      onAgentStarted: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -1002,7 +999,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => payloads.shift()),
       onDelivery: vi.fn(() => () => {}),
-      onAgentStarted: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -1097,7 +1093,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => payloads.shift() ?? new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
-      onAgentStarted: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -1173,7 +1168,6 @@ describe("SessionExecution checkpoints", () => {
         signalDelivery = handler;
         return () => {};
       }),
-      onAgentStarted: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -1218,21 +1212,198 @@ describe("SessionExecution checkpoints", () => {
 
     expect(continuation).toEqual({ delivery: steering, steered: false });
   });
+
+  it("publishes and adopts consecutive boundary agent-started messages in one step, keeping admission order", async () => {
+    const { inbox, planner, progress, reviewer, writer } = boundaryRunMessages();
+    const cursor = createCursor({ inbox, sessionState: state("") });
+    publishIntoContext();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "park",
+          hasPendingAuthorization: false,
+          hasPendingInputBatch: false,
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+          settled: { output: "Done." },
+        })),
+      );
+    inbox.drain = vi
+      .fn()
+      .mockReturnValueOnce([planner, reviewer, progress, writer])
+      .mockReturnValue([]);
+
+    await expect(
+      createExecution({ cursor, inbox, sessionState: cursor.sessionState }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "park", settled: { output: "Done." } });
+
+    expect(cursor.serializedContext[PUBLISHED]).toEqual([
+      "planner-session+reviewer-session",
+      "Halfway through the sources.",
+      "writer-session",
+    ]);
+  });
+
+  it("announces no child when the step ends the session, whose stream it closed", async () => {
+    const { inbox, planner, progress } = boundaryRunMessages();
+    const sessionState = state("");
+    const cursor = createCursor({ inbox, sessionState });
+    publishIntoContext();
+    inbox.drain = vi.fn().mockReturnValueOnce([planner, progress]).mockReturnValue([]);
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async () => ({ action: "done", serializedContext: {}, sessionState })),
+      );
+
+    await expect(
+      createExecution({ cursor, inbox, sessionState }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    // The boundary still ran: it handled the task's report and dropped only the child.
+    expect(cursor.serializedContext[PUBLISHED]).toEqual(["Halfway through the sources."]);
+    expect(emitAgentStartedStep).not.toHaveBeenCalled();
+  });
+
+  it("announces a child opened before a cancel ahead of cancelling the turn's work", async () => {
+    const { inbox, planner } = boundaryRunMessages();
+    const sessionState = state("");
+    let interrupt: (payload: SessionInboxPayload) => void = () => {};
+    inbox.onInterrupt = (handler) => {
+      interrupt = handler;
+      return () => {};
+    };
+    // Bob cancels while the turn waits, just as Alice's run opens a planner.
+    inbox.next = vi.fn(async () => {
+      interrupt({ kind: "cancel" });
+      return planner;
+    });
+    publishIntoContext();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementation(
+        turnStepWork(async () => ({
+          action: "park",
+          pendingCoordinationCallIds: ["hold-call"],
+          hasPendingAuthorization: false,
+          hasPendingInputBatch: false,
+          serializedContext: {},
+          sessionState,
+        })),
+      );
+    vi.mocked(dispatchCoordinationStep).mockImplementation(
+      dispatchWork(async () => ({ results: [], serializedContext: {}, sessionState })),
+    );
+
+    await expect(createExecution({ inbox, sessionState }).runTurn(undefined)).resolves.toEqual({
+      cancelled: true,
+      kind: "park",
+    });
+
+    const [announced] = vi.mocked(emitAgentStartedStep).mock.invocationCallOrder;
+    const [cancelled] = vi.mocked(cancelDescendantTurnsStep).mock.invocationCallOrder;
+    expect(announced).toBeLessThan(cancelled!);
+  });
 });
 
-function createExecution(input: {
-  readonly capabilities?: SessionCapabilities;
+/** The context key the mocked publishing steps append to, as a hook's state write would. */
+const PUBLISHED = "test.published";
+
+/** Mocks the run-message publishing steps to record what they publish in the session context. */
+function publishIntoContext(): void {
+  const append = (context: Record<string, unknown>, entry: string) => ({
+    serializedContext: {
+      ...context,
+      [PUBLISHED]: [...((context[PUBLISHED] as string[] | undefined) ?? []), entry],
+    },
+  });
+  vi.mocked(emitAgentStartedStep)
+    .mockReset()
+    .mockImplementation(
+      stepWork(async (input: Parameters<typeof emitAgentStartedStep>[0]) =>
+        append(
+          input.serializedContext,
+          input.messages.map((message) => message.session.sessionId).join("+"),
+        ),
+      ),
+    );
+  vi.mocked(emitWorkflowToolRunReportStep)
+    .mockReset()
+    .mockImplementation(
+      stepWork(async (input: Parameters<typeof emitWorkflowToolRunReportStep>[0]) =>
+        append(input.serializedContext, String(input.update)),
+      ),
+    );
+}
+
+/**
+ * Alice's runs open a planner, a reviewer, and a writer, and her research task
+ * reports progress, with an inbox that has nothing else to admit.
+ */
+function boundaryRunMessages() {
+  const from = (callId: string, taskId?: string): WorkflowToolRunRef => ({
+    callId,
+    input: {},
+    runId: `run-${callId}`,
+    sequence: 0,
+    stepIndex: 0,
+    ...(taskId !== undefined && { taskId }),
+    toolName: "execute",
+    turnId: "turn_0",
+  });
+  const opened = (callId: string, name: string): WorkflowToolRunMessage => ({
+    from: from(callId),
+    kind: "agent-started",
+    session: { kind: "local", name, nodeId: name, sessionId: `${name}-session` },
+  });
+  const inbox: SessionInbox = {
+    claimedTokens: [],
+    claimSessionHook: vi.fn(),
+    claimSessionHooks: vi.fn(),
+    drain: () => [],
+    hasPending: () => false,
+    whenPending: () => new Promise<void>(() => {}),
+    next: vi.fn(() => new Promise<never>(() => {})),
+    restore: vi.fn(),
+    onDelivery: () => () => {},
+    onInterrupt: () => () => {},
+  };
+  return {
+    inbox,
+    planner: opened("call-1", "planner"),
+    progress: {
+      from: from("call-3", "research"),
+      kind: "report",
+      update: "Halfway through the sources.",
+    } satisfies WorkflowToolRunMessage,
+    reviewer: opened("call-2", "reviewer"),
+    writer: opened("call-4", "writer"),
+  };
+}
+
+function createCursor(input: {
   readonly inbox: SessionInbox;
-  readonly queue?: SessionInputQueue;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): SessionExecution {
-  const cursor = new SessionStateCursor({
+}): SessionStateCursor {
+  return new SessionStateCursor({
     inbox: input.inbox,
     sessionWritable: new WritableStream<Uint8Array>(),
     serializedContext: input.serializedContext ?? {},
     sessionState: input.sessionState,
   });
+}
+
+function createExecution(input: {
+  readonly capabilities?: SessionCapabilities;
+  readonly cursor?: SessionStateCursor;
+  readonly inbox: SessionInbox;
+  readonly queue?: SessionInputQueue;
+  readonly serializedContext?: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): SessionExecution {
+  const cursor = input.cursor ?? createCursor(input);
   return new SessionExecution({
     capabilities: input.capabilities,
     cursor,

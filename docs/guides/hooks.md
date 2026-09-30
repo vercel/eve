@@ -91,12 +91,9 @@ For `task.started`, `task.settled`, and `agent.started`, `ctx.session.id`
 identifies the session that started the task or opened the subagent session.
 Typed handlers and `*` handlers receive this context even when the event
 arrives between turns. These hooks can use `ctx.getSandbox()` against that
-session. For `task.started` and `task.settled`, sandbox changes they make are
-kept for its next turn. eve publishes `agent.started` as soon as the child
-session opens, even while the parent's model step is still running, and
-changes an `agent.started` hook makes to session state at that point are not
-kept. Use `agent.started` hooks to observe the event, not to change session
-state.
+session. Session state and sandbox changes they make are kept for the
+session's next turn. `agent.started` appears when the child session opens, or
+when the parent's current model step ends if one is running.
 
 ### Narrowing tool results
 
@@ -178,11 +175,12 @@ See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envel
 
 ## Execution order
 
-When a stream event fires, three things happen in order:
+When a session publishes a stream event while it runs, the step that owns the session does four things in order:
 
-1. Emit. The channel adapter handler runs, the event is stamped with its `meta` envelope, then it is written to the durable stream.
-2. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
-3. Model preparation, for model lifecycle events. Dynamic resolvers subscribed to those events update the model context. Subagent notifications do not run model preparation.
+1. Channel delivery. The channel adapter handler runs.
+2. Write. The event is stamped with its `meta` envelope, then written to the durable stream.
+3. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
+4. Model preparation, for model lifecycle events. Dynamic resolvers subscribed to those events update the model context. Subagent notifications do not run model preparation.
 
 Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
 

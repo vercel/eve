@@ -4,11 +4,10 @@ import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
 import { dispatchDynamicSubagentEvent } from "#context/dynamic-subagent-lifecycle.js";
 import { dispatchDynamicToolEvent } from "#context/dynamic-tool-lifecycle.js";
 import type { ContextContainer } from "#context/container.js";
-import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
 import type { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import type { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
-import type { SessionEventSink } from "#execution/publish-session-events.js";
+import type { SessionEventPublisher } from "#execution/publish-session-events.js";
 import { throwIfTurnAborted, TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { HookEventType } from "#public/definitions/hook.js";
@@ -78,11 +77,14 @@ export function createTurnEventHandler(input: {
   readonly effectiveAgent: ReturnType<typeof resolveEffectiveAgentRuntime>;
   readonly effectiveNode: CompiledBundle["graph"]["root"];
   readonly instrumentation: ExecutionInstrumentation | undefined;
-  readonly sink: SessionEventSink;
+  readonly publisher: SessionEventPublisher;
 }): HandleEventFn {
   const { abortSignal, bundle, ctx, effectiveAgent, effectiveNode } = input;
+  const { publisher } = input;
   return async (event, messages) => {
-    const emitted = await input.sink.emit(event);
+    // An event's memory lifecycle runs after its write and before its hooks, so
+    // a turn emits the event and runs its hooks itself instead of calling `publish`.
+    const emitted = await publisher.emit(event);
     const lifecycleMessages = await dispatchMemoryLifecycleEvent({
       abortSignal,
       appRoot: effectiveNode.agent?.metadata?.appRoot ?? "",
@@ -97,12 +99,7 @@ export function createTurnEventHandler(input: {
       input.canCancelTurn && isHookCancellableEvent(emitted.type)
         ? () => input.hookCancellation.abort(new TurnCancelledError())
         : undefined;
-    await dispatchStreamEventHooks({
-      cancelTurn,
-      ctx,
-      registry: bundle.hookRegistry,
-      event: emitted,
-    });
+    await publisher.dispatcher.runHooks(emitted, cancelTurn);
     if (emitted.type !== "step.started") {
       await dispatchDynamicModelEvent({
         abortSignal,

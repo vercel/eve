@@ -22,7 +22,7 @@ import {
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
-import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
+import { legacyTaskInputRoute } from "#execution/legacy-remote-agent/protocol.js";
 import {
   EVE_CALLBACK_ROUTE_PATTERN,
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
@@ -97,7 +97,7 @@ const log = createLogger("eve.channel");
  * Default-export the result as your `agent/channels/eve.ts` channel; reach for
  * {@link defineChannel} directly only for a custom transport.
  */
-/** A delegating caller checks that this deployment speaks its remote agent protocol. */
+/** A delegating caller checks that this deployment serves its remote agent protocol. */
 function createdSessionBody(sessionId: string, body: ParsedCreateBody) {
   const created: {
     ok: true;
@@ -105,7 +105,7 @@ function createdSessionBody(sessionId: string, body: ParsedCreateBody) {
     sessionId: string;
     status: "accepted";
   } = { ok: true, sessionId, status: "accepted" };
-  if (body.callback !== undefined) created.protocolVersion = REMOTE_AGENT_PROTOCOL_VERSION;
+  if (body.protocolVersion !== undefined) created.protocolVersion = body.protocolVersion;
   return created;
 }
 
@@ -149,6 +149,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       GET(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
+      POST(legacyTaskInputRoute.path, legacyTaskInputRoute.handler),
       GET(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       POST(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       PUT(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
@@ -173,6 +174,12 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
+        if (body.callback !== undefined && body.legacyRemoteAgentCaller !== undefined) {
+          log.info("serving a remote agent protocol 1 caller", {
+            callerOrigin: new URL(body.callback.url).origin,
+            forwarder: authResult.principalId,
+          });
+        }
         const forwardedParentSession =
           body.callback === undefined
             ? "absent"
@@ -321,6 +328,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             auth: messageResult.auth,
             capabilities: body.capabilities ?? { requestInput: true },
             callback: body.callback,
+            legacyRemoteAgentCaller: body.legacyRemoteAgentCaller,
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: attachClientContext(

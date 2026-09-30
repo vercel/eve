@@ -3,11 +3,13 @@ import type { HookContext, HookEvent } from "eve/hooks";
 
 export interface SubagentHookObservation {
   readonly subscriber: "typed" | "wildcard";
-  readonly type: "task.started" | "task.settled";
+  readonly type: "task.started" | "task.settled" | "agent.started";
   readonly callId: string;
   readonly eventId: string;
   readonly sessionId: string;
   readonly output?: string;
+  /** The session an `agent.started` event announced. */
+  readonly childSessionId?: string;
 }
 
 export const subagentHookAudit = defineState<SubagentHookObservation[]>(
@@ -20,7 +22,13 @@ export async function recordSubagentHook(
   event: HookEvent,
   ctx: HookContext,
 ): Promise<void> {
-  if (event.type !== "task.started" && event.type !== "task.settled") return;
+  if (
+    event.type !== "task.started" &&
+    event.type !== "task.settled" &&
+    event.type !== "agent.started"
+  ) {
+    return;
+  }
   const sandbox = await ctx.getSandbox();
   await sandbox.writeTextFile({
     path: `subagent-hook-${event.meta.id}-${subscriber}.txt`,
@@ -35,6 +43,7 @@ export async function recordSubagentHook(
       eventId: event.meta.id,
       sessionId: ctx.session.id,
       output: event.type === "task.settled" ? readOutput(event.data.output) : undefined,
+      childSessionId: event.type === "agent.started" ? event.data.sessionId : undefined,
     },
   ]);
   if (subscriber === "typed") {

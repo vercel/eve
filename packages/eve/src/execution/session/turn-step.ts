@@ -57,7 +57,7 @@ import type {
 } from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { withSessionStateDelta } from "#execution/session/state-delta.js";
-import { createSessionEventSink } from "#execution/publish-session-events.js";
+import { openSessionEventPublisher } from "#execution/publish-session-events.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import {
@@ -225,12 +225,12 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     );
     await instrumentation?.flush();
   };
-  const sink = createSessionEventSink({
+  const publisher = openSessionEventPublisher({
     ctx,
+    origin: "own",
     sessionWritable: input.sessionWritable,
-    sessionId: initialSession.sessionId,
   });
-  const { adapterCtx } = sink;
+  const { adapterCtx } = publisher.dispatcher;
   // A hook's `ctx.cancel()` aborts the same signal the harness already honors
   // for `session.cancel()`, so both settle through one cancellation path.
   const hookCancellation = new AbortController();
@@ -251,7 +251,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       effectiveAgent,
       effectiveNode,
       instrumentation,
-      sink,
+      publisher,
     });
     const previousAdapterState =
       delivery !== undefined && !isHarnessBetweenTurns(initialSession)
@@ -549,9 +549,9 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     stepResult = { ...stepResult, session: aliased };
 
     const durableResult = resolveSessionStepResult(stepResult, nextSerializedContext);
-    if (durableResult.action === "done") await sink.close();
+    if (durableResult.action === "done") await publisher.writer.close();
     return durableResult;
   } finally {
-    sink.release();
+    publisher.writer.release();
   }
 }

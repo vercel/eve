@@ -27,6 +27,10 @@ import {
   readRemoteAgentProtocolVersion,
 } from "#protocol/remote-agent-protocol.js";
 import {
+  LEGACY_REMOTE_AGENT_PROTOCOL_VERSION,
+  splitLegacyTaskFields,
+} from "#execution/legacy-remote-agent/protocol.js";
+import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
   type UploadPolicy,
@@ -59,7 +63,9 @@ export async function deriveOperationContinuationToken(input: {
   return `eve:op:${hex.slice(0, 32)}`;
 }
 
-export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | Response {
+export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
+  const legacy = splitLegacyTaskFields(input);
+  const { payload } = legacy;
   if (payload.inputResponses !== undefined) {
     return Response.json(
       { error: "'inputResponses' is only accepted for an existing session.", ok: false },
@@ -74,10 +80,9 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  if (callback !== undefined) {
-    const protocolRejection = rejectRemoteAgentProtocolMismatch(payload.protocolVersion);
-    if (protocolRejection !== undefined) return protocolRejection;
-  }
+  const protocolVersion =
+    callback === undefined ? undefined : parseProtocolVersionField(payload.protocolVersion);
+  if (protocolVersion instanceof Response) return protocolVersion;
 
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
@@ -110,6 +115,10 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   };
   if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
+  if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
+  if (protocolVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION) {
+    result.legacyRemoteAgentCaller = legacy.taskId === undefined ? {} : { taskId: legacy.taskId };
+  }
   return result;
 }
 
@@ -123,8 +132,9 @@ interface ParsedSessionMessageBody {
 }
 
 export function parseSessionMessageBody(
-  payload: Record<string, unknown>,
+  input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
+  const { payload } = splitLegacyTaskFields(input);
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
 
@@ -325,10 +335,22 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
 }
 
-/** Delegating callers must speak this deployment's remote agent protocol. */
-function rejectRemoteAgentProtocolMismatch(value: unknown): Response | undefined {
+/** Delegating callers must speak a remote agent protocol this deployment serves. */
+function parseProtocolVersionField(value: unknown): number | Response {
+  // Only an absent version means protocol 1; 0.66–0.68 callers omit the field.
+  if (value !== undefined && typeof value !== "number") {
+    return Response.json(
+      { error: "Expected 'protocolVersion' to be a number.", ok: false },
+      { status: 400 },
+    );
+  }
   const callerVersion = readRemoteAgentProtocolVersion(value);
-  if (callerVersion === REMOTE_AGENT_PROTOCOL_VERSION) return undefined;
+  if (
+    callerVersion === REMOTE_AGENT_PROTOCOL_VERSION ||
+    callerVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION
+  ) {
+    return callerVersion;
+  }
   return Response.json(
     {
       code: REMOTE_AGENT_PROTOCOL_MISMATCH,

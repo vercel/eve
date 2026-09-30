@@ -10,11 +10,21 @@ import { auto } from "./auto.js";
 
 const runtime = vi.hoisted(() => ({
   localEvaluationModel: vi.fn(),
+  logWarn: vi.fn(),
   state: undefined as ContextContainer | undefined,
 }));
 vi.mock("#context/container.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#context/container.js")>()),
   loadContext: () => runtime.state!,
+}));
+vi.mock("#internal/logging.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#internal/logging.js")>()),
+  createLogger: () => ({
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: runtime.logWarn,
+  }),
 }));
 vi.mock("#internal/model-auth/transport.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#internal/model-auth/transport.js")>()),
@@ -59,6 +69,7 @@ function evaluationModel(choice = "openai/small", modelId = "fixture-evaluator")
 beforeEach(() => {
   runtime.state = new ContextContainer();
   runtime.localEvaluationModel.mockReset();
+  runtime.logWarn.mockReset();
 });
 
 describe("auto", () => {
@@ -158,7 +169,55 @@ describe("auto", () => {
     ]);
   });
 
-  it("propagates provider errors and cancellation", async () => {
+  it("uses and retains the fallback model when evaluation fails", async () => {
+    const providerError = new Error("evaluation unavailable");
+    const doEvaluate = vi.fn(async () => {
+      throw providerError;
+    });
+    const failed = new Experimental_EvaluationMockModelV4({ doEvaluate });
+    const handler = auto({
+      model: failed,
+      fallback: "anthropic/claude-sonnet-5",
+      options,
+    }).events["step.started"]!;
+
+    await expect(handler(event(), context())).resolves.toBe("anthropic/claude-sonnet-5");
+    await expect(handler(event(), context())).resolves.toBe("anthropic/claude-sonnet-5");
+    expect(doEvaluate).toHaveBeenCalledOnce();
+    expect(runtime.logWarn).toHaveBeenCalledOnce();
+    expect(runtime.logWarn).toHaveBeenCalledWith("model evaluation failed; using fallback", {
+      error: expect.objectContaining({
+        message: expect.stringContaining("evaluation unavailable"),
+      }),
+      fallback: "anthropic/claude-sonnet-5",
+      turnId: "turn_1",
+    });
+  });
+
+  it("supports a provider model and reasoning as the fallback", async () => {
+    const fallback = anthropic("sonnet-5");
+    const failed = new Experimental_EvaluationMockModelV4({
+      doEvaluate: async () => {
+        throw new Error("evaluation unavailable");
+      },
+    });
+    const handler = auto({
+      model: failed,
+      fallback: { model: fallback, reasoning: "low" },
+      options,
+    }).events["step.started"]!;
+
+    await expect(handler(event(), context())).resolves.toEqual({
+      model: fallback,
+      reasoning: "low",
+    });
+    expect(runtime.logWarn).toHaveBeenCalledWith(
+      "model evaluation failed; using fallback",
+      expect.objectContaining({ fallback: "anthropic.messages/sonnet-5" }),
+    );
+  });
+
+  it("propagates provider errors without a fallback and always propagates cancellation", async () => {
     const providerError = new Error("evaluation unavailable");
     const failed = new Experimental_EvaluationMockModelV4({
       doEvaluate: async () => {
@@ -176,7 +235,11 @@ describe("auto", () => {
           abortSignal?.addEventListener("abort", () => reject(abortSignal.reason), { once: true });
         }),
     });
-    const pendingHandler = auto({ model: pendingModel, options }).events["step.started"]!;
+    const pendingHandler = auto({
+      model: pendingModel,
+      fallback: "anthropic/claude-sonnet-5",
+      options,
+    }).events["step.started"]!;
     const pending = pendingHandler(event(), context("Alice needs help.", controller.signal));
     const reason = new Error("cancelled");
     controller.abort(reason);
@@ -188,6 +251,10 @@ describe("auto", () => {
     expect(() => auto({ model: evaluator, options: {} })).toThrow("at least one option");
     expect(() => auto({ model: evaluator, options: { broken: "" } })).toThrow();
     expect(() => auto({ model: "", options })).toThrow("valid evaluation model");
+    expect(() => auto({ model: evaluator, fallback: "", options })).toThrow("fallback model");
+    expect(() => auto({ model: evaluator, fallback: {} as never, options })).toThrow(
+      "fallback model",
+    );
     expect(() =>
       auto({
         model: evaluator,

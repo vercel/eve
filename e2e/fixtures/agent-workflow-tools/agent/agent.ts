@@ -3,13 +3,25 @@ import { latestTaskResult } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
+import { RESEARCH_INTERIM_MESSAGE } from "../task-scenario-text.ts";
 import { respondToTaskScenario } from "./lib/task-scenarios.ts";
+
+/**
+ * The child-opening call each SUBAGENT-HOOKS mode makes: an agent call the
+ * model waits on, a task whose run opens a helper while the model keeps
+ * answering, or a waiting workflow tool.
+ */
+const HOOK_SCENARIO_CALLS = {
+  direct: { name: "workflow-marker", input: { message: "Alice's hook audit" } },
+  background: { name: "research_brief", input: { topic: "Alice's hook audit" } },
+  waiting: { name: "blocking_agent", input: { service: "hook-audit" } },
+} as const;
 
 /**
  * Deterministic script: each directive names the workflow tool to call with
  * service "api"; once the turn holds a tool result the reply echoes it.
  */
-function respond(request: MockModelRequest): MockModelResponse | string {
+async function respond(request: MockModelRequest): Promise<MockModelResponse | string> {
   const hookScenario = request.userMessages.find((entry) => entry.includes("SUBAGENT-HOOKS:"));
   if (hookScenario !== undefined) {
     const auditing = request.lastUserMessage?.includes("SUBAGENT-HOOKS:AUDIT");
@@ -19,7 +31,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         toolCalls: [{ id: skillCallId, name: "load_skill", input: { skill: "delegation-policy" } }],
       };
     }
-    const mode = /SUBAGENT-HOOKS:(direct|waiting)/u.exec(hookScenario)?.[1];
+    const mode = (/SUBAGENT-HOOKS:(direct|background|waiting)/u.exec(hookScenario)?.[1] ??
+      "waiting") as keyof typeof HOOK_SCENARIO_CALLS;
     if (auditing) {
       const auditTool = request.lastUserMessage?.includes("DYNAMIC-SKILL-CONTEXT")
         ? "read_dynamic_skill_context"
@@ -29,24 +42,24 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         ? { toolCalls: [{ name: auditTool, input: {} }] }
         : JSON.stringify(audit.output);
     }
-    const tool = mode === "direct" ? "workflow-marker" : "blocking_agent";
-    if (!request.toolResults.some((entry) => entry.name === tool)) {
-      return {
-        toolCalls: [
-          {
-            name: tool,
-            input:
-              mode === "direct" ? { message: "Alice's hook audit" } : { service: "hook-audit" },
-          },
-        ],
-      };
-    }
-    // The agent call returned a receipt; its result arrives in a <task_result> message.
+    const { name: tool, input } = HOOK_SCENARIO_CALLS[mode];
+    const call = request.toolResults.find((entry) => entry.name === tool);
+    if (call === undefined) return { toolCalls: [{ name: tool, input }] };
+    // An agent call or task returned a receipt; its result arrives in a <task_result> message.
     if (mode === "direct") {
       return latestTaskResult(request, tool) ?? { toolCalls: [{ name: "task_wait", input: {} }] };
     }
-    const result = request.toolResults.find((entry) => entry.name === tool);
-    return typeof result?.output === "string" ? result.output : JSON.stringify(result?.output);
+    // Ends the step with text while the task works, which holds the turn. The
+    // step takes a few seconds, so the task's helper most likely opens while it
+    // runs; that is likely, not guaranteed, and the hook assertions hold
+    // whether the helper opens mid-step or while the turn is held.
+    if (mode === "background") {
+      const result = latestTaskResult(request, tool);
+      if (result !== undefined) return result;
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      return RESEARCH_INTERIM_MESSAGE;
+    }
+    return typeof call.output === "string" ? call.output : JSON.stringify(call.output);
   }
 
   const message =
