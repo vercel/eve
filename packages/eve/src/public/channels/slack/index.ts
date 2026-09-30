@@ -93,11 +93,6 @@ export type {
 } from "#channel/task-card.js";
 
 export {
-  describeActionRequest,
-  describeActionRequests,
-} from "#public/channels/slack/action-status.js";
-
-export {
   loadThreadContextMessages,
   type LoadThreadContextMessagesOptions,
   type ThreadContextSince,

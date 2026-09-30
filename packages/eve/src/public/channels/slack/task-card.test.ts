@@ -133,7 +133,8 @@ const TWO_TASKS_STARTED: readonly UnstampedMessageStreamEvent[] = [
 const BOTH_TASKS_SETTLED: readonly UnstampedMessageStreamEvent[] = [
   createTaskSettledEvent({
     callId: DEPLOY_CALL,
-    output: "3 deploys; 14:02 changed the cache TTL\nFull log attached.",
+    output:
+      "The 14:02 deploy changed the cache TTL for every storefront route, so checkout requests missed the cache and queued at the origin. Full log attached.",
     status: "completed",
     taskId: "deploy-4hd8sa",
     turnId: TURN_ID,
@@ -193,7 +194,15 @@ describe("Slack task card", () => {
           tasks: [
             {
               output: {
-                elements: [{ elements: [{ text: "3 deploys; 14:02 changed the cache TTL" }] }],
+                elements: [
+                  {
+                    elements: [
+                      {
+                        text: "The 14:02 deploy changed the cache TTL for every storefront route, so checkout requests missed the…",
+                      },
+                    ],
+                  },
+                ],
               },
               status: "complete",
             },

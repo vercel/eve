@@ -695,7 +695,7 @@ describe("slackChannel() default event handlers", () => {
     expect(fetchMock).toHaveBeenCalledTimes(method === "files.getUploadURLExternal" ? 1 : 3);
   });
 
-  it("names the working tasks in the status while a turn waits on them", async () => {
+  it("names one working task in the status while a turn waits, and counts several", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
@@ -730,10 +730,23 @@ describe("slackChannel() default event handlers", () => {
       ctx,
     );
     await callEvent(adapter, waiting, ctx);
+    await callEvent(
+      adapter,
+      makeEvent("task.settled", {
+        callId: "c2",
+        status: "completed",
+        taskId: "reviewer-1",
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    await callEvent(adapter, taskStarted("c4", "agent"), ctx);
+    await callEvent(adapter, waiting, ctx);
 
     expect(slackStatuses(fetchMock)).toEqual([
-      "Waiting on researcher and 2 more tasks...",
+      "Waiting on 3 tasks...",
       "Waiting on reviewer...",
+      "Waiting on a task...",
     ]);
   });
 
@@ -846,7 +859,7 @@ describe("slackChannel() default event handlers", () => {
     expect(ctx.state.pendingToolCallMessage).toBeNull();
   });
 
-  it("keeps the model's own task calls out of the typing status", async () => {
+  it("shows the first call's start label in the typing status, without the model's own task calls", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
@@ -854,12 +867,13 @@ describe("slackChannel() default event handlers", () => {
     const ctx = buildAdapterContext(adapter, stubAccessor());
     const requested = (toolNames: readonly string[]) =>
       makeEvent("actions.requested", {
-        actions: toolNames.map((toolName, index) => ({
-          callId: `call_${String(index)}`,
+        actions: toolNames.map((toolName) => ({
+          callId: `call_${toolName}`,
           input: {},
           kind: "tool-call" as const,
           toolName,
         })),
+        presentation: { call_search: { label: "Search checkout incidents" } },
         sequence: 0,
         stepIndex: 0,
         turnId: "t1",
@@ -868,11 +882,9 @@ describe("slackChannel() default event handlers", () => {
     await callEvent(adapter, requested(["task_wait"]), ctx);
     expect(fetchMock).not.toHaveBeenCalled();
 
-    await callEvent(adapter, requested(["task_cancel", "search"]), ctx);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit)).toMatchObject({
-      status: "search",
-    });
+    await callEvent(adapter, requested(["task_cancel", "search", "deploy"]), ctx);
+    await callEvent(adapter, requested(["task_cancel", "deploy"]), ctx);
+    expect(slackStatuses(fetchMock)).toEqual(["Search checkout incidents +1 more", "deploy"]);
   });
 
   it("message.completed clears typing without posting for empty delivery", async () => {

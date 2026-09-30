@@ -3,7 +3,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import { normalizePresentationText } from "#shared/presentation-text.js";
+import { firstSentence, normalizePresentationText } from "#shared/presentation-text.js";
 
 /** A call's input travels to renderers only up to this many characters of JSON. */
 const MAX_ACTION_INPUT_LENGTH = 4_096;
@@ -32,13 +32,16 @@ export interface TaskCardTask {
   readonly kind: "agent" | "tool";
   /** The tool or agent name. */
   readonly name: string;
-  /** The tool's start label, `agent: brief` for an agent, or the name. */
+  /**
+   * The tool's start label, or the name. An agent's is `researcher: brief`,
+   * or the brief alone for a call to the agent's own copy.
+   */
   readonly title: string;
   /** `blocked` while the task waits on a person; see {@link TaskCardTask.blockedOn}. */
   readonly status: TaskCardStatus | "blocked";
   readonly blockedOn?: TaskCardBlocker;
   /**
-   * One line describing the result once settled. A failure's line appears
+   * The first sentence of the result once settled. A failure's line appears
    * only in a private conversation, since error text can carry internals.
    */
   readonly summary?: string;
@@ -381,7 +384,8 @@ function bounded(calls: readonly TrackedCall[]): readonly TrackedCall[] {
   });
 }
 
-function actionName(action: RuntimeActionRequest): string {
+/** The tool, skill loader, or agent a call targets. */
+export function actionName(action: RuntimeActionRequest): string {
   switch (action.kind) {
     case "load-skill":
       return "load_skill";
@@ -418,9 +422,9 @@ function taskSummary(data: {
 }): string | undefined {
   switch (data.status) {
     case "completed":
-      return firstLine(resultText(data.output));
+      return brief(resultText(data.output));
     case "failed":
-      return firstLine(data.error?.message);
+      return brief(data.error?.message);
     default:
       return undefined;
   }
@@ -434,13 +438,8 @@ function resultText(output: JsonValue | undefined): unknown {
   return fields.message ?? fields.text ?? fields.summary;
 }
 
-function firstLine(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const line = value
-    .split(/\r?\n/u)
-    .map((candidate) => candidate.trim())
-    .find((candidate) => candidate.length > 0);
-  return presentationText(line);
+function brief(value: unknown): string | undefined {
+  return typeof value === "string" ? firstSentence(value) : undefined;
 }
 
 function presentationText(value: string | undefined): string | undefined {

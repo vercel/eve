@@ -6,7 +6,8 @@ import {
 import { isAgentTool } from "#execution/tasks/tool-entry-point.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { JsonObject } from "#shared/json.js";
-import { normalizePresentationText } from "#shared/presentation-text.js";
+import { firstSentence } from "#shared/presentation-text.js";
+import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { isToolSchema, withOptionalStringProperty } from "#tools/schema.js";
 
 // A `serve` tool's model input is the tool's own input plus an optional
@@ -18,7 +19,7 @@ export const TASK_ID_INPUT = "taskId";
 /**
  * The tool as the model sees it: its input gains `taskId`, and its description
  * explains it. An agent tool also gets its activity label, the agent and the
- * first line of its message: `researcher: Find the March incidents`.
+ * first sentence of its message: `researcher: Find the March incidents`.
  */
 export function withTaskIdInput(definition: HarnessToolDefinition): HarnessToolDefinition {
   const schema = definition.inputSchema;
@@ -44,22 +45,19 @@ export function withTaskIdInput(definition: HarnessToolDefinition): HarnessToolD
   };
 }
 
-/** `researcher: Find the March incidents`, or the agent's name when the message is empty. */
+/**
+ * `researcher: Find the March incidents`, from the first sentence of the
+ * message. A call to the agent's own copy shows the brief alone, since its
+ * name, `agent`, says nothing. The agent's name when the message is empty.
+ */
 function agentCallLabel(name: string, input: unknown): string {
   const message =
     typeof input === "object" && input !== null
       ? (input as { message?: unknown }).message
       : undefined;
-  const line = typeof message === "string" ? firstLine(message) : undefined;
-  return line === undefined ? name : `${name}: ${line}`;
-}
-
-function firstLine(text: string): string | undefined {
-  for (const line of text.split(/\r?\n/u)) {
-    const normalized = normalizePresentationText(line);
-    if (normalized !== "") return normalized;
-  }
-  return undefined;
+  const brief = typeof message === "string" ? firstSentence(message) : undefined;
+  if (brief === undefined) return name;
+  return name === AGENT_TOOL_NAME ? brief : `${name}: ${brief}`;
 }
 
 /** A `serve` tool call's model input, split into the task it names and the tool's own input. */

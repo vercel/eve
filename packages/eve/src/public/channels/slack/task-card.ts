@@ -28,7 +28,7 @@ const log = createLogger("slack.task-card");
 /** A plan block holds at most 50 tasks. */
 const MAX_PLAN_ROWS = 50;
 const MAX_TITLE_LENGTH = 80;
-const MAX_LINE_LENGTH = 200;
+const MAX_LINE_LENGTH = 100;
 /** Unfinished turns eve keeps tracking; the oldest drop first. */
 const MAX_TRACKED_TURNS = 20;
 const WRITE_RETRY_MS = 1_000;
@@ -180,8 +180,12 @@ function richText(line: string): BlockKitBlock {
   };
 }
 
+/** Cuts at a word boundary when one is near, so a row doesn't end mid-word. */
 function truncate(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
 /** Slack task ids must be unique in a plan; call ids are, but can carry characters Slack rejects. */

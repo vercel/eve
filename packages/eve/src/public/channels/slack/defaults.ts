@@ -477,7 +477,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
       (action) => action.kind !== "tool-call" || !isTaskControlTool(action.toolName),
     );
     if (actions.length === 0) return;
-    await channel.thread.startTyping(truncateTypingStatus(describeActionRequests(actions)));
+    await channel.thread.startTyping(
+      truncateTypingStatus(describeActionRequests(actions, event.presentation)),
+    );
   },
 
   async "message.completed"(event, channel, _ctx) {
