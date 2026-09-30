@@ -19,6 +19,16 @@ Add a tool that converts temperatures between Celsius and Fahrenheit.
 
 The self-modification subagent changes the authored files in your project. Review the diff and test the new behavior as you would for any other source change. `eve dev` reloads changes while you work.
 
+## Change the self-modification model
+
+The subagent uses your agent's model by default. To give it a different model or reasoning level, ask for it directly:
+
+```text
+Switch the self-modification subagent to openai/gpt-6-sol with low reasoning.
+```
+
+The first time, this creates `agent/extensions/self-modification/extension.ts` with those settings. After that file exists, later changes edit it. You can also edit the file yourself: it accepts `model` and `reasoning` options.
+
 ## Run without self-modification
 
 Pass `--no-default-extensions` when you do not want `eve dev` to mount bundled development extensions:

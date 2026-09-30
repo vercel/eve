@@ -85,7 +85,7 @@ export function defineSelfModificationAgent(
     const mode = resolveSelfModificationMode(config);
     const model = configuredModel ?? FALLBACK_SELF_MODIFICATION_MODEL;
     const description = renderDescription([
-      "Delegate here when the user asks to change this eve agent or its authored source.",
+      "Delegate here immediately when the user asks to change the self-modification subagent's model, reasoning, or configuration. Also delegate when the user asks to change this eve agent or its authored source.",
       sourceDelegation,
       persistenceDelegation,
       namedInstallationDelegation,
