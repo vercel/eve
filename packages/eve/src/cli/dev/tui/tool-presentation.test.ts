@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { agentDisplayName, presentPreparingTool, presentTool } from "./tool-presentation.js";
+import { presentPreparingTool, presentTool } from "./tool-presentation.js";
 
 describe("presentPreparingTool", () => {
   it("leads with the activity verb while the input still streams", () => {
@@ -223,11 +223,10 @@ describe("presentTool", () => {
   });
 
   it("names the self-modification subagent without its extension namespace", () => {
-    expect(agentDisplayName("self-modification__agent")).toBe("self-modification");
     expect(
       presentTool("self-modification__agent", { message: "Add a tool." }, { isSubagent: true })
         .title,
-    ).toBe("Delegate self-modification");
+    ).toBe("Delegate agent editor");
   });
 
   it("keeps unknown tools on the generic formatter", () => {

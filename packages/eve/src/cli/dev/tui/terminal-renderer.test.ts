@@ -1182,6 +1182,39 @@ describe("TerminalRenderer (inline scrollback)", () => {
       expect(screen.snapshot()).toMatch(/✓ researcher {2}finished in \d+s · Fetched 1 URL/u);
     });
 
+    it("names a self-modification task as the agent editor modifying your agent", async () => {
+      const { screen, renderer } = makeRenderer();
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+      const stream = taskStream();
+      const rendering = renderer.renderStream(stream.result, { continueSession: true });
+
+      stream.push(
+        { type: "step-start" },
+        {
+          type: "tool-call",
+          toolCallId: "call-s",
+          toolName: "self-modification__agent",
+          input: { message: "Add a tool that reports the forecast" },
+        },
+        {
+          type: "task-started",
+          toolCallId: "call-s",
+          kind: "agent",
+          toolName: "self-modification__agent",
+        },
+        { type: "step-finish" },
+      );
+      await screen.waitForText("Modifying your agent");
+      expect(screen.snapshot()).toContain("※ agent editor  Add a tool that reports the forecast");
+      expect(screen.snapshot()).not.toContain("self-modification__agent");
+
+      stream.push({ type: "task-settled", toolCallId: "call-s", status: "completed" });
+      await screen.waitForText("✓ agent editor");
+      stream.close();
+      await rendering;
+      renderer.shutdown();
+    });
+
     it("waits for an agent's own last events before writing its end line", async () => {
       const { screen, renderer } = makeRenderer();
       renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });

@@ -296,8 +296,13 @@ export function presentTool(
  */
 const AGENT_DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([
   ["agent", "subagent"],
-  ["self-modification__agent", "self-modification"],
+  ["self-modification__agent", "agent editor"],
 ]);
+
+/** True for the bundled self-modification subagent's dispatch tool. */
+export function isSelfModificationAgent(toolName: string): boolean {
+  return toolBaseName(toolName) === "self-modification__agent";
+}
 
 /** The name an agent task goes by in the delegate row, task line, and task panel. */
 export function agentDisplayName(toolName: string): string {

@@ -11,6 +11,7 @@ import type { Theme } from "./theme.js";
 import { formatTurnDuration } from "./stream-format.js";
 import { TOOL_COLUMN_LEAD } from "./rail.js";
 import { truncate } from "./tool-format.js";
+import { isSelfModificationAgent } from "./tool-presentation.js";
 import { clipVisible, visibleLength } from "#cli/ui/terminal-text.js";
 
 export type TaskKind = "agent" | "tool";
@@ -93,6 +94,9 @@ export class TaskActivity {
 
 /** Joins the working tasks' names for the turn bar: `Waiting for researcher and reviewer`. */
 export function waitingLabel(entries: readonly TaskEntry[]): string {
+  if (entries.length === 1 && isSelfModificationAgent(entries[0]!.toolName)) {
+    return "Modifying your agent";
+  }
   const names = entries.map((entry) => entry.name);
   if (names.length === 1) return `Waiting for ${names[0]!}`;
   if (names.length === 2) return `Waiting for ${names[0]!} and ${names[1]!}`;
