@@ -29,11 +29,15 @@ type DiagnosticPresentation =
 /**
  * Splits captured output into ordered Workflow SDK and other segments. A
  * Workflow SDK record runs until the next tagged line, so its field rows and
- * stack stay with it.
+ * stack stay with it. Pass `continuesWorkflow` when the previous chunk ended
+ * inside a Workflow SDK record: pipes can split one record across chunks.
  */
-export function splitWorkflowLogs(text: string): { text: string; workflow: boolean }[] {
+export function splitWorkflowLogs(
+  text: string,
+  continuesWorkflow = false,
+): { text: string; workflow: boolean }[] {
   const segments: { text: string; workflow: boolean }[] = [];
-  let workflow = false;
+  let workflow = continuesWorkflow;
   for (const line of text.split("\n")) {
     if (TAGGED_LOG_LINE_PATTERN.test(line)) workflow = WORKFLOW_LOG_LINE_PATTERN.test(line);
     const last = segments.at(-1);

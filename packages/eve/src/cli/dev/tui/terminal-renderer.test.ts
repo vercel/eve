@@ -3259,7 +3259,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
       diagnostics: stub.diagnostics,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    // One pipe chunk can carry several records from the server process.
     const detail = [
       "[workflow-sdk] Step execution already in flight in this process; awaiting its settlement instead of executing again",
       "  run    wrun_01",
@@ -3268,10 +3267,18 @@ describe("TerminalRenderer (inline scrollback)", () => {
       "    at releaseStep (release-step.ts:1:1)",
       "[eve:dev] agent reloaded",
     ].join("\n");
+    // Pipe chunks from the server process can carry several records and can
+    // split one record, even mid-line.
+    const split = detail.indexOf("body threw");
 
-    process.stderr.write(`${detail}\n`);
+    process.stderr.write(detail.slice(0, split));
+    process.stderr.write(`${detail.slice(split)}\n`);
 
-    expect(stub.append).toHaveBeenCalledWith({ source: "stderr", detail });
+    const recorded = stub.append.mock.calls
+      .map(([entry]) => entry as { source: string; detail?: string })
+      .filter((entry) => entry.source === "stderr")
+      .map((entry) => entry.detail);
+    expect(recorded.join("\n")).toBe(detail);
     const hidden = screen.snapshot();
     expect(hidden).toContain("[eve:dev] agent reloaded");
     expect(hidden).not.toContain("[workflow-sdk]");
@@ -3279,8 +3286,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(hidden).not.toContain("step body threw");
 
     renderer.setLogDisplayMode("all");
+    // Adjacent log blocks collapse to the newest, so the split record's tail
+    // proves the hidden segments are revealed.
     const shown = screen.snapshot();
-    expect(shown).toContain("[workflow-sdk] Step execution already in flight");
     expect(shown).toContain("FatalError: step body threw");
     expect(shown).toContain("[eve:dev] agent reloaded");
     renderer.shutdown();

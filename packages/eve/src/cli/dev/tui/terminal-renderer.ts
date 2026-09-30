@@ -616,6 +616,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #restoreLogCapture?: () => void;
   #stdoutLogBuffer = "";
   #stderrLogBuffer = "";
+  #stderrInWorkflowLog = false;
   #delayedDevBuildError?: string;
   /**
    * The in-place dev rebuild status line. While the dev server's rebuild log
@@ -5029,6 +5030,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     this.#stdoutLogBuffer = "";
     this.#stderrLogBuffer = "";
+    this.#stderrInWorkflowLog = false;
 
     const capture = (target: NodeJS.WriteStream, source: "stdout" | "stderr"): (() => void) => {
       const original = target.write.bind(target);
@@ -5089,7 +5091,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #displayLogRecord(record: LogRecord): void {
     const fieldsText = record.fields === undefined ? "" : ` ${JSON.stringify(record.fields)}`;
-    this.#handleCapturedStderr(`[eve:${record.namespace}] ${record.message}${fieldsText}`);
+    this.#presentCapturedStderr(`[eve:${record.namespace}] ${record.message}${fieldsText}`);
     this.#paint();
   }
 
@@ -5173,7 +5175,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * it shows only under `/loglevel all`; the diagnostic log keeps every line.
    */
   #handleCapturedStderr(content: string): void {
-    for (const segment of splitWorkflowLogs(content)) {
+    const segments = splitWorkflowLogs(content, this.#stderrInWorkflowLog);
+    this.#stderrInWorkflowLog = segments.at(-1)?.workflow ?? this.#stderrInWorkflowLog;
+    for (const segment of segments) {
       if (segment.text.trim().length === 0) continue;
       if (!segment.workflow) {
         this.#presentCapturedStderr(segment.text);
