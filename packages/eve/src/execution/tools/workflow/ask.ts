@@ -46,7 +46,7 @@ type WorkflowToolRunContextCarrier = {
 };
 
 export function attachWorkflowToolRunContext(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal">,
   context: WorkflowToolRunContext,
 ): void {
   Object.defineProperty(ctx, WORKFLOW_TOOL_RUN_CONTEXT, {
@@ -56,7 +56,7 @@ export function attachWorkflowToolRunContext(
 }
 
 function readWorkflowToolRunContext(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal">,
   helper: "agent" | "ask",
 ): WorkflowToolRunContext {
   const context = (ctx as WorkflowToolRunContextCarrier | undefined)?.[WORKFLOW_TOOL_RUN_CONTEXT];
@@ -176,7 +176,7 @@ export class WorkflowToolRunAsks {
  * the session withdrew it before it accepted a person's answer.
  */
 export function ask(
-  ctx: ToolContext,
+  ctx: Pick<ToolContext, "abortSignal">,
   request: ToolInputRequest,
   options: ToolInputRequestOptions = {},
 ): Promise<ToolInputResponse> {

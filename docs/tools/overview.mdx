@@ -179,6 +179,7 @@ examples.
 - `ctx.session`: session metadata, turn, auth, parent lineage.
 - `ctx.callId`: the id of the current tool call, carried by the call's [stream events](/docs/concepts/sessions-runs-and-streaming) and approval context.
 - `ctx.toolName`: the final runtime name the model called, including any namespace qualification.
+- `ctx.messages`: the model input for the step that requested this call, the same messages a `step.started` [dynamic resolver](/docs/guides/dynamic-capabilities) reads.
 - `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to cancellation-aware work; sandbox sessions from `ctx.getSandbox()` are already bound to it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
 

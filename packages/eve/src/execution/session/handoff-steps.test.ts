@@ -27,7 +27,7 @@ describe("validateSessionCheckpointStep", () => {
     readDurableSessionMock.mockReturnValue({});
     const checkpoint = createCheckpoint();
 
-    await validateSessionCheckpointStep({ checkpoint });
+    await expect(validateSessionCheckpointStep({ checkpoint })).resolves.toEqual({ kind: "valid" });
 
     expect(require).toHaveBeenCalledWith(BundleKey);
     expect(readDurableSessionMock).toHaveBeenCalledWith(checkpoint.sessionState);
@@ -56,15 +56,16 @@ describe("validateSessionCheckpointStep", () => {
   });
 
   it.each([5, 6, 7, 8, 9, 11])(
-    "rejects checkpoint version %s before reading nested state",
+    "reports checkpoint version %s as incompatible before reading nested state",
     async (version) => {
       const checkpoint = createCheckpoint();
       // Simulate an incompatible checkpoint received over the wire.
       Object.assign(checkpoint, { version });
 
-      await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
-        `Unsupported session checkpoint version ${version}`,
-      );
+      await expect(validateSessionCheckpointStep({ checkpoint })).resolves.toEqual({
+        kind: "incompatible",
+        reason: "checkpoint-version",
+      });
       expect(deserializeContextMock).not.toHaveBeenCalled();
       expect(readDurableSessionMock).not.toHaveBeenCalled();
     },
