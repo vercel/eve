@@ -138,8 +138,6 @@ A sent delivery can interrupt generation before your `deliver` hook runs. If the
 
 Every `send()` and `respond()` delivery passes its `state` option to your channel's `deliver(payload, channel)` hook as `payload.state`, including deliveries to an existing session. Use it for values that belong to one delivery, such as the author of a message. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
 
-The built-in Slack, Teams, and Telegram channels, and the Chat SDK bridge's `send`, hand every inbound message to `from(address).send(message, options)`. A route wrapper that replaces `send` on the source returned by `from(address)` therefore sees each inbound message, and a rejected delivery reaches the wrapper as an error.
-
 Configure `turnPolicy: "queue"` on `defineChannel(...)` when messages should wait for the active turn to finish, or override one send:
 
 ```ts
@@ -163,6 +161,58 @@ The same override is available on fixed `Session.send(...)` and cross-channel `t
 Attaching does no lookup. The first operation reports whether the ID is active.
 Call `resolveSession(address)` only when you explicitly need to snapshot an
 address's current owner as a fixed handle.
+
+## Wrap an existing channel's routes
+
+A channel value can be spread into a new object with replaced `routes`. eve keeps the channel's adapter, events, and build metadata (such as the Slack app manifest) on the spread copy, so `{ ...channel, routes }` compiles and runs like the original.
+
+The built-in Slack, Teams, and Telegram channels, and the Chat SDK bridge's `send`, hand every inbound message to `from(address).send(message, options)`. A route wrapper that replaces `send` on the source returned by `from(address)` therefore sees each inbound message, and a rejected delivery reaches the wrapper as an error:
+
+```ts title="agent/channels/slack.ts"
+import type { RouteHandlerArgs } from "eve/channels";
+import { slackChannel, type SlackChannelState } from "eve/channels/slack";
+
+const slack = slackChannel();
+
+function reportFailedDeliveries(
+  args: RouteHandlerArgs<SlackChannelState>,
+): RouteHandlerArgs<SlackChannelState> {
+  return {
+    ...args,
+    from(address) {
+      const source = args.from(address);
+      return {
+        ...source,
+        async send(message, options) {
+          try {
+            return await source.send(message, options);
+          } catch (error) {
+            console.error("Slack delivery failed", { address, error });
+            throw error;
+          }
+        },
+      };
+    },
+  };
+}
+
+const channel: typeof slack = {
+  ...slack,
+  routes: slack.routes.map((route) =>
+    route.transport === "websocket"
+      ? route
+      : {
+          ...route,
+          handler: (request: Request, args: RouteHandlerArgs<SlackChannelState>) =>
+            route.handler(request, reportFailedDeliveries(args)),
+        },
+  ),
+};
+
+export default channel;
+```
+
+Keep each route's `method` and `path` unless you mean to move the endpoint.
 
 ## Operation semantics
 

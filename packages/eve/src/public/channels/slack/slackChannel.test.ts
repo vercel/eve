@@ -522,6 +522,18 @@ describe("slackChannel()", () => {
     });
   });
 
+  it("keeps build metadata when spread with replaced routes", () => {
+    const channel = slackChannel({ botName: "Support Bot" });
+    const wrapped = { ...channel, routes: [...channel.routes] };
+
+    expect(getChannelBuildMetadata(wrapped, "support")).toEqual(
+      getChannelBuildMetadata(channel, "support"),
+    );
+    expect(getChannelBuildMetadata(wrapped, "support")?.manifest).toMatchObject({
+      display_information: { name: "Support Bot" },
+    });
+  });
+
   it("classifies from durable state through the audience hook", () => {
     const adapter = withState(getAdapter(slackChannel()), { audience: "private" });
 
