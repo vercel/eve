@@ -1213,54 +1213,43 @@ describe("SessionExecution checkpoints", () => {
     expect(continuation).toEqual({ delivery: steering, steered: false });
   });
 
-  it("publishes a boundary's consecutive agent-started messages in one step, in admission order, when the step ends the turn", async () => {
+  it("adopts a settled step's boundary agent-started messages in one step each run, in admission order", async () => {
+    const { inbox, planner, progress, reviewer, writer } = boundaryRunMessages();
+    const cursor = createCursor({ inbox, sessionState: state("") });
+    publishIntoContext();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "park",
+          hasPendingAuthorization: false,
+          hasPendingInputBatch: false,
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+          settled: { output: "Done." },
+        })),
+      );
+    inbox.drain = vi
+      .fn()
+      .mockReturnValueOnce([planner, reviewer, progress, writer])
+      .mockReturnValue([]);
+
+    await expect(
+      createExecution({ cursor, inbox, sessionState: cursor.sessionState }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "park", settled: { output: "Done." } });
+
+    expect(cursor.serializedContext[PUBLISHED]).toEqual([
+      "planner-session+reviewer-session",
+      "Halfway through the sources.",
+      "writer-session",
+    ]);
+  });
+
+  it("announces no child when the step ends the session, whose stream it closed", async () => {
+    const { inbox, planner, progress } = boundaryRunMessages();
     const sessionState = state("");
-    const from = (callId: string, taskId?: string): WorkflowToolRunRef => ({
-      callId,
-      input: {},
-      runId: `run-${callId}`,
-      sequence: 0,
-      stepIndex: 0,
-      ...(taskId !== undefined && { taskId }),
-      toolName: "execute",
-      turnId: "turn_0",
-    });
-    const opened = (callId: string, name: string): WorkflowToolRunMessage => ({
-      from: from(callId),
-      kind: "agent-started",
-      session: { kind: "local", name, nodeId: name, sessionId: `${name}-session` },
-    });
-    // While Alice's final model step runs, her runs open a planner and a
-    // reviewer, her research task reports progress, and a writer opens.
-    const planner = opened("call-1", "planner");
-    const reviewer = opened("call-2", "reviewer");
-    const progress = {
-      from: from("call-3", "research"),
-      kind: "report",
-      update: "Halfway through the sources.",
-    } as const satisfies WorkflowToolRunMessage;
-    const writer = opened("call-4", "writer");
-    const inbox: SessionInbox = {
-      claimedTokens: [],
-      claimSessionHook: vi.fn(),
-      claimSessionHooks: vi.fn(),
-      drain: vi.fn().mockReturnValueOnce([planner, reviewer, progress, writer]).mockReturnValue([]),
-      hasPending: () => false,
-      whenPending: () => new Promise<void>(() => {}),
-      next: vi.fn(),
-      restore: vi.fn(),
-      onDelivery: () => () => {},
-      onInterrupt: () => () => {},
-    };
-    const published: unknown[] = [];
-    vi.mocked(emitAgentStartedStep).mockImplementation(async (input) => {
-      published.push(input.messages);
-      return { stateDelta: {} };
-    });
-    vi.mocked(emitWorkflowToolRunReportStep).mockImplementation(async (input) => {
-      published.push(input.update);
-      return { stateDelta: {} };
-    });
+    publishIntoContext();
+    inbox.drain = vi.fn().mockReturnValueOnce([planner, progress]).mockReturnValue([]);
     vi.mocked(turnStep)
       .mockReset()
       .mockImplementationOnce(
@@ -1271,23 +1260,147 @@ describe("SessionExecution checkpoints", () => {
       createExecution({ inbox, sessionState }).runTurn(undefined),
     ).resolves.toMatchObject({ kind: "done" });
 
-    expect(published).toEqual([[planner, reviewer], progress.update, [writer]]);
+    expect(emitAgentStartedStep).not.toHaveBeenCalled();
+  });
+
+  it("announces a child opened before a cancel ahead of cancelling the turn's work", async () => {
+    const { inbox, planner } = boundaryRunMessages();
+    const sessionState = state("");
+    let interrupt: (payload: SessionInboxPayload) => void = () => {};
+    inbox.onInterrupt = (handler) => {
+      interrupt = handler;
+      return () => {};
+    };
+    // Bob cancels while the turn waits, just as Alice's run opens a planner.
+    inbox.next = vi.fn(async () => {
+      interrupt({ kind: "cancel" });
+      return planner;
+    });
+    publishIntoContext();
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementation(
+        turnStepWork(async () => ({
+          action: "park",
+          pendingCoordinationCallIds: ["hold-call"],
+          hasPendingAuthorization: false,
+          hasPendingInputBatch: false,
+          serializedContext: {},
+          sessionState,
+        })),
+      );
+    vi.mocked(dispatchCoordinationStep).mockImplementation(
+      dispatchWork(async () => ({ results: [], serializedContext: {}, sessionState })),
+    );
+
+    await expect(createExecution({ inbox, sessionState }).runTurn(undefined)).resolves.toEqual({
+      cancelled: true,
+      kind: "park",
+    });
+
+    const [announced] = vi.mocked(emitAgentStartedStep).mock.invocationCallOrder;
+    const [cancelled] = vi.mocked(cancelDescendantTurnsStep).mock.invocationCallOrder;
+    expect(announced).toBeLessThan(cancelled!);
   });
 });
 
-function createExecution(input: {
-  readonly capabilities?: SessionCapabilities;
+/** The context key the mocked publishing steps append to, as a hook's state write would. */
+const PUBLISHED = "test.published";
+
+/** Mocks the run-message publishing steps to record what they publish in the session context. */
+function publishIntoContext(): void {
+  const append = (context: Record<string, unknown>, entry: string) => ({
+    serializedContext: {
+      ...context,
+      [PUBLISHED]: [...((context[PUBLISHED] as string[] | undefined) ?? []), entry],
+    },
+  });
+  vi.mocked(emitAgentStartedStep)
+    .mockReset()
+    .mockImplementation(
+      stepWork(async (input: Parameters<typeof emitAgentStartedStep>[0]) =>
+        append(
+          input.serializedContext,
+          input.messages.map((message) => message.session.sessionId).join("+"),
+        ),
+      ),
+    );
+  vi.mocked(emitWorkflowToolRunReportStep)
+    .mockReset()
+    .mockImplementation(
+      stepWork(async (input: Parameters<typeof emitWorkflowToolRunReportStep>[0]) =>
+        append(input.serializedContext, String(input.update)),
+      ),
+    );
+}
+
+/**
+ * Alice's runs open a planner, a reviewer, and a writer, and her research task
+ * reports progress, with an inbox that has nothing else to admit.
+ */
+function boundaryRunMessages() {
+  const from = (callId: string, taskId?: string): WorkflowToolRunRef => ({
+    callId,
+    input: {},
+    runId: `run-${callId}`,
+    sequence: 0,
+    stepIndex: 0,
+    ...(taskId !== undefined && { taskId }),
+    toolName: "execute",
+    turnId: "turn_0",
+  });
+  const opened = (callId: string, name: string): WorkflowToolRunMessage => ({
+    from: from(callId),
+    kind: "agent-started",
+    session: { kind: "local", name, nodeId: name, sessionId: `${name}-session` },
+  });
+  const inbox: SessionInbox = {
+    claimedTokens: [],
+    claimSessionHook: vi.fn(),
+    claimSessionHooks: vi.fn(),
+    drain: () => [],
+    hasPending: () => false,
+    whenPending: () => new Promise<void>(() => {}),
+    next: vi.fn(() => new Promise<never>(() => {})),
+    restore: vi.fn(),
+    onDelivery: () => () => {},
+    onInterrupt: () => () => {},
+  };
+  return {
+    inbox,
+    planner: opened("call-1", "planner"),
+    progress: {
+      from: from("call-3", "research"),
+      kind: "report",
+      update: "Halfway through the sources.",
+    } satisfies WorkflowToolRunMessage,
+    reviewer: opened("call-2", "reviewer"),
+    writer: opened("call-4", "writer"),
+  };
+}
+
+function createCursor(input: {
   readonly inbox: SessionInbox;
-  readonly queue?: SessionInputQueue;
   readonly serializedContext?: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): SessionExecution {
-  const cursor = new SessionStateCursor({
+}): SessionStateCursor {
+  return new SessionStateCursor({
     inbox: input.inbox,
     sessionWritable: new WritableStream<Uint8Array>(),
     serializedContext: input.serializedContext ?? {},
     sessionState: input.sessionState,
   });
+}
+
+function createExecution(input: {
+  readonly capabilities?: SessionCapabilities;
+  readonly cursor?: SessionStateCursor;
+  readonly inbox: SessionInbox;
+  readonly queue?: SessionInputQueue;
+  readonly serializedContext?: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): SessionExecution {
+  const cursor = input.cursor ?? createCursor(input);
   return new SessionExecution({
     capabilities: input.capabilities,
     cursor,

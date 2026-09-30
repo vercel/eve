@@ -1,11 +1,6 @@
 import { sleep } from "#compiled/@workflow/core/index.js";
 
-import type {
-  DeliverHookPayload,
-  SessionAuthContext,
-  SessionCapabilities,
-  TurnCaller,
-} from "#channel/types.js";
+import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
@@ -15,10 +10,9 @@ import {
   type SessionInputQueue,
   type SteeringTurn,
 } from "#execution/session/input-queue.js";
-import { AuthKey } from "#context/keys.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
-import { principalOf } from "#execution/session/principal.js";
+import { resolveTurnPrincipal } from "#execution/session/principal.js";
 import { renderTaskWaitResult } from "#execution/tasks/render.js";
 import {
   answerTaskCancel,
@@ -116,7 +110,7 @@ export class SessionExecution {
       const outcome = await this.runTurnSteps(turn, delivery);
       // Tasks run beside the turn, and a run can open a session after its call
       // returns, so these messages still reach the session.
-      await this.handleBoundaryMessages(turn);
+      await this.handleBoundaryMessages(turn.takeBoundaryMessages(), outcome.kind === "done");
       // The turn rule holds a turn while its tasks work, so a turn that ends
       // anyway, such as by failing, cancels them.
       if (outcome.kind === "park" && outcome.settled !== undefined) {
@@ -131,15 +125,20 @@ export class SessionExecution {
   /**
    * Applies what runs reported while the model step ran, so the next step sees
    * it. Consecutive `agent-started` messages, such as a fan-out's, share one step.
+   * An ending session drops them: its stream is closed, and finalizing the
+   * session terminates the children.
    */
-  private async handleBoundaryMessages(turn: ActiveTurn): Promise<void> {
-    for (const batch of batchAgentStarts(turn.takeBoundaryMessages())) {
-      if (Array.isArray(batch)) {
+  private async handleBoundaryMessages(
+    messages: readonly WorkflowToolRunMessage[],
+    ending = false,
+  ): Promise<void> {
+    for (const batch of batchAgentStarts(messages)) {
+      if (batch.kind === "message") {
+        await this.handleWorkflowMessage(batch.message);
+      } else if (!ending) {
         await this.input.cursor.advance((state) =>
-          emitAgentStartedStep({ ...state, messages: batch }),
+          emitAgentStartedStep({ ...state, messages: batch.messages }),
         );
-      } else {
-        await this.handleWorkflowMessage(batch);
       }
     }
   }
@@ -165,11 +164,11 @@ export class SessionExecution {
       const turnCompleted = result.action === "park" && result.settled !== undefined;
 
       await turn.admitBoundary();
-      await this.handleBoundaryMessages(turn);
+      await this.handleBoundaryMessages(turn.takeBoundaryMessages(), result.action === "done");
 
-      if (result.action === "cancelled") return await this.finishCancelledTurn();
+      if (result.action === "cancelled") return await this.finishCancelledTurn(turn);
       if (!turnCompleted && turn.signal.aborted && pendingCallIds === undefined) {
-        return await this.finishCancelledTurn();
+        return await this.finishCancelledTurn(turn);
       }
 
       if (result.action === "done") {
@@ -184,7 +183,7 @@ export class SessionExecution {
 
       if (result.action === "held") {
         const woke = await this.waitForHeldTurn(turn);
-        if (woke === "cancelled") return await this.finishCancelledTurn();
+        if (woke === "cancelled") return await this.finishCancelledTurn(turn);
         const steering = await turn.takeSteering();
         nextStepInput = steering === undefined ? undefined : { delivery: steering };
         continue;
@@ -209,7 +208,7 @@ export class SessionExecution {
           pendingCallIds,
           turn,
         });
-        if (runtimeResults === "cancelled") return await this.finishCancelledTurn();
+        if (runtimeResults === "cancelled") return await this.finishCancelledTurn(turn);
         // Steering accepted during the wait is appended ahead of the result in
         // the same step, so the model sees it before the blocking action resolves.
         nextStepInput = { delivery: await turn.takeSteering(), runtimeResults };
@@ -250,8 +249,10 @@ export class SessionExecution {
   }
 
   /** `session.cancel()` stops the turn, the calls it waits on, and every working task. */
-  private async finishCancelledTurn(): Promise<TurnOutcome> {
+  private async finishCancelledTurn(turn: ActiveTurn): Promise<TurnOutcome> {
     const { cursor } = this.input;
+    // A child a run opened before the cancel appears before its task settles as cancelled.
+    await this.handleBoundaryMessages(turn.takeBoundaryMessages("agent-started"));
     await cancelDescendantTurnsStep({
       sessionState: cursor.sessionState,
     });
@@ -455,19 +456,6 @@ type RuntimeEvent =
   | "cancelled";
 
 /**
- * The principal of the delivery that starts or continues a turn. A delivery
- * without auth keeps the session's current identity, as the turn step does.
- */
-function resolveTurnPrincipal(
-  payload: TurnStepPayload | undefined,
-  serializedContext: Record<string, unknown>,
-): string {
-  const auth = payload?.delivery?.auth;
-  if (auth !== undefined) return principalOf(auth);
-  return principalOf(serializedContext[AuthKey.name] as SessionAuthContext | null | undefined);
-}
-
-/**
  * Admission policy, cancellation, and steering for one active turn.
  * Deliveries admitted while a model step runs stay in the shared queue until
  * the turn reaches a committed boundary; a runtime-action wait routes them
@@ -574,13 +562,16 @@ class ActiveTurn {
     return delivery;
   }
 
-  /** Removes the admitted run messages the session applies at once instead of in a runtime wait. */
-  takeBoundaryMessages(): WorkflowToolRunMessage[] {
+  /**
+   * Removes the admitted run messages the session applies at once instead of
+   * in a runtime wait, or only those of `kind`.
+   */
+  takeBoundaryMessages(kind?: "agent-started"): WorkflowToolRunMessage[] {
     const taken: WorkflowToolRunMessage[] = [];
     const kept: RuntimeEvent[] = [];
     for (const event of this.runtimeResults) {
       const message = asBoundaryMessage(event);
-      if (message === undefined) kept.push(event);
+      if (message === undefined || (kind !== undefined && message.kind !== kind)) kept.push(event);
       else taken.push(message);
     }
     this.runtimeResults.splice(0, this.runtimeResults.length, ...kept);

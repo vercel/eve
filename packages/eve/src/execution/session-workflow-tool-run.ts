@@ -62,19 +62,19 @@ export async function handleWorkflowToolRunMessage(
   }
 }
 
-/**
- * Groups consecutive `agent-started` messages so one `emitAgentStartedStep`
- * publishes each group, keeping every message in admission order.
- */
-export function batchAgentStarts(
-  messages: readonly WorkflowToolRunMessage[],
-): (WorkflowToolRunMessage | WorkflowToolRunAgentStartedMessage[])[] {
-  const batches: (WorkflowToolRunMessage | WorkflowToolRunAgentStartedMessage[])[] = [];
+/** Boundary messages in admission order, with consecutive `agent-started` messages grouped. */
+type BoundaryBatch =
+  | { readonly kind: "agent-started"; readonly messages: WorkflowToolRunAgentStartedMessage[] }
+  | { readonly kind: "message"; readonly message: WorkflowToolRunMessage };
+
+/** Groups consecutive `agent-started` messages so one `emitAgentStartedStep` publishes each group. */
+export function batchAgentStarts(messages: readonly WorkflowToolRunMessage[]): BoundaryBatch[] {
+  const batches: BoundaryBatch[] = [];
   for (const message of messages) {
     const last = batches.at(-1);
-    if (message.kind !== "agent-started") batches.push(message);
-    else if (Array.isArray(last)) last.push(message);
-    else batches.push([message]);
+    if (message.kind !== "agent-started") batches.push({ kind: "message", message });
+    else if (last?.kind === "agent-started") last.messages.push(message);
+    else batches.push({ kind: "agent-started", messages: [message] });
   }
   return batches;
 }
