@@ -307,7 +307,9 @@ Code running inside the agent's own deployment, such as a hook, tool, schedule, 
 ```ts
 import { sessions } from "eve/server";
 
-for await (const event of sessions.attach(sessionId).stream({ startIndex, follow: false })) {
+const events = sessions.attach(sessionId).stream({ startIndex, follow: false });
+
+for await (const event of events) {
   await saveEvent(sessionId, event.meta.id, event);
 }
 ```
