@@ -42,19 +42,18 @@ import {
   type WorkflowFunction,
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
-import { type MessageStreamEvent, withMessageStreamEventIndex } from "#protocol/message.js";
-import {
-  normalizePersistedMessageStreamEvent,
-  type MessageStreamEventForVersion,
-  type MessageStreamVersion,
-} from "#protocol/message-version.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
-import { parseNdjsonStream } from "#execution/ndjson-stream.js";
+import {
+  readSessionEventStream,
+  readSessionStreamTailIndex,
+  resolveSessionStreamStartIndex,
+} from "#execution/session-event-stream.js";
 import {
   SESSION_HANDOFF_VERSION,
   type HandoffWorkflowEntryInput,
@@ -295,18 +294,16 @@ export function createWorkflowRuntime(config: {
       sessionId: string,
       options?: GetEventStreamOptions,
     ): Promise<ReadableStream<MessageStreamEvent>> {
-      const startIndex = options?.startIndex ?? 0;
       // Resolve a tail-relative cursor before opening so every event can carry
       // an absolute `meta.index`.
-      const absoluteStartIndex =
-        startIndex < 0
-          ? Math.max(0, (await readStreamTailIndex(sessionId)) + 1 + startIndex)
-          : startIndex;
-      return readSessionEventStream(sessionId, absoluteStartIndex);
+      return readSessionEventStream(
+        sessionId,
+        await resolveSessionStreamStartIndex(sessionId, options?.startIndex ?? 0),
+      );
     },
 
     async getStreamTailIndex(sessionId: string): Promise<number> {
-      return await readStreamTailIndex(sessionId);
+      return await readSessionStreamTailIndex(sessionId);
     },
 
     async resolveContinuation(
@@ -356,41 +353,6 @@ export async function startSessionOwnerStep(input: SessionOwnerStartInput): Prom
     input.checkpoint.retention === undefined
       ? undefined
       : { experimental_retention: input.checkpoint.retention },
-  );
-}
-
-/**
- * Reads one session's durable event stream from an absolute cursor, labeling
- * each event with its stream position.
- *
- * Workflow reports no position per chunk on read, so positions count up from
- * `startIndex`. That holds because the writer persists exactly one chunk per
- * event (see `createOrderedStreamEmitter`).
- */
-function readSessionEventStream(
-  sessionId: string,
-  startIndex: number,
-): ReadableStream<MessageStreamEvent> {
-  let index = startIndex;
-  return parseNdjsonStream<MessageStreamEvent>(
-    () => getRun(sessionId).getReadable({ startIndex }),
-    (value) => withMessageStreamEventIndex(normalizePersistedEvent(value), index++),
-  );
-}
-
-async function readStreamTailIndex(sessionId: string): Promise<number> {
-  // The readable is never consumed; cancel it so the unread source does not linger.
-  const readable = getRun(sessionId).getReadable();
-  try {
-    return await readable.getTailIndex();
-  } finally {
-    await readable.cancel().catch(() => {});
-  }
-}
-
-function normalizePersistedEvent(value: unknown): MessageStreamEvent {
-  return normalizePersistedMessageStreamEvent(
-    value as MessageStreamEventForVersion<MessageStreamVersion>,
   );
 }
 

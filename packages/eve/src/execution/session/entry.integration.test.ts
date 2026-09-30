@@ -18,6 +18,7 @@ import {
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { sessions } from "#public/server/index.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { isEventId } from "#internal/testing/event-id.js";
 import { always } from "#tools/approval/policies.js";
@@ -445,6 +446,74 @@ describe("workflowEntry integration", () => {
         const tailIndex = await workflowRuntime.getStreamTailIndex(run.runId);
         const lastTwo = await readIndexes(-2, 2);
         expect(lastTwo.map((event) => event.meta.index)).toEqual([tailIndex - 1, tailIndex]);
+      } finally {
+        await run.cancel();
+      }
+    });
+  });
+
+  it("reads a session's durable stream in process through eve/server, including from a hook", async () => {
+    const hookReads: number[][] = [];
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-server-sessions" },
+      modules: [
+        {
+          logicalPath: "hooks/read-own-stream.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                async "step.completed"(_event, ctx) {
+                  const indexes: number[] = [];
+                  for await (const event of sessions
+                    .attach(ctx.session.id)
+                    .stream({ follow: false })) {
+                    indexes.push(event.meta.index ?? -1);
+                  }
+                  hookReads.push(indexes);
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "read your own stream" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken: "http:workflow-entry-server-sessions",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      let firstTurn: readonly MessageStreamEvent[];
+      try {
+        firstTurn = await stream.nextTurn();
+      } finally {
+        stream.dispose();
+      }
+
+      try {
+        // A hook's bounded read ends at the durable tail. The step's own writes
+        // may still be buffered, so it can see only an earlier prefix.
+        expect(hookReads.length).toBeGreaterThan(0);
+        for (const indexes of hookReads) {
+          expect(indexes).toEqual(indexes.map((_, index) => index));
+        }
+
+        const events: MessageStreamEvent[] = [];
+        for await (const event of sessions.attach(run.runId).stream({ follow: false })) {
+          events.push(event);
+        }
+        expect(events.map((event) => event.meta.index)).toEqual(events.map((_, index) => index));
+        expect(events.slice(0, firstTurn.length).map((event) => event.meta.id)).toEqual(
+          firstTurn.map((event) => event.meta.id),
+        );
       } finally {
         await run.cancel();
       }
