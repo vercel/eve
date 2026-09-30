@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-09-29"
+last_updated: "2026-09-30"
 ---
 
 # Cache-stable connection tools
@@ -79,6 +79,27 @@ read but not run.
   `context.state`.
 - **Deterministic rendering.** Namespaces are sorted, and entries are chosen
   by cost and path (`core/src/codemode/catalog.ts`).
+
+## Prior art: AI SDK
+
+Read in the versions eve pins: `ai@7.0.105` and `@ai-sdk/code-mode@1.0.62`.
+eve already uses `@ai-sdk/mcp` for MCP transport, discovery, and calls.
+
+- **`toolSearch()` with `deferLoading`.** Called directly by the model, a
+  search adds its matches to the active tools on the next step, which changes
+  `tools` and loses the cache just as the old `connection_search` did. It
+  stays cache-stable only when every deferred tool is callable solely through
+  `code_mode` with `toolDiscovery: 'conversation'`. It also needs every tool
+  definition before the generation starts, so each connection would have to
+  connect, and sign in, first. It keeps discoveries in memory for one
+  generation, while eve runs each step durably.
+- **Code mode's conversation catalog.** `toolDiscovery: 'conversation'`
+  delivers TypeScript signatures in user messages and keeps the `code_mode`
+  description fixed, the same split this slice makes. The renderer is not
+  exported, so this slice renders its own signatures. The types match; the
+  differences are a single-line layout, constraints such as `pattern` kept as
+  comments, and no generated example call. Code mode can use its own
+  catalog once it lands.
 
 ## Design
 

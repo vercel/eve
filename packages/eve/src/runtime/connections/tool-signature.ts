@@ -135,9 +135,14 @@ function renderObject(schema: Schema, context: RenderContext): string {
 
 function propertyComment(schema: Schema): string {
   const parts: string[] = [];
-  if (typeof schema.description === "string" && schema.description.trim().length > 0) {
-    parts.push(truncate(schema.description.trim().replaceAll(/\s+/gu, " ")));
-  }
+  const description =
+    typeof schema.description === "string"
+      ? schema.description
+          .replaceAll(/\s+/gu, " ")
+          .replace(/[\s.;,:]+$/u, "")
+          .trim()
+      : "";
+  if (description.length > 0) parts.push(truncate(description));
   for (const key of CONSTRAINT_KEYS) {
     if (schema[key] !== undefined) parts.push(`${key}: ${JSON.stringify(schema[key])}`);
   }
