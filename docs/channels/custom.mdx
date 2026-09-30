@@ -3,7 +3,7 @@ title: "Custom Channels"
 description: "Author custom HTTP and WebSocket channels with routes, events, metadata, continuation tokens, and file uploads."
 ---
 
-When eve doesn't ship a channel for your surface, you build one. Custom channels expose HTTP or WebSocket endpoints, parse incoming requests, start or resume sessions, observe runtime events, and own delivery back to your platform.
+Build a custom channel to connect an HTTP or WebSocket endpoint to your agent. It can host a conversation or pass incoming events to another channel.
 
 ## File location and identity
 
@@ -237,45 +237,54 @@ The bridge server does not listen on its own port. It receives only upgrade even
 
 ## Cross-channel hand-off
 
-Route handlers can start or resume an agent session on a different channel via `ctx.to(channel, target).send(message, options)`. This is an agent hand-off: the message becomes turn input and invokes the model on the destination channel. Use it when an inbound request should pivot the conversation, such as an incident webhook that opens an investigation thread in Slack.
+Use `ctx.to(channel, target).send(message, { auth })` in a route handler to start or resume a conversation on another channel. The agent runs and replies on the destination channel. The hand-off doesn't start a session on the source channel, which returns only its HTTP response.
 
-To post a provider notification without starting an agent turn, call the destination provider's API instead. If that notification must survive process failures, use an application-owned outbox; see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
+This webhook filters incoming events and asks the agent to investigate in Slack. Import the destination channel's default export; `verifyAndParseEvent` is a helper you implement in your application.
 
-```ts
+```ts title="agent/channels/intake.ts"
 import { defineChannel, POST } from "eve/channels";
+
+import { verifyAndParseEvent } from "../lib/inbound-events";
 import slack from "./slack";
 
 export default defineChannel({
   routes: [
-    POST("/incident", async (req, ctx) => {
-      const incident = await req.json();
+    POST("/intake/events", async (req, ctx) => {
+      const event = await verifyAndParseEvent(req);
+      if (!event) return new Response("unauthorized", { status: 401 });
+      if (event.kind !== "actionable") return new Response("ok");
 
       ctx.waitUntil(
         ctx
           .to(slack, { channelId: "C0123ABC" })
-          .send(`Investigate ${incident.reference}: ${incident.title}`, {
+          .send(`Investigate ${event.reference}: ${event.summary}`, {
             auth: {
-              authenticator: "incidentio",
+              authenticator: "intake",
               principalType: "service",
-              principalId: incident.actor.id,
-              attributes: { reference: incident.reference, severity: incident.severity },
+              principalId: event.source,
+              attributes: {},
             },
           }),
       );
-
       return new Response("ok");
     }),
   ],
 });
 ```
 
-Semantics:
+Before sending:
 
-- The target channel's authored `receive(input, { from })` hook owns the continuation-token format and initial state. Callers supply the target to `to(...)`, then the message and auth to `send(...)`.
-- `auth` flows through to `session.auth.initiator` so the target's event handlers and the agent's tools can read who started the session.
-- Calling `ctx.to(...).send(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
-- `send(...)` is not a direct provider-message API. It supplies input to the agent on the destination channel.
-- The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
+- Verify the provider's signature and validate the payload, including size limits. Derive `event.source` from the verified sender, not an untrusted payload field.
+- Filter out events that should not reach the agent.
+- Deduplicate retried events in your application if duplicates would cause unwanted sessions or posts. `send(...)` does not deduplicate them.
+
+The supplied `auth` identifies who started the session, available to tools and event handlers as `session.auth.initiator`.
+
+The destination's `receive` hook defines the target fields and how they map to a session. See [Slack proactive sessions](./slack#proactive-sessions) for its target options. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
+
+`ctx.to(...)` is a route-handler API, not a method on every platform callback. [Handler-form schedules](../schedules#handler-form-run) provide the same operation as `to(...)`.
+
+For notifications that don't need an agent turn, use the platform's API instead. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when those posts also need retries.
 
 ## Channel metadata
 

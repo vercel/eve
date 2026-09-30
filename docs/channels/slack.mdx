@@ -474,8 +474,6 @@ When the model replies while its tasks keep working, that reply posts like any o
 
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 
-When a session starts without a `threadTs` (say, from a schedule's `to(slack, target).send(...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
-
 ### Task card
 
 When a turn starts its first task, eve posts a task card in the thread and keeps it current until the turn and its tasks finish. One task renders as a Slack `task_card` block; two or more render as a `plan` block with one row per task the turn started. What an agent task does on its own, including the tasks it starts, stays inside that task and does not add rows. The card needs no configuration beyond the `chat:write` scope the channel already uses.
@@ -703,9 +701,20 @@ The private authorization button uses the label **Sign in**, so long connection 
 
 ### Proactive sessions
 
-Start a session without an inbound message through `ctx.to(slack, target).send(message, { auth })` from another channel, or `to(slack, target).send(message, { auth })` from a schedule `run` handler. The proactive target shape is `{ channelId, installationTeamId?, threadTs?, initialMessage?, audience? }`. It defaults to `unknown`; pass `audience` only when the caller already knows the destination's visibility. Set `installationTeamId` to the app installation workspace when a function-form bot token must select an installation. This sends turn input to the agent; it is not a direct Slack post.
+Start a Slack conversation from a [webhook on another channel](./custom#cross-channel-hand-off) or a [schedule](../schedules#handler-form-run), without waiting for someone to message the app.
 
-To post without invoking the model, use `ctx.thread.post(...)` in an inbound Slack handler or `channel.thread.post(...)` in a renderer's event handler. Use `callSlackApi(...)` where no Slack channel context exists. For application-managed retries and deduplication, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
+Pass `{ channelId }` as the target to start a new thread. The agent's first post becomes the thread's root message. You can also set these target fields:
+
+| Field                | Use                                                                                       |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| `threadTs`           | Continue an existing thread instead of creating one.                                      |
+| `initialMessage`     | Post a card as the thread root before the agent runs. Cannot be combined with `threadTs`. |
+| `installationTeamId` | Select the app installation workspace when using a function-form bot token.               |
+| `audience`           | Set the destination's visibility when you know it. Defaults to `unknown`.                 |
+
+The default mention handler lets teammates continue the session by mentioning the app in the thread. To accept replies without a mention, [configure an `onMessage` hook and the required Slack subscriptions and scopes](#continue-conversations-without-repeated-mentions).
+
+For a Slack post without an agent turn, use `ctx.thread.post(...)` in an inbound handler or `channel.thread.post(...)` in a renderer's event handler. Outside a handler, use [`callSlackApi(...)`](#slack-api-calls-outside-a-handler).
 
 ### Attachments
 
