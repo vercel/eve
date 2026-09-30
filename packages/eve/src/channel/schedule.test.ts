@@ -11,8 +11,9 @@ import {
 } from "#channel/schedule.js";
 import { contextStorage } from "#context/container.js";
 import { ScheduleIdKey } from "#context/keys.js";
-import type { RunHandle, Runtime } from "#channel/types.js";
+import type { RunHandle, Runtime, SessionAuthContext } from "#channel/types.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
+import { isScheduleAuth } from "#public/schedules/index.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 
 function createMockRunHandle(): RunHandle {
@@ -207,6 +208,32 @@ describe("ScheduleDispatcher", () => {
         }),
       ).rejects.toThrow(/not registered in this agent/);
     });
+  });
+
+  it("isScheduleAuth recognizes the app principal schedules dispatch with, and only it", async () => {
+    const runtime = createMockRuntime();
+    const dispatcher = new ScheduleDispatcher({ runtime, channels: [] });
+    let appAuth: SessionAuthContext | undefined;
+
+    await dispatcher.trigger({ scheduleId: "heartbeat", markdown: "Run heartbeat task." });
+    await dispatcher.trigger({
+      scheduleId: "digest",
+      async run(args) {
+        appAuth = args.appAuth;
+      },
+    });
+
+    expect(isScheduleAuth(vi.mocked(runtime.createSession).mock.calls[0]![0].auth)).toBe(true);
+    expect(isScheduleAuth(appAuth)).toBe(true);
+    const alice: SessionAuthContext = {
+      attributes: {},
+      authenticator: "okta",
+      principalId: "okta|alice",
+      principalType: "user",
+    };
+    expect(isScheduleAuth(alice)).toBe(false);
+    expect(isScheduleAuth({ ...alice, principalId: "eve:app" })).toBe(false);
+    expect(isScheduleAuth(null)).toBe(false);
   });
 
   it("throws when neither run nor markdown is provided", async () => {
