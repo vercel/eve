@@ -85,23 +85,9 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  // Only an absent version means protocol 1; 0.66–0.68 callers omit the field.
-  if (
-    callback !== undefined &&
-    payload.protocolVersion !== undefined &&
-    typeof payload.protocolVersion !== "number"
-  ) {
-    return Response.json(
-      { error: "Expected 'protocolVersion' to be a number.", ok: false },
-      { status: 400 },
-    );
-  }
   const protocolVersion =
-    callback === undefined ? undefined : readRemoteAgentProtocolVersion(payload.protocolVersion);
-  if (protocolVersion !== undefined) {
-    const protocolRejection = rejectRemoteAgentProtocolMismatch(protocolVersion);
-    if (protocolRejection !== undefined) return protocolRejection;
-  }
+    callback === undefined ? undefined : parseProtocolVersionField(payload.protocolVersion);
+  if (protocolVersion instanceof Response) return protocolVersion;
 
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
@@ -372,12 +358,20 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
 }
 
 /** Delegating callers must speak a remote agent protocol this deployment serves. */
-function rejectRemoteAgentProtocolMismatch(callerVersion: number): Response | undefined {
+function parseProtocolVersionField(value: unknown): number | Response {
+  // Only an absent version means protocol 1; 0.66–0.68 callers omit the field.
+  if (value !== undefined && typeof value !== "number") {
+    return Response.json(
+      { error: "Expected 'protocolVersion' to be a number.", ok: false },
+      { status: 400 },
+    );
+  }
+  const callerVersion = readRemoteAgentProtocolVersion(value);
   if (
     callerVersion === REMOTE_AGENT_PROTOCOL_VERSION ||
     callerVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION
   ) {
-    return undefined;
+    return callerVersion;
   }
   return Response.json(
     {
