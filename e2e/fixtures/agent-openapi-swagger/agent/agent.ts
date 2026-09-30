@@ -1,6 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
-import type { MockModelRequest } from "eve/evals";
+import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
 /** Whether eve announced `name` in its connection listing. */
 function announced({ messages }: MockModelRequest, name: string): boolean {
@@ -9,9 +9,53 @@ function announced({ messages }: MockModelRequest, name: string): boolean {
   );
 }
 
+const kennelCall = (id: string, tool: string, input: Record<string, unknown>) => ({
+  id,
+  input: { connection: "kennel", tool, input },
+  name: "connection_execute",
+});
+
+const BISCUIT_VISIT = {
+  petId: 4217,
+  visit: { kind: "grooming", date: "2026-10-14" },
+  contacts: [{ name: "Alice", phone: "555-0100" }],
+};
+
+/** Walks every kennel result shape, retrying the misshapen call from its signature. */
+function kennelResponse({ toolResults }: MockModelRequest): MockModelResponse | string {
+  const byId = new Map(toolResults.map((result) => [result.id, result]));
+  if (!byId.has("kennel-bad-input")) {
+    return {
+      toolCalls: [
+        kennelCall("kennel-find", "find_pet", { name: "Biscuit" }),
+        kennelCall("kennel-feedings", "list_feedings", { petId: 4217 }),
+        kennelCall("kennel-photo", "pet_photo", { petId: 4217 }),
+        kennelCall("kennel-discharge", "discharge_pet", { petId: 4217 }),
+        kennelCall("kennel-bad-input", "book_visit", {
+          petId: "4217",
+          visit: { kind: "bath" },
+        }),
+        kennelCall("kennel-unknown", "find_pets", { name: "Biscuit" }),
+      ],
+    };
+  }
+  if (!byId.has("kennel-book")) {
+    const error = byId.get("kennel-bad-input");
+    return error?.isError === true && JSON.stringify(error.output).includes("book_visit(input:")
+      ? { toolCalls: [kennelCall("kennel-book", "book_visit", BISCUIT_VISIT)] }
+      : "KENNEL_SIGNATURE_MISSING";
+  }
+  const photo = byId.get("kennel-photo")?.output;
+  const imageParts = Array.isArray(photo)
+    ? photo.filter((part) => JSON.stringify(part).includes('"image/png"')).length
+    : 0;
+  return `KENNEL_MCP_DONE photo-image-parts=${imageParts}`;
+}
+
 const config = e2eAgentConfig({
   mock: (request) => {
     const { lastUserMessage, toolResults } = request;
+    if (lastUserMessage?.includes("KENNEL_MCP_E2E")) return kennelResponse(request);
     if (lastUserMessage?.includes("DYNAMIC_MCP_CONNECTION_E2E")) {
       return announced(request, "dynamic-mcp")
         ? "DYNAMIC_MCP_CONNECTION_FOUND"
