@@ -448,6 +448,44 @@ it("keeps same-turn approval blocked when its parallel workflow finishes [contro
   expect(f.executions).toEqual(["gateA"]);
 });
 
+it("applies response authorization to an approval sharing a step with a workflow (#3891)", async () => {
+  const response = vi.fn(() => ({
+    status: "rejected" as const,
+    reason: "Only the requester may approve this tool call.",
+  }));
+  const f = fixture("response-authorization-with-parallel-workflow", response);
+  f.script.push(calls("gateA", "workflow"));
+  await f.drive({ message: "Prepare the protected action and start the workflow." });
+  await f.finishRuntime();
+
+  const approval = f.respond("gateA").inputResponses![0]!;
+  f.script.push("FINAL");
+  await f.drive({
+    attributedInputResponses: [
+      {
+        response: approval,
+        auth: {
+          attributes: {},
+          authenticator: "test",
+          issuer: "test",
+          principalId: "other-user",
+          principalType: "user",
+        },
+      },
+    ],
+  });
+
+  expect({
+    responsePolicyCalls: response.mock.calls.length,
+    executedTools: f.executions,
+    approvalStillPending: f.pending().some((request) => request.action.toolName === "gateA"),
+  }).toEqual({
+    responsePolicyCalls: 1,
+    executedTools: [],
+    approvalStillPending: true,
+  });
+});
+
 it("settles a text-only follow-up carrying a partial approval response", async () => {
   const f = fixture("partial-response-with-text");
   await f.gate("gateA", "gateB");
