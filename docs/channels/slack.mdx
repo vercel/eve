@@ -486,7 +486,56 @@ Each row shows:
 
 The plan title summarizes the turn: `Working on 2 tasks`, `1 of 2 tasks done`, `Waiting for approval`, then `Finished 2 tasks` or `Finished 3 tasks: 1 failed, 1 stopped`. A resumable task continued in a later turn appears in that turn's card.
 
-eve writes the card from the session's own events as they happen, and only when it changed. A failed Slack call never fails the turn: eve tries a failed write once more after a second, then again on the turn's next change. If someone deletes the card, eve posts it again on its next change. Card posts never unfurl links. Schedule sessions and sessions without a Slack thread get no card.
+eve tracks the card from the session's own events and writes it in separate steps of the session's workflow, outside the turn, so a slow Slack call never holds up the agent. Several changes in a row become one write, and eve writes only when the card changed. A failed Slack call never fails the turn: eve tries the write again a second later, then a few more times over about half a minute, and after that waits for the card's next change. If someone deletes the card, eve posts it again on its next change. Card posts never unfurl links. Schedule sessions and sessions without a Slack thread get no card.
+
+### Show an agent task's own work
+
+By default the card changes only when the session's own events change it: a task starts, waits on a person, or settles. An agent task's own work happens in its own session. A `taskCard` can await `task.agent.work()` for what the agent has done for that call, for example to list its latest tool calls under its row:
+
+```ts title="agent/channels/slack.ts"
+import { defineSlackRenderer, slackChannel, type BlockKitBlock } from "eve/channels/slack";
+
+const agentSteps = defineSlackRenderer({
+  async taskCard(view, next) {
+    const card = await next(view);
+    const [block] = card?.blocks ?? [];
+    if (card === null || block === undefined) return card;
+    // eve's card is one `plan` block, or one `task_card` block for a single task, with rows in task order.
+    const rows = block["type"] === "plan" ? (block["tasks"] as BlockKitBlock[]) : [block];
+    const withSteps = await Promise.all(
+      rows.map(async (row, index) => {
+        // The agent's latest three tool calls, one per line.
+        const work = await view.tasks[index]?.agent?.work();
+        const text = work?.actions
+          .slice(-3)
+          .map((action) => action.title)
+          .join("\n");
+        if (!text || row["details"] !== undefined) return row;
+        return {
+          ...row,
+          details: {
+            elements: [{ elements: [{ text, type: "text" }], type: "rich_text_section" }],
+            type: "rich_text",
+          },
+        };
+      }),
+    );
+    return {
+      ...card,
+      blocks: block["type"] === "plan" ? [{ ...block, tasks: withSteps }] : withSteps,
+    };
+  },
+});
+
+export default slackChannel({
+  renderers: [agentSteps],
+  taskCards: { refreshIntervalMs: 15_000 },
+});
+```
+
+`work()` reads the agent's session and returns its tool calls for this call, including the tasks it started, as `actions`: each with the same `title` and `status` a row's `actions` have, newest 20, oldest first, without `input`. `earlierActions` counts the older ones left out. It's the only part of the view that reads anything, and a card that never calls it costs nothing. It rejects when eve can't read the agent's session, which leaves that turn's card as it was.
+
+Without `taskCards.refreshIntervalMs`, eve reads the agent's session only when the session's own events change the card. With it, eve also renders the card that often, at least once a second, while an agent whose work a card read is still working. Each render is a step of the session's workflow. Only agents in the same deployment have `agent`; remote agents don't.
 
 ### Customize rendering
 
@@ -494,7 +543,7 @@ Without `renderers`, eve renders everything above with its default renderer. Pas
 
 - `received(message, channel, next)` acknowledges a mention or DM the moment it arrives, and another channel message once `onMessage` dispatches it. eve's default sets `Thinking...`.
 - `events` handles session events such as `message.completed` or `input.requested`. Each handler receives `(eventData, channel, ctx, next)`, with Slack platform handles on `channel.thread` and `channel.slack`; a `session.failed` handler receives `(eventData, channel, next)`.
-- `taskCard(view, next)` returns the task card's blocks and notification text, or `null` for no card.
+- `taskCard(view, next)` returns, or resolves to, the task card's blocks and notification text, or `null` for no card.
 
 Call `next()` to run the rest of the chain, ending with eve's default. Call it after your own work, before it, or with changed data, as in `next({ ...event, message })`; the rest of the chain runs at most once. Skip `next` to replace the default for that event. This renderer adds feedback buttons below each final reply and a context row to the finished task card:
 
@@ -528,8 +577,8 @@ const feedback = defineSlackRenderer({
       });
     },
   },
-  taskCard(view, next) {
-    const card = next(view);
+  async taskCard(view, next) {
+    const card = await next(view);
     if (card === null || view.state !== "finished") return card;
     const note = {
       type: "context",
@@ -548,10 +597,10 @@ export default slackChannel({
 `taskCard` runs for every turn that calls a tool, and receives the same view eve's default renders from:
 
 - `state`: `blocked` while any task waits on a person, `working` while the turn or any other task works, then `finished`.
-- `tasks`: the tasks the turn started, each with a `title`, `status`, `blockedOn`, and `summary`. A failed task's `summary` and a blocked task's `blockedOn.label` are present only in a DM or private channel.
+- `tasks`: the tasks the turn started, each with a `title`, `status`, `blockedOn`, `summary`, and, for an agent task in the same deployment, `agent`, whose [`work()`](#show-an-agent-tasks-own-work) reads what the agent did. A failed task's `summary` and a blocked task's `blockedOn.label` are present only in a DM or private channel.
 - `actions`: the turn's other tool calls, each with its tool `name`, `title`, `status`, and `input`. `input` is left out when its JSON is longer than 4,096 characters.
 
-`taskCard` is synchronous and pure: eve posts the card and updates it as the view changes. eve's default returns `null` for a turn that started no tasks. To change a row's title in every channel, give the tool a [label](/docs/tools#label-tool-activity) instead.
+`taskCard` makes no Slack calls: eve posts the card and updates it as the view changes. It can await `next` and `task.agent.work()`, and nothing else it awaits should call Slack either. eve's default returns `null` for a turn that started no tasks. To change a row's title in every channel, give the tool a [label](/docs/tools#label-tool-activity) instead.
 
 Renderers run in the order you list them, and the first one is outermost. `onInteraction` receives clicks on buttons a renderer posts, such as the feedback buttons above.
 
@@ -596,8 +645,8 @@ const SLACK_STATUS = {
 } as const;
 
 const plan = defineSlackRenderer({
-  taskCard(view, next) {
-    const card = next(view);
+  async taskCard(view, next) {
+    const card = await next(view);
     const calls = view.actions.filter((action) => action.name === "plan");
     const items = calls.at(-1)?.input?.items as PlanItem[] | undefined;
     if (items === undefined) return card;

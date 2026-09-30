@@ -18,9 +18,10 @@ import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.
  * build than the owner that produced it; bump when any field changes shape so
  * an incompatible successor rejects the handoff instead of misreading state.
  * Mount-owned state requires a new version so older readers reject it rather
- * than dropping unrecognized state keys during reverse handoff.
+ * than dropping unrecognized state keys during reverse handoff. So does the
+ * render lane's state, which holds the `ts` of each task card a channel wrote.
  */
-export const SESSION_CHECKPOINT_VERSION = 10;
+export const SESSION_CHECKPOINT_VERSION = 11;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {
@@ -106,13 +107,10 @@ export class SessionHandoff {
     selection: TurnSelection,
     state: Pick<SessionCheckpoint, "serializedContext" | "sessionState">,
   ): Promise<SessionTransferOutcome> {
-    const { deploymentId, inbox } = this.input;
-    const targetDeploymentId = readAcceptedDeploymentId(selection.delivery);
-    if (targetDeploymentId === undefined) return { kind: "retained", reason: "missing-deployment" };
-    if (targetDeploymentId === deploymentId) return { kind: "retained", reason: "same-deployment" };
-    if (this.incompatibleTargetDeploymentIds.has(targetDeploymentId))
-      return { kind: "retained", reason: "known-incompatible" };
-    if (!selection.handoffEligible) return { kind: "retained", reason: "busy" };
+    const { inbox } = this.input;
+    const target = this.transferTarget(selection);
+    if (target.kind === "retained") return target;
+    const { targetDeploymentId } = target;
     if (!(await isSessionIdleForHandoffStep(state)))
       return { kind: "retained", reason: "not-idle" };
 
@@ -159,6 +157,26 @@ export class SessionHandoff {
     } finally {
       await Promise.all(markers.map((marker) => disposeHook(marker)));
     }
+  }
+
+  /** Whether `tryTransfer` would try to move the session for this selection; runs no step. */
+  mayTransfer(selection: TurnSelection): boolean {
+    return this.transferTarget(selection).kind === "transfer";
+  }
+
+  private transferTarget(
+    selection: TurnSelection,
+  ):
+    | { readonly kind: "transfer"; readonly targetDeploymentId: string }
+    | Extract<SessionTransferOutcome, { readonly kind: "retained" }> {
+    const targetDeploymentId = readAcceptedDeploymentId(selection.delivery);
+    if (targetDeploymentId === undefined) return { kind: "retained", reason: "missing-deployment" };
+    if (targetDeploymentId === this.input.deploymentId)
+      return { kind: "retained", reason: "same-deployment" };
+    if (this.incompatibleTargetDeploymentIds.has(targetDeploymentId))
+      return { kind: "retained", reason: "known-incompatible" };
+    if (!selection.handoffEligible) return { kind: "retained", reason: "busy" };
+    return { kind: "transfer", targetDeploymentId };
   }
 
   /** After a transfer, the original run parks until the final owner reports the session result. */

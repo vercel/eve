@@ -10,6 +10,7 @@ import { createSessionStep } from "#execution/create-session-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
 import { createSessionInbox, type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
+import { takeRenderLaneCheckpoint } from "#execution/session/render-lane.js";
 import { DEFAULT_SESSION_TIMEOUT_MS, sessionTimeoutDeadline } from "#execution/session/timeout.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
@@ -157,7 +158,9 @@ async function bootInitialOwner(
 async function bootHandoffOwner(
   input: HandoffWorkflowEntryInput,
 ): Promise<BootOutcome | undefined> {
-  const { checkpoint, sessionId } = input;
+  const { sessionId } = input;
+  const handedOff = takeRenderLaneCheckpoint(input.checkpoint.serializedContext);
+  const checkpoint = { ...input.checkpoint, serializedContext: handedOff.serializedContext };
   const serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
   const inbox = createSessionInbox(sessionId);
   try {
@@ -193,6 +196,7 @@ async function bootHandoffOwner(
       capabilities: checkpoint.capabilities,
       deploymentId: input.ownerDeploymentId,
       initialInput: input.delivery,
+      renderLane: handedOff.lane,
       awaitFirstMessage: false,
       retention: checkpoint.retention,
       serializedContext,

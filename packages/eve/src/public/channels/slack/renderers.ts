@@ -107,14 +107,16 @@ export interface SlackRenderer {
   /**
    * Returns the message for a turn's task card, or `null` for none. Runs for
    * every turn that calls a tool; the view carries the turn's tasks and its
-   * other tool calls with their input. Pure and synchronous: eve posts the
-   * card, updates it as the turn changes, and handles Slack's rate limits.
-   * `next` returns eve's default card, which is `null` for a turn without tasks.
+   * other tool calls with their input. It makes no Slack calls: eve posts the
+   * card, updates it as the turn changes, and handles Slack's rate limits. It
+   * may await an agent task's `agent.work()`, which reads that agent's session.
+   * `next` resolves to eve's default card, which is `null` for a turn without
+   * tasks.
    */
   readonly taskCard?: (
     view: TaskCardView,
-    next: (view: TaskCardView) => SlackTaskCard | null,
-  ) => SlackTaskCard | null;
+    next: (view: TaskCardView) => Promise<SlackTaskCard | null>,
+  ) => SlackTaskCard | null | Promise<SlackTaskCard | null>;
 }
 
 /** Types a Slack renderer. */
@@ -129,7 +131,7 @@ export function defineSlackRenderer(renderer: SlackRenderer): SlackRenderer {
 export interface SlackRenderChain {
   readonly events: SlackChannelInternalEvents;
   readonly received: (message: SlackMessage, channel: SlackContext) => Promise<void>;
-  readonly taskCard: (view: TaskCardView) => SlackTaskCard | null;
+  readonly taskCard: (view: TaskCardView) => SlackTaskCard | null | Promise<SlackTaskCard | null>;
 }
 
 type AnyHandler = (...args: unknown[]) => void | Promise<void>;
@@ -241,14 +243,14 @@ async function composeReceived(
   });
 }
 
-function composeTaskCard(
+async function composeTaskCard(
   renderers: readonly SlackRenderer[],
   defaults: SlackRenderChain,
   view: TaskCardView,
   index: number,
-): SlackTaskCard | null {
-  if (index === renderers.length) return defaults.taskCard(view);
+): Promise<SlackTaskCard | null> {
+  if (index === renderers.length) return await defaults.taskCard(view);
   const taskCard = renderers[index]!.taskCard;
-  if (taskCard === undefined) return composeTaskCard(renderers, defaults, view, index + 1);
-  return taskCard(view, (next) => composeTaskCard(renderers, defaults, next, index + 1));
+  if (taskCard === undefined) return await composeTaskCard(renderers, defaults, view, index + 1);
+  return await taskCard(view, (next) => composeTaskCard(renderers, defaults, next, index + 1));
 }

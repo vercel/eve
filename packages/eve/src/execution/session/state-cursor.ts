@@ -20,6 +20,7 @@ export class SessionStateCursor {
 
   private readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks">;
   private values: SessionStateValues;
+  private readonly advanceListeners: (() => void)[] = [];
 
   constructor(input: {
     readonly inbox: Pick<SessionInboxOwnership, "claimSessionHooks">;
@@ -57,7 +58,13 @@ export class SessionStateCursor {
       throw new Error("Session state changed while a step ran, so its state delta cannot apply.");
     }
     this.values = next;
+    for (const listener of this.advanceListeners) listener();
     return result;
+  }
+
+  /** Calls `listener` each time the cursor adopts a step's state. */
+  onAdvance(listener: () => void): void {
+    this.advanceListeners.push(listener);
   }
 
   /** The session's stream and current state, spread into a step's input. */

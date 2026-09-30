@@ -22,6 +22,8 @@ import {
 interface SerializedAdapter {
   readonly kind: string;
   readonly state: Record<string, unknown>;
+  /** The adapter's render lane revision, which the session workflow reads; see `ChannelRenderLane`. */
+  readonly renderRevision?: string;
 }
 
 /** Compiled bundle on the durable context — re-exported under a stable name. */
@@ -35,10 +37,11 @@ interface SerializedBundle {
 export const ChannelKey = new ContextKey<ChannelAdapter>(CHANNEL_CONTEXT_KEY_NAME, {
   codec: {
     serialize(adapter): SerializedAdapter {
-      return {
-        kind: getAdapterKind(adapter),
-        state: adapter.state ? { ...adapter.state } : {},
-      };
+      const state = adapter.state ? { ...adapter.state } : {};
+      const renderRevision = adapter.renderLane?.revision(state);
+      return renderRevision === undefined
+        ? { kind: getAdapterKind(adapter), state }
+        : { kind: getAdapterKind(adapter), renderRevision, state };
     },
     deserialize(data, ctx): ChannelAdapter {
       const bundle = ctx.get(BundleKey);

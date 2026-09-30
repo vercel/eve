@@ -54,7 +54,9 @@ import {
   type SlackRenderer,
 } from "#public/channels/slack/renderers.js";
 import {
+  attachSlackTaskCards,
   renderDefaultSlackTaskCard,
+  type SlackTaskCardOptions,
   type SlackTaskCardState,
   withTaskCards,
 } from "#public/channels/slack/task-card.js";
@@ -245,10 +247,12 @@ export interface SlackChannelState {
   pendingAuthMessageTs?: Record<string, string>;
   pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
   /**
-   * Each recent turn's tool calls and the task card eve last wrote for it, by
-   * turn id. The default `turn.waiting` handler names the working tasks.
+   * Each recent turn's tool calls, by turn id, which the task card renders
+   * from. The default `turn.waiting` handler names the working tasks.
    */
   taskCards?: Record<string, SlackTaskCardState> | null;
+  /** Counts changes to `taskCards`, so eve knows when to write the cards again. */
+  taskCardRevision?: number;
   /**
    * Principal id to Slack user id, recorded as each message or input response
    * is delivered. Default handlers use it to address the principal named on
@@ -754,6 +758,9 @@ export interface SlackChannelConfig {
    * eve's default, by calling `next`, and skips it by not calling it.
    */
   readonly renderers?: readonly SlackRenderer[];
+
+  /** How eve keeps task cards current; see {@link SlackTaskCardOptions}. */
+  readonly taskCards?: SlackTaskCardOptions;
 }
 
 function rebuildSlackContext(
@@ -815,19 +822,16 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     taskCard: renderDefaultSlackTaskCard,
   });
   const renderTurnStarted = rendering.events["turn.started"];
-  const events = withTaskCards(
-    {
-      ...rendering.events,
-      async "turn.started"(data, channel, ctx) {
-        const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
-        if (triggeringUserId !== undefined) {
-          channel.state.triggeringUserId = triggeringUserId;
-        }
-        await renderTurnStarted?.(data, channel, ctx);
-      },
+  const events = withTaskCards({
+    ...rendering.events,
+    async "turn.started"(data, channel, ctx) {
+      const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
+      if (triggeringUserId !== undefined) {
+        channel.state.triggeringUserId = triggeringUserId;
+      }
+      await renderTurnStarted?.(data, channel, ctx);
     },
-    rendering.taskCard,
-  );
+  });
 
   // Set of events we've already handled on this process.
   // Light weight dedup mechanism - not reliable across multiple invocations.
@@ -917,6 +921,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
     events,
   });
+  attachSlackTaskCards(channel, rendering.taskCard, config.taskCards);
   const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
   const manifest = defineSlackAppManifest({ botName: config.botName });
   setChannelBuildMetadata(channel, (channelName) => ({

@@ -20,6 +20,7 @@ import { finalizeSession, type SessionTerminalOutcome } from "#execution/session
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
 import { SessionHandoff, sessionAnchorToken } from "#execution/session/handoff.js";
+import { SessionRenderLane } from "#execution/session/render-lane.js";
 import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -49,6 +50,8 @@ export interface SessionBoot {
   readonly capabilities?: SessionCapabilities;
   readonly deploymentId: string;
   readonly initialInput: DeliverHookPayload | undefined;
+  /** The render lane's state a predecessor handed off with the session. */
+  readonly renderLane?: unknown;
   /** Parks on the inbox before any session-scoped lifecycle work. */
   readonly awaitFirstMessage: boolean;
   readonly retention?: AgentWorkflowRetentionDefinition;
@@ -89,6 +92,8 @@ export async function runPreparedSession(
     sessionState: boot.sessionState,
   });
   const progress: SessionProgress = { caller: boot.caller, terminalEmitted: false };
+  const renderLane = new SessionRenderLane({ cursor, lane: boot.renderLane });
+  renderLane.start();
   const handoff = new SessionHandoff({
     checkpoint: {
       capabilities: boot.capabilities,
@@ -104,10 +109,13 @@ export async function runPreparedSession(
   let loop: SessionLoopOutcome | undefined;
   try {
     try {
-      loop = await runSessionLoop(boot, { cursor, handoff, inbox, progress });
+      loop = await runSessionLoop(boot, { cursor, handoff, inbox, progress, renderLane });
     } finally {
       await inbox.dispose();
     }
+    // A transferred session's lane settled before the checkpoint; the successor renders now.
+    if (loop.kind !== "transferred") await renderLane.settle();
+    await renderLane.stop();
     if (loop.kind === "transferred") {
       if (boot.anchor.kind !== "self") return { output: "" };
       result = await handoff.awaitAnchoredResult();
@@ -121,6 +129,9 @@ export async function runPreparedSession(
     progress.terminalEmitted = true;
     return result;
   } catch (error) {
+    // Cards still show the last committed state of a session that failed.
+    await renderLane.settle();
+    await renderLane.stop();
     if (!progress.terminalEmitted) {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
@@ -189,9 +200,10 @@ async function runSessionLoop(
     readonly handoff: SessionHandoff;
     readonly inbox: SessionInboxHandle;
     readonly progress: SessionProgress;
+    readonly renderLane: SessionRenderLane;
   },
 ): Promise<SessionLoopOutcome> {
-  const { cursor, handoff, inbox, progress } = deps;
+  const { cursor, handoff, inbox, progress, renderLane } = deps;
   const queue = new SessionInputQueue();
   const execution = new SessionExecution({
     capabilities: boot.capabilities,
@@ -247,11 +259,16 @@ async function runSessionLoop(
   const runDeliveredTurn = async (
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
   ): Promise<SessionActionResult> => {
-    const transfer = await handoff.tryTransfer(next, {
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
-    });
-    if (transfer.kind === "transferred") return transfer;
+    if (handoff.mayTransfer(next)) {
+      // The checkpoint carries the lane's state, so no render may run until the transfer resolves.
+      await renderLane.settle();
+      const transfer = await handoff.tryTransfer(next, {
+        serializedContext: renderLane.checkpoint(cursor.serializedContext),
+        sessionState: cursor.sessionState,
+      });
+      if (transfer.kind === "transferred") return transfer;
+      renderLane.release();
+    }
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };

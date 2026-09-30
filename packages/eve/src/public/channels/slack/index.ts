@@ -86,11 +86,15 @@ export {
 
 export type {
   TaskCardAction,
+  TaskCardAgent,
+  TaskCardAgentWork,
   TaskCardBlocker,
   TaskCardStatus,
   TaskCardTask,
   TaskCardView,
 } from "#channel/task-card.js";
+
+export type { SlackTaskCardOptions } from "#public/channels/slack/task-card.js";
 
 export {
   loadThreadContextMessages,

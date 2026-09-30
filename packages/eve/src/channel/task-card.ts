@@ -46,8 +46,33 @@ export interface TaskCardTask {
    * only in a private conversation, since error text can carry internals.
    */
   readonly summary?: string;
+  /** An agent task's own session, when it runs in this deployment. */
+  readonly agent?: TaskCardAgent;
   readonly startedAt: string;
   readonly settledAt?: string;
+}
+
+/** The session an agent task's run opened. */
+export interface TaskCardAgent {
+  readonly sessionId: string;
+  /**
+   * Reads the agent's session and rolls up what it did for this call. The only
+   * part of the view that reads anything: rows are complete without it. It
+   * rejects when eve can't read the session.
+   */
+  work(): Promise<TaskCardAgentWork>;
+}
+
+/** What an agent task's own session did for one call. */
+export interface TaskCardAgentWork {
+  /**
+   * The agent's own tool calls, including tasks it started: newest first
+   * dropped past a bound, oldest first here. Titles and statuses mean what
+   * they do in `TaskCardView.actions`; `input` is left out.
+   */
+  readonly actions: readonly TaskCardAction[];
+  /** The agent's older tool calls for this call, left out of `actions`. */
+  readonly earlierActions: number;
 }
 
 /**
@@ -93,6 +118,8 @@ interface TrackedCall {
     readonly id: string;
     readonly kind: "agent" | "tool";
     readonly summary?: string;
+    /** The local session an agent task's run opened, from its `agent.started`. */
+    readonly sessionId?: string;
     /** Open requests and sign-ins the task waits on, oldest first. */
     readonly blockers?: readonly (TaskCardBlocker & { readonly id: string })[];
   };
@@ -268,7 +295,18 @@ function trackTurnEvent(
       };
       const summary = taskSummary(event.data);
       if (summary !== undefined) task.summary = summary;
+      if (call.task.sessionId !== undefined) task.sessionId = call.task.sessionId;
       return { turn: replaceCall(current, { ...call, settledAt: at, status, task }), turnId };
+    }
+    case "agent.started": {
+      const { callId, remote, sessionId, turnId } = event.data;
+      const current = turns[turnId];
+      const call = current?.calls.find((candidate) => candidate.callId === callId);
+      // A remote session's stream is read through its parent's proxy, which eve doesn't follow yet.
+      if (current === undefined || call?.task === undefined || remote !== undefined)
+        return undefined;
+      if (call.task.sessionId === sessionId) return undefined;
+      return { turn: replaceCall(current, { ...call, task: { ...call.task, sessionId } }), turnId };
     }
     case "turn.completed":
     case "turn.failed":
@@ -286,13 +324,21 @@ function trackTurnEvent(
 export function taskCardView(
   turnId: string,
   turn: TaskCardTurn,
-  options: { readonly audience: ChannelAudience },
+  options: {
+    readonly audience: ChannelAudience;
+    /** Rolls up an agent task's own session; see {@link TaskCardAgent.work}. */
+    readonly agentWork?: (call: {
+      readonly sessionId: string;
+      readonly startedAt: string;
+      readonly settledAt?: string;
+    }) => Promise<TaskCardAgentWork>;
+  },
 ): TaskCardView {
   const tasks: TaskCardTask[] = [];
   const actions: TaskCardAction[] = [];
   for (const call of turn.calls) {
     if (call.task === undefined) actions.push(toAction(call));
-    else tasks.push(toTask(call, call.task, options.audience));
+    else tasks.push(toTask(call, call.task, options));
   }
   const state = tasks.some((task) => task.status === "blocked")
     ? "blocked"
@@ -300,6 +346,47 @@ export function taskCardView(
       ? "working"
       : "finished";
   return { actions, state, tasks, turnId };
+}
+
+/** The local sessions of a turn's agent tasks. */
+export function agentSessions(turn: TaskCardTurn): readonly string[] {
+  return turn.calls.flatMap((call) =>
+    call.task?.sessionId === undefined ? [] : [call.task.sessionId],
+  );
+}
+
+/** The local sessions of a turn's working agent tasks. */
+export function workingAgentSessions(turn: TaskCardTurn): readonly string[] {
+  return turn.calls.flatMap((call) =>
+    call.status === "working" && call.task?.sessionId !== undefined ? [call.task.sessionId] : [],
+  );
+}
+
+/**
+ * An agent session's tool calls made while one of its calls worked, from the
+ * session's own turns as {@link trackTaskCardEvent} folds them, newest `limit`.
+ */
+export function taskCardAgentWork(
+  turns: Readonly<Record<string, TaskCardTurn>>,
+  call: { readonly startedAt: string; readonly settledAt?: string },
+  limit: number,
+): TaskCardAgentWork {
+  const calls = Object.values(turns)
+    .flatMap((turn) => turn.calls)
+    .filter(
+      (tracked) =>
+        tracked.startedAt >= call.startedAt &&
+        (call.settledAt === undefined || tracked.startedAt <= call.settledAt),
+    )
+    .sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
+  const kept = calls.slice(-limit);
+  return {
+    actions: kept.map((tracked) => {
+      const { input: _input, ...action } = toAction(tracked);
+      return action;
+    }),
+    earlierActions: calls.length - kept.length,
+  };
 }
 
 /** The names of a turn's working tasks, for a status such as `Waiting on researcher...`. */
@@ -343,8 +430,9 @@ function toAction(call: TrackedCall): TaskCardAction {
 function toTask(
   call: TrackedCall,
   task: NonNullable<TrackedCall["task"]>,
-  audience: ChannelAudience,
+  options: Parameters<typeof taskCardView>[2],
 ): TaskCardTask {
+  const { audience } = options;
   const row: { -readonly [K in keyof TaskCardTask]: TaskCardTask[K] } = {
     id: call.callId,
     kind: task.kind,
@@ -365,6 +453,18 @@ function toTask(
   }
   const shown = call.status !== "failed" || shareable;
   if (task.summary !== undefined && shown) row.summary = task.summary;
+  const { agentWork } = options;
+  const { sessionId } = task;
+  if (agentWork !== undefined && sessionId !== undefined) {
+    const { settledAt, startedAt } = call;
+    row.agent = {
+      sessionId,
+      work: () =>
+        agentWork(
+          settledAt === undefined ? { sessionId, startedAt } : { sessionId, settledAt, startedAt },
+        ),
+    };
+  }
   if (call.settledAt !== undefined) row.settledAt = call.settledAt;
   return row;
 }
