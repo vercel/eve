@@ -320,7 +320,7 @@ describe("ConversationTranscript", () => {
         live: false,
       }),
     ]);
-    expect(turnActivity(working, transcript.tasks)).toBe("Waiting for summarize");
+    expect(turnActivity(working, transcript.tasks)).toBe("Waiting for subagent(summarize)");
     // A root approval in the same step ends the turn while the task keeps working.
     expect(transcript.project(view(state, false), options)).toHaveLength(1);
     expect(transcript.tasks.map((task) => task.name)).toEqual(["summarize"]);

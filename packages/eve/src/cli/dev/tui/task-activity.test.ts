@@ -20,17 +20,17 @@ const render = (entries: readonly TaskEntry[], width = 80, maxRows = 9) =>
   renderTaskPanelRows(entries, { width, maxRows, theme, nowMs: 12_000 }).map(stripAnsi);
 
 describe("live task panel", () => {
-  it("keeps purpose separate from activity and flattens deeper ownership paths", () => {
+  it("labels subagents, groups their activity, and flattens deeper ownership paths", () => {
     const rows = render([task("researcher", [task("analyst", [task("download")])])]);
-    expect(rows[0]).toMatch(/^─+ Working · 3 tasks ──$/);
+    expect(rows[0]).toMatch(/^── Working · 3 tasks ─+$/);
     expect(visibleLength(rows[0]!)).toBe(80);
     expect(rows.slice(1, -1)).toEqual([
-      "  researcher",
-      "    Starting · 12s",
-      "  └ analyst",
-      "      Starting · 12s",
-      "  └ analyst → download",
-      "      Starting · 12s",
+      "  subagent(researcher)",
+      "    ⎿ Starting · 12s",
+      "  └ subagent(analyst)",
+      "      ⎿ Starting · 12s",
+      "  └ subagent(analyst) → subagent(download)",
+      "      ⎿ Starting · 12s",
     ]);
     expect(rows.at(-1)).toBe("─".repeat(80));
     expect(rows.join("\n")).not.toContain("Find Alice's notes");
@@ -60,7 +60,7 @@ describe("live task panel", () => {
   });
 
   it("keeps turn status inside the drawer and includes it in the panel's row budget", () => {
-    const rows = renderTaskPanelRows([task("researcher")], {
+    const rows = renderTaskPanelRows([task("self-modification__agent")], {
       width: 80,
       maxRows: 5,
       theme,
@@ -68,8 +68,8 @@ describe("live task panel", () => {
       turnStatus: "Waiting for researcher (16s)",
     }).map(stripAnsi);
     expect(rows).toHaveLength(5);
-    expect(rows.slice(-2)).toEqual(["  Waiting for researcher (16s)", "─".repeat(80)]);
-    expect(rows[1]).toBe("  researcher");
+    expect(rows.slice(-2)).toEqual(["Waiting for researcher (16s)", "─".repeat(80)]);
+    expect(rows[1]).toBe("  subagent(self-modification)");
   });
 
   it("fits narrow terminals and small row budgets without retaining an empty panel", () => {

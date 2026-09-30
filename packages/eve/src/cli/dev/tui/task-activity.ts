@@ -99,7 +99,7 @@ export function waitingLabel(entries: readonly TaskEntry[]): string {
   if (entries.length === 1 && isSelfModificationAgent(entries[0]!.toolName)) {
     return "Modifying your agent";
   }
-  const names = entries.map((entry) => entry.name);
+  const names = entries.map(taskLabel);
   if (names.length === 1) return `Waiting for ${names[0]!}`;
   if (names.length === 2) return `Waiting for ${names[0]!} and ${names[1]!}`;
   return `Waiting for ${String(names.length)} tasks`;
@@ -128,6 +128,12 @@ function currentActivity(entry: TaskEntry): { text: string; attention: boolean }
 }
 
 /** Stable ownership order, with only one visible level of indentation. */
+function taskLabel(entry: TaskEntry): string {
+  if (entry.kind !== "agent") return entry.name;
+  const name = entry.name.replace(/__agent(?= #\d+$|$)/u, "");
+  return name === "subagent" ? name : `subagent(${name})`;
+}
+
 function panelEntries(entries: readonly TaskEntry[]): Array<{ entry: TaskEntry; path: string[] }> {
   const rows: Array<{ entry: TaskEntry; path: string[] }> = [];
   const visit = (tasks: readonly TaskEntry[], path: string[], depth: number): void => {
@@ -135,7 +141,7 @@ function panelEntries(entries: readonly TaskEntry[]): Array<{ entry: TaskEntry; 
     for (const entry of tasks) {
       if (rows.length >= 128) break;
       rows.push({ entry, path });
-      visit(entry.children ?? [], [...path, entry.name], depth + 1);
+      visit(entry.children ?? [], [...path, taskLabel(entry)], depth + 1);
     }
   };
   visit(entries, [], 0);
@@ -171,14 +177,14 @@ export function renderTaskPanelRows(
   for (const { entry, path } of shown) {
     const nested = path.length > 0;
     const lead = `  ${nested ? `${theme.glyph.corner} ` : ""}`;
-    const parentShown = shown.some((task) => task.entry.name === path.at(-1));
+    const parentShown = shown.some((task) => taskLabel(task.entry) === path.at(-1));
     const owners = parentShown ? path.slice(1) : path;
     const ownership =
       owners.length > 0 ? `${owners.join(` ${theme.glyph.arrow} `)} ${theme.glyph.arrow} ` : "";
-    rows.push(clipVisible(`${lead}${c.bold(`${ownership}${entry.name}`)}`, width));
+    rows.push(clipVisible(`${lead}${c.bold(`${ownership}${taskLabel(entry)}`)}`, width));
     const activity = currentActivity(entry);
     const elapsed = formatTurnDuration(nowMs - entry.startedAtMs);
-    const detailLead = `    ${nested ? "  " : ""}`;
+    const detailLead = `    ${nested ? "  " : ""}${theme.glyph.elbow} `;
     const suffix = ` ${theme.glyph.dot} ${elapsed}`;
     const text = truncate(
       activity.text,
@@ -192,7 +198,7 @@ export function renderTaskPanelRows(
     rows.push(clipVisible(`  ${c.dim(`${theme.glyph.ellipsis} ${hidden} more working`)}`, width));
   }
   if (options.turnStatus !== undefined && rows.length + 3 <= budget) {
-    rows.push(clipVisible(`  ${options.turnStatus}`, width));
+    rows.push(clipVisible(options.turnStatus.trimStart(), width));
   }
   return renderTransientDrawer(
     rows,
@@ -201,5 +207,6 @@ export function renderTaskPanelRows(
     width,
     `Working ${theme.glyph.dot} ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`,
     true,
+    "left",
   ).rows;
 }

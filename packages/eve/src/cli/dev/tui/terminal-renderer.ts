@@ -3635,7 +3635,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
     );
     if (taskRows.length > 0) {
       rows.push(...taskRows);
-      if (this.#inputActive) rows.push("");
     }
 
     // Messages typed while the agent starts wait in a panel directly above
@@ -3659,7 +3658,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           ),
         );
       }
-      if (taskRows.length === 0 || !this.#inputActive || this.#cancelRequested) rows.push("");
+      if (taskRows.length === 0 || this.#cancelRequested) rows.push("");
     }
 
     if (this.#inputActive) {
@@ -3723,7 +3722,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The composer is closed while a command or other surface runs. A kept
     // draft stays visible so keys typed in this gap have somewhere to land.
     if (working || this.#draft.text.length > 0) {
-      this.#pushDraftPrompt(rows, width, { inert: working });
+      this.#pushDraftPrompt(rows, width, { inert: working, adjacent: taskRows.length > 0 });
       this.#pushStatusLine(rows, width);
       return rows;
     }
@@ -3770,8 +3769,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /** The kept draft as a prompt row, inert while work runs without the composer. */
-  #pushDraftPrompt(rows: string[], width: number, options: { inert: boolean }): void {
-    if (rows.at(-1) !== "") rows.push("");
+  #pushDraftPrompt(
+    rows: string[],
+    width: number,
+    options: { inert: boolean; adjacent?: boolean },
+  ): void {
+    if (!options.adjacent && rows.at(-1) !== "") rows.push("");
     const prompt: Parameters<typeof promptInputRows>[0] = {
       text: this.#draft.text,
       cursor: this.#draft.cursor,
