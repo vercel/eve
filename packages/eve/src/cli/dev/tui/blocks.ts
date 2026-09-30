@@ -98,7 +98,8 @@ export interface Block {
   /** When true, expand tool input/output instead of summarizing. */
   expanded?: boolean;
   /** Captured-log visibility used for concise-vs-raw diagnostic replay. */
-  logVisibility?: "stderr-only" | "all-only";
+  logVisibility?: "summary" | "all-only";
+  logLevel?: "error" | "warn" | "info" | "debug";
   /** Raw tool input / output for the expanded view. */
   toolInput?: unknown;
   toolOutput?: unknown;
@@ -516,10 +517,14 @@ function renderSandbox(
  * only ever sees visible blocks.
  */
 function renderLog(block: DisplayBlock, width: number, theme: Theme): string[] {
-  const isErr = block.title === "stderr";
-  const color = isErr ? theme.colors.red : theme.colors.gray;
+  const color =
+    block.logLevel === "error"
+      ? theme.colors.red
+      : block.logLevel === "warn"
+        ? theme.colors.yellow
+        : theme.colors.gray;
   const rule = theme.colors.dim(theme.glyph.rule);
-  const source = isErr ? "stderr" : "stdout";
+  const source = block.logLevel ?? block.title ?? "stdout";
 
   const rows = [`${theme.colors.dim(theme.glyph.reasoning)} ${theme.colors.dim(source)}`];
   if (block.elided !== undefined && block.elided > 0) {

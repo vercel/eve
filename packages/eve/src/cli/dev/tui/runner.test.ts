@@ -1847,15 +1847,15 @@ describe("EveTUIRunner local commands", () => {
   it("dispatches /loglevel to the renderer and reports the outcome", async () => {
     const modes: string[] = [];
     const { renderer, outcomes } = recorder(
-      ["/loglevel none", "/loglevel bogus", "/loglevel sandbox", undefined],
+      ["/loglevel none", "/loglevel bogus", "/loglevel warn", undefined],
       { logDisplayMode: () => "all", setLogDisplayMode: (mode) => modes.push(mode) },
     );
     await new EveTUIRunner({ client: stubClient(), renderer }).run();
 
-    expect(modes).toEqual(["none", "sandbox"]);
+    expect(modes).toEqual(["none", "warn"]);
     expect(outcomes[0]).toContain("hidden");
     expect(outcomes[1]).toContain('Unknown log level "bogus"');
-    expect(outcomes[2]).toContain("sandbox");
+    expect(outcomes[2]).toContain("warnings");
   });
 
   it("reports /loglevel as unavailable when the renderer cannot toggle logs", async () => {

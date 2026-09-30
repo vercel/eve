@@ -1,27 +1,22 @@
-/** Every supported captured-output filter, in CLI help order. */
-export const LOG_DISPLAY_MODES = ["all", "stderr", "sandbox", "none"] as const;
+import type { LogLevel } from "#internal/logging.js";
 
+export const LOG_DISPLAY_MODES = ["none", "error", "warn", "debug", "all"] as const;
 export type LogDisplayMode = (typeof LOG_DISPLAY_MODES)[number];
+export const LOG_DISPLAY_MODE_CYCLE = ["none", "error", "warn", "debug", "all"] as const;
 
-/**
- * Order the dev TUI's Ctrl+L shortcut steps through {@link LogDisplayMode}
- * values, starting from `none`: each press reveals the next view and wraps
- * back to `none`.
- */
-export const LOG_DISPLAY_MODE_CYCLE = [
-  "none",
-  "all",
-  "stderr",
-  "sandbox",
-] as const satisfies readonly LogDisplayMode[];
-
-/** Parses one CLI or `/loglevel` argument into a supported display mode. */
 export function parseLogDisplayMode(value: string): LogDisplayMode | undefined {
   return LOG_DISPLAY_MODES.find((mode) => mode === value);
 }
 
-/** The mode after `current` in the Ctrl+L cycle, wrapping at the end. */
 export function nextLogDisplayMode(current: LogDisplayMode): LogDisplayMode {
   const index = LOG_DISPLAY_MODE_CYCLE.indexOf(current);
   return LOG_DISPLAY_MODE_CYCLE[(index + 1) % LOG_DISPLAY_MODE_CYCLE.length] ?? "none";
+}
+
+export function isLogVisible(mode: LogDisplayMode, source: string, level?: LogLevel): boolean {
+  if (mode === "none") return false;
+  if (mode === "all") return true;
+  if (level === "error" || (level === undefined && source === "stderr")) return true;
+  if (mode === "debug") return level !== undefined;
+  return mode === "warn" && level === "warn";
 }

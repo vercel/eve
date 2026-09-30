@@ -59,10 +59,15 @@ function inlineArgumentSuggestions(appRoot: string) {
   ): Promise<readonly PromptArgumentSuggestion[]> => {
     if (command === "loglevel") {
       return [
-        { value: "all", label: "all", hint: "Show all captured logs" },
-        { value: "stderr", label: "stderr", hint: "Show stderr logs only" },
-        { value: "sandbox", label: "sandbox", hint: "Show sandbox logs only" },
-        { value: "none", label: "none", hint: "Hide captured logs" },
+        { value: "none", label: "none", hint: "Hide logs" },
+        { value: "error", label: "error", hint: "Errors and unclassified stderr (default)" },
+        { value: "warn", label: "warn", hint: "Warnings, errors, and unclassified stderr" },
+        {
+          value: "debug",
+          label: "debug",
+          hint: "All severity-tagged logs and unclassified stderr",
+        },
+        { value: "all", label: "all", hint: "Include raw stdout and sandbox output" },
       ];
     }
     if (command === "login") {

@@ -130,7 +130,10 @@ import { copyTextToClipboard } from "./clipboard.js";
 import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import { TraceViewerSession } from "./traces/trace-viewer-session.js";
 import { buildStatusLine, type DevBuildStatus } from "./status-line.js";
-import { nextLogDisplayMode } from "./log-display-mode.js";
+import { isLogVisible, nextLogDisplayMode } from "./log-display-mode.js";
+import { setConsoleRecordSubscriber, type ConsoleRecord } from "../console-records.js";
+import type { LogLevel } from "#internal/logging.js";
+import { format } from "node:util";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
 import {
   clipVisible,
@@ -562,7 +565,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#diagnostics = options?.diagnostics;
     this.#onExitRequest = options?.onExitRequest;
     this.#argumentSuggestions = options?.argumentSuggestions;
-    this.#logs = options?.logs ?? "none";
+    this.#logs = options?.logs ?? "error";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
 
@@ -3921,6 +3924,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
       };
     };
 
+    const consoleMethods = ["error", "warn", "log", "info", "debug"] as const;
+    const originals = consoleMethods.map((method) => [method, console[method]] as const);
+    for (const method of consoleMethods) {
+      console[method] = (...args: unknown[]) =>
+        this.#displayConsoleRecord({
+          level: method === "log" ? "info" : method,
+          text: format(...args),
+        });
+    }
+    setConsoleRecordSubscriber((record) => this.#displayConsoleRecord(record));
     const restoreStdout = capture(process.stdout, "stdout");
     const restoreStderr = capture(process.stderr, "stderr");
     // The recorder takes ownership of eve's own structured log records for
@@ -3931,6 +3944,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#diagnostics?.subscribeLogRecords((record) => this.#displayLogRecord(record));
     this.#restoreLogCapture = () => {
       this.#diagnostics?.unsubscribeLogRecords();
+      setConsoleRecordSubscriber(undefined);
+      for (const [method, original] of originals) console[method] = original;
       restoreStdout();
       restoreStderr();
     };
@@ -3962,7 +3977,25 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #displayLogRecord(record: LogRecord): void {
     const fieldsText = record.fields === undefined ? "" : ` ${JSON.stringify(record.fields)}`;
-    this.#presentCapturedStderr(`[eve:${record.namespace}] ${record.message}${fieldsText}`);
+    this.#handleCapturedStderr(
+      `[eve:${record.namespace}] ${record.message}${fieldsText}`,
+      record.level,
+    );
+    this.#paint();
+  }
+
+  #displayConsoleRecord(record: ConsoleRecord): void {
+    const source = record.level === "error" || record.level === "warn" ? "stderr" : "stdout";
+    this.#diagnostics?.append({ source, level: record.level, detail: record.text });
+    if (source === "stderr") this.#handleCapturedStderr(stripAnsi(record.text), record.level);
+    else
+      this.#pushBlock({
+        kind: "log",
+        title: source,
+        logLevel: record.level,
+        body: stripAnsi(record.text),
+        live: true,
+      });
     this.#paint();
   }
 
@@ -4041,49 +4074,33 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flushPending();
   }
 
-  /**
-   * Workflow SDK output is framework-internal and not actionable for users, so
-   * it shows only under `/loglevel all`; the diagnostic log keeps every line.
-   */
-  #handleCapturedStderr(content: string): void {
-    const segments = splitWorkflowLogs(content, this.#stderrInWorkflowLog);
-    this.#stderrInWorkflowLog = segments.at(-1)?.workflow ?? this.#stderrInWorkflowLog;
-    for (const segment of segments) {
-      if (segment.text.trim().length === 0) continue;
-      if (!segment.workflow) {
-        this.#presentCapturedStderr(segment.text);
-        continue;
-      }
-      this.#pushBlock({
-        kind: "log",
-        title: "stderr",
-        body: segment.text,
-        logVisibility: "all-only",
-        live: true,
-      });
-    }
-  }
-
-  #presentCapturedStderr(content: string): void {
+  #handleCapturedStderr(content: string, logLevel?: LogLevel): void {
     const lines = content.split("\n");
     const failedIndex = lines.findIndex((line) => {
       return parseDevRebuildLogLine(line.trimEnd())?.kind === "failed";
     });
     if (failedIndex === -1) {
       if (this.#diagnostics === undefined) {
-        this.#pushBlock({ kind: "log", title: "stderr", body: content, live: true });
+        this.#pushBlock({ kind: "log", title: "stderr", logLevel, body: content, live: true });
         return;
       }
       const presentation = presentDiagnostic(content, this.#diagnostics.displayPath);
       if (presentation.kind === "inline") {
-        this.#pushBlock({ kind: "log", title: "stderr", body: presentation.text, live: true });
+        this.#pushBlock({
+          kind: "log",
+          title: "stderr",
+          logLevel,
+          body: presentation.text,
+          live: true,
+        });
         return;
       }
       this.#pushBlock({
         kind: "log",
         title: "stderr",
         body: formatStoredDiagnostic(presentation),
-        logVisibility: "stderr-only",
+        logVisibility: "summary",
+        logLevel,
         live: true,
       });
       this.#pushBlock({
@@ -4091,6 +4108,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         title: "stderr",
         body: content,
         logVisibility: "all-only",
+        logLevel,
         live: true,
       });
       return;
@@ -4209,26 +4227,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (block !== undefined) block.live = false;
   }
 
-  #shouldRenderLog(source: "stdout" | "stderr" | "sandbox"): boolean {
-    switch (this.#logs) {
-      case "none":
-        return false;
-      case "stderr":
-        return source === "stderr";
-      case "sandbox":
-        return source === "sandbox";
-      case "all":
-        return true;
-    }
+  #shouldRenderLog(source: "stdout" | "stderr" | "sandbox", level?: LogLevel): boolean {
+    return isLogVisible(this.#logs, source, level);
   }
 
   /** True for a buffered log or sandbox block the current display mode filters out. */
   #isHiddenLog(block: Block): boolean {
     if (block.kind === "sandbox") return !this.#shouldRenderLog("sandbox");
     if (block.kind !== "log") return false;
-    if (block.logVisibility === "stderr-only") return this.#logs !== "stderr";
+    if (block.logVisibility === "summary" && this.#logs === "all") return true;
     if (block.logVisibility === "all-only") return this.#logs !== "all";
-    return !this.#shouldRenderLog(block.title === "stderr" ? "stderr" : "stdout");
+    return !this.#shouldRenderLog(block.title === "stderr" ? "stderr" : "stdout", block.logLevel);
   }
 }
 

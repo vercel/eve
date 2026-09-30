@@ -207,7 +207,7 @@ describe("buildStatusLine", () => {
 
   it("leads with the transient logs hint and keeps it as width narrows", () => {
     const input = {
-      logLevel: "sandbox",
+      logLevel: "warn",
       model: "anthropic/claude-sonnet-5",
       endpoint: connected,
       vercel: { identity },
@@ -215,10 +215,10 @@ describe("buildStatusLine", () => {
     } as const;
 
     const full = buildStatusLine({ ...input, width: 120 })!;
-    expect(full.startsWith("logs: sandbox · ")).toBe(true);
+    expect(full.startsWith("logs: warn · ")).toBe(true);
 
     // Narrow enough that only the leading hint survives.
-    expect(buildStatusLine({ ...input, width: 13 })).toBe("logs: sandbox");
+    expect(buildStatusLine({ ...input, width: 13 })).toBe("logs: warn");
   });
 
   it("renders the logs hint alone at a bare prompt", () => {

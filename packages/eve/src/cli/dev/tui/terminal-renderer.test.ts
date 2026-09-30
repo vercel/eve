@@ -1309,7 +1309,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "stderr",
+      logs: "error",
       unicode: true,
       diagnostics: stub.diagnostics,
     });
@@ -1346,7 +1346,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "stderr",
+      logs: "error",
       unicode: true,
       diagnostics: stub.diagnostics,
     });
@@ -1363,6 +1363,32 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     renderer.shutdown();
     expect(stub.subscribed).toBe(false);
+  });
+
+  it("defaults to errors, buffers warnings, and preserves console severity", () => {
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const renderer = new TerminalRenderer({
+      input: new MockUserInput(),
+      output: screen,
+      captureForeignOutput: true,
+      unicode: true,
+    });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    console.warn("Step already running\n  run abc\n  step def");
+    console.error("Actual failure");
+    process.stderr.write("Unclassified stderr\n");
+    console.debug("Debug detail");
+    expect(screen.snapshot()).not.toContain("Step already running");
+    expect(screen.snapshot()).toContain("○ error");
+    expect(screen.snapshot()).toContain("Actual failure");
+    expect(screen.snapshot()).toContain("Unclassified stderr");
+    renderer.setLogDisplayMode("warn");
+    expect(screen.snapshot()).toContain("○ warn");
+    expect(screen.snapshot()).toContain("step def");
+    expect(screen.snapshot()).not.toContain("Debug detail");
+    renderer.setLogDisplayMode("debug");
+    expect(screen.snapshot()).toContain("Debug detail");
+    renderer.shutdown();
   });
 
   it("records captured sandbox log lines in the diagnostic log", () => {
@@ -1405,7 +1431,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
           { event: "change", path: "/app/agent/instructions.md" },
         ])}\n`,
       );
-      expect(renderer.logDisplayMode()).toBe("none");
+      expect(renderer.logDisplayMode()).toBe("error");
       expect(screen.snapshot()).not.toContain("agent/instructions.md changed");
       expect(screen.snapshot()).not.toContain("○ stdout");
 
@@ -1445,7 +1471,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     process.stdout.write("captured while hidden\n");
     renderer.renderNotice("after the log");
-    expect(renderer.logDisplayMode()).toBe("none");
+    expect(renderer.logDisplayMode()).toBe("error");
     expect(screen.snapshot()).not.toContain("captured while hidden");
 
     renderer.setLogDisplayMode("all");
@@ -1468,7 +1494,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       output: screen,
       captureForeignOutput: true,
       unicode: true,
-      logs: "stderr",
+      logs: "error",
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
@@ -1493,35 +1519,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
       snapshot.indexOf("second stderr line"),
     );
     expect(snapshot).toContain("interleaved stdout line");
-  });
-
-  it("shows sandbox stdout lines and hides ordinary stdout under the sandbox log level", () => {
-    const screen = new MockScreen({ columns: 100, rows: 30 });
-    const input = new MockUserInput();
-    const renderer = new TerminalRenderer({
-      input,
-      output: screen,
-      captureForeignOutput: true,
-      logs: "sandbox",
-      unicode: true,
-    });
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-
-    process.stdout.write('eve: sandbox template "root" (microsandbox): checking cached snapshot\n');
-    process.stdout.write("eve: initializing 3 sandbox templates...\n");
-    process.stdout.write('eve: built sandbox template "root" on backend "microsandbox".\n');
-    process.stdout.write("ordinary stdout log\n");
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain(
-      'sandbox · built sandbox template "root" on backend "microsandbox".',
-    );
-    expect(snapshot).not.toContain("initializing 3 sandbox templates");
-    expect(snapshot).not.toContain("checking cached snapshot");
-    expect(snapshot).not.toContain("ordinary stdout log");
-    expect(snapshot).not.toContain("○ stdout");
-    expect(snapshot).not.toContain("○ stderr");
   });
 
   it("hides sandbox lines under the none log level", () => {
@@ -1567,14 +1564,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("ordinary stdout log");
   });
 
-  it("renders captured lazy preparation logs under the sandbox log level", () => {
+  it("renders captured lazy preparation logs under all", () => {
     const screen = new MockScreen({ columns: 100, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "sandbox",
+      logs: "all",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1589,8 +1586,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain('sandbox · built sandbox template "root" on backend "docker".');
     expect(snapshot).not.toContain("initializing 3 sandbox templates");
     expect(snapshot).not.toContain("checking Docker daemon");
-    expect(snapshot).not.toContain("ordinary stdout log");
-    expect(snapshot).not.toContain("○ stdout");
+    expect(snapshot).toContain("ordinary stdout log");
+    expect(snapshot).toContain("○ stdout");
   });
 
   it("cycles the log mode on Ctrl+L with a transient status hint that clears after 5s", () => {
@@ -1604,21 +1601,21 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
       // Ctrl+R only redraws — it must not cycle the mode or show the hint.
       input.type("\u0012");
-      expect(renderer.logDisplayMode()).toBe("none");
+      expect(renderer.logDisplayMode()).toBe("error");
       expect(screen.snapshot()).not.toContain("logs:");
 
-      input.type("\u000c"); // Ctrl+L: none → all
-      expect(renderer.logDisplayMode()).toBe("all");
-      expect(screen.snapshot()).toContain("logs: all");
+      input.type("\u000c"); // Ctrl+L: error → warn
+      expect(renderer.logDisplayMode()).toBe("warn");
+      expect(screen.snapshot()).toContain("logs: warn");
 
-      input.type("\u000c"); // Ctrl+L: all → stderr
-      expect(renderer.logDisplayMode()).toBe("stderr");
-      expect(screen.snapshot()).toContain("logs: stderr");
+      input.type("\u000c"); // Ctrl+L: warn → debug
+      expect(renderer.logDisplayMode()).toBe("debug");
+      expect(screen.snapshot()).toContain("logs: debug");
 
       // The hint clears after 5s of no further cycling; the mode itself stays.
       vi.advanceTimersByTime(5_000);
       expect(screen.snapshot()).not.toContain("logs:");
-      expect(renderer.logDisplayMode()).toBe("stderr");
+      expect(renderer.logDisplayMode()).toBe("debug");
 
       renderer.shutdown();
     } finally {
@@ -1755,7 +1752,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "stderr",
+      logs: "error",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1778,7 +1775,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "stderr",
+      logs: "error",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1802,7 +1799,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "stderr",
+      logs: "error",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });

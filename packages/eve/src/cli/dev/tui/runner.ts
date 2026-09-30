@@ -1447,7 +1447,7 @@ export class EveTUIRunner {
   }
 
   /**
-   * Applies `/loglevel [all|stderr|sandbox|none]` against the renderer's buffered
+   * Applies `/loglevel [none|error|warn|debug|all]` against the renderer's buffered
    * log filter and returns the one-line outcome. A bare `/loglevel` reports
    * the current mode instead of changing it.
    */
@@ -1457,11 +1457,11 @@ export class EveTUIRunner {
       return "/loglevel is not available in this session.";
     }
     if (argument === "") {
-      return `Logs: ${renderer.logDisplayMode()}. Use /loglevel all|stderr|sandbox|none — logs stay buffered, so switching also hides or restores past lines.`;
+      return `Logs: ${renderer.logDisplayMode()}. Use /loglevel none|error|warn|debug|all — logs stay buffered, so switching also hides or restores past lines.`;
     }
     const mode = parseLogDisplayMode(argument);
     if (mode === undefined) {
-      return `Unknown log level "${argument}". Use all, stderr, sandbox, or none.`;
+      return `Unknown log level "${argument}". Use none, error, warn, debug, or all.`;
     }
     if (mode === renderer.logDisplayMode()) {
       return `Logs already set to ${mode}.`;
@@ -1470,10 +1470,12 @@ export class EveTUIRunner {
     switch (mode) {
       case "none":
         return "Logs hidden. Output stays buffered — /loglevel all restores it.";
-      case "stderr":
-        return "Showing stderr logs only.";
-      case "sandbox":
-        return "Showing sandbox logs only.";
+      case "error":
+        return "Showing errors and unclassified stderr.";
+      case "warn":
+        return "Showing warnings, errors, and unclassified stderr.";
+      case "debug":
+        return "Showing all severity-tagged logs and unclassified stderr.";
       case "all":
         return "Showing all logs.";
     }
