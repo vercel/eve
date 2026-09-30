@@ -7,6 +7,7 @@ import {
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
 import type { RemoteAgentBinding } from "#eve-channel/support.js";
+import { createInputResolvedEvent, type InputResolvedStreamEvent } from "#protocol/message.js";
 
 const PROXY_INPUT_REQUESTS_KEY = "eve.runtime.proxyInputRequests";
 
@@ -136,24 +137,28 @@ export function upsertProxyInputRequestState(input: {
   return Object.keys(state).length > 0 ? state : undefined;
 }
 
-/** Removes every proxy route the predicate selects. */
-export function clearProxyInputRequestsWhere<T extends { readonly state?: SessionStateMap }>(
+/**
+ * Retires the requests `select` picks, which nobody can answer anymore, and
+ * returns the `input.resolved` events that report them `cancelled` so
+ * channels stop offering them. Publish the events as relayed.
+ */
+export function withdrawProxyInputRequests<T extends { readonly state?: SessionStateMap }>(
   session: T,
-  select: (route: ProxyInputRequest) => boolean,
-): T {
-  const current = readMap(session.state);
-  const next: Record<string, ProxyInputRequest> = {};
-  let changed = false;
-
-  for (const [requestId, route] of Object.entries(current)) {
-    if (select(route)) {
-      changed = true;
-      continue;
-    }
-    next[requestId] = route;
+  select: (requestId: string, route: ProxyInputRequest) => boolean,
+): { readonly events: readonly InputResolvedStreamEvent[]; readonly session: T } {
+  const requestIds: string[] = [];
+  const events: InputResolvedStreamEvent[] = [];
+  for (const [requestId, route] of Object.entries(readMap(session.state))) {
+    if (!select(requestId, route)) continue;
+    requestIds.push(requestId);
+    events.push(
+      createInputResolvedEvent({
+        resolutions: [{ kind: route.kind, outcome: "cancelled", requestId }],
+        ...route.event,
+      }),
+    );
   }
-
-  return changed ? writeMap(session, next) : session;
+  return { events, session: retireProxyInputRequests(session, requestIds) };
 }
 
 /** Removes only the request IDs whose responses were successfully forwarded. */
@@ -173,17 +178,6 @@ export function retireProxyInputRequests<T extends { readonly state?: SessionSta
   }
 
   return changed ? writeMap(session, next) : session;
-}
-
-/**
- * Removes every proxy entry. Called when a cancelled turn orphans its
- * descendants so stale HITL responses no longer route to them.
- */
-export function clearAllProxyInputRequests(session: HarnessSession): HarnessSession {
-  if (!hasProxyInputRequests(session.state)) {
-    return session;
-  }
-  return writeMap(session, {});
 }
 
 /**

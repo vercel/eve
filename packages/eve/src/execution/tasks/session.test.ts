@@ -4,6 +4,7 @@ import type { DurableSession } from "#execution/durable-session-store.js";
 import type { SessionInbox } from "#execution/session-inbox/inbox.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { answerTaskCancel } from "#execution/tasks/session.js";
+import { applyTaskRunMessageStep } from "#execution/tasks/steps.js";
 import {
   createTask,
   markTaskRunStarted,
@@ -48,15 +49,7 @@ describe("answerTaskCancel", () => {
     );
     session = withQuestion(session, "research-run");
     session = withQuestion(session, "summarize-run");
-    const cursor = new SessionStateCursor({
-      inbox: { claimSessionHooks: vi.fn() } as Partial<SessionInbox> as SessionInbox,
-      serializedContext: {},
-      sessionState: {
-        ...createTestSessionState({ sessionId: "session-1" }),
-        snapshot: { session },
-      },
-      sessionWritable: new WritableStream<Uint8Array>(),
-    });
+    const cursor = cursorFor(session);
 
     await answerTaskCancel(cursor, {
       callId: "cancel-call",
@@ -90,6 +83,78 @@ describe("answerTaskCancel", () => {
     ]);
   });
 });
+
+describe("applyTaskRunMessageStep", () => {
+  it("withdraws the questions of a task() run that fails on its own, and only those", async () => {
+    const research = startedTask(readTaskTable(undefined), "research");
+    const summarize = startedTask(research.table, "summarize");
+    let session: DurableSession = writeTaskTable(
+      createTestSessionState({ sessionId: "session-1" }).snapshot.session,
+      summarize.table,
+    );
+    session = withQuestion(session, "research-run");
+    session = withQuestion(session, "summarize-run");
+    const cursor = cursorFor(session);
+
+    await cursor.advance((state) =>
+      applyTaskRunMessageStep({
+        ...state,
+        message: {
+          from: {
+            callId: "research-call",
+            input: {},
+            runId: "research-run",
+            sequence: 3,
+            stepIndex: 1,
+            taskId: research.taskId,
+            toolName: "research",
+            turnId: "turn_1",
+          },
+          kind: "outcome",
+          result: { error: "The research service is unavailable.", status: "failed" },
+        },
+      }),
+    );
+
+    const committed = cursor.sessionState.snapshot.session;
+    expect([...getProxyInputRequests(committed.state).keys()]).toEqual(["summarize-run-ask-1"]);
+    expect(published).toEqual([
+      {
+        data: {
+          ...REQUEST_EVENT,
+          resolutions: [
+            { kind: "question", outcome: "cancelled", requestId: "research-run-ask-1" },
+          ],
+        },
+        type: "input.resolved",
+      },
+      {
+        data: {
+          callId: "research-call",
+          error: { message: "The research service is unavailable." },
+          kind: "tool",
+          name: "research",
+          status: "failed",
+          taskId: research.taskId,
+          turnId: "turn_1",
+        },
+        type: "task.settled",
+      },
+    ]);
+  });
+});
+
+function cursorFor(session: DurableSession): SessionStateCursor {
+  return new SessionStateCursor({
+    inbox: { claimSessionHooks: vi.fn() } as Partial<SessionInbox> as SessionInbox,
+    serializedContext: {},
+    sessionState: {
+      ...createTestSessionState({ sessionId: "session-1" }),
+      snapshot: { session },
+    },
+    sessionWritable: new WritableStream<Uint8Array>(),
+  });
+}
 
 /** A working `task()` task whose run has started. */
 function startedTask(

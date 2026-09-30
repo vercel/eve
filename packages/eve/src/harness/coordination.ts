@@ -10,7 +10,6 @@ import type {
 } from "#shared/action-types.js";
 import { markRuntimeWorkflowToolAction } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
 import {
   findBlockingWorkflowToolRun,
   removeBlockingWorkflowToolRuns,
@@ -254,7 +253,7 @@ export async function resolvePendingCoordination(input: {
   }
 
   let nextSession: HarnessSession = input.session;
-  // Drop a finished run's unanswered requests so a late click cannot reach it.
+  // The session withdrew each finished run's open questions when its outcome arrived.
   for (const result of readyResults) {
     if (result.kind !== "tool-result") continue;
     const record = findBlockingWorkflowToolRun(
@@ -263,14 +262,7 @@ export async function resolvePendingCoordination(input: {
       batch.event.turnId,
     );
     if (record === undefined) continue;
-    nextSession = removeBlockingWorkflowToolRuns(
-      clearProxyInputRequestsWhere(
-        nextSession,
-        (route) => route.workflowAsk?.runId === record.address.runId,
-      ),
-      batch.event.turnId,
-      record.callId,
-    );
+    nextSession = removeBlockingWorkflowToolRuns(nextSession, batch.event.turnId, record.callId);
   }
 
   const state = { ...nextSession.state };
