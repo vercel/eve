@@ -129,6 +129,7 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     },
 
     async "turn.failed"(event, channel, _ctx) {
+      if (event.terminal) return;
       const hint = formatErrorHint(event);
       const errorId = extractErrorId(event.details);
       const message = [

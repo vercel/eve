@@ -619,6 +619,11 @@ export interface TurnFailedStreamEvent {
     details?: JsonObject;
     message: string;
     sequence: number;
+    /**
+     * `true` when the failure also ends the session: `session.failed`
+     * follows instead of `session.waiting`.
+     */
+    terminal?: boolean;
     turnId: string;
   };
   type: "turn.failed";
@@ -1687,6 +1692,7 @@ export function createTurnFailedEvent(input: {
   readonly details?: JsonObject;
   readonly message: string;
   readonly sequence: number;
+  readonly terminal?: boolean;
   readonly turnId: string;
 }): TurnFailedStreamEvent {
   return {
@@ -1695,6 +1701,7 @@ export function createTurnFailedEvent(input: {
       details: input.details,
       message: input.message,
       sequence: input.sequence,
+      terminal: input.terminal,
       turnId: input.turnId,
     },
     type: "turn.failed",

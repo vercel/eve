@@ -174,6 +174,7 @@ export const defaultEvents: TelegramChannelEvents = {
   },
 
   async "turn.failed"(event, channel, _ctx) {
+    if (event.terminal) return;
     const hint = formatErrorHint(event);
     const errorId = extractErrorId(event.details);
     await channel.telegram.post(

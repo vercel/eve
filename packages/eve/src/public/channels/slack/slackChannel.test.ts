@@ -1617,6 +1617,28 @@ describe("slackChannel() default event handlers", () => {
     );
   });
 
+  it("turn.failed leaves a terminal failure to the session.failed notice", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("turn.failed", {
+        code: "MODEL_CALL_FAILED",
+        message: "The model did not respond.",
+        sequence: 0,
+        terminal: true,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps fallback remediation outside a semantic error block without a hint", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),

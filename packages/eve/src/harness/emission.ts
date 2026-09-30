@@ -146,13 +146,14 @@ interface FailedStepPayload {
 
 /**
  * Emits the shared head of both failure cascades: `step.failed` →
- * `turn.failed`. Both terminal and recoverable paths diverge only on
- * the third event (`session.failed` vs. `session.waiting`).
+ * `turn.failed`, whose `terminal` flag announces the third event
+ * (`session.failed` when `true`, `session.waiting` otherwise).
  */
 async function emitStepAndTurnFailed(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   input: FailedStepPayload,
+  terminal: boolean,
 ): Promise<void> {
   await emitFn(
     createStepFailedEvent({
@@ -166,6 +167,7 @@ async function emitStepAndTurnFailed(
     createTurnFailedEvent({
       ...input,
       sequence: state.sequence,
+      terminal,
       turnId: state.turnId,
     }),
   );
@@ -185,7 +187,7 @@ export async function emitFailedStep(
   state: HarnessEmissionState,
   input: FailedStepPayload & { readonly sessionId: string },
 ): Promise<void> {
-  await emitStepAndTurnFailed(emitFn, state, input);
+  await emitStepAndTurnFailed(emitFn, state, input, true);
   await emitFn(createSessionFailedEvent(input));
 }
 
@@ -198,7 +200,7 @@ export async function emitRecoverableFailedTurn(
   state: HarnessEmissionState,
   input: FailedStepPayload & { readonly continuationToken: string },
 ): Promise<HarnessEmissionState> {
-  await emitStepAndTurnFailed(emitFn, state, input);
+  await emitStepAndTurnFailed(emitFn, state, input, false);
   await emitFn(createSessionWaitingEvent());
 
   return {

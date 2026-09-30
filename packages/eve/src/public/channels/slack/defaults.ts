@@ -498,6 +498,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "turn.failed"(event, channel, _ctx) {
+    if (event.terminal) return;
     const errorId = extractErrorId(event.details);
     const semanticSummary = extractSemanticErrorSummary(event);
     if (semanticSummary !== null) {

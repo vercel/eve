@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { emitFailedStep } from "#harness/emission.js";
+import { emitFailedStep, emitRecoverableFailedTurn } from "#harness/emission.js";
 import type { HarnessEmitFn } from "#harness/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import { createDefaultEvents } from "#public/channels/linear/defaults.js";
@@ -111,6 +111,25 @@ describe("createDefaultEvents failure notices", () => {
 
     expect(errorActivityBodies(fetch)).toEqual([
       expect.stringContaining("Start a new Linear agent session to continue."),
+    ]);
+  });
+
+  it("posts only the retry notice when the session waits after a failed turn", async () => {
+    const { events, fetch } = buildEvents();
+
+    await emitRecoverableFailedTurn(
+      emitToDefaults(events),
+      { sessionStarted: true, sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      {
+        code: "MODEL_CALL_FAILED",
+        continuationToken: "linear:agent_session_1",
+        details: { errorId: "err_4064" },
+        message: "The provider rejected the request",
+      },
+    );
+
+    expect(errorActivityBodies(fetch)).toEqual([
+      expect.stringContaining("Please try again, rephrase, or reach out if it keeps failing."),
     ]);
   });
 });

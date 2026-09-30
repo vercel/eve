@@ -423,6 +423,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
       await finalizeStreamedMessage(channel, event.message, true);
     },
     async "turn.failed"(event, channel, _ctx) {
+      if (event.terminal) return;
       await postFailure(channel.thread, "I hit an error while handling your request", event);
     },
     async "session.failed"(event, channel) {
