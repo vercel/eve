@@ -1,3 +1,9 @@
+import {
+  MAX_PLAN_ITEM_TITLE_LENGTH,
+  MAX_PLAN_ITEMS,
+  PLAN_ITEM_STATUSES,
+} from "#tools/provided/plan.js";
+
 const MAX_ACTIVITY_EVENTS_PER_BATCH = 100;
 
 export type ActivityWorkKind = "root-turn" | "subagent" | "remote-agent";
@@ -52,6 +58,12 @@ export interface ActivityActionTaskV1 {
   readonly title: string;
   /** One line describing the call's result or failure, once it settles. */
   readonly summary?: string;
+}
+
+/** One step of a root turn's plan, as the `plan` tool last set it. */
+export interface ActivityPlanItemV1 {
+  readonly status: (typeof PLAN_ITEM_STATUSES)[number];
+  readonly title: string;
 }
 
 export interface ActivityActionStateV1 extends ActivityActionIdentityV1 {
@@ -111,6 +123,12 @@ export type ActivityEventV1 =
       readonly label: string;
     }
   | {
+      readonly eventId: string;
+      readonly items: readonly ActivityPlanItemV1[];
+      readonly kind: "plan.updated";
+      readonly rootTurnId: string;
+    }
+  | {
       readonly actionId: string;
       readonly eventId: string;
       readonly kind: "task.started";
@@ -148,6 +166,8 @@ export interface ActivitySnapshotV1 {
   readonly actions: Readonly<Record<string, ActivityActionStateV1>>;
   readonly blockers: Readonly<Record<string, ActivityBlockerStateV1>>;
   readonly pendingSettlements: Readonly<Record<string, PendingActivitySettlementV1>>;
+  /** Each root turn's latest plan, by root turn id. */
+  readonly plans: Readonly<Record<string, readonly ActivityPlanItemV1[]>>;
   readonly revision: number;
   readonly seenEventIds: readonly string[];
   readonly version: 1;
@@ -276,6 +296,13 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
         label: value.label,
       };
     }
+    case "plan.updated": {
+      if (!hasOnlyKeys(value, ["eventId", "items", "kind", "rootTurnId"])) return undefined;
+      const items = parsePlanItems(value.items);
+      if (!isIdentity(value.eventId) || !isIdentity(value.rootTurnId) || items === undefined)
+        return undefined;
+      return { eventId: value.eventId, items, kind: "plan.updated", rootTurnId: value.rootTurnId };
+    }
     case "task.started": {
       if (!hasOnlyKeys(value, ["actionId", "eventId", "kind", "taskId", "taskKind"]))
         return undefined;
@@ -348,6 +375,21 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
     default:
       return null;
   }
+}
+
+/** A plan's items, or undefined unless every item is a bounded title with a known status. */
+export function parsePlanItems(value: unknown): readonly ActivityPlanItemV1[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_PLAN_ITEMS)
+    return undefined;
+  const items: ActivityPlanItemV1[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || !hasOnlyKeys(item, ["status", "title"])) return undefined;
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    if (title === "" || title.length > MAX_PLAN_ITEM_TITLE_LENGTH) return undefined;
+    if (!isOneOf(item.status, PLAN_ITEM_STATUSES)) return undefined;
+    items.push({ status: item.status, title });
+  }
+  return items;
 }
 
 function parseActionIdentity(value: unknown): ActivityActionIdentityV1 | undefined {

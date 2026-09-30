@@ -86,6 +86,8 @@ export {
 
 export type {
   TaskCardBlocker,
+  TaskCardPlanItem,
+  TaskCardStep,
   TaskCardTask,
   TaskCardTaskStatus,
   TaskCardView,

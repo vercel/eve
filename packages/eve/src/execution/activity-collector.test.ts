@@ -147,6 +147,58 @@ describe("activityCollectorWorkflow", () => {
     });
   });
 
+  it("renders the same snapshot again while a task works and nothing changes", async () => {
+    const keepalive = Promise.withResolvers<void>();
+    const keepalives = [keepalive.promise];
+    const task = {
+      id: "action:root:call",
+      kind: "tool" as const,
+      name: "deploy",
+      parentWorkId: work.id,
+      rootTurnId: "turn",
+      stepIndex: 0,
+    };
+    mocks.sleep.mockImplementation((duration: Date | number) => {
+      if (duration === 90_000) return keepalives.shift() ?? new Promise<void>(() => {});
+      return duration instanceof Date ? new Promise<void>(() => {}) : Promise.resolve();
+    });
+    mocks.createHook.mockReturnValue({
+      token: "activity",
+      getConflict: async () => null,
+      async *[Symbol.asyncIterator]() {
+        yield {
+          events: [
+            { eventId: "start", kind: "work.started", startedAt: "1", work },
+            { action: task, eventId: "action", kind: "action.started", startedAt: "2" },
+            {
+              actionId: task.id,
+              eventId: "task",
+              kind: "task.started",
+              taskId: "deploy-4hd8sa",
+              taskKind: "tool",
+            },
+          ],
+          version: 1,
+        } satisfies ActivityBatchV1;
+        yield await new Promise<ActivityBatchV1>(() => {});
+      },
+    });
+    mocks.renderSessionActivityStep.mockResolvedValue(undefined);
+
+    void activityCollectorWorkflow({
+      expiresAt: "2026-09-04T00:00:00Z",
+      serializedContext: {},
+      token: "activity",
+    });
+    await vi.waitFor(() => expect(mocks.renderSessionActivityStep).toHaveBeenCalledOnce());
+
+    keepalive.resolve();
+    await vi.waitFor(() => expect(mocks.renderSessionActivityStep).toHaveBeenCalledTimes(2));
+    expect(mocks.renderSessionActivityStep.mock.calls[1]?.[0].snapshot).toBe(
+      mocks.renderSessionActivityStep.mock.calls[0]?.[0].snapshot,
+    );
+  });
+
   it.each([false, true])(
     "expires with a pending hook read (debouncing: %s)",
     async (debouncing) => {

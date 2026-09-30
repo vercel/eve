@@ -9,6 +9,8 @@ import type { TaskSettledStreamEvent, UnstampedMessageStreamEvent } from "#proto
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
+import { parsePlanItems } from "#protocol/activity.js";
+import { PLAN_TOOL_NAME } from "#tools/provided/plan.js";
 
 type TaskSettledActivity = Extract<ActivityEventV1, { readonly kind: "task.settled" }>;
 
@@ -24,18 +26,17 @@ export function projectActivityEvents(input: {
   if (event.type === "actions.requested") {
     return event.data.actions.flatMap((action) => {
       if (action.kind === "tool-call" && isTaskControlTool(action.toolName)) return [];
-      const agent = action.kind === "subagent-call" || action.kind === "remote-agent-call";
-      return projectActionStarted({
+      const started = projectActionStarted({
         at: input.at,
         callId: action.callId,
         kind: action.kind === "load-skill" ? "skill" : "tool",
-        label:
-          event.data.presentation?.[action.callId]?.label ??
-          (agent ? agentCallLabel(actionName(action), action.input) : undefined),
+        label: event.data.presentation?.[action.callId]?.label,
         lineage,
         name: actionName(action),
         stepIndex: event.data.stepIndex,
       });
+      const plan = projectPlan(lineage, action);
+      return plan === undefined ? started : [...started, plan];
     });
   }
   if (event.type === "action.partial") {
@@ -307,10 +308,21 @@ export function projectActionStarted(input: {
   return [started, { actionId: id, eventId: `${id}:label`, kind: "action.label.updated", label }];
 }
 
-/** An agent call reads as the agent and its brief: `researcher: Find the March incidents`. */
-export function agentCallLabel(name: string, input: JsonObject): string | undefined {
-  const brief = firstLine(input.message);
-  return brief === undefined ? undefined : `${name}: ${brief}`;
+/** A root turn's call to the `plan` tool sets that turn's plan. */
+function projectPlan(
+  lineage: ActivityWorkIdentityV1,
+  action: RuntimeActionRequest,
+): ActivityEventV1 | undefined {
+  if (lineage.kind !== "root-turn") return undefined;
+  if (action.kind !== "tool-call" || action.toolName !== PLAN_TOOL_NAME) return undefined;
+  const items = parsePlanItems(action.input.items);
+  if (items === undefined) return undefined;
+  return {
+    eventId: `${actionId(lineage.id, action.callId)}:plan`,
+    items,
+    kind: "plan.updated",
+    rootTurnId: lineage.rootTurnId,
+  };
 }
 
 function actionName(action: RuntimeActionRequest): string {

@@ -3,10 +3,11 @@ import { randomBytes } from "node:crypto";
 import { getChannelActivityPresenter } from "#channel/activity-presenter.js";
 import type { ActivitySinkV1 } from "#channel/types.js";
 import type { ContextContainer } from "#context/container.js";
-import { ActivityObserverKey, ScheduleIdKey } from "#context/keys.js";
+import { ActivityObserverKey, ParentSessionKey, ScheduleIdKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
-import { agentCallLabel, projectActionStarted } from "#execution/activity-events.js";
+import { projectActionStarted } from "#execution/activity-events.js";
+import { agentCallLabel } from "#execution/tasks/task-id-input.js";
 import {
   resolvePreparedActivity,
   type PreparedCoordinationDispatch,
@@ -27,15 +28,18 @@ import type { HarnessSession } from "#harness/types.js";
 import { createLogger } from "#internal/logging.js";
 import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { rootTurnWork } from "#execution/session-activity-projection.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+import { PLAN_TOOL_NAME } from "#tools/provided/plan.js";
 import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 
-const log = createLogger("execution.task-activity-observer");
+const log = createLogger("execution.activity-collector-start");
 
 /** What starting and seeding a collector reads from a dispatch step. */
 export type ObservedDispatch = Pick<
   PreparedCoordinationDispatch,
-  "activityObserver" | "adapter" | "batch" | "parentSession" | "plan" | "serializedContext"
+  "activityObserver" | "adapter" | "batch" | "plan" | "serializedContext"
 > & {
   readonly session: Pick<HarnessSession, "rootSessionId" | "sessionId" | "state"> & {
     readonly agent: Pick<HarnessSession["agent"], "tools">;
@@ -56,14 +60,12 @@ const DEFAULT_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
  * never a schedule's session, which posts only its final reply.
  */
 export async function observeTaskActivity<T extends ObservedDispatch>(prepared: T): Promise<T> {
-  if (prepared.activityObserver !== undefined || prepared.parentSession !== undefined) {
-    return prepared;
-  }
+  if (prepared.activityObserver !== undefined) return prepared;
   const taskCalls = prepared.plan.filter((call) => call.entry.entryPoint !== "execute");
   if (taskCalls.length === 0) return prepared;
   if (getChannelActivityPresenter(prepared.adapter) === undefined) return prepared;
   const ctx = await deserializeContext(prepared.serializedContext);
-  if (ctx.has(ScheduleIdKey)) return prepared;
+  if (!presentsActivity(ctx)) return prepared;
 
   const sink = await startActivityCollector(ctx);
   if (sink === undefined) return prepared;
@@ -79,6 +81,40 @@ export async function observeTaskActivity<T extends ObservedDispatch>(prepared: 
     sink,
   });
   return { ...prepared, activityObserver, serializedContext: serializeContext(ctx) };
+}
+
+/**
+ * Starts a root session's collector on its first call to the `plan` tool, in
+ * the step that publishes the call, so the call's plan reaches the collector.
+ * A turn that plans without starting a task still gets its card.
+ */
+export async function observePlanActivity(input: {
+  readonly ctx: ContextContainer;
+  readonly event: MessageStreamEvent;
+  readonly sessionId: string;
+}): Promise<void> {
+  const { ctx, event } = input;
+  if (event.type !== "actions.requested" || ctx.has(ActivityObserverKey)) return;
+  const plans = event.data.actions.some(
+    (action) => action.kind === "tool-call" && action.toolName === PLAN_TOOL_NAME,
+  );
+  if (!plans || !presentsActivity(ctx)) return;
+  if (getChannelActivityPresenter(ctx.require(ChannelKey)) === undefined) return;
+  const sink = await startActivityCollector(ctx);
+  if (sink === undefined) return;
+  ctx.set(ActivityObserverKey, { sink });
+  const work = rootTurnWork({ sessionId: input.sessionId, turnId: event.data.turnId });
+  await submitActivity({
+    events: [
+      { eventId: `${work.id}:started`, kind: "work.started", startedAt: event.meta.at, work },
+    ],
+    sink,
+  });
+}
+
+/** Only root sessions present activity, and never a schedule's, which posts only its reply. */
+function presentsActivity(ctx: ContextContainer): boolean {
+  return !ctx.has(ParentSessionKey) && !ctx.has(ScheduleIdKey);
 }
 
 async function startActivityCollector(ctx: ContextContainer): Promise<ActivitySinkV1 | undefined> {

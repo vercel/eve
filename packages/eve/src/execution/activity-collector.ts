@@ -9,6 +9,11 @@ import { renderSessionActivityStep } from "#execution/session-activity-presenter
 const RENDER_DEBOUNCE_MS = 350;
 /** Slack asks agents to update a message at most once every 3 seconds. */
 const RENDER_COOLDOWN_MS = 3_000;
+/**
+ * While a task works, the presenter renders again this often with nothing new,
+ * so a status the channel expires, such as Slack's after two minutes, stays up.
+ */
+const KEEPALIVE_MS = 90_000;
 
 export interface ActivityCollectorInput {
   readonly expiresAt: string;
@@ -20,6 +25,7 @@ export interface ActivityCollectorInput {
  * Owns activity reduction and presentation for one root session. A change
  * renders after a short debounce and at most once per cooldown, always from the
  * latest snapshot, so a burst renders once and the final state is never lost.
+ * While a task works and nothing changes, it renders again every 90 seconds.
  */
 export async function activityCollectorWorkflow(input: ActivityCollectorInput): Promise<void> {
   "use workflow";
@@ -31,6 +37,8 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
   let snapshot = createActivitySnapshot();
   let presenterState: unknown;
   let cooldown: Promise<void> = Promise.resolve();
+  // One timer across idle waits, so batches arriving while a task works don't each start one.
+  let keepalive: Promise<CollectorWake> | undefined;
 
   try {
     await claimHookOwnership(batches);
@@ -41,15 +49,26 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
 
   while (true) {
     pendingRead ??= iterator.next();
-    const next = await Promise.race([
+    const waits: Promise<CollectorWake>[] = [
       pendingRead.then((value) => ({ kind: "batch" as const, value })),
       expiry,
-    ]);
-    if (next.kind === "expired" || next.value.done === true) return;
-    pendingRead = undefined;
-    const reduced = reduceCollectorActivity(snapshot, next.value.value);
-    snapshot = reduced.snapshot;
-    if (!reduced.presentationChanged) continue;
+    ];
+    if (hasWorkingTask(snapshot)) {
+      keepalive ??= sleep(KEEPALIVE_MS).then(() => ({ kind: "keepalive" as const }));
+      waits.push(keepalive);
+    } else {
+      keepalive = undefined;
+    }
+    const next = await Promise.race(waits);
+    if (next.kind === "expired") return;
+    if (next.kind === "keepalive") keepalive = undefined;
+    if (next.kind === "batch") {
+      if (next.value.done === true) return;
+      pendingRead = undefined;
+      const reduced = reduceCollectorActivity(snapshot, next.value.value);
+      snapshot = reduced.snapshot;
+      if (!reduced.presentationChanged) continue;
+    }
 
     const ready = Promise.all([cooldown, sleep(RENDER_DEBOUNCE_MS)]).then(() => ({
       kind: "ready" as const,
@@ -74,6 +93,17 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
     });
     cooldown = sleep(RENDER_COOLDOWN_MS);
   }
+}
+
+type CollectorWake =
+  | { readonly kind: "batch"; readonly value: IteratorResult<ActivityBatchV1> }
+  | { readonly kind: "expired" }
+  | { readonly kind: "keepalive" };
+
+function hasWorkingTask(snapshot: ActivitySnapshotV1): boolean {
+  return Object.values(snapshot.actions).some(
+    (action) => action.task !== undefined && action.phase === "running",
+  );
 }
 
 export function reduceCollectorActivity(

@@ -17,7 +17,7 @@ import {
   captureAgentSessionContext,
   resolveStepAgentLimits,
 } from "#execution/agent-sessions/context.js";
-import { observeTaskActivity } from "#execution/task-activity-observer.js";
+import { observeTaskActivity } from "#execution/activity-collector-start.js";
 import type { TaskStartedStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSession } from "#harness/types.js";

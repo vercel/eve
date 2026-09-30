@@ -1,6 +1,6 @@
 ---
 title: "Built-in Tools"
-description: "The default and opt-in tools eve provides, including glob, grep, and sleep."
+description: "The default and opt-in tools eve provides, including glob, grep, plan, and sleep."
 ---
 
 eve provides a default tool set for every agent and additional tools you can add with one file. Each default occupies the same `agent/tools/<name>.ts` slot you would author yourself, so an authored definition replaces it and `disableTool()` removes it. Use this page to review what the model can call, opt into more capabilities, or override and disable defaults. For custom tools, see [Tools](../tools).
@@ -353,6 +353,20 @@ export default defineTool({
 ```
 
 Remove the file to remove the tool. `disableTool()` is unnecessary because `grep` is not added by default.
+
+### `plan`
+
+`plan` lets the model show the steps of a multi-step request as a checklist. Each call passes the complete list, with each item's title and its status: `pending`, `working`, `completed`, or `failed`. Channels show the list live, such as the rows of a [Slack task card](/docs/channels/slack#task-card); the call itself only records the list and returns `{ updated: true }`. Add it:
+
+```sh
+eve add tool/plan
+```
+
+```ts title="agent/tools/plan.ts"
+export { default } from "eve/tools/plan";
+```
+
+A plan holds up to 12 items of up to 120 characters each. Channels read the plan from calls to the tool named `plan`, so keep the file at `agent/tools/plan.ts`. Tasks the model starts already appear on the card, and the tool's description tells the model not to add items only to show them. Remove the file to remove the tool.
 
 ### `sleep`
 

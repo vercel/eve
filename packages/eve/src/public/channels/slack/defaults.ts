@@ -1,7 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
-import { describeActionRequests } from "#public/channels/slack/action-status.js";
+import { describeActionRequests, waitingOnTasks } from "#public/channels/slack/action-status.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
 import {
   buildSlackAuthContext,
@@ -178,14 +178,6 @@ export function defaultOnMessage(ctx: SlackContext, message: SlackMessage): Slac
 /** eve's default `received`: the `Thinking...` status, set the moment a message arrives. */
 export async function defaultReceived(_message: SlackMessage, ctx: SlackContext): Promise<void> {
   await ctx.thread.startTyping("Thinking...");
-}
-
-/** `Waiting on researcher...`, `Waiting on researcher and deploy...`, or `... and 2 more tasks...`. */
-function waitingOnTasks(names: readonly string[]): string {
-  const [first, second] = names;
-  if (names.length === 1) return `Waiting on ${first!}...`;
-  if (names.length === 2) return `Waiting on ${first!} and ${second!}...`;
-  return `Waiting on ${first!} and ${String(names.length - 1)} more tasks...`;
 }
 
 /**

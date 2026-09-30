@@ -102,9 +102,10 @@ export interface SlackRenderer {
   /** Handlers for session events, such as posting replies and questions. */
   readonly events?: SlackRendererEvents;
   /**
-   * Returns the message for a turn's task card, or `null` for none. Pure and
-   * synchronous: eve posts the card, updates it as the tasks change, and
-   * handles Slack's rate limits. `next` returns eve's default card.
+   * Returns the message for a turn's task card, which shows the turn's plan
+   * and tasks, or `null` for none. Pure and synchronous: eve posts the card,
+   * updates it as the turn changes, and handles Slack's rate limits. `next`
+   * returns eve's default card.
    */
   readonly taskCard?: (
     view: TaskCardView,

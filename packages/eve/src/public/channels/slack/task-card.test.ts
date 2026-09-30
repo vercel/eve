@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getChannelActivityPresenter } from "#channel/activity-presenter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
@@ -11,6 +11,7 @@ import {
   createActionsRequestedEvent,
   createTaskSettledEvent,
   createTaskStartedEvent,
+  createTurnCompletedEvent,
   createTurnStartedEvent,
   type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
@@ -42,7 +43,7 @@ function observe(
     const activity = projectSessionActivity({
       event: stamp(event),
       sessionId: workIdentity === undefined ? SESSION_ID : "session_researcher",
-      taskCallIds: [DEPLOY_CALL, RESEARCH_CALL],
+      taskCallIds: [DEPLOY_CALL, RESEARCH_CALL, "call_lint"],
       workIdentity,
     });
     next = reduceActivityBatch(next, { events: activity, version: 1 });
@@ -64,15 +65,15 @@ function startTwoTasks(): ActivitySnapshotV1 {
         },
         {
           callId: RESEARCH_CALL,
-          description: "Researches incidents.",
           input: { message: "Find the incidents behind the checkout spike\nInclude timelines." },
-          kind: "subagent-call",
-          name: "researcher",
-          nodeId: "subagents/researcher",
-          subagentName: "researcher",
+          kind: "tool-call",
+          toolName: "researcher",
         },
       ],
-      presentation: { [DEPLOY_CALL]: { label: "Deploy storefront" } },
+      presentation: {
+        [DEPLOY_CALL]: { label: "Deploy storefront" },
+        [RESEARCH_CALL]: { label: "researcher: Find the incidents behind the checkout spike" },
+      },
       sequence: 1,
       stepIndex: 0,
       turnId: TURN_ID,
@@ -141,10 +142,35 @@ function settleBothTasks(snapshot: ActivitySnapshotV1): ActivitySnapshotV1 {
       taskId: "researcher-7k2m9q",
       turnId: TURN_ID,
     }),
+    createTurnCompletedEvent({ sequence: 2, turnId: TURN_ID }),
   ]);
 }
 
-function slackApi() {
+/** A later root turn that starts one lint task. */
+function startLint(snapshot: ActivitySnapshotV1): ActivitySnapshotV1 {
+  return observe(snapshot, [
+    createTurnStartedEvent({ sequence: 3, turnId: "turn_2" }),
+    createActionsRequestedEvent({
+      actions: [{ callId: "call_lint", input: {}, kind: "tool-call", toolName: "lint" }],
+      sequence: 3,
+      stepIndex: 0,
+      turnId: "turn_2",
+    }),
+    createTaskStartedEvent({
+      callId: "call_lint",
+      kind: "tool",
+      name: "lint",
+      taskId: "lint-2b7x0p",
+      turnId: "turn_2",
+    }),
+  ]);
+}
+
+/** Records each Slack call; `reply` answers one call, defaulting to success. */
+function slackApi(
+  reply: (operation: string, index: number) => Record<string, unknown> | undefined = () =>
+    undefined,
+) {
   const calls: Array<{ readonly body: Record<string, unknown>; readonly operation: string }> = [];
   const fetch = vi.fn(async (input: URL | string | Request, init?: RequestInit) => {
     const operation = String(input).split("/").at(-1)!;
@@ -153,7 +179,8 @@ function slackApi() {
       body: decodeSlackApiBody(init?.body ?? "", contentType) as Record<string, unknown>,
       operation,
     });
-    return Response.json({ ok: true, ts: "1700000009.000100" });
+    const ts = `1700000009.00010${String(calls.length)}`;
+    return Response.json(reply(operation, calls.length - 1) ?? { ok: true, ts });
   });
   return { calls, fetch };
 }
@@ -165,7 +192,20 @@ function presenterOf(channel: unknown) {
   return presenter;
 }
 
-const THREAD = { channelId: "C01", installationTeamId: null, threadTs: "1700000000.000001" };
+const THREAD = {
+  audience: "private",
+  channelId: "C01",
+  installationTeamId: null,
+  threadTs: "1700000000.000001",
+};
+
+function defaultPresenter(fetch: typeof globalThis.fetch) {
+  return presenterOf(slackChannel({ api: { fetch }, credentials: { botToken: "xoxb-test" } }));
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("Slack task card", () => {
   it("posts one live card for a turn's tasks, then updates it in place as they settle", async () => {
@@ -180,13 +220,15 @@ describe("Slack task card", () => {
 
     expect(calls.map((call) => call.operation)).toEqual(["chat.postMessage"]);
     expect(calls[0]!.body).toMatchObject({
+      unfurl_links: "false",
+      unfurl_media: "false",
       blocks: [
         {
           tasks: [
             { status: "in_progress", title: "Deploy storefront" },
             {
               details: {
-                elements: [{ elements: [{ text: "Reading INC-2291 postmortem" }] }],
+                elements: [{ elements: [{ text: "Reading INC-2291 postmortem..." }] }],
               },
               status: "in_progress",
               title: "researcher: Find the incidents behind the checkout spike",
@@ -225,7 +267,7 @@ describe("Slack task card", () => {
           title: "Finished 2 tasks: 1 failed",
         },
       ],
-      ts: "1700000009.000100",
+      ts: "1700000009.000101",
     });
 
     await presenter.render({ destination, snapshot: settled, state: updated });
@@ -261,5 +303,136 @@ describe("Slack task card", () => {
       { title: "Working on 2 tasks", type: "plan" },
       { elements: [{ text: TURN_ID }], type: "context" },
     ]);
+  });
+
+  it("shows a failure without its error text outside private conversations", async () => {
+    const { calls, fetch } = slackApi();
+    const presenter = defaultPresenter(fetch);
+
+    await presenter.render({
+      destination: presenter.destination({ ...THREAD, audience: "public" }),
+      snapshot: settleBothTasks(startTwoTasks()),
+      state: undefined,
+    });
+
+    expect(JSON.stringify(calls[0]!.body["blocks"])).not.toContain("Rate limited");
+    expect(calls[0]!.body["blocks"]).toMatchObject([
+      {
+        tasks: [
+          { status: "complete" },
+          { output: { elements: [{ elements: [{ text: "Failed" }] }] } },
+        ],
+      },
+    ]);
+  });
+
+  it("writes each turn's card on its own, so a failed write never posts the others twice", async () => {
+    const { calls, fetch } = slackApi((operation, index) =>
+      operation === "chat.postMessage" && index === 1
+        ? { error: "ratelimited", ok: false }
+        : undefined,
+    );
+    const presenter = defaultPresenter(fetch);
+    const destination = presenter.destination(THREAD);
+    const snapshot = startLint(startTwoTasks());
+
+    const first = await presenter.render({ destination, snapshot, state: undefined });
+    await presenter.render({ destination, snapshot, state: first });
+
+    const posts = calls.filter((call) => call.operation === "chat.postMessage");
+    expect(posts.map((post) => post.body["text"])).toEqual([
+      expect.stringContaining("Deploy storefront"),
+      expect.stringContaining("lint"),
+      expect.stringContaining("lint"),
+    ]);
+  });
+
+  it("posts the card again when someone deleted it", async () => {
+    const { calls, fetch } = slackApi((operation) =>
+      operation === "chat.update" ? { error: "message_not_found", ok: false } : undefined,
+    );
+    const presenter = defaultPresenter(fetch);
+    const destination = presenter.destination(THREAD);
+    const working = startTwoTasks();
+
+    const posted = await presenter.render({ destination, snapshot: working, state: undefined });
+    const reposted = await presenter.render({
+      destination,
+      snapshot: settleBothTasks(working),
+      state: posted,
+    });
+
+    expect(calls.map((call) => call.operation)).toEqual([
+      "chat.postMessage",
+      "chat.update",
+      "chat.postMessage",
+    ]);
+    expect(reposted).toMatchObject({ cards: { [TURN_ID]: { ts: "1700000009.000103" } } });
+  });
+
+  it("shows the agent's plan as rows ahead of its tasks", async () => {
+    const { calls, fetch } = slackApi();
+    const presenter = defaultPresenter(fetch);
+    const snapshot = observe(createActivitySnapshot(), [
+      createTurnStartedEvent({ sequence: 1, turnId: TURN_ID }),
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_plan",
+            input: {
+              items: [
+                { status: "completed", title: "Read the incident report" },
+                { status: "working", title: "Check recent deploys" },
+                { status: "pending", title: "Write up the cause" },
+              ],
+            },
+            kind: "tool-call",
+            toolName: "plan",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: TURN_ID,
+      }),
+    ]);
+
+    await presenter.render({
+      destination: presenter.destination(THREAD),
+      snapshot,
+      state: undefined,
+    });
+
+    expect(calls[0]!.body["blocks"]).toMatchObject([
+      {
+        tasks: [
+          { status: "complete", title: "Read the incident report" },
+          { status: "in_progress", title: "Check recent deploys" },
+          { status: "pending", title: "Write up the cause" },
+        ],
+        title: "1 of 3 tasks done",
+        type: "plan",
+      },
+    ]);
+  });
+
+  it("sets the waiting status again before Slack expires it while tasks work", async () => {
+    vi.useFakeTimers({ now: Date.UTC(2026, 8, 30, 12) });
+    const { calls, fetch } = slackApi();
+    const presenter = defaultPresenter(fetch);
+    const destination = presenter.destination(THREAD);
+    const snapshot = startLint(createActivitySnapshot());
+
+    const posted = await presenter.render({ destination, snapshot, state: undefined });
+    vi.setSystemTime(Date.UTC(2026, 8, 30, 12, 1, 30));
+    await presenter.render({ destination, snapshot, state: posted });
+
+    expect(calls.map((call) => call.operation)).toEqual([
+      "chat.postMessage",
+      "assistant.threads.setStatus",
+    ]);
+    expect(calls[1]!.body).toMatchObject({
+      status: "Waiting on lint...",
+      thread_ts: THREAD.threadTs,
+    });
   });
 });

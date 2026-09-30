@@ -90,3 +90,11 @@ export function describeActionRequests(actions: readonly RuntimeActionRequest[])
   const label = describeActionRequest(first);
   return actions.length === 1 ? label : `${label} +${actions.length - 1} more`;
 }
+
+/** `Waiting on researcher...`, `Waiting on researcher and deploy...`, or `... and 2 more tasks...`. */
+export function waitingOnTasks(names: readonly string[]): string {
+  const [first, second] = names;
+  if (names.length === 1) return `Waiting on ${first!}...`;
+  if (names.length === 2) return `Waiting on ${first!} and ${second!}...`;
+  return `Waiting on ${first!} and ${String(names.length - 1)} more tasks...`;
+}

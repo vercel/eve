@@ -92,14 +92,23 @@ function workFor(input: {
     };
   }
   if (turnId === undefined) return undefined;
-  const rootTurnId = input.rootTurnId ?? turnId;
+  return rootTurnWork({ rootTurnId: input.rootTurnId, sessionId: input.sessionId, turnId });
+}
+
+/** The work of a root session's turn, which its own actions and tasks belong to. */
+export function rootTurnWork(input: {
+  readonly rootTurnId?: string;
+  readonly sessionId: string;
+  readonly turnId: string;
+}): ActivityWorkIdentityV1 {
+  const rootTurnId = input.rootTurnId ?? input.turnId;
   return {
     id: deriveRootTurnActivityWorkId({ sessionId: input.sessionId, turnId: rootTurnId }),
     kind: "root-turn",
     rootSessionId: input.sessionId,
     rootTurnId,
     sessionId: input.sessionId,
-    turnId,
+    turnId: input.turnId,
   };
 }
 

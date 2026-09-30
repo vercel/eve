@@ -748,11 +748,11 @@ export interface SlackChannelConfig {
   ): SlackInputResponseResult | Promise<SlackInputResponseResult>;
 
   /**
-   * Renderers that wrap eve's default Slack rendering, outermost first. Each
-   * can acknowledge messages (`received`), render session events (`events`),
-   * and shape the task card (`taskCard`). A handler runs the rest of the chain,
-   * ending with eve's default, by calling `next`, and skips it by not calling
-   * it.
+   * Renderers that wrap eve's default Slack rendering, outermost first. Omit
+   * it and eve renders with its default alone. Each renderer can acknowledge
+   * messages (`received`), render session events (`events`), and shape the
+   * task card (`taskCard`). A handler runs the rest of the chain, ending with
+   * eve's default, by calling `next`, and skips it by not calling it.
    */
   readonly renderers?: readonly SlackRenderer[];
 }
@@ -795,7 +795,7 @@ export interface SlackChannel extends Channel<
  * Slack channel factory. Wires up the webhook route, message dispatch,
  * interaction handling, and eve's default rendering: the `Thinking...`
  * acknowledgement, status lines, replies, questions, sign-ins, errors, and a
- * live task card for each turn that starts tasks. Message hooks decide whether
+ * live task card for each turn that sets a plan or starts tasks. Message hooks decide whether
  * and how to dispatch; `renderers` wrap the default rendering without
  * replacing it.
  */

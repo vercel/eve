@@ -8,10 +8,18 @@ import { ActivityObserverKey, ScheduleIdKey } from "#context/keys.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import { projectSessionActivity } from "#execution/session-activity-projection.js";
 import { createTask, writeTaskTable } from "#execution/tasks/table.js";
-import { observeTaskActivity, type ObservedDispatch } from "#execution/task-activity-observer.js";
+import {
+  observePlanActivity,
+  observeTaskActivity,
+  type ObservedDispatch,
+} from "#execution/activity-collector-start.js";
 import type { ActivityEventV1 } from "#protocol/activity.js";
-import { createTaskStartedEvent, type MessageStreamEvent } from "#protocol/message.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import {
+  createActionsRequestedEvent,
+  createTaskStartedEvent,
+  type MessageStreamEvent,
+} from "#protocol/message.js";
+import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const mocks = vi.hoisted(() => ({
   context: undefined as ContextContainer | undefined,
@@ -83,7 +91,6 @@ function dispatchOfTwoTasks(): {
   const prepared: ObservedDispatch = {
     activityObserver: undefined,
     adapter,
-    parentSession: undefined,
     batch: { event: { sequence: 1, stepIndex: 0, turnId: TURN_ID }, requests: [] },
     plan: [
       {
@@ -151,7 +158,7 @@ describe("observeTaskActivity", () => {
       });
     }
 
-    expect(projectTaskCards(snapshot)).toMatchObject([
+    expect(projectTaskCards(snapshot, { audience: "private" })).toMatchObject([
       {
         state: "working",
         tasks: [
@@ -175,5 +182,50 @@ describe("observeTaskActivity", () => {
 
     expect(observed).toBe(prepared);
     expect(mocks.startWorkflow).not.toHaveBeenCalled();
+  });
+});
+
+describe("observePlanActivity", () => {
+  it("starts the collector on a root turn's first plan, so a turn without tasks still shows it", async () => {
+    const adapter: ChannelAdapter = { kind: "slack", state: {} };
+    attachChannelActivityPresenter(adapter, { destination: () => ({}), render: vi.fn() });
+    const ctx = mocks.context!;
+    ctx.set(ChannelKey, adapter);
+    const planned = {
+      ...createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_plan",
+            input: { items: [{ status: "working", title: "Check recent deploys" }] },
+            kind: "tool-call",
+            toolName: "plan",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: TURN_ID,
+      }),
+      meta: { at: "2026-09-30T12:00:01.000Z", id: "evt_plan" },
+    } as MessageStreamEvent;
+
+    await observePlanActivity({ ctx, event: planned, sessionId: "session_root" });
+
+    expect(mocks.startWorkflow).toHaveBeenCalledOnce();
+    expect(ctx.get(ActivityObserverKey)?.sink.url).toMatch(/\/eve\/v1\/activity\//);
+    const snapshot = reduceActivityBatch(createActivitySnapshot(), {
+      events: [
+        ...mocks.submitted.flat(),
+        ...projectSessionActivity({ event: planned, sessionId: "session_root" }),
+      ],
+      version: 1,
+    });
+    expect(projectTaskCards(snapshot, { audience: "private" })).toEqual([
+      {
+        plan: [{ status: "working", title: "Check recent deploys" }],
+        state: "working",
+        tasks: [],
+        turnId: TURN_ID,
+      },
+    ]);
   });
 });

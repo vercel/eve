@@ -19,6 +19,7 @@ export function createActivitySnapshot(): ActivitySnapshotV1 {
     actions: {},
     blockers: {},
     pendingSettlements: {},
+    plans: {},
     revision: 0,
     seenEventIds: [],
     version: 1,
@@ -52,7 +53,10 @@ export function reduceActivityBatch(
 
 function presentationDiffers(left: ActivitySnapshotV1, right: ActivitySnapshotV1): boolean {
   return (
-    left.actions !== right.actions || left.blockers !== right.blockers || left.work !== right.work
+    left.actions !== right.actions ||
+    left.blockers !== right.blockers ||
+    left.plans !== right.plans ||
+    left.work !== right.work
   );
 }
 
@@ -68,6 +72,11 @@ function reduceEvent(snapshot: ActivitySnapshotV1, event: ActivityEventV1): Acti
       return settleAction(snapshot, event);
     case "action.label.updated":
       return updateActionLabel(snapshot, event);
+    case "plan.updated":
+      return {
+        ...snapshot,
+        plans: replaceBounded(snapshot.plans ?? {}, event.rootTurnId, event.items),
+      };
     case "task.started":
       return startTask(snapshot, event);
     case "task.settled":
