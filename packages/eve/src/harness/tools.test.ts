@@ -64,6 +64,7 @@ async function resolveApproval(
 
 async function executeSdkTool(input: {
   readonly abortSignal?: AbortSignal;
+  readonly messages?: ToolExecuteOptions["messages"];
   readonly tool: unknown;
   readonly toolCallId?: string;
   readonly toolInput?: unknown;
@@ -79,7 +80,7 @@ async function executeSdkTool(input: {
   expect(execute).toBeTypeOf("function");
   return await execute!(input.toolInput ?? {}, {
     abortSignal: input.abortSignal,
-    messages: [],
+    messages: input.messages ?? [],
     toolCallId: input.toolCallId ?? "call_1",
   });
 }
@@ -287,6 +288,44 @@ describe("buildToolSet", () => {
     );
 
     expect(receivedCallId).toBe("call_observe");
+  });
+
+  it("passes the AI SDK step messages to the authored tool context", async () => {
+    let receivedMessages: ToolContext["messages"] | undefined;
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "observe_messages",
+        {
+          description: "Observe the step messages.",
+          execute: createToolExecuteWithAuth({
+            execute(_input, ctx) {
+              receivedMessages = (ctx as ToolContext).messages;
+              return { ok: true };
+            },
+            scope: "observe_messages",
+          }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "observe_messages",
+        },
+      ],
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+    const messages: ToolExecuteOptions["messages"] = [
+      { content: "Can I talk to a person?", role: "user" },
+      { content: "Let me check.", role: "assistant" },
+    ];
+
+    const result = buildToolSet({ tools });
+    await contextStorage.run(ctx, () =>
+      executeSdkTool({ messages, tool: result.observe_messages }),
+    );
+
+    expect(receivedMessages).toEqual(messages);
   });
 
   it("passes through the input schema to the SDK tool", () => {

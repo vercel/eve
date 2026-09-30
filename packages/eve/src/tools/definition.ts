@@ -1,4 +1,4 @@
-import type { ToolExecutionOptions } from "ai";
+import type { ModelMessage, ToolExecutionOptions } from "ai";
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
@@ -189,6 +189,15 @@ export type ToolContext = SessionContext & {
    * the tool's {@link ApprovalContext}.
    */
   readonly toolName: string;
+  /**
+   * Messages sent to the model for the step that requested this call, oldest
+   * first — the same model input a `step.started` dynamic resolver reads from
+   * `ctx.messages`. Excludes system instructions and the assistant response
+   * that contains this call. Includes eve-authored context messages, such as
+   * request context and recalled memory, and reflects history projection and
+   * compaction.
+   */
+  readonly messages: readonly ModelMessage[];
   /**
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`

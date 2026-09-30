@@ -11,6 +11,7 @@ import {
 } from "#internal/testing/session-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
+import { SESSION_CHECKPOINT_VERSION } from "#execution/session/handoff.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -168,6 +169,180 @@ describe("workflowEntry integration", () => {
       expect(
         output.unexpected(workflowSdkNotice.unpinnedDelivery, workflowSdkNotice.maxRetries),
       ).toEqual([]);
+    });
+
+    it("stops attempting a deployment that cannot read the checkpoint version", async () => {
+      const output = captureConsoleOutput();
+      const runtime = await createTestRuntime({ agent: { name: "handoff-checkpoint-version" } });
+      await runtime.run(async () => {
+        const anchor = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            sessionTimeoutMs: false,
+            input: { message: "Alice opens a research session." },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(anchor);
+        const world = await getWorld();
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        const rewritten = new Map<string, Promise<unknown>>();
+        const candidateIds = new Set<string>();
+        // Rewrites only the candidate checkpoint version. Owner and candidate both
+        // run this build, so the test covers successor validation and memoization
+        // on a current owner — not an owner workflow still on a pre-upgrade build.
+        const olderCheckpointInput = (runId: string, encoded: unknown): Promise<unknown> => {
+          let pending = rewritten.get(runId);
+          if (pending === undefined) {
+            pending = (async () => {
+              const args = (await hydrateWorkflowArguments(encoded, runId, undefined)) as [
+                HandoffWorkflowEntryInput,
+              ];
+              expect(args[0].kind).toBe("handoff");
+              candidateIds.add(runId);
+              Object.assign(args[0].checkpoint, { version: SESSION_CHECKPOINT_VERSION - 1 });
+
+              const operations: Promise<void>[] = [];
+              const result = await dehydrateWorkflowArguments(args, runId, undefined, operations);
+              await Promise.all(operations);
+              return result;
+            })();
+            rewritten.set(runId, pending);
+          }
+          return pending;
+        };
+        const createEvent = world.events.create.bind(world.events);
+        const created = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
+          const [runId] = args;
+          const event = args[1] as (typeof args)[1] | RunCreatedEventRequest;
+          if (event.eventType === "run_created" && event.eventData.deploymentId === "dpl_b") {
+            event.eventData.input = await olderCheckpointInput(runId, event.eventData.input);
+          }
+          return createEvent(...args);
+        });
+        const queue = world.queue.bind(world);
+        const queued = vi.spyOn(world, "queue").mockImplementation(async (...args) => {
+          const message = args[1] as {
+            runId?: string;
+            runInput?: { deploymentId?: string; input: unknown };
+          };
+          if (message.runId !== undefined && message.runInput?.deploymentId === "dpl_b") {
+            message.runInput.input = await olderCheckpointInput(
+              message.runId,
+              message.runInput.input,
+            );
+          }
+          return queue(...args);
+        });
+        const handoffMarkerClaims = async (): Promise<number> => {
+          const events = await world.events.list({
+            pagination: { limit: 1000 },
+            resolveData: "all",
+            runId: anchor.runId,
+          });
+          return events.data.filter(
+            (event) =>
+              event.eventType === "hook_created" &&
+              event.eventData.token.startsWith("eve:inbox:handoff:"),
+          ).length;
+        };
+        try {
+          await stream.nextTurn();
+          await waitForParkedTurnStep(anchor.runId);
+
+          await workflowRuntime.dispatchSession({
+            command: handoffFollowUp("dpl_b", "Bob requests the first research step.", "version-1"),
+            sessionId: anchor.runId,
+          });
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+          await waitForParkedTurnStep(anchor.runId, 2);
+          expect(candidateIds.size).toBe(1);
+          const markersAfterAttempt = await handoffMarkerClaims();
+          expect(markersAfterAttempt).toBeGreaterThan(0);
+
+          await workflowRuntime.dispatchSession({
+            command: handoffFollowUp(
+              "dpl_b",
+              "Bob requests the second research step.",
+              "version-2",
+            ),
+            sessionId: anchor.runId,
+          });
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+          await waitForParkedTurnStep(anchor.runId, 3);
+          // The remembered target is skipped before any candidate or marker exists.
+          expect(candidateIds.size).toBe(1);
+          expect(await handoffMarkerClaims()).toBe(markersAfterAttempt);
+
+          const [candidateId] = candidateIds;
+          const candidateEvents = await world.events.list({
+            pagination: { limit: 1000 },
+            resolveData: "none",
+            runId: candidateId!,
+          });
+          // An unreadable version is an answer, not a fault: validation runs once.
+          expect(
+            candidateEvents.data.filter(
+              (event) => event.eventType === "step_failed" || event.eventType === "step_retrying",
+            ),
+          ).toEqual([]);
+
+          expect(
+            (
+              await waitForCommandHookOwner(
+                sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+              )
+            ).runId,
+          ).toBe(anchor.runId);
+          await vi.waitFor(
+            async () => {
+              // Recorded steps are not returned in turn order; the settled
+              // history is the one that accumulated every turn.
+              const settled = (await readTurnStepStates(anchor.runId))
+                .map((state) => state.sessionState.snapshot.session.history)
+                .reduce<readonly unknown[]>(
+                  (longest, history) => (history.length > longest.length ? history : longest),
+                  [],
+                ) as readonly { role: string; content: unknown }[];
+              const delivered = (message: string) =>
+                settled.filter(
+                  (entry) =>
+                    entry.role === "user" && JSON.stringify(entry.content).includes(message),
+                );
+              expect(delivered("Bob requests the first research step.")).toHaveLength(1);
+              expect(delivered("Bob requests the second research step.")).toHaveLength(1);
+            },
+            { timeout: 5000 },
+          );
+
+          // A different deployment is unproven, so it earns a fresh attempt.
+          await workflowRuntime.dispatchSession({
+            command: handoffFollowUp("dpl_c", "Bob requests a third research step.", "version-3"),
+            sessionId: anchor.runId,
+          });
+          await stream.nextTurn();
+          const successor = await waitForCommandHookOwner(
+            sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+          );
+          expect(successor.runId).not.toBe(anchor.runId);
+        } finally {
+          created.mockRestore();
+          queued.mockRestore();
+          stream.dispose();
+          await anchor.cancel();
+        }
+      });
+      expect(output.lines).toContainEqual(
+        expect.stringContaining(workflowSdkNotice.unpinnedDelivery),
+      );
+      // No validation retry: the SDK never reports an exhausted step.
+      expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
     });
 
     it("retains a message accepted just before durable hook disposal", async () => {
