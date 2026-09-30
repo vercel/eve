@@ -170,7 +170,7 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
 | `messaging`        | object           | Session route patterns: `{ create, messages, stream }`                                    |
 | `artifacts`        | object or `null` | Paths to the compiled manifest, discovery manifest, diagnostics, module map, and metadata |
 
-`toolInputSchemas.root` maps each root agent tool name to its JSON Schema, including tools from mounted extensions under their namespaced names. `toolInputSchemas.subagents` maps each declared subagent name to the same kind of map for that subagent's tools. Each schema is the form eve sends to the model: schemas from a validation library such as Zod have `additionalProperties: false` on objects that allow no other keys, plain JSON Schema is kept as written, and tools whose calls run as `serve` tasks, including agent tools, include the optional `taskId` input eve adds.
+`toolInputSchemas.root` maps each root agent tool name to its JSON Schema, including tools from mounted extensions under their namespaced names. `toolInputSchemas.subagents` has one entry for each declared subagent, including nested subagents, and each value is the same kind of map for that subagent's own tools. Each key is the subagent's path of names from the root agent: `forecaster` for a subagent the root agent declares, and `forecaster/reviewer` for a `reviewer` subagent that `forecaster` declares. Subagents that share a name under different parents get separate entries. Each schema is the form eve sends to the model: schemas from a validation library such as Zod have `additionalProperties: false` on objects that allow no other keys, plain JSON Schema is kept as written, and tools whose calls run as `serve` tasks, including agent tools, include the optional `taskId` input eve adds.
 
 ```json
 {
@@ -184,7 +184,17 @@ Run this first when something behaves unexpectedly. It confirms a file was disco
         "additionalProperties": false
       }
     },
-    "subagents": {}
+    "subagents": {
+      "forecaster": {},
+      "forecaster/reviewer": {
+        "check_source": {
+          "type": "object",
+          "properties": { "url": { "type": "string" } },
+          "required": ["url"],
+          "additionalProperties": false
+        }
+      }
+    }
   }
 }
 ```

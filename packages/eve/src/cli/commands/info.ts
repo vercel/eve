@@ -1,5 +1,9 @@
 import { type ApplicationInspection, inspectApplication } from "#services/inspect-application.js";
-import type { CompiledInstructionsDefinition, CompiledToolDefinition } from "#compiler/manifest.js";
+import type {
+  CompiledInstructionsDefinition,
+  CompiledSubagentNode,
+  CompiledToolDefinition,
+} from "#compiler/manifest.js";
 import type { JsonObject } from "#shared/json.js";
 import { type CliRow, createCliTheme, renderCliSection } from "#cli/ui/output.js";
 
@@ -28,7 +32,10 @@ export interface ApplicationInfoJson {
   toolInputSchemas: {
     /** The root agent's tools, including tools from mounted extensions. */
     root: Record<string, JsonObject>;
-    /** Each declared subagent's own tools, keyed by subagent name. */
+    /**
+     * Each declared subagent's own tools, keyed by the subagent's path of names
+     * from the root agent, such as `researcher` or `researcher/reviewer`.
+     */
     subagents: Record<string, Record<string, JsonObject>>;
   };
   subagents: string[];
@@ -77,12 +84,7 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
     tools: (compiledState?.manifest.tools ?? []).map((tool) => tool.name),
     toolInputSchemas: {
       root: modelInputSchemas(compiledState?.manifest.tools ?? []),
-      subagents: Object.fromEntries(
-        (compiledState?.manifest.subagents ?? []).map((subagent) => [
-          subagent.name,
-          modelInputSchemas(subagent.agent.tools),
-        ]),
-      ),
+      subagents: subagentModelInputSchemas(compiledState?.manifest.subagents ?? []),
     },
     subagents: (compiledState?.manifest.subagents ?? []).map((subagent) => subagent.name),
     schedules: (compiledState?.manifest.schedules ?? []).map((schedule) => schedule.name),
@@ -115,6 +117,20 @@ function modelInputSchemas(tools: readonly CompiledToolDefinition[]): Record<str
     tools.flatMap((tool) =>
       tool.modelInputSchema === undefined ? [] : [[tool.name, tool.modelInputSchema]],
     ),
+  );
+}
+
+/** Subagent names are unique only among siblings, so each entry is keyed by its path from the root. */
+function subagentModelInputSchemas(
+  subagents: readonly CompiledSubagentNode[],
+): Record<string, Record<string, JsonObject>> {
+  const subagentsByNodeId = new Map(subagents.map((subagent) => [subagent.nodeId, subagent]));
+  const pathOf = (subagent: CompiledSubagentNode): string => {
+    const parent = subagentsByNodeId.get(subagent.parentNodeId);
+    return parent === undefined ? subagent.name : `${pathOf(parent)}/${subagent.name}`;
+  };
+  return Object.fromEntries(
+    subagents.map((subagent) => [pathOf(subagent), modelInputSchemas(subagent.agent.tools)]),
   );
 }
 
