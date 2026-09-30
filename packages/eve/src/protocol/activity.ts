@@ -42,11 +42,24 @@ export interface ActivityActionIdentityV1 {
   readonly stepIndex: number;
 }
 
+export type ActivityTaskKind = "agent" | "tool";
+
+/** Marks an action whose call runs as a task, which a channel shows as one live row. */
+export interface ActivityActionTaskV1 {
+  readonly id: string;
+  readonly kind: ActivityTaskKind;
+  /** The action's label, or its name, when the task started. */
+  readonly title: string;
+  /** One line describing the call's result or failure, once it settles. */
+  readonly summary?: string;
+}
+
 export interface ActivityActionStateV1 extends ActivityActionIdentityV1 {
   readonly label?: string;
   readonly phase: ActivityActionPhase;
   readonly settledAt?: string;
   readonly startedAt: string;
+  readonly task?: ActivityActionTaskV1;
 }
 
 export interface ActivityBlockerIdentityV1 {
@@ -96,6 +109,21 @@ export type ActivityEventV1 =
       readonly eventId: string;
       readonly kind: "action.label.updated";
       readonly label: string;
+    }
+  | {
+      readonly actionId: string;
+      readonly eventId: string;
+      readonly kind: "task.started";
+      readonly taskId: string;
+      readonly taskKind: ActivityTaskKind;
+    }
+  | {
+      readonly actionId: string;
+      readonly eventId: string;
+      readonly kind: "task.settled";
+      readonly outcome: "completed" | "failed" | "cancelled";
+      readonly settledAt: string;
+      readonly summary?: string;
     }
   | {
       readonly blocker: ActivityBlockerIdentityV1;
@@ -179,6 +207,8 @@ export function parseActivityBatchV1(value: unknown): ActivityBatchV1 | undefine
   return { events, version: 1 };
 }
 
+type TaskSettledEvent = Extract<ActivityEventV1, { readonly kind: "task.settled" }>;
+
 function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null | undefined {
   switch (value.kind) {
     case "work.started": {
@@ -245,6 +275,45 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
         kind: "action.label.updated",
         label: value.label,
       };
+    }
+    case "task.started": {
+      if (!hasOnlyKeys(value, ["actionId", "eventId", "kind", "taskId", "taskKind"]))
+        return undefined;
+      if (
+        !isIdentity(value.actionId) ||
+        !isIdentity(value.eventId) ||
+        !isIdentity(value.taskId) ||
+        !isOneOf(value.taskKind, ["agent", "tool"] as const)
+      )
+        return undefined;
+      return {
+        actionId: value.actionId,
+        eventId: value.eventId,
+        kind: "task.started",
+        taskId: value.taskId,
+        taskKind: value.taskKind,
+      };
+    }
+    case "task.settled": {
+      if (!hasOnlyKeys(value, ["actionId", "eventId", "kind", "outcome", "settledAt", "summary"]))
+        return undefined;
+      if (
+        !isIdentity(value.actionId) ||
+        !isIdentity(value.eventId) ||
+        !isOneOf(value.outcome, ["completed", "failed", "cancelled"] as const) ||
+        !isBoundedString(value.settledAt) ||
+        !isOptionalBoundedString(value.summary)
+      )
+        return undefined;
+      const settled: { -readonly [K in keyof TaskSettledEvent]: TaskSettledEvent[K] } = {
+        actionId: value.actionId,
+        eventId: value.eventId,
+        kind: "task.settled",
+        outcome: value.outcome,
+        settledAt: value.settledAt,
+      };
+      if (value.summary !== undefined) settled.summary = value.summary;
+      return settled;
     }
     case "blocker.started": {
       if (!hasOnlyKeys(value, ["blocker", "eventId", "kind", "startedAt"])) return undefined;

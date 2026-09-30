@@ -1,8 +1,8 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
 import {
-  attachChannelActivityPresentation,
-  type ChannelActivityPresentation,
-} from "#channel/activity-renderer.js";
+  attachChannelActivityPresenter,
+  type ChannelActivityPresenter,
+} from "#channel/activity-presenter.js";
 import type { UserContent } from "ai";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -111,12 +111,12 @@ export function getChannelInstrumentationKind(value: unknown): string | undefine
   return routeSignature === undefined ? undefined : channelInstrumentationKinds.get(routeSignature);
 }
 
-export function setChannelActivityRenderers(
+export function setChannelActivityPresenter(
   channel: unknown,
-  input: ChannelActivityPresentation,
+  presenter: ChannelActivityPresenter,
 ): void {
   if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
-  attachChannelActivityPresentation(channel.adapter, input);
+  attachChannelActivityPresenter(channel.adapter, presenter);
 }
 
 export function setChannelInstrumentationKind(channel: CompiledChannel, kind: string): void {

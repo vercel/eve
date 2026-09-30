@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { HTTP_ADAPTER, HTTP_ADAPTER_KIND } from "#channel/http.js";
 import {
-  attachChannelActivityPresentation,
-  getChannelActivityPresentation,
-} from "#channel/activity-renderer.js";
+  attachChannelActivityPresenter,
+  getChannelActivityPresenter,
+} from "#channel/activity-presenter.js";
 import { SCHEDULE_ADAPTER, SCHEDULE_ADAPTER_KIND } from "#channel/schedule.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
@@ -86,14 +86,10 @@ describe("createRuntimeAdapterRegistry", () => {
     });
   });
 
-  it("rehydrates non-enumerable activity renderer behavior", () => {
+  it("rehydrates the non-enumerable activity presenter", () => {
     const adapter: ChannelAdapter = { kind: "slack", state: { channelId: null } };
-    const render = vi.fn();
-    const destination = vi.fn();
-    attachChannelActivityPresentation(adapter, {
-      destination,
-      renderers: [{ id: "slack.status.v1", render }],
-    });
+    const presenter = { destination: vi.fn(), render: vi.fn() };
+    attachChannelActivityPresenter(adapter, presenter);
     const registry = createRuntimeAdapterRegistry({ channels: [makeChannelDefinition(adapter)] });
 
     const rehydrated = deserializeRuntimeAdapter(registry, {
@@ -101,10 +97,7 @@ describe("createRuntimeAdapterRegistry", () => {
       state: { channelId: "C1", threadTs: "T1" },
     });
 
-    expect(getChannelActivityPresentation(rehydrated)).toEqual({
-      destination,
-      renderers: [{ id: "slack.status.v1", render }],
-    });
+    expect(getChannelActivityPresenter(rehydrated)).toBe(presenter);
     expect(rehydrated.state).toEqual({ channelId: "C1", threadTs: "T1" });
   });
 

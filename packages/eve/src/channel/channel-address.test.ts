@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import {
-  attachChannelActivityPresentation,
-  getChannelActivityPresentation,
-} from "#channel/activity-renderer.js";
+  attachChannelActivityPresenter,
+  getChannelActivityPresenter,
+} from "#channel/activity-presenter.js";
 import type { Runtime } from "#channel/types.js";
 
 function createRuntime(): Runtime {
@@ -120,7 +120,7 @@ describe("createChannelAddress", () => {
     );
   });
 
-  it("enables activity only for a newly created session with configured renderers", async () => {
+  it("keeps the channel's activity presenter on a newly created session", async () => {
     const runtime = createRuntime();
     vi.mocked(runtime.dispatchContinuation).mockResolvedValue({ status: "session_not_active" });
     vi.mocked(runtime.createSession).mockResolvedValue({
@@ -128,10 +128,8 @@ describe("createChannelAddress", () => {
       sessionId: "sess_activity",
     });
     const adapter = { kind: "slack" };
-    attachChannelActivityPresentation(adapter, {
-      destination: () => ({}),
-      renderers: [{ id: "status", render: vi.fn() }],
-    });
+    const presenter = { destination: () => ({}), render: vi.fn() };
+    attachChannelActivityPresenter(adapter, presenter);
     const address = createChannelAddress<{ channelId: string; threadTs: string }>({
       adapter,
       channelName: "slack",
@@ -156,9 +154,7 @@ describe("createChannelAddress", () => {
     );
     const created = vi.mocked(runtime.createSession).mock.calls[0]?.[0].adapter;
     expect(created).toBeDefined();
-    expect(getChannelActivityPresentation(created!)?.renderers).toEqual([
-      expect.objectContaining({ id: "status" }),
-    ]);
+    expect(getChannelActivityPresenter(created!)).toBe(presenter);
   });
 
   it("binds every control directly to the namespaced continuation token", async () => {

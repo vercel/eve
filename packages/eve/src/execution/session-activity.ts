@@ -68,6 +68,10 @@ function reduceEvent(snapshot: ActivitySnapshotV1, event: ActivityEventV1): Acti
       return settleAction(snapshot, event);
     case "action.label.updated":
       return updateActionLabel(snapshot, event);
+    case "task.started":
+      return startTask(snapshot, event);
+    case "task.settled":
+      return settleTask(snapshot, event);
     case "blocker.started":
       return startBlocker(snapshot, event);
     case "blocker.settled":
@@ -175,6 +179,44 @@ function settleAction(
       ...current,
       phase: event.outcome,
       settledAt: event.settledAt,
+    }),
+  };
+}
+
+function startTask(
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "task.started" }>,
+): ActivitySnapshotV1 {
+  const current = snapshot.actions[event.actionId];
+  if (current === undefined || current.task !== undefined) return snapshot;
+  return {
+    ...snapshot,
+    actions: replaceBounded(snapshot.actions, event.actionId, {
+      ...current,
+      task: { id: event.taskId, kind: event.taskKind, title: current.label ?? current.name },
+    }),
+  };
+}
+
+function settleTask(
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "task.settled" }>,
+): ActivitySnapshotV1 {
+  const current = snapshot.actions[event.actionId];
+  if (current === undefined) return retainPending(snapshot, "action", event.actionId, event);
+  if (current.phase !== "running") return snapshot;
+  const summary =
+    event.summary === undefined ? undefined : normalizePresentationText(event.summary) || undefined;
+  return {
+    ...snapshot,
+    actions: replaceBounded(snapshot.actions, event.actionId, {
+      ...current,
+      phase: event.outcome,
+      settledAt: event.settledAt,
+      task:
+        current.task === undefined || summary === undefined
+          ? current.task
+          : { ...current.task, summary },
     }),
   };
 }

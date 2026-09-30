@@ -173,6 +173,7 @@ export async function withSessionEventEmitter<T>(
     });
   } finally {
     await instrumentation?.flush();
+    await sink.flushActivity();
     sink.release();
   }
 }
@@ -187,6 +188,11 @@ export interface SessionEventSink {
   emit(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
   /** Closes the session stream; only a terminal `done` step does this. */
   close(): Promise<void>;
+  /**
+   * Waits for the activity this sink submitted. A step awaits it before it
+   * returns, so a host that freezes after the step can't drop a task's settlement.
+   */
+  flushActivity(): Promise<void>;
   /** Releases the writer lock so the next step can acquire it. Safe after `close()`. */
   release(): void;
 }
@@ -216,6 +222,7 @@ function openSessionEventStream(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const writer = input.sessionWritable.getWriter();
 
+  const submittedActivity: Promise<void>[] = [];
   let released = false;
   const release = (): void => {
     if (released) return;
@@ -243,13 +250,18 @@ function openSessionEventStream(input: {
       );
       await writer.write(encodeMessageStreamEvent(stamped));
       if (origin === "own") {
-        void observeSessionActivity({ ctx, event: stamped, sessionId: input.sessionId });
+        submittedActivity.push(
+          observeSessionActivity({ ctx, event: stamped, sessionId: input.sessionId }),
+        );
       }
       return stamped;
     },
     close: async () => {
       await writer.close();
       release();
+    },
+    async flushActivity() {
+      await Promise.allSettled(submittedActivity.splice(0));
     },
     release,
   };
@@ -315,6 +327,7 @@ export async function publishTerminalSessionEvent(input: {
   } catch (error) {
     log.error(`failed to publish terminal ${type} event`, { ...fields, error });
   } finally {
+    await sink.flushActivity();
     sink.release();
     try {
       await instrumentation?.flush();

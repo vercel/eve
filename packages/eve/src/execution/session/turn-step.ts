@@ -564,6 +564,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     if (durableResult.action === "done") await sink.close();
     return durableResult;
   } finally {
+    await sink.flushActivity();
     sink.release();
   }
 }

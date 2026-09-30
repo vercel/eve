@@ -9,7 +9,6 @@ import type { ActivityBatchV1 } from "#protocol/activity.js";
 
 const mocks = vi.hoisted(() => ({
   createHook: vi.fn(),
-  disposeSessionActivityStep: vi.fn(),
   renderSessionActivityStep: vi.fn(),
   sleep: vi.fn(),
 }));
@@ -19,14 +18,12 @@ vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
   createHook: mocks.createHook,
   sleep: mocks.sleep,
 }));
-vi.mock("#execution/session-activity-renderer-step.js", () => ({
-  disposeSessionActivityStep: mocks.disposeSessionActivityStep,
+vi.mock("#execution/session-activity-presenter-step.js", () => ({
   renderSessionActivityStep: mocks.renderSessionActivityStep,
 }));
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.disposeSessionActivityStep.mockResolvedValue(undefined);
 });
 
 const work = {
@@ -61,7 +58,7 @@ describe("activityCollectorWorkflow", () => {
         } satisfies ActivityBatchV1;
       },
     });
-    mocks.renderSessionActivityStep.mockResolvedValue({ rendererStates: { slack: "rendered" } });
+    mocks.renderSessionActivityStep.mockResolvedValue("rendered");
 
     await expect(
       activityCollectorWorkflow({
@@ -72,7 +69,7 @@ describe("activityCollectorWorkflow", () => {
     ).resolves.toBeUndefined();
 
     expect(mocks.renderSessionActivityStep).toHaveBeenCalledExactlyOnceWith({
-      rendererStates: {},
+      presenterState: undefined,
       serializedContext: {},
       snapshot: expect.objectContaining({
         work: expect.objectContaining({
@@ -80,9 +77,73 @@ describe("activityCollectorWorkflow", () => {
         }),
       }),
     });
-    expect(mocks.disposeSessionActivityStep).toHaveBeenCalledExactlyOnceWith({
-      rendererStates: { slack: "rendered" },
+  });
+
+  it("renders changes made during the cooldown once, from the latest snapshot", async () => {
+    const cooldown = Promise.withResolvers<void>();
+    const firstRender = Promise.withResolvers<void>();
+    const burstRead = Promise.withResolvers<void>();
+    const action = {
+      id: "action:root:call",
+      kind: "tool" as const,
+      name: "deploy",
+      parentWorkId: work.id,
+      rootTurnId: "turn",
+      stepIndex: 0,
+    };
+    mocks.sleep.mockImplementation((duration: Date | number) => {
+      if (duration instanceof Date) return new Promise<void>(() => {});
+      return duration === 3_000 ? cooldown.promise : Promise.resolve();
+    });
+    mocks.createHook.mockReturnValue({
+      token: "activity",
+      getConflict: async () => null,
+      async *[Symbol.asyncIterator]() {
+        yield {
+          events: [{ eventId: "start", kind: "work.started", startedAt: "1", work }],
+          version: 1,
+        } satisfies ActivityBatchV1;
+        await firstRender.promise;
+        yield {
+          events: [{ action, eventId: "action", kind: "action.started", startedAt: "2" }],
+          version: 1,
+        } satisfies ActivityBatchV1;
+        yield {
+          events: [
+            {
+              actionId: action.id,
+              eventId: "action-settled",
+              kind: "action.settled",
+              outcome: "completed",
+              settledAt: "3",
+            },
+          ],
+          version: 1,
+        } satisfies ActivityBatchV1;
+        burstRead.resolve();
+        yield await new Promise<ActivityBatchV1>(() => {});
+      },
+    });
+    mocks.renderSessionActivityStep.mockImplementation(
+      async ({ presenterState }: { presenterState: number | undefined }) => {
+        firstRender.resolve();
+        return (presenterState ?? 0) + 1;
+      },
+    );
+
+    void activityCollectorWorkflow({
+      expiresAt: "2026-09-04T00:00:00Z",
       serializedContext: {},
+      token: "activity",
+    });
+    await burstRead.promise;
+    expect(mocks.renderSessionActivityStep).toHaveBeenCalledOnce();
+
+    cooldown.resolve();
+    await vi.waitFor(() => expect(mocks.renderSessionActivityStep).toHaveBeenCalledTimes(2));
+    expect(mocks.renderSessionActivityStep.mock.calls[1]?.[0]).toMatchObject({
+      presenterState: 1,
+      snapshot: { actions: { [action.id]: { phase: "completed" } } },
     });
   });
 
@@ -118,10 +179,7 @@ describe("activityCollectorWorkflow", () => {
       expiry.resolve();
 
       await expect(result).resolves.toBeUndefined();
-      expect(mocks.disposeSessionActivityStep).toHaveBeenCalledExactlyOnceWith({
-        rendererStates: {},
-        serializedContext: {},
-      });
+      expect(mocks.renderSessionActivityStep).not.toHaveBeenCalled();
     },
     1_000,
   );

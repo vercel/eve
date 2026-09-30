@@ -3,12 +3,12 @@ import { createHook, sleep } from "#compiled/@workflow/core/index.js";
 import { claimHookOwnership, isHookConflictError } from "#execution/hook-ownership.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import type { ActivityBatchV1, ActivitySnapshotV1 } from "#protocol/activity.js";
-import {
-  disposeSessionActivityStep,
-  renderSessionActivityStep,
-} from "#execution/session-activity-renderer-step.js";
+import { renderSessionActivityStep } from "#execution/session-activity-presenter-step.js";
 
+/** Coalesces the batches of one burst, such as a step starting several tasks. */
 const RENDER_DEBOUNCE_MS = 350;
+/** Slack asks agents to update a message at most once every 3 seconds. */
+const RENDER_COOLDOWN_MS = 3_000;
 
 export interface ActivityCollectorInput {
   readonly expiresAt: string;
@@ -16,7 +16,11 @@ export interface ActivityCollectorInput {
   readonly token: string;
 }
 
-/** Independently owns activity reduction and provider presentation for one root session. */
+/**
+ * Owns activity reduction and presentation for one root session. A change
+ * renders after a short debounce and at most once per cooldown, always from the
+ * latest snapshot, so a burst renders once and the final state is never lost.
+ */
 export async function activityCollectorWorkflow(input: ActivityCollectorInput): Promise<void> {
   "use workflow";
 
@@ -25,7 +29,8 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
   let pendingRead: Promise<IteratorResult<ActivityBatchV1>> | undefined;
   const expiry = sleep(new Date(input.expiresAt)).then(() => ({ kind: "expired" as const }));
   let snapshot = createActivitySnapshot();
-  let rendererStates: Readonly<Record<string, unknown>> = {};
+  let presenterState: unknown;
+  let cooldown: Promise<void> = Promise.resolve();
 
   try {
     await claimHookOwnership(batches);
@@ -34,46 +39,40 @@ export async function activityCollectorWorkflow(input: ActivityCollectorInput): 
     throw error;
   }
 
-  try {
+  while (true) {
+    pendingRead ??= iterator.next();
+    const next = await Promise.race([
+      pendingRead.then((value) => ({ kind: "batch" as const, value })),
+      expiry,
+    ]);
+    if (next.kind === "expired" || next.value.done === true) return;
+    pendingRead = undefined;
+    const reduced = reduceCollectorActivity(snapshot, next.value.value);
+    snapshot = reduced.snapshot;
+    if (!reduced.presentationChanged) continue;
+
+    const ready = Promise.all([cooldown, sleep(RENDER_DEBOUNCE_MS)]).then(() => ({
+      kind: "ready" as const,
+    }));
     while (true) {
       pendingRead ??= iterator.next();
-      const next = await Promise.race([
+      const buffered = await Promise.race([
         pendingRead.then((value) => ({ kind: "batch" as const, value })),
+        ready,
         expiry,
       ]);
-      if (next.kind === "expired" || next.value.done === true) break;
+      if (buffered.kind === "expired") return;
+      if (buffered.kind === "ready" || buffered.value.done === true) break;
       pendingRead = undefined;
-      const reduced = reduceCollectorActivity(snapshot, next.value.value);
-      snapshot = reduced.snapshot;
-      if (!reduced.presentationChanged) continue;
-
-      const debounce = sleep(RENDER_DEBOUNCE_MS).then(() => ({ kind: "render" as const }));
-      while (true) {
-        pendingRead ??= iterator.next();
-        const buffered = await Promise.race([
-          pendingRead.then((value) => ({ kind: "batch" as const, value })),
-          debounce,
-          expiry,
-        ]);
-        if (buffered.kind === "expired") return;
-        if (buffered.kind === "render") break;
-        if (buffered.value.done === true) break;
-        pendingRead = undefined;
-        snapshot = reduceActivityBatch(snapshot, buffered.value.value);
-      }
-
-      const rendered = await renderSessionActivityStep({
-        rendererStates,
-        serializedContext: input.serializedContext,
-        snapshot,
-      });
-      rendererStates = rendered.rendererStates;
+      snapshot = reduceActivityBatch(snapshot, buffered.value.value);
     }
-  } finally {
-    await disposeSessionActivityStep({
-      rendererStates,
+
+    presenterState = await renderSessionActivityStep({
+      presenterState,
       serializedContext: input.serializedContext,
-    }).catch(() => {});
+      snapshot,
+    });
+    cooldown = sleep(RENDER_COOLDOWN_MS);
   }
 }
 

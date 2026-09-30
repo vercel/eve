@@ -152,7 +152,7 @@ controls observability content capture, not access to the channel. See
 Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history. Public conversations use the returned `title`, or the triggering message text when `title` is omitted. DMs and private channels always use `Private message` so the run title does not expose message details.
 
 - `onMessage(ctx, message)` handles Slack `message` events. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. Messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies.
-- `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth and posts `Thinking…`.
+- `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth.
 - `onDirectMessage(ctx, message)` handles only DMs and takes precedence over `onMessage`. Bot-authored messages and edits are filtered first; Slack requires `message.im` and `im:history`.
 
 | Incoming event         | Handler order                                                       |
@@ -163,6 +163,8 @@ Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context
 | Other Events API event | `onEvent` → ignore                                                  |
 
 Only the first available handler runs. A message hook returning `null` drops the message; it does not continue down the table.
+
+Message hooks only decide whether and how a message starts a turn. They don't render anything, so replacing one never changes what people see: eve still acknowledges the message, shows progress, and posts the reply. To change what the agent posts, add [renderers](#customize-rendering).
 
 `onInteraction(action, ctx)` separately handles user-owned `block_actions` callbacks. eve-owned HITL buttons and modal submissions go through `onInputResponse(ctx, submission)` instead. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
 
@@ -397,7 +399,7 @@ const session = await ctx.resolveSession({ target });
 
 ### Slack API calls outside a handler
 
-Inside inbound webhook handlers such as `onAppMention`, `onEvent`, `onInteraction`, `onShortcut`, `onSlashCommand`, and `onInputResponse`, `ctx.slack.request(operation, body)` is the raw-API escape hatch. Inside an `events` handler, use `channel.slack.request(...)` instead. Outside those contexts there is no handle — a schedule resolving reactions on old
+Inside inbound webhook handlers such as `onAppMention`, `onEvent`, `onInteraction`, `onShortcut`, `onSlashCommand`, and `onInputResponse`, `ctx.slack.request(operation, body)` is the raw-API escape hatch. Inside a [renderer](#customize-rendering)'s event handler, use `channel.slack.request(...)` instead. Outside those contexts there is no handle — a schedule resolving reactions on old
 messages, for example, has no inbound Slack request. For that, call the
 same primitive the handle uses directly:
 
@@ -450,28 +452,102 @@ The bases say where a call may go. `apiBaseUrl` is the base Slack Web API method
 
 ### Delivery
 
-The default handlers reply in-thread and show activity. Typing indicators post automatically: `Thinking…` on inbound, `Working…` on `turn.started`, a truncated reasoning snippet on `reasoning.appended`, and an action label on `actions.requested` — the tool name plus its most telling argument (`grep useEveAgent`, `read_file agent/agent.ts`), the subagent or remote-agent name for dispatched calls, and `+N more` when the model requests several actions at once. Labels leave out the model's own `task_wait` and `task_cancel` calls. The model's own pre-tool narration, when present, takes precedence over the derived label. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use the five-second refresh interval to avoid one Slack request per token. Override `events["reasoning.appended"]` if you prefer generic wording. Override an inbound handler or the `events` handlers to customize.
+eve shows an agent's progress in two places. Short work, such as thinking or a tool call, appears in the thread status and never posts a message. [Tasks](/docs/tools/tasks), which keep working while the conversation continues, appear in a task card: one message per turn that eve updates in place. Replies post as ordinary messages, so the thread holds the conversation, the task card, and nothing else.
 
-The built-in `message.completed` handler renders responses up to 12,000 characters inline. Longer responses are uploaded unchanged as a Markdown snippet named `eve-response.md` with a short in-thread note, which requires the `files:write` bot scope. Upload failures are logged by the channel dispatcher; they do not trigger a model retry. An authored `events["message.completed"]` handler replaces this behavior and owns its own delivery limits.
+| Moment                             | Thread status                                                                 |
+| ---------------------------------- | ----------------------------------------------------------------------------- |
+| A mention or DM arrives            | `Thinking...`, right away, while the message hook is still deciding           |
+| The message hook drops the message | Cleared                                                                       |
+| The turn starts                    | `Working...`                                                                  |
+| The model reasons                  | The first line of its reasoning                                               |
+| The model calls tools              | Its narration before the calls, or an action label such as `grep useEveAgent` |
+| The turn waits on its tasks        | `Waiting on researcher...`, or `Waiting on researcher and 2 more tasks...`    |
+| A reply posts                      | Cleared by Slack                                                              |
 
-When the model replies while its [tasks](/docs/tools/tasks) keep working, that reply posts like any other, and the reply after the results posts as another message. A schedule's session posts only the final reply.
+Action labels are the tool name plus its most telling argument, the agent name for agent calls, and `+N more` when the model requests several actions at once. They leave out the model's own `task_wait` and `task_cancel` calls. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use a five-second refresh interval to avoid one Slack request per token.
+
+Replies up to 12,000 characters render inline. Longer replies are uploaded unchanged as a Markdown snippet named `eve-response.md` with a short in-thread note, which requires the `files:write` bot scope. Upload failures are logged by the channel dispatcher; they do not trigger a model retry.
+
+When the model replies while its tasks keep working, that reply posts like any other, and the reply after the results posts as another message. A schedule's session posts only the final reply.
 
 Outbound text preserves bare `@` tokens as literal text. To mention a user, embed Slack's `<@USER_ID>` syntax directly or use `channel.thread.mentionUser(userId)`.
 
 When a session starts without a `threadTs` (say, from a schedule's `to(slack, target).send(...)`), eve gives it a unique temporary continuation token. The first agent post anchors the session to the Slack message timestamp, and later posts and mentions resume that same session. Pass `initialMessage` with a `Card` to land a structured anchor first instead. `threadTs` and `initialMessage` are mutually exclusive.
 
-The example below overrides `onAppMention` to gate on an authored message. The built-in completion handler still posts the reply and uploads long responses as snippets. Event handlers receive `(eventData, channel, ctx)`, with Slack platform handles on `channel.thread` and `channel.slack`:
+### Task card
 
-```ts
-import { defaultSlackAuth, slackChannel } from "eve/channels/slack";
+When a turn starts its first task, eve posts a task card in the thread and keeps it current until the turn ends. One task renders as a Slack `task_card` block; two or more render as a `plan` block with one row per task call. The card needs no configuration beyond the `chat:write` scope the channel already uses.
+
+Each row shows:
+
+- **Title:** the tool's [`label.start`](/docs/tools#label-tool-activity), the agent name and the first line of its brief for an agent task (`researcher: Find the incidents behind the checkout spike`), or the tool name.
+- **What it's doing now:** the agent's current tool call, or what it's waiting for when the agent needs an approval, an answer, or a sign-in. The question itself still posts in the thread.
+- **How it ended:** the first line of the result or the agent's reply, `Failed:` and the first line of the error, or `Stopped` for a cancelled task. Failed and stopped rows never show a success check.
+
+The plan title summarizes the turn: `Working on 2 tasks`, `1 of 2 tasks done`, `Waiting for approval`, then `Finished 2 tasks` or `Finished 3 tasks: 1 failed, 1 stopped`. A resumable task continued in a later turn appears in that turn's card.
+
+The card is rendered off the turn's critical path, so a slow or failed Slack call never delays or fails the turn. eve coalesces updates and changes the card at most once every 3 seconds, as Slack recommends, and always renders the final state. Schedule sessions and sessions without a Slack thread get no card.
+
+### Customize rendering
+
+Pass `renderers` to change what the agent posts without replacing eve's defaults. Each renderer wraps the ones after it, ending with eve's default renderer, and has three optional parts:
+
+- `received(message, channel, next)` acknowledges a mention or DM the moment it arrives. eve's default sets `Thinking...`.
+- `events` handles session events such as `message.completed` or `input.requested`. Each handler receives `(eventData, channel, ctx, next)`, with Slack platform handles on `channel.thread` and `channel.slack`.
+- `taskCard(view, next)` returns the task card's blocks and notification text, or `null` for no card.
+
+Call `next()` to run the rest of the chain, ending with eve's default. Call it after your own work, before it, or with changed data, as in `next({ ...event, message })`; the rest of the chain runs at most once. Skip `next` to replace the default for that event. This renderer adds feedback buttons below each final reply and a context row to the finished task card:
+
+```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
+import { defineSlackRenderer, slackChannel } from "eve/channels/slack";
+
+const feedback = defineSlackRenderer({
+  events: {
+    async "message.completed"(event, channel, _ctx, next) {
+      await next(); // eve posts the reply, or uploads a long one as a snippet
+      if (event.finishReason === "tool-calls") return;
+      await channel.thread.post({
+        blocks: [
+          {
+            type: "context_actions",
+            elements: [
+              {
+                type: "feedback_buttons",
+                action_id: "reply_feedback",
+                positive_button: { text: { type: "plain_text", text: "Helpful" }, value: "up" },
+                negative_button: {
+                  text: { type: "plain_text", text: "Not helpful" },
+                  value: "down",
+                },
+              },
+            ],
+          },
+        ],
+        text: "Was this helpful?",
+      });
+    },
+  },
+  taskCard(view, next) {
+    const card = next(view);
+    if (card === null || view.state !== "finished") return card;
+    const note = {
+      type: "context",
+      elements: [{ type: "mrkdwn", text: "Results are in the reply below." }],
+    };
+    return { ...card, blocks: [...card.blocks, note] };
+  },
+});
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  onAppMention: (ctx, message) =>
-    message.author ? { auth: defaultSlackAuth(message, ctx) } : null,
+  renderers: [feedback],
 });
 ```
+
+`taskCard` receives the same view eve's default renders from: the turn's `state` (`working`, `blocked`, or `finished`) and its `tasks`, each with a `title`, `status`, current `activity`, `blockedOn`, and `summary`. It is synchronous and pure: eve posts the card, updates it as the view changes, and handles Slack's rate limits. To change a row's title in every channel, give the tool a [label](/docs/tools#label-tool-activity) instead.
+
+Renderers run in the order you list them, and the first one is outermost. `onInteraction` receives clicks on buttons a renderer posts, such as the feedback buttons above.
 
 ### Human-in-the-loop (HITL)
 
@@ -492,7 +568,7 @@ export default slackChannel({
 
 The callback receives the `InputRequest` and current `SessionContext`, so it can switch on `kind`, `action`, or presentation properties. Omit it to keep every request in the thread, or return `"direct-message"` unconditionally to make every request private. If eve cannot resolve the triggering Slack user for a direct message, it logs the undelivered request and posts no fallback, so private delivery fails closed. The existing `onInputResponse` or tool approval response policy still decides whether the person who clicks may respond.
 
-An authored `input.requested` handler can extend delivery and then hand the requests back to eve through `defaultDeliver()`. For example, an application can add non-sensitive context to the Slack thread before eve renders the actionable controls. The configured `approvalChannel` still sends sensitive reviews to a DM and keeps ordinary requests in the thread:
+A renderer's `input.requested` handler can extend delivery and then hand the requests on to eve with `next()`. For example, an application can add non-sensitive context to the Slack thread before eve renders the actionable controls. The configured `approvalChannel` still sends sensitive reviews to a DM and keeps ordinary requests in the thread:
 
 ```ts title="agent/channels/slack.ts"
 import { slackChannel } from "eve/channels/slack";
@@ -502,41 +578,49 @@ export default slackChannel({
   approvalChannel(request) {
     return isPrivate(request) ? "direct-message" : "thread";
   },
-  events: {
-    async "input.requested"(event, channel, _ctx, defaultDeliver) {
-      await channel.thread.post({
-        blocks: [
-          {
-            type: "context",
-            elements: [
+  renderers: [
+    {
+      events: {
+        async "input.requested"(_event, channel, _ctx, next) {
+          await channel.thread.post({
+            blocks: [
               {
-                type: "mrkdwn",
-                text: "A review is needed before this work can continue.",
+                type: "context",
+                elements: [
+                  {
+                    type: "mrkdwn",
+                    text: "A review is needed before this work can continue.",
+                  },
+                ],
               },
             ],
-          },
-        ],
-        text: "A review is needed before this work can continue.",
-      });
-      await defaultDeliver(event);
+            text: "A review is needed before this work can continue.",
+          });
+          await next();
+        },
+      },
     },
-  },
+  ],
 });
 ```
 
-Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the Slack user behind the event's `principalId`, device code included, and then updates that public status when `authorization.completed` fires. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access. `state.slackUsersByPrincipal` maps each principal eve has seen in the thread, through a message or an input response, to its Slack user ID. If the principal has no entry, the challenge is not sent privately.
+Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the Slack user behind the event's `principalId`, device code included, and then updates that public status when `authorization.completed` fires. A renderer's `authorization.required` handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access. Its `next()` reaches eve's default, which posts the public status; skip `next` to deliver the challenge yourself, as this handler does by direct message. `state.slackUsersByPrincipal` maps each principal eve has seen in the thread, through a message or an input response, to its Slack user ID. If the principal has no entry, the challenge is not sent privately.
 
 ```ts
-events: {
-  "authorization.required"(eventData, channel) {
-    const userId =
-      eventData.principalId === undefined
-        ? undefined
-        : channel.state.slackUsersByPrincipal?.[eventData.principalId];
-    if (!userId || !eventData.authorization?.url) return;
-    return channel.postDirectMessage(userId, `Sign in to continue: ${eventData.authorization.url}`);
+renderers: [
+  {
+    events: {
+      "authorization.required"(eventData, channel) {
+        const userId =
+          eventData.principalId === undefined
+            ? undefined
+            : channel.state.slackUsersByPrincipal?.[eventData.principalId];
+        if (!userId || !eventData.authorization?.url) return;
+        return channel.postDirectMessage(userId, `Sign in to continue: ${eventData.authorization.url}`);
+      },
+    },
   },
-},
+],
 ```
 
 The private authorization button uses the label **Sign in**, so long connection display names do not make the button invalid. The public status identifies the connection.
@@ -545,7 +629,7 @@ The private authorization button uses the label **Sign in**, so long connection 
 
 Start a session without an inbound message through `ctx.to(slack, target).send(message, { auth })` from another channel, or `to(slack, target).send(message, { auth })` from a schedule `run` handler. The proactive target shape is `{ channelId, installationTeamId?, threadTs?, initialMessage?, audience? }`. It defaults to `unknown`; pass `audience` only when the caller already knows the destination's visibility. Set `installationTeamId` to the app installation workspace when a function-form bot token must select an installation. This sends turn input to the agent; it is not a direct Slack post.
 
-To post without invoking the model, use `ctx.thread.post(...)` in an inbound Slack handler or `channel.thread.post(...)` in an `events` handler. Use `callSlackApi(...)` where no Slack channel context exists. For application-managed retries and deduplication, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
+To post without invoking the model, use `ctx.thread.post(...)` in an inbound Slack handler or `channel.thread.post(...)` in a renderer's event handler. Use `callSlackApi(...)` where no Slack channel context exists. For application-managed retries and deduplication, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
 ### Attachments
 

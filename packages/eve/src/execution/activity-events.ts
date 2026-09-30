@@ -5,8 +5,12 @@ import type {
   ActivityEventV1,
   ActivityWorkIdentityV1,
 } from "#protocol/activity.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { TaskSettledStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { RuntimeActionRequest } from "#shared/action-types.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
+
+type TaskSettledActivity = Extract<ActivityEventV1, { readonly kind: "task.settled" }>;
 
 export function projectActivityEvents(input: {
   readonly at: string;
@@ -19,38 +23,19 @@ export function projectActivityEvents(input: {
   const { event, lineage } = input;
   if (event.type === "actions.requested") {
     return event.data.actions.flatMap((action) => {
-      if (action.kind === "subagent-call" || action.kind === "remote-agent-call") return [];
       if (action.kind === "tool-call" && isTaskControlTool(action.toolName)) return [];
-      const kind = action.kind === "load-skill" ? ("skill" as const) : ("tool" as const);
-      const rawName = action.kind === "load-skill" ? "load_skill" : action.toolName;
-      const name = normalizePresentationText(rawName) || (kind === "skill" ? "Skill" : "Tool");
-      const id = actionId(lineage.id, action.callId);
-      const label = activityLabel(event.data.presentation?.[action.callId]?.label);
-      return [
-        {
-          action: {
-            id,
-            kind,
-            name,
-            parentWorkId: lineage.id,
-            rootTurnId: lineage.rootTurnId,
-            stepIndex: event.data.stepIndex,
-          },
-          eventId: `${id}:started`,
-          kind: "action.started" as const,
-          startedAt: input.at,
-        },
-        ...(label === undefined
-          ? []
-          : [
-              {
-                actionId: id,
-                eventId: `${id}:label`,
-                kind: "action.label.updated" as const,
-                label,
-              },
-            ]),
-      ];
+      const agent = action.kind === "subagent-call" || action.kind === "remote-agent-call";
+      return projectActionStarted({
+        at: input.at,
+        callId: action.callId,
+        kind: action.kind === "load-skill" ? "skill" : "tool",
+        label:
+          event.data.presentation?.[action.callId]?.label ??
+          (agent ? agentCallLabel(actionName(action), action.input) : undefined),
+        lineage,
+        name: actionName(action),
+        stepIndex: event.data.stepIndex,
+      });
     });
   }
   if (event.type === "action.partial") {
@@ -109,13 +94,34 @@ export function projectActivityEvents(input: {
               label,
             },
           ];
-    const isTaskReceipt = input.taskCallIds?.includes(result.callId) === true;
-    if (isTaskReceipt) return labelUpdates;
+    // A task call's result is its receipt: `task.settled` settles it, with the real outcome.
+    if (input.taskCallIds?.includes(result.callId) === true) return [];
     return [...labelUpdates, actionSettled(id, event.data.status, input.at)];
+  }
+  if (event.type === "task.started") {
+    const id = actionId(lineage.id, event.data.callId);
+    return [
+      {
+        actionId: id,
+        eventId: `${id}:task`,
+        kind: "task.started",
+        taskId: event.data.taskId,
+        taskKind: event.data.kind,
+      },
+    ];
   }
   if (event.type === "task.settled") {
     const id = actionId(lineage.id, event.data.callId);
-    return [actionSettled(id, event.data.status, input.at)];
+    const settled: { -readonly [K in keyof TaskSettledActivity]: TaskSettledActivity[K] } = {
+      actionId: id,
+      eventId: `${id}:settled:${event.data.status}`,
+      kind: "task.settled",
+      outcome: event.data.status,
+      settledAt: input.at,
+    };
+    const summary = taskSummary(event.data);
+    if (summary !== undefined) settled.summary = summary;
+    return [settled];
   }
   if (event.type === "authorization.required") {
     const id = blockerId(
@@ -269,6 +275,84 @@ function actionSettled(
     outcome,
     settledAt,
   };
+}
+
+/** The events that start one action, and its label when it has one. */
+export function projectActionStarted(input: {
+  readonly at: string;
+  readonly callId: string;
+  readonly kind: "skill" | "tool";
+  readonly label: string | undefined;
+  readonly lineage: ActivityWorkIdentityV1;
+  readonly name: string;
+  readonly stepIndex: number;
+}): readonly ActivityEventV1[] {
+  const id = actionId(input.lineage.id, input.callId);
+  const name = normalizePresentationText(input.name) || (input.kind === "skill" ? "Skill" : "Tool");
+  const label = activityLabel(input.label);
+  const started: ActivityEventV1 = {
+    action: {
+      id,
+      kind: input.kind,
+      name,
+      parentWorkId: input.lineage.id,
+      rootTurnId: input.lineage.rootTurnId,
+      stepIndex: input.stepIndex,
+    },
+    eventId: `${id}:started`,
+    kind: "action.started",
+    startedAt: input.at,
+  };
+  if (label === undefined) return [started];
+  return [started, { actionId: id, eventId: `${id}:label`, kind: "action.label.updated", label }];
+}
+
+/** An agent call reads as the agent and its brief: `researcher: Find the March incidents`. */
+export function agentCallLabel(name: string, input: JsonObject): string | undefined {
+  const brief = firstLine(input.message);
+  return brief === undefined ? undefined : `${name}: ${brief}`;
+}
+
+function actionName(action: RuntimeActionRequest): string {
+  switch (action.kind) {
+    case "load-skill":
+      return "load_skill";
+    case "subagent-call":
+      return action.subagentName;
+    case "remote-agent-call":
+      return action.remoteAgentName;
+    default:
+      return action.toolName;
+  }
+}
+
+/** One line describing how a task call ended, for the channel's task row. */
+function taskSummary(data: TaskSettledStreamEvent["data"]): string | undefined {
+  switch (data.status) {
+    case "completed":
+      return firstLine(resultText(data.output));
+    case "failed":
+      return firstLine(data.error?.message);
+    case "cancelled":
+      return undefined;
+  }
+}
+
+/** The text a result leads with: a string result, or an agent reply's message. */
+function resultText(output: JsonValue | undefined): unknown {
+  if (typeof output === "string") return output;
+  if (output === null || typeof output !== "object" || Array.isArray(output)) return undefined;
+  const fields = output as JsonObject;
+  return fields.message ?? fields.text ?? fields.summary;
+}
+
+function firstLine(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const line = value
+    .split(/\r?\n/u)
+    .map((candidate) => candidate.trim())
+    .find((candidate) => candidate.length > 0);
+  return line === undefined ? undefined : normalizePresentationText(line) || undefined;
 }
 
 function activityLabel(value: string | undefined): string | undefined {
