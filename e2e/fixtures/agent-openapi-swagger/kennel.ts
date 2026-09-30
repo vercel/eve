@@ -27,10 +27,13 @@ export const KENNEL_TOOLS = [
   },
   {
     name: "list_feedings",
-    description: "List today's feeding schedule for a pet.",
+    description: "List a pet's feeding schedule for a day.",
     inputSchema: {
       type: "object",
-      properties: { petId: { type: "integer" } },
+      properties: {
+        petId: { type: "integer" },
+        day: { type: "string", enum: ["today", "tomorrow"], default: "today" },
+      },
       required: ["petId"],
       additionalProperties: false,
     },

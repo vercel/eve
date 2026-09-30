@@ -15,6 +15,7 @@ import {
   modelFacingAuthorizationOutput,
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
+import { isApprovedToolCall, markApprovalRecheck } from "#harness/approval-recheck.js";
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
@@ -22,10 +23,14 @@ import { isAsyncIterable } from "#shared/async-iterable.js";
 
 type NativeApprovalStatus = Exclude<ApprovalStatus, boolean>;
 
-const toolApprovals = new WeakMap<
-  object,
-  (toolInput: unknown, callId: string, abortSignal?: AbortSignal) => Promise<NativeApprovalStatus>
->();
+type ApprovalFn = (
+  toolInput: unknown,
+  callId: string,
+  abortSignal: AbortSignal | undefined,
+  recheck: boolean,
+) => Promise<NativeApprovalStatus>;
+
+const toolApprovals = new WeakMap<object, ApprovalFn>();
 
 /**
  * Builds an AI SDK `ToolSet` from unified harness tool definitions.
@@ -255,24 +260,23 @@ export async function buildToolSetWithProviderTools(input: {
 function buildApprovalFn(
   definition: HarnessToolDefinition,
   input: { readonly approvedTools?: ReadonlySet<string> },
-): (
-  toolInput: unknown,
-  callId: string,
-  abortSignal?: AbortSignal,
-) => Promise<NativeApprovalStatus> {
-  return async (toolInput: unknown, callId: string, abortSignal?: AbortSignal) => {
+): ApprovalFn {
+  return async (toolInput, callId, abortSignal, recheck) => {
     if (definition.approval === undefined) return undefined;
 
     const toolInputRecord = isObject(toolInput) ? toolInput : undefined;
-
-    const status = await resolveApprovalPolicy(definition.approval)({
+    const context = {
       ...buildCallbackContext(),
       abortSignal: abortSignal ?? new AbortController().signal,
-      approvedTools: input.approvedTools ?? new Set(),
+      approvedTools: input.approvedTools ?? new Set<string>(),
       callId,
       toolInput: toolInputRecord,
       toolName: definition.name,
-    });
+    };
+
+    const status = await resolveApprovalPolicy(definition.approval)(
+      recheck ? markApprovalRecheck(context) : context,
+    );
     return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
   };
 }
@@ -282,7 +286,7 @@ export function buildToolApproval(
   tools: ToolSet,
   abortSignal?: AbortSignal,
 ): ToolApprovalConfiguration<ToolSet, Record<string, unknown>> {
-  return async ({ toolCall }) => {
+  return async ({ toolCall, messages }) => {
     const toolDefinition = tools[toolCall.toolName];
     if (toolDefinition === undefined) return undefined;
 
@@ -291,6 +295,7 @@ export function buildToolApproval(
       toolCall.input,
       toolCall.toolCallId,
       abortSignal,
+      isApprovedToolCall(messages, toolCall.toolCallId),
     )) as ToolApprovalStatus;
   };
 }

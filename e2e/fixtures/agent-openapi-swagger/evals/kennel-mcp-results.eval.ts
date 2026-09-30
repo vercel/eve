@@ -21,10 +21,15 @@ export default defineEval({
       count: 1,
       output: { petId: 4217, name: "Biscuit", kennel: "B3" },
     });
-    // Text-only results without an output schema are parsed as JSON.
+    // Text-only results without an output schema are parsed as JSON, and the
+    // omitted `day` reaches the server as its schema default.
     turn.calledTool("kennel__list_feedings", {
       count: 1,
-      output: (value) => Array.isArray(value) && value.length === 2,
+      input: { day: "today" },
+      output: (value) =>
+        Array.isArray(value) &&
+        value.length === 2 &&
+        value.every((entry) => (entry as { day?: unknown }).day === "today"),
     });
     // Image content stays MCP content, and the model receives it as a file part.
     turn.calledTool("kennel__pet_photo", {

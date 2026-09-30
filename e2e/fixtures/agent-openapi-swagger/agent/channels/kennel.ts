@@ -40,13 +40,16 @@ function callTool(name: string, args: Record<string, unknown>): ToolResult {
       const pet = { petId: BISCUIT_PET_ID, name: "Biscuit", kennel: "B3" };
       return { ...text(JSON.stringify(pet)), structuredContent: pet };
     }
-    case "list_feedings":
+    case "list_feedings": {
+      // Echoes `day` so evals can see whether eve applied the schema default.
+      const day = args.day ?? "unspecified";
       return text(
         JSON.stringify([
-          { time: "08:00", food: "kibble" },
-          { time: "18:00", food: "salmon" },
+          { day, time: "08:00", food: "kibble" },
+          { day, time: "18:00", food: "salmon" },
         ]),
       );
+    }
     case "pet_photo":
       return {
         content: [

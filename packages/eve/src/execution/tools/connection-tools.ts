@@ -5,20 +5,12 @@
  * step from the connection registry with identical model-facing definitions.
  */
 
-import {
-  resolveApprovalPolicy,
-  type Approval,
-  type ApprovalContext,
-  type ApprovalResponseContext,
-  type ApprovalResponseDecision,
-  type ApprovalStatus,
-} from "#approval/definition.js";
+import type { Approval } from "#approval/definition.js";
 import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
 import { loadContext } from "#context/container.js";
-import { ContextKey } from "#context/key.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import {
   getAuthorizationResults,
@@ -52,16 +44,21 @@ import { defineTool, type ToolContext } from "#tools/definition.js";
 import type { DynamicToolSet } from "#tools/dynamic.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
+import { connectionExecuteApproval, releaseApprovalPin } from "./connection-approval.js";
+import {
+  CONNECTION_EXECUTE_TOOL_NAME,
+  findConnection,
+  qualifiedToolName,
+  readExecuteTarget,
+} from "./connection-target.js";
+
 const log = createLogger("framework.connection-tools");
 
 export const CONNECTION_SEARCH_TOOL_NAME = "connection_search";
-export const CONNECTION_EXECUTE_TOOL_NAME = "connection_execute";
 
 const DEFAULT_SEARCH_LIMIT = 10;
 const MAX_SEARCH_LIMIT = 50;
 const MAX_SUGGESTIONS = 5;
-/** Bounds the approval pins kept for calls that were never executed. */
-const MAX_APPROVAL_PINS = 50;
 
 const CONNECTION_SEARCH_DESCRIPTION = [
   "Find tools in your connected services (MCP servers and OpenAPI APIs).",
@@ -117,12 +114,6 @@ interface ConnectionSearchInput {
   readonly query?: string;
 }
 
-interface ConnectionExecuteInput {
-  readonly connection: string;
-  readonly input?: JsonObject;
-  readonly tool: string;
-}
-
 interface ConnectionSearchMatch {
   readonly connection: string;
   readonly description: string;
@@ -143,15 +134,6 @@ interface ConnectionSearchOutput {
   readonly total: number;
   readonly unavailable?: readonly Omit<UnavailableConnection, "terminal">[];
 }
-
-/**
- * Connection instance each approved `connection_execute` call was approved
- * against, keyed by call id. A call whose connection resolves to a different
- * instance by the time it runs is rejected rather than sent to it.
- */
-const ConnectionApprovalPinsKey = new ContextKey<Readonly<Record<string, string>>>(
-  "eve.connectionApprovalPins",
-);
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -186,32 +168,6 @@ export function resolveConnectionTools(): DynamicToolSet | null {
       }),
       ...connectionExecuteApproval(approvals),
     }),
-  };
-}
-
-/**
- * Delegates approval to the called connection's policy. The request and
- * response phases exist only when some registered connection defines them,
- * so connections without a response policy keep the default response flow
- * unless another connection in the same agent defines one.
- */
-function connectionExecuteApproval(approvals: readonly Approval[]) {
-  if (approvals.length === 0) return {};
-  const request = defineDurableCallback({ callback: requestConnectionApproval, closure: {} });
-  const hasResponsePolicy = approvals.some(
-    (approval) => typeof approval !== "function" && approval.response !== undefined,
-  );
-  return {
-    approvalKey: defineDurableCallback({ callback: connectionApprovalKey, closure: {} }),
-    approval: hasResponsePolicy
-      ? {
-          request,
-          response: defineDurableCallback({
-            callback: authorizeConnectionApprovalResponse,
-            closure: {},
-          }),
-        }
-      : request,
   };
 }
 
@@ -410,19 +366,19 @@ async function executeConnectionTool(
   }
   const tool = tools.find((entry) => entry.name === target.tool);
   if (tool === undefined) throw new Error(unknownToolMessage(connection, target.tool, tools));
-  await assertValidToolInput(connection, tool, target.input);
+  const input = await validToolInput(connection, tool, target.input);
 
   const toolName = qualifiedToolName(target);
   let raw: unknown;
   try {
-    raw = await client.executeTool(tool.name, target.input, {
+    raw = await client.executeTool(tool.name, input, {
       abortSignal: ctx.abortSignal,
       callId: ctx.callId,
     });
   } catch (error) {
     if (isConnectionAuthorizationRequiredError(error)) return await auth.handleError(error, scoped);
     reportNestedToolAction(ctx.callId, {
-      input: target.input,
+      input,
       isError: true,
       output: toErrorMessage(error),
       toolName,
@@ -433,26 +389,27 @@ async function executeConnectionTool(
   const result = toConnectionToolResult(connection.protocol, tool, raw);
   if (!result.ok) {
     reportNestedToolAction(ctx.callId, {
-      input: target.input,
+      input,
       isError: true,
       output: result.error,
       toolName,
     });
     throw new Error(result.error);
   }
-  reportNestedToolAction(ctx.callId, { input: target.input, output: result.value, toolName });
+  reportNestedToolAction(ctx.callId, { input, output: result.value, toolName });
   return result.value;
 }
 
-async function assertValidToolInput(
+/** Validates `input` against the tool's schema, returning it with schema defaults filled in. */
+async function validToolInput(
   connection: ResolvedConnectionDefinition,
   tool: ConnectionToolMetadata,
   input: JsonObject,
-): Promise<void> {
+): Promise<JsonObject> {
   const result = await defineJsonSchema(tool.inputSchema as JsonObject)["~standard"].validate(
     input,
   );
-  if (result.issues === undefined) return;
+  if (result.issues === undefined) return result.value as JsonObject;
   const issues = result.issues
     .map((issue) => {
       const path = (issue.path ?? [])
@@ -484,101 +441,6 @@ function unknownToolMessage(
       ? ` Closest tools: ${suggestions.join(", ")}.`
       : " Use connection_search to find its tools.";
   return `Connection "${connection.connectionName}" has no tool named "${toolName}".${hint}`;
-}
-
-// ---------------------------------------------------------------------------
-// Approval
-// ---------------------------------------------------------------------------
-
-function connectionApprovalKey(_closure: object, input: unknown): string {
-  const target = readExecuteTarget(input);
-  return target === undefined ? CONNECTION_EXECUTE_TOOL_NAME : qualifiedToolName(target);
-}
-
-async function requestConnectionApproval(
-  _closure: object,
-  context: ApprovalContext,
-): Promise<ApprovalStatus> {
-  const target = readExecuteTarget(context.toolInput);
-  const registry = loadContext().get(ConnectionRegistryKey);
-  if (target === undefined || registry === undefined) return "not-applicable";
-  const connection = findConnection(registry, target.connection);
-  const approval =
-    connection === undefined
-      ? undefined
-      : registry.getConnectionApproval(connection.connectionName);
-  if (connection === undefined || approval === undefined) return "not-applicable";
-
-  // The AI SDK re-runs this policy before executing an approved call. The
-  // first pin survives, so execution rejects a call whose connection changed.
-  pinApprovedInstance(context.callId, connection);
-  return await resolveApprovalPolicy(approval)({
-    ...context,
-    toolInput: target.input,
-    toolName: qualifiedToolName(target),
-  });
-}
-
-async function authorizeConnectionApprovalResponse(
-  _closure: object,
-  context: ApprovalResponseContext,
-): Promise<ApprovalResponseDecision> {
-  const target = readExecuteTarget(context.request.toolInput);
-  const registry = loadContext().get(ConnectionRegistryKey);
-  const connection =
-    target === undefined || registry === undefined
-      ? undefined
-      : findConnection(registry, target.connection);
-  if (target === undefined || registry === undefined || connection === undefined) {
-    return { reason: "The connection for this tool call is unavailable.", status: "rejected" };
-  }
-  if (!matchesApprovalPin(context.request.callId, connection)) {
-    return { reason: CONNECTION_CHANGED_MESSAGE, status: "rejected" };
-  }
-  const approval = registry.getConnectionApproval(connection.connectionName);
-  const response =
-    approval === undefined || typeof approval === "function" ? undefined : approval.response;
-  if (response === undefined) return { status: "allowed" };
-  return await response({
-    ...context,
-    request: {
-      ...context.request,
-      toolInput: target.input,
-      toolName: qualifiedToolName(target),
-    },
-  });
-}
-
-const CONNECTION_CHANGED_MESSAGE =
-  "The connection for this tool call changed or is unavailable. Request a new tool call and approval.";
-
-/** Records the instance a call was first evaluated against; later evaluations keep it. */
-function pinApprovedInstance(callId: string, connection: ResolvedConnectionDefinition): void {
-  if (connection.instanceId === undefined) return;
-  const instanceId = connection.instanceId;
-  const ctx = loadContext();
-  if (ctx.get(ConnectionApprovalPinsKey)?.[callId] !== undefined) return;
-  ctx.set(ConnectionApprovalPinsKey, (pins = {}) =>
-    Object.fromEntries([
-      ...Object.entries(pins).slice(-(MAX_APPROVAL_PINS - 1)),
-      [callId, instanceId],
-    ]),
-  );
-}
-
-function matchesApprovalPin(callId: string, connection: ResolvedConnectionDefinition): boolean {
-  const pinned = loadContext().get(ConnectionApprovalPinsKey)?.[callId];
-  return pinned === undefined || pinned === connection.instanceId;
-}
-
-/** Consumes the call's approval pin, rejecting the call if its connection changed. */
-function releaseApprovalPin(callId: string, connection: ResolvedConnectionDefinition): void {
-  const ctx = loadContext();
-  const pins = ctx.get(ConnectionApprovalPinsKey);
-  if (pins?.[callId] === undefined) return;
-  const { [callId]: pinned, ...rest } = pins;
-  ctx.set(ConnectionApprovalPinsKey, rest);
-  if (pinned !== connection.instanceId) throw new Error(CONNECTION_CHANGED_MESSAGE);
 }
 
 // ---------------------------------------------------------------------------
@@ -637,34 +499,10 @@ function assertPendingAuthorizationInstances(
 // Shared
 // ---------------------------------------------------------------------------
 
-interface ExecuteTarget {
-  readonly connection: string;
-  readonly input: JsonObject;
-  readonly tool: string;
-}
-
-function readExecuteTarget(value: unknown): ExecuteTarget | undefined {
-  if (!isObject(value)) return undefined;
-  const { connection, input, tool } = value as Partial<ConnectionExecuteInput>;
-  if (typeof connection !== "string" || typeof tool !== "string") return undefined;
-  return { connection, input: isObject(input) ? (input as JsonObject) : {}, tool };
-}
-
-function qualifiedToolName(target: Pick<ExecuteTarget, "connection" | "tool">): string {
-  return `${target.connection}__${target.tool}`;
-}
-
 function requireRegistry(): ConnectionRegistry {
   const registry = loadContext().get(ConnectionRegistryKey);
   if (registry === undefined) throw new Error("This agent has no connections.");
   return registry;
-}
-
-function findConnection(
-  registry: ConnectionRegistry,
-  name: string,
-): ResolvedConnectionDefinition | undefined {
-  return registry.getConnections().find((connection) => connection.connectionName === name);
 }
 
 function requireConnection(

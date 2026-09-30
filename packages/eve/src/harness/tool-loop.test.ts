@@ -2229,6 +2229,7 @@ describe("createToolLoopHarness", () => {
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as
       | {
           toolApproval?: (options: {
+            messages: readonly unknown[];
             toolCall: { input: unknown; toolCallId: string; toolName: string };
           }) => Promise<unknown>;
         }
@@ -2237,6 +2238,7 @@ describe("createToolLoopHarness", () => {
     await expect(
       contextStorage.run(ctx, () =>
         agentCall!.toolApproval?.({
+          messages: [],
           toolCall: {
             input: { line: "victoria" },
             toolCallId: "call_1",

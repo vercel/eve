@@ -59,25 +59,24 @@ const usage = {
 };
 const sessionId = "turn-connection-approval";
 
-/** A model step that saves a note through `connection_execute`, or replies when `callId` is omitted. */
-function modelResponse(callId?: string, connection = "notes") {
+/** A model step that saves notes through `connection_execute`, or replies when `callId` is omitted. */
+function modelResponse(callId?: string | readonly string[], connection = "notes") {
+  const callIds = callId === undefined ? [] : typeof callId === "string" ? [callId] : callId;
   return {
     stream: simulateReadableStream({
       chunks: [
         { type: "stream-start" as const, warnings: [] },
-        ...(callId
-          ? [
-              {
-                type: "tool-call" as const,
-                toolCallId: callId,
-                toolName: "connection_execute",
-                input: JSON.stringify({
-                  connection,
-                  tool: "saveNote",
-                  input: { body: { note: "hello" } },
-                }),
-              },
-            ]
+        ...(callIds.length > 0
+          ? callIds.map((toolCallId) => ({
+              type: "tool-call" as const,
+              toolCallId,
+              toolName: "connection_execute",
+              input: JSON.stringify({
+                connection,
+                tool: "saveNote",
+                input: { body: { note: "hello" } },
+              }),
+            }))
           : [
               { type: "text-start" as const, id: "reply" },
               { type: "text-delta" as const, id: "reply", delta: "Saved." },
@@ -87,7 +86,7 @@ function modelResponse(callId?: string, connection = "notes") {
           type: "finish" as const,
           finishReason: {
             raw: undefined,
-            unified: callId ? ("tool-calls" as const) : ("stop" as const),
+            unified: callIds.length > 0 ? ("tool-calls" as const) : ("stop" as const),
           },
           usage,
         },
@@ -438,6 +437,50 @@ describe("turn connection approval restoration", () => {
       ).toContain("connection for this tool call changed or is unavailable");
     },
   );
+
+  it("rejects only the approved call whose instance pin was evicted", async () => {
+    const fixture = setup("turn.started", false, "request-only");
+    // One more parked call than the pin map holds evicts the first call's pin.
+    const callIds = Array.from({ length: 51 }, (_, index) => `save-${index}`);
+    fixture.doStream.mockReset();
+    fixture.doStream
+      .mockImplementationOnce(() => modelResponse(callIds))
+      .mockImplementation(() => modelResponse());
+    await fixture.step({
+      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's notes." }] },
+    });
+    const parked = await fixture.step();
+    const requests = getPendingInputBatches(readDurableSession(parked.sessionState).state).flatMap(
+      (batch) => batch.requests,
+    );
+    await fixture.step({
+      delivery: {
+        kind: "deliver",
+        auth: bob,
+        payloads: [
+          {
+            inputResponses: requests.map((request) => ({
+              requestId: request.requestId,
+              optionId: "approve",
+            })),
+          },
+        ],
+      },
+    });
+    await fixture.step();
+    // A missing pin can't prove the connection is unchanged, so that call fails
+    // rather than re-pinning to whatever the connection resolves to now.
+    const failed = fixture.events.flatMap((event) =>
+      event.type === "action.result" && event.data.status === "failed"
+        ? [event.data.result as { callId: string; output: unknown }]
+        : [],
+    );
+    expect(failed.map((result) => result.callId)).toEqual(["save-0"]);
+    expect(JSON.stringify(failed[0]!.output)).toContain(
+      "connection for this tool call changed or is unavailable",
+    );
+    expect(fixture.fetch).toHaveBeenCalledTimes(50);
+  });
 
   it.each([false, true])(
     "fails an approved call whose connection is gone while running an available one (cold: %s)",
