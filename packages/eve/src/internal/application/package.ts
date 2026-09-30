@@ -65,7 +65,9 @@ function resolveCurrentModulePathFromStack(): string {
   }
 }
 
-const require = createRequire(resolveCurrentModulePath());
+// Not named `require`: bundles inline this module, and a top-level `require`
+// binding makes the Node ESM compatibility banner re-parse the whole chunk.
+const packageRequire = createRequire(resolveCurrentModulePath());
 
 function tryResolveVerifiedPackageRoot(packageJsonPath: string): string | undefined {
   try {
@@ -267,7 +269,7 @@ export function resolvePackageSourceDirectoryPath(relativeSourcePath: string): s
 
 export function resolvePackageDependencyPath(specifier: string): string {
   try {
-    return require.resolve(specifier);
+    return packageRequire.resolve(specifier);
   } catch (error) {
     const packageRoot = tryResolvePackageRoot();
     const sourcePath =
@@ -374,7 +376,7 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
   }
 
   try {
-    const resolvedPackageJsonPath = require.resolve(`${EVE_PACKAGE_NAME}/package.json`);
+    const resolvedPackageJsonPath = packageRequire.resolve(`${EVE_PACKAGE_NAME}/package.json`);
     const resolvedPackageInfo = tryReadInstalledPackageInfo(
       resolvedPackageJsonPath,
       EVE_PACKAGE_NAME,
@@ -446,7 +448,7 @@ export function resolveExpectedWorkflowVersion(): string | undefined {
 
   try {
     return readWorkflowVersionFromManifest(
-      JSON.parse(readFileSync(require.resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8")),
+      JSON.parse(readFileSync(packageRequire.resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8")),
     );
   } catch {
     return undefined;
@@ -479,5 +481,5 @@ export function resolveWorkflowModulePath(specifier: string): string {
     return resolvePackageCompiledFilePath(alias);
   }
 
-  return require.resolve(specifier);
+  return packageRequire.resolve(specifier);
 }

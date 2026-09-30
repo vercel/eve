@@ -12,7 +12,7 @@ interface Mount {
   readonly programmaticImport?: { readonly specifier: string; readonly entryPath: string };
 }
 
-function canonical(path: string): string {
+function canonicalize(path: string): string {
   try {
     return realpathSync(path);
   } catch {
@@ -30,6 +30,17 @@ export function createExtensionMountPlugin(
   overridePaths: ReadonlyMap<string, string> = new Map(),
 ): Record<string, unknown> | null {
   if (mounts.length === 0) return null;
+  // Every import in the bundle resolves through this plugin, and each JS
+  // realpath walks the whole path. One plugin instance serves one build.
+  const canonicalPaths = new Map<string, string>();
+  const canonical = (path: string): string => {
+    let canonicalPath = canonicalPaths.get(path);
+    if (canonicalPath === undefined) {
+      canonicalPath = canonicalize(path);
+      canonicalPaths.set(path, canonicalPath);
+    }
+    return canonicalPath;
+  };
   const roots = mounts.map((mount) => ({ ...mount, root: canonical(mount.sourceRoot) }));
   const declarationPaths = new Map(
     roots

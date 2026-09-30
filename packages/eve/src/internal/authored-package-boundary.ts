@@ -5,6 +5,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import {
   resolvePackageDependencyPath,
+  resolvePackageRoot,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
 
@@ -122,10 +123,14 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
       // condition used by the app build maps them to TypeScript source.
       // Resolve through Node's default package-import conditions here so a
       // packed eve installation does not leak #shared/* into the bundle.
+      // eve's own compiled modules load by path: inlining them re-bundles most
+      // of the framework for every eve-owned module this loader evaluates.
       if (source.startsWith("#")) {
         const resolvedPackageImport = resolvePackageImport(source, importer, input.packageRoot);
         if (resolvedPackageImport !== undefined) {
-          return { id: resolvedPackageImport };
+          return isFrameworkPackagePath(resolvedPackageImport)
+            ? { external: true, id: normalizeEsmImportSpecifier(resolvedPackageImport) }
+            : { id: resolvedPackageImport };
         }
       }
 
@@ -363,6 +368,13 @@ function resolvePackageImport(
   } catch {
     return undefined;
   }
+}
+
+let canonicalFrameworkPackageRoot: string | undefined;
+
+function isFrameworkPackagePath(path: string): boolean {
+  canonicalFrameworkPackageRoot ??= toCanonicalPath(resolvePackageRoot());
+  return nearestPackageRoot(path) === canonicalFrameworkPackageRoot;
 }
 
 function resolveExistingExternalFilePath(id: string): string | undefined {

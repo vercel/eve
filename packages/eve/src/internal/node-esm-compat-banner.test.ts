@@ -134,11 +134,53 @@ describe("createNodeEsmCompatBannerPlugin", () => {
     "var // comment\n__dirname = '/';",
     "const first = (() => { return 1; })(), /* next */ __dirname = '/';",
     String.raw`const __dirn\u0061me = '/';`,
+    String.raw`let value = 1, \u{5f}_filename = '/x';`,
   ])("parses possible declarations: %s", (code) => {
     const parse = vi.fn(() => programWithTopLevelBindings("__dirname"));
     const result = createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
     expect(parse).toHaveBeenCalledOnce();
     expect(result?.code).not.toContain("const __dirname = __eveDirname");
+  });
+
+  it.each([
+    "const line = `const __filename = fileURLToPath(import.meta.url);`; export const value = __dirname;",
+    "const lines = ['var __dirname = x', \"let require = y\"]; export const value = __dirname;",
+  ])("does not parse chunks that only quote a declaration: %s", (code) => {
+    const parse = vi.fn(() => EMPTY_PROGRAM);
+    const result = createNodeEsmCompatBannerPlugin({ includeRequire: true }).renderChunk.call(
+      { parse },
+      code,
+    );
+    expect(parse).not.toHaveBeenCalled();
+    expect(result?.code).toContain("const __dirname =");
+  });
+
+  it.each([
+    String.raw`const separators = /[\u2028,\u2029]/; export const value = __dirname;`,
+    String.raw`const label = "caf\u00e9", other\u0041 = 1; export const value = __dirname;`,
+    String.raw`const requir\u0065 = customRequire; export const value = __dirname;`,
+  ])("does not parse chunks whose unicode escapes cannot name a binding: %s", (code) => {
+    const parse = vi.fn(() => EMPTY_PROGRAM);
+    const result = createNodeEsmCompatBannerPlugin().renderChunk.call({ parse }, code);
+    expect(parse).not.toHaveBeenCalled();
+    expect(result?.code).toContain("const __dirname =");
+  });
+
+  it("scans adjacent comments after a comma in linear time", () => {
+    // Each boundary between adjacent comments must have exactly one parse;
+    // otherwise a failed match retries 2^n comment partitions.
+    const comments = Array.from({ length: 26 }, (_, index) => `/** Timer ${index}. */`);
+    const code = `export const timers = [first,\n${comments.join("\n")}\nsecond];\nexport const directory = __dirname;`;
+    const parse = vi.fn(() => EMPTY_PROGRAM);
+    const startedAt = performance.now();
+    const result = createNodeEsmCompatBannerPlugin({ includeRequire: true }).renderChunk.call(
+      { parse },
+      code,
+    );
+
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
+    expect(parse).not.toHaveBeenCalled();
+    expect(result?.code).toContain("const __dirname =");
   });
 
   it("checks require declarations only when providing a require shim", () => {
