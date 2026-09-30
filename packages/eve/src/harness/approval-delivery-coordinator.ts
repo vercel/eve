@@ -185,7 +185,11 @@ export async function coordinateApprovalDelivery(input: {
     didCommit ||= created.changed;
   }
 
-  const remainingStepInput = removeConsumedResponses(stepInput, consumed);
+  // Consuming a response for an already-settled request must not drop its settlement.
+  const remainingStepInput = appendSettledResponses(
+    removeConsumedResponses(stepInput, consumed),
+    pendingSettlements,
+  );
   if (consumed.size > 0) {
     return deliveryResult(
       session,
