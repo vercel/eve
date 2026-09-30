@@ -2551,6 +2551,40 @@ describe("createToolLoopHarness", () => {
       expect(result.next).toBe(runStep);
       expect(result.settledTurn).toBeUndefined();
     });
+
+    it.each([
+      {
+        case: "a root session",
+        description:
+          "Reacts to the message.\n\nCalling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.",
+      },
+      { case: "a delegated session", delegated: true, description: "Reacts to the message." },
+      {
+        case: "a structured-output turn",
+        description: "Reacts to the message.",
+        outputSchema: { properties: {}, type: "object" },
+      },
+    ] as const)("appends the turn-ending note only where endsTurn applies: $case", async (row) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Glad it helped!", role: "assistant" }] },
+        text: "Glad it helped!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const runStep = createToolLoopHarness(createTestConfig(undefined, { tools }));
+      const ctx = new ContextContainer();
+      if ("delegated" in row) setDelegatedParent(ctx);
+      const outputSchema = "outputSchema" in row ? row.outputSchema : undefined;
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession({ outputSchema }), { message: "Thanks, that fixed it!" }),
+      );
+
+      const agentTools = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]?.tools;
+      expect(agentTools?.react?.description).toBe(row.description);
+      expect(agentTools?.add?.description).toBe("Adds numbers");
+    });
   });
 
   it("parks a conversation when requested structured output is not fulfilled", async () => {

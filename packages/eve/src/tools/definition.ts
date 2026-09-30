@@ -232,7 +232,9 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    * tool call in the model's step ends the turn and succeeds; a failed call
    * lets the model recover. Ignored in delegated sessions, which must return
    * a reply to their caller, and on turns that request structured output.
-   * Defaults to `false`.
+   * Wherever it applies, eve appends a sentence to the description the model
+   * sees telling it the call ends its turn, so write `description` for what
+   * the tool does. Defaults to `false`.
    */
   endsTurn?: boolean;
   /**

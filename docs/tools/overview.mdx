@@ -76,9 +76,17 @@ export default defineTool({
 });
 ```
 
+eve tells the model that the call ends its turn by appending this sentence, after a blank line, to the description the model sees:
+
+```text
+Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.
+```
+
+Write `description` for what the tool does and when to use it, and leave the turn-ending rule to eve. The appended sentence is not part of the tool definition, so `eve info` shows the description as you wrote it.
+
 The turn ends only when every tool call in the model's step sets `endsTurn` and succeeds. When the call fails, or another tool runs in the same step, the model receives the results and continues as usual. Text the model writes before the call is narration, so channels do not post it as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
 
-eve ignores `endsTurn` in delegated sessions, which must return a reply to their caller, and on turns that request structured output. The option works with `defineTool` and dynamic tool entries; `defineWorkflowTool` rejects it at build time. To end a turn without taking any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+eve ignores `endsTurn` in delegated sessions, which must return a reply to their caller, and on turns that request structured output; the model does not see the appended sentence there. The option works with `defineTool` and dynamic tool entries; `defineWorkflowTool` rejects it at build time. To end a turn without taking any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
 
 ### Label tool activity
 

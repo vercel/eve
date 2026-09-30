@@ -1451,6 +1451,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
       session = advertisedModelTools.session;
       const modelTools = advertisedModelTools.modelTools;
+      // Only where `endsTurn` is honored; see `stepEndsTurn`.
+      if (!hasDelegatedCaller && session.outputSchema === undefined) {
+        for (const [name, modelTool] of Object.entries(modelTools)) {
+          if (modelTool.type === "provider" || presentationTools.get(name)?.endsTurn !== true) {
+            continue;
+          }
+          modelTool.description =
+            `${modelTool.description ?? ""}\n\n${ENDS_TURN_TOOL_NOTE}`.trimStart();
+        }
+      }
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
       for (const tool of Object.values(effectiveTools)) {
@@ -2866,6 +2876,10 @@ async function handleStepResult(input: {
     stepOutput: endsTurn ? null : stepOutput,
   });
 }
+
+/** Appended to the model-facing description of every tool that ends the turn. */
+const ENDS_TURN_TOOL_NOTE =
+  "Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.";
 
 /**
  * Whether the step ends the turn: every tool call targets an `endsTurn` tool
