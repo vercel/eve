@@ -18,6 +18,7 @@ import {
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { defineHook } from "#public/definitions/hook.js";
+import { sessions } from "#public/server/index.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { isEventId } from "#internal/testing/event-id.js";
 import { always } from "#tools/approval/policies.js";
@@ -361,6 +362,72 @@ describe("workflowEntry integration", () => {
         // compare membership and count, not append order.
         expect(replayedIds).toHaveLength(ids.length);
         expect(new Set(replayedIds)).toEqual(new Set(ids));
+      } finally {
+        await run.cancel();
+      }
+    });
+  });
+
+  it("reads a session's durable stream in process through eve/server, including from a hook", async () => {
+    const hookReads: string[][] = [];
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-server-sessions" },
+      modules: [
+        {
+          logicalPath: "hooks/read-own-stream.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                async "step.completed"(_event, ctx) {
+                  const ids: string[] = [];
+                  for await (const event of sessions
+                    .attach(ctx.session.id)
+                    .stream({ follow: false })) {
+                    ids.push(event.meta.id);
+                  }
+                  hookReads.push(ids);
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "read your own stream" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken: "http:workflow-entry-server-sessions",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      let firstTurn: readonly MessageStreamEvent[];
+      try {
+        firstTurn = await stream.nextTurn();
+      } finally {
+        stream.dispose();
+      }
+
+      try {
+        const events: MessageStreamEvent[] = [];
+        for await (const event of sessions.attach(run.runId).stream({ follow: false })) {
+          events.push(event);
+        }
+        const ids = events.map((event) => event.meta.id);
+        expect(ids.slice(0, firstTurn.length)).toEqual(firstTurn.map((event) => event.meta.id));
+
+        // A hook's bounded read ends at the durable tail. The step's own writes
+        // may still be buffered, so it can see only an earlier prefix.
+        expect(hookReads.length).toBeGreaterThan(0);
+        for (const hookRead of hookReads) {
+          expect(hookRead).toEqual(ids.slice(0, hookRead.length));
+        }
       } finally {
         await run.cancel();
       }

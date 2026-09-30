@@ -38,18 +38,16 @@ import {
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
-import {
-  normalizePersistedMessageStreamEvent,
-  type MessageStreamEventForVersion,
-  type MessageStreamVersion,
-} from "#protocol/message-version.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
-import { parseNdjsonStream } from "#execution/ndjson-stream.js";
+import {
+  readSessionEventStream,
+  readSessionStreamTailIndex,
+} from "#execution/session-event-stream.js";
 import {
   SESSION_HANDOFF_VERSION,
   type HandoffWorkflowEntryInput,
@@ -202,10 +200,7 @@ export function createWorkflowRuntime(config: {
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
-        events ??= parseNdjsonStream<MessageStreamEvent>(
-          () => getRun(run.runId).getReadable(),
-          normalizePersistedEvent,
-        );
+        events ??= readSessionEventStream(run.runId);
         return events;
       };
 
@@ -233,20 +228,11 @@ export function createWorkflowRuntime(config: {
       sessionId: string,
       options?: GetEventStreamOptions,
     ): Promise<ReadableStream<MessageStreamEvent>> {
-      return parseNdjsonStream<MessageStreamEvent>(
-        () => getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
-        normalizePersistedEvent,
-      );
+      return readSessionEventStream(sessionId, options?.startIndex);
     },
 
     async getStreamTailIndex(sessionId: string): Promise<number> {
-      // The readable is never consumed; cancel it so the unread source does not linger.
-      const readable = getRun(sessionId).getReadable();
-      try {
-        return await readable.getTailIndex();
-      } finally {
-        await readable.cancel().catch(() => {});
-      }
+      return await readSessionStreamTailIndex(sessionId);
     },
 
     async resolveContinuation(
@@ -296,12 +282,6 @@ export async function startSessionOwnerStep(input: SessionOwnerStartInput): Prom
     input.checkpoint.retention === undefined
       ? undefined
       : { experimental_retention: input.checkpoint.retention },
-  );
-}
-
-function normalizePersistedEvent(value: unknown): MessageStreamEvent {
-  return normalizePersistedMessageStreamEvent(
-    value as MessageStreamEventForVersion<MessageStreamVersion>,
   );
 }
 

@@ -300,6 +300,22 @@ For scripts, server-to-server calls, tests, evals, and custom UIs, `eve/client` 
 
 Start with the [Client SDK](../guides/client/overview) guide. It covers basic usage, sending messages, session state, streaming, and per-turn `outputSchema` results.
 
+## Read a session in process
+
+Code running inside the agent's own deployment, such as a hook, tool, schedule, or channel route, can read a session's durable stream without calling its own HTTP route. `eve/server` exposes the same `attach(sessionId).stream(...)` shape as the client, so it needs no deployment URL, credentials, or stream protocol:
+
+```ts
+import { sessions } from "eve/server";
+
+for await (const event of sessions.attach(sessionId).stream({ startIndex, follow: false })) {
+  await saveEvent(sessionId, event.meta.id, event);
+}
+```
+
+`stream()` accepts `startIndex` (negative values count back from the tail), `follow`, and `signal`. Key stored events on [`meta.id`](#the-event-envelope), which stays stable across reads. With `follow: false`, the read ends at the durable tail observed when it opens; otherwise it keeps following new events until the stream closes or the signal aborts.
+
+A read reflects events that are already durable. In a hook, the current step's events may still be buffered, so a bounded read there can end before the event that triggered the hook; read again later to catch up. `sessions` reads any session ID without channel auth, so check that a caller may read a session before passing an ID from a request. It is available only in code that runs inside the eve server.
+
 ## Inspect the agent over HTTP
 
 `GET /eve/v1/info` returns agent-info version 6, a JSON inspection snapshot of the effective compiled agent. It reports the selected config; active tools, instructions, memory slots, skills, channels, schedules, sandbox, connections, hooks, and instrumentation with explicit source ownership; dynamic resolvers separately from their session-specific output; local and remote agents in separate collections; prepared built-in effects; and shadowed or disabled source diagnostics. Memory tool wrappers include their selected memory-source dependency. Channel routes appear in the same effective order used by the HTTP host. Static instructions remain an ordered array whose entries expose `content` and `role`. Sandbox inspection exposes the opaque `revisionHash` that identifies its compiler-discovered environment inputs.
