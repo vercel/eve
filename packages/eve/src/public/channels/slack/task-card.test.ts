@@ -29,13 +29,17 @@ import type { TaskCardAgentWork } from "#channel/task-card.js";
 /** What each agent session's stream holds, which the lane reads from. */
 const sessionStreams = vi.hoisted(() => new Map<string, unknown[]>());
 const sessionReads = vi.hoisted(() => [] as string[]);
+/** Where each read of a remote agent's session went. */
+const remoteReads = vi.hoisted(() => new Map<string, unknown>());
 vi.mock("#execution/read-session-events.js", () => ({
   async readSessionEvents(input: {
     readonly limit: number;
+    readonly remote?: unknown;
     readonly sessionId: string;
     readonly startIndex: number;
   }): Promise<SessionEventsPage> {
     sessionReads.push(input.sessionId);
+    if (input.remote !== undefined) remoteReads.set(input.sessionId, input.remote);
     const stream = (sessionStreams.get(input.sessionId) ?? []) as MessageStreamEvent[];
     const events = stream.slice(input.startIndex, input.startIndex + input.limit);
     const nextIndex = input.startIndex + events.length;
@@ -267,6 +271,7 @@ afterEach(() => {
 beforeEach(() => {
   sessionStreams.clear();
   sessionReads.length = 0;
+  remoteReads.clear();
 });
 
 describe("Slack task card", () => {
@@ -647,6 +652,31 @@ describe("Slack task card", () => {
     // Once the agent settles, the card keeps its steps but stops refreshing.
     const settled = await emit(...BOTH_TASKS_SETTLED, TURN_COMPLETED);
     expect(settled.wakeInMs).toBeUndefined();
+  });
+
+  it("reads a remote agent task's session from where the agent runs", async () => {
+    const { cardCalls, emit } = slackThread({ renderers: [agentSteps] });
+    const child = "session_remote_researcher";
+    const remote = { resolverId: "researcher", url: "https://research.example.com" };
+
+    await emit(...TWO_TASKS_STARTED);
+    agentToolCall(child, "child_read", "Reading the INC-2291 postmortem");
+    await emit(
+      createAgentStartedEvent({
+        callId: RESEARCH_CALL,
+        name: "researcher",
+        parentSessionId: "session_root",
+        remote,
+        sessionId: child,
+        taskId: "researcher-7k2m9q",
+        turnId: TURN_ID,
+      }),
+    );
+
+    expect(remoteReads.get(child)).toEqual({ name: "researcher", ...remote });
+    expect(rowDetails(cardCalls())[1]).toEqual([
+      expect.objectContaining({ text: "Reading the INC-2291 postmortem" }),
+    ]);
   });
 
   it("keeps reading an agent session that is behind until it reaches the tail", async () => {

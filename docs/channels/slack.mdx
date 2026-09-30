@@ -535,7 +535,7 @@ export default slackChannel({
 
 `work()` reads the agent's session and returns its tool calls for this call, including the tasks it started, as `actions`: each with the same `title` and `status` a row's `actions` have, newest 20, oldest first, without `input`. `earlierActions` counts the older ones left out. It's the only part of the view that reads anything, and a card that never calls it costs nothing. It rejects when eve can't read the agent's session, which leaves that turn's card as it was.
 
-Without `taskCards.refreshIntervalMs`, eve reads the agent's session only when the session's own events change the card. With it, eve also renders the card that often, at least once a second, while an agent whose work a card read is still working. Each render is a step of the session's workflow. Only agents in the same deployment have `agent`; remote agents don't.
+Without `taskCards.refreshIntervalMs`, eve reads the agent's session only when the session's own events change the card. With it, eve also renders the card that often, at least once a second, while an agent whose work a card read is still working. Each render is a step of the session's workflow. A [remote subagent](/docs/subagents#vercel-workspace-peers)'s session is read from its own deployment, with the same credentials eve calls it with.
 
 ### Customize rendering
 
@@ -597,7 +597,7 @@ export default slackChannel({
 `taskCard` runs for every turn that calls a tool, and receives the same view eve's default renders from:
 
 - `state`: `blocked` while any task waits on a person, `working` while the turn or any other task works, then `finished`.
-- `tasks`: the tasks the turn started, each with a `title`, `status`, `blockedOn`, `summary`, and, for an agent task in the same deployment, `agent`, whose [`work()`](#show-an-agent-tasks-own-work) reads what the agent did. A failed task's `summary` and a blocked task's `blockedOn.label` are present only in a DM or private channel.
+- `tasks`: the tasks the turn started, each with a `title`, `status`, `blockedOn`, `summary`, and, for an agent task, local or remote, `agent`, whose [`work()`](#show-an-agent-tasks-own-work) reads what the agent did. A failed task's `summary` and a blocked task's `blockedOn.label` are present only in a DM or private channel.
 - `actions`: the turn's other tool calls, each with its tool `name`, `title`, `status`, and `input`. `input` is left out when its JSON is longer than 4,096 characters.
 
 `taskCard` makes no Slack calls: eve posts the card and updates it as the view changes. It can await `next` and `task.agent.work()`, and nothing else it awaits should call Slack either. eve's default returns `null` for a turn that started no tasks. To change a row's title in every channel, give the tool a [label](/docs/tools#label-tool-activity) instead.

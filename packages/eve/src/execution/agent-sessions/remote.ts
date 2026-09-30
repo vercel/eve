@@ -467,6 +467,21 @@ export function resolveRemoteAgentForAction(input: {
  * event's `name`/`url`, so a stale or mismatched key fails closed rather
  * than minting headers for the wrong upstream.
  */
+/**
+ * The `resolverId` a remote child's `agent.started` records for
+ * {@link resolveRemoteAgentStreamHeaders}: a static agent's node id, or a
+ * dynamic agent's compiled credentials step. A dynamic agent without
+ * credentials records none, since its node id names a non-remote definition.
+ */
+export function remoteAgentResolverId(input: {
+  readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
+  readonly nodeId: string;
+}): string | undefined {
+  return input.dynamicRemoteAgent === undefined
+    ? input.nodeId
+    : input.dynamicRemoteAgent.credentialsStepId;
+}
+
 export async function resolveRemoteAgentStreamHeaders(input: {
   readonly bundle: CompiledRuntimeAgentBundle;
   readonly name: string;

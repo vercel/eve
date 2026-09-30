@@ -360,7 +360,7 @@ export async function openStreamBody(
   throw new ClientError(lastStatus ?? 0, lastBody ?? "Failed to open message stream.", lastHeaders);
 }
 
-function parseTailIndexHeader(headers: Headers): number | undefined {
+export function parseTailIndexHeader(headers: Headers): number | undefined {
   const raw = headers.get(EVE_STREAM_TAIL_INDEX_HEADER);
   if (raw === null || !/^-?\d+$/.test(raw)) {
     return undefined;

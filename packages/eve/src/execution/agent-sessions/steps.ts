@@ -29,6 +29,7 @@ import type { SubagentParentContext } from "#subagents/invocation.js";
 import {
   cancelRemoteAgentTurn,
   continueRemoteAgentSession,
+  remoteAgentResolverId,
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
@@ -273,6 +274,10 @@ async function startRemoteSession(
     remoteAgentName: action.remoteAgentName,
   });
   const callbackBaseUrl = resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url);
+  const resolverId = remoteAgentResolverId({
+    dynamicRemoteAgent: target.dynamicRemoteAgent,
+    nodeId: action.nodeId,
+  });
   const child = await startRemoteAgentSession({
     action,
     auth: auth.current,
@@ -291,7 +296,7 @@ async function startRemoteSession(
     forwardPrincipal: remote.forwardPrincipal,
     name: action.remoteAgentName,
     nodeId: action.nodeId,
-    resolverId: target.dynamicRemoteAgent?.credentialsStepId ?? action.nodeId,
+    ...(resolverId !== undefined && { resolverId }),
     sessionId: child.sessionId,
     url: remote.url,
   };

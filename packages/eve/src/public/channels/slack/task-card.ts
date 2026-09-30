@@ -13,6 +13,7 @@ import {
   taskCardView,
   trackTaskCardEvent,
   workingAgentSessions,
+  type TaskCardAgentCall,
   type TaskCardAgentWork,
   type TaskCardBlocker,
   type TaskCardTask,
@@ -420,11 +421,7 @@ async function renderTaskCards(
   const audience = normalizeChannelAudience(channel.state.audience);
   const turns = Object.entries(channel.state.taskCards ?? {});
   const agents = new AgentSessionReads(lane.agents);
-  const agentWork = (call: {
-    readonly sessionId: string;
-    readonly startedAt: string;
-    readonly settledAt?: string;
-  }) => agents.work(call);
+  const agentWork = (call: TaskCardAgentCall) => agents.work(call);
 
   const cards: Record<string, { readonly fingerprint: string; readonly ts: string }> = {};
   const failures: Record<string, { readonly fingerprint: string; readonly renders: number }> = {};
@@ -496,11 +493,7 @@ class AgentSessionReads {
     return [...this.#reads.keys()];
   }
 
-  async work(call: {
-    readonly sessionId: string;
-    readonly startedAt: string;
-    readonly settledAt?: string;
-  }): Promise<TaskCardAgentWork> {
+  async work(call: TaskCardAgentCall): Promise<TaskCardAgentWork> {
     const fold = await this.#fold(call);
     return taskCardAgentWork(fold.turns, call, MAX_WORK_ACTIONS);
   }
@@ -512,11 +505,8 @@ class AgentSessionReads {
     );
   }
 
-  #fold(call: {
-    readonly sessionId: string;
-    readonly settledAt?: string;
-  }): Promise<AgentSessionFold> {
-    const { sessionId, settledAt } = call;
+  #fold(call: TaskCardAgentCall): Promise<AgentSessionFold> {
+    const { remote, sessionId, settledAt } = call;
     const previous = this.#folds[sessionId] ?? { nextIndex: 0, turns: {} };
     let read = this.#reads.get(sessionId);
     if (read !== undefined) return read;
@@ -527,16 +517,21 @@ class AgentSessionReads {
       this.behind = true;
       return Promise.resolve(previous);
     }
-    read = this.#readFrom(sessionId, previous);
+    read = this.#readFrom({ remote, sessionId }, previous);
     this.#reads.set(sessionId, read);
     return read;
   }
 
-  async #readFrom(sessionId: string, previous: AgentSessionFold): Promise<AgentSessionFold> {
+  async #readFrom(
+    session: Pick<TaskCardAgentCall, "remote" | "sessionId">,
+    previous: AgentSessionFold,
+  ): Promise<AgentSessionFold> {
+    const { remote, sessionId } = session;
     let fold = previous;
     for (let pages = 0; pages < MAX_AGENT_READ_PAGES; pages += 1) {
       const page = await readSessionEvents({
         limit: MAX_AGENT_READ_EVENTS,
+        remote,
         sessionId,
         startIndex: fold.nextIndex,
       });

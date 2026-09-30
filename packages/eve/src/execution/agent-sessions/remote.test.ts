@@ -7,6 +7,7 @@ import {
   continueRemoteAgentSession,
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
+  remoteAgentResolverId,
   resolveRemoteAgentStreamHeaders,
   respondToRemoteAgentSession,
   startRemoteAgentSession,
@@ -127,6 +128,42 @@ describe("resolveRemoteAgentStreamHeaders", () => {
         url: "https://dynamic.example",
       }),
     ).resolves.toEqual({ authorization: "Bearer dynamic" });
+  });
+
+  it("records no resolver for a dynamic remote agent without credentials", async () => {
+    // A dynamic agent's node holds its resolver's definition, not a remote agent's.
+    const dynamicNode = { definition: { kind: "subagent", name: "research", nodeId: "research" } };
+    const bundle = {
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { subagentRegistry: { subagentsByNodeId: new Map([["research", dynamicNode]]) } },
+      },
+    } as never;
+    const dynamicRemoteAgent = {
+      description: "Research",
+      path: "/eve/v1/session",
+      url: "https://dynamic.example",
+    };
+
+    const resolverId = remoteAgentResolverId({ dynamicRemoteAgent, nodeId: "research" });
+
+    expect(resolverId).toBeUndefined();
+    await expect(
+      resolveRemoteAgentStreamHeaders({
+        bundle,
+        name: "research",
+        resolverId,
+        url: dynamicRemoteAgent.url,
+      }),
+    ).resolves.toEqual({});
+    await expect(
+      resolveRemoteAgentStreamHeaders({
+        bundle,
+        name: "research",
+        resolverId: "research",
+        url: dynamicRemoteAgent.url,
+      }),
+    ).rejects.toThrow(/does not match/);
   });
 
   it("rejects a static resolver whose authored URL does not match the event", async () => {

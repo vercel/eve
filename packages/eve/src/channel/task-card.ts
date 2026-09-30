@@ -2,6 +2,7 @@ import { isTaskControlTool } from "#protocol/task-tools.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
+import type { RemoteAgentBinding } from "#eve-channel/support.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { firstSentence, normalizePresentationText } from "#shared/presentation-text.js";
@@ -46,7 +47,7 @@ export interface TaskCardTask {
    * only in a private conversation, since error text can carry internals.
    */
   readonly summary?: string;
-  /** An agent task's own session, when it runs in this deployment. */
+  /** An agent task's own session, local or a remote agent's. */
   readonly agent?: TaskCardAgent;
   readonly startedAt: string;
   readonly settledAt?: string;
@@ -118,12 +119,17 @@ interface TrackedCall {
     readonly id: string;
     readonly kind: "agent" | "tool";
     readonly summary?: string;
-    /** The local session an agent task's run opened, from its `agent.started`. */
+    /** The session an agent task's run opened, from its `agent.started`. */
     readonly sessionId?: string;
+    /** Where the session runs when it's a remote agent's. */
+    readonly remote?: TaskCardRemoteSession;
     /** Open requests and sign-ins the task waits on, oldest first. */
     readonly blockers?: readonly (TaskCardBlocker & { readonly id: string })[];
   };
 }
+
+/** Where a remote agent task's session runs, as its `agent.started` recorded it. */
+type TaskCardRemoteSession = Pick<RemoteAgentBinding, "name" | "resolverId" | "url">;
 
 /** One turn's calls as a channel tracks them from its session's own events. */
 export interface TaskCardTurn {
@@ -296,17 +302,23 @@ function trackTurnEvent(
       const summary = taskSummary(event.data);
       if (summary !== undefined) task.summary = summary;
       if (call.task.sessionId !== undefined) task.sessionId = call.task.sessionId;
+      if (call.task.remote !== undefined) task.remote = call.task.remote;
       return { turn: replaceCall(current, { ...call, settledAt: at, status, task }), turnId };
     }
     case "agent.started": {
-      const { callId, remote, sessionId, turnId } = event.data;
+      const { callId, name, remote, sessionId, turnId } = event.data;
       const current = turns[turnId];
       const call = current?.calls.find((candidate) => candidate.callId === callId);
-      // A remote session's stream is read through its parent's proxy, which eve doesn't follow yet.
-      if (current === undefined || call?.task === undefined || remote !== undefined)
-        return undefined;
+      if (current === undefined || call?.task === undefined) return undefined;
       if (call.task.sessionId === sessionId) return undefined;
-      return { turn: replaceCall(current, { ...call, task: { ...call.task, sessionId } }), turnId };
+      const task = { ...call.task, sessionId };
+      return {
+        turn: replaceCall(current, {
+          ...call,
+          task: remote === undefined ? task : { ...task, remote: { name, ...remote } },
+        }),
+        turnId,
+      };
     }
     case "turn.completed":
     case "turn.failed":
@@ -320,6 +332,14 @@ function trackTurnEvent(
   }
 }
 
+/** One agent task call whose own work {@link TaskCardAgent.work} rolls up. */
+export interface TaskCardAgentCall {
+  readonly sessionId: string;
+  readonly remote?: TaskCardRemoteSession;
+  readonly startedAt: string;
+  readonly settledAt?: string;
+}
+
 /** The view a renderer draws one turn's card from. */
 export function taskCardView(
   turnId: string,
@@ -327,11 +347,7 @@ export function taskCardView(
   options: {
     readonly audience: ChannelAudience;
     /** Rolls up an agent task's own session; see {@link TaskCardAgent.work}. */
-    readonly agentWork?: (call: {
-      readonly sessionId: string;
-      readonly startedAt: string;
-      readonly settledAt?: string;
-    }) => Promise<TaskCardAgentWork>;
+    readonly agentWork?: (call: TaskCardAgentCall) => Promise<TaskCardAgentWork>;
   },
 ): TaskCardView {
   const tasks: TaskCardTask[] = [];
@@ -348,14 +364,14 @@ export function taskCardView(
   return { actions, state, tasks, turnId };
 }
 
-/** The local sessions of a turn's agent tasks. */
+/** The sessions of a turn's agent tasks. */
 export function agentSessions(turn: TaskCardTurn): readonly string[] {
   return turn.calls.flatMap((call) =>
     call.task?.sessionId === undefined ? [] : [call.task.sessionId],
   );
 }
 
-/** The local sessions of a turn's working agent tasks. */
+/** The sessions of a turn's working agent tasks. */
 export function workingAgentSessions(turn: TaskCardTurn): readonly string[] {
   return turn.calls.flatMap((call) =>
     call.status === "working" && call.task?.sessionId !== undefined ? [call.task.sessionId] : [],
@@ -454,16 +470,15 @@ function toTask(
   const shown = call.status !== "failed" || shareable;
   if (task.summary !== undefined && shown) row.summary = task.summary;
   const { agentWork } = options;
-  const { sessionId } = task;
+  const { remote, sessionId } = task;
   if (agentWork !== undefined && sessionId !== undefined) {
-    const { settledAt, startedAt } = call;
-    row.agent = {
+    const agentCall: { -readonly [K in keyof TaskCardAgentCall]: TaskCardAgentCall[K] } = {
       sessionId,
-      work: () =>
-        agentWork(
-          settledAt === undefined ? { sessionId, startedAt } : { sessionId, settledAt, startedAt },
-        ),
+      startedAt: call.startedAt,
     };
+    if (remote !== undefined) agentCall.remote = remote;
+    if (call.settledAt !== undefined) agentCall.settledAt = call.settledAt;
+    row.agent = { sessionId, work: () => agentWork(agentCall) };
   }
   if (call.settledAt !== undefined) row.settledAt = call.settledAt;
   return row;
