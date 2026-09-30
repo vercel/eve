@@ -1462,6 +1462,20 @@ describe("eveChannel — remote agent protocol 1 callers", () => {
     });
     expect(handler.createSession).not.toHaveBeenCalled();
   });
+
+  it.each([null, "2"])(
+    "rejects a delegating create whose protocolVersion is %j instead of treating it as protocol 1",
+    async (protocolVersion) => {
+      const handler = createEveCreateHandler({ auth: none() });
+
+      const response = await handler.fetch(
+        createJsonMessageRequest({ callback, message: "hi", protocolVersion }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(handler.createSession).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("eveChannel — create session (UserContent array)", () => {

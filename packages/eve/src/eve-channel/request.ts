@@ -85,6 +85,17 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
+  // Only an absent version means protocol 1; 0.66–0.68 callers omit the field.
+  if (
+    callback !== undefined &&
+    payload.protocolVersion !== undefined &&
+    typeof payload.protocolVersion !== "number"
+  ) {
+    return Response.json(
+      { error: "Expected 'protocolVersion' to be a number.", ok: false },
+      { status: 400 },
+    );
+  }
   const protocolVersion =
     callback === undefined ? undefined : readRemoteAgentProtocolVersion(payload.protocolVersion);
   if (protocolVersion !== undefined) {
