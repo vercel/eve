@@ -91,6 +91,17 @@ for (const item of items) {
         'Registry item "memory/arcana" must declare ARCANA_API_KEY and ARCANA_WORKSPACE as environment variables.',
       );
     }
+  } else if (slug === "hindsight") {
+    if (!item.dependencies?.includes("@vectorize-io/hindsight-eve")) {
+      throw new Error(
+        'Registry item "memory/hindsight" must depend on @vectorize-io/hindsight-eve.',
+      );
+    }
+    if (!("HINDSIGHT_API_KEY" in (item.envVars ?? {}))) {
+      throw new Error(
+        'Registry item "memory/hindsight" must declare HINDSIGHT_API_KEY as an environment variable.',
+      );
+    }
   } else if (slug === "supermemory") {
     if (!item.dependencies?.includes("@supermemory/eve")) {
       throw new Error('Registry item "memory/supermemory" must depend on @supermemory/eve.');

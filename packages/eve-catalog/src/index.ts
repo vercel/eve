@@ -375,8 +375,9 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {
     slug: "hindsight",
     name: "Hindsight",
-    kind: "extension",
-    tagline: "Recall relevant context before every turn and retain each exchange automatically.",
+    kind: "memory",
+    tagline:
+      "Give your agents scoped long-term memory with automatic recall before each turn, automatic capture after, and a reflect tool.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
