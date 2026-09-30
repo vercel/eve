@@ -1,5 +1,6 @@
 import type { ContextContainer } from "#context/container.js";
 import {
+  CallerRemoteAgentProtocolKey,
   ContinuationTokenKey,
   SessionCallbackKey,
   SessionIdKey,
@@ -8,6 +9,7 @@ import {
 import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { LEGACY_REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 /** A remote session sends input to its caller instead of presenting it on its own channel. */
 export async function forwardSessionInput(
@@ -17,6 +19,8 @@ export async function forwardSessionInput(
 ): Promise<boolean> {
   const callback = ctx.get(SessionCallbackKey);
   if (callback === undefined) return false;
+  // Protocol-1 callers reject these callback kinds; their children keep input on their own channel.
+  if (ctx.get(CallerRemoteAgentProtocolKey) === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION) return false;
   if (
     event.type !== "input.requested" &&
     event.type !== "authorization.required" &&

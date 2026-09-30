@@ -178,8 +178,18 @@ The message stream version is now 26. The TypeScript client accepts versions 21 
 client that accepts only versions up to 25 fails the stream with an unsupported-version error. See
 [Turns wait for their tasks](/docs/tools/tasks#turns-wait-for-their-tasks).
 
-## Upgrade remote agents together
+## Upgrade remote agents before their callers
 
-The remote agent protocol is now version 2. Upgrade the calling deployment and every
-[remote agent](/docs/guides/remote-agents) it calls to this release together; a mismatch fails the
-call at start with an error that names both versions.
+The remote agent protocol is now version 2. Deploy each [remote agent](/docs/guides/remote-agents)
+before the deployments that call it. A remote agent on this release still serves callers on eve 0.66
+through 0.68, which speak protocol 1: it runs their turns, sends each result to their callback, and
+accepts their follow-up and reset requests. Questions, approvals, and sign-in requests from the
+remote agent stay on its own channel, as they did before this release, and activity from a
+background task's remote agent isn't relayed to the caller.
+
+Each protocol-1 create logs a `serving a caller on deprecated eve remote agent protocol 1` warning
+with the caller's origin, so you can find callers that still need to upgrade. Protocol 1 support is
+deprecated and will be removed in a later release.
+
+Upgrade a caller after every remote agent it calls. A caller on this release fails a call at start,
+with an error that names both versions, when the remote agent's deployment speaks protocol 1.

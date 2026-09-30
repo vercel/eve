@@ -159,6 +159,9 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>(
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 );
 
+/** Remote agent protocol the delegating caller spoke when it created the session. */
+export const CallerRemoteAgentProtocolKey = new ContextKey<number>("eve.callerRemoteAgentProtocol");
+
 // ---------------------------------------------------------------------------
 // Derived keys — reconstructed by providers each step, never serialized.
 // ---------------------------------------------------------------------------

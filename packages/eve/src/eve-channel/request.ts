@@ -27,6 +27,7 @@ import {
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
 import {
+  LEGACY_REMOTE_AGENT_PROTOCOL_VERSION,
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
   readRemoteAgentProtocolVersion,
@@ -36,6 +37,7 @@ import {
   formatUploadPolicyViolation,
   type UploadPolicy,
 } from "#public/channels/upload-policy.js";
+import { isObject } from "#shared/guards.js";
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { parseTurnPolicyField } from "#eve-channel/turn-policy-request.js";
@@ -64,7 +66,8 @@ export async function deriveOperationContinuationToken(input: {
   return `eve:op:${hex.slice(0, 32)}`;
 }
 
-export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateBody | Response {
+export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
+  const payload = withoutLegacyTaskFields(input);
   if (payload.inputResponses !== undefined) {
     return Response.json(
       { error: "'inputResponses' is only accepted for an existing session.", ok: false },
@@ -79,8 +82,10 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  if (callback !== undefined) {
-    const protocolRejection = rejectRemoteAgentProtocolMismatch(payload.protocolVersion);
+  const protocolVersion =
+    callback === undefined ? undefined : readRemoteAgentProtocolVersion(payload.protocolVersion);
+  if (protocolVersion !== undefined) {
+    const protocolRejection = rejectRemoteAgentProtocolMismatch(protocolVersion);
     if (protocolRejection !== undefined) return protocolRejection;
   }
 
@@ -124,6 +129,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   };
   if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
+  if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
   return result;
 }
 
@@ -138,8 +144,9 @@ interface ParsedSessionMessageBody {
 }
 
 export function parseSessionMessageBody(
-  payload: Record<string, unknown>,
+  input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
+  const payload = withoutLegacyTaskFields(input);
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
 
@@ -347,10 +354,37 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
 }
 
-/** Delegating callers must speak this deployment's remote agent protocol. */
-function rejectRemoteAgentProtocolMismatch(value: unknown): Response | undefined {
-  const callerVersion = readRemoteAgentProtocolVersion(value);
-  if (callerVersion === REMOTE_AGENT_PROTOCOL_VERSION) return undefined;
+/**
+ * Callers delegating from an eve 0.66–0.68 background task send a
+ * `callback.taskId` and a `task` activity work identity. Tasks no longer
+ * exist, so serve the delegation without them; current callers send neither.
+ */
+function withoutLegacyTaskFields(payload: Record<string, unknown>): Record<string, unknown> {
+  const { activityObserver, callback } = payload;
+  const legacyTaskId = isObject(callback) && "taskId" in callback;
+  const legacyTaskObserver =
+    isObject(activityObserver) &&
+    isObject(activityObserver.workIdentity) &&
+    activityObserver.workIdentity.kind === "task";
+  if (!legacyTaskId && !legacyTaskObserver) return payload;
+
+  const next = { ...payload };
+  if (legacyTaskId) {
+    const { taskId: _taskId, ...rest } = callback;
+    next.callback = rest;
+  }
+  if (legacyTaskObserver) delete next.activityObserver;
+  return next;
+}
+
+/** Delegating callers must speak a remote agent protocol this deployment serves. */
+function rejectRemoteAgentProtocolMismatch(callerVersion: number): Response | undefined {
+  if (
+    callerVersion === REMOTE_AGENT_PROTOCOL_VERSION ||
+    callerVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION
+  ) {
+    return undefined;
+  }
   return Response.json(
     {
       code: REMOTE_AGENT_PROTOCOL_MISMATCH,

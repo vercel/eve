@@ -462,6 +462,8 @@ export interface RunInput {
    * caller for their own turn.
    */
   readonly callback?: SessionCallback;
+  /** Remote agent protocol of the caller that sent {@link callback}. */
+  readonly callerRemoteAgentProtocol?: number;
   /** Private collector capability and current work lineage. */
   readonly activityObserver?: ActivityObserverConfig;
   /**

@@ -5,6 +5,7 @@ import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import {
   AuthKey,
+  CallerRemoteAgentProtocolKey,
   ContinuationTokenKey,
   SessionCallbackKey,
   SessionIdKey,
@@ -201,6 +202,32 @@ describe("proxied stream hooks", () => {
       });
       expect(f.order).not.toContain("channel:input.requested");
       expect(f.events.map((event) => event.type)).toEqual(["input.requested"]);
+    } finally {
+      sink.release();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps input on its own channel when the caller speaks protocol 1", async () => {
+    const f = fixture();
+    f.ctx.set(SessionCallbackKey, {
+      callId: "remote-call",
+      subagentName: "remote-child",
+      token: "parent-reply",
+      url: "https://parent.example/eve/v1/callback/parent-reply",
+    });
+    f.ctx.set(CallerRemoteAgentProtocolKey, 1);
+    const fetchMock = vi.fn(async () => Response.json({ ok: true }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const sink = createSessionEventSink({
+      ctx: f.ctx,
+      sessionId: "parent-session",
+      sessionWritable: f.sessionWritable,
+    });
+    try {
+      await sink.emit({ type: "input.requested", data: f.hookPayload.event });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(f.order).toContain("channel:input.requested");
     } finally {
       sink.release();
       vi.unstubAllGlobals();

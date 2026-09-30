@@ -15,6 +15,8 @@ export interface ParsedCreateBody {
   context?: readonly string[];
   operationId?: string;
   outputSchema?: JsonObject;
+  /** Remote agent protocol of a delegating caller; set only with {@link callback}. */
+  protocolVersion?: number;
 }
 
 /** Enforces the fields that only make sense when creation also starts a turn. */
