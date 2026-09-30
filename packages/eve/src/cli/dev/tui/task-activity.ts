@@ -36,7 +36,7 @@ export interface TaskEntry {
 }
 
 /** Includes the heading and overflow summary, regardless of nesting. */
-const maxPanelRows = 11;
+const maxPanelRows = 15;
 
 export class TaskActivity {
   readonly #entries = new Map<string, TaskEntry>();
@@ -123,8 +123,10 @@ function currentActivity(entry: TaskEntry): { text: string; attention: boolean }
   }
   const running = tools.findLast((tool) => tool.status === "running");
   if (running !== undefined) return { text: running.title ?? "Working", attention: false };
+  const latest = tools.at(-1);
+  if (latest?.title !== undefined) return { text: latest.title, attention: false };
   if (entry.step !== undefined) return { text: entry.step, attention: false };
-  return { text: entry.kind === "agent" ? "Starting" : "Running", attention: false };
+  return { text: "", attention: false };
 }
 
 /** Stable ownership order, with only one visible level of indentation. */
@@ -182,17 +184,15 @@ export function renderTaskPanelRows(
     const owners = parentShown ? path.slice(1) : path;
     const ownership =
       owners.length > 0 ? `${owners.join(` ${theme.glyph.arrow} `)} ${theme.glyph.arrow} ` : "";
-    rows.push(clipVisible(`${lead}${c.bold(`${ownership}${taskLabel(entry)}`)}`, width));
-    const activity = currentActivity(entry);
     const elapsed = formatTurnDuration(nowMs - entry.startedAtMs);
-    const detailLead = `    ${nested ? "  " : ""}${theme.glyph.elbow} `;
-    const suffix = ` ${theme.glyph.dot} ${elapsed}`;
-    const text = truncate(
-      activity.text,
-      Math.max(0, width - visibleLength(detailLead) - suffix.length),
+    rows.push(
+      clipVisible(`${lead}${c.bold(`${ownership}${taskLabel(entry)}`)} ${c.dim(elapsed)}`, width),
     );
+    const activity = currentActivity(entry);
+    const detailLead = `    ${nested ? "  " : ""}${theme.glyph.elbow} `;
+    const text = truncate(activity.text, Math.max(0, width - visibleLength(detailLead)));
     const color = activity.attention ? c.yellow : c.dim;
-    rows.push(clipVisible(`${detailLead}${color(text)}${c.dim(suffix)}`, width));
+    if (text.length > 0) rows.push(clipVisible(`${detailLead}${color(text)}`, width));
   }
   const hidden = tasks.length - shown.length;
   if (hidden > 0 && rows.length < contentBudget) {

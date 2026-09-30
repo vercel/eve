@@ -1876,7 +1876,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
 
     expect(screen.snapshot()).toMatch(
-      /─ subagent\(number_picker:13\) · 2 of 10 ──\n\n\s+Approve random_number\?/,
+      /^── subagent\(number_picker:13\) · 2 of 10 ─+\n\n\s+Approve random_number\?/,
     );
     input.enter();
     await expect(approval).resolves.toEqual({ approved: true });
@@ -3846,10 +3846,9 @@ describe("TerminalRenderer conversation", () => {
     renderer.renderConversation(conversationOf(working, { working: true }));
     const during = screen.snapshot();
     expect(during).toContain("▪ Delegate number_picker  Pick a number for Alice.");
-    expect(during).toMatch(
-      /── Waiting · 1 task · \S+ ─+\n\n  subagent\(number_picker\)\n    ⎿ Starting ·/,
-    );
-    expect(during).toMatch(/Starting · \S+\n\n─+\n❯/);
+    expect(during).toMatch(/── Waiting · 1 task · \S+ ─+\n\n  subagent\(number_picker\) \S+/);
+    expect(during).toMatch(/subagent\(number_picker\) \S+\n\n─+\n❯/);
+    expect(during).not.toContain("Starting");
     expect(countOccurrences(during, "Pick a number for Alice.")).toBe(1);
     expect(during).not.toContain("Waiting for");
     expect(during).not.toContain("↑");
@@ -3864,13 +3863,15 @@ describe("TerminalRenderer conversation", () => {
     });
     expect(screen.snapshot()).toContain("Approve wait_random_number?");
     expect(screen.snapshot()).toMatch(/── Waiting · 1 task/);
-    expect(screen.snapshot()).toMatch(/Starting · \S+\n\n─+\n\n  Approve wait_random_number\?/);
+    expect(screen.snapshot()).toMatch(
+      /subagent\(number_picker\) \S+\n\n─+\n\n  Approve wait_random_number\?/,
+    );
     expect(countOccurrences(screen.snapshot(), "subagent(number_picker)")).toBe(1);
     input.enter();
     await expect(approval).resolves.toEqual({ approved: true });
     expect(screen.snapshot()).toContain("Waiting · 1 task");
     const prompt = readPrompt(renderer);
-    expect(screen.snapshot()).toMatch(/Starting · \S+\n\n─+\n❯/);
+    expect(screen.snapshot()).toMatch(/subagent\(number_picker\) \S+\n\n─+\n❯/);
 
     renderer.renderConversation(
       conversationOf(

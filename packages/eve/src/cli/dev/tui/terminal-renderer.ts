@@ -1127,6 +1127,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(request.context),
+        false,
+        "left",
       );
     this.#paint();
 
@@ -1233,6 +1235,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(question.context),
+        false,
+        "left",
       );
 
     const textPanel = (width: number) => {
@@ -1256,6 +1260,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(question.context),
+        false,
+        "left",
       );
     };
 
@@ -3145,7 +3151,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#taskEndGraceTimer = undefined;
   }
 
-  #taskPanelRows(width: number, maxRows = Math.max(6, Math.floor(this.#height() / 3))): string[] {
+  #taskPanelRows(width: number, maxRows = Math.max(8, Math.floor(this.#height() / 2))): string[] {
     const tasks = this.#transcript.tasks;
     if (tasks.length === 0) return [];
     const working = this.#view?.working === true && this.#flowlessStatus === undefined;
