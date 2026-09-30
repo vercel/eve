@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { presentPreparingTool, presentTool } from "./tool-presentation.js";
+import { agentDisplayName, presentPreparingTool, presentTool } from "./tool-presentation.js";
 
 describe("presentPreparingTool", () => {
   it("leads with the activity verb while the input still streams", () => {
@@ -220,6 +220,14 @@ describe("presentTool", () => {
     );
     // Without roster knowledge the generic formatter keeps its shape.
     expect(presentTool("stock-price", { message: "x" }).title).toBe("stock-price");
+  });
+
+  it("names the self-modification subagent without its extension namespace", () => {
+    expect(agentDisplayName("self-modification__agent")).toBe("self-modification");
+    expect(
+      presentTool("self-modification__agent", { message: "Add a tool." }, { isSubagent: true })
+        .title,
+    ).toBe("Delegate self-modification");
   });
 
   it("keeps unknown tools on the generic formatter", () => {

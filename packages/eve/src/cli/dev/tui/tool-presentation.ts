@@ -290,12 +290,19 @@ export function presentTool(
 }
 
 /**
- * The name an agent task goes by. The generic self-delegation tool is
- * literally named `agent`, which reads as `subagent` to a person.
+ * Tool names that read poorly to a person. The generic self-delegation tool is
+ * literally named `agent`, and the bundled self-modification subagent carries
+ * its extension namespace (`self-modification__agent`).
  */
+const AGENT_DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([
+  ["agent", "subagent"],
+  ["self-modification__agent", "self-modification"],
+]);
+
+/** The name an agent task goes by in the delegate row, task line, and task panel. */
 export function agentDisplayName(toolName: string): string {
   const baseName = toolBaseName(toolName);
-  return baseName === "agent" ? "subagent" : baseName;
+  return AGENT_DISPLAY_NAMES.get(baseName) ?? baseName;
 }
 
 /**
