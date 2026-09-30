@@ -16,7 +16,7 @@ const task = (name: string, children: readonly TaskEntry[] = []): TaskEntry => (
   childTools: new Map(),
   children,
 });
-const render = (entries: readonly TaskEntry[], width = 80, maxRows = 9) =>
+const render = (entries: readonly TaskEntry[], width = 80, maxRows = 11) =>
   renderTaskPanelRows(entries, { width, maxRows, theme, nowMs: 12_000 }).map(stripAnsi);
 
 describe("live task panel", () => {
@@ -24,7 +24,7 @@ describe("live task panel", () => {
     const rows = render([task("researcher", [task("analyst", [task("download")])])]);
     expect(rows[0]).toMatch(/^── Working · 3 tasks ─+$/);
     expect(visibleLength(rows[0]!)).toBe(80);
-    expect(rows.slice(1, -1)).toEqual([
+    expect(rows.slice(2, -2)).toEqual([
       "  subagent(researcher)",
       "    ⎿ Starting · 12s",
       "  └ subagent(analyst)",
@@ -51,25 +51,30 @@ describe("live task panel", () => {
         task("supervisor", [approval]),
       ],
       80,
-      6,
+      7,
     );
-    expect(rows).toHaveLength(5);
+    expect(rows).toHaveLength(7);
     expect(rows.join("\n")).toContain("Needs your approval: run command");
-    expect(rows.at(-2)).toContain("5 more working");
+    expect(rows.at(-2)).toBe("");
+    expect(rows.at(-3)).toContain("5 more working");
     expect(rows.join("\n")).not.toContain("download ·");
   });
 
-  it("keeps turn status inside the drawer and includes it in the panel's row budget", () => {
+  it("puts parent state and turn time in the header with breathing room around tasks", () => {
     const rows = renderTaskPanelRows([task("self-modification__agent")], {
       width: 80,
-      maxRows: 5,
+      maxRows: 6,
       theme,
       nowMs: 12_000,
-      turnStatus: "Waiting for researcher (16s)",
+      activity: "Waiting",
+      turnElapsedMs: 16_000,
     }).map(stripAnsi);
-    expect(rows).toHaveLength(5);
-    expect(rows.slice(-2)).toEqual(["Waiting for researcher (16s)", "─".repeat(80)]);
-    expect(rows[1]).toBe("  subagent(self-modification)");
+    expect(rows).toHaveLength(6);
+    expect(rows[0]).toMatch(/^── Waiting · 1 task · 16s ─+$/);
+    expect(rows[1]).toBe("");
+    expect(rows[2]).toBe("  subagent(self-modification)");
+    expect(rows.slice(-2)).toEqual(["", "─".repeat(80)]);
+    expect(rows.join("\n")).not.toContain("Waiting for");
   });
 
   it("fits narrow terminals and small row budgets without retaining an empty panel", () => {

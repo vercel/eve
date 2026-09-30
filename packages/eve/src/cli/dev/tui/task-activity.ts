@@ -36,7 +36,7 @@ export interface TaskEntry {
 }
 
 /** Includes the heading and overflow summary, regardless of nesting. */
-const maxPanelRows = 9;
+const maxPanelRows = 11;
 
 export class TaskActivity {
   readonly #entries = new Map<string, TaskEntry>();
@@ -154,7 +154,8 @@ export function renderTaskPanelRows(
     readonly width: number;
     readonly theme: Theme;
     readonly nowMs: number;
-    readonly turnStatus?: string;
+    readonly activity?: string;
+    readonly turnElapsedMs?: number;
     readonly maxRows?: number;
   },
 ): string[] {
@@ -163,8 +164,8 @@ export function renderTaskPanelRows(
   const c = theme.colors;
   const tasks = panelEntries(entries);
   const budget = Math.max(2, Math.min(maxPanelRows, options.maxRows ?? maxPanelRows));
-  const statusRows = options.turnStatus === undefined ? 0 : 1;
-  const contentBudget = Math.max(0, budget - 2 - statusRows);
+  const padded = budget >= 5;
+  const contentBudget = Math.max(0, budget - (padded ? 4 : 2));
   const overflow = tasks.length * 2 > contentBudget;
   const capacity = Math.max(0, Math.floor((contentBudget - (overflow ? 1 : 0)) / 2));
   // Approval requests must not disappear behind a busy branch's overflow summary.
@@ -197,16 +198,13 @@ export function renderTaskPanelRows(
   if (hidden > 0 && rows.length < contentBudget) {
     rows.push(clipVisible(`  ${c.dim(`${theme.glyph.ellipsis} ${hidden} more working`)}`, width));
   }
-  if (options.turnStatus !== undefined && rows.length + 3 <= budget) {
-    rows.push(clipVisible(options.turnStatus.trimStart(), width));
-  }
   return renderTransientDrawer(
     rows,
     [],
     theme,
     width,
-    `Working ${theme.glyph.dot} ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`,
-    true,
+    `${options.activity ?? "Working"} ${theme.glyph.dot} ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}${options.turnElapsedMs === undefined ? "" : ` ${theme.glyph.dot} ${formatTurnDuration(options.turnElapsedMs)}`}`,
+    !padded,
     "left",
   ).rows;
 }

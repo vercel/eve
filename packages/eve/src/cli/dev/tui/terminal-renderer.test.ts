@@ -1844,8 +1844,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toMatch(/^─+\n  Approve random_color\?/);
-    expect(snapshot).toMatch(/No\n─+\n  y yes/);
+    expect(snapshot).toMatch(/^─+\n\n  Approve random_color\?/);
+    expect(snapshot).toMatch(/No\n\n─+\n  y yes/);
     const yes = snapshot.split("\n").find((row) => row.includes("Yes"));
     expect(yes).toBe("     Yes");
     expect(snapshot).toContain("No");
@@ -1876,7 +1876,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
 
     expect(screen.snapshot()).toMatch(
-      /─ subagent\(number_picker:13\) · 2 of 10 ──\n\s+Approve random_number\?/,
+      /─ subagent\(number_picker:13\) · 2 of 10 ──\n\n\s+Approve random_number\?/,
     );
     input.enter();
     await expect(approval).resolves.toEqual({ approved: true });
@@ -3800,7 +3800,7 @@ describe("TerminalRenderer conversation", () => {
   let sequence = 0;
   const stamped = (event: UnstampedMessageStreamEvent) => stampTestEvent(event, ++sequence);
 
-  it("writes a task's start and end lines and yields its live drawer to approval", async () => {
+  it("keeps live tasks above approval with a shared divider and state in the header", async () => {
     const { screen, input, renderer } = makeRenderer(100, 30);
     const initialPrompt = readPrompt(renderer);
     input.type("Pick a number for Alice.");
@@ -3846,13 +3846,14 @@ describe("TerminalRenderer conversation", () => {
     renderer.renderConversation(conversationOf(working, { working: true }));
     const during = screen.snapshot();
     expect(during).toContain("▪ Delegate number_picker  Pick a number for Alice.");
-    expect(during).toContain("Working · 1 task");
-    expect(during).toMatch(/── Working · 1 task ─+/);
-    expect(during).toMatch(/── Working · 1 task ─+\n  subagent\(number_picker\)\n    ⎿ Starting ·/);
-    expect(during).toMatch(/\n[• ] Waiting for subagent\(number_picker\).*\n─+\n❯/);
+    expect(during).toMatch(
+      /── Waiting · 1 task · \S+ ─+\n\n  subagent\(number_picker\)\n    ⎿ Starting ·/,
+    );
+    expect(during).toMatch(/Starting · \S+\n\n─+\n❯/);
     expect(countOccurrences(during, "Pick a number for Alice.")).toBe(1);
-    expect(countOccurrences(during, "Waiting for subagent(number_picker)")).toBe(1);
-    expect(during).toContain("Waiting for subagent(number_picker)");
+    expect(during).not.toContain("Waiting for");
+    expect(during).not.toContain("↑");
+    expect(during).not.toContain("↓");
     expect(during).not.toContain("task_wait");
 
     const approval = renderer.readToolApproval({
@@ -3862,12 +3863,14 @@ describe("TerminalRenderer conversation", () => {
       input: {},
     });
     expect(screen.snapshot()).toContain("Approve wait_random_number?");
-    expect(screen.snapshot()).not.toContain("Working · 1 task");
+    expect(screen.snapshot()).toMatch(/── Waiting · 1 task/);
+    expect(screen.snapshot()).toMatch(/Starting · \S+\n\n─+\n\n  Approve wait_random_number\?/);
+    expect(countOccurrences(screen.snapshot(), "subagent(number_picker)")).toBe(1);
     input.enter();
     await expect(approval).resolves.toEqual({ approved: true });
-    expect(screen.snapshot()).toContain("Working · 1 task");
+    expect(screen.snapshot()).toContain("Waiting · 1 task");
     const prompt = readPrompt(renderer);
-    expect(screen.snapshot()).toMatch(/Waiting for subagent\(number_picker\).*\n─+\n❯/);
+    expect(screen.snapshot()).toMatch(/Starting · \S+\n\n─+\n❯/);
 
     renderer.renderConversation(
       conversationOf(
@@ -3880,7 +3883,7 @@ describe("TerminalRenderer conversation", () => {
     );
     const after = screen.snapshot();
     expect(after).toMatch(/✓ number_picker +finished in/);
-    expect(after).not.toContain("Working · 1 task");
+    expect(after).not.toContain("Waiting · 1 task");
     renderer.requestInterrupt();
     await prompt.catch(() => {});
   });

@@ -1127,7 +1127,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(request.context),
-        true,
       );
     this.#paint();
 
@@ -1234,7 +1233,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(question.context),
-        true,
       );
 
     const textPanel = (width: number) => {
@@ -1258,7 +1256,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(question.context),
-        true,
       );
     };
 
@@ -3148,15 +3145,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#taskEndGraceTimer = undefined;
   }
 
-  #taskPanelRows(width: number, turnStatus?: string): string[] {
-    const working = this.#transcript.tasks;
-    if (working.length === 0) return [];
-    return renderTaskPanelRows(working, {
+  #taskPanelRows(width: number, maxRows = Math.max(6, Math.floor(this.#height() / 3))): string[] {
+    const tasks = this.#transcript.tasks;
+    if (tasks.length === 0) return [];
+    const working = this.#view?.working === true && this.#flowlessStatus === undefined;
+    const now = Date.now();
+    const activity =
+      working && this.#view !== undefined ? turnActivity(this.#view, tasks) : "Working";
+    return renderTaskPanelRows(tasks, {
       width,
       theme: this.#theme,
-      nowMs: Date.now(),
-      maxRows: Math.max(turnStatus === undefined ? 4 : 6, Math.floor(this.#height() / 3)),
-      turnStatus,
+      nowMs: now,
+      maxRows,
+      activity: activity.startsWith("Waiting for ") ? "Waiting" : activity,
+      turnElapsedMs: working ? Math.max(0, now - (this.#turnClock.startedAtMs ?? now)) : undefined,
     });
   }
 
@@ -3540,10 +3542,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return [...drawer.rows, ...drawer.controls];
     }
 
-    // HITL replaces activity and owns the footer through its controls.
+    // The request keeps priority; activity uses the remaining height and shares its top rule.
     if (this.#hitlDrawer !== undefined) {
       const drawer = this.#hitlDrawer(width);
-      return [...drawer.rows, ...drawer.controls];
+      const available = this.#height() - drawer.rows.length - drawer.controls.length - 1;
+      const activity = available >= 4 ? this.#taskPanelRows(width, available + 1) : [];
+      return [...activity.slice(0, -1), ...drawer.rows, ...drawer.controls];
     }
 
     const flow = this.#setupFlow;
@@ -3629,10 +3633,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The task panel is the one region that redraws in place while tasks
     // work, so it sits in the footer rather than the transcript.
     const working = this.#view?.working === true && this.#flowlessStatus === undefined;
-    const taskRows = this.#taskPanelRows(
-      width,
-      working ? this.#streamingTurnBar(width - 4) : undefined,
-    );
+    const taskRows = this.#taskPanelRows(width);
     if (taskRows.length > 0) {
       rows.push(...taskRows);
     }
