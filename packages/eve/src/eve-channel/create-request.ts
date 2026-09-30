@@ -5,6 +5,7 @@ import type {
   SessionCallback,
   SessionCapabilities,
 } from "#channel/types.js";
+import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
 import type { JsonObject } from "#shared/json.js";
 
 export interface ParsedCreateBody {
@@ -17,6 +18,7 @@ export interface ParsedCreateBody {
   outputSchema?: JsonObject;
   /** Remote agent protocol of a delegating caller; set only with {@link callback}. */
   protocolVersion?: number;
+  legacyRemoteAgentCaller?: LegacyRemoteAgentCaller;
 }
 
 /** Enforces the fields that only make sense when creation also starts a turn. */

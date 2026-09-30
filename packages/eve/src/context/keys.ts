@@ -23,6 +23,7 @@ import {
   type SessionInboxAddress,
 } from "#execution/session-inbox/address.js";
 import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
 import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
 import type { UserModelMessage } from "#harness/messages.js";
 import type { HandleEventFn } from "#harness/types.js";
@@ -159,8 +160,10 @@ export const SessionCallbackKey = new ContextKey<SessionCallback>(
   SESSION_CALLBACK_CONTEXT_KEY_NAME,
 );
 
-/** Remote agent protocol the delegating caller spoke when it created the session. */
-export const CallerRemoteAgentProtocolKey = new ContextKey<number>("eve.callerRemoteAgentProtocol");
+/** Present when a remote agent protocol 1 caller created the session. */
+export const LegacyRemoteAgentCallerKey = new ContextKey<LegacyRemoteAgentCaller>(
+  "eve.legacyRemoteAgentCaller",
+);
 
 // ---------------------------------------------------------------------------
 // Derived keys — reconstructed by providers each step, never serialized.

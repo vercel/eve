@@ -6,18 +6,14 @@
  */
 export const REMOTE_AGENT_PROTOCOL_VERSION = 2;
 
-/**
- * Protocol of eve 0.66–0.68 callers. Receivers still serve these callers, so a
- * receiver can deploy before its callers; support is deprecated.
- */
-export const LEGACY_REMOTE_AGENT_PROTOCOL_VERSION = 1;
-
 /** Error code a receiver answers when the caller speaks another protocol version. */
 export const REMOTE_AGENT_PROTOCOL_MISMATCH = "REMOTE_AGENT_PROTOCOL_MISMATCH";
 
+const UNVERSIONED_REMOTE_AGENT_PROTOCOL = 1;
+
 /** Reads a peer's protocol version, treating an absent one as the unversioned protocol. */
 export function readRemoteAgentProtocolVersion(value: unknown): number {
-  return typeof value === "number" ? value : LEGACY_REMOTE_AGENT_PROTOCOL_VERSION;
+  return typeof value === "number" ? value : UNVERSIONED_REMOTE_AGENT_PROTOCOL;
 }
 
 /** The caller's message when a remote agent's deployment speaks another version. */

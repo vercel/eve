@@ -23,7 +23,7 @@ import {
   EVE_STREAM_TAIL_INDEX_HEADER,
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
-import { LEGACY_REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
+import { legacyTaskInputRoute } from "#execution/legacy-remote-agent/protocol.js";
 import {
   EVE_ACTIVITY_ROUTE_PATTERN,
   EVE_CALLBACK_ROUTE_PATTERN,
@@ -152,6 +152,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_ACTIVITY_ROUTE_PATTERN, handleActivityRequest),
       POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
+      POST(legacyTaskInputRoute.path, legacyTaskInputRoute.handler),
       GET(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       POST(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       PUT(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
@@ -176,11 +177,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
-        if (
-          body.callback !== undefined &&
-          body.protocolVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION
-        ) {
-          log.warn("serving a caller on deprecated eve remote agent protocol 1", {
+        if (body.callback !== undefined && body.legacyRemoteAgentCaller !== undefined) {
+          log.info("serving a remote agent protocol 1 caller", {
             callerOrigin: new URL(body.callback.url).origin,
             forwarder: authResult.principalId,
           });
@@ -334,7 +332,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             auth: messageResult.auth,
             capabilities: body.capabilities ?? { requestInput: true },
             callback: body.callback,
-            callerRemoteAgentProtocol: body.protocolVersion,
+            legacyRemoteAgentCaller: body.legacyRemoteAgentCaller,
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: attachClientContext(

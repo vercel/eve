@@ -17,7 +17,7 @@ import {
   ActivityObserverKey,
   ScheduleIdKey,
   SessionCallbackKey,
-  CallerRemoteAgentProtocolKey,
+  LegacyRemoteAgentCallerKey,
   SessionTitleKey,
 } from "#context/keys.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
@@ -95,8 +95,8 @@ export function buildRunContext(input: {
   if (run.callback !== undefined) {
     ctx.set(SessionCallbackKey, run.callback);
   }
-  if (run.callerRemoteAgentProtocol !== undefined) {
-    ctx.set(CallerRemoteAgentProtocolKey, run.callerRemoteAgentProtocol);
+  if (run.legacyRemoteAgentCaller !== undefined) {
+    ctx.set(LegacyRemoteAgentCallerKey, run.legacyRemoteAgentCaller);
   }
   if (run.activityObserver !== undefined) {
     ctx.set(ActivityObserverKey, run.activityObserver);

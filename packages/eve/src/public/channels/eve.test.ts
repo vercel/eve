@@ -1403,34 +1403,37 @@ describe("eveChannel — remote agent protocol 1 callers", () => {
   };
 
   it.each([
-    ["a direct call", { callback }],
-    ["a background task", legacyTaskFields],
-  ])("serves an unversioned create from %s and answers protocol 1", async (_caller, fields) => {
-    const logs = captureLogRecords();
-    const handler = createEveCreateHandler({ auth: none() });
+    ["a direct call", { callback }, {}],
+    ["a background task", legacyTaskFields, { taskId: "task-1" }],
+  ])(
+    "serves an unversioned create from %s and answers protocol 1",
+    async (_caller, fields, legacyCaller) => {
+      const logs = captureLogRecords();
+      const handler = createEveCreateHandler({ auth: none() });
 
-    const response = await handler.fetch(
-      createJsonMessageRequest({ capabilities: {}, message: "hi", ...fields }),
-    );
+      const response = await handler.fetch(
+        createJsonMessageRequest({ capabilities: {}, message: "hi", ...fields }),
+      );
 
-    expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      protocolVersion: 1,
-      sessionId: "test-session-id",
-      status: "accepted",
-    });
-    const runInput = handler.createSession.mock.calls[0]?.[0];
-    expect(runInput?.callback).toEqual(callback);
-    expect(runInput?.activityObserver).toBeUndefined();
-    expect(runInput?.callerRemoteAgentProtocol).toBe(1);
-    expect(logs.records).toContainEqual(
-      expect.objectContaining({
-        level: "warn",
-        message: "serving a caller on deprecated eve remote agent protocol 1",
-      }),
-    );
-  });
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        protocolVersion: 1,
+        sessionId: "test-session-id",
+        status: "accepted",
+      });
+      const runInput = handler.createSession.mock.calls[0]?.[0];
+      expect(runInput?.callback).toEqual(callback);
+      expect(runInput?.activityObserver).toBeUndefined();
+      expect(runInput?.legacyRemoteAgentCaller).toEqual(legacyCaller);
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "info",
+          message: "serving a remote agent protocol 1 caller",
+        }),
+      );
+    },
+  );
 
   it("serves a protocol-1 continuation", async () => {
     const handler = createEveContinueHandler({ auth: none() });

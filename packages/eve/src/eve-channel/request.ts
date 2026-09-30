@@ -27,17 +27,19 @@ import {
   EVE_STREAM_VERSION_HEADER,
 } from "#protocol/message.js";
 import {
-  LEGACY_REMOTE_AGENT_PROTOCOL_VERSION,
   REMOTE_AGENT_PROTOCOL_MISMATCH,
   REMOTE_AGENT_PROTOCOL_VERSION,
   readRemoteAgentProtocolVersion,
 } from "#protocol/remote-agent-protocol.js";
 import {
+  LEGACY_REMOTE_AGENT_PROTOCOL_VERSION,
+  splitLegacyTaskFields,
+} from "#execution/legacy-remote-agent/protocol.js";
+import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
   type UploadPolicy,
 } from "#public/channels/upload-policy.js";
-import { isObject } from "#shared/guards.js";
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { parseTurnPolicyField } from "#eve-channel/turn-policy-request.js";
@@ -67,7 +69,8 @@ export async function deriveOperationContinuationToken(input: {
 }
 
 export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBody | Response {
-  const payload = withoutLegacyTaskFields(input);
+  const legacy = splitLegacyTaskFields(input);
+  const { payload } = legacy;
   if (payload.inputResponses !== undefined) {
     return Response.json(
       { error: "'inputResponses' is only accepted for an existing session.", ok: false },
@@ -130,6 +133,9 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
   if (message !== undefined) result.message = message;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
+  if (protocolVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION) {
+    result.legacyRemoteAgentCaller = legacy.taskId === undefined ? {} : { taskId: legacy.taskId };
+  }
   return result;
 }
 
@@ -146,7 +152,7 @@ interface ParsedSessionMessageBody {
 export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
-  const payload = withoutLegacyTaskFields(input);
+  const { payload } = splitLegacyTaskFields(input);
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
 
@@ -352,29 +358,6 @@ function parseCallbackField(value: unknown): SessionCallback | Response | undefi
   if (parsed.ok) return parsed.callback;
 
   return Response.json({ error: parsed.message, ok: false }, { status: 400 });
-}
-
-/**
- * Callers delegating from an eve 0.66–0.68 background task send a
- * `callback.taskId` and a `task` activity work identity. Tasks no longer
- * exist, so serve the delegation without them; current callers send neither.
- */
-function withoutLegacyTaskFields(payload: Record<string, unknown>): Record<string, unknown> {
-  const { activityObserver, callback } = payload;
-  const legacyTaskId = isObject(callback) && "taskId" in callback;
-  const legacyTaskObserver =
-    isObject(activityObserver) &&
-    isObject(activityObserver.workIdentity) &&
-    activityObserver.workIdentity.kind === "task";
-  if (!legacyTaskId && !legacyTaskObserver) return payload;
-
-  const next = { ...payload };
-  if (legacyTaskId) {
-    const { taskId: _taskId, ...rest } = callback;
-    next.callback = rest;
-  }
-  if (legacyTaskObserver) delete next.activityObserver;
-  return next;
 }
 
 /** Delegating callers must speak a remote agent protocol this deployment serves. */
