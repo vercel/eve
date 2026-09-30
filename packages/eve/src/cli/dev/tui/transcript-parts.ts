@@ -86,7 +86,7 @@ export function uniqueTaskName(baseName: string, records: Iterable<TaskRecord>):
   );
   if (!taken.has(baseName)) return baseName;
   for (let ordinal = 2; ; ordinal += 1) {
-    const candidate = `${baseName} #${ordinal}`;
+    const candidate = `${baseName}:${ordinal}`;
     if (!taken.has(candidate)) return candidate;
   }
 }

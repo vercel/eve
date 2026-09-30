@@ -582,11 +582,11 @@ describe("ConversationTranscript", () => {
     const starts = transcript.project(view(state, true), options);
     expect(starts.map((block) => block.title)).toEqual([
       "Delegate subagent(research)",
-      "Delegate subagent(research #2)",
+      "Delegate subagent(research:2)",
     ]);
-    expect(transcript.tasks.map((task) => task.name)).toEqual(["research", "research #2"]);
+    expect(transcript.tasks.map((task) => task.name)).toEqual(["research", "research:2"]);
     // An input request names the task that asked as its lines do.
-    expect(transcript.taskLabel(state, "task_2")).toBe("subagent(research #2)");
+    expect(transcript.taskLabel(state, "task_2")).toBe("subagent(research:2)");
 
     const cancelled = conversation(
       [event(createTurnCancelledEvent({ sequence: 3, turnId: "turn_1" }))],
@@ -597,7 +597,7 @@ describe("ConversationTranscript", () => {
       .filter((block) => block.id?.endsWith(":end"));
     expect(ends.map((block) => [block.title, block.status, block.body])).toEqual([
       ["subagent(research)", "denied", "stopped"],
-      ["subagent(research #2)", "denied", "stopped"],
+      ["subagent(research:2)", "denied", "stopped"],
     ]);
     expect(transcript.tasks).toEqual([]);
 

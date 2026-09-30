@@ -312,7 +312,7 @@ export function isSelfModificationAgent(toolName: string): boolean {
 
 /** The name an agent task goes by in the delegate row, task line, and task panel. */
 export function agentTaskLabel(name: string): string {
-  const readable = name.replace(/__agent(?= #\d+$|$)/u, "");
+  const readable = name.replace(/__agent(?=:\d+$|$)/u, "");
   return readable === "subagent" ? readable : `subagent(${readable})`;
 }
 export function agentDisplayName(toolName: string): string {

@@ -86,12 +86,12 @@ export class TaskActivity {
     this.#entries.clear();
   }
 
-  /** Parallel calls to one agent read `researcher`, `researcher #2`, …; a name is never renamed. */
+  /** Parallel calls to one agent read `researcher`, `researcher:2`, …; a name is never renamed. */
   #uniqueName(baseName: string): string {
     const taken = new Set([...this.#entries.values()].map((entry) => entry.name));
     if (!taken.has(baseName)) return baseName;
     for (let ordinal = 2; ; ordinal += 1) {
-      const candidate = `${baseName} #${String(ordinal)}`;
+      const candidate = `${baseName}:${String(ordinal)}`;
       if (!taken.has(candidate)) return candidate;
     }
   }
