@@ -1,6 +1,7 @@
 import {
   agentCallTurns,
   agentToolSession,
+  conversationAuthorizations,
   isAgentCallContentPending,
   type ConversationState,
   type ConversationTask,
@@ -17,7 +18,7 @@ import { isTaskControlTool } from "#protocol/task-tools.js";
 import type { Block } from "./blocks.js";
 import type { AgentTUIConversationView, AgentTUIFailure, ToolLabels } from "./conversation-view.js";
 import { FileContentCache } from "./file-content-cache.js";
-import { waitingLabel, type TaskEntry } from "./task-activity.js";
+import { signInLabel, waitingLabel, type TaskEntry } from "./task-activity.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import {
   agentDisplayName,
@@ -613,8 +614,8 @@ export class ConversationTranscript {
 }
 
 /**
- * Running tools and the live turn's model activity, for the turn bar. A turn parked on its tasks
- * names them.
+ * Running tools and the live turn's model activity, for the turn bar. A session parked on a
+ * sign-in names its connections, and a turn parked on its tasks names them.
  */
 export function turnActivity(view: AgentTUIConversationView, tasks: readonly TaskEntry[]): string {
   const { conversation } = view;
@@ -636,6 +637,12 @@ export function turnActivity(view: AgentTUIConversationView, tasks: readonly Tas
     ) === true
   )
     return "Running";
+  if (turn === undefined || turn.waiting === true) {
+    const signIns = conversationAuthorizations(conversation).filter(
+      (part) => part.state === "required" && part.awaitsCallback === true,
+    );
+    if (signIns.length > 0) return signInLabel(signIns.map((part) => part.displayName));
+  }
   if (turn?.waiting === true && tasks.length > 0) return waitingLabel(tasks);
   if (message === undefined) return "Thinking";
   const last = message.parts.findLast((part) => part.type !== "step-start");

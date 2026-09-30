@@ -324,6 +324,25 @@ describe("ConversationTranscript", () => {
     expect(transcript.tasks.map((task) => task.name)).toEqual(["summarize"]);
   });
 
+  it("names the connection a session parked on a sign-in waits for", () => {
+    const state = conversation([
+      turn,
+      event(
+        createAuthorizationRequiredEvent({
+          attemptId: "attempt_1",
+          description: "Sign in to Linear",
+          name: "linear",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+          webhookUrl: "https://example.com/callback",
+        }),
+      ),
+      event(createTurnCompletedEvent({ sequence: 2, turnId: "turn_1" })),
+    ]);
+    expect(turnActivity(view(state, true), [])).toBe("Waiting for sign-in to Linear");
+  });
+
   it("writes an agent's finished rows and end line where the transcript had reached, after its last events", () => {
     vi.useFakeTimers({ now: 0 });
     onTestFinished(() => void vi.useRealTimers());

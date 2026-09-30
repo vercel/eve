@@ -11,6 +11,7 @@ import {
 import { isAbortError } from "#client/eve-agent-store-helpers.js";
 import { normalizeActionRequest, normalizeActionResult } from "#client/message-action-parts.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
+import { userText } from "./transcript-parts.js";
 import { isTaskRetryRefusal } from "#protocol/task-tools.js";
 import type { SendTurnPayload } from "#client/types.js";
 import type { ModelAccessChange } from "#shared/model-connection.js";
@@ -195,6 +196,11 @@ export type AgentTUIRenderer = {
    * recovery and slash-command results. Optional.
    */
   renderNotice?(text: string): void;
+  /**
+   * Puts back a message whose turn was cancelled from outside this prompt, such as `/cancel` from
+   * another client, when the composer is empty. Optional.
+   */
+  restoreDraft?(text: string): void;
   /**
    * Commits the session boundary (`┌── Session restarted, clear context.`)
    * when a dead session is replaced mid-conversation. The old conversation's
@@ -438,6 +444,10 @@ export class EveTUIRunner {
   #onBootProgress?: DevBootProgressReporter;
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
+  /** The message this TUI last sent, until its turn settles. */
+  #sentMessage?: string;
+  /** Whether this TUI asked to cancel the turn of {@link #sentMessage}. */
+  #cancelRequested = false;
   /** Aborts the off-critical-path boot auth probe when the run loop unwinds. */
   readonly #authProbeAbort = new AbortController();
   /**
@@ -833,6 +843,8 @@ export class EveTUIRunner {
   #submitMessage(message: string): void {
     const snapshot = this.#store.snapshot;
     const steering = isWorking(snapshot.status);
+    this.#sentMessage = message;
+    if (!steering) this.#cancelRequested = false;
     const input: SendTurnPayload = steering
       ? { message, turnPolicy: "steer" }
       : snapshot.session === undefined
@@ -871,6 +883,7 @@ export class EveTUIRunner {
     this.#recordAgentToolFailures(snapshot.conversation);
     this.#reportFirstResponse(snapshot.conversation);
     this.#queueRegistryHandoffs(snapshot.conversation);
+    this.#restoreCancelledMessage(snapshot.conversation);
     if (
       snapshot.data.sessionFailed ||
       this.#answerableInputs().length > 0 ||
@@ -878,6 +891,19 @@ export class EveTUIRunner {
     ) {
       this.#inputController?.abort();
     }
+  }
+
+  /** A turn cancelled from outside this prompt hands its message back instead of losing it. */
+  #restoreCancelledMessage(conversation: ConversationState): void {
+    const sent = this.#sentMessage;
+    if (sent === undefined) return;
+    const message = conversation.messages.findLast((candidate) => candidate.role === "user");
+    const turnId = message?.metadata?.turnId;
+    if (message === undefined || turnId === undefined || userText(message) !== sent) return;
+    const status = conversation.turns[turnId]?.status;
+    if (status === undefined || status === "active") return;
+    this.#sentMessage = undefined;
+    if (status === "cancelled" && !this.#cancelRequested) this.#renderer.restoreDraft?.(sent);
   }
 
   /** Session failures render from the conversation; other errors get one block each. */
@@ -996,6 +1022,7 @@ export class EveTUIRunner {
 
   /** Cancels the running turn without holding the composer; the store waits for its turn ID. */
   #cancelTurn(): void {
+    this.#cancelRequested = true;
     void this.#store.cancel().catch((error: unknown) => {
       this.#renderer.renderNotice?.(`Couldn't cancel the turn: ${toErrorMessage(error)}`);
     });

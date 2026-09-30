@@ -425,6 +425,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #lastTurnStats?: { elapsedMs: number } & TokenUsage;
   /** The composer's draft, kept while other input surfaces own the keyboard. */
   #draft: LineState = EMPTY_LINE;
+  /** Replaces the open composer's line; set while {@link readInput} reads. */
+  #applyDraft?: (next: LineState) => void;
   /** Set by a cancel key while work runs; a second Ctrl+C stops following. */
   #cancelRequested = false;
   /** Rejects the reader currently awaiting keys, so #stop never strands it. */
@@ -763,6 +765,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     return await new Promise((resolve, reject) => {
       const signal = options?.signal;
       const release = () => {
+        this.#applyDraft = undefined;
         signal?.removeEventListener("abort", onAbort);
         this.#typeahead = undefined;
         this.#argumentTypeahead = undefined;
@@ -793,6 +796,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#syncTypeahead(next.text);
         this.#paint();
       };
+      this.#applyDraft = apply;
       const recall = (entry: string | undefined) => {
         if (entry !== undefined) apply(lineOf(entry));
       };
@@ -1562,6 +1566,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#start();
     this.#pushBlock({ kind: "notice", body: content, live: false });
     this.#paint();
+  }
+
+  /** Puts a cancelled turn's message back into an empty composer, with a notice. */
+  restoreDraft(text: string): void {
+    const apply = this.#inputActive ? this.#applyDraft : undefined;
+    if ((apply === undefined ? this.#draft.text : this.#inputText).length > 0) return;
+    const line = lineOf(stripPromptControlCharacters(text));
+    if (apply === undefined) this.#draft = line;
+    else apply(line);
+    this.renderNotice(
+      "The turn was cancelled from outside this prompt, so its message is back in the input.",
+    );
   }
 
   /**

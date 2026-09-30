@@ -423,6 +423,47 @@ describe("eve dev conversation", () => {
     await run;
   });
 
+  it("puts a message back when another client cancels its turn, but not when this prompt does", async () => {
+    const server = new FakeEveServer(silent());
+    const restored: string[] = [];
+    const tui = scriptedRenderer({ restoreDraft: (text) => restored.push(text) });
+    const run = startRunner(server, tui.renderer);
+    const cancelled = (turnId: string, message: string, delivery: string) => {
+      server.emit(
+        [
+          createTurnStartedEvent({ sequence: 0, turnId }),
+          createMessageReceivedEvent({ message, sequence: 1, turnId }),
+        ],
+        delivery,
+      );
+      return () =>
+        server.emit(
+          [createTurnCancelledEvent({ sequence: 2, turnId }), createSessionWaitingEvent()],
+          delivery,
+        );
+    };
+
+    // Bob cancels Alice's turn from another client.
+    await tui.input({ type: "submit", text: "Draft the release notes." });
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
+    cancelled("turn_1", "Draft the release notes.", "delivery_1")();
+    await vi.waitFor(() => expect(restored).toEqual(["Draft the release notes."]));
+    await vi.waitFor(() => expect(tui.latest().working).toBe(false));
+
+    // Alice cancels her own next turn.
+    await tui.input({ type: "submit", text: "Summarize Bob's feedback." });
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/session_1")).toHaveLength(1));
+    const settle = cancelled("turn_2", "Summarize Bob's feedback.", "delivery_2");
+    await vi.waitFor(() => expect(tui.latest().working).toBe(true));
+    await tui.input({ type: "cancel" });
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/cancel")).toHaveLength(1));
+    settle();
+    await vi.waitFor(() => expect(tui.latest().working).toBe(false));
+    expect(restored).toEqual(["Draft the release notes."]);
+    await tui.input(undefined);
+    await run;
+  });
+
   it("starts a fresh session after the current one fails", async () => {
     const server = new FakeEveServer(silent());
     const renderSessionBoundary = vi.fn();
