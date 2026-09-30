@@ -1,7 +1,6 @@
 import type { FilePart, TextPart, UserContent } from "ai";
 
 import type {
-  ActivityObserverConfig,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
@@ -9,10 +8,6 @@ import type {
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
-import {
-  parseActivityObserverField,
-  validateActivityObserverBinding,
-} from "#eve-channel/activity-observer-request.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
@@ -87,18 +82,10 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
 
-  const activityObserver = parseActivityObserverField(payload.activityObserver);
-  if (activityObserver instanceof Response) return activityObserver;
-  if (activityObserver !== undefined) {
-    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
-    if (observerRejection !== undefined) return observerRejection;
-  }
-
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
 
   const messageFreeRejection = validateMessageFreeCreate({
-    activityObserver,
     callback,
     hasClientContext: payload.clientContext !== undefined,
     hasMessageField: "message" in payload,
@@ -116,7 +103,6 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   }
 
   const result: ParsedCreateBody = {
-    activityObserver,
     callback,
     capabilities,
     context,
@@ -128,7 +114,6 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 }
 
 interface ParsedSessionMessageBody {
-  activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -147,12 +132,6 @@ export function parseSessionMessageBody(
   if (message instanceof Response) return message;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
-  const activityObserver = parseActivityObserverField(payload.activityObserver);
-  if (activityObserver instanceof Response) return activityObserver;
-  if (activityObserver !== undefined) {
-    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
-    if (observerRejection !== undefined) return observerRejection;
-  }
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
   const context = parseClientContextField(payload.clientContext);
@@ -180,7 +159,6 @@ export function parseSessionMessageBody(
   }
 
   return {
-    activityObserver,
     callback,
     message,
     inputResponses,

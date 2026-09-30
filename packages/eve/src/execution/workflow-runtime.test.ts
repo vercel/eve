@@ -15,7 +15,6 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
   waitForCommandHookOwner,
-  activityCollectorWorkflowReference,
   sessionTimeoutWorkflowReference,
   startSessionOwnerStep,
   startWorkflowOnCurrentDeployment,
@@ -94,9 +93,6 @@ describe("workflowEntryReference", () => {
     );
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("/src/execution/");
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("@");
-    expect(activityCollectorWorkflowReference.workflowId).toBe(
-      `workflow//${packageInfo.name}//activityCollectorWorkflow`,
-    );
     expect(workflowToolRunWorkflowReference.workflowId).toBe(
       `workflow//${packageInfo.name}//workflowToolRunWorkflow`,
     );

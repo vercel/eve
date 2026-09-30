@@ -17,15 +17,14 @@ wraps eve's defaults. Paths are relative to `packages/eve/src/`.
 1. **Each task a root turn starts gets a live row in a task card.** When a turn starts its first
    task, eve posts one message in the thread and keeps it updated. One task renders as a
    `task_card` block, and two or more render as a `plan` block. Each row shows the task's title,
-   its latest steps, and a one-line result when it settles. Tasks that an agent task starts on its
-   own show as that row's steps, not as rows.
+   its status, and a one-line result when it settles. Tasks that an agent task starts on its own
+   add no rows.
 2. **Short work stays in the status line.** Thinking, ordinary tool calls, and waits use Slack's
    thread status. They never post messages, so the thread holds only the conversation and the
    task card.
 3. **The card is a posted message that eve updates, not a stream.** Tasks can run for minutes or
    days. Slack stops streams after a few minutes, and `chat.update` fails while a stream is open.
-   So eve posts the card with `chat.postMessage` and changes it with coalesced `chat.update`
-   calls.
+   So eve posts the card with `chat.postMessage` and changes it with `chat.update`.
 4. **eve's default message hooks don't render.** A message hook decides whether to start a turn
    and with what auth, and eve's rendering no longer depends on which hook ran. A custom hook can
    still post through its context, but it no longer has to recreate eve's rendering. The `Thinking...` acknowledgement moves from `defaultOnAppMention` into eve's default
@@ -35,12 +34,14 @@ wraps eve's defaults. Paths are relative to `packages/eve/src/`.
 5. **Rendering is a chain.** `slackChannel({ renderers: [a, b] })` wraps eve's default renderer.
    Each event handler receives `next`, so it can run before or after the default, change its
    input, or skip it. `taskCard(view, next)` is a pure function that returns blocks; eve owns
-   posting, updating, and rate limits. The view carries every tool call of the turn with its
+   posting and updating. The view carries every tool call of the turn with its
    input, so an app can put its own tools on the card, such as a checklist, without eve knowing
    about them.
-6. **The experimental activity renderers are removed.** eve keeps the activity collector as the
-   internal engine behind the task card. `activity.renderers`, `experimental_slackActivity*`, and
-   the raw snapshot contract go away.
+6. **The card renders from the root session's own events.** The root session's Slack channel
+   tracks its turns' calls and writes the card itself. The experimental activity renderers and the
+   activity collector behind them are removed: no extra workflow runs per session, and cards
+   follow the session across deploys. A collector may return later, designed from scratch, for
+   what only other sessions can see, such as an agent task's own progress.
 
 ## Before this change
 
@@ -165,55 +166,45 @@ The status line shows work that finishes within a step. The default renderer own
 | `turn.waiting`, tasks working          | `Waiting on researcher and 2 more tasks...`            |
 | A reply posts                          | Cleared by Slack                                       |
 
-The status lists tasks by tool or agent name, from `task.started` and `task.settled`. Slack clears
-a status after two minutes without a message, and whenever the app posts. So the Slack presenter
-sets the waiting status right after it posts a card, and the collector renders about every 90
-seconds with nothing new while a task works, so the presenter can set it again once it is 80
-seconds old. It skips that refresh while the turn's own calls ran in the last 80 seconds, since a
-working turn sets its own status. The refresh uses eve's wording, not the renderer chain's. When a task's
-question posts, the status still names the task: the question card is the call to action, and the
-task row says what it is waiting for.
+The status names the waiting turn's working tasks by tool or agent name. Slack clears a status
+after two minutes without a message, and nothing runs in the root session while it waits, so the
+status is short-lived by design: the task card is the long-lived signal during a long wait.
 
 ### Task card
 
-- **One card for each root turn that starts a task.** The collector posts it after the burst that
-  begins the work, then updates it in place until the turn and its tasks finish. A resumable task
-  continued in a later turn shows up in that turn's card as a new call.
+- **One card for each root turn that starts a task.** The root session posts it on the turn's
+  first `task.started`, then updates it in place until the turn and its tasks finish. A resumable
+  task continued in a later turn shows up in that turn's card as a new call.
 - **Rows are the root turn's own task calls.** What an agent task or workflow run does on the
-  task's behalf, including tasks it starts, fills that row's steps.
+  task's behalf, including tasks it starts, happens in other sessions and adds no rows.
 - **Block choice.** One task renders as a standalone `task_card`, and a second task turns the
   message into a `plan`. More than 50 calls in one turn collapse the oldest settled ones into a
   single `N tasks finished earlier` row.
-- **Plan title**, first match wins: `Waiting for approval`, `Waiting for a response`, or
-  `Waiting for sign-in` while any task is blocked on a person; `Working on N tasks`, or
-  `D of N tasks done` once some have settled; `Finished N tasks`, or
+- **Plan title:** `Working on N tasks`, or `D of N tasks done` once some have settled;
+  `Finished N tasks`, or
   `Finished N tasks: F failed, S stopped`, naming only the counts that aren't zero.
 - **Rows:**
 
-| Field     | Tool task                                                                                    | Agent task                                           |
-| --------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `title`   | `label.start(input)`, else the tool name                                                     | `name: first line of message`                        |
-| `status`  | `in_progress` while working or blocked; `complete`; `error` for failed or cancelled          | Same                                                 |
-| `details` | The latest three steps of a workflow run's `ctx.agent` session, when it opens one            | The agent's latest three steps, or what it waits for |
-| `output`  | First line of a string result; `Failed`, with the error's first line when private; `Stopped` | First line of the agent's reply; same for errors     |
+| Field    | Tool task                                                                                    | Agent task                                       |
+| -------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `title`  | `label.start(input)`, else the tool name                                                     | `name: first line of message`                    |
+| `status` | `in_progress` while working; `complete`; `error` for failed or cancelled                     | Same                                             |
+| `output` | First line of a string result; `Failed`, with the error's first line when private; `Stopped` | First line of the agent's reply; same for errors |
 
-Titles are capped at 80 characters and each `details` and `output` line at 200. Steps show while
-the task works: `Reading the postmortem...` while running, then `✓`, `✗`, or `–` before the label.
+Titles are capped at 80 characters and `output` at 200. A task waiting on a question or approval
+stays `in_progress`; the request itself posts wherever `approvalChannel` sends it.
 
 - **Failure text stays private.** In a DM or private channel, a failed row shows `Failed: ` and
   the first line of `task.settled.error.message`. Error text can carry internal hostnames or
   identifiers, so other channels show `Failed` alone. The view leaves a failed task's `summary`
   out there too, so a custom `taskCard` can't leak it by accident.
-- **Requests stay where `approvalChannel` sends them.** A blocked row names the request's prompt
-  only in a DM or private channel. Elsewhere `blockedOn` carries only its kind, since a request
-  sent to one person by DM would otherwise show in the shared thread.
 - **Stopped is not success.** Slack has no cancelled status. A cancelled row uses `error` with the
   output `Stopped`, so it never shows a success check. The plan title counts stopped tasks
   separately from failed ones.
-- **Writes are per card.** A failed post or update is tried once more after a second. If that
-  fails too, the card keeps its previous state, so a later render writes it again without posting
-  the cards that landed a second time. An update that
-  fails with `message_not_found`, because someone deleted the card, posts it again. Posts set
+- **Writes are per card, and only on change.** eve fingerprints the card and writes it only when
+  it changed. A failed post or update is tried once more after a second; if that fails too, the
+  card keeps its last fingerprint, so the turn's next change writes it again. An update that fails
+  with `message_not_found`, because someone deleted the card, posts it again. Posts set
   `unfurl_links` and `unfurl_media` to `false`.
 - **Where it doesn't appear:** schedule turns, which post only their final reply, and sessions
   without a Slack thread.
@@ -289,109 +280,86 @@ export default slackChannel({
 ```ts
 interface TaskCardView {
   readonly turnId: string;
-  readonly state: "working" | "blocked" | "finished";
-  readonly tasks: readonly TaskCardTask[]; // in start order
-  readonly actions: readonly TaskCardAction[]; // the turn's other tool calls, in start order
+  readonly state: "working" | "finished";
+  readonly tasks: readonly TaskCardTask[]; // in call order
+  readonly actions: readonly TaskCardAction[]; // the turn's other tool calls, in call order
+}
+
+type TaskCardStatus = "working" | "completed" | "failed" | "cancelled";
+
+interface TaskCardTask {
+  readonly id: string; // the call id; a resumable task called twice has two rows
+  readonly taskId: string;
+  readonly kind: "agent" | "tool";
+  readonly name: string;
+  readonly title: string;
+  readonly status: TaskCardStatus;
+  readonly summary?: string; // a failure's only in a private conversation
+  readonly startedAt: string;
+  readonly settledAt?: string;
 }
 
 interface TaskCardAction {
   readonly id: string;
   readonly name: string;
   readonly title: string;
-  readonly status: "working" | "completed" | "failed" | "cancelled";
+  readonly status: TaskCardStatus;
   readonly input?: Readonly<Record<string, unknown>>; // left out past 4,096 characters of JSON
-  readonly startedAt: string;
-}
-
-interface TaskCardTask {
-  readonly id: string; // unique in the card; a resumable task called twice has two rows
-  readonly taskId: string;
-  readonly kind: "agent" | "tool";
-  readonly name: string;
-  readonly title: string;
-  readonly status: "working" | "blocked" | "completed" | "failed" | "cancelled";
-  readonly steps: readonly {
-    readonly label: string;
-    readonly status: "working" | "completed" | "failed" | "cancelled";
-  }[]; // the latest three, oldest first
-  readonly blockedOn?: {
-    readonly kind: "approval" | "input" | "authorization";
-    readonly label?: string;
-  };
-  readonly summary?: string; // a failure's only in a private conversation
   readonly startedAt: string;
   readonly settledAt?: string;
 }
 ```
 
-A card is `working` while its turn or any task works, `blocked` while a task waits on a person,
-then `finished`.
+A card is `working` while its turn or any of its tasks works, then `finished`.
 
 ## Architecture
 
-Rendering splits into two lanes by what each message needs. Both lanes are defined by the same
-renderer chain.
+Everything renders in the root session, from the events it already publishes. The same renderer
+chain defines every message.
 
 ```text
 Slack webhook ─┬─► renderers.received ─► status: Thinking... (right away)
                └─► message hook (route, auth) ─► dispatch, or drop and clear status
 
-root session ─ own events, inline ─► renderers.events
-   │            replies, questions, sign-ins, errors, status line
-   │
-   │ first tool call: start the collector, then the turn's calls and task lifecycle
-   ▼
-task card presenter (collector workflow)  ─► renderers.taskCard(view) ─► post, then update
-   ▲ activity
-child and remote agent sessions
+root session ─ own events ─► renderers.events ─► replies, questions, sign-ins, errors, status
+              │
+              └─► task card tracking (actions.requested, action.result, task.started,
+                   task.settled, turn end) ─► renderers.taskCard(view) ─► post, then update
 ```
-
-- **Conversation lane (inline).** Replies, question cards, sign-in notices, errors, and the status
-  line stay in the root session's event handlers. Their order matters, and interactions such as
-  approval updates depend on the channel state these handlers write.
-- **Card lane (collector).** The card is a live view: safe to coalesce, and it has to include child
-  agents' progress, which never reaches the root session's stream. The activity collector already
-  combines root, child, and remote activity off the turn's critical path, so it is the single
-  writer of the card, from its first post to its last update.
 
 **Invariants:**
 
-1. **Sessions without tool calls pay nothing new.** The collector starts in the step that
-   publishes a root session's first tool call (`execution/activity-collector-start.ts`), so a
-   session that only replies never starts one. Only root sessions of a channel with an activity
-   presenter start one, and never a schedule's session. Before this change, it started at session
-   creation when renderers were configured, which also required cancelling it when a session lost
-   its continuation claim; that path is gone.
-2. **The collector sees the whole turn.** It starts before the first call's activity is projected,
-   so every tool call of the turn reaches it, including calls before the first task. Tasks start
-   in a later step and capture their context there, so child sessions inherit the sink. A call's
-   input travels only for the root turn's own calls, and only up to 4,096 characters of JSON.
-3. **A step waits for its activity.** Every publishing step awaits the activity it submitted before
-   it returns (`SessionEventSink.flushActivity`), so a host that freezes after the step can't drop
-   a task's settlement. Child activity only fills a row's details; losing it can't strand a status.
-4. **One card per root turn, one writer.** The collector keeps each card's `ts` in its durable
-   state, so there is no `conversations.replies` scan and no history scope.
-5. **Updates are coalesced and rate-aware.** A change renders after a 350 ms debounce, which
-   gathers a burst such as parallel task starts, and at most once every 3 seconds, always from the
-   latest snapshot. The final state is always rendered.
-6. **Rendering never affects a turn.** A failed render is retried once, then logged and skipped.
-7. **A working task keeps the channel alive.** While a task works and nothing changes, the
-   collector renders again every 90 seconds, which lets a presenter refresh anything the platform
-   expires, such as Slack's thread status.
-
-`ChannelActivityPresenter` (`channel/activity-presenter.ts`) is the internal seam between the
-collector and a channel: one presenter per channel, not public.
+1. **No extra work outside the session.** The card is tracked in the Slack channel's state, which
+   the root session persists with every step. No workflow, route, or sink exists for it, so a
+   session that never starts a task pays one `taskCard` call per tool-call event and nothing else.
+2. **One writer per card.** Only the root session writes, and its steps run one after another. The
+   card's `ts` and a fingerprint of what eve last wrote live next to the turn's calls, so there is
+   no `conversations.replies` scan and no history scope.
+3. **Tracking can't be skipped.** Tracking and writing wrap the renderer chain's handlers for
+   those events, so a renderer that replaces eve's default for one of them still gets a card.
+4. **Cards follow the session.** Rendering is session code, so after a deploy a handed-off session
+   renders with the new deployment's code, and there is nothing pinned to the old one.
+5. **Rendering never fails a turn.** A failed write is retried once, then logged; the turn's next
+   change writes the card again.
+6. **State stays bounded.** eve forgets a turn once its card is finished, tracks at most 20
+   unfinished turns and 100 calls per turn, and keeps a call's input only up to 4,096 characters
+   of JSON.
 
 ## Alternatives considered
 
 - **A streamed plan for each turn** (the removed plan renderer). This is Slack's native pattern for
   short turns, but tasks outlive streams, and a stopped stream leaves a permanent error pill.
-- **Render tasks only from inline channel events.** Simpler, but it can't show what a child agent
-  is doing, and it would put `chat.update` calls on the turn's critical path with no coalescing.
-- **Post the card's first version inline.** It would pin the card's position exactly, but the card
-  would then have two writers and the root would have to hand its `ts` to the collector. With the
-  collector posting after a 350 ms debounce, the card lands before the text the model writes in its
-  next step in practice.
+- **Render the card in the activity collector,** a separate durable workflow per root session that
+  child and remote sessions report to over HTTP. It is the only way to show an agent task's own
+  steps and blocked requests, and to refresh the status during a long wait. It also runs a second
+  workflow per session, stays pinned to the deployment that started it for up to the session
+  timeout (30 days by default), and has to accept activity from newer code after a handoff. The
+  first versions of this change used it; rendering from the root's own events keeps what people
+  asked for with far less. A collector may return, designed from scratch, for what only other
+  sessions can see.
+- **Let subagents call the channel's handlers.** The card's state belongs to the root session, and
+  `chat.update` rewrites the whole message, so parallel agents writing their own rows would
+  overwrite each other with stale rows. Remote agents can't run the app's handlers at all.
 - **Keep custom activity renderers public.** That exposes reduction internals, makes every author
   handle `ts`, rate limits, and recovery, and offers no way to build on eve's card.
 - **`preventDefault` instead of `next`.** Authors could neither change the default's input nor
@@ -411,11 +379,10 @@ Everything below is breaking, which is allowed before 1.0.
 - **Message hooks:** the default mention and DM hooks no longer post `Thinking...`. The default
   renderer's `received` does, right away for mentions and DMs, whichever hook handles them.
 - **Channel core:** `ChannelEvents` gains `task.started`, `task.settled`, and `turn.waiting`.
-- **Activity protocol:** `task.started` and `task.settled` activity events mark an action as a task
-  and carry its summary. They are new event kinds, so an older collector ignores them. Agent calls
-  now project as actions, so each agent task has a row.
-- **Activity protocol:** `action.started` carries a root turn's own call's input, up to 4,096
-  characters of JSON.
+- **Removed: the activity collector** and everything that fed it: the `/eve/v1/activity` route,
+  the activity protocol and reducer, the per-step activity posting, and the `activityObserver`
+  field on delegated and remote-agent sessions. A remote-agent request from an older eve that still
+  sends `activityObserver` is accepted, and the field is ignored.
 - **New default output:** task cards, and the `Waiting on ...` status.
 
 ## Follow-ups
@@ -423,9 +390,12 @@ Everything below is breaking, which is allowed before 1.0.
 - **Settlement labels.** `label.complete(input, output)` runs on a task's receipt today, not its
   result. Running it at settlement needs the tool definition where the call settles; until then,
   summaries come from the result text.
-- **Tool task progress and questions.** A task run's `action.partial` carries no `label.delta`, and
-  a `task()` body's `ctx.ask` is relayed through the root, which activity doesn't observe, so a tool
-  task row shows neither.
+- **What only other sessions see.** An agent task's own steps, a blocked row that clears when its
+  question is answered, and a status that stays up during a long wait all need something besides
+  the root session. Channels also receive no `input.resolved` today, which a blocked row would
+  need. Revisit a collector, or another mechanism, designed from scratch for these.
+- **Tool task progress.** A task run's `action.partial` carries no `label.delta`, so a tool task
+  row shows no progress.
 - **Agent sessions.** Move status to `agents.sessions.setStatus`, which keeps `processing` for an
   hour, and map Slack's native stop button (`agent_session_stopped`) to `session.cancel()`.
 - **Streamed replies.** Stream reply text with `chat.startStream` for turns that start no tasks.
@@ -442,8 +412,8 @@ When a choice was open, clarity for the person reading the thread decided it.
    and `Failed` alone elsewhere.
 2. **Stopped rows never look successful.** A cancelled task uses `error` with `Stopped`, and the
    plan title counts it apart from failures.
-3. **The card has one writer.** The collector posts it right after the burst that starts the work
-   and owns every update, so there is never a second message or a stale overwrite.
+3. **The card has one writer.** The root session posts the card and owns every update, so there is
+   never a second message or a stale overwrite.
 4. **Acknowledging is rendering, and it is immediate.** `Thinking...` belongs to `received` in the
    renderer chain, not to message hooks. It appears right away for mentions and DMs and is cleared
    if the message is dropped.
@@ -465,6 +435,5 @@ When a choice was open, clarity for the person reading the thread decided it.
   [python-slack-sdk#1859](https://github.com/slackapi/python-slack-sdk/issues/1859) (stream
   lifetime reports).
 - eve: `research/eve-tasks.md`, `docs/tools/tasks.md`, `docs/channels/slack.mdx`,
-  `public/channels/slack/{slackChannel,defaults,renderers,task-card}.ts`,
-  `execution/{activity-collector,activity-events,session-activity-projection}.ts`,
+  `channel/task-card.ts`, `public/channels/slack/{slackChannel,defaults,renderers,task-card}.ts`,
   `cli/dev/tui/task-activity.ts`.

@@ -7,7 +7,6 @@
 import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
 import type {
-  ActivityObserverConfig,
   ChannelDeliveryMetadata,
   ChannelInstrumentationProjection,
   SessionAuthContext,
@@ -137,20 +136,6 @@ export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled
  * dispatch so HITL readiness flows through a conversation chain.
  */
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
-export const ActivityObserverKey = new ContextKey<ActivityObserverConfig>("eve.activityObserver");
-/** Originating root turn that owns the current user-visible activity artifact. */
-export const ActivityRootTurnIdKey = new ContextKey<string>("eve.activityRootTurnId");
-/** Pending HITL request identities that keep the current activity artifact open. */
-export const ActivityPendingBlockersKey = new ContextKey<readonly string[]>(
-  "eve.activityPendingBlockers",
-);
-/**
- * Call IDs that got `task.started` this turn, so their `action.result` is a
- * receipt that leaves the activity running. Not read from the task table: a
- * call leaves it once it settles, which can happen before its receipt is
- * published. Cleared at turn end.
- */
-export const ActivityTaskCallsKey = new ContextKey<readonly string[]>("eve.activityTaskCalls");
 
 /**
  * Optional framework-owned caller callback captured when the session is created.

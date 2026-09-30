@@ -1,3 +1,4 @@
+import { workingTaskNames } from "#channel/task-card.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
@@ -351,38 +352,6 @@ export async function postCompletedSlackReply(
  * `authorization.required` handler owns the public link-free status, which
  * authored renderers cannot express.
  */
-/**
- * Keeps `workingTasks`, which the waiting status names, current around the
- * renderer chain, so a renderer that skips eve's default for one of these
- * events can't leave a finished task in a later turn's status.
- */
-export function withWorkingTasks(events: SlackChannelInternalEvents): SlackChannelInternalEvents {
-  return {
-    ...events,
-    async "task.started"(event, channel, ctx) {
-      channel.state.workingTasks = { ...channel.state.workingTasks, [event.callId]: event.name };
-      await events["task.started"]?.(event, channel, ctx);
-    },
-    async "task.settled"(event, channel, ctx) {
-      const { [event.callId]: _settled, ...working } = channel.state.workingTasks ?? {};
-      channel.state.workingTasks = working;
-      await events["task.settled"]?.(event, channel, ctx);
-    },
-    async "turn.completed"(event, channel, ctx) {
-      channel.state.workingTasks = null;
-      await events["turn.completed"]?.(event, channel, ctx);
-    },
-    async "turn.cancelled"(event, channel, ctx) {
-      channel.state.workingTasks = null;
-      await events["turn.cancelled"]?.(event, channel, ctx);
-    },
-    async "turn.failed"(event, channel, ctx) {
-      channel.state.workingTasks = null;
-      await events["turn.failed"]?.(event, channel, ctx);
-    },
-  };
-}
-
 export const defaultEvents: SlackChannelInternalEvents = {
   async "approval.candidate"(event, channel, _ctx) {
     const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
@@ -440,8 +409,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
     channel.state.pendingApprovalCards = next;
   },
 
-  async "turn.waiting"(_event, channel, _ctx) {
-    const working = Object.values(channel.state.workingTasks ?? {});
+  async "turn.waiting"(event, channel, _ctx) {
+    const working = workingTaskNames(channel.state.taskCards?.[event.turnId]?.turn);
     if (working.length > 0) await channel.thread.startTyping(waitingOnTasks(working));
   },
 

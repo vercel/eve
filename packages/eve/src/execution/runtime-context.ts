@@ -14,7 +14,6 @@ import {
   InitiatorAuthKey,
   ParentSessionKey,
   ParentTraceContextKey,
-  ActivityObserverKey,
   ScheduleIdKey,
   SessionCallbackKey,
   SessionTitleKey,
@@ -93,9 +92,6 @@ export function buildRunContext(input: {
 
   if (run.callback !== undefined) {
     ctx.set(SessionCallbackKey, run.callback);
-  }
-  if (run.activityObserver !== undefined) {
-    ctx.set(ActivityObserverKey, run.activityObserver);
   }
 
   if (run.parent !== undefined) {

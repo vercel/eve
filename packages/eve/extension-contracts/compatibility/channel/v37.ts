@@ -1,6 +1,7 @@
 import { defineChannel } from "#public/channels/index.js";
 
-// Epoch 37 channels had no `task.started`, `task.settled`, or `turn.waiting` handlers; they are additive.
+// Epoch 37 channels had no `task.started`, `task.settled`, or `turn.waiting` handlers, which are
+// additive, and could pass an `activityObserver` that eve now ignores.
 export default defineChannel({
   routes: [],
   events: {

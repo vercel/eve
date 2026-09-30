@@ -5,7 +5,6 @@ import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { ParentSessionKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import * as activityCohort from "#execution/activity-cohort.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { forwardSessionInput } from "#execution/forward-session-input.js";
 import {
@@ -16,8 +15,6 @@ import {
 } from "#execution/durable-session-store.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
-import { observeSessionActivity } from "#execution/session-activity-projection.js";
-import { observeRootActivity } from "#execution/activity-collector-start.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
@@ -37,14 +34,14 @@ const log = createLogger("execution.publish-session-events");
 /**
  * Whose event a session publishes. Every event reaches the channel adapter, the
  * session stream, and stream-event hooks. The session's own events also reach
- * its instrumentation and activity and carry its turn's delivery ids.
+ * its instrumentation and carry its turn's delivery ids.
  *
  * A relayed event belongs to an exchange this session carries for a child
  * session or a workflow run: the question or sign-in it raised, the turn
  * boundary that question causes here, and the `input.resolved` for the answer
- * this session routes back. This session's instrumentation and activity never
- * track that pending input, so no event of the exchange reaches them; the
- * child records its side as its own.
+ * this session routes back. This session's instrumentation never tracks that
+ * pending input, so no event of the exchange reaches it; the child records its
+ * side as its own.
  */
 export type SessionEventOrigin = "own" | "relayed";
 
@@ -174,7 +171,6 @@ export async function withSessionEventEmitter<T>(
     });
   } finally {
     await instrumentation?.flush();
-    await sink.flushActivity();
     sink.release();
   }
 }
@@ -189,11 +185,6 @@ export interface SessionEventSink {
   emit(event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent>;
   /** Closes the session stream; only a terminal `done` step does this. */
   close(): Promise<void>;
-  /**
-   * Waits for the activity this sink submitted. A step awaits it before it
-   * returns, so a host that freezes after the step can't drop a task's settlement.
-   */
-  flushActivity(): Promise<void>;
   /** Releases the writer lock so the next step can acquire it. Safe after `close()`. */
   release(): void;
 }
@@ -223,7 +214,6 @@ function openSessionEventStream(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const writer = input.sessionWritable.getWriter();
 
-  const submittedActivity: Promise<void>[] = [];
   let released = false;
   const release = (): void => {
     if (released) return;
@@ -233,7 +223,6 @@ function openSessionEventStream(input: {
   return {
     adapterCtx,
     async emit(event) {
-      if (origin === "own") activityCohort.updateActivityState(ctx, event);
       const forwarded = await forwardSessionInput(ctx, event, input.inputSource);
       const routed = forwarded
         ? event
@@ -250,20 +239,11 @@ function openSessionEventStream(input: {
         origin === "own" ? ctx.get(TurnDeliveryIdsKey) : undefined,
       );
       await writer.write(encodeMessageStreamEvent(stamped));
-      if (origin === "own") {
-        await observeRootActivity({ ctx, event: stamped, sessionId: input.sessionId });
-        submittedActivity.push(
-          observeSessionActivity({ ctx, event: stamped, sessionId: input.sessionId }),
-        );
-      }
       return stamped;
     },
     close: async () => {
       await writer.close();
       release();
-    },
-    async flushActivity() {
-      await Promise.allSettled(submittedActivity.splice(0));
     },
     release,
   };
@@ -329,7 +309,6 @@ export async function publishTerminalSessionEvent(input: {
   } catch (error) {
     log.error(`failed to publish terminal ${type} event`, { ...fields, error });
   } finally {
-    await sink.flushActivity();
     sink.release();
     try {
       await instrumentation?.flush();

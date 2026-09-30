@@ -1,11 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { HTTP_ADAPTER, HTTP_ADAPTER_KIND } from "#channel/http.js";
-import {
-  attachChannelActivityPresenter,
-  getChannelActivityPresenter,
-} from "#channel/activity-presenter.js";
 import { SCHEDULE_ADAPTER, SCHEDULE_ADAPTER_KIND } from "#channel/schedule.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
@@ -84,21 +80,6 @@ describe("createRuntimeAdapterRegistry", () => {
 
       expect(rehydrated).toEqual({ kind: HTTP_ADAPTER_KIND, state: {} });
     });
-  });
-
-  it("rehydrates the non-enumerable activity presenter", () => {
-    const adapter: ChannelAdapter = { kind: "slack", state: { channelId: null } };
-    const presenter = { destination: vi.fn(), render: vi.fn() };
-    attachChannelActivityPresenter(adapter, presenter);
-    const registry = createRuntimeAdapterRegistry({ channels: [makeChannelDefinition(adapter)] });
-
-    const rehydrated = deserializeRuntimeAdapter(registry, {
-      kind: "slack",
-      state: { channelId: "C1", threadTs: "T1" },
-    });
-
-    expect(getChannelActivityPresenter(rehydrated)).toBe(presenter);
-    expect(rehydrated.state).toEqual({ channelId: "C1", threadTs: "T1" });
   });
 
   describe("route-declared adapters sharing a framework kind", () => {

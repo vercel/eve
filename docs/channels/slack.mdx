@@ -464,7 +464,7 @@ eve shows an agent's progress in two places. Short work, such as thinking or a t
 | The turn waits on its tasks        | `Waiting on researcher...`, or `Waiting on researcher and 2 more tasks...`    |
 | A reply posts                      | Cleared by Slack                                                              |
 
-Slack clears a thread status after two minutes without a message, and whenever the app posts one. So eve sets the waiting status again right after it posts a task card, and about every 90 seconds while tasks work and the turn itself makes no tool calls. This refresh always uses eve's `Waiting on ...` wording, even when a renderer replaces the `turn.waiting` handler.
+Slack clears a thread status after two minutes without a message, so during a long wait the task card is what shows the work is still going.
 
 Action labels are the tool name plus its most telling argument, the agent name for agent calls, and `+N more` when the model requests several actions at once. They leave out the model's own `task_wait` and `task_cancel` calls. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use a five-second refresh interval to avoid one Slack request per token.
 
@@ -478,17 +478,17 @@ When a session starts without a `threadTs` (say, from a schedule's `to(slack, ta
 
 ### Task card
 
-When a turn starts its first task, eve posts a task card in the thread and keeps it current until the turn and its tasks finish. One task renders as a Slack `task_card` block; two or more render as a `plan` block with one row per task the turn started. Tasks that an agent task starts on its own appear as that row's steps, not as rows of their own. The card needs no configuration beyond the `chat:write` scope the channel already uses.
+When a turn starts its first task, eve posts a task card in the thread and keeps it current until the turn and its tasks finish. One task renders as a Slack `task_card` block; two or more render as a `plan` block with one row per task the turn started. What an agent task does on its own, including the tasks it starts, stays inside that task and does not add rows. The card needs no configuration beyond the `chat:write` scope the channel already uses.
 
 Each row shows:
 
 - **Title:** the tool's [`label.start`](/docs/tools#label-tool-activity), the agent name and the first line of its brief for an agent task (`researcher: Find the incidents behind the checkout spike`), or the tool name.
-- **What it's doing now:** the task's latest three steps, such as an agent's tool calls, or what it's waiting for when the agent needs an approval, an answer, or a sign-in. In a DM or private channel, the row also shows the request's prompt; elsewhere it shows only what kind of request is waiting, since `approvalChannel` can send the request to one person. The question itself still posts wherever `approvalChannel` sends it.
+- **Status:** in progress while the task works, including while it waits on a question or approval, which posts wherever `approvalChannel` sends it.
 - **How it ended:** the first line of the result or the agent's reply, `Failed` for a failure, or `Stopped` for a cancelled task. Failed and stopped rows never show a success check. In a DM or private channel, a failure also shows the first line of its error, as in `Failed: Rate limited`. Error text can carry internal details, so everywhere else, including proactive sessions without a known `audience`, shows `Failed` alone.
 
-The plan title summarizes the turn: `Working on 2 tasks`, `1 of 2 tasks done`, `Waiting for approval`, then `Finished 2 tasks` or `Finished 3 tasks: 1 failed, 1 stopped`. A resumable task continued in a later turn appears in that turn's card.
+The plan title summarizes the turn: `Working on 2 tasks`, `1 of 2 tasks done`, then `Finished 2 tasks` or `Finished 3 tasks: 1 failed, 1 stopped`. A resumable task continued in a later turn appears in that turn's card.
 
-The card is rendered off the turn's critical path, so a slow or failed Slack call never delays or fails the turn. eve coalesces updates and changes the card at most once every 3 seconds, as Slack recommends, and always renders the final state. When a write fails, eve tries it once more after a second, then again on the next update, and leaves the other cards alone. If someone deletes the card, eve posts it again on its next update. Card posts never unfurl links. Schedule sessions and sessions without a Slack thread get no card.
+eve writes the card from the session's own events as they happen, and only when it changed. A failed Slack call never fails the turn: eve tries a failed write once more after a second, then again on the turn's next change. If someone deletes the card, eve posts it again on its next change. Card posts never unfurl links. Schedule sessions and sessions without a Slack thread get no card.
 
 ### Customize rendering
 
@@ -549,11 +549,11 @@ export default slackChannel({
 
 `taskCard` runs for every turn that calls a tool, and receives the same view eve's default renders from:
 
-- `state`: `working`, `blocked`, or `finished`.
-- `tasks`: the tasks the turn started, each with a `title`, `status`, latest `steps`, `blockedOn`, and `summary`. A failed task's `summary` and a blocked task's `blockedOn.label` are present only in a DM or private channel.
+- `state`: `working` while the turn or any of its tasks works, then `finished`.
+- `tasks`: the tasks the turn started, each with a `title`, `status`, and `summary`. A failed task's `summary` is present only in a DM or private channel.
 - `actions`: the turn's other tool calls, each with its tool `name`, `title`, `status`, and `input`. `input` is left out when its JSON is longer than 4,096 characters.
 
-`taskCard` is synchronous and pure: eve posts the card, updates it as the view changes, and handles Slack's rate limits. eve's default returns `null` for a turn that started no tasks. To change a row's title in every channel, give the tool a [label](/docs/tools#label-tool-activity) instead.
+`taskCard` is synchronous and pure: eve posts the card and updates it as the view changes. eve's default returns `null` for a turn that started no tasks. To change a row's title in every channel, give the tool a [label](/docs/tools#label-tool-activity) instead.
 
 Renderers run in the order you list them, and the first one is outermost. `onInteraction` receives clicks on buttons a renderer posts, such as the feedback buttons above.
 

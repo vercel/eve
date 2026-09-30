@@ -1,20 +1,25 @@
 import { createHash } from "node:crypto";
 
-import type { ChannelActivityPresenter } from "#channel/activity-presenter.js";
 import {
-  projectTaskCards,
-  type TaskCardBlocker,
-  type TaskCardStep,
+  taskCardView,
+  trackTaskCardEvent,
   type TaskCardTask,
+  type TaskCardTurn,
   type TaskCardView,
 } from "#channel/task-card.js";
+import { contextStorage } from "#context/container.js";
+import { ScheduleIdKey } from "#context/keys.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { waitingOnTasks } from "#public/channels/slack/action-status.js";
-import { callSlackApi, type SlackBotToken } from "#public/channels/slack/api.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { SlackHandle } from "#public/channels/slack/api.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
-import { truncateMessageText, truncateTypingStatus } from "#public/channels/slack/limits.js";
+import { truncateMessageText } from "#public/channels/slack/limits.js";
 import type { SlackTaskCard } from "#public/channels/slack/renderers.js";
-import type { SlackTransportOptions } from "#public/channels/slack/transport.js";
+import type {
+  SlackChannelInternalEvents,
+  SlackChannelState,
+  SlackEventContext,
+} from "#public/channels/slack/slackChannel.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("slack.task-card");
@@ -23,18 +28,13 @@ const log = createLogger("slack.task-card");
 const MAX_PLAN_ROWS = 50;
 const MAX_TITLE_LENGTH = 80;
 const MAX_LINE_LENGTH = 200;
-/**
- * Slack clears a thread's status after two minutes without a message, so a
- * status set while tasks work is set again before then. The collector renders
- * about every 90 seconds while a task works.
- */
-const STATUS_REFRESH_MS = 80_000;
+/** Unfinished turns eve keeps tracking; the oldest drop first. */
+const MAX_TRACKED_TURNS = 20;
 const WRITE_RETRY_MS = 1_000;
 
 type SlackTaskStatus = "in_progress" | "complete" | "error";
 
 interface SlackTaskObject {
-  details?: BlockKitBlock;
   output?: BlockKitBlock;
   readonly status: SlackTaskStatus;
   readonly task_id: string;
@@ -43,13 +43,13 @@ interface SlackTaskObject {
 
 /**
  * eve's default task card: a `task_card` block for one task, or a `plan` block
- * for several, and no card for a turn that started none. A task shows its
- * latest steps while it works and one line about how it ended once it settles.
- * A stopped task shows as an error, never as a success.
+ * for several, and no card for a turn that started none. A settled task shows
+ * one line about how it ended. A stopped task shows as an error, never as a
+ * success.
  */
 export function renderDefaultSlackTaskCard(view: TaskCardView): SlackTaskCard | null {
   if (view.tasks.length === 0) return null;
-  const rows = collapseEarlierRows(view.tasks, MAX_PLAN_ROWS).map(toSlackTask);
+  const rows = collapseEarlierRows(view.tasks).map(toSlackTask);
   const title = planTitle(view);
   const blocks: BlockKitBlock[] =
     rows.length === 1
@@ -60,10 +60,6 @@ export function renderDefaultSlackTaskCard(view: TaskCardView): SlackTaskCard | 
 }
 
 function planTitle(view: TaskCardView): string {
-  if (view.state === "blocked") {
-    const blocker = view.tasks.find((task) => task.blockedOn !== undefined)?.blockedOn;
-    return waitingText(blocker?.kind ?? "input");
-  }
   const statuses = view.tasks.map((task) => task.status);
   const total = statuses.length;
   if (view.state === "working") {
@@ -86,20 +82,17 @@ function countTasks(count: number): string {
 }
 
 /** Keeps a plan within Slack's cap by folding the oldest settled rows into one. */
-function collapseEarlierRows(
-  tasks: readonly TaskCardTask[],
-  limit: number,
-): readonly TaskCardTask[] {
-  if (tasks.length <= limit) return tasks;
-  const overflow = tasks.length - (limit - 1);
+function collapseEarlierRows(tasks: readonly TaskCardTask[]): readonly TaskCardTask[] {
+  if (tasks.length <= MAX_PLAN_ROWS) return tasks;
+  const overflow = tasks.length - (MAX_PLAN_ROWS - 1);
   const folded = new Set(
     tasks
-      .filter((task) => task.status !== "working" && task.status !== "blocked")
+      .filter((task) => task.status !== "working")
       .slice(0, overflow)
       .map((task) => task.id),
   );
   const kept = tasks.filter((task) => !folded.has(task.id));
-  if (folded.size === 0) return kept.slice(-limit);
+  if (folded.size === 0) return kept.slice(-MAX_PLAN_ROWS);
   const foldedFailure = tasks.some(
     (task) => folded.has(task.id) && (task.status === "failed" || task.status === "cancelled"),
   );
@@ -109,11 +102,10 @@ function collapseEarlierRows(
     name: "earlier",
     startedAt: tasks[0]!.startedAt,
     status: foldedFailure ? "failed" : "completed",
-    steps: [],
     taskId: "earlier",
     title: `${countTasks(folded.size)} finished earlier`,
   };
-  return [earlier, ...kept].slice(-limit);
+  return [earlier, ...kept].slice(-MAX_PLAN_ROWS);
 }
 
 function toSlackTask(task: TaskCardTask): SlackTaskObject {
@@ -122,42 +114,20 @@ function toSlackTask(task: TaskCardTask): SlackTaskObject {
     task_id: slackTaskId(task.id),
     title: truncate(task.title, MAX_TITLE_LENGTH),
   };
-  const details =
-    task.blockedOn !== undefined
-      ? [blockerDetails(task.blockedOn)]
-      : task.status === "working"
-        ? task.steps.map(stepLine)
-        : [];
-  if (details.length > 0) slackTask.details = richText(details);
   const output = outputLine(task);
-  if (output !== undefined) slackTask.output = richText([output]);
+  if (output !== undefined) slackTask.output = richText(output);
   return slackTask;
 }
 
 function slackStatus(task: TaskCardTask): SlackTaskStatus {
   switch (task.status) {
     case "working":
-    case "blocked":
       return "in_progress";
     case "completed":
       return "complete";
     case "failed":
     case "cancelled":
       return "error";
-  }
-}
-
-function stepLine(step: TaskCardStep): string {
-  const label = truncate(step.label, MAX_TITLE_LENGTH);
-  switch (step.status) {
-    case "working":
-      return `${label}...`;
-    case "completed":
-      return `✓ ${label}`;
-    case "failed":
-      return `✗ ${label}`;
-    case "cancelled":
-      return `– ${label}`;
   }
 }
 
@@ -174,29 +144,11 @@ function outputLine(task: TaskCardTask): string | undefined {
   }
 }
 
-function blockerDetails(blocker: TaskCardBlocker): string {
-  const waiting = waitingText(blocker.kind);
-  return blocker.label === undefined ? waiting : `${waiting}: ${blocker.label}`;
-}
-
-function waitingText(kind: TaskCardBlocker["kind"]): string {
-  switch (kind) {
-    case "approval":
-      return "Waiting for approval";
-    case "authorization":
-      return "Waiting for sign-in";
-    case "input":
-      return "Waiting for a response";
-  }
-}
-
-function richText(lines: readonly string[]): BlockKitBlock {
+function richText(line: string): BlockKitBlock {
   return {
     elements: [
       {
-        elements: [
-          { text: lines.map((line) => truncate(line, MAX_LINE_LENGTH)).join("\n"), type: "text" },
-        ],
+        elements: [{ text: truncate(line, MAX_LINE_LENGTH), type: "text" }],
         type: "rich_text_section",
       },
     ],
@@ -208,98 +160,114 @@ function truncate(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
-/** Slack task ids must be unique in a plan; row ids are, but carry characters Slack rejects. */
+/** Slack task ids must be unique in a plan; call ids are, but can carry characters Slack rejects. */
 function slackTaskId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(-200);
 }
 
-interface PostedCard {
-  readonly fingerprint: string;
-  readonly ts: string;
+/** A turn's tracked calls, and the card eve last wrote for it. */
+export interface SlackTaskCardState {
+  readonly turn: TaskCardTurn;
+  readonly ts?: string;
+  readonly fingerprint?: string;
 }
 
-interface TaskCardPresenterState {
-  readonly cards: Readonly<Record<string, PostedCard>>;
-  /** When eve last set the waiting status, while tasks work. */
-  readonly statusAt?: number;
+const TRACKED_EVENTS = [
+  "actions.requested",
+  "action.result",
+  "task.started",
+  "task.settled",
+  "turn.completed",
+  "turn.failed",
+  "turn.cancelled",
+] as const;
+
+type TrackedEvent = (typeof TRACKED_EVENTS)[number];
+type TrackedHandler = (
+  data: Extract<UnstampedMessageStreamEvent, { readonly type: TrackedEvent }>["data"],
+  channel: SlackEventContext,
+  ctx: Parameters<NonNullable<SlackChannelInternalEvents["task.started"]>>[2],
+) => Promise<void>;
+
+/**
+ * Keeps each turn's task card current from the session's own events. It runs
+ * around the renderer chain, so the card never depends on which handlers a
+ * renderer keeps: eve tracks the turn's calls first, runs the chain's handler,
+ * then writes the card `taskCard` returns if it changed.
+ */
+export function withTaskCards(
+  events: SlackChannelInternalEvents,
+  taskCard: (view: TaskCardView) => SlackTaskCard | null,
+): SlackChannelInternalEvents {
+  const wrapped: Partial<Record<TrackedEvent, TrackedHandler>> = {};
+  for (const type of TRACKED_EVENTS) {
+    const handler = events[type] as TrackedHandler | undefined;
+    wrapped[type] = async (data, channel, ctx) => {
+      const event = { data, type } as UnstampedMessageStreamEvent;
+      const tracked = trackTaskCardEvent(
+        trackedTurns(channel.state),
+        event,
+        new Date().toISOString(),
+      );
+      if (tracked !== undefined) rememberTurn(channel.state, tracked.turnId, tracked.turn);
+      await handler?.(data, channel, ctx);
+      if (tracked !== undefined) await writeTaskCard(channel, tracked.turnId, taskCard);
+    };
+  }
+  return { ...events, ...wrapped } as SlackChannelInternalEvents;
 }
 
-interface SlackDestination {
-  readonly api: SlackTransportOptions | undefined;
-  readonly botToken: SlackBotToken | undefined;
-  readonly channelId: string;
-  readonly teamId: string | undefined;
-  readonly threadTs: string;
+function trackedTurns(state: SlackChannelState): Readonly<Record<string, TaskCardTurn>> {
+  return Object.fromEntries(
+    Object.entries(state.taskCards ?? {}).map(([turnId, card]) => [turnId, card.turn]),
+  );
+}
+
+function rememberTurn(state: SlackChannelState, turnId: string, turn: TaskCardTurn): void {
+  const cards = { ...state.taskCards, [turnId]: { ...state.taskCards?.[turnId], turn } };
+  const turnIds = Object.keys(cards);
+  for (const oldest of turnIds.slice(0, Math.max(0, turnIds.length - MAX_TRACKED_TURNS))) {
+    delete cards[oldest];
+  }
+  state.taskCards = cards;
 }
 
 /**
- * Posts one task card per root turn in the session's thread and updates it in
- * place as the turn changes. The collector decides when to render; this only
- * writes what changed, and keeps the waiting status alive while tasks work.
+ * Renders the turn's card and posts or updates it, then forgets a finished
+ * turn, whose card can't change again. A schedule's session posts only its
+ * final reply, and a session without a thread has nowhere to post.
  */
-export function createSlackTaskCardPresenter(input: {
-  readonly api: SlackTransportOptions | undefined;
-  readonly botToken: SlackBotToken | undefined;
-  readonly taskCard: (view: TaskCardView) => SlackTaskCard | null;
-}): ChannelActivityPresenter {
-  return {
-    destination(state) {
-      return {
-        audience: normalizeChannelAudience(state?.["audience"]),
-        channelId: state?.["channelId"] ?? null,
-        installationTeamId: state?.["installationTeamId"] ?? null,
-        threadTs: state?.["threadTs"] ?? null,
+async function writeTaskCard(
+  channel: SlackEventContext,
+  turnId: string,
+  taskCard: (view: TaskCardView) => SlackTaskCard | null,
+): Promise<void> {
+  const current = channel.state.taskCards?.[turnId];
+  if (current === undefined) return;
+  const audience = normalizeChannelAudience(channel.state.audience);
+  const view = taskCardView(turnId, current.turn, { audience });
+  const { channelId, threadTs } = channel.state;
+  const scheduled = contextStorage.getStore()?.get(ScheduleIdKey) !== undefined;
+  const thread = channelId && threadTs && !scheduled ? { channelId, threadTs } : undefined;
+  const card = thread === undefined ? null : renderCard(taskCard, view);
+  if (thread !== undefined && card !== null) {
+    const fingerprint = createHash("sha256").update(JSON.stringify(card)).digest("base64url");
+    if (fingerprint !== current.fingerprint) {
+      const ts = await writeCardWithRetry(channel.slack, { ...thread, card, ts: current.ts });
+      // Keep a card that failed to land, so the turn's next change writes it again.
+      if (ts === undefined) return;
+      channel.state.taskCards = {
+        ...channel.state.taskCards,
+        [turnId]: { fingerprint, ts, turn: current.turn },
       };
-    },
-    async render({ destination, snapshot, state }) {
-      const channelId = destination["channelId"];
-      const threadTs = destination["threadTs"];
-      if (typeof channelId !== "string" || typeof threadTs !== "string" || threadTs === "") {
-        return state;
-      }
-      const slack: SlackDestination = {
-        api: input.api,
-        botToken: input.botToken,
-        channelId,
-        teamId:
-          typeof destination["installationTeamId"] === "string"
-            ? destination["installationTeamId"]
-            : undefined,
-        threadTs,
-      };
-      const previous = isPresenterState(state) ? state : { cards: {} };
-      const views = projectTaskCards(snapshot, {
-        audience: normalizeChannelAudience(destination["audience"]),
-      });
-      const cards: Record<string, PostedCard> = {};
-      let posted = false;
-      for (const view of views) {
-        const current = previous.cards[view.turnId];
-        const card = renderCard(input.taskCard, view);
-        const fingerprint = card === null ? undefined : fingerprintOf(card);
-        if (card === null || current?.fingerprint === fingerprint) {
-          if (current !== undefined) cards[view.turnId] = current;
-          continue;
-        }
-        const ts = await writeCardWithRetry(slack, card, current?.ts, view.turnId);
-        if (ts === undefined) {
-          // Keep the card as it was, so a later render writes it again
-          // without posting the cards that did land a second time.
-          if (current !== undefined) cards[view.turnId] = current;
-          continue;
-        }
-        cards[view.turnId] = { fingerprint: fingerprint!, ts };
-        if (ts !== current?.ts) posted = true;
-      }
-      const next: { cards: Record<string, PostedCard>; statusAt?: number } = { cards };
-      const statusAt = await refreshWaitingStatus(slack, views, {
-        posted,
-        statusAt: previous.statusAt,
-      });
-      if (statusAt !== undefined) next.statusAt = statusAt;
-      return next satisfies TaskCardPresenterState;
-    },
-  };
+    }
+  }
+  if (view.state === "finished") forgetTurn(channel.state, turnId);
+}
+
+function forgetTurn(state: SlackChannelState, turnId: string): void {
+  const { [turnId]: _finished, ...cards } = state.taskCards ?? {};
+  state.taskCards = cards;
 }
 
 /** An authored card that throws leaves that turn's card as it was. */
@@ -315,89 +283,44 @@ function renderCard(
   }
 }
 
-/** A short, stable digest of a card, so presenter state stays small. */
-function fingerprintOf(card: SlackTaskCard): string {
-  return createHash("sha256").update(JSON.stringify(card)).digest("base64url");
+interface CardWrite {
+  readonly card: SlackTaskCard;
+  readonly channelId: string;
+  readonly threadTs: string;
+  readonly ts: string | undefined;
 }
 
-/** Writes a card, trying once more after a second; undefined when both fail. */
+/**
+ * Writes a card, trying once more after a second. A card that still fails
+ * keeps its last fingerprint, so the next change writes it again. Never
+ * throws: a card is never worth failing the turn over.
+ */
 async function writeCardWithRetry(
-  slack: SlackDestination,
-  card: SlackTaskCard,
-  ts: string | undefined,
-  turnId: string,
+  slack: SlackHandle,
+  write: CardWrite,
 ): Promise<string | undefined> {
   for (const attempt of [1, 2]) {
     try {
-      return await writeCard(slack, card, ts);
+      return await writeCard(slack, write);
     } catch (error) {
-      logError(log, "task card write failed", error, { attempt, turnId });
+      logError(log, "task card write failed", error, { attempt });
       if (attempt === 1) await new Promise((resolve) => setTimeout(resolve, WRITE_RETRY_MS));
     }
   }
   return undefined;
 }
 
-/**
- * Keeps the waiting status up while tasks work. The session sets it when the
- * turn waits; Slack clears it after two minutes and whenever the app posts, so
- * it is set right after a new card and again once it is about to lapse. A
- * turn whose own calls ran recently is still working and sets its own status.
- */
-async function refreshWaitingStatus(
-  slack: SlackDestination,
-  views: readonly TaskCardView[],
-  input: { readonly posted: boolean; readonly statusAt: number | undefined },
-): Promise<number | undefined> {
-  const working = views
-    .filter((view) => view.state === "working")
-    .flatMap((view) => view.tasks.filter((task) => task.status === "working"))
-    .map((task) => task.name);
-  if (working.length === 0) return undefined;
-  const now = Date.now();
-  if (!input.posted) {
-    if (input.statusAt === undefined) return now;
-    if (now - input.statusAt < STATUS_REFRESH_MS) return input.statusAt;
-    if (views.some((view) => turnActedSince(view, now - STATUS_REFRESH_MS))) return input.statusAt;
-  }
-  const status = truncateTypingStatus(waitingOnTasks(working));
-  const response = await callSlack(slack, "assistant.threads.setStatus", {
-    channel_id: slack.channelId,
-    loading_messages: [status],
-    status,
-    thread_ts: slack.threadTs,
-  }).catch((error: unknown) => {
-    logError(log, "waiting status refresh failed", error);
-    return undefined;
-  });
-  if (response !== undefined && response.ok !== true) {
-    log.warn("assistant.threads.setStatus returned not-ok", { error: response.error });
-  }
-  return now;
-}
-
-function turnActedSince(view: TaskCardView, since: number): boolean {
-  return view.actions.some(
-    (action) =>
-      action.status === "working" || Date.parse(action.settledAt ?? action.startedAt) > since,
-  );
-}
-
 /** Updates the card in place, or posts it again when someone deleted it. */
-async function writeCard(
-  slack: SlackDestination,
-  card: SlackTaskCard,
-  ts: string | undefined,
-): Promise<string> {
-  const message = { blocks: card.blocks, channel: slack.channelId, text: card.text };
-  if (ts !== undefined) {
-    const updated = await callSlack(slack, "chat.update", { ...message, ts });
-    if (updated.ok === true) return ts;
+async function writeCard(slack: SlackHandle, write: CardWrite): Promise<string> {
+  const message = { blocks: write.card.blocks, channel: write.channelId, text: write.card.text };
+  if (write.ts !== undefined) {
+    const updated = await slack.request("chat.update", { ...message, ts: write.ts });
+    if (updated.ok === true) return write.ts;
     if (updated.error !== "message_not_found") throw slackError(updated.error);
   }
-  const posted = await callSlack(slack, "chat.postMessage", {
+  const posted = await slack.request("chat.postMessage", {
     ...message,
-    thread_ts: slack.threadTs,
+    thread_ts: write.threadTs,
     unfurl_links: false,
     unfurl_media: false,
   });
@@ -408,24 +331,6 @@ async function writeCard(
   return posted.ts;
 }
 
-function callSlack(slack: SlackDestination, operation: string, body: Record<string, unknown>) {
-  return callSlackApi({
-    api: slack.api,
-    body,
-    botToken: slack.botToken,
-    context: { teamId: slack.teamId },
-    operation,
-  });
-}
-
 function slackError(error: string | undefined): Error {
   return new Error(`Slack task card failed: ${error ?? "unknown_error"}`);
-}
-
-function isPresenterState(value: unknown): value is TaskCardPresenterState {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { cards?: unknown }).cards === "object"
-  );
 }

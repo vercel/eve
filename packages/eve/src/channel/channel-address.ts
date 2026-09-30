@@ -1,7 +1,6 @@
 import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { copyChannelActivityPresenter } from "#channel/activity-presenter.js";
 import {
   createChannelDeliveryMetadata,
   type ChannelDeliverySource,
@@ -131,7 +130,6 @@ export function createChannelAddress<TState = undefined>(input: {
               ...input.adapter,
               state: { ...input.adapter.state, ...(state as Record<string, unknown>) },
             };
-      if (adapter !== input.adapter) copyChannelActivityPresenter(input.adapter, adapter);
       const runInput: RunInput = {
         adapter,
         auth: options.auth,

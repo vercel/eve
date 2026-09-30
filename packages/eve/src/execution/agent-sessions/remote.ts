@@ -15,7 +15,6 @@ import {
   createEveSessionRoutePath,
 } from "#protocol/routes.js";
 import type {
-  ActivityObserverConfig,
   CancelTurnResult,
   SessionAuthContext,
   SessionCapabilities,
@@ -63,7 +62,6 @@ export async function startRemoteAgentSession(input: {
   readonly callbackBaseUrl: string | undefined;
   readonly capabilities?: SessionCapabilities;
   readonly originAudience?: ChannelAudience;
-  readonly activityObserver?: ActivityObserverConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
   /**
@@ -95,7 +93,6 @@ export async function startRemoteAgentSession(input: {
       token: string;
       url: string;
     };
-    activityObserver?: ActivityObserverConfig;
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
     operationId?: string;
@@ -120,7 +117,6 @@ export async function startRemoteAgentSession(input: {
     outputSchema: input.action.input.outputSchema as JsonObject | undefined,
     protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
   };
-  if (input.activityObserver !== undefined) requestBody.activityObserver = input.activityObserver;
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
   }
@@ -257,7 +253,6 @@ export async function respondToRemoteAgentSession(input: {
 
 /** Continues one remote-agent session by its immutable session ID. */
 export async function continueRemoteAgentSession(input: {
-  readonly activityObserver?: ActivityObserverConfig;
   /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth: SessionAuthContext | null;
   readonly callback: {
@@ -273,13 +268,11 @@ export async function continueRemoteAgentSession(input: {
 }): Promise<void> {
   const forwardedPrincipal = buildForwardedPrincipalField(input);
   const requestBody: {
-    activityObserver?: ActivityObserverConfig;
     callback: typeof input.callback;
     forwardedPrincipal?: ForwardedPrincipal;
     message: string;
     outputSchema?: JsonObject;
   } = {
-    activityObserver: input.activityObserver,
     callback: input.callback,
     message: input.message,
     outputSchema: input.outputSchema,

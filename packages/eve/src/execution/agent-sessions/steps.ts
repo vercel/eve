@@ -1,5 +1,4 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
-import type { ActivityObserverConfig } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
@@ -8,7 +7,6 @@ import {
   resolveAgentStartTarget,
   type SubagentStartTarget,
 } from "#execution/agent-sessions/target.js";
-import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import {
   createWorkflowCallbackUrl,
@@ -130,7 +128,6 @@ export async function sendAgentSessionMessageStep(
   if (address.kind === "remote") {
     const remote = await resolveSessionRemote(context, address);
     await continueRemoteAgentSession({
-      activityObserver: sessionActivityObserver(context, { ...address, key: input.key }),
       auth: input.auth.current,
       callback: {
         callId: context.parent.callId,
@@ -152,7 +149,6 @@ export async function sendAgentSessionMessageStep(
     command: {
       auth: input.auth.current,
       caller: {
-        activityObserver: sessionActivityObserver(context, { ...address, key: input.key }),
         callId: context.parent.callId,
         replyTo: { kind: "hook", token: input.replyTo },
         subagentName: address.name,
@@ -235,11 +231,6 @@ async function startLocalSession(
   const { action } = target;
   const { childContinuationToken, runInput } = buildSubagentRunInput({
     action,
-    activityObserver: sessionActivityObserver(context, {
-      key: input.key,
-      kind: "local",
-      name: action.name,
-    }),
     auth: auth.current,
     capabilities: context.capabilities,
     channelMetadata: context.channelMetadata,
@@ -284,11 +275,6 @@ async function startRemoteSession(
   const callbackBaseUrl = resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url);
   const child = await startRemoteAgentSession({
     action,
-    activityObserver: sessionActivityObserver(context, {
-      key: input.key,
-      kind: "remote",
-      name: action.remoteAgentName,
-    }),
     auth: auth.current,
     callbackBaseUrl,
     capabilities: context.capabilities,
@@ -309,27 +295,6 @@ async function startRemoteSession(
     sessionId: child.sessionId,
     url: remote.url,
   };
-}
-
-/**
- * The session's turns report their activity as its own work, beneath the
- * opening call's turn, never as the caller's. Every message carries the same
- * identity: its call id is the one steering and remote binding check, and the
- * session's key tells apart the sessions one call opens.
- */
-function sessionActivityObserver(
-  context: AgentSessionContext,
-  session: Pick<AgentSessionAddress, "kind" | "name"> & { readonly key: string },
-): ActivityObserverConfig | undefined {
-  return deriveChildActivityObserverConfig({
-    activityObserver: context.activityObserver,
-    callId: context.parent.callId,
-    kind: session.kind === "remote" ? "remote-agent" : "subagent",
-    name: session.name,
-    parentSessionId: context.parent.sessionId,
-    parentTurnId: context.parent.turn.id,
-    sessionKey: session.key,
-  });
 }
 
 function createParentContext(context: AgentSessionContext, replyTo: string): SubagentParentContext {

@@ -88,7 +88,6 @@ import {
   createCancelledModelCallBatchResult,
   type CompletedModelCallCheckpoint,
 } from "#execution/cancelled-model-call-batch.js";
-import * as activityCohort from "#execution/activity-cohort.js";
 
 function channelDeliveryErrorCode(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {
@@ -143,11 +142,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     );
     delivery = { ...delivery, payloads: remainingPayloads };
     if (matches.length > 0) {
-      const matchedAttemptIds = activityCohort.restoreAuthorizationActivity({
-        ctx,
-        matches,
-        pending: pendingAuth,
-      });
+      const matchedAttemptIds = matches.map((match) => match.result.attemptId);
       const authResults = matches.map((match) => match.result);
       ctx.set(PendingAuthorizationResultKey, authResults);
       durableSession = {
@@ -314,13 +309,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       }
       resolved = { ...resolved, runtimeActionResults: runtimeResults.results };
     }
-
-    activityCohort.updateActivityRootForDelivery({
-      activeTurnId: activeTurnId(initialEmissionState),
-      ctx,
-      delivery: ignoredActiveDelivery ? undefined : rawDelivery,
-      sessionState: durableSession.state,
-    });
 
     if (rawDelivery !== undefined) {
       const updatedAdapter = { ...adapter, state: { ...adapterCtx.state } };
@@ -564,7 +552,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     if (durableResult.action === "done") await sink.close();
     return durableResult;
   } finally {
-    await sink.flushActivity();
     sink.release();
   }
 }

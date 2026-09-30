@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
-import {
-  attachChannelActivityPresenter,
-  getChannelActivityPresenter,
-} from "#channel/activity-presenter.js";
 import type { Runtime } from "#channel/types.js";
 
 function createRuntime(): Runtime {
@@ -118,43 +114,6 @@ describe("createChannelAddress", () => {
     expect(first?.kind === "send" ? first.delivery?.deliveryId : undefined).not.toBe(
       second?.kind === "send" ? second.delivery?.deliveryId : undefined,
     );
-  });
-
-  it("keeps the channel's activity presenter on a newly created session", async () => {
-    const runtime = createRuntime();
-    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({ status: "session_not_active" });
-    vi.mocked(runtime.createSession).mockResolvedValue({
-      events: new ReadableStream(),
-      sessionId: "sess_activity",
-    });
-    const adapter = { kind: "slack" };
-    const presenter = { destination: () => ({}), render: vi.fn() };
-    attachChannelActivityPresenter(adapter, presenter);
-    const address = createChannelAddress<{ channelId: string; threadTs: string }>({
-      adapter,
-      channelName: "slack",
-      continuationToken: "C1:T1",
-      runtime,
-    });
-
-    await address.send("hello", {
-      auth: null,
-      state: { channelId: "C1", threadTs: "T1" },
-    });
-
-    expect(runtime.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        adapter: expect.objectContaining({ state: { channelId: "C1", threadTs: "T1" } }),
-        capabilities: { requestInput: true },
-        continuationConflictCommand: expect.objectContaining({
-          kind: "send",
-          payload: { message: "hello" },
-        }),
-      }),
-    );
-    const created = vi.mocked(runtime.createSession).mock.calls[0]?.[0].adapter;
-    expect(created).toBeDefined();
-    expect(getChannelActivityPresenter(created!)).toBe(presenter);
   });
 
   it("binds every control directly to the namespaced continuation token", async () => {

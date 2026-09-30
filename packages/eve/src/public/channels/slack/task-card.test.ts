@@ -1,172 +1,31 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { getChannelActivityPresenter } from "#channel/activity-presenter.js";
+import { buildAdapterContext } from "#channel/adapter-context.js";
+import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
-import { deriveChildWorkIdentity } from "#execution/activity-work.js";
-import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
-import { projectSessionActivity } from "#execution/session-activity-projection.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { ScheduleIdKey, SessionKey } from "#context/keys.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
-import type { ActivitySnapshotV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import {
   createActionsRequestedEvent,
   createTaskSettledEvent,
   createTaskStartedEvent,
   createTurnCompletedEvent,
-  createTurnStartedEvent,
-  type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
-import { defineSlackRenderer } from "#public/channels/slack/renderers.js";
+import { defineSlackRenderer, type SlackRenderer } from "#public/channels/slack/renderers.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 
-const SESSION_ID = "session_root";
 const TURN_ID = "turn_1";
 const DEPLOY_CALL = "call_deploy";
 const RESEARCH_CALL = "call_research";
-let clock = 0;
-
-function stamp(event: UnstampedMessageStreamEvent): MessageStreamEvent {
-  clock += 1;
-  return {
-    ...event,
-    meta: { at: new Date(Date.UTC(2026, 8, 30, 12, 0, clock)).toISOString(), id: `evt_${clock}` },
-  } as MessageStreamEvent;
-}
-
-/** Reduces events as the collector would receive them from each session. */
-function observe(
-  snapshot: ActivitySnapshotV1,
-  events: readonly UnstampedMessageStreamEvent[],
-  workIdentity?: ActivityWorkIdentityV1,
-): ActivitySnapshotV1 {
-  let next = snapshot;
-  for (const event of events) {
-    const activity = projectSessionActivity({
-      event: stamp(event),
-      sessionId: workIdentity === undefined ? SESSION_ID : "session_researcher",
-      taskCallIds: [DEPLOY_CALL, RESEARCH_CALL, "call_lint"],
-      workIdentity,
-    });
-    next = reduceActivityBatch(next, { events: activity, version: 1 });
-  }
-  return next;
-}
-
-/** A root turn that starts a deploy tool task and a researcher agent task. */
-function startTwoTasks(): ActivitySnapshotV1 {
-  const started = observe(createActivitySnapshot(), [
-    createTurnStartedEvent({ sequence: 1, turnId: TURN_ID }),
-    createActionsRequestedEvent({
-      actions: [
-        {
-          callId: DEPLOY_CALL,
-          input: { service: "storefront" },
-          kind: "tool-call",
-          toolName: "deploy",
-        },
-        {
-          callId: RESEARCH_CALL,
-          input: { message: "Find the incidents behind the checkout spike\nInclude timelines." },
-          kind: "tool-call",
-          toolName: "researcher",
-        },
-      ],
-      presentation: {
-        [DEPLOY_CALL]: { label: "Deploy storefront" },
-        [RESEARCH_CALL]: { label: "researcher: Find the incidents behind the checkout spike" },
-      },
-      sequence: 1,
-      stepIndex: 0,
-      turnId: TURN_ID,
-    }),
-    createTaskStartedEvent({
-      callId: DEPLOY_CALL,
-      kind: "tool",
-      name: "deploy",
-      taskId: "deploy-4hd8sa",
-      turnId: TURN_ID,
-    }),
-    createTaskStartedEvent({
-      callId: RESEARCH_CALL,
-      kind: "agent",
-      name: "researcher",
-      taskId: "researcher-7k2m9q",
-      turnId: TURN_ID,
-    }),
-  ]);
-  const rootWork = Object.values(started.work).find((work) => work.kind === "root-turn")!;
-  const researcher = deriveChildWorkIdentity({
-    callId: RESEARCH_CALL,
-    kind: "subagent",
-    name: "researcher",
-    parentSessionId: SESSION_ID,
-    parentTurnId: TURN_ID,
-    parentWork: rootWork,
-    sessionKey: "0",
-  });
-  return observe(
-    started,
-    [
-      createTurnStartedEvent({ sequence: 1, turnId: "child_turn" }),
-      createActionsRequestedEvent({
-        actions: [
-          {
-            callId: "child_read",
-            input: { path: "incidents/2291.md" },
-            kind: "tool-call",
-            toolName: "read_file",
-          },
-        ],
-        presentation: { child_read: { label: "Reading INC-2291 postmortem" } },
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "child_turn",
-      }),
-    ],
-    researcher,
-  );
-}
-
-function settleBothTasks(snapshot: ActivitySnapshotV1): ActivitySnapshotV1 {
-  return observe(snapshot, [
-    createTaskSettledEvent({
-      callId: DEPLOY_CALL,
-      output: "3 deploys; 14:02 changed the cache TTL\nFull log attached.",
-      status: "completed",
-      taskId: "deploy-4hd8sa",
-      turnId: TURN_ID,
-    }),
-    createTaskSettledEvent({
-      callId: RESEARCH_CALL,
-      error: { message: "Rate limited by the incidents API\nRetry after 60s." },
-      status: "failed",
-      taskId: "researcher-7k2m9q",
-      turnId: TURN_ID,
-    }),
-    createTurnCompletedEvent({ sequence: 2, turnId: TURN_ID }),
-  ]);
-}
-
-/** A later root turn that starts one lint task. */
-function startLint(snapshot: ActivitySnapshotV1): ActivitySnapshotV1 {
-  return observe(snapshot, [
-    createTurnStartedEvent({ sequence: 3, turnId: "turn_2" }),
-    createActionsRequestedEvent({
-      actions: [{ callId: "call_lint", input: {}, kind: "tool-call", toolName: "lint" }],
-      sequence: 3,
-      stepIndex: 0,
-      turnId: "turn_2",
-    }),
-    createTaskStartedEvent({
-      callId: "call_lint",
-      kind: "tool",
-      name: "lint",
-      taskId: "lint-2b7x0p",
-      turnId: "turn_2",
-    }),
-  ]);
-}
+const THREAD = {
+  audience: "private",
+  channelId: "C01",
+  threadTs: "1700000000.000001",
+};
+const CARD_OPERATIONS = new Set(["chat.postMessage", "chat.update"]);
 
 /** Records each Slack call; `reply` answers one call, defaulting to success. */
 function slackApi(
@@ -187,54 +46,129 @@ function slackApi(
   return { calls, fetch };
 }
 
-function presenterOf(channel: unknown) {
+/**
+ * A root session's Slack channel in a thread. `emit` delivers an event the way
+ * the session does, keeping the channel's state between events.
+ */
+function slackThread(
+  input: {
+    readonly renderers?: readonly SlackRenderer[];
+    readonly reply?: Parameters<typeof slackApi>[0];
+    readonly schedule?: boolean;
+    readonly state?: Record<string, unknown>;
+  } = {},
+) {
+  const { calls, fetch } = slackApi(input.reply);
+  const channel = slackChannel({
+    api: { fetch },
+    credentials: { botToken: "xoxb-test" },
+    renderers: input.renderers,
+  });
   if (!isCompiledChannel(channel)) throw new Error("Expected a compiled channel.");
-  const presenter = getChannelActivityPresenter(channel.adapter);
-  if (presenter === undefined) throw new Error("Expected a task card presenter.");
-  return presenter;
+  const adapter: ChannelAdapter = {
+    ...channel.adapter,
+    state: { ...channel.adapter.state, ...(input.state ?? THREAD) },
+  };
+  const adapterCtx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as never);
+  const session = new ContextContainer();
+  session.setVirtualContext(SessionKey, {
+    auth: { current: null, initiator: null },
+    sessionId: "session_root",
+    turn: { id: TURN_ID, sequence: 0 },
+  });
+  if (input.schedule === true) session.set(ScheduleIdKey, "nightly-report");
+  const emit = async (...events: UnstampedMessageStreamEvent[]) => {
+    for (const event of events) {
+      await contextStorage.run(session, () => callAdapterEventHandler(adapter, event, adapterCtx));
+    }
+  };
+  const cardCalls = () => calls.filter((call) => CARD_OPERATIONS.has(call.operation));
+  return { calls, cardCalls, emit };
 }
 
-const THREAD = {
-  audience: "private",
-  channelId: "C01",
-  installationTeamId: null,
-  threadTs: "1700000000.000001",
-};
+/** A root turn that starts a deploy tool task and a researcher agent task. */
+const TWO_TASKS_STARTED: readonly UnstampedMessageStreamEvent[] = [
+  createActionsRequestedEvent({
+    actions: [
+      {
+        callId: DEPLOY_CALL,
+        input: { service: "storefront" },
+        kind: "tool-call",
+        toolName: "deploy",
+      },
+      {
+        callId: RESEARCH_CALL,
+        input: { message: "Find the incidents behind the checkout spike\nInclude timelines." },
+        kind: "tool-call",
+        toolName: "researcher",
+      },
+    ],
+    presentation: {
+      [DEPLOY_CALL]: { label: "Deploy storefront" },
+      [RESEARCH_CALL]: { label: "researcher: Find the incidents behind the checkout spike" },
+    },
+    sequence: 1,
+    stepIndex: 0,
+    turnId: TURN_ID,
+  }),
+  createTaskStartedEvent({
+    callId: DEPLOY_CALL,
+    kind: "tool",
+    name: "deploy",
+    taskId: "deploy-4hd8sa",
+    turnId: TURN_ID,
+  }),
+  createTaskStartedEvent({
+    callId: RESEARCH_CALL,
+    kind: "agent",
+    name: "researcher",
+    taskId: "researcher-7k2m9q",
+    turnId: TURN_ID,
+  }),
+];
 
-function defaultPresenter(fetch: typeof globalThis.fetch) {
-  return presenterOf(slackChannel({ api: { fetch }, credentials: { botToken: "xoxb-test" } }));
-}
+const BOTH_TASKS_SETTLED: readonly UnstampedMessageStreamEvent[] = [
+  createTaskSettledEvent({
+    callId: DEPLOY_CALL,
+    output: "3 deploys; 14:02 changed the cache TTL\nFull log attached.",
+    status: "completed",
+    taskId: "deploy-4hd8sa",
+    turnId: TURN_ID,
+  }),
+  createTaskSettledEvent({
+    callId: RESEARCH_CALL,
+    error: { message: "Rate limited by the incidents API\nRetry after 60s." },
+    status: "failed",
+    taskId: "researcher-7k2m9q",
+    turnId: TURN_ID,
+  }),
+];
+
+const TURN_COMPLETED = createTurnCompletedEvent({ sequence: 2, turnId: TURN_ID });
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
 describe("Slack task card", () => {
-  it("posts one live card for a turn's tasks, then updates it in place as they settle", async () => {
-    const { calls, fetch } = slackApi();
-    const presenter = presenterOf(
-      slackChannel({ api: { fetch }, credentials: { botToken: "xoxb-test" } }),
-    );
-    const destination = presenter.destination(THREAD);
-    const working = startTwoTasks();
+  it("posts one live card for a turn's tasks, then updates it in place until the turn ends", async () => {
+    const { cardCalls, emit } = slackThread();
 
-    const posted = await presenter.render({ destination, snapshot: working, state: undefined });
+    await emit(...TWO_TASKS_STARTED);
 
-    expect(calls.map((call) => call.operation)).toEqual([
-      "chat.postMessage",
-      "assistant.threads.setStatus",
-    ]);
-    expect(calls[0]!.body).toMatchObject({
+    expect(cardCalls().map((call) => call.operation)).toEqual(["chat.postMessage", "chat.update"]);
+    expect(cardCalls()[0]!.body).toMatchObject({
+      channel: "C01",
+      thread_ts: "1700000000.000001",
       unfurl_links: "false",
       unfurl_media: "false",
+    });
+    expect(cardCalls()[1]!.body).toMatchObject({
       blocks: [
         {
           tasks: [
             { status: "in_progress", title: "Deploy storefront" },
             {
-              details: {
-                elements: [{ elements: [{ text: "Reading INC-2291 postmortem..." }] }],
-              },
               status: "in_progress",
               title: "researcher: Find the incidents behind the checkout spike",
             },
@@ -243,20 +177,14 @@ describe("Slack task card", () => {
           type: "plan",
         },
       ],
-      channel: "C01",
       text: "Working on 2 tasks: Deploy storefront, researcher: Find the incidents behind the checkout spike",
-      thread_ts: "1700000000.000001",
     });
+    const cardTs = cardCalls()[1]!.body["ts"];
+    expect(cardTs).toEqual(expect.any(String));
 
-    const settled = settleBothTasks(working);
-    const updated = await presenter.render({ destination, snapshot: settled, state: posted });
+    await emit(...BOTH_TASKS_SETTLED, TURN_COMPLETED);
 
-    expect(calls.map((call) => call.operation)).toEqual([
-      "chat.postMessage",
-      "assistant.threads.setStatus",
-      "chat.update",
-    ]);
-    expect(calls[2]!.body).toMatchObject({
+    expect(cardCalls().at(-1)!.body).toMatchObject({
       blocks: [
         {
           tasks: [
@@ -276,56 +204,22 @@ describe("Slack task card", () => {
           title: "Finished 2 tasks: 1 failed",
         },
       ],
-      ts: "1700000009.000101",
+      ts: cardTs,
     });
 
-    await presenter.render({ destination, snapshot: settled, state: updated });
-    expect(calls).toHaveLength(3);
-  });
-
-  it("builds an authored task card on eve's default card", async () => {
-    const { calls, fetch } = slackApi();
-    const presenter = presenterOf(
-      slackChannel({
-        api: { fetch },
-        credentials: { botToken: "xoxb-test" },
-        renderers: [
-          {
-            taskCard(view, next) {
-              const card = next(view);
-              if (card === null) return null;
-              const footer = { elements: [{ text: view.turnId, type: "mrkdwn" }], type: "context" };
-              return { ...card, blocks: [...card.blocks, footer] };
-            },
-          },
-        ],
-      }),
-    );
-
-    await presenter.render({
-      destination: presenter.destination(THREAD),
-      snapshot: startTwoTasks(),
-      state: undefined,
-    });
-
-    expect(calls[0]!.body["blocks"]).toMatchObject([
-      { title: "Working on 2 tasks", type: "plan" },
-      { elements: [{ text: TURN_ID }], type: "context" },
-    ]);
+    const written = cardCalls().length;
+    await emit(TURN_COMPLETED);
+    expect(cardCalls()).toHaveLength(written);
   });
 
   it("shows a failure without its error text outside private conversations", async () => {
-    const { calls, fetch } = slackApi();
-    const presenter = defaultPresenter(fetch);
+    const { cardCalls, emit } = slackThread({ state: { ...THREAD, audience: "public" } });
 
-    await presenter.render({
-      destination: presenter.destination({ ...THREAD, audience: "public" }),
-      snapshot: settleBothTasks(startTwoTasks()),
-      state: undefined,
-    });
+    await emit(...TWO_TASKS_STARTED, ...BOTH_TASKS_SETTLED);
 
-    expect(JSON.stringify(calls[0]!.body["blocks"])).not.toContain("Rate limited");
-    expect(calls[0]!.body["blocks"]).toMatchObject([
+    const blocks = JSON.stringify(cardCalls().at(-1)!.body["blocks"]);
+    expect(blocks).not.toContain("Rate limited");
+    expect(cardCalls().at(-1)!.body["blocks"]).toMatchObject([
       {
         tasks: [
           { status: "complete" },
@@ -335,53 +229,76 @@ describe("Slack task card", () => {
     ]);
   });
 
-  it("writes each turn's card on its own, so a failed write never posts the others twice", async () => {
-    vi.useFakeTimers();
-    // The lint card's post and its one retry both fail.
-    const { calls, fetch } = slackApi((operation, index) =>
-      operation === "chat.postMessage" && (index === 1 || index === 2)
-        ? { error: "ratelimited", ok: false }
-        : undefined,
-    );
-    const presenter = defaultPresenter(fetch);
-    const destination = presenter.destination(THREAD);
-    const snapshot = startLint(startTwoTasks());
-
-    const rendering = presenter.render({ destination, snapshot, state: undefined });
-    await vi.runAllTimersAsync();
-    await presenter.render({ destination, snapshot, state: await rendering });
-
-    const posts = calls.filter((call) => call.operation === "chat.postMessage");
-    expect(posts.map((post) => post.body["text"])).toEqual([
-      expect.stringContaining("Deploy storefront"),
-      expect.stringContaining("lint"),
-      expect.stringContaining("lint"),
-      expect.stringContaining("lint"),
-    ]);
-  });
-
   it("posts the card again when someone deleted it", async () => {
-    const { calls, fetch } = slackApi((operation) =>
-      operation === "chat.update" ? { error: "message_not_found", ok: false } : undefined,
-    );
-    const presenter = defaultPresenter(fetch);
-    const destination = presenter.destination(THREAD);
-    const working = startTwoTasks();
-
-    const posted = await presenter.render({ destination, snapshot: working, state: undefined });
-    const reposted = await presenter.render({
-      destination,
-      snapshot: settleBothTasks(working),
-      state: posted,
+    const { cardCalls, emit } = slackThread({
+      reply: (operation) =>
+        operation === "chat.update" ? { error: "message_not_found", ok: false } : undefined,
     });
 
-    expect(calls.map((call) => call.operation)).toEqual([
+    await emit(TWO_TASKS_STARTED[0]!, TWO_TASKS_STARTED[1]!, BOTH_TASKS_SETTLED[0]!);
+
+    expect(cardCalls().map((call) => call.operation)).toEqual([
       "chat.postMessage",
-      "assistant.threads.setStatus",
       "chat.update",
       "chat.postMessage",
     ]);
-    expect(reposted).toMatchObject({ cards: { [TURN_ID]: { ts: "1700000009.000104" } } });
+  });
+
+  it("tries a failed write once more, then again on the turn's next change", async () => {
+    vi.useFakeTimers();
+    // The card's first post and its retry both fail.
+    let posts = 0;
+    const { cardCalls, emit } = slackThread({
+      reply: (operation) =>
+        operation === "chat.postMessage" && ++posts <= 2
+          ? { error: "ratelimited", ok: false }
+          : undefined,
+    });
+
+    const starting = emit(TWO_TASKS_STARTED[0]!, TWO_TASKS_STARTED[1]!);
+    await vi.runAllTimersAsync();
+    await starting;
+    await emit(BOTH_TASKS_SETTLED[0]!);
+
+    expect(cardCalls().map((call) => call.operation)).toEqual([
+      "chat.postMessage",
+      "chat.postMessage",
+      "chat.postMessage",
+    ]);
+  });
+
+  it("keeps the card current when a renderer replaces eve's task handlers", async () => {
+    const { cardCalls, emit } = slackThread({
+      renderers: [{ events: { async "task.started"() {}, async "task.settled"() {} } }],
+    });
+
+    await emit(TWO_TASKS_STARTED[0]!, TWO_TASKS_STARTED[1]!, BOTH_TASKS_SETTLED[0]!);
+
+    expect(cardCalls().at(-1)!.body).toMatchObject({
+      blocks: [{ status: "complete", title: "Deploy storefront", type: "task_card" }],
+    });
+  });
+
+  it("builds an authored task card on eve's default card", async () => {
+    const { cardCalls, emit } = slackThread({
+      renderers: [
+        {
+          taskCard(view, next) {
+            const card = next(view);
+            if (card === null) return null;
+            const footer = { elements: [{ text: view.turnId, type: "mrkdwn" }], type: "context" };
+            return { ...card, blocks: [...card.blocks, footer] };
+          },
+        },
+      ],
+    });
+
+    await emit(TWO_TASKS_STARTED[0]!, TWO_TASKS_STARTED[1]!);
+
+    expect(cardCalls()[0]!.body["blocks"]).toMatchObject([
+      { type: "task_card" },
+      { elements: [{ text: TURN_ID }], type: "context" },
+    ]);
   });
 
   it("lets an app show its own plan tool's checklist ahead of eve's task rows", async () => {
@@ -395,7 +312,7 @@ describe("Slack task card", () => {
     const planRenderer = defineSlackRenderer({
       taskCard(view, next) {
         const card = next(view);
-        const plan = view.actions.findLast((action) => action.name === "plan");
+        const plan = view.actions.filter((action) => action.name === "plan").at(-1);
         const items = plan?.input?.["items"] as
           | { status: keyof typeof status; title: string }[]
           | undefined;
@@ -414,22 +331,12 @@ describe("Slack task card", () => {
           title: item.title,
         }));
         const tasks = [...planRows, ...taskRows.map(({ type: _type, ...row }) => row)];
-        return {
-          blocks: [{ tasks, title: "Plan", type: "plan" }],
-          text: `Plan: ${items.map((item) => item.title).join(", ")}`,
-        };
+        return { blocks: [{ tasks, title: "Plan", type: "plan" }], text: "Plan" };
       },
     });
-    const { calls, fetch } = slackApi();
-    const presenter = presenterOf(
-      slackChannel({
-        api: { fetch },
-        credentials: { botToken: "xoxb-test" },
-        renderers: [planRenderer],
-      }),
-    );
-    const snapshot = observe(createActivitySnapshot(), [
-      createTurnStartedEvent({ sequence: 1, turnId: TURN_ID }),
+    const { cardCalls, emit } = slackThread({ renderers: [planRenderer] });
+
+    await emit(
       createActionsRequestedEvent({
         actions: [
           {
@@ -449,35 +356,20 @@ describe("Slack task card", () => {
         stepIndex: 0,
         turnId: TURN_ID,
       }),
-      createActionsRequestedEvent({
-        actions: [{ callId: DEPLOY_CALL, input: {}, kind: "tool-call", toolName: "deploy" }],
-        presentation: { [DEPLOY_CALL]: { label: "Deploy history for storefront" } },
-        sequence: 1,
-        stepIndex: 1,
-        turnId: TURN_ID,
-      }),
-      createTaskStartedEvent({
-        callId: DEPLOY_CALL,
-        kind: "tool",
-        name: "deploy",
-        taskId: "deploy-4hd8sa",
-        turnId: TURN_ID,
-      }),
+    );
+    expect(cardCalls()[0]!.body["blocks"]).toMatchObject([
+      { tasks: [{ title: "Read the incident report" }, {}, {}], type: "plan" },
     ]);
 
-    await presenter.render({
-      destination: presenter.destination(THREAD),
-      snapshot,
-      state: undefined,
-    });
+    await emit(TWO_TASKS_STARTED[0]!, TWO_TASKS_STARTED[1]!);
 
-    expect(calls[0]!.body["blocks"]).toMatchObject([
+    expect(cardCalls().at(-1)!.body["blocks"]).toMatchObject([
       {
         tasks: [
           { status: "complete", title: "Read the incident report" },
           { status: "in_progress", title: "Check recent deploys" },
           { status: "pending", title: "Write up the cause" },
-          { status: "in_progress", title: "Deploy history for storefront" },
+          { status: "in_progress", title: "Deploy storefront" },
         ],
         type: "plan",
       },
@@ -485,109 +377,26 @@ describe("Slack task card", () => {
   });
 
   it("posts no default card for a turn whose tool calls start no task", async () => {
-    const { calls, fetch } = slackApi();
-    const presenter = defaultPresenter(fetch);
-    const snapshot = observe(createActivitySnapshot(), [
-      createTurnStartedEvent({ sequence: 1, turnId: TURN_ID }),
+    const { cardCalls, emit } = slackThread();
+
+    await emit(
       createActionsRequestedEvent({
         actions: [{ callId: "call_logs", input: {}, kind: "tool-call", toolName: "logs" }],
         sequence: 1,
         stepIndex: 0,
         turnId: TURN_ID,
       }),
-    ]);
-
-    await presenter.render({
-      destination: presenter.destination(THREAD),
-      snapshot,
-      state: undefined,
-    });
-
-    expect(calls).toEqual([]);
-  });
-
-  it("sets the waiting status after posting a card, and again before Slack expires it", async () => {
-    vi.useFakeTimers({ now: Date.UTC(2026, 8, 30, 12) });
-    const { calls, fetch } = slackApi();
-    const presenter = defaultPresenter(fetch);
-    const destination = presenter.destination(THREAD);
-    const snapshot = startLint(createActivitySnapshot());
-
-    const posted = await presenter.render({ destination, snapshot, state: undefined });
-    vi.setSystemTime(Date.UTC(2026, 8, 30, 12, 1, 30));
-    await presenter.render({ destination, snapshot, state: posted });
-
-    expect(calls.map((call) => call.operation)).toEqual([
-      "chat.postMessage",
-      "assistant.threads.setStatus",
-      "assistant.threads.setStatus",
-    ]);
-    expect(calls[2]!.body).toMatchObject({
-      status: "Waiting on lint...",
-      thread_ts: THREAD.threadTs,
-    });
-  });
-
-  it("leaves the status to a turn that is still calling tools", async () => {
-    vi.useFakeTimers({ now: Date.UTC(2026, 8, 30, 12) });
-    const { calls, fetch } = slackApi();
-    const presenter = defaultPresenter(fetch);
-    const destination = presenter.destination(THREAD);
-    const snapshot = observe(startLint(createActivitySnapshot()), [
-      createActionsRequestedEvent({
-        actions: [{ callId: "call_logs", input: {}, kind: "tool-call", toolName: "logs" }],
-        sequence: 4,
-        stepIndex: 1,
-        turnId: "turn_2",
-      }),
-    ]);
-
-    const posted = await presenter.render({ destination, snapshot, state: undefined });
-    vi.setSystemTime(Date.UTC(2026, 8, 30, 12, 1, 30));
-    await presenter.render({ destination, snapshot, state: posted });
-
-    expect(calls.map((call) => call.operation)).toEqual([
-      "chat.postMessage",
-      "assistant.threads.setStatus",
-    ]);
-  });
-
-  it("keeps a blocked task's request out of the card outside private conversations", async () => {
-    const working = startTwoTasks();
-    const deploy = Object.values(working.actions).find((action) => action.name === "deploy")!;
-    const blocked = reduceActivityBatch(working, {
-      events: [
-        {
-          blocker: {
-            id: "blocker:deploy",
-            kind: "approval",
-            label: "Deploy storefront to production?",
-            parentActionId: deploy.id,
-            parentWorkId: deploy.parentWorkId,
-            rootTurnId: TURN_ID,
-          },
-          eventId: "blocker:deploy:started",
-          kind: "blocker.started",
-          startedAt: "2026-09-30T12:05:00.000Z",
-        },
-      ],
-      version: 1,
-    });
-    const details = async (audience: string) => {
-      const { calls, fetch } = slackApi();
-      const presenter = defaultPresenter(fetch);
-      await presenter.render({
-        destination: presenter.destination({ ...THREAD, audience }),
-        snapshot: blocked,
-        state: undefined,
-      });
-      return JSON.stringify(calls[0]!.body["blocks"]);
-    };
-
-    expect(await details("public")).not.toContain("Deploy storefront to production?");
-    expect(await details("public")).toContain("Waiting for approval");
-    expect(await details("private")).toContain(
-      "Waiting for approval: Deploy storefront to production?",
+      TURN_COMPLETED,
     );
+
+    expect(cardCalls()).toEqual([]);
+  });
+
+  it("posts no card in a schedule's session, which posts only its final reply", async () => {
+    const { cardCalls, emit } = slackThread({ schedule: true });
+
+    await emit(...TWO_TASKS_STARTED);
+
+    expect(cardCalls()).toEqual([]);
   });
 });

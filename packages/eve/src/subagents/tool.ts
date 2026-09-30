@@ -2,7 +2,6 @@ import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { formatSubagentInput, type SubagentParentContext } from "#subagents/invocation.js";
 import type { JsonObject } from "#shared/json.js";
 import type {
-  ActivityObserverConfig,
   ChannelInstrumentationProjection,
   RunSessionLimits,
   SessionAuthContext,
@@ -81,7 +80,6 @@ export function buildSubagentRunInput(input: {
   /** Session token limits the child inherits. */
   readonly limits: RunSessionLimits;
   readonly parent: SubagentParentContext;
-  readonly activityObserver?: ActivityObserverConfig;
   readonly session: Pick<HarnessSession, "continuationToken" | "sandboxState" | "sessionId">;
   readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
@@ -138,7 +136,6 @@ export function buildSubagentRunInput(input: {
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,
-    activityObserver: input.activityObserver,
   };
   return { childContinuationToken, runInput };
 }

@@ -9,7 +9,7 @@ import type {
 } from "#channel/channel-operations.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import { setChannelActivityPresenter, setChannelBuildMetadata } from "#channel/compiled-channel.js";
+import { setChannelBuildMetadata } from "#channel/compiled-channel.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { CardElement } from "#compiled/chat/index.js";
@@ -47,7 +47,6 @@ import {
   defaultInputRequestedHandler,
   defaultOnMessage,
   defaultReceived,
-  withWorkingTasks,
 } from "#public/channels/slack/defaults.js";
 import {
   composeSlackRenderers,
@@ -56,8 +55,9 @@ import {
   type SlackRenderer,
 } from "#public/channels/slack/renderers.js";
 import {
-  createSlackTaskCardPresenter,
   renderDefaultSlackTaskCard,
+  type SlackTaskCardState,
+  withTaskCards,
 } from "#public/channels/slack/task-card.js";
 import {
   parseMessageEvent,
@@ -247,10 +247,10 @@ export interface SlackChannelState {
   pendingAuthMessageTs?: Record<string, string>;
   pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
   /**
-   * Working task calls by call id, with their tool or agent names. The default
-   * `turn.waiting` handler names them in the status line.
+   * Each recent turn's tool calls and the task card eve last wrote for it, by
+   * turn id. The default `turn.waiting` handler names the working tasks.
    */
-  workingTasks?: Record<string, string> | null;
+  taskCards?: Record<string, SlackTaskCardState> | null;
   /**
    * Principal id to Slack user id, recorded as each message or input response
    * is delivered. Default handlers use it to address the principal named on
@@ -817,16 +817,19 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     taskCard: renderDefaultSlackTaskCard,
   });
   const renderTurnStarted = rendering.events["turn.started"];
-  const events = withWorkingTasks({
-    ...rendering.events,
-    async "turn.started"(data, channel, ctx) {
-      const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
-      if (triggeringUserId !== undefined) {
-        channel.state.triggeringUserId = triggeringUserId;
-      }
-      await renderTurnStarted?.(data, channel, ctx);
+  const events = withTaskCards(
+    {
+      ...rendering.events,
+      async "turn.started"(data, channel, ctx) {
+        const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
+        if (triggeringUserId !== undefined) {
+          channel.state.triggeringUserId = triggeringUserId;
+        }
+        await renderTurnStarted?.(data, channel, ctx);
+      },
     },
-  });
+    rendering.taskCard,
+  );
 
   // Set of events we've already handled on this process.
   // Light weight dedup mechanism - not reliable across multiple invocations.
@@ -920,14 +923,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
 
     events,
   });
-  setChannelActivityPresenter(
-    channel,
-    createSlackTaskCardPresenter({
-      api,
-      botToken: config.credentials?.botToken,
-      taskCard: rendering.taskCard,
-    }),
-  );
   const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
   const manifest = defineSlackAppManifest({ botName: config.botName });
   setChannelBuildMetadata(channel, (channelName) => ({

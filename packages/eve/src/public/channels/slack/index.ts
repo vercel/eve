@@ -85,11 +85,9 @@ export {
 } from "#public/channels/slack/renderers.js";
 
 export type {
-  TaskCardBlocker,
   TaskCardAction,
-  TaskCardStep,
+  TaskCardStatus,
   TaskCardTask,
-  TaskCardTaskStatus,
   TaskCardView,
 } from "#channel/task-card.js";
 

@@ -4,7 +4,6 @@ import type { SessionAuthContext, SessionParent, SessionTraceContext } from "#ch
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
-import { handleActivityRequest } from "#execution/activity-route.js";
 import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import {
   handleWorkflowWebhookRequest,
@@ -25,7 +24,6 @@ import {
 } from "#protocol/message.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 import {
-  EVE_ACTIVITY_ROUTE_PATTERN,
   EVE_CALLBACK_ROUTE_PATTERN,
   EVE_CONNECTION_CALLBACK_ROUTE_PATTERN,
   EVE_HEALTH_ROUTE_PATH,
@@ -150,7 +148,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       ),
       GET(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
       POST(EVE_CONNECTION_CALLBACK_ROUTE_PATTERN, handleConnectionCallbackRequest),
-      POST(EVE_ACTIVITY_ROUTE_PATTERN, handleActivityRequest),
       POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
       GET(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
       POST(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
@@ -320,7 +317,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await createSession({
-            activityObserver: body.activityObserver,
             audienceAuth: authResult,
             auth: messageResult.auth,
             capabilities: body.capabilities ?? { requestInput: true },
@@ -402,7 +398,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           const session = attachSession(sessionId);
           const options = attachClientContext(
             {
-              activityObserver: body.activityObserver,
               auth: dispatchAuth,
               callback: body.callback,
               context,
