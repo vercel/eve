@@ -239,10 +239,12 @@ export const createIntegrationOgImage = async (
         <div
           style={{
             alignItems: "center",
+            background: "#f4f4f5",
+            borderRadius: 20,
             display: "flex",
-            height: 132,
-            justifyContent: "flex-start",
-            width: 240,
+            height: 180,
+            justifyContent: "center",
+            width: 180,
           }}
         >
           <img
