@@ -3,13 +3,13 @@ title: "Overview"
 description: "How users reach your agent: the channel contract, the base eve HTTP channel, and authoring custom channels."
 ---
 
-A channel connects an external surface to your agent. A conversational channel:
+A channel connects a platform to your agent. For conversations, it:
 
-- Normalizes platform input into a user message.
-- Owns the channel-local address that maps a platform conversation to its current durable session.
-- Decides how, where, and whether to deliver a response.
+- Converts incoming messages into agent input.
+- Maps each platform conversation to an eve session.
+- Decides how, where, and whether to deliver replies.
 
-A channel can also receive an event without hosting the conversation: its route can start a session on another channel instead.
+A channel can also receive events and pass them to another channel, without starting a conversation of its own.
 
 eve ships a base HTTP channel plus first-class platform channels, and you can author your own. Browse the full set in the [Integrations](/integrations) gallery and choose the Channels filter.
 
@@ -17,9 +17,9 @@ After a channel dispatches a message, eve runs the same agent runtime regardless
 
 ## Choose where the conversation lives
 
-Use the originating channel when the agent should reply on the same platform. When an event should lead to a conversation elsewhere, use a [cross-channel hand-off](./custom#cross-channel-hand-off) to start or continue a session on the destination channel. A [handler-form schedule](../schedules#handler-form-run) can select a destination too.
+The agent doesn't have to reply where an event arrived. A webhook, for example, can start a conversation in a team chat without sending an agent reply to the webhook's source.
 
-Both paths invoke the agent on the destination channel. To notify a platform without an agent turn, call its provider API instead; see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) for application-managed retries and deduplication.
+Use a [cross-channel hand-off](./custom#cross-channel-hand-off) when the conversation belongs elsewhere. The destination channel handles the session, replies, and follow-up messages. To post a notification without running the agent, use the platform's API instead.
 
 ## Audience
 
@@ -80,7 +80,7 @@ The eve channel is the framework's default HTTP session API, the routes the term
 
 ## Custom channels
 
-When eve doesn't ship a channel for your surface, build one with `defineChannel` from `eve/channels`. A custom channel can use route handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `WS`) to start a local session with `from(address).send(...)` or hand an event to another channel with `ctx.to(...)`. It needs an `events` map only when it handles session events. See [Custom channels](./custom) for route handling, cross-channel hand-off, channel metadata, address tokens, and file uploads.
+Build a channel with `defineChannel` from `eve/channels` when you need your own HTTP or WebSocket endpoint. Its routes can start conversations on that channel or hand work to another one. See [Custom channels](./custom) for examples and the authoring API.
 
 ## Relationship to the Chat SDK
 

@@ -3,7 +3,7 @@ title: "Custom Channels"
 description: "Author custom HTTP and WebSocket channels with routes, events, metadata, continuation tokens, and file uploads."
 ---
 
-When eve doesn't ship a channel for your surface, you build one. A custom channel can receive HTTP or WebSocket events and start or resume a session on that channel. It can also act only as ingress: verify an event, then start or resume a session on another channel without delivering a reply to the source.
+Build a custom channel to connect an HTTP or WebSocket endpoint to your agent. It can host a conversation or pass incoming events to another channel.
 
 ## File location and identity
 
@@ -232,7 +232,9 @@ The bridge server does not listen on its own port. It receives only upgrade even
 
 ## Cross-channel hand-off
 
-A custom channel can receive an event without hosting an agent session. Its route verifies the source, filters the event, and calls `ctx.to(channel, target).send(message, options)` to start or resume the session on the destination channel. For example, an event webhook can open an investigation in Slack:
+Use `ctx.to(channel, target).send(message, { auth })` in a route handler to start or resume a conversation on another channel. The agent runs and replies on the destination channel. The hand-off doesn't start a session on the source channel, which returns only its HTTP response.
+
+This webhook filters incoming events and asks the agent to investigate in Slack. Import the destination channel's default export; `verifyAndParseEvent` is a helper you implement in your application.
 
 ```ts title="agent/channels/intake.ts"
 import { defineChannel, POST } from "eve/channels";
@@ -265,16 +267,19 @@ export default defineChannel({
 });
 ```
 
-`verifyAndParseEvent` represents application code, not an eve API: verify the provider's signature, validate and bound the payload, and derive `event.source` from the verified sender rather than an arbitrary payload field. Filter events before dispatching. For retried webhooks, make the hand-off idempotent in application storage when duplicate sessions or provider posts matter; `to(...).send(...)` does not deduplicate source events for you.
+Before sending:
 
-Semantics:
+- Verify the provider's signature and validate the payload, including size limits. Derive `event.source` from the verified sender, not an untrusted payload field.
+- Filter out events that should not reach the agent.
+- Deduplicate retried events in your application if duplicates would cause unwanted sessions or posts. `send(...)` does not deduplicate them.
 
-- The target channel's authored `receive(input, { from })` hook owns the continuation-token format and initial state. Callers supply the target to `to(...)`, then the message and auth to `send(...)`.
-- `auth` flows through to `session.auth.initiator` so the target's event handlers and the agent's tools can read who started the session.
-- Calling `ctx.to(...).send(...)` does not also start a session on the current channel. The destination owns the session and its replies; configure its inbound handlers to accept follow-up messages. The source receives only the route handler's HTTP response.
-- `ctx.to(...)` belongs to authored route handlers; platform-specific inbound callbacks do not necessarily expose it. [Handler-form schedules](../schedules#handler-form-run) expose the same destination-selection contract as `to(...)`.
-- `send(...)` invokes the agent; it is not a direct provider-message API. To post without an agent turn, use the provider API. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) for an application-owned outbox.
-- The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
+The supplied `auth` identifies who started the session, available to tools and event handlers as `session.auth.initiator`.
+
+The destination's `receive` hook defines the target fields and how they map to a session. See [Slack proactive sessions](./slack#proactive-sessions) for its target options. To let people continue the conversation, configure the destination's inbound handlers to accept follow-ups.
+
+`ctx.to(...)` is a route-handler API, not a method on every platform callback. [Handler-form schedules](../schedules#handler-form-run) provide the same operation as `to(...)`.
+
+For notifications that don't need an agent turn, use the platform's API instead. See [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications) when those posts also need retries.
 
 ## Channel metadata
 
