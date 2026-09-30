@@ -104,6 +104,15 @@ export {
   type BlockKitBlock,
 } from "#public/channels/slack/blocks.js";
 
+export {
+  deriveHitlResponse,
+  HITL_ACTION_PREFIX,
+  renderInputRequestBlocks,
+  type DerivedHitlResponse,
+  type SlackHitlAction,
+  type SlackHitlRoute,
+} from "#public/channels/slack/hitl.js";
+
 /**
  * Card builders and element types re-exported from the vendored chat
  * SDK module. These are pure data factories. They return plain typed

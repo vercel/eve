@@ -678,6 +678,25 @@ export default slackChannel({
 });
 ```
 
+#### Render and decode HITL controls yourself
+
+`eve/channels/slack` exports the helpers eve uses for its own HITL controls. `renderInputRequestBlocks(request, route?)` returns the Block Kit blocks for one `InputRequest`. `deriveHitlResponse(action)` decodes a click on those blocks into `{ response, kind?, route? }`, where `response` is the eve `InputResponse`, or returns `null` for any other action. Every eve-owned control's `action_id` starts with `HITL_ACTION_PREFIX` (`"eve_input:"`), so give your own buttons a different prefix to keep them routed to `onInteraction`.
+
+```ts
+import { deriveHitlResponse, renderInputRequestBlocks } from "eve/channels/slack";
+
+const [card] = renderInputRequestBlocks(request) as [
+  { actions: { action_id: string; value: string }[] },
+];
+const button = card.actions[0]!;
+
+// For a request whose first option id is "approve":
+deriveHitlResponse({ actionId: button.action_id, value: button.value });
+// { response: { optionId: "approve", requestId: request.requestId } }
+```
+
+Use them to test a custom renderer against eve's wire format, or to post eve's controls from your own renderer. A click on these controls in the session's Slack thread resumes the session through `onInputResponse`, the same as eve's own controls. To pass `response` to `respond()` yourself, validate it first with `parseInputResponses` from `eve/client`.
+
 Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the Slack user behind the event's `principalId`, device code included, and then updates that public status when `authorization.completed` fires. A renderer's `authorization.required` handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access. Its `next()` reaches eve's default, which posts the public status; skip `next` to deliver the challenge yourself, as this handler does by direct message. `state.slackUsersByPrincipal` maps each principal eve has seen in the thread, through a message or an input response, to its Slack user ID. If the principal has no entry, the challenge is not sent privately.
 
 ```ts

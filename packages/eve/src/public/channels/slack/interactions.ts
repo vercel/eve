@@ -26,7 +26,7 @@ import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildFreeformModalView,
   decodeFreeformHitlActionId,
-  deriveHitlResponse,
+  decodeHitlResponse,
   HITL_FREEFORM_MODAL_ACTION_ID,
   HITL_FREEFORM_MODAL_BLOCK_ID,
   HITL_FREEFORM_MODAL_CALLBACK_ID,
@@ -302,7 +302,7 @@ export async function handleInteractionPost(
   }
 
   const hitlActions = interaction.actions.flatMap((action) => {
-    const derived = deriveHitlResponse(action);
+    const derived = decodeHitlResponse(action);
     return derived === null ? [] : [{ action, derived }];
   });
 
@@ -503,7 +503,7 @@ async function dispatchBlockInputResponses(input: {
   }
 
   if (
-    input.submission.actions.some((action) => deriveHitlResponse(action)?.kind === "tool-approval")
+    input.submission.actions.some((action) => decodeHitlResponse(action)?.kind === "tool-approval")
   ) {
     return;
   }
