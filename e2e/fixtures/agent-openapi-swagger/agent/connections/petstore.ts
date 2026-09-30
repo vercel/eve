@@ -9,7 +9,7 @@ export default defineDynamic({
         baseUrl: petstoreBaseUrl(),
         spec: `${petstoreBaseUrl()}/swagger`,
         description: "Sample Petstore API from a fixture-owned Swagger 2.0 document.",
-        operations: { allow: ["getInventory"] },
+        operations: { allow: ["getInventory", "addPet"] },
       }),
     }),
   },
