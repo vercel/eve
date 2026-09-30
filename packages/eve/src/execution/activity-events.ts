@@ -1,6 +1,7 @@
 import { normalizePresentationText } from "#shared/presentation-text.js";
 import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
 import type {
+  ActivityActionIdentityV1,
   ActivityActionPhase,
   ActivityEventV1,
   ActivityWorkIdentityV1,
@@ -9,8 +10,7 @@ import type { TaskSettledStreamEvent, UnstampedMessageStreamEvent } from "#proto
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
-import { parsePlanItems } from "#protocol/activity.js";
-import { PLAN_TOOL_NAME } from "#tools/provided/plan.js";
+import { boundedActionInput } from "#protocol/activity.js";
 
 type TaskSettledActivity = Extract<ActivityEventV1, { readonly kind: "task.settled" }>;
 
@@ -26,17 +26,17 @@ export function projectActivityEvents(input: {
   if (event.type === "actions.requested") {
     return event.data.actions.flatMap((action) => {
       if (action.kind === "tool-call" && isTaskControlTool(action.toolName)) return [];
-      const started = projectActionStarted({
+      return projectActionStarted({
         at: input.at,
         callId: action.callId,
+        // Renderers read a root turn's own calls, such as an app's plan tool.
+        input: lineage.kind === "root-turn" ? boundedActionInput(action.input) : undefined,
         kind: action.kind === "load-skill" ? "skill" : "tool",
         label: event.data.presentation?.[action.callId]?.label,
         lineage,
         name: actionName(action),
         stepIndex: event.data.stepIndex,
       });
-      const plan = projectPlan(lineage, action);
-      return plan === undefined ? started : [...started, plan];
     });
   }
   if (event.type === "action.partial") {
@@ -282,6 +282,7 @@ function actionSettled(
 export function projectActionStarted(input: {
   readonly at: string;
   readonly callId: string;
+  readonly input?: JsonObject;
   readonly kind: "skill" | "tool";
   readonly label: string | undefined;
   readonly lineage: ActivityWorkIdentityV1;
@@ -291,38 +292,23 @@ export function projectActionStarted(input: {
   const id = actionId(input.lineage.id, input.callId);
   const name = normalizePresentationText(input.name) || (input.kind === "skill" ? "Skill" : "Tool");
   const label = activityLabel(input.label);
+  const action: { -readonly [K in keyof ActivityActionIdentityV1]: ActivityActionIdentityV1[K] } = {
+    id,
+    kind: input.kind,
+    name,
+    parentWorkId: input.lineage.id,
+    rootTurnId: input.lineage.rootTurnId,
+    stepIndex: input.stepIndex,
+  };
+  if (input.input !== undefined) action.input = input.input;
   const started: ActivityEventV1 = {
-    action: {
-      id,
-      kind: input.kind,
-      name,
-      parentWorkId: input.lineage.id,
-      rootTurnId: input.lineage.rootTurnId,
-      stepIndex: input.stepIndex,
-    },
+    action,
     eventId: `${id}:started`,
     kind: "action.started",
     startedAt: input.at,
   };
   if (label === undefined) return [started];
   return [started, { actionId: id, eventId: `${id}:label`, kind: "action.label.updated", label }];
-}
-
-/** A root turn's call to the `plan` tool sets that turn's plan. */
-function projectPlan(
-  lineage: ActivityWorkIdentityV1,
-  action: RuntimeActionRequest,
-): ActivityEventV1 | undefined {
-  if (lineage.kind !== "root-turn") return undefined;
-  if (action.kind !== "tool-call" || action.toolName !== PLAN_TOOL_NAME) return undefined;
-  const items = parsePlanItems(action.input.items);
-  if (items === undefined) return undefined;
-  return {
-    eventId: `${actionId(lineage.id, action.callId)}:plan`,
-    items,
-    kind: "plan.updated",
-    rootTurnId: lineage.rootTurnId,
-  };
 }
 
 function actionName(action: RuntimeActionRequest): string {

@@ -16,6 +16,8 @@ import {
   type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
+import { defineSlackRenderer } from "#public/channels/slack/renderers.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 
 const SESSION_ID = "session_root";
@@ -370,9 +372,50 @@ describe("Slack task card", () => {
     expect(reposted).toMatchObject({ cards: { [TURN_ID]: { ts: "1700000009.000103" } } });
   });
 
-  it("shows the agent's plan as rows ahead of its tasks", async () => {
+  it("lets an app show its own plan tool's checklist ahead of eve's task rows", async () => {
+    // What an app writes: its own `plan` tool, rendered from the call's input.
+    const status = {
+      completed: "complete",
+      failed: "error",
+      pending: "pending",
+      working: "in_progress",
+    };
+    const planRenderer = defineSlackRenderer({
+      taskCard(view, next) {
+        const card = next(view);
+        const plan = view.actions.findLast((action) => action.name === "plan");
+        const items = plan?.input?.["items"] as
+          | { status: keyof typeof status; title: string }[]
+          | undefined;
+        if (items === undefined) return card;
+        // eve's card is one `plan` block, or one `task_card` block for a single task.
+        const [block] = card?.blocks ?? [];
+        const taskRows: BlockKitBlock[] =
+          block === undefined
+            ? []
+            : block["type"] === "plan"
+              ? (block["tasks"] as BlockKitBlock[])
+              : [block];
+        const planRows = items.map((item, index) => ({
+          status: status[item.status],
+          task_id: `plan_${String(index)}`,
+          title: item.title,
+        }));
+        const tasks = [...planRows, ...taskRows.map(({ type: _type, ...row }) => row)];
+        return {
+          blocks: [{ tasks, title: "Plan", type: "plan" }],
+          text: `Plan: ${items.map((item) => item.title).join(", ")}`,
+        };
+      },
+    });
     const { calls, fetch } = slackApi();
-    const presenter = defaultPresenter(fetch);
+    const presenter = presenterOf(
+      slackChannel({
+        api: { fetch },
+        credentials: { botToken: "xoxb-test" },
+        renderers: [planRenderer],
+      }),
+    );
     const snapshot = observe(createActivitySnapshot(), [
       createTurnStartedEvent({ sequence: 1, turnId: TURN_ID }),
       createActionsRequestedEvent({
@@ -394,6 +437,20 @@ describe("Slack task card", () => {
         stepIndex: 0,
         turnId: TURN_ID,
       }),
+      createActionsRequestedEvent({
+        actions: [{ callId: DEPLOY_CALL, input: {}, kind: "tool-call", toolName: "deploy" }],
+        presentation: { [DEPLOY_CALL]: { label: "Deploy history for storefront" } },
+        sequence: 1,
+        stepIndex: 1,
+        turnId: TURN_ID,
+      }),
+      createTaskStartedEvent({
+        callId: DEPLOY_CALL,
+        kind: "tool",
+        name: "deploy",
+        taskId: "deploy-4hd8sa",
+        turnId: TURN_ID,
+      }),
     ]);
 
     await presenter.render({
@@ -408,11 +465,33 @@ describe("Slack task card", () => {
           { status: "complete", title: "Read the incident report" },
           { status: "in_progress", title: "Check recent deploys" },
           { status: "pending", title: "Write up the cause" },
+          { status: "in_progress", title: "Deploy history for storefront" },
         ],
-        title: "1 of 3 tasks done",
         type: "plan",
       },
     ]);
+  });
+
+  it("posts no default card for a turn whose tool calls start no task", async () => {
+    const { calls, fetch } = slackApi();
+    const presenter = defaultPresenter(fetch);
+    const snapshot = observe(createActivitySnapshot(), [
+      createTurnStartedEvent({ sequence: 1, turnId: TURN_ID }),
+      createActionsRequestedEvent({
+        actions: [{ callId: "call_logs", input: {}, kind: "tool-call", toolName: "logs" }],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: TURN_ID,
+      }),
+    ]);
+
+    await presenter.render({
+      destination: presenter.destination(THREAD),
+      snapshot,
+      state: undefined,
+    });
+
+    expect(calls).toEqual([]);
   });
 
   it("sets the waiting status again before Slack expires it while tasks work", async () => {

@@ -207,10 +207,9 @@ export async function prepareActionDispatch<PlanEntry>(input: {
   };
 }
 
-/** The caller's activity observer, bound to the turn whose calls the step dispatches. */
-export function resolvePreparedActivity(
+function resolvePreparedActivity(
   activityObserver: ActivityObserverConfig | undefined,
-  session: Pick<HarnessSession, "rootSessionId" | "sessionId">,
+  session: HarnessSession,
   turnId: string,
 ): (ActivityObserverConfig & { readonly workIdentity: ActivityWorkIdentityV1 }) | undefined {
   if (activityObserver === undefined) return undefined;

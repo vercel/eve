@@ -795,7 +795,7 @@ export interface SlackChannel extends Channel<
  * Slack channel factory. Wires up the webhook route, message dispatch,
  * interaction handling, and eve's default rendering: the `Thinking...`
  * acknowledgement, status lines, replies, questions, sign-ins, errors, and a
- * live task card for each turn that sets a plan or starts tasks. Message hooks decide whether
+ * live task card for each turn that starts tasks. Message hooks decide whether
  * and how to dispatch; `renderers` wrap the default rendering without
  * replacing it.
  */

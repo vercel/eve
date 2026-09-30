@@ -425,19 +425,6 @@
       ]
     },
     {
-      "name": "tool/plan",
-      "type": "registry:item",
-      "title": "Plan",
-      "description": "Show the steps of a multi-step request as a live checklist.",
-      "files": [
-        {
-          "path": "registry/tools/plan.ts",
-          "type": "registry:file",
-          "target": "agent/tools/plan.ts"
-        }
-      ]
-    },
-    {
       "name": "tool/glob",
       "type": "registry:item",
       "title": "Glob",

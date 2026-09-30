@@ -17,7 +17,7 @@ import {
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
-import { observePlanActivity } from "#execution/activity-collector-start.js";
+import { observeRootActivity } from "#execution/activity-collector-start.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
@@ -251,7 +251,7 @@ function openSessionEventStream(input: {
       );
       await writer.write(encodeMessageStreamEvent(stamped));
       if (origin === "own") {
-        await observePlanActivity({ ctx, event: stamped, sessionId: input.sessionId });
+        await observeRootActivity({ ctx, event: stamped, sessionId: input.sessionId });
         submittedActivity.push(
           observeSessionActivity({ ctx, event: stamped, sessionId: input.sessionId }),
         );

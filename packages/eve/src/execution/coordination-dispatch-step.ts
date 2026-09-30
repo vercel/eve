@@ -17,7 +17,6 @@ import {
   captureAgentSessionContext,
   resolveStepAgentLimits,
 } from "#execution/agent-sessions/context.js";
-import { observeTaskActivity } from "#execution/activity-collector-start.js";
 import type { TaskStartedStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -36,11 +35,11 @@ export async function dispatchCoordinationStep(
 async function dispatchCoordination(
   input: CoordinationDispatchStepInput,
 ): Promise<CoordinationDispatchResult> {
-  const unobserved = await prepareCoordinationDispatch({
+  const prepared = await prepareCoordinationDispatch({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   });
-  if (unobserved === undefined) {
+  if (prepared === undefined) {
     return {
       results: [],
       serializedContext: input.serializedContext,
@@ -48,7 +47,6 @@ async function dispatchCoordination(
     };
   }
 
-  const prepared = await observeTaskActivity(unobserved);
   const { batch, session } = prepared;
   let nextSession = session;
   const results: RuntimeActionResult[] = [];
@@ -73,7 +71,7 @@ async function dispatchCoordination(
 
   const published = await publishSessionEvents(
     {
-      serializedContext: prepared.serializedContext,
+      serializedContext: input.serializedContext,
       sessionState:
         nextSession === session
           ? prepared.sessionState

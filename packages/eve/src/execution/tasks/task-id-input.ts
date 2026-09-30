@@ -45,7 +45,7 @@ export function withTaskIdInput(definition: HarnessToolDefinition): HarnessToolD
 }
 
 /** `researcher: Find the March incidents`, or the agent's name when the message is empty. */
-export function agentCallLabel(name: string, input: unknown): string {
+function agentCallLabel(name: string, input: unknown): string {
   const message =
     typeof input === "object" && input !== null
       ? (input as { message?: unknown }).message

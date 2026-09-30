@@ -478,13 +478,9 @@ When a session starts without a `threadTs` (say, from a schedule's `to(slack, ta
 
 ### Task card
 
-When a turn starts its first task or sets a plan, eve posts a task card in the thread and keeps it current until the turn and its tasks finish. One row renders as a Slack `task_card` block; two or more render as a `plan` block. The card needs no configuration beyond the `chat:write` scope the channel already uses.
+When a turn starts its first task, eve posts a task card in the thread and keeps it current until the turn and its tasks finish. One task renders as a Slack `task_card` block; two or more render as a `plan` block with one row per task the turn started. Tasks that an agent task starts on its own appear as that row's steps, not as rows of their own. The card needs no configuration beyond the `chat:write` scope the channel already uses.
 
-The card lists the turn's plan first, then one row per task the turn started. Tasks that an agent task starts on its own appear as that row's steps, not as rows of their own.
-
-The plan comes from the opt-in [`plan` tool](/docs/concepts/built-in-tools#plan). Each item is a row with its status, and an item still pending or working when the turn ends stops spinning.
-
-Each task row shows:
+Each row shows:
 
 - **Title:** the tool's [`label.start`](/docs/tools#label-tool-activity), the agent name and the first line of its brief for an agent task (`researcher: Find the incidents behind the checkout spike`), or the tool name.
 - **What it's doing now:** the task's latest three steps, such as an agent's tool calls, or what it's waiting for when the agent needs an approval, an answer, or a sign-in. The question itself still posts in the thread.
@@ -551,9 +547,83 @@ export default slackChannel({
 });
 ```
 
-`taskCard` receives the same view eve's default renders from: the turn's `state` (`working`, `blocked`, or `finished`), its `plan` items, each with a `title` and `status`, and its `tasks`, each with a `title`, `status`, latest `steps`, `blockedOn`, and `summary`. A failed task's `summary` is present only in a DM or private channel. It is synchronous and pure: eve posts the card, updates it as the view changes, and handles Slack's rate limits. To change a row's title in every channel, give the tool a [label](/docs/tools#label-tool-activity) instead.
+`taskCard` runs for every turn that calls a tool, and receives the same view eve's default renders from:
+
+- `state`: `working`, `blocked`, or `finished`.
+- `tasks`: the tasks the turn started, each with a `title`, `status`, latest `steps`, `blockedOn`, and `summary`. A failed task's `summary` is present only in a DM or private channel.
+- `actions`: the turn's other tool calls, each with its tool `name`, `title`, `status`, and `input`. `input` is left out when its JSON is longer than 4,096 characters.
+
+`taskCard` is synchronous and pure: eve posts the card, updates it as the view changes, and handles Slack's rate limits. eve's default returns `null` for a turn that started no tasks. To change a row's title in every channel, give the tool a [label](/docs/tools#label-tool-activity) instead.
 
 Renderers run in the order you list them, and the first one is outermost. `onInteraction` receives clicks on buttons a renderer posts, such as the feedback buttons above.
+
+### Show your own tool on the task card
+
+A renderer can draw any of the turn's tool calls from their input. For example, give the agent a `plan` tool that records a checklist, and show the checklist ahead of eve's task rows:
+
+```ts title="agent/tools/plan.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description:
+    "Show the steps of a multi-step request as a checklist. Pass the complete list on every call.",
+  inputSchema: z.object({
+    items: z.array(
+      z.object({
+        status: z.enum(["pending", "working", "completed", "failed"]),
+        title: z.string(),
+      }),
+    ),
+  }),
+  async execute() {
+    return { updated: true };
+  },
+});
+```
+
+```ts title="agent/channels/slack.ts"
+import { type BlockKitBlock, defineSlackRenderer, slackChannel } from "eve/channels/slack";
+
+interface PlanItem {
+  readonly status: "pending" | "working" | "completed" | "failed";
+  readonly title: string;
+}
+
+const SLACK_STATUS = {
+  completed: "complete",
+  failed: "error",
+  pending: "pending",
+  working: "in_progress",
+} as const;
+
+const plan = defineSlackRenderer({
+  taskCard(view, next) {
+    const card = next(view);
+    const items = view.actions.findLast((action) => action.name === "plan")?.input?.items as
+      PlanItem[] | undefined;
+    if (items === undefined) return card;
+    // eve's card is one `plan` block, or one `task_card` block for a single task.
+    const [block] = card?.blocks ?? [];
+    const taskRows: BlockKitBlock[] =
+      block === undefined ? [] : block.type === "plan" ? (block.tasks as BlockKitBlock[]) : [block];
+    const planRows = items.map((item, index) => ({
+      status: SLACK_STATUS[item.status],
+      task_id: `plan_${index}`,
+      title: item.title,
+    }));
+    const tasks = [...planRows, ...taskRows.map(({ type: _type, ...row }) => row)];
+    return {
+      blocks: [{ type: "plan", title: "Plan", tasks }],
+      text: `Plan: ${items.map((item) => item.title).join(", ")}`,
+    };
+  },
+});
+
+export default slackChannel({ renderers: [plan] });
+```
+
+A turn that only plans gets a card too, because `taskCard` runs for every turn that calls a tool.
 
 ### Human-in-the-loop (HITL)
 

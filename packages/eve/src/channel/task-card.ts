@@ -1,7 +1,6 @@
 import type {
   ActivityActionStateV1,
   ActivityBlockerStateV1,
-  ActivityPlanItemV1,
   ActivitySnapshotV1,
 } from "#protocol/activity.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -26,10 +25,20 @@ export interface TaskCardStep {
   readonly status: "working" | "completed" | "failed" | "cancelled";
 }
 
-/** One item of the checklist the agent set with the `plan` tool. */
-export interface TaskCardPlanItem {
+/**
+ * One of the turn's own tool calls that doesn't run as a task, such as a call
+ * to an app's `plan` tool whose input a renderer shows as rows.
+ */
+export interface TaskCardAction {
+  readonly id: string;
+  /** The tool name. */
+  readonly name: string;
+  /** The tool's start label, or the name. */
   readonly title: string;
-  readonly status: "pending" | "working" | "completed" | "failed";
+  readonly status: "working" | "completed" | "failed" | "cancelled";
+  /** The call's input, when its JSON is at most 4,096 characters. */
+  readonly input?: Readonly<Record<string, unknown>>;
+  readonly startedAt: string;
 }
 
 /** One task call in a turn's task card. */
@@ -56,41 +65,54 @@ export interface TaskCardTask {
 }
 
 /**
- * One root turn's plan and the tasks it started, in start order. `blocked`
- * while any task waits on a person, `working` while the turn or any task
- * works, then `finished`.
+ * One root turn's own tool calls: the tasks it started, and its other
+ * actions, each in start order. `blocked` while any task waits on a person,
+ * `working` while the turn or any task works, then `finished`.
  */
 export interface TaskCardView {
   readonly turnId: string;
   readonly state: "working" | "blocked" | "finished";
-  /** The checklist the agent last set with the `plan` tool, or empty. */
-  readonly plan: readonly TaskCardPlanItem[];
   readonly tasks: readonly TaskCardTask[];
+  readonly actions: readonly TaskCardAction[];
 }
 
 /**
- * Projects a root session's activity into one task card per root turn that
- * set a plan or started a task. Rows are the root turn's own task calls; what
- * an agent or workflow run does on a task's behalf fills that row's steps.
+ * Projects a root session's activity into one view per root turn that called
+ * a tool. Tasks and actions are the root turn's own calls; what an agent or
+ * workflow run does on a task's behalf fills that task's steps.
  */
 export function projectTaskCards(
   snapshot: ActivitySnapshotV1,
   options: { readonly audience: ChannelAudience },
 ): readonly TaskCardView[] {
-  const rowsByTurn = new Map<string, TaskCardTask[]>();
-  for (const turnId of Object.keys(snapshot.plans ?? {})) rowsByTurn.set(turnId, []);
-  for (const action of Object.values(snapshot.actions)) {
-    if (action.task === undefined) continue;
+  const turns = new Map<string, { tasks: TaskCardTask[]; actions: TaskCardAction[] }>();
+  const byStart = (left: ActivityActionStateV1, right: ActivityActionStateV1) =>
+    left.startedAt.localeCompare(right.startedAt);
+  for (const action of Object.values(snapshot.actions).sort(byStart)) {
     if (snapshot.work[action.parentWorkId]?.kind !== "root-turn") continue;
-    const rows = rowsByTurn.get(action.rootTurnId) ?? [];
-    rows.push(projectRow(snapshot, action, action.task, options.audience));
-    rowsByTurn.set(action.rootTurnId, rows);
+    const turn = turns.get(action.rootTurnId) ?? { actions: [], tasks: [] };
+    if (action.task === undefined) turn.actions.push(projectAction(action));
+    else turn.tasks.push(projectRow(snapshot, action, action.task, options.audience));
+    turns.set(action.rootTurnId, turn);
   }
-  return [...rowsByTurn].map(([turnId, rows]) => {
-    const tasks = [...rows].sort((left, right) => left.startedAt.localeCompare(right.startedAt));
-    const plan: readonly ActivityPlanItemV1[] = snapshot.plans?.[turnId] ?? [];
-    return { plan, state: cardState(snapshot, turnId, tasks), tasks, turnId };
-  });
+  return [...turns].map(([turnId, { actions, tasks }]) => ({
+    actions,
+    state: cardState(snapshot, turnId, tasks),
+    tasks,
+    turnId,
+  }));
+}
+
+function projectAction(action: ActivityActionStateV1): TaskCardAction {
+  const projected: { -readonly [K in keyof TaskCardAction]: TaskCardAction[K] } = {
+    id: action.id,
+    name: action.name,
+    startedAt: action.startedAt,
+    status: stepStatus(action),
+    title: action.label ?? action.name,
+  };
+  if (action.input !== undefined) projected.input = action.input;
+  return projected;
 }
 
 function projectRow(

@@ -5,33 +5,25 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { projectTaskCards } from "#channel/task-card.js";
 import { ContextContainer } from "#context/container.js";
 import { ActivityObserverKey, ScheduleIdKey } from "#context/keys.js";
+import { observeRootActivity } from "#execution/activity-collector-start.js";
 import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-activity.js";
 import { projectSessionActivity } from "#execution/session-activity-projection.js";
-import { createTask, writeTaskTable } from "#execution/tasks/table.js";
-import {
-  observePlanActivity,
-  observeTaskActivity,
-  type ObservedDispatch,
-} from "#execution/activity-collector-start.js";
 import type { ActivityEventV1 } from "#protocol/activity.js";
 import {
   createActionsRequestedEvent,
   createTaskStartedEvent,
   type MessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const mocks = vi.hoisted(() => ({
-  context: undefined as ContextContainer | undefined,
   startWorkflow: vi.fn(),
   submitted: [] as ActivityEventV1[][],
 }));
 
 vi.mock("#context/serialize.js", () => ({
-  deserializeContext: async () => mocks.context,
-  serializeContext: (ctx: ContextContainer) => ({
-    [ActivityObserverKey.name]: ctx.get(ActivityObserverKey),
-  }),
+  serializeContext: () => ({}),
 }));
 vi.mock("#execution/effective-agent-config.js", () => ({
   resolveEffectiveAgentRuntime: () => ({ limits: { sessionTimeoutMs: 60_000 } }),
@@ -46,120 +38,119 @@ vi.mock("#execution/submit-activity.js", () => ({
   },
 }));
 
+const SESSION_ID = "session_root";
 const TURN_ID = "turn_1";
+let clock = 0;
 
-/** A root turn's dispatch step for a deploy tool task and a researcher agent task. */
-function dispatchOfTwoTasks(): {
-  readonly prepared: ObservedDispatch;
-  readonly taskIds: { readonly deploy: string; readonly researcher: string };
-} {
+function stamp(event: UnstampedMessageStreamEvent): MessageStreamEvent {
+  clock += 1;
+  return {
+    ...event,
+    meta: { at: new Date(Date.UTC(2026, 8, 30, 12, 0, clock)).toISOString(), id: `evt_${clock}` },
+  } as MessageStreamEvent;
+}
+
+/** A root Slack session's context, whose channel presents activity. */
+function rootContext(): ContextContainer {
   const adapter: ChannelAdapter = { kind: "slack", state: {} };
   attachChannelActivityPresenter(adapter, { destination: () => ({}), render: vi.fn() });
-  const deploy = createTask(
-    { tasks: [] },
-    {
-      callId: "call_deploy",
-      kind: "tool",
-      name: "deploy",
-      resumable: false,
-      turnId: TURN_ID,
-    },
-  );
-  const researcher = createTask(deploy.table, {
-    callId: "call_research",
-    kind: "agent",
-    name: "researcher",
-    resumable: true,
+  const ctx = new ContextContainer();
+  ctx.set(BundleKey, { resolvedAgent: {} } as never);
+  ctx.set(ChannelKey, adapter);
+  return ctx;
+}
+
+/** A model step that checks the logs, then starts a deploy task and a researcher task. */
+const LOGS_THEN_TASKS = [
+  createActionsRequestedEvent({
+    actions: [
+      {
+        callId: "call_logs",
+        input: { service: "storefront" },
+        kind: "tool-call",
+        toolName: "logs",
+      },
+    ],
+    sequence: 1,
+    stepIndex: 0,
     turnId: TURN_ID,
-  });
-  const root: ObservedDispatch["session"] = {
-    agent: {
-      tools: [
-        {
-          description: "Deploy a service.",
-          inputSchema: {},
-          label: { start: (input) => `Deploy ${String((input as { service: string }).service)}` },
-          name: "deploy",
-        },
-      ],
-    },
-    rootSessionId: undefined,
-    sessionId: "session_root",
-    state: undefined,
-  };
-  const session = writeTaskTable(root, researcher.table);
-  const prepared: ObservedDispatch = {
-    activityObserver: undefined,
-    adapter,
-    batch: { event: { sequence: 1, stepIndex: 0, turnId: TURN_ID }, requests: [] },
-    plan: [
+  }),
+  createActionsRequestedEvent({
+    actions: [
       {
         callId: "call_deploy",
-        entry: { entryPoint: "task", taskId: deploy.taskId },
         input: { service: "storefront" },
-        kind: "workflow-task",
+        kind: "tool-call",
         toolName: "deploy",
-        workflowId: "deploy",
       },
       {
         callId: "call_research",
-        entry: { entryPoint: "serve", taskId: researcher.taskId },
         input: { message: "Find the incidents behind the checkout spike" },
-        kind: "workflow-task",
+        kind: "tool-call",
         toolName: "researcher",
-        workflowId: "researcher",
       },
     ],
-    serializedContext: {},
-    session,
-  };
-  return { prepared, taskIds: { deploy: deploy.taskId, researcher: researcher.taskId } };
+    presentation: {
+      call_deploy: { label: "Deploy storefront" },
+      call_research: { label: "researcher: Find the incidents behind the checkout spike" },
+    },
+    sequence: 2,
+    stepIndex: 1,
+    turnId: TURN_ID,
+  }),
+  createTaskStartedEvent({
+    callId: "call_deploy",
+    kind: "tool",
+    name: "deploy",
+    taskId: "deploy-4hd8sa",
+    turnId: TURN_ID,
+  }),
+  createTaskStartedEvent({
+    callId: "call_research",
+    kind: "agent",
+    name: "researcher",
+    taskId: "researcher-7k2m9q",
+    turnId: TURN_ID,
+  }),
+];
+
+/** Publishes events as a root session's steps do: start the collector, then project. */
+async function publish(ctx: ContextContainer, events: readonly UnstampedMessageStreamEvent[]) {
+  for (const unstamped of events) {
+    const event = stamp(unstamped);
+    await observeRootActivity({ ctx, event, sessionId: SESSION_ID });
+    if (!ctx.has(ActivityObserverKey)) continue;
+    mocks.submitted.push([
+      ...projectSessionActivity({
+        event,
+        sessionId: SESSION_ID,
+        taskCallIds: ["call_deploy", "call_research"],
+      }),
+    ]);
+  }
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.submitted = [];
-  mocks.context = new ContextContainer();
-  mocks.context.set(BundleKey, { resolvedAgent: {} } as never);
   mocks.startWorkflow.mockResolvedValue({ runId: "collector-run" });
 });
 
-describe("observeTaskActivity", () => {
-  it("starts the collector on a root turn's first tasks and seeds it with those calls", async () => {
-    const { prepared, taskIds } = dispatchOfTwoTasks();
+describe("observeRootActivity", () => {
+  it("starts the collector on a root turn's first tool call, so the card sees the whole turn", async () => {
+    const ctx = rootContext();
 
-    const observed = await observeTaskActivity(prepared);
+    await publish(ctx, LOGS_THEN_TASKS);
 
     expect(mocks.startWorkflow).toHaveBeenCalledOnce();
-    expect(observed.activityObserver?.sink.url).toMatch(/\/eve\/v1\/activity\/[\w-]{43}$/);
-    expect(observed.serializedContext[ActivityObserverKey.name]).toEqual({
-      sink: observed.activityObserver?.sink,
-    });
-
-    // The session's own `task.started` events follow the seed, as the dispatch step publishes them.
-    let snapshot = reduceActivityBatch(createActivitySnapshot(), {
+    expect(ctx.get(ActivityObserverKey)?.sink.url).toMatch(/\/eve\/v1\/activity\/[\w-]{43}$/);
+    const snapshot = reduceActivityBatch(createActivitySnapshot(), {
       events: mocks.submitted.flat(),
       version: 1,
     });
-    for (const [callId, taskId, kind, name] of [
-      ["call_deploy", taskIds.deploy, "tool", "deploy"],
-      ["call_research", taskIds.researcher, "agent", "researcher"],
-    ] as const) {
-      const started = createTaskStartedEvent({ callId, kind, name, taskId, turnId: TURN_ID });
-      snapshot = reduceActivityBatch(snapshot, {
-        events: projectSessionActivity({
-          event: {
-            ...started,
-            meta: { at: "2026-09-30T12:00:01.000Z", id: callId },
-          } as MessageStreamEvent,
-          sessionId: "session_root",
-        }),
-        version: 1,
-      });
-    }
-
     expect(projectTaskCards(snapshot, { audience: "private" })).toMatchObject([
       {
+        actions: [{ input: { service: "storefront" }, name: "logs", status: "working" }],
         state: "working",
         tasks: [
           { kind: "tool", status: "working", title: "Deploy storefront" },
@@ -175,57 +166,12 @@ describe("observeTaskActivity", () => {
   });
 
   it("never starts a collector for a schedule's session", async () => {
-    mocks.context!.set(ScheduleIdKey, "nightly-report");
-    const { prepared } = dispatchOfTwoTasks();
+    const ctx = rootContext();
+    ctx.set(ScheduleIdKey, "nightly-report");
 
-    const observed = await observeTaskActivity(prepared);
+    await publish(ctx, LOGS_THEN_TASKS);
 
-    expect(observed).toBe(prepared);
     expect(mocks.startWorkflow).not.toHaveBeenCalled();
-  });
-});
-
-describe("observePlanActivity", () => {
-  it("starts the collector on a root turn's first plan, so a turn without tasks still shows it", async () => {
-    const adapter: ChannelAdapter = { kind: "slack", state: {} };
-    attachChannelActivityPresenter(adapter, { destination: () => ({}), render: vi.fn() });
-    const ctx = mocks.context!;
-    ctx.set(ChannelKey, adapter);
-    const planned = {
-      ...createActionsRequestedEvent({
-        actions: [
-          {
-            callId: "call_plan",
-            input: { items: [{ status: "working", title: "Check recent deploys" }] },
-            kind: "tool-call",
-            toolName: "plan",
-          },
-        ],
-        sequence: 1,
-        stepIndex: 0,
-        turnId: TURN_ID,
-      }),
-      meta: { at: "2026-09-30T12:00:01.000Z", id: "evt_plan" },
-    } as MessageStreamEvent;
-
-    await observePlanActivity({ ctx, event: planned, sessionId: "session_root" });
-
-    expect(mocks.startWorkflow).toHaveBeenCalledOnce();
-    expect(ctx.get(ActivityObserverKey)?.sink.url).toMatch(/\/eve\/v1\/activity\//);
-    const snapshot = reduceActivityBatch(createActivitySnapshot(), {
-      events: [
-        ...mocks.submitted.flat(),
-        ...projectSessionActivity({ event: planned, sessionId: "session_root" }),
-      ],
-      version: 1,
-    });
-    expect(projectTaskCards(snapshot, { audience: "private" })).toEqual([
-      {
-        plan: [{ status: "working", title: "Check recent deploys" }],
-        state: "working",
-        tasks: [],
-        turnId: TURN_ID,
-      },
-    ]);
+    expect(ctx.has(ActivityObserverKey)).toBe(false);
   });
 });

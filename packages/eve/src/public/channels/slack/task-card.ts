@@ -2,7 +2,6 @@ import type { ChannelActivityPresenter } from "#channel/activity-presenter.js";
 import {
   projectTaskCards,
   type TaskCardBlocker,
-  type TaskCardPlanItem,
   type TaskCardStep,
   type TaskCardTask,
   type TaskCardView,
@@ -29,7 +28,7 @@ const MAX_LINE_LENGTH = 200;
  */
 const STATUS_REFRESH_MS = 80_000;
 
-type SlackTaskStatus = "pending" | "in_progress" | "complete" | "error";
+type SlackTaskStatus = "in_progress" | "complete" | "error";
 
 interface SlackTaskObject {
   details?: BlockKitBlock;
@@ -40,24 +39,21 @@ interface SlackTaskObject {
 }
 
 /**
- * eve's default task card: a `task_card` block for one row, or a `plan` block
- * for several. The agent's plan comes first, then one row per task. A working
- * task shows its latest steps, then one line about how it ended. A stopped
- * task shows as an error, never as a success.
+ * eve's default task card: a `task_card` block for one task, or a `plan` block
+ * for several, and no card for a turn that started none. A working task shows
+ * its latest steps, then one line about how it ended. A stopped task shows as
+ * an error, never as a success.
  */
 export function renderDefaultSlackTaskCard(view: TaskCardView): SlackTaskCard | null {
-  const rows = [
-    ...view.plan.map((item, index) => planRow(item, index, view.state)),
-    ...collapseEarlierRows(view.tasks, MAX_PLAN_ROWS - view.plan.length).map(toSlackTask),
-  ];
-  if (rows.length === 0) return null;
+  if (view.tasks.length === 0) return null;
+  const rows = collapseEarlierRows(view.tasks, MAX_PLAN_ROWS).map(toSlackTask);
   const title = planTitle(view);
   const blocks: BlockKitBlock[] =
     rows.length === 1
       ? [{ type: "task_card", ...rows[0]! }]
       : [{ type: "plan", tasks: rows, title }];
-  const titles = [...view.plan, ...view.tasks].map((row) => row.title);
-  return { blocks, text: truncateMessageText(`${title}: ${titles.join(", ")}`) };
+  const titles = view.tasks.map((task) => task.title).join(", ");
+  return { blocks, text: truncateMessageText(`${title}: ${titles}`) };
 }
 
 function planTitle(view: TaskCardView): string {
@@ -65,10 +61,10 @@ function planTitle(view: TaskCardView): string {
     const blocker = view.tasks.find((task) => task.blockedOn !== undefined)?.blockedOn;
     return waitingText(blocker?.kind ?? "input");
   }
-  const statuses = [...view.plan, ...view.tasks].map((row) => row.status);
+  const statuses = view.tasks.map((task) => task.status);
   const total = statuses.length;
   if (view.state === "working") {
-    const done = statuses.filter((status) => status !== "working" && status !== "pending").length;
+    const done = statuses.filter((status) => status !== "working").length;
     return done === 0
       ? `Working on ${countTasks(total)}`
       : `${String(done)} of ${countTasks(total)} done`;
@@ -84,27 +80,6 @@ function planTitle(view: TaskCardView): string {
 
 function countTasks(count: number): string {
   return count === 1 ? "1 task" : `${String(count)} tasks`;
-}
-
-/** An item the turn left unfinished stops spinning once the turn ends. */
-function planRow(
-  item: TaskCardPlanItem,
-  index: number,
-  state: TaskCardView["state"],
-): SlackTaskObject {
-  const status: SlackTaskStatus =
-    item.status === "completed"
-      ? "complete"
-      : item.status === "failed"
-        ? "error"
-        : item.status === "working" && state !== "finished"
-          ? "in_progress"
-          : "pending";
-  return {
-    status,
-    task_id: `plan_${String(index)}`,
-    title: truncate(item.title, MAX_TITLE_LENGTH),
-  };
 }
 
 /** Keeps a plan within Slack's cap by folding the oldest settled rows into one. */
