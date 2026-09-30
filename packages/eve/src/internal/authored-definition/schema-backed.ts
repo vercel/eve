@@ -117,10 +117,16 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       `${message} Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
     );
   }
+  if (workflow !== undefined && record.endsTurn !== undefined) {
+    throw new Error(
+      `${message} "endsTurn" is not supported on defineWorkflowTool(). Workflow tools resume the turn when they finish; use defineTool() for a tool that ends the turn.`,
+    );
+  }
   expectOnlyKnownKeys(
     record,
     [
       "availableInSubagents",
+      "endsTurn",
       "label",
       "auth",
       "description",
@@ -153,6 +159,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
         ? undefined
         : expectBoolean(record.availableInSubagents, message),
     description: expectString(record.description, message),
+    endsTurn: record.endsTurn === undefined ? undefined : expectBoolean(record.endsTurn, message),
     hasApproval: record.approval !== undefined,
     hasExecute,
     hasModelOutputProjection: record.toModelOutput !== undefined,

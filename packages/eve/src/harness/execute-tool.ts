@@ -14,6 +14,8 @@ export interface HarnessToolDefinition {
   readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly behavior?: PreparedToolBehavior;
   readonly description: string;
+  /** A successful call ends the turn without a final reply; see `ToolDefinition.endsTurn`. */
+  readonly endsTurn?: boolean;
   readonly execute?: (input: any, options: ToolExecuteOptions) => any;
   /** Optional JSON input substituted when this tool starts its workflow body. */
   readonly executeInput?: (input: unknown) => JsonValue;

@@ -137,6 +137,11 @@
       "import": "./dist/src/public/tools/sleep.js",
       "default": "./dist/src/public/tools/sleep.js"
     },
+    "./tools/no_reply": {
+      "types": "./dist/src/public/tools/no-reply.d.ts",
+      "import": "./dist/src/public/tools/no-reply.js",
+      "default": "./dist/src/public/tools/no-reply.js"
+    },
     "./tools": {
       "types": "./dist/src/public/tools/index.d.ts",
       "import": "./dist/src/public/tools/index.js",

@@ -60,6 +60,26 @@ The option defaults to `true` and works with `defineTool` and `defineWorkflowToo
 
 Compiled tools preserve Zod schema composition, including input and output schemas imported from helper modules. Durable replay metadata stays separate from the original schema, so adding it does not mutate shared schema objects.
 
+### End the turn after a tool call
+
+Set `endsTurn: true` when a successful call is the whole answer, such as reacting to a message. eve ends the turn after the call instead of calling the model again, so the turn completes without a final message and channels post no reply:
+
+```ts title="agent/tools/react.ts"
+export default defineTool({
+  description: "React to the current message. Use this when a reaction is the whole answer.",
+  endsTurn: true,
+  inputSchema: z.object({ emoji: z.string() }),
+  async execute({ emoji }) {
+    await addReaction(emoji);
+    return { emoji };
+  },
+});
+```
+
+The turn ends only when every tool call in the model's step sets `endsTurn` and succeeds. When the call fails, or another tool runs in the same step, the model receives the results and continues as usual. Text the model writes before the call is narration, so channels do not post it as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
+
+eve ignores `endsTurn` in delegated sessions, which must return a reply to their caller, and on turns that request structured output. The option works with `defineTool` and dynamic tool entries; `defineWorkflowTool` rejects it at build time. To end a turn without taking any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+
 ### Label tool activity
 
 Use `label.start(input)` to describe a call in user-facing activity. The callback receives the validated tool input, so it can select the useful fields without exposing the full argument object:

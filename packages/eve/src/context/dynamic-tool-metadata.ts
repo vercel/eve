@@ -5,6 +5,7 @@ interface DynamicToolMetadataBase {
   readonly availableInSubagents?: boolean;
   readonly name: string;
   readonly description: string;
+  readonly endsTurn?: boolean;
   readonly inputSchema: JsonObject;
   readonly outputSchema?: JsonObject;
   readonly resolverSlug: string;

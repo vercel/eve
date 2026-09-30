@@ -113,7 +113,10 @@ import {
   renderPendingApprovalsInstruction,
   renderPendingApprovalsSnippet,
 } from "#harness/hitl/approval-prompt.js";
-import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
+import {
+  createToolResultMessagePartFromToolError,
+  isToolResultError,
+} from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   clearTurnClientContextState,
@@ -1992,6 +1995,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         runStep,
         session,
         coordinationTools: modelCallCoordinationTools,
+        delegated: hasDelegatedCaller,
       });
     } catch (error) {
       throwIfTurnAborted(config.abortSignal);
@@ -2522,6 +2526,8 @@ async function handleStepResult(input: {
   readonly result: HarnessStepResult;
   readonly runStep: StepFn;
   readonly coordinationTools: HarnessToolMap;
+  /** A child's caller or a remote parent expects the turn's reply as its result. */
+  readonly delegated: boolean;
   readonly session: HarnessSession;
 }): Promise<StepResult> {
   const { config, emit, promptMessages, result, runStep } = input;
@@ -2817,9 +2823,13 @@ async function handleStepResult(input: {
     };
   }
 
+  const endsTurn =
+    !input.delegated &&
+    nextSession.outputSchema === undefined &&
+    stepEndsTurn(result, continuationMessages, input.coordinationTools);
   const continueLoop =
     (!calledFinalOutput || finalOutputRejected) &&
-    (responseTail.at(-1)?.role === "tool" ||
+    ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasRunnableDeferredStepInput(nextSession));
   const holdsTurn = !continueLoop && workingTasks.length > 0;
@@ -2852,7 +2862,36 @@ async function handleStepResult(input: {
     result,
     schema: nextSession.outputSchema,
     session: nextSession,
-    stepOutput,
+    // Text written before an `endsTurn` call was narration, not the reply.
+    stepOutput: endsTurn ? null : stepOutput,
+  });
+}
+
+/**
+ * Whether the step ends the turn: every tool call targets an `endsTurn` tool
+ * and succeeded. A failed or invalid call lets the model recover instead.
+ */
+function stepEndsTurn(
+  result: HarnessStepResult,
+  responseMessages: readonly ModelMessage[],
+  tools: HarnessToolMap,
+): boolean {
+  const toolCalls = result.toolCalls ?? [];
+  if (toolCalls.length === 0) return false;
+  const outputs = new Map<string, ToolResultPart["output"]>();
+  for (const message of responseMessages) {
+    if (message.role !== "tool") continue;
+    for (const part of message.content) {
+      if (part.type === "tool-result") outputs.set(part.toolCallId, part.output);
+    }
+  }
+  return toolCalls.every((toolCall) => {
+    const output = outputs.get(toolCall.toolCallId);
+    return (
+      tools.get(toolCall.toolName)?.endsTurn === true &&
+      output !== undefined &&
+      !isToolResultError(output)
+    );
   });
 }
 

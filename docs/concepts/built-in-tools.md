@@ -359,6 +359,22 @@ export default defineTool({
 
 Remove the file to remove the tool. `disableTool()` is unnecessary because `grep` is not added by default.
 
+### `no_reply`
+
+`no_reply` ends the turn without a reply. Use it when a scheduled check finds nothing to report, or when an action the agent already took is the whole answer. The model calls it with an optional `{ reason }`, which stays in the session history and traces and is never sent. The turn completes without a final message, so channels and schedule sends post nothing, and later turns see that the agent chose to stay quiet. Add it:
+
+```sh
+eve add tool/no_reply
+```
+
+```ts title="agent/tools/no_reply.ts"
+import { noReply } from "eve/tools/no_reply";
+
+export default noReply();
+```
+
+`no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends only when no other tool runs in the same step. Only root sessions receive it. Slack clears the thread status when the turn completes. Remove the file to remove the tool.
+
 ### `sleep`
 
 `sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. A steering message, the default for a new message, ends the wait early: `sleep` returns `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, followed by the message. Add it:

@@ -323,6 +323,7 @@ function createMetadata(input: {
       name: input.name,
     }),
     description: input.entry.description,
+    endsTurn: input.entry.endsTurn,
     entryKey: input.entryKey,
     inputSchema: serializeInputSchema(input.entry.inputSchema),
     name: input.name,

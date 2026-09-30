@@ -2438,6 +2438,121 @@ describe("createToolLoopHarness", () => {
     expect(result.session.outputSchema).toBeUndefined();
   });
 
+  describe("endsTurn tools", () => {
+    const reacted = { type: "text", value: "reacted" } as const;
+    const tools = new Map([
+      ...createTestConfig().tools,
+      [
+        "react",
+        {
+          description: "Reacts to the message.",
+          endsTurn: true,
+          execute: vi.fn().mockResolvedValue("reacted"),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "react",
+        },
+      ],
+    ]);
+
+    function stepCalling(
+      calls: readonly {
+        readonly name: string;
+        readonly output: { readonly type: "error-text" | "text"; readonly value: string };
+      }[],
+    ): Record<string, unknown> {
+      const toolCalls = calls.map((call, index) => ({
+        input: {},
+        toolCallId: `call-${index}`,
+        toolName: call.name,
+      }));
+      return {
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            {
+              content: [
+                { text: "Reacting now.", type: "text" },
+                ...toolCalls.map((toolCall) => ({ ...toolCall, type: "tool-call" })),
+              ],
+              role: "assistant",
+            },
+            {
+              content: calls.map((call, index) => ({
+                output: call.output,
+                toolCallId: `call-${index}`,
+                toolName: call.name,
+                type: "tool-result",
+              })),
+              role: "tool",
+            },
+          ],
+        },
+        text: "Reacting now.",
+        toolCalls,
+        toolResults: [],
+      };
+    }
+
+    it("ends the turn without a reply when every call in the step ends the turn", async () => {
+      setupMockAgent(stepCalling([{ name: "react", output: reacted }]));
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig(emit, { tools }));
+
+      const result = await runStep(createTestSession(), { message: "Thanks, that fixed it!" });
+
+      expect(result.next).toBeNull();
+      expect(result.settledTurn).toEqual({ output: "" });
+      // The narration before the call stays interim, so no channel posts it.
+      expect(
+        events.flatMap((event) =>
+          event.type === "message.completed" ? [event.data.finishReason] : [],
+        ),
+      ).toEqual(["tool-calls"]);
+      expect(getCompatibilityEventTypes(events).slice(-2)).toEqual([
+        "turn.completed",
+        "session.waiting",
+      ]);
+      expect(result.session.history.at(-1)).toMatchObject({ role: "tool" });
+    });
+
+    it.each([
+      {
+        calls: [{ name: "react", output: { type: "error-text", value: "Reaction rejected." } }],
+        case: "the call fails",
+      },
+      {
+        calls: [
+          { name: "react", output: reacted },
+          { name: "add", output: { type: "text", value: "42" } },
+        ],
+        case: "another tool shares the step",
+      },
+      {
+        calls: [{ name: "react", output: reacted }],
+        case: "the session is delegated",
+        delegated: true,
+      },
+      {
+        calls: [{ name: "react", output: reacted }],
+        case: "the turn requests structured output",
+        outputSchema: { properties: {}, type: "object" },
+      },
+    ] as const)("continues the turn when $case", async ({ calls, ...options }) => {
+      setupMockAgent(stepCalling(calls));
+      const runStep = createToolLoopHarness(createTestConfig(undefined, { tools }));
+      const ctx = new ContextContainer();
+      if ("delegated" in options) setDelegatedParent(ctx);
+      const outputSchema = "outputSchema" in options ? options.outputSchema : undefined;
+
+      const result = await contextStorage.run(ctx, () =>
+        runStep(createTestSession({ outputSchema }), { message: "Thanks, that fixed it!" }),
+      );
+
+      expect(result.next).toBe(runStep);
+      expect(result.settledTurn).toBeUndefined();
+    });
+  });
+
   it("parks a conversation when requested structured output is not fulfilled", async () => {
     setupMockAgent({
       finishReason: "stop",

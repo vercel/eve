@@ -90,6 +90,7 @@ export async function resolveToolDefinition(
       availableInSubagents: definition.availableInSubagents,
       behavior: definition.behavior,
       description: definition.description,
+      endsTurn: definition.endsTurn,
       execute,
       executeInput,
       exportName: definition.exportName,

@@ -122,6 +122,7 @@ export async function compileToolEntry(
             : { ...entry.definition.behavior, shape }
           : { availability: [], handling: { kind: "workflow-tool", ...workflow }, shape },
       description: entry.definition.description,
+      endsTurn: entry.definition.endsTurn,
       exportName: source.exportName,
       hasExecute: entry.definition.hasExecute,
       hasModelOutputProjection: entry.definition.hasModelOutputProjection,

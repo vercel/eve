@@ -857,6 +857,7 @@ const compiledToolDefinitionSchema = z
     availableInSubagents: z.boolean().optional(),
     behavior: compiledToolBehaviorSchema.optional(),
     description: z.string(),
+    endsTurn: z.boolean().optional(),
     exportName: z.string().optional(),
     hasExecute: z.boolean(),
     hasModelOutputProjection: z.boolean(),

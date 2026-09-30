@@ -754,3 +754,16 @@ describe("defaultEvents authorization.completed", () => {
     expect(postEphemeral).not.toHaveBeenCalled();
   });
 });
+
+describe("defaultEvents turn.completed", () => {
+  it("clears the thread status when a turn ends without a reply", async () => {
+    const { channel, post, startTyping } = buildChannelStub();
+    const turn = { sequence: 0, turnId: "turn_0" };
+
+    await defaultEvents["turn.started"]!(turn, channel, sessionCtx);
+    await defaultEvents["turn.completed"]!({ ...turn, sequence: 1 }, channel, sessionCtx);
+
+    expect(startTyping.mock.calls).toEqual([["Working..."], []]);
+    expect(post).not.toHaveBeenCalled();
+  });
+});

@@ -25,6 +25,8 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   readonly availableInSubagents?: boolean;
   readonly label?: ToolLabelDefinition<TInput, TOutput>;
   readonly description: string;
+  /** Ends the turn after a successful call, as `endsTurn` on `defineTool`. */
+  readonly endsTurn?: boolean;
   readonly inputSchema: PublicToolInputSchema<TInput>;
   readonly outputSchema?: PublicToolOutputSchema<TOutput>;
   execute(input: TInput, ctx: ToolContext): TOutput | Promise<TOutput>;

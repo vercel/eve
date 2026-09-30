@@ -464,6 +464,19 @@
       ]
     },
     {
+      "name": "tool/no_reply",
+      "type": "registry:item",
+      "title": "No Reply",
+      "description": "End the turn without sending a reply.",
+      "files": [
+        {
+          "path": "registry/tools/no_reply.ts",
+          "type": "registry:file",
+          "target": "agent/tools/no_reply.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/browser-use",
       "type": "registry:item",
       "title": "Browser Use",

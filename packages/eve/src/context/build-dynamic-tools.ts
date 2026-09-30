@@ -142,6 +142,7 @@ export function replayDynamicTools(
     } = {
       availableInSubagents: entry.availableInSubagents,
       description: entry.description,
+      endsTurn: entry.endsTurn,
       execute: createToolExecuteWithAuth({
         scope: entry.name,
         execute: (input, context) => {

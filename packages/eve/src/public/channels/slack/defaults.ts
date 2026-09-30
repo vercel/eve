@@ -422,6 +422,12 @@ export const defaultEvents: SlackChannelInternalEvents = {
     await channel.thread.startTyping("Working...");
   },
 
+  // A reply clears the status, but a turn ended by an `endsTurn` tool posts
+  // none, and Slack would otherwise show the status until it times out.
+  async "turn.completed"(_event, channel, _ctx) {
+    await channel.thread.startTyping();
+  },
+
   async "reasoning.appended"(event, channel, _ctx) {
     const current = reasoningByState.get(channel.state);
     const continuesCurrentBlock =
