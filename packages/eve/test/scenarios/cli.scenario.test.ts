@@ -1,7 +1,8 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { access, mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -300,6 +301,45 @@ describe("runCli", () => {
     expect(output).toContain("ready");
     expect(output).toContain("0 errors, 0 warnings");
   });
+
+  it("writes all of a large `eve info --json` document before the bin exits", async () => {
+    const appRoot = await createMinimalAppRoot("eve-cli-info-json-pipe-");
+    // Far larger than a pipe or socket buffer, so most of it is still queued
+    // when the command resolves.
+    const descriptionLength = 1024 * 1024;
+    await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
+    await writeFile(
+      join(appRoot, "agent", "tools", "file_report.mjs"),
+      [
+        "export default {",
+        '  description: "File a report.",',
+        "  inputSchema: {",
+        '    type: "object",',
+        `    properties: { body: { type: "string", description: "x".repeat(${descriptionLength}) } },`,
+        "  },",
+        "  execute: () => null,",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      [EVE_BIN_PATH, "info", "--json"],
+      {
+        cwd: appRoot,
+        // A telemetry flush yields to the event loop, which would drain stdout
+        // and hide an early exit.
+        env: { ...process.env, EVE_TELEMETRY_DISABLED: "1" },
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+
+    const info = JSON.parse(stdout);
+    expect(info.toolInputSchemas.root.file_report.properties.body.description).toHaveLength(
+      descriptionLength,
+    );
+  }, 60_000);
 
   it("defaults to dev when no command is provided in an eve project", async () => {
     const appRoot = await createMinimalAppRoot("eve-cli-default-dev-");

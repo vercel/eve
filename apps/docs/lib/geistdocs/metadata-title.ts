@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-export const siteTitle = "eve – durable AI agent framework";
+export const siteTitle = "eve – build AI agents that you own";
 const siteTitleTemplate = "%s – eve";
 
 export const rootTitleMetadata = {

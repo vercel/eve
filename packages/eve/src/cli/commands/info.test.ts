@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
+import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
@@ -115,21 +116,38 @@ describe("buildApplicationInfoJson", () => {
     });
   });
 
-  test("keys each subagent's tool input schemas by subagent name", async () => {
+  test("keys subagent tool input schemas by path so same-named nested subagents stay distinct", async () => {
     const compiledState = await makeCompiledState();
-    const lookupOrder = compiledState.manifest.tools.find((tool) => tool.name === "lookup_order")!;
-    const researcher = { agent: { tools: [lookupOrder] }, name: "researcher" };
+    const toolNamed = (name: string) =>
+      compiledState.manifest.tools.find((tool) => tool.name === name)!;
+    const subagent = (name: string, parentNodeId: string, tools: CompiledToolDefinition[]) => ({
+      agent: { tools },
+      name,
+      nodeId: parentNodeId === "__root__" ? name : `${parentNodeId}::${name}`,
+      parentNodeId,
+    });
     const json = buildApplicationInfoJson({
       application: getApplicationInfo(APP_ROOT),
       compiledState: {
         ...compiledState,
-        manifest: { ...compiledState.manifest, subagents: [researcher as never] },
+        manifest: {
+          ...compiledState.manifest,
+          subagents: [
+            subagent("billing", "__root__", []),
+            subagent("red_team", "billing", [toolNamed("lookup_order")]),
+            subagent("support", "__root__", []),
+            subagent("red_team", "support", [toolNamed("create_ticket")]),
+          ] as never,
+        },
       },
       messaging: MESSAGING,
     });
 
     expect(json.toolInputSchemas.subagents).toEqual({
-      researcher: { lookup_order: lookupOrder.modelInputSchema },
+      billing: {},
+      "billing/red_team": { lookup_order: toolNamed("lookup_order").modelInputSchema },
+      support: {},
+      "support/red_team": { create_ticket: toolNamed("create_ticket").modelInputSchema },
     });
     expect(json.channels).toContainEqual(
       expect.objectContaining({ method: "GET", urlPath: "/eve/v1/health" }),
