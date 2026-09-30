@@ -4,7 +4,6 @@ import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 import { RESEARCH_INTERIM_MESSAGE } from "../task-scenario-text.ts";
-import { generateWhileHelperOpens } from "./lib/helper-opened.ts";
 import { respondToTaskScenario } from "./lib/task-scenarios.ts";
 
 /**
@@ -45,20 +44,19 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     }
     const { name: tool, input } = HOOK_SCENARIO_CALLS[mode];
     const call = request.toolResults.find((entry) => entry.name === tool);
-    if (call === undefined) {
-      // A call id no other run shares keys the background helper handshake.
-      return { toolCalls: [{ id: `${tool}-${crypto.randomUUID()}`, name: tool, input }] };
-    }
+    if (call === undefined) return { toolCalls: [{ name: tool, input }] };
     // An agent call or task returned a receipt; its result arrives in a <task_result> message.
     if (mode === "direct") {
       return latestTaskResult(request, tool) ?? { toolCalls: [{ name: "task_wait", input: {} }] };
     }
     // Ends the step with text while the task works, which holds the turn. The
-    // task's helper opens while this step generates.
+    // step takes a few seconds, so the task's helper most likely opens while it
+    // runs; that is likely, not guaranteed, and the hook assertions hold
+    // whether the helper opens mid-step or while the turn is held.
     if (mode === "background") {
       const result = latestTaskResult(request, tool);
       if (result !== undefined) return result;
-      await generateWhileHelperOpens(call.id);
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
       return RESEARCH_INTERIM_MESSAGE;
     }
     return typeof call.output === "string" ? call.output : JSON.stringify(call.output);
