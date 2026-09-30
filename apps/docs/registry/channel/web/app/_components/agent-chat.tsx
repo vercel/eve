@@ -2,15 +2,14 @@
 
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
-import { AlertCircleIcon, BrainIcon, PlusIcon, SquareIcon } from "lucide-react";
-import { useState } from "react";
+import { CircleAlertIcon, PlusIcon, SquareIcon } from "lucide-react";
+import { useMemo, useState } from "react";
 import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
   ConversationTopFade,
 } from "@/components/ai-elements/conversation";
-import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
   PromptInput,
   PromptInputButton,
@@ -22,8 +21,10 @@ import {
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { AgentMessage } from "./agent-message";
 import { WEB_CHAT_AGENT } from "@/app/eve-agent";
+import { AssistantMessage, UserMessage } from "./agent-message";
+import { viewContext } from "./conversation-view";
+import type { AgentInputResponse } from "./input-request";
 
 const DEFAULT_AGENT_NAME = "eve-agent";
 const AGENT_NAME = WEB_CHAT_AGENT ?? DEFAULT_AGENT_NAME;
@@ -39,6 +40,7 @@ export function AgentChat({
   const [hasInputText, setHasInputText] = useState(false);
   const agent = useEveAgent({
     agent: WEB_CHAT_AGENT,
+    followSubagents: true,
     initialSession:
       sessionId === undefined
         ? undefined
@@ -62,8 +64,13 @@ export function AgentChat({
 
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
   const isResuming = agent.status === "resuming";
-  const isEmpty = agent.data.messages.length === 0;
-  const lastMessage = agent.data.messages.at(-1);
+  const conversation = agent.data;
+  const isEmpty = conversation.messages.length === 0;
+  const context = useMemo(
+    () => viewContext(conversation, isBusy || isResuming),
+    [conversation, isBusy, isResuming],
+  );
+  const lastMessage = conversation.messages.at(-1);
   const isPendingAssistantShell =
     lastMessage?.role === "assistant" &&
     lastMessage.parts.every((part) => part.type === "step-start");
@@ -75,9 +82,11 @@ export function AgentChat({
   const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
   const showConversationLayout = isResuming || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
-  // Answers are accepted while work runs; the server's settlement closes each request.
-  const canRespond = (requestId: string) =>
-    !isResuming && agent.data.inputs[requestId]?.status === "open";
+
+  const respond = async (response: AgentInputResponse) => {
+    setCancellationError(undefined);
+    await agent.respond([response]);
+  };
 
   const requestCancellation = () => {
     setCancellationError(undefined);
@@ -150,21 +159,17 @@ export function AgentChat({
         >
           <ConversationTopFade className="top-14" />
           <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-36 sm:px-6">
-            {agent.data.messages.map((message, index) =>
-              showPendingThinking &&
-              isPendingAssistantShell &&
-              message.id === lastMessage.id ? null : (
-                <AgentMessage
-                  canRespond={canRespond}
-                  isStreaming={
-                    agent.status === "streaming" && index === agent.data.messages.length - 1
-                  }
+            {conversation.messages.map((message) =>
+              message.role === "user" ? (
+                <UserMessage key={message.id} message={message} />
+              ) : (
+                <AssistantMessage
+                  canRespond={!isResuming}
+                  context={context}
+                  isStreaming={isBusy && message === lastMessage}
                   key={message.id}
                   message={message}
-                  onInputResponses={(inputResponses) => {
-                    setCancellationError(undefined);
-                    return agent.respond(inputResponses);
-                  }}
+                  onRespond={respond}
                 />
               ),
             )}
@@ -226,20 +231,10 @@ function ComposerAction({
 
 function ErrorMessage({ message }: { readonly message: string }) {
   return (
-    <Message className="max-w-full" from="assistant">
-      <MessageContent>
-        <div
-          className="flex w-full items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
-          role="alert"
-        >
-          <AlertCircleIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
-          <div>
-            <p className="font-medium">Request failed</p>
-            <p className="mt-0.5 text-muted-foreground">{message}</p>
-          </div>
-        </div>
-      </MessageContent>
-    </Message>
+    <p className="flex items-start gap-1.5 text-destructive text-sm" role="alert">
+      <CircleAlertIcon className="mt-0.5 size-3.5 shrink-0" />
+      <span>{message}</span>
+    </p>
   );
 }
 
@@ -268,19 +263,12 @@ function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) 
 
 function PendingThinking() {
   return (
-    <Message aria-live="polite" from="assistant">
-      <MessageContent>
-        <div className="mb-4 flex w-full items-center gap-2 text-muted-foreground text-sm">
-          <BrainIcon className="size-4" />
-          <Shimmer duration={1}>Thinking</Shimmer>
-        </div>
-      </MessageContent>
-    </Message>
+    <div aria-live="polite" className="text-muted-foreground text-sm">
+      <Shimmer as="span" duration={1}>
+        Thinking
+      </Shimmer>
+    </div>
   );
-}
-
-function toErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Unable to cancel the response.";
 }
 
 function getLatestTurnFailure(
@@ -288,21 +276,22 @@ function getLatestTurnFailure(
 ): string | undefined {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
-
     if (event.type === "turn.failed") {
       return event.data.code === "MODEL_CALL_FAILED"
         ? "The model is temporarily unavailable. Please try again."
         : event.data.message;
     }
-
-    if (event.type === "turn.completed" || event.type === "turn.cancelled") {
-      return undefined;
-    }
-
-    if (event.type === "message.received") {
+    if (
+      event.type === "turn.completed" ||
+      event.type === "turn.cancelled" ||
+      event.type === "message.received"
+    ) {
       return undefined;
     }
   }
-
   return undefined;
+}
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unable to cancel the response.";
 }

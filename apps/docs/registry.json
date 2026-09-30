@@ -1830,6 +1830,11 @@
       ],
       "files": [
         {
+          "path": "registry/channel/web/app/_components/activity.tsx",
+          "type": "registry:file",
+          "target": "apps/web/app/_components/activity.tsx"
+        },
+        {
           "path": "registry/channel/web/app/_components/agent-chat.tsx",
           "type": "registry:file",
           "target": "apps/web/app/_components/agent-chat.tsx"
@@ -1838,6 +1843,16 @@
           "path": "registry/channel/web/app/_components/agent-message.tsx",
           "type": "registry:file",
           "target": "apps/web/app/_components/agent-message.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/_components/conversation-view.ts",
+          "type": "registry:file",
+          "target": "apps/web/app/_components/conversation-view.ts"
+        },
+        {
+          "path": "registry/channel/web/app/_components/input-request.tsx",
+          "type": "registry:file",
+          "target": "apps/web/app/_components/input-request.tsx"
         },
         {
           "path": "registry/channel/web/app/globals.css",

@@ -272,9 +272,8 @@ describe("ensureChannel", () => {
     expect(agentChatSource).toMatch(/<PromptInputTextarea\s+disabled=\{isResuming\}/);
     expect(agentChatSource).toContain('turnPolicy: "steer"');
     expect(agentChatSource).toContain('const isResuming = agent.status === "resuming"');
-    expect(agentChatSource).toContain(
-      '!isResuming && agent.data.inputs[requestId]?.status === "open"',
-    );
+    expect(agentChatSource).toContain("followSubagents: true");
+    expect(agentChatSource).toContain("onRespond={respond}");
     expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
     expect(agentChatSource).not.toContain("StatusDot");
     await expect(readFile(join(projectRoot, "app/icon.svg"), "utf8")).resolves.toContain(
@@ -549,17 +548,17 @@ describe("ensureChannel", () => {
       webPackageVersions: TEST_WEB_PACKAGE_VERSIONS,
     });
 
-    const agentMessageSource = await readFile(
-      join(projectRoot, "app/_components/agent-message.tsx"),
+    const inputRequestSource = await readFile(
+      join(projectRoot, "app/_components/input-request.tsx"),
       "utf8",
     );
     const questionSource = await readFile(
       join(projectRoot, "components/ai-elements/question.tsx"),
       "utf8",
     );
-    expect(agentMessageSource).toContain('inputRequest?.kind === "question"');
-    expect(agentMessageSource).toContain("<QuestionRequest");
-    expect(agentMessageSource).toContain("onInputResponses");
+    expect(inputRequestSource).toContain('request.kind === "question"');
+    expect(inputRequestSource).toContain("<QuestionRequest");
+    expect(inputRequestSource).toContain("onRespond");
     expect(questionSource).toContain("export const Question");
     expect(questionSource).toContain("export const QuestionInput");
     expect(questionSource).toContain("export const QuestionOption");
