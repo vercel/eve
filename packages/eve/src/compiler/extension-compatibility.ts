@@ -22,10 +22,10 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 69,
+    current: 70,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 29, 30, 31, 32, 34, 35, 54, 55, 63, 64, 65, 66, 67,
-      68, 69,
+      68, 69, 70,
     ],
     dropped: {
       14: "TaskExec.delegated was removed; migrate to workflow-backed background tools",
@@ -72,10 +72,10 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   dynamicTool: {
-    current: 66,
+    current: 67,
     supported: [
       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 31, 32, 33, 52, 54,
-      60, 61, 62, 63, 64, 65, 66,
+      60, 61, 62, 63, 64, 65, 66, 67,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",

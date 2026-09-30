@@ -1431,6 +1431,42 @@ describe("dispatchDynamicToolEvent", () => {
     );
   });
 
+  it("keeps endsTurn: true on a replayed dynamic tool", async () => {
+    const ctx = createCtx();
+    const resolver = createResolver("react", ["session.started"], () =>
+      Object.assign(createReplayableTool(), { endsTurn: true }),
+    );
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    expect(buildDynamicTools(ctx)[0]?.endsTurn).toBe(true);
+  });
+
+  it("rejects an endsTurn function, which durable dynamic metadata cannot hold", async () => {
+    const logs = captureLogRecords();
+    const ctx = createCtx();
+    const resolver = createResolver("react", ["session.started"], () =>
+      Object.assign(createReplayableTool(), { endsTurn: () => true }),
+    );
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+
+    expect(buildDynamicTools(ctx)).toHaveLength(0);
+    expect(JSON.stringify(logs.records)).toContain(
+      'Dynamic tool \\"react\\" sets endsTurn to a function, which dynamic tools do not support.',
+    );
+  });
+
   it("uses file slug when handler returns a single entry", async () => {
     const ctx = createCtx();
     const resolver = createResolver("analytics", ["session.started"], () => createReplayableTool());

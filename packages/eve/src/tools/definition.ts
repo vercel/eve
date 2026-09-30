@@ -59,7 +59,7 @@ export interface InternalToolLabelDefinition {
 }
 
 export interface InternalToolDefinition extends ToolDefinitionBase {
-  readonly endsTurn?: boolean;
+  readonly endsTurn?: ToolDefinition["endsTurn"];
   label?: InternalToolLabelDefinition;
   name: string;
   inputSchema: JsonObject | null;
@@ -232,11 +232,17 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
    * tool call in the model's step ends the turn and succeeds; a failed call
    * lets the model recover. Ignored in delegated sessions, which must return
    * a reply to their caller, and on turns that request structured output.
-   * Wherever it applies, eve appends a sentence to the description the model
-   * sees telling it the call ends its turn, so write `description` for what
-   * the tool does. Defaults to `false`.
+   * With `true`, eve appends a sentence to the description the model sees
+   * telling it the call ends its turn, so write `description` for what the
+   * tool does.
+   *
+   * Pass a function to decide from the result. eve calls it with the output
+   * of `execute` after each successful call, and the call ends the turn only
+   * when it returns `true`. The model sees no appended sentence, so describe
+   * when the call ends the turn in `description` if the model needs to know.
+   * Defaults to `false`.
    */
-  endsTurn?: boolean;
+  endsTurn?: boolean | ((output: TOutput) => boolean | Promise<boolean>);
   /**
    * Optional per-tool approval gate. The return value determines whether
    * user approval is required before executing this tool.
@@ -287,7 +293,7 @@ export function defineTool<
     | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>,
 >(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
-  endsTurn?: ToolDefinition<unknown, unknown>["endsTurn"];
+  endsTurn?: ToolDefinition<unknown, StandardJSONSchemaV1.InferOutput<TOutputSchema>>["endsTurn"];
   inputSchema: TInputSchema;
   outputSchema: TOutputSchema;
   execute(input: StandardSchemaV1.InferOutput<TInputSchema>, ctx: ToolContext): TReturn;
@@ -311,7 +317,7 @@ export function defineTool<
   TReturn,
 >(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
-  endsTurn?: ToolDefinition<unknown, unknown>["endsTurn"];
+  endsTurn?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["endsTurn"];
   inputSchema: TSchema;
   outputSchema?: JsonObject;
   execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext): TReturn;
@@ -335,7 +341,7 @@ export function defineTool<
     | AsyncIterable<StandardJSONSchemaV1.InferOutput<TOutputSchema>>,
 >(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
-  endsTurn?: ToolDefinition<unknown, unknown>["endsTurn"];
+  endsTurn?: ToolDefinition<unknown, StandardJSONSchemaV1.InferOutput<TOutputSchema>>["endsTurn"];
   inputSchema: JsonObject;
   outputSchema: TOutputSchema;
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;
@@ -356,7 +362,7 @@ export function defineTool<
 >;
 export function defineTool<TReturn>(definition: {
   description: ToolDefinition<unknown, unknown>["description"];
-  endsTurn?: ToolDefinition<unknown, unknown>["endsTurn"];
+  endsTurn?: ToolDefinition<unknown, ToolOutputFromExecuteReturn<TReturn>>["endsTurn"];
   inputSchema: JsonObject;
   outputSchema?: JsonObject;
   execute(input: Record<string, unknown>, ctx: ToolContext): TReturn;

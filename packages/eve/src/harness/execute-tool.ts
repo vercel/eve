@@ -1,7 +1,11 @@
 import type { FlexibleSchema } from "ai";
 
 import type { Approval } from "#approval/definition.js";
-import type { InternalToolLabelDefinition, ToolExecuteOptions } from "#tools/definition.js";
+import type {
+  InternalToolDefinition,
+  InternalToolLabelDefinition,
+  ToolExecuteOptions,
+} from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
 import type { PreparedToolBehavior } from "#tools/behavior.js";
 
@@ -15,7 +19,7 @@ export interface HarnessToolDefinition {
   readonly behavior?: PreparedToolBehavior;
   readonly description: string;
   /** A successful call ends the turn without a final reply; see `ToolDefinition.endsTurn`. */
-  readonly endsTurn?: boolean;
+  readonly endsTurn?: InternalToolDefinition["endsTurn"];
   readonly execute?: (input: any, options: ToolExecuteOptions) => any;
   /** Optional JSON input substituted when this tool starts its workflow body. */
   readonly executeInput?: (input: unknown) => JsonValue;

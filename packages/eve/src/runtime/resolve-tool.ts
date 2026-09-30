@@ -90,7 +90,6 @@ export async function resolveToolDefinition(
       availableInSubagents: definition.availableInSubagents,
       behavior: definition.behavior,
       description: definition.description,
-      endsTurn: definition.endsTurn,
       execute,
       executeInput,
       exportName: definition.exportName,
@@ -125,7 +124,7 @@ export async function resolveToolDefinition(
  */
 type OptionalResolvedFields = {
   -readonly [
-    K in "label" | "approval" | "approvalKey" | "toModelOutput"
+    K in "label" | "approval" | "approvalKey" | "endsTurn" | "toModelOutput"
   ]?: ResolvedToolDefinition[K];
 };
 
@@ -179,6 +178,16 @@ function extractOptionalHooks(
       record.approvalKey,
       describe(definition, "to provide an approvalKey function"),
     ) as ResolvedToolDefinition["approvalKey"];
+  }
+
+  if (record.endsTurn !== undefined) {
+    optional.endsTurn =
+      typeof record.endsTurn === "boolean"
+        ? record.endsTurn
+        : (expectFunction(
+            record.endsTurn,
+            describe(definition, "to provide endsTurn as a boolean or a function"),
+          ) as ResolvedToolDefinition["endsTurn"]);
   }
 
   if (record.toModelOutput !== undefined) {

@@ -1264,6 +1264,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
      */
     // The tools advertised to the latest model call; they decide which tool calls defer.
     let modelCallCoordinationTools = config.tools;
+    let modelCallEndsTurnTools: EndsTurnTools = new Map();
     const createRequestMessages = () => {
       // Persist framework announcements before the new input, or after earlier
       // tool results on a continuation, so later requests retain the full prefix.
@@ -1451,16 +1452,23 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
       session = advertisedModelTools.session;
       const modelTools = advertisedModelTools.modelTools;
-      // Only where `endsTurn` is honored; see `stepEndsTurn`.
+      // `endsTurn` applies only in root, unstructured turns. Only a literal
+      // `true` is described to the model; a function decides from each result.
+      const endsTurnTools = new Map<string, NonNullable<HarnessToolDefinition["endsTurn"]>>();
       if (!hasDelegatedCaller && session.outputSchema === undefined) {
         for (const [name, modelTool] of Object.entries(modelTools)) {
-          if (modelTool.type === "provider" || presentationTools.get(name)?.endsTurn !== true) {
+          const endsTurn = presentationTools.get(name)?.endsTurn;
+          if (modelTool.type === "provider" || endsTurn === undefined || endsTurn === false) {
             continue;
           }
-          modelTool.description =
-            `${modelTool.description ?? ""}\n\n${ENDS_TURN_TOOL_NOTE}`.trimStart();
+          endsTurnTools.set(name, endsTurn);
+          if (endsTurn === true) {
+            modelTool.description =
+              `${modelTool.description ?? ""}\n\n${ENDS_TURN_TOOL_NOTE}`.trimStart();
+          }
         }
       }
+      modelCallEndsTurnTools = endsTurnTools;
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
       for (const tool of Object.values(effectiveTools)) {
@@ -2005,7 +2013,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         runStep,
         session,
         coordinationTools: modelCallCoordinationTools,
-        delegated: hasDelegatedCaller,
+        endsTurnTools: modelCallEndsTurnTools,
       });
     } catch (error) {
       throwIfTurnAborted(config.abortSignal);
@@ -2536,8 +2544,8 @@ async function handleStepResult(input: {
   readonly result: HarnessStepResult;
   readonly runStep: StepFn;
   readonly coordinationTools: HarnessToolMap;
-  /** A child's caller or a remote parent expects the turn's reply as its result. */
-  readonly delegated: boolean;
+  /** Tools that can end the turn in this step, with their `endsTurn` option. */
+  readonly endsTurnTools: EndsTurnTools;
   readonly session: HarnessSession;
 }): Promise<StepResult> {
   const { config, emit, promptMessages, result, runStep } = input;
@@ -2833,10 +2841,7 @@ async function handleStepResult(input: {
     };
   }
 
-  const endsTurn =
-    !input.delegated &&
-    nextSession.outputSchema === undefined &&
-    stepEndsTurn(result, continuationMessages, input.coordinationTools);
+  const endsTurn = await stepEndsTurn(result, continuationMessages, input.endsTurnTools);
   const continueLoop =
     (!calledFinalOutput || finalOutputRejected) &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
@@ -2877,19 +2882,22 @@ async function handleStepResult(input: {
   });
 }
 
-/** Appended to the model-facing description of every tool that ends the turn. */
+/** Appended to the model-facing description of every tool with `endsTurn: true`. */
 const ENDS_TURN_TOOL_NOTE =
   "Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.";
 
+type EndsTurnTools = ReadonlyMap<string, NonNullable<HarnessToolDefinition["endsTurn"]>>;
+
 /**
- * Whether the step ends the turn: every tool call targets an `endsTurn` tool
- * and succeeded. A failed or invalid call lets the model recover instead.
+ * Whether the step ends the turn: every tool call targets a tool that can end
+ * the turn and succeeded, and each `endsTurn` function accepts its call's
+ * `execute` output. A failed or invalid call lets the model recover instead.
  */
-function stepEndsTurn(
+async function stepEndsTurn(
   result: HarnessStepResult,
   responseMessages: readonly ModelMessage[],
-  tools: HarnessToolMap,
-): boolean {
+  endsTurnTools: EndsTurnTools,
+): Promise<boolean> {
   const toolCalls = result.toolCalls ?? [];
   if (toolCalls.length === 0) return false;
   const outputs = new Map<string, ToolResultPart["output"]>();
@@ -2899,14 +2907,26 @@ function stepEndsTurn(
       if (part.type === "tool-result") outputs.set(part.toolCallId, part.output);
     }
   }
-  return toolCalls.every((toolCall) => {
+  const succeeded = toolCalls.every((toolCall) => {
     const output = outputs.get(toolCall.toolCallId);
     return (
-      tools.get(toolCall.toolName)?.endsTurn === true &&
-      output !== undefined &&
-      !isToolResultError(output)
+      endsTurnTools.has(toolCall.toolName) && output !== undefined && !isToolResultError(output)
     );
   });
+  if (!succeeded) return false;
+  const executeOutputs = new Map(
+    (result.toolResults ?? []).map((toolResult) => [toolResult.toolCallId, toolResult.output]),
+  );
+  for (const toolCall of toolCalls) {
+    const endsTurn = endsTurnTools.get(toolCall.toolName);
+    if (
+      typeof endsTurn === "function" &&
+      (await endsTurn(executeOutputs.get(toolCall.toolCallId))) !== true
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function isDeferredHarnessTool(tool: HarnessToolDefinition | undefined): boolean {

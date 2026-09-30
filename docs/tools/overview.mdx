@@ -76,7 +76,7 @@ export default defineTool({
 });
 ```
 
-eve tells the model that the call ends its turn by appending this sentence, after a blank line, to the description the model sees:
+With `endsTurn: true`, eve tells the model that the call ends its turn by appending this sentence, after a blank line, to the description the model sees:
 
 ```text
 Calling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.
@@ -84,9 +84,27 @@ Calling this tool ends your turn once it succeeds: do not write a reply or call 
 
 Write `description` for what the tool does and when to use it, and leave the turn-ending rule to eve. The appended sentence is not part of the tool definition, so `eve info` shows the description as you wrote it.
 
-The turn ends only when every tool call in the model's step sets `endsTurn` and succeeds. When the call fails, or another tool runs in the same step, the model receives the results and continues as usual. Text the model writes before the call is narration, so channels do not post it as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
+To decide from the result instead, pass a function. eve calls it with the output of `execute` after each successful call, and the call ends the turn only when the function returns `true` or resolves to `true`:
 
-eve ignores `endsTurn` in delegated sessions, which must return a reply to their caller, and on turns that request structured output; the model does not see the appended sentence there. The option works with `defineTool` and dynamic tool entries; `defineWorkflowTool` rejects it at build time. To end a turn without taking any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
+```ts title="agent/tools/react.ts"
+export default defineTool({
+  description:
+    "React to the current message. When the reaction posts, your turn ends; otherwise, reply in text.",
+  inputSchema: z.object({ emoji: z.string() }),
+  async execute({ emoji }) {
+    return { posted: await addReaction(emoji) };
+  },
+  endsTurn: (output) => output.posted,
+});
+```
+
+Declare `endsTurn` after `execute`, as above, so TypeScript infers `output` from what `execute` returns. With an `outputSchema`, `output` takes that schema's type wherever `endsTurn` appears.
+
+eve does not append the sentence for a function, because whether the call ends the turn is known only after it runs. Describe the behavior in `description` when the model needs to know it.
+
+The turn ends only when every tool call in the model's step can end the turn and succeeds, and every `endsTurn` function returns `true`. Otherwise the model receives the results and continues as usual. Text the model writes before the call is narration, so channels do not post it as the reply. While [tasks](/docs/tools/tasks) are still working, the turn waits for them and then calls the model again.
+
+eve ignores `endsTurn` in delegated sessions, which must return a reply to their caller, and on turns that request structured output; the model does not see the appended sentence there, and eve does not call an `endsTurn` function. `defineWorkflowTool` rejects `endsTurn` at build time. Dynamic tool entries accept `endsTurn: true` or `false`; eve rejects a function when the resolver returns the entry, because dynamic tool metadata is stored durably. To end a turn without taking any other action, add the opt-in [`no_reply`](/docs/concepts/built-in-tools#no_reply) tool.
 
 ### Label tool activity
 

@@ -2456,6 +2456,7 @@ describe("createToolLoopHarness", () => {
 
     function stepCalling(
       calls: readonly {
+        readonly executeOutput?: unknown;
         readonly name: string;
         readonly output: { readonly type: "error-text" | "text"; readonly value: string };
       }[],
@@ -2489,8 +2490,23 @@ describe("createToolLoopHarness", () => {
         },
         text: "Reacting now.",
         toolCalls,
-        toolResults: [],
+        toolResults: calls.flatMap((call, index) =>
+          call.output.type === "error-text"
+            ? []
+            : [
+                {
+                  input: {},
+                  output: call.executeOutput ?? call.output.value,
+                  toolCallId: `call-${index}`,
+                  toolName: call.name,
+                },
+              ],
+        ),
       };
+    }
+
+    function toolsWithReactEndsTurn(endsTurn: (output: unknown) => boolean | Promise<boolean>) {
+      return new Map([...tools, ["react", { ...tools.get("react")!, endsTurn }]]);
     }
 
     it("ends the turn without a reply when every call in the step ends the turn", async () => {
@@ -2564,7 +2580,8 @@ describe("createToolLoopHarness", () => {
         description: "Reacts to the message.",
         outputSchema: { properties: {}, type: "object" },
       },
-    ] as const)("appends the turn-ending note only where endsTurn applies: $case", async (row) => {
+      { case: "an endsTurn function", description: "Reacts to the message.", endsTurnFn: true },
+    ] as const)("appends the turn-ending note only for endsTurn: true: $case", async (row) => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Glad it helped!", role: "assistant" }] },
@@ -2572,7 +2589,11 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      const runStep = createToolLoopHarness(createTestConfig(undefined, { tools }));
+      const runStep = createToolLoopHarness(
+        createTestConfig(undefined, {
+          tools: "endsTurnFn" in row ? toolsWithReactEndsTurn(() => true) : tools,
+        }),
+      );
       const ctx = new ContextContainer();
       if ("delegated" in row) setDelegatedParent(ctx);
       const outputSchema = "outputSchema" in row ? row.outputSchema : undefined;
@@ -2585,6 +2606,24 @@ describe("createToolLoopHarness", () => {
       expect(agentTools?.react?.description).toBe(row.description);
       expect(agentTools?.add?.description).toBe("Adds numbers");
     });
+
+    it.each([true, false])(
+      "passes the execute output to an endsTurn function, which returns %s",
+      async (decision) => {
+        const endsTurn = vi.fn().mockResolvedValue(decision);
+        setupMockAgent(
+          stepCalling([{ executeOutput: { emoji: "tada" }, name: "react", output: reacted }]),
+        );
+        const runStep = createToolLoopHarness(
+          createTestConfig(undefined, { tools: toolsWithReactEndsTurn(endsTurn) }),
+        );
+
+        const result = await runStep(createTestSession(), { message: "Thanks, that fixed it!" });
+
+        expect(endsTurn).toHaveBeenCalledExactlyOnceWith({ emoji: "tada" });
+        expect(result.next).toBe(decision ? null : runStep);
+      },
+    );
   });
 
   it("parks a conversation when requested structured output is not fulfilled", async () => {

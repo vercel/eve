@@ -323,13 +323,23 @@ function createMetadata(input: {
       name: input.name,
     }),
     description: input.entry.description,
-    endsTurn: input.entry.endsTurn,
+    endsTurn: readDynamicEndsTurn(input.name, input.entry.endsTurn) || undefined,
     entryKey: input.entryKey,
     inputSchema: serializeInputSchema(input.entry.inputSchema),
     name: input.name,
     outputSchema: serializeOutputSchema(input.entry.outputSchema),
     resolverSlug: input.resolver.slug,
   };
+}
+
+/** Dynamic tool metadata is durable, so it can hold only a literal `endsTurn`. */
+function readDynamicEndsTurn(name: string, endsTurn: DynamicToolEntry["endsTurn"]): boolean {
+  if (typeof endsTurn === "function") {
+    throw new Error(
+      `Dynamic tool "${name}" sets endsTurn to a function, which dynamic tools do not support. Set endsTurn to true or false; the resolver runs for each event, so it can decide then.`,
+    );
+  }
+  return endsTurn === true;
 }
 
 interface ResolvedDynamicToolEvent {

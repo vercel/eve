@@ -164,7 +164,12 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
         ? undefined
         : expectBoolean(record.availableInSubagents, message),
     description: expectString(record.description, message),
-    endsTurn: record.endsTurn === undefined ? undefined : expectBoolean(record.endsTurn, message),
+    endsTurn:
+      record.endsTurn === undefined || typeof record.endsTurn === "boolean"
+        ? record.endsTurn
+        : (expectFunction(record.endsTurn, message) as (
+            output: unknown,
+          ) => boolean | Promise<boolean>),
     hasApproval: record.approval !== undefined,
     hasExecute,
     hasModelOutputProjection: record.toModelOutput !== undefined,

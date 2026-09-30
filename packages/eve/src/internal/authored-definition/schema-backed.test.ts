@@ -48,6 +48,23 @@ describe("normalizeToolDefinition", () => {
     expect(entry.definition.endsTurn).toBe(true);
   });
 
+  it("accepts an endsTurn function and rejects other endsTurn values", () => {
+    const endsTurn = (output: unknown) => output === null;
+    const tool = defineTool({
+      description: "Decides from its result.",
+      endsTurn,
+      inputSchema: z.object({}),
+      execute: () => null,
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind === "tool" && entry.definition.endsTurn).toBe(endsTurn);
+    expect(() => normalizeToolDefinition({ ...tool, endsTurn: "yes" }, FAILURE_MESSAGE)).toThrow(
+      FAILURE_MESSAGE,
+    );
+  });
+
   it("normalizes a tool with a Zod 3 input schema", () => {
     const tool = defineTool({
       description: "Gets weather for a city.",
