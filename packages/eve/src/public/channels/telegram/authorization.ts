@@ -28,13 +28,14 @@ export function renderTelegramAuthorizationPrompt(
 }
 
 export function renderTelegramAuthorizationStatus(input: {
+  readonly attemptId?: string;
   readonly displayName: string;
-  readonly requesterUserId?: string | null;
+  readonly requesterUserId?: string;
 }): { readonly reply_markup?: Readonly<Record<string, unknown>>; readonly text: string } {
   const callbackData =
-    input.requesterUserId === undefined || input.requesterUserId === null
+    input.attemptId === undefined || input.requesterUserId === undefined
       ? undefined
-      : `${TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX}${input.requesterUserId}`;
+      : formatTelegramAuthorizationCallback(input.attemptId, input.requesterUserId);
   return {
     reply_markup:
       callbackData === undefined
@@ -64,4 +65,20 @@ export function renderTelegramAuthorizationCompleted(input: {
   const reason = input.reason === undefined ? "" : ` (${input.reason})`;
   const outcome = input.outcome === "timed-out" ? "timed out" : input.outcome;
   return `${input.displayName} authorization ${outcome}${reason}.`;
+}
+
+/** Binds an "Authorize" button to one attempt and the Telegram user who must complete it. */
+export function formatTelegramAuthorizationCallback(attemptId: string, userId: string): string {
+  return `${TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX}${attemptId}:${userId}`;
+}
+
+export function parseTelegramAuthorizationCallback(
+  data: string | undefined,
+): { readonly attemptId: string; readonly userId: string } | undefined {
+  if (data?.startsWith(TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX) !== true) return undefined;
+  const [attemptId, userId, ...rest] = data
+    .slice(TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX.length)
+    .split(":");
+  if (!attemptId || !userId || rest.length > 0) return undefined;
+  return { attemptId, userId };
 }

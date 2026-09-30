@@ -51,6 +51,13 @@ export function defaultTelegramAuth(message: TelegramMessage): SessionAuthContex
   };
 }
 
+/** Returns the Telegram user id carried by a Telegram-derived auth context. */
+export function telegramUserIdFromAuth(auth: SessionAuthContext | null): string | undefined {
+  if (auth?.authenticator !== "telegram-webhook") return undefined;
+  const userId = auth.attributes.user_id;
+  return typeof userId === "string" && userId.length > 0 ? userId : undefined;
+}
+
 /** Default inbound message hook: dispatch allowed messages with Telegram user auth. */
 export async function defaultOnMessage(
   ctx: TelegramContext,
@@ -87,12 +94,13 @@ export const defaultEvents: TelegramChannelEvents = {
     );
     const isPrivate = channel.telegram.chatType === "private";
     const pending = channel.state.pendingAuthMessageIds ?? {};
+    const key = event.attemptId ?? event.name;
 
     if (isPrivate) {
       try {
         const posted = await channel.telegram.post(renderTelegramAuthorizationPrompt(event));
         if (posted.id) {
-          channel.state.pendingAuthMessageIds = { ...pending, [event.name]: posted.id };
+          channel.state.pendingAuthMessageIds = { ...pending, [key]: posted.id };
         }
       } catch (error) {
         log.error("Telegram authorization prompt delivery failed", { error, name: event.name });
@@ -100,16 +108,21 @@ export const defaultEvents: TelegramChannelEvents = {
       return;
     }
 
-    if (pending[event.name] === undefined) {
+    if (pending[key] === undefined) {
+      const requesterUserId =
+        event.principalId === undefined
+          ? undefined
+          : channel.state.telegramUsersByPrincipal?.[event.principalId];
       try {
         const posted = await channel.telegram.post(
           renderTelegramAuthorizationStatus({
+            attemptId: event.attemptId,
             displayName,
-            requesterUserId: channel.state.triggeringUserId,
+            requesterUserId,
           }),
         );
         if (posted.id) {
-          channel.state.pendingAuthMessageIds = { ...pending, [event.name]: posted.id };
+          channel.state.pendingAuthMessageIds = { ...pending, [key]: posted.id };
         }
       } catch (error) {
         log.error("Telegram authorization status delivery failed", { error, name: event.name });
@@ -124,7 +137,8 @@ export const defaultEvents: TelegramChannelEvents = {
     if (event.candidateId !== undefined) return;
 
     const pending = channel.state.pendingAuthMessageIds ?? {};
-    const messageId = pending[event.name];
+    const key = event.attemptId ?? event.name;
+    const messageId = pending[key];
     if (messageId === undefined) return;
     const displayName = formatTelegramAuthorizationDisplayName(
       event.name,
@@ -144,7 +158,7 @@ export const defaultEvents: TelegramChannelEvents = {
       log.error("Telegram authorization status edit failed", { error, name: event.name });
     }
     const next = { ...pending };
-    delete next[event.name];
+    delete next[key];
     channel.state.pendingAuthMessageIds = next;
   },
 

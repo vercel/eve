@@ -3,7 +3,7 @@ import type { Session } from "#channel/session.js";
 import { createLogger } from "#internal/logging.js";
 import type { AuthorizationRequiredStreamEvent } from "#protocol/message.js";
 import {
-  TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX,
+  parseTelegramAuthorizationCallback,
   renderTelegramAuthorizationPrompt,
 } from "#public/channels/telegram/authorization.js";
 import type { TelegramCallbackQuery } from "#public/channels/telegram/inbound.js";
@@ -21,8 +21,12 @@ export async function dispatchTelegramAuthorizationCallback(input: {
   readonly state: TelegramChannelState;
   readonly telegram: TelegramContext;
 }): Promise<void> {
-  const expectedUserId = input.query.data?.slice(TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX.length);
-  if (expectedUserId !== input.query.from.id) {
+  const binding = parseTelegramAuthorizationCallback(input.query.data);
+  if (binding === undefined) {
+    await inactiveAuthorization(input.telegram.telegram, input.query.id);
+    return;
+  }
+  if (binding.userId !== input.query.from.id) {
     await input.telegram.telegram.answerCallbackQuery({
       callbackQueryId: input.query.id,
       showAlert: true,
@@ -38,7 +42,7 @@ export async function dispatchTelegramAuthorizationCallback(input: {
       await inactiveAuthorization(input.telegram.telegram, input.query.id);
       return;
     }
-    const authorization = await findPendingAuthorization(session);
+    const authorization = await findAuthorizationAttempt(session, binding.attemptId);
     if (authorization === undefined) {
       await inactiveAuthorization(input.telegram.telegram, input.query.id);
       return;
@@ -69,8 +73,9 @@ async function inactiveAuthorization(
   });
 }
 
-async function findPendingAuthorization(
+async function findAuthorizationAttempt(
   session: Session,
+  attemptId: string,
 ): Promise<AuthorizationRequiredStreamEvent | undefined> {
   const tailIndex = await session.getStreamTailIndex();
   if (tailIndex < 0) return undefined;
@@ -82,9 +87,12 @@ async function findPendingAuthorization(
       const next = await reader.read();
       if (next.done) break;
       if (
-        next.value.type === "authorization.required" &&
-        next.value.data.candidateId === undefined
+        next.value.type === "authorization.completed" &&
+        next.value.data.attemptId === attemptId
       ) {
+        return undefined;
+      }
+      if (next.value.type === "authorization.required" && next.value.data.attemptId === attemptId) {
         authorization = next.value;
       }
     }

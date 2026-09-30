@@ -39,6 +39,7 @@ import {
   defaultEvents,
   defaultOnMessage,
   isTelegramBotMentioned,
+  telegramUserIdFromAuth,
 } from "#public/channels/telegram/defaults.js";
 import {
   TELEGRAM_HITL_CALLBACK_PREFIX,
@@ -107,8 +108,13 @@ export interface TelegramChannelState extends TelegramHitlState {
   messageThreadId: number | null;
   /** Telegram user id that triggered the current session/turn. */
   triggeringUserId?: string | null;
-  /** Public authorization status messages, keyed by connection name. */
+  /** Public authorization status messages, keyed by attempt id (connection name for attempts without one). */
   pendingAuthMessageIds?: Record<string, string>;
+  /**
+   * Principal id to Telegram user id, recorded as each message is delivered.
+   * Default handlers use it to address the principal named on `authorization.required`.
+   */
+  telegramUsersByPrincipal?: Record<string, string>;
 }
 
 /** Telegram channel credentials. `webhookVerifier` is a custom inbound webhook verifier for forwarded webhooks. */
@@ -603,6 +609,7 @@ async function dispatchMessage(input: {
         context: [contextBlock, ...channelContext],
         inputResponses: replyInputResponses,
         message: turnMessage,
+        state: { triggeringUserId: input.message.from?.id ?? null },
       },
       { auth: result.auth, state, title: result.title },
     );
@@ -678,6 +685,7 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
   if (!isCompiledChannel(channel)) return;
   const adapter = channel.adapter;
   adapter.deliver = (payload: DeliverPayload, ctx: ChannelAdapterContext<TelegramChannelState>) => {
+    recordTelegramPrincipal(ctx.state, ctx.session.auth.current, payload);
     const responses = payload.inputResponses ?? [];
     if (responses.some(isTelegramSyntheticResponse)) {
       const resolved = resolveTelegramInputResponses(ctx.state, responses);
@@ -697,4 +705,25 @@ function readChatId(value: unknown): string | undefined {
   if (typeof value === "string" && value.length > 0) return value;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return undefined;
+}
+
+/**
+ * Records the Telegram user behind a delivery's principal. Telegram-authenticated
+ * callers carry their user id; custom `onMessage` auth relies on the sender the
+ * message dispatch stamped on the payload.
+ */
+function recordTelegramPrincipal(
+  state: TelegramChannelState,
+  caller: SessionAuthContext | null,
+  payload: DeliverPayload,
+): void {
+  if (caller === null) return;
+  const stamped = (payload.state as Partial<TelegramChannelState> | undefined)?.triggeringUserId;
+  const telegramUserId =
+    telegramUserIdFromAuth(caller) ?? (typeof stamped === "string" ? stamped : undefined);
+  if (telegramUserId === undefined) return;
+  state.telegramUsersByPrincipal = {
+    ...state.telegramUsersByPrincipal,
+    [caller.principalId]: telegramUserId,
+  };
 }

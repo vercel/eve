@@ -5,7 +5,7 @@ import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.j
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import { AuthKey, SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
@@ -276,7 +276,7 @@ describe("telegramChannel() inbound route", () => {
     );
   });
 
-  it("sends authorization privately after the requester taps its group callback", async () => {
+  it("sends the tapped attempt privately, not a later one from someone else", async () => {
     const logs = captureLogRecords();
     const fetchMock = vi
       .fn()
@@ -292,11 +292,25 @@ describe("telegramChannel() inbound route", () => {
             controller.enqueue({
               type: "authorization.required",
               data: {
+                attemptId: "att-alice",
                 authorization: { url: "https://connect.example.com/a/sca_1", userCode: "ABC-123" },
                 name: "notion",
+                principalId: "telegram:-1001:U1",
                 sequence: 0,
                 stepIndex: 0,
                 turnId: "t1",
+              },
+            });
+            controller.enqueue({
+              type: "authorization.required",
+              data: {
+                attemptId: "att-bob",
+                authorization: { url: "https://connect.example.com/a/sca_bob" },
+                name: "notion",
+                principalId: "telegram:-1001:U2",
+                sequence: 1,
+                stepIndex: 0,
+                turnId: "t2",
               },
             });
             controller.close();
@@ -304,7 +318,7 @@ describe("telegramChannel() inbound route", () => {
         });
       },
       async getStreamTailIndex() {
-        return 0;
+        return 1;
       },
     };
 
@@ -314,7 +328,7 @@ describe("telegramChannel() inbound route", () => {
         callback_query: {
           id: "cb-auth",
           from: { id: "U1", is_bot: false },
-          data: "eve_auth:U1",
+          data: "eve_auth:att-alice:U1",
           message: {
             message_id: 55,
             chat: { id: -1001, type: "supergroup" },
@@ -541,15 +555,22 @@ describe("telegramChannel() default event handlers", () => {
     vi.stubGlobal("fetch", fetchMock);
     const adapter = withState(
       getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
-      { chatId: "-100", chatType: "group", triggeringUserId: "U1" },
+      {
+        chatId: "-100",
+        chatType: "group",
+        telegramUsersByPrincipal: { "telegram:-100:U1": "U1" },
+        triggeringUserId: "U_STALE",
+      },
     );
     const ctx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as any);
 
     await callEvent(
       adapter,
       makeEvent("authorization.required", {
+        attemptId: "att-1",
         authorization: { url: "https://connect.example.com/a/sca_1", userCode: "ABC-123" },
         name: "notion",
+        principalId: "telegram:-100:U1",
         sequence: 0,
         stepIndex: 0,
         turnId: "t1",
@@ -561,7 +582,7 @@ describe("telegramChannel() default event handlers", () => {
     expect(publicBody).toEqual({
       chat_id: "-100",
       reply_markup: {
-        inline_keyboard: [[{ callback_data: "eve_auth:U1", text: "Authorize" }]],
+        inline_keyboard: [[{ callback_data: "eve_auth:att-1:U1", text: "Authorize" }]],
       },
       text: "Authorization required for Notion. The requester must sign in to resume.",
     });
@@ -570,6 +591,7 @@ describe("telegramChannel() default event handlers", () => {
     await callEvent(
       adapter,
       makeEvent("authorization.completed", {
+        attemptId: "att-1",
         name: "notion",
         outcome: "declined",
         reason: "access_denied",
@@ -588,6 +610,79 @@ describe("telegramChannel() default event handlers", () => {
     });
     expect(ctx.state.pendingAuthMessageIds).toEqual({});
   });
+
+  it("posts no Authorize button when the requester has no Telegram user", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          result: { message_id: 72, chat: { id: -100, type: "group" } },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
+      { chatId: "-100", chatType: "group", triggeringUserId: "U_STALE" },
+    );
+    const ctx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as any);
+
+    await callEvent(
+      adapter,
+      makeEvent("authorization.required", {
+        attemptId: "att-1",
+        authorization: { url: "https://connect.example.com/a/sca_1" },
+        name: "notion",
+        principalId: "okta|alice",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    const publicBody = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body));
+    expect(publicBody.reply_markup).toBeUndefined();
+  });
+
+  it.each([
+    {
+      auth: {
+        attributes: { user_id: "U1" },
+        authenticator: "telegram-webhook",
+        principalId: "telegram:-100:U1",
+        principalType: "user",
+      },
+      name: "Telegram auth",
+      stamped: undefined,
+    },
+    {
+      auth: {
+        attributes: {},
+        authenticator: "okta",
+        principalId: "okta|alice",
+        principalType: "user",
+      },
+      name: "custom auth with the stamped sender",
+      stamped: "U1",
+    },
+  ])(
+    "records the Telegram user behind a delivered message's principal: $name",
+    ({ auth, stamped }) => {
+      const adapter = withState(
+        getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
+        { chatId: "-100", chatType: "group" },
+      );
+      const ctx = buildAdapterContext(adapter, {
+        get: (key: unknown) => (key === AuthKey ? auth : undefined),
+        set: () => {},
+      } as any);
+
+      adapter.deliver!({ message: "hello", state: { triggeringUserId: stamped } }, ctx);
+
+      expect(ctx.state.telegramUsersByPrincipal).toEqual({ [auth.principalId]: "U1" });
+    },
+  );
 
   it("restarts the typing indicator after authorization succeeds", async () => {
     const fetchMock = vi.fn().mockResolvedValue(

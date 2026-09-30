@@ -55,6 +55,7 @@ export function initialTelegramState(botUsername: string | undefined): TelegramC
     nextHitlCallbackId: 0,
     pendingAuthMessageIds: {},
     pendingFreeformReplies: {},
+    telegramUsersByPrincipal: {},
     triggeringUserId: null,
   };
 }
