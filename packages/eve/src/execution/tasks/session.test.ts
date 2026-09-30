@@ -79,6 +79,8 @@ describe("answerTaskCancel", () => {
       {
         data: {
           callId: "research-call",
+          kind: "tool",
+          name: "research",
           status: "cancelled",
           taskId: research.taskId,
           turnId: "turn_1",

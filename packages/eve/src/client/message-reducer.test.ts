@@ -18,7 +18,6 @@ import {
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
-  createTaskSettledEvent,
   createTurnCancelledEvent,
   createTurnCompletedEvent,
   createTurnFailedEvent,
@@ -1283,6 +1282,7 @@ describe("defaultMessageReducer", () => {
   });
 
   describe("task tool parts", () => {
+    // Built without `name` and `kind`, as events recorded by older eve versions are.
     function settleResearchTask(settled: TaskSettledStreamEvent["data"]) {
       const reducer = defaultMessageReducer();
       const data = reduceServerEvents(reducer, reducer.initial(), [
@@ -1298,7 +1298,7 @@ describe("defaultMessageReducer", () => {
           turnId: "turn_1",
         }),
         createTurnCompletedEvent({ sequence: 0, turnId: "turn_1" }),
-        createTaskSettledEvent(settled),
+        { data: settled, type: "task.settled" },
       ]);
       const [message] = data.messages;
       return { status: message?.metadata?.status, toolPart: message?.parts[1] };
