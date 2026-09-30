@@ -111,6 +111,45 @@ const cropLogo = (image: PNG): PNG => {
   return cropped;
 };
 
+const contrastLogo = (node: ReactNode): ReactNode => {
+  if (!isValidElement(node)) return node;
+
+  const element = node as ReactElement<LogoElementProps>;
+  if (element.type === "mask") return element;
+
+  const liftDarkColor = (color: string | undefined): string | undefined => {
+    if (!color || color === "none" || color === "currentColor") return color;
+    if (color === "black") return "#b4b4b4";
+
+    const hex = color.startsWith("#") ? color.slice(1) : "";
+    const expanded = hex.length === 3 ? [...hex].map((digit) => digit.repeat(2)).join("") : hex;
+    if (!/^[\da-f]{6}$/iu.test(expanded)) return color;
+
+    const channels = [0, 2, 4].map((offset) =>
+      Number.parseInt(expanded.slice(offset, offset + 2), 16),
+    );
+    const [red, green, blue] = channels as [number, number, number];
+    const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    if (luminance >= 110) return color;
+
+    const lift = (180 - luminance) / (255 - luminance);
+    return `#${channels
+      .map((channel) =>
+        Math.round(channel + (255 - channel) * lift)
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("")}`;
+  };
+
+  const props = element.props;
+  return cloneElement(
+    element,
+    { ...props, fill: liftDarkColor(props.fill), stroke: liftDarkColor(props.stroke) },
+    Children.map(props.children, contrastLogo),
+  );
+};
+
 const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
   const response = new ImageResponse(
     <div
@@ -175,7 +214,7 @@ const getRasterizedLogo = (integration: Integration): Promise<RasterizedLogo> =>
 
   const Logo = logos[integration.logo];
   const resolvedLogo = resolveLogo(<Logo aria-hidden />);
-  const rasterized = rasterizeLogo(resolvedLogo);
+  const rasterized = rasterizeLogo(contrastLogo(resolvedLogo));
   rasterizedLogos.set(integration.logo, rasterized);
   return rasterized;
 };
@@ -239,12 +278,10 @@ export const createIntegrationOgImage = async (
         <div
           style={{
             alignItems: "center",
-            background: "#f4f4f5",
-            borderRadius: 20,
             display: "flex",
-            height: 180,
-            justifyContent: "center",
-            width: 180,
+            height: 132,
+            justifyContent: "flex-start",
+            width: 240,
           }}
         >
           <img

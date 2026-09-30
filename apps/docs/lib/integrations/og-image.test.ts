@@ -35,18 +35,19 @@ describe("createIntegrationOgImage", () => {
     expect(saturatedPixels).toBeGreaterThan(100);
   });
 
-  it("gives dark logos a light backing against the black background", async () => {
+  it("lifts dark logo colors enough to read against the black background", async () => {
     const image = await renderIntegrationOgImage("arcana");
-    const lightBackingPixels = countPixels(
+    const liftedLogoPixels = countPixels(
       image,
-      (red, green, blue) => red === 244 && green === 244 && blue === 245,
+      (red, green, blue) =>
+        red >= 150 && red <= 210 && green >= 150 && green <= 210 && blue >= 150 && blue <= 210,
     );
-    const darkLogoPixels = countPixels(
+    const blackBackgroundPixels = countPixels(
       image,
-      (red, green, blue) => red === 26 && green === 28 && blue === 26,
+      (red, green, blue) => red === 0 && green === 0 && blue === 0,
     );
 
-    expect(lightBackingPixels).toBeGreaterThan(10_000);
-    expect(darkLogoPixels).toBeGreaterThan(100);
+    expect(liftedLogoPixels).toBeGreaterThan(100);
+    expect(blackBackgroundPixels).toBeGreaterThan(100_000);
   });
 });
