@@ -10,6 +10,13 @@ const base = e2eAgentConfig({
       }
       return "Callback identity checked.";
     }
+    if (request.lastUserMessage?.includes("`context_messages`")) {
+      const roles = request.messages.map((message) => message.role);
+      if (roles.lastIndexOf("tool") <= roles.lastIndexOf("user")) {
+        return { toolCalls: [{ name: "context_messages", input: {} }] };
+      }
+      return "Context messages checked.";
+    }
     if (request.lastUserMessage?.includes("`schema_validate`")) {
       const roles = request.messages.map((message) => message.role);
       if (roles.lastIndexOf("tool") <= roles.lastIndexOf("user")) {

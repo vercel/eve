@@ -133,6 +133,60 @@ describe("SessionHandoff", () => {
     expect(inbox.restore).toHaveBeenCalledWith(payloads);
   });
 
+  it("remembers every incompatible target for the rest of the owner run", async () => {
+    const inbox = createInbox();
+    const payloads: SessionInboxPayload[] = [
+      { kind: "send", payload: { message: "Alice sends a follow-up." } },
+    ];
+    installActivationSequence(
+      { kind: "incompatible", payloads, reason: "checkpoint-version" },
+      { kind: "incompatible", payloads, reason: "checkpoint-version" },
+    );
+    startSessionOwnerStepMock.mockResolvedValue(undefined);
+    const handoff = createHandoff(inbox);
+
+    await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
+      kind: "retained",
+      reason: "checkpoint-incompatible",
+    });
+    expect(inbox.restore).toHaveBeenCalledWith(payloads);
+
+    await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
+      kind: "retained",
+      reason: "known-incompatible",
+    });
+    expect(startSessionOwnerStepMock).toHaveBeenCalledTimes(1);
+    expect(inbox.release).toHaveBeenCalledTimes(1);
+
+    await expect(handoff.tryTransfer(selection("deployment-c"), state())).resolves.toEqual({
+      kind: "retained",
+      reason: "checkpoint-incompatible",
+    });
+    expect(startSessionOwnerStepMock).toHaveBeenCalledTimes(2);
+
+    await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
+      kind: "retained",
+      reason: "known-incompatible",
+    });
+    expect(startSessionOwnerStepMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("attempts handoff on every turn when the owner only sees a generic activation failure", async () => {
+    installActivation({ error: new Error("unsupported checkpoint"), kind: "failed", payloads: [] });
+    startSessionOwnerStepMock.mockResolvedValue(undefined);
+    const handoff = createHandoff(createInbox());
+
+    await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
+      kind: "retained",
+      reason: "activation-failed",
+    });
+    await expect(handoff.tryTransfer(selection("deployment-b"), state())).resolves.toEqual({
+      kind: "retained",
+      reason: "activation-failed",
+    });
+    expect(startSessionOwnerStepMock).toHaveBeenCalledTimes(2);
+  });
+
   it("abandons transfer when input was accepted during release", async () => {
     installActivation({ kind: "active" });
     const accepted: SessionInboxPayload[] = [{ kind: "send", payload: { message: "late" } }];
@@ -152,9 +206,16 @@ function createdHooks() {
 }
 
 function installActivation(activation: SessionOwnerActivation): void {
+  installActivationSequence(activation);
+}
+
+function installActivationSequence(...activations: SessionOwnerActivation[]): void {
   created.length = 0;
+  let index = 0;
   createHookMock.mockImplementation((options: { token: string }) => {
-    const resolved = options.token.endsWith(":anchor") ? { output: "done" } : activation;
+    const resolved = options.token.endsWith(":anchor")
+      ? { output: "done" }
+      : (activations[Math.min(index++, activations.length - 1)] ?? activations.at(-1)!);
     const hook = Object.assign(Promise.resolve(resolved), {
       dispose: vi.fn(),
       getConflict: vi.fn(async () => null),

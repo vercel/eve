@@ -37,7 +37,7 @@ import type {
   WorkflowSharedContext,
 } from "#tools/workflow-definition.js";
 
-type ServeContext = ToolContext & WorkflowServeContext<JsonValue>;
+type ServeContext = Omit<ToolContext, "messages"> & WorkflowServeContext<JsonValue>;
 
 type ServeEntryPoint = (
   receive: WorkflowServeReceive<JsonValue>,

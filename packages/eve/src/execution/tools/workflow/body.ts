@@ -74,7 +74,8 @@ export interface StartedWorkflowBody {
   readonly usage: RunUsageTally;
 }
 
-type WorkflowCallContext = ToolContext & WorkflowToolContext;
+// Workflow bodies replay deterministically, so they never receive model messages.
+type WorkflowCallContext = Omit<ToolContext, "messages"> & WorkflowToolContext;
 
 /** What an `execute` call a steering message stopped settles with when its body rejects. */
 const INTERRUPTED_OUTPUT = { interrupted: true } as const;
@@ -244,7 +245,10 @@ export function createSharedContext(
   input: WorkflowBodyInput,
   agent: (name: string) => AgentSession,
   askPerson: WorkflowSharedContext["ask"],
-): Omit<ToolContext & WorkflowSharedContext, "abortSignal" | "agents" | "callId" | "session"> {
+): Omit<
+  ToolContext & WorkflowSharedContext,
+  "abortSignal" | "agents" | "callId" | "messages" | "session"
+> {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
       `ctx.${member} is not available inside a workflow tool; ${hint}. Tool "${input.toolName}" runs as a durable workflow body, which only replays deterministic code.`,
