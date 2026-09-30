@@ -96,6 +96,7 @@ import type {
   TuiDisplayOptions,
 } from "./types.js";
 import { TerminalRenderer, type TerminalInput, type TerminalOutput } from "./terminal-renderer.js";
+import { SELF_MODIFICATION_AGENT_NAME } from "./tool-presentation.js";
 import {
   createVercelStatusTracker,
   type VercelStatusEffect,
@@ -2147,7 +2148,7 @@ export function registryHandoffAddress(
   output: unknown,
 ): string | undefined {
   const isPackagedChild =
-    subagentName === "self-modification__agent" && toolName === "registry_add";
+    subagentName === SELF_MODIFICATION_AGENT_NAME && toolName === "registry_add";
   const isLegacyRoot = subagentName === undefined && toolName === "selfmod__registry_add";
   if ((!isPackagedChild && !isLegacyRoot) || typeof output !== "object" || output === null) {
     return undefined;

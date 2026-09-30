@@ -290,18 +290,24 @@ export function presentTool(
 }
 
 /**
+ * The bundled self-modification subagent's compiled name: its extension
+ * namespace joined to `subagents/agent` by the compiler's `__` rule.
+ */
+export const SELF_MODIFICATION_AGENT_NAME = "self-modification__agent";
+
+/**
  * Tool names that read poorly to a person. The generic self-delegation tool is
- * literally named `agent`, and the bundled self-modification subagent carries
- * its extension namespace (`self-modification__agent`).
+ * literally named `agent`, and the self-modification subagent carries its
+ * extension namespace.
  */
 const AGENT_DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([
   ["agent", "subagent"],
-  ["self-modification__agent", "agent editor"],
+  [SELF_MODIFICATION_AGENT_NAME, "agent editor"],
 ]);
 
 /** True for the bundled self-modification subagent's dispatch tool. */
 export function isSelfModificationAgent(toolName: string): boolean {
-  return toolBaseName(toolName) === "self-modification__agent";
+  return toolBaseName(toolName) === SELF_MODIFICATION_AGENT_NAME;
 }
 
 /** The name an agent task goes by in the delegate row, task line, and task panel. */
