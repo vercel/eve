@@ -98,7 +98,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
       </Link>
 
       <header className="mt-8 flex flex-col gap-5 border-b pb-10">
-        <span className="flex size-14 items-center justify-center rounded-xl border bg-background text-gray-1000">
+        <span className="flex size-14 items-center justify-center rounded-xl border bg-background">
           <Logo aria-hidden className="size-7" height={28} width={28} />
         </span>
         <div className="flex flex-col gap-2">
