@@ -1322,9 +1322,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
       "  at fourth",
     ].join("\n");
 
-    process.stderr.write(`${detail}\n`);
+    console.error(detail);
 
-    expect(append).toHaveBeenCalledWith({ source: "stderr", detail });
+    expect(append).toHaveBeenCalledWith({ source: "stderr", level: "error", detail });
     expect(screen.snapshot()).toContain("Error: request returned 403");
     expect(screen.snapshot()).toContain("details: .eve/logs/dev.log");
     expect(screen.snapshot()).not.toContain("at fourth");
@@ -1381,13 +1381,18 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).not.toContain("Step already running");
     expect(screen.snapshot()).toContain("○ error");
     expect(screen.snapshot()).toContain("Actual failure");
-    expect(screen.snapshot()).toContain("Unclassified stderr");
+    expect(screen.snapshot()).not.toContain("Unclassified stderr");
     renderer.setLogDisplayMode("warn");
     expect(screen.snapshot()).toContain("○ warn");
     expect(screen.snapshot()).toContain("step def");
     expect(screen.snapshot()).not.toContain("Debug detail");
     renderer.setLogDisplayMode("debug");
     expect(screen.snapshot()).toContain("Debug detail");
+    expect(screen.snapshot()).not.toContain("Unclassified stderr");
+    console.info('eve: built sandbox template "root" on backend "microsandbox".');
+    expect(screen.snapshot()).toContain('sandbox · built sandbox template "root"');
+    renderer.setLogDisplayMode("all");
+    expect(screen.snapshot()).toContain("Unclassified stderr");
     renderer.shutdown();
   });
 
@@ -1498,13 +1503,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    process.stderr.write("first stderr line\n");
+    console.error("first stderr line");
     process.stdout.write("interleaved stdout line\n");
-    process.stderr.write("second stderr line\n");
+    console.error("second stderr line");
 
     // Both stderr writes merge into one stream section; the hidden stdout
     // write contributes no section of its own.
-    expect(countOccurrences(screen.snapshot(), "○ stderr")).toBe(1);
+    expect(countOccurrences(screen.snapshot(), "○ error")).toBe(1);
     expect(screen.snapshot()).not.toContain("○ stdout");
 
     renderer.setLogDisplayMode("all");
@@ -1513,7 +1518,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Once visible, stdout gets its own section; the stderr stream stays
     // whole and ordered.
     const snapshot = screen.snapshot();
-    expect(countOccurrences(snapshot, "○ stderr")).toBe(1);
+    expect(countOccurrences(snapshot, "○ error")).toBe(1);
     expect(countOccurrences(snapshot, "○ stdout")).toBe(1);
     expect(snapshot.indexOf("first stderr line")).toBeLessThan(
       snapshot.indexOf("second stderr line"),

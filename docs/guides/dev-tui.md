@@ -116,7 +116,7 @@ Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or 
 
 ## Logs and traces
 
-By default, the UI shows errors and unclassified raw stderr. Use `/loglevel <none|error|warn|debug|all>` to change the display; bare `/loglevel` reports the current setting. `warn` adds warnings, `debug` adds all severity-tagged records, and `all` also shows raw stdout and sandbox lifecycle output. `none` hides logs. Errors render red, warnings yellow, and unclassified stderr neutral. `Ctrl+L` cycles the same modes. These modes filter received records; they do not change `EVE_LOG_LEVEL` or enable a dependency's debug logging.
+By default, the UI shows severity-tagged errors. Use `/loglevel <none|error|warn|debug|all>` to change the display; bare `/loglevel` reports the current setting. `warn` adds warnings, `debug` adds all severity-tagged records, and `all` also shows unclassified stdout, stderr, and sandbox output. `none` hides logs. Errors render red, warnings yellow, and unclassified stderr neutral. `Ctrl+L` cycles the same modes. These modes filter received records; they do not change `EVE_LOG_LEVEL` or enable a dependency's debug logging.
 
 Workflow SDK output, such as lines tagged `[workflow-sdk]` or `[world-local]`, reports internal runtime details, so the transcript shows it only in `all` mode.
 

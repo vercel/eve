@@ -60,12 +60,12 @@ function inlineArgumentSuggestions(appRoot: string) {
     if (command === "loglevel") {
       return [
         { value: "none", label: "none", hint: "Hide logs" },
-        { value: "error", label: "error", hint: "Errors and unclassified stderr (default)" },
-        { value: "warn", label: "warn", hint: "Warnings, errors, and unclassified stderr" },
+        { value: "error", label: "error", hint: "Errors only (default)" },
+        { value: "warn", label: "warn", hint: "Warnings and errors" },
         {
           value: "debug",
           label: "debug",
-          hint: "All severity-tagged logs and unclassified stderr",
+          hint: "All severity-tagged logs",
         },
         { value: "all", label: "all", hint: "Include raw stdout and sandbox output" },
       ];

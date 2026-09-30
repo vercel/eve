@@ -3449,7 +3449,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const body = this.#delayedDevBuildError;
     if (body === undefined) return;
     this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
+    this.#pushBlock({ kind: "log", title: "stderr", logLevel: "error", body, live: true });
     this.#paint();
   }
 
@@ -3959,12 +3959,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     if (this.#stdoutLogBuffer.length > 0) {
       this.#diagnostics?.append({ source: "stdout", detail: this.#stdoutLogBuffer });
-      if (this.#shouldRenderLog("stdout")) process.stdout.write(`${this.#stdoutLogBuffer}\n`);
+      if (this.#shouldRenderLog()) process.stdout.write(`${this.#stdoutLogBuffer}\n`);
       this.#stdoutLogBuffer = "";
     }
     if (this.#stderrLogBuffer.length > 0) {
       this.#diagnostics?.append({ source: "stderr", detail: this.#stderrLogBuffer });
-      if (this.#shouldRenderLog("stderr")) process.stderr.write(`${this.#stderrLogBuffer}\n`);
+      if (this.#shouldRenderLog()) process.stderr.write(`${this.#stderrLogBuffer}\n`);
       this.#stderrLogBuffer = "";
     }
   }
@@ -3988,14 +3988,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const source = record.level === "error" || record.level === "warn" ? "stderr" : "stdout";
     this.#diagnostics?.append({ source, level: record.level, detail: record.text });
     if (source === "stderr") this.#handleCapturedStderr(stripAnsi(record.text), record.level);
-    else
-      this.#pushBlock({
-        kind: "log",
-        title: source,
-        logLevel: record.level,
-        body: stripAnsi(record.text),
-        live: true,
-      });
+    else this.#handleCapturedStdout(stripAnsi(record.text), record.level);
     this.#paint();
   }
 
@@ -4045,21 +4038,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * Contiguous ordinary lines within one write stay one block, preserving the
    * single-block-per-write shape for plain output.
    */
-  #handleCapturedStdout(content: string): void {
+  #handleCapturedStdout(content: string, logLevel?: LogLevel): void {
     let pending: string[] = [];
     const flushPending = () => {
       if (pending.length === 0) return;
       const body = pending.join("\n");
       pending = [];
       if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stdout", body, live: true });
+      this.#pushBlock({ kind: "log", title: "stdout", logLevel, body, live: true });
     };
 
     for (const line of content.split("\n")) {
       const sandboxMessage = parseSandboxLogLine(line.trimEnd());
       if (sandboxMessage !== undefined) {
         flushPending();
-        this.#pushBlock({ kind: "sandbox", body: sandboxMessage, live: false });
+        this.#pushBlock({ kind: "sandbox", logLevel, body: sandboxMessage, live: false });
         continue;
       }
 
@@ -4227,17 +4220,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (block !== undefined) block.live = false;
   }
 
-  #shouldRenderLog(source: "stdout" | "stderr" | "sandbox", level?: LogLevel): boolean {
-    return isLogVisible(this.#logs, source, level);
+  #shouldRenderLog(level?: LogLevel): boolean {
+    return isLogVisible(this.#logs, level);
   }
 
   /** True for a buffered log or sandbox block the current display mode filters out. */
   #isHiddenLog(block: Block): boolean {
-    if (block.kind === "sandbox") return !this.#shouldRenderLog("sandbox");
+    if (block.kind === "sandbox") return !this.#shouldRenderLog(block.logLevel);
     if (block.kind !== "log") return false;
     if (block.logVisibility === "summary" && this.#logs === "all") return true;
     if (block.logVisibility === "all-only") return this.#logs !== "all";
-    return !this.#shouldRenderLog(block.title === "stderr" ? "stderr" : "stdout", block.logLevel);
+    return !this.#shouldRenderLog(block.logLevel);
   }
 }
 

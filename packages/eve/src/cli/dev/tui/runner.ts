@@ -1471,11 +1471,11 @@ export class EveTUIRunner {
       case "none":
         return "Logs hidden. Output stays buffered — /loglevel all restores it.";
       case "error":
-        return "Showing errors and unclassified stderr.";
+        return "Showing errors.";
       case "warn":
-        return "Showing warnings, errors, and unclassified stderr.";
+        return "Showing warnings and errors.";
       case "debug":
-        return "Showing all severity-tagged logs and unclassified stderr.";
+        return "Showing all severity-tagged logs.";
       case "all":
         return "Showing all logs.";
     }

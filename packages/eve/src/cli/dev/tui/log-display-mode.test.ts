@@ -21,7 +21,7 @@ describe("log severity modes", () => {
       "none",
     ]);
   });
-  it("keeps unknown stderr visible while separating tagged debug logs from raw output", () => {
+  it("shows unclassified output only under all", () => {
     const records = [
       ["stderr", "error"],
       ["stderr", "warn"],
@@ -31,34 +31,34 @@ describe("log severity modes", () => {
       ["stdout", undefined],
       ["sandbox", undefined],
     ] as const;
-    expect(records.map(([source, level]) => isLogVisible("error", source, level))).toEqual([
+    expect(records.map(([, level]) => isLogVisible("error", level))).toEqual([
       true,
       false,
       false,
       false,
-      true,
+      false,
       false,
       false,
     ]);
-    expect(records.map(([source, level]) => isLogVisible("warn", source, level))).toEqual([
+    expect(records.map(([, level]) => isLogVisible("warn", level))).toEqual([
       true,
       true,
       false,
       false,
-      true,
       false,
-      false,
-    ]);
-    expect(records.map(([source, level]) => isLogVisible("debug", source, level))).toEqual([
-      true,
-      true,
-      true,
-      true,
-      true,
       false,
       false,
     ]);
-    expect(records.every(([source, level]) => isLogVisible("all", source, level))).toBe(true);
-    expect(records.some(([source, level]) => isLogVisible("none", source, level))).toBe(false);
+    expect(records.map(([, level]) => isLogVisible("debug", level))).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(records.every(([, level]) => isLogVisible("all", level))).toBe(true);
+    expect(records.some(([, level]) => isLogVisible("none", level))).toBe(false);
   });
 });

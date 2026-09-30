@@ -13,10 +13,10 @@ export function nextLogDisplayMode(current: LogDisplayMode): LogDisplayMode {
   return LOG_DISPLAY_MODE_CYCLE[(index + 1) % LOG_DISPLAY_MODE_CYCLE.length] ?? "none";
 }
 
-export function isLogVisible(mode: LogDisplayMode, source: string, level?: LogLevel): boolean {
+export function isLogVisible(mode: LogDisplayMode, level?: LogLevel): boolean {
   if (mode === "none") return false;
   if (mode === "all") return true;
-  if (level === "error" || (level === undefined && source === "stderr")) return true;
+  if (level === "error") return true;
   if (mode === "debug") return level !== undefined;
   return mode === "warn" && level === "warn";
 }
