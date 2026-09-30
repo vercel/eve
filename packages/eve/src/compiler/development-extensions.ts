@@ -14,10 +14,12 @@ import {
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { discoverBundledExtension } from "#discover/bundled-extension.js";
 import { mountRefNamespace } from "#discover/extensions.js";
-import { resolvePackageSourceDirectoryPath } from "#internal/application/package.js";
+import {
+  resolvePackageSourceDirectoryPath,
+  resolvePackageSourceFilePath,
+} from "#internal/application/package.js";
 
-// Keep this indirect so extension-contract declaration generation does not follow the dev-only mount.
-const SELF_MODIFICATION_EXTENSION_MODULE = "#self-modification/extension/extension.js";
+const SELF_MODIFICATION_CONFIG = { local: { enabled: true } };
 
 const DEVELOPMENT_EXTENSION_IDS = ["self-modification"] as const;
 
@@ -39,11 +41,10 @@ function getBundledExtensionById(): ReadonlyMap<string, BundledExtensionMount> {
         [
           {
             namespace: "self-modification",
+            importSpecifier: "eve/self-modification",
+            entryPath: resolvePackageSourceFilePath("src/self-modification/extension/extension.ts"),
+            config: SELF_MODIFICATION_CONFIG,
             sourceDirectory: resolvePackageSourceDirectoryPath("src/self-modification/extension"),
-            loadMount: async () => {
-              const { default: extension } = await import(SELF_MODIFICATION_EXTENSION_MODULE);
-              return extension({ local: { enabled: true } });
-            },
           },
         ] as const satisfies readonly BundledExtensionDescriptor[]
       )
@@ -124,7 +125,10 @@ export async function prepareDevelopmentExtensions(input: {
         nodeId: input.nodeId,
         owner: { feature: extension.declaration.id, kind: "framework" },
         registration: { applyTo: "root", source: extension.declaration },
-      }),
+      }).map((candidate) => ({
+        ...candidate,
+        backing: { ...candidate.backing, mountId: `extensions/${extension.namespace}` },
+      })),
     );
   }
 

@@ -30,9 +30,8 @@ describe("approval definitions", () => {
         getToken: (...args: any[]) => Promise<unknown>;
         requireAuth: (...args: any[]) => never;
       };
-      request: { callId: string; requestId: string; toolName: string };
-      response: { decision: "approve" };
-      responder: { principalId: string };
+      request: { callId: string; principal: unknown; requestId: string; toolName: string };
+      response: { decision: "approve" | "cancel"; principal: { principalId: string } };
       session: { id: string; initiator: unknown; turn: unknown };
     }>();
     expectTypeOf<ApprovalResponseContext["auth"]>().not.toHaveProperty("getSandbox");

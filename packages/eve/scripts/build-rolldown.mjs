@@ -19,7 +19,7 @@ import { join, parse, relative } from "node:path";
 
 import { buildWithNitroRolldown } from "./nitro-rolldown.mjs";
 import vendoredZod from "./vendor-compiled/zod.mjs";
-import { createVendoredDependencyWarningFilter } from "./vendor-warning-log.mjs";
+import { onVendoredDependencyLog } from "../src/internal/bundler/vendored-dependency-log.ts";
 
 /**
  * Names of the CJS-interop helpers that rolldown injects into its
@@ -308,8 +308,6 @@ const input = Object.fromEntries(
   }),
 );
 
-const warningFilter = createVendoredDependencyWarningFilter();
-
 await buildWithNitroRolldown({
   input,
   external: isExternalPackageSpecifier,
@@ -362,7 +360,7 @@ await buildWithNitroRolldown({
     // silent `undefined` reads deep inside the runtime.
     topLevelVar: false,
   },
-  onLog: warningFilter.onLog,
+  onLog: onVendoredDependencyLog,
 });
 
 // Vue integration — separate build that resolves `#` subpath imports so the
@@ -419,7 +417,7 @@ if (vueSourceFiles.length > 0) {
       minify: false,
       sourcemap: false,
     },
-    onLog: warningFilter.onLog,
+    onLog: onVendoredDependencyLog,
   });
 }
 
@@ -476,6 +474,6 @@ if (svelteSourceFiles.length > 0) {
       minify: false,
       sourcemap: false,
     },
-    onLog: warningFilter.onLog,
+    onLog: onVendoredDependencyLog,
   });
 }

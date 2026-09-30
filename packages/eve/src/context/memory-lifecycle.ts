@@ -150,8 +150,7 @@ export async function dispatchMemoryTurnStarted(input: {
       state: committed.state,
     }) ?? recalledMessages;
   input.ctx.setVirtualContext(PendingMemoryCommitKey, {
-    history: committed.history,
-    projectedMessages,
+    recalledMessages: committed.recalledMessages,
     state: committed.state,
   });
   return projectedMessages;
@@ -312,8 +311,7 @@ export async function dispatchMemoryCompactionCompleted(input: {
     messages: committed.history,
   });
   input.ctx.setVirtualContext(PendingMemoryCommitKey, {
-    history: committed.history,
-    projectedMessages,
+    recalledMessages: committed.recalledMessages,
     state: committed.state,
   });
   input.ctx.delete(PreparedMemoryCompactionKey);
@@ -477,7 +475,7 @@ async function settleMemoryOperations<T>(operations: readonly Promise<T>[]): Pro
   return values;
 }
 
-export function memoryOperationId(input: {
+function memoryOperationId(input: {
   readonly phase: string;
   readonly sequence: number;
   readonly sessionId: string;

@@ -32,7 +32,7 @@ export interface CodexTokenBroker {
 
 export type ChatGptCredentialOwner = "codex" | "eve";
 
-export interface CodexTokenBrokerOptions extends CodexAppServerOptions {
+interface CodexTokenBrokerOptions extends CodexAppServerOptions {
   readonly appServer?: CodexAppServer;
   readonly store?: ChatGptCredentialStore;
   readonly fetch?: typeof fetch;

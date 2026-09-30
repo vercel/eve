@@ -18,16 +18,12 @@ import {
   defineDynamic as defineDynamicInstructions,
   defineInstructions,
 } from "#public/definitions/instructions.js";
-import {
-  defineInstrumentation,
-  type ProviderDefinition,
-} from "#public/definitions/instrumentation.js";
+import { defineInstrumentation, type ProviderDefinition } from "#public/instrumentation/index.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { DockerSandbox, VercelSandbox } from "#sandbox/providers.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
-import { defineTool, type TaskReceipt, type ToolDefinition } from "#public/tools/index.js";
-import { defineWorkflowTool } from "#public/tools/index.js";
+import { defineTool, type ToolDefinition } from "#public/tools/index.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -106,34 +102,6 @@ describe("definition helper exact inputs", () => {
     expectTypeOf<ReturnType<typeof ordinaryTool.execute>>().toEqualTypeOf<
       Promise<{ ok: boolean }>
     >();
-  });
-
-  it("types background workflow tools in terms of their receipt", () => {
-    const backgroundTool = defineWorkflowTool({
-      description: "Start a durable export.",
-      execution: "background",
-      inputSchema: z.object({ jobId: z.string() }),
-      async *execute(input) {
-        yield { jobId: input.jobId };
-        return { jobId: input.jobId };
-      },
-    });
-
-    expectTypeOf(backgroundTool.execution).toEqualTypeOf<"background">();
-    expectTypeOf<
-      Parameters<NonNullable<typeof backgroundTool.toModelOutput>>[0]
-    >().toEqualTypeOf<TaskReceipt>();
-    expect(backgroundTool.execution).toBe("background");
-  });
-
-  it("rejects background execution on ordinary tools", () => {
-    const definition = {
-      description: "Start a durable export.",
-      execution: "background",
-      inputSchema: z.object({ jobId: z.string() }),
-      execute: async () => null,
-    };
-    expect(() => defineTool(definition)).toThrow("Use defineWorkflowTool for background work");
   });
 
   it("infers tool input from Zod 3 schemas", () => {

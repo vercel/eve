@@ -39,6 +39,10 @@ import {
 } from "#internal/workflow-bundle/builder-support.js";
 import { buildSingleRolldownChunk } from "#internal/bundler/nitro-rolldown.js";
 import {
+  type BundlerDefaultLogHandler,
+  onVendoredDependencyLog,
+} from "#internal/bundler/vendored-dependency-log.js";
+import {
   type NitroStepEntrypointDiscoveredEntries,
   writeNitroStepEntrypoint,
 } from "#internal/workflow-bundle/nitro-step-entry.js";
@@ -64,6 +68,7 @@ export class WorkflowBundleBuilder {
       resolvePackageSourceDirectoryPath("src/execution"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
       resolvePackageSourceDirectoryPath("src/subagents"),
+      resolvePackageSourceDirectoryPath("src/tools/provided"),
     ];
     if (options.includeTestFixtures === true) {
       dirs.push(resolvePackageSourceDirectoryPath("src/internal/testing"));
@@ -103,7 +108,7 @@ export class WorkflowBundleBuilder {
 
     if (frameworkInputFiles.length === 0) {
       throw new Error(
-        `Expected framework workflow source files under eve's execution, runtime/subagents, or subagents source directories.`,
+        `Expected framework workflow source files under eve's execution, runtime/subagents, subagents, or tools/provided source directories.`,
       );
     }
 
@@ -304,11 +309,17 @@ export class WorkflowBundleBuilder {
     ].join("\n");
     const interimBundle = await buildSingleRolldownChunk(`${options.label} workflow driver chunk`, {
       cwd: this.config.workingDir,
-      onwarn(warning: { code: string; message: string }, warn: (warning: unknown) => void) {
-        if (warning.code === "UNRESOLVED_IMPORT") {
-          throw new Error(`Cannot build workflow bundle: ${warning.message}`);
+      // Checked before the dependency-warning filter, which would otherwise
+      // drop an unresolved import raised inside node_modules.
+      onLog(
+        level: string,
+        log: { code?: string; message: string },
+        defaultHandler: BundlerDefaultLogHandler,
+      ) {
+        if (level === "warn" && log.code === "UNRESOLVED_IMPORT") {
+          throw new Error(`Cannot build workflow bundle: ${log.message}`);
         }
-        warn(warning);
+        onVendoredDependencyLog(level, log, defaultHandler);
       },
       input: WORKFLOW_VIRTUAL_ENTRY_ID,
       platform: "neutral",

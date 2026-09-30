@@ -7,7 +7,7 @@ const CONVERSATIONS_DIRECTORY = `${INDEX_DIRECTORY}/conversations`;
 const INDEXED_MARKER = `${INDEX_DIRECTORY}/indexed`;
 
 /** A path-safe, non-reversible key for one recorded conversation identifier. */
-export function localTraceConversationIndexKey(conversationId: string): string {
+function localTraceConversationIndexKey(conversationId: string): string {
   return createHash("sha256").update(conversationId).digest("hex");
 }
 

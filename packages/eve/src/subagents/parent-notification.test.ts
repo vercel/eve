@@ -7,15 +7,14 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   bindTurnCallerContextStep,
-  notifyDelegatedParentStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
+import { runSessionStateStep } from "#internal/testing/session-state-step.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
@@ -30,21 +29,6 @@ const fetchMock = vi.fn();
 
 const USAGE = { cacheReadTokens: 10, cacheWriteTokens: 5, inputTokens: 100, outputTokens: 50 };
 const ZERO_USAGE = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
-
-function createSuccessResult(): RuntimeSubagentChildResult {
-  return {
-    callId: "call-1",
-    kind: "subagent-result",
-    origin: "child",
-    outcome: {
-      kind: "terminal",
-      result: { kind: "succeeded", output: "done" },
-      usageDelta: ZERO_USAGE,
-    },
-    output: "done",
-    subagentName: "research",
-  };
-}
 
 function createSerializedContext(
   adapterState: Record<string, unknown> = {},
@@ -73,88 +57,6 @@ function createSerializedContext(
   });
   return serializeContext(ctx);
 }
-
-describe("notifyDelegatedParentStep", () => {
-  beforeEach(() => {
-    resumeHookMock.mockReset();
-    resumeHookMock.mockResolvedValue(undefined as never);
-  });
-
-  it("attaches usage to a success result and folds it into the outcome delta", async () => {
-    await notifyDelegatedParentStep({
-      result: createSuccessResult(),
-      serializedContext: createSerializedContext(),
-      usage: USAGE,
-    });
-
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-tok", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          callId: "call-1",
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "done" },
-            usageDelta: USAGE,
-          },
-          output: "done",
-          subagentName: "research",
-          usage: USAGE,
-        },
-      ],
-    });
-  });
-
-  it("omits usage when none is provided", async () => {
-    await notifyDelegatedParentStep({
-      result: createSuccessResult(),
-      serializedContext: createSerializedContext(),
-    });
-
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-tok", {
-      kind: "runtime-action-result",
-      results: [createSuccessResult()],
-    });
-  });
-
-  it("attaches usage to error results", async () => {
-    const errorResult: RuntimeSubagentChildResult = {
-      callId: "call-1",
-      isError: true,
-      kind: "subagent-result",
-      origin: "child",
-      outcome: {
-        kind: "terminal",
-        result: {
-          error: { code: "SUBAGENT_EXECUTION_FAILED", message: "boom" },
-          kind: "failed",
-        },
-        usageDelta: ZERO_USAGE,
-      },
-      output: { code: "SUBAGENT_EXECUTION_FAILED", message: "boom" },
-      subagentName: "research",
-    };
-
-    await notifyDelegatedParentStep({
-      result: errorResult,
-      serializedContext: createSerializedContext(),
-      usage: USAGE,
-    });
-
-    expect(resumeHookMock).toHaveBeenCalledWith("parent-tok", {
-      kind: "runtime-action-result",
-      results: [
-        {
-          ...errorResult,
-          outcome: { ...errorResult.outcome, usageDelta: USAGE },
-          usage: USAGE,
-        },
-      ],
-    });
-  });
-});
 
 describe("turn caller notification", () => {
   beforeEach(() => {
@@ -187,11 +89,10 @@ describe("turn caller notification", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
-  it("restores task ownership from a local adapter with an opaque reply hook", async () => {
+  it("restores the caller from a local adapter with an opaque reply hook", async () => {
     const caller = await resolveInitialTurnCallerStep({
       serializedContext: createSerializedContext({
         parentContinuationToken: "invocation-reply-hook",
-        taskId: "task-1",
       }),
     });
 
@@ -199,7 +100,6 @@ describe("turn caller notification", () => {
       callId: "call-1",
       replyTo: { kind: "hook", token: "invocation-reply-hook" },
       subagentName: "research",
-      taskId: "task-1",
     });
   });
 
@@ -444,116 +344,69 @@ describe("turn caller notification", () => {
 });
 
 describe("turn caller binding", () => {
-  it("rebinds local adapter forwarding to a non-task continuation caller", async () => {
+  it("rebinds local adapter forwarding to a continuation caller", async () => {
     await expect(
-      bindTurnCallerContextStep({
-        caller: {
-          callId: "call-new",
-          replyTo: { kind: "hook", token: "turn-new" },
-          subagentName: "research",
-        },
-        serializedContext: {
-          [ChannelKey.name]: {
-            kind: SUBAGENT_ADAPTER_KIND,
-            state: {
-              callId: "call-old",
-              parentContinuationToken: "turn-old",
-              parentSessionId: "parent",
-              subagentName: "research",
-              taskId: "task-old",
+      runSessionStateStep(
+        {
+          caller: {
+            callId: "call-new",
+            replyTo: { kind: "hook", token: "turn-new" },
+            subagentName: "research",
+          },
+          serializedContext: {
+            [ChannelKey.name]: {
+              kind: SUBAGENT_ADAPTER_KIND,
+              state: {
+                callId: "call-old",
+                parentContinuationToken: "turn-old",
+                parentSessionId: "parent",
+                subagentName: "research",
+              },
             },
           },
         },
-      }),
+        bindTurnCallerContextStep,
+      ),
     ).resolves.toEqual({
-      [ChannelKey.name]: {
-        kind: SUBAGENT_ADAPTER_KIND,
-        state: {
-          callId: "call-new",
-          parentContinuationToken: "turn-new",
-          parentSessionId: "parent",
-          subagentName: "research",
-        },
-      },
-    });
-  });
-
-  it("rebinds remote callback forwarding to a non-task continuation caller", async () => {
-    await expect(
-      bindTurnCallerContextStep({
-        caller: {
-          callId: "call-new",
-          replyTo: {
-            kind: "callback",
-            token: "turn-new",
-            url: "https://parent.example/eve/v1/callback/turn-new",
+      serializedContext: {
+        [ChannelKey.name]: {
+          kind: SUBAGENT_ADAPTER_KIND,
+          state: {
+            callId: "call-new",
+            parentContinuationToken: "turn-new",
+            parentSessionId: "parent",
+            subagentName: "research",
           },
-          subagentName: "research",
         },
-        serializedContext: {},
-      }),
-    ).resolves.toEqual({
-      [SessionCallbackKey.name]: {
-        callId: "call-new",
-        subagentName: "research",
-        token: "turn-new",
-        url: "https://parent.example/eve/v1/callback/turn-new",
       },
     });
   });
 
-  it("rebinds local adapter forwarding to the current task", async () => {
-    const serializedContext = {
-      [ChannelKey.name]: {
-        kind: SUBAGENT_ADAPTER_KIND,
-        state: {
-          callId: "call-old",
-          parentContinuationToken: "task-old",
-          parentSessionId: "parent",
-          subagentName: "research",
-        },
-      },
-    };
-
+  it("rebinds remote callback forwarding to a continuation caller", async () => {
     await expect(
-      bindTurnCallerContextStep({
-        caller: {
-          callId: "call-new",
-          replyTo: { kind: "hook", token: "task-new" },
-          subagentName: "research",
-          taskId: "task-new",
-        },
-        serializedContext,
-      }),
-    ).resolves.toMatchObject({
-      [ChannelKey.name]: {
-        state: { callId: "call-new", parentContinuationToken: "task-new", taskId: "task-new" },
-      },
-    });
-  });
-
-  it("rebinds remote callback forwarding to the current task", async () => {
-    await expect(
-      bindTurnCallerContextStep({
-        caller: {
-          callId: "call-new",
-          replyTo: {
-            kind: "callback",
-            token: "task-new",
-            url: "https://parent.example/eve/v1/callback/task-new",
+      runSessionStateStep(
+        {
+          caller: {
+            callId: "call-new",
+            replyTo: {
+              kind: "callback",
+              token: "turn-new",
+              url: "https://parent.example/eve/v1/callback/turn-new",
+            },
+            subagentName: "research",
           },
-          subagentName: "research",
-          taskId: "task-new",
+          serializedContext: {},
         },
-        serializedContext: {},
-      }),
+        bindTurnCallerContextStep,
+      ),
     ).resolves.toEqual({
-      [SessionCallbackKey.name]: {
-        callId: "call-new",
-        subagentName: "research",
-        taskId: "task-new",
-        token: "task-new",
-        url: "https://parent.example/eve/v1/callback/task-new",
+      serializedContext: {
+        [SessionCallbackKey.name]: {
+          callId: "call-new",
+          subagentName: "research",
+          token: "turn-new",
+          url: "https://parent.example/eve/v1/callback/turn-new",
+        },
       },
     });
   });

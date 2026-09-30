@@ -73,7 +73,7 @@ test("built worker keeps explicit read tools without shell or write capabilities
     assert.deepEqual(worker.agent.connections, []);
     assert.deepEqual(
       worker.agent.dynamicTools.map((tool) => tool.slug),
-      ["connection_search"],
+      ["connection_tools"],
     );
   } finally {
     await rm(root, { recursive: true, force: true });

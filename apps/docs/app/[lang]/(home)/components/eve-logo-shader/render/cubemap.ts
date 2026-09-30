@@ -92,11 +92,7 @@ export function renderStudioCubemap(
   }
 }
 
-export function cubeParamsData(
-  face: number,
-  lights: readonly EnvLightConfig[],
-  globalIntensity: number,
-) {
+function cubeParamsData(face: number, lights: readonly EnvLightConfig[], globalIntensity: number) {
   if (lights.length > CUBE_MAX_LIGHTS) {
     throw new Error(
       `Studio cubemap supports up to ${CUBE_MAX_LIGHTS} lights, received ${lights.length}`,
@@ -125,11 +121,11 @@ export function cubeParamsData(
   return data;
 }
 
-export function lightColorLinear(light: EnvLightConfig): Vec3 {
+function lightColorLinear(light: EnvLightConfig): Vec3 {
   return srgbHexToLinear(light.color);
 }
 
-export function srgbHexToLinear(hex: string): Vec3 {
+function srgbHexToLinear(hex: string): Vec3 {
   const normalized = hex.replace(/^#/, "");
   if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
     throw new Error(`Expected a 6-digit sRGB hex color, received ${hex}`);

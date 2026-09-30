@@ -11,5 +11,3 @@
 
 export const CHANNEL_CONTEXT_KEY_NAME = "eve.channel";
 export const SESSION_CALLBACK_CONTEXT_KEY_NAME = "eve.sessionCallback";
-
-export const TASK_DELIVERY_POLICY_CONTEXT_KEY_NAME = "eve.runtime.taskDeliveryPolicy";

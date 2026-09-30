@@ -63,6 +63,8 @@ export interface DevelopmentServer<H extends DevelopmentServerHandle = Developme
 }
 
 export interface DevelopmentServerOptions {
+  /** Recover compatible unfinished runs from previous local dev invocations. Defaults to false. */
+  readonly resume?: boolean;
   /** Development-only source extensions. Defaults to the framework catalog. */
   readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly existing?: "attach-if-unconfigured" | "reject";

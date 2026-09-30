@@ -12,21 +12,20 @@ import { startSessionOwnerStep } from "#execution/workflow-runtime.js";
 import { sessionHandoffMarkerToken } from "#execution/session-inbox/address.js";
 import { isSessionIdleForHandoffStep } from "#execution/session/handoff-steps.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
-import type { RunMode } from "#shared/run-mode.js";
 
 /**
  * Cross-deployment checkpoint contract. The successor may run a different eve
  * build than the owner that produced it; bump when any field changes shape so
  * an incompatible successor rejects the handoff instead of misreading state.
- * Dynamic skill manifests retain instruction bodies and package revisions.
+ * Mount-owned state requires a new version so older readers reject it rather
+ * than dropping unrecognized state keys during reverse handoff.
  */
-export const SESSION_CHECKPOINT_VERSION = 8;
+export const SESSION_CHECKPOINT_VERSION = 10;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {
   readonly version: typeof SESSION_CHECKPOINT_VERSION;
   readonly capabilities?: SessionCapabilities;
-  readonly mode: RunMode;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -36,13 +35,21 @@ export interface SessionCheckpoint {
 export type SessionOwnerActivation =
   | { readonly kind: "active" }
   | {
+      // Owners running older eve builds read every non-`active` result as a
+      // failure, so this variant carries `payloads` in the same shape.
+      readonly kind: "incompatible";
+      readonly reason: "checkpoint-version";
+      /** Commands accepted by partial successor claims before it rejected the checkpoint. */
+      readonly payloads: readonly SessionInboxPayload[];
+    }
+  | {
       readonly kind: "failed";
       readonly error: unknown;
       /** Commands accepted by partial successor claims before startup failed. */
       readonly payloads: readonly SessionInboxPayload[];
     };
 
-export type SessionTransferOutcome =
+type SessionTransferOutcome =
   | { readonly kind: "transferred" }
   | {
       readonly kind: "retained";
@@ -52,10 +59,12 @@ export type SessionTransferOutcome =
         | "not-idle"
         | "busy"
         | "accepted-during-release"
-        | "activation-failed";
+        | "activation-failed"
+        | "checkpoint-incompatible"
+        | "known-incompatible";
     };
 
-export interface SessionHandoffInput {
+interface SessionHandoffInput {
   readonly checkpoint: Omit<SessionCheckpoint, "serializedContext" | "sessionState" | "version">;
   readonly deploymentId: string;
   readonly inbox: SessionInboxHandle;
@@ -71,10 +80,18 @@ export function sessionAnchorToken(sessionId: string): string {
  * The sole boundary for moving an idle session to another exact deployment.
  * Constructed once per owner; `tryTransfer()` is attempted per eligible selection.
  * When the upstream atomic hook-handoff primitive lands, only this class changes.
+ *
+ * Skipping known-incompatible targets requires this owner run to execute the
+ * `incompatible` activation branch below. Owners still on an older eve build
+ * treat that signal as a generic failure and attempt handoff on every turn;
+ * they still benefit from successors returning incompatibility without step
+ * retries.
  */
 export class SessionHandoff {
   private readonly input: SessionHandoffInput;
   private anchor: Hook<WorkflowEntryResult> | undefined;
+  /** Deployments that rejected this session's checkpoint during this owner run. */
+  private readonly incompatibleTargetDeploymentIds = new Set<string>();
 
   constructor(input: SessionHandoffInput) {
     this.input = input;
@@ -93,6 +110,8 @@ export class SessionHandoff {
     const targetDeploymentId = readAcceptedDeploymentId(selection.delivery);
     if (targetDeploymentId === undefined) return { kind: "retained", reason: "missing-deployment" };
     if (targetDeploymentId === deploymentId) return { kind: "retained", reason: "same-deployment" };
+    if (this.incompatibleTargetDeploymentIds.has(targetDeploymentId))
+      return { kind: "retained", reason: "known-incompatible" };
     if (!selection.handoffEligible) return { kind: "retained", reason: "busy" };
     if (!(await isSessionIdleForHandoffStep(state)))
       return { kind: "retained", reason: "not-idle" };
@@ -126,6 +145,11 @@ export class SessionHandoff {
           targetDeploymentId,
         );
         if (activation.kind === "active") return { kind: "transferred" };
+        if (activation.kind === "incompatible") {
+          this.incompatibleTargetDeploymentIds.add(targetDeploymentId);
+          await this.recover(tokens, activation.payloads);
+          return { kind: "retained", reason: "checkpoint-incompatible" };
+        }
         acceptedByFailedCandidate = activation.payloads;
       } catch {
         // The current owner remains authoritative until activation.

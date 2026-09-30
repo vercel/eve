@@ -1,4 +1,4 @@
-import type { ToolExecutionOptions } from "ai";
+import type { ModelMessage, ToolExecutionOptions } from "ai";
 import type {
   StandardJSONSchemaV1,
   StandardSchemaV1,
@@ -30,13 +30,10 @@ export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   options: ToolExecuteOptions,
 ) => Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
 
-export type ToolExecution = "background";
-
 interface ToolDefinitionBase {
   /** Whether delegated agent sessions receive this tool. Defaults to `true`. */
   readonly availableInSubagents?: boolean;
   readonly description: string;
-  readonly execution?: ToolExecution;
 }
 
 export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
@@ -103,13 +100,6 @@ export interface InternalToolDefinitionWithExecuteFn<
   execute: ToolExecuteFn<TInput, TOutput>;
 }
 
-export interface PublicToolDefinitionWithExecuteFn<
-  TInput = unknown,
-  TOutput = unknown,
-> extends PublicToolDefinition<TInput, TOutput> {
-  execute: ToolExecuteFn<TInput, TOutput>;
-}
-
 /**
  * A question a workflow tool asks the human on the session's channel, sent
  * with `ctx.ask` from a `defineWorkflowTool` executor. Channels render it the
@@ -121,12 +111,6 @@ export interface ToolInputRequest {
    * {@link options}.
    */
   readonly allowFreeform?: boolean;
-  /**
-   * Whether the user's next message may skip the question. When `true`, a
-   * message that does not answer it resolves the request as `dismissed`, and
-   * the message reaches the agent as usual.
-   */
-  readonly dismissible?: boolean;
   /** Rendering hint: confirmation buttons, a selection list, or a text field. */
   readonly display?: "confirmation" | "select" | "text";
   /** Selectable answers. */
@@ -134,11 +118,20 @@ export interface ToolInputRequest {
   readonly prompt: string;
 }
 
+/** Public identity fields for the authenticated person who answered a question. */
+export interface ToolInputResponseResponder {
+  readonly authenticator: string;
+  readonly principalId: string;
+  readonly principalType: string;
+}
+
 /**
  * The outcome of a {@link ToolInputRequest}.
  *
- * - `answered`: the user picked an option or typed an answer.
- * - `dismissed`: the user moved on without answering a `dismissible` request.
+ * - `answered`: the user picked an option or typed an answer. An answer the
+ *   session accepted before a withdrawal wins, even after a signal aborted.
+ * - `cancelled`: the request was withdrawn before anyone answered it, because
+ *   the ask's `signal` or the call's `abortSignal` aborted.
  * - `unavailable`: the session cannot reach a human, such as a scheduled run,
  *   so the request resolved immediately without being shown.
  */
@@ -147,11 +140,24 @@ export type ToolInputResponse =
       readonly status: "answered";
       /** The selected option's `id`, when the user picked one. */
       readonly optionId?: string;
+      /** Authenticated identity of the responder, without channel attributes. */
+      readonly responder?: ToolInputResponseResponder;
       /** Free text, when the user typed an answer. */
       readonly text?: string;
     }
-  | { readonly status: "dismissed" }
+  | { readonly status: "cancelled" }
   | { readonly status: "unavailable" };
+
+/** Options for `ctx.ask` in a `defineWorkflowTool` executor. */
+export interface ToolInputRequestOptions {
+  /**
+   * Withdraws the request when it aborts: the channel stops offering the
+   * question and the ask resolves as `cancelled`, unless the session accepted
+   * an answer first, which the ask then resolves with. The call's
+   * `abortSignal` withdraws the request the same way without being passed.
+   */
+  readonly signal?: AbortSignal;
+}
 
 /**
  * Authored tool context. Passed as the last argument to
@@ -184,6 +190,15 @@ export type ToolContext = SessionContext & {
    */
   readonly toolName: string;
   /**
+   * Messages sent to the model for the step that requested this call, oldest
+   * first — the same model input a `step.started` dynamic resolver reads from
+   * `ctx.messages`. Excludes system instructions and the assistant response
+   * that contains this call. Includes eve-authored context messages, such as
+   * request context and recalled memory, and reflects history projection and
+   * compaction.
+   */
+  readonly messages: readonly ModelMessage[];
+  /**
    * Resolves the bearer token for an inline provider. This accepts the same
    * auth shapes as a connection's `auth` field, including `connect("...")`
    * from `@vercel/connect/eve`.
@@ -208,7 +223,6 @@ export interface ToolDefinition<TInput = unknown, TOutput = unknown> extends Pub
   TInput,
   TOutput
 > {
-  readonly execution?: never;
   execute(input: TInput, ctx: ToolContext): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   /**
    * Optional per-tool approval gate. The return value determines whether
@@ -344,11 +358,6 @@ export function defineTool<TInput = unknown, TOutput = unknown>(
 export function defineTool<TInput = unknown, TOutput = unknown>(
   definition: ToolDefinition<TInput, TOutput>,
 ): ToolDefinition<TInput, TOutput> {
-  if ("execution" in definition && definition.execution !== undefined) {
-    throw new Error(
-      'defineTool: "execution" is not supported. Use defineWorkflowTool for background work.',
-    );
-  }
   return stampToolDefinition(definition, "defineTool");
 }
 
@@ -357,7 +366,7 @@ export function stampToolDefinition<
     readonly description: string;
     readonly inputSchema?: unknown;
     readonly outputSchema?: unknown;
-    readonly execute: (...args: never[]) => unknown;
+    readonly execute?: (...args: never[]) => unknown;
     readonly label?: ToolLabelDefinition;
     readonly approval?: Approval<never>;
     readonly approvalKey?: (...args: never[]) => unknown;

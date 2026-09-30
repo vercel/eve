@@ -54,9 +54,15 @@ export function mockChannelContext<TState = undefined>(
                   ...payload,
                   inputResponses: inputResponseSchema.array().parse(payload.inputResponses),
                 };
+          const optionsState = (options as { readonly state?: Partial<TState> }).state;
+          const state =
+            payload.state === undefined
+              ? optionsState
+              : { ...optionsState, ...(payload.state as Partial<TState>) };
           return (await observeDelivery(continuationToken, {
             ...options,
             ...validatedPayload,
+            state,
           } as ObservedChannelDelivery<TState>)) as never;
         },
       };

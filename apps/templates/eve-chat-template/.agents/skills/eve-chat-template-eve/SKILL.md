@@ -38,6 +38,7 @@ Use this skill to preserve the Eve protocol and durable-session invariants while
 - Treat `message.appended.data.messageDelta` as the new text. Treat `messageSoFar`, reduced message text, and rendered parts as cumulative.
 - Read the stream as NDJSON. Buffering until newline is normal parsing, not app-level response buffering.
 - Consider a turn settled on `session.completed`, `session.failed`, or `session.waiting`. Treat `authorization.required` as a blocked state for normal text input.
+- Treat `turn.waiting` as progress, not a settled turn: the turn is parked, for example while its tasks work or a running call asks a question, and resumes with the next `step.started` for the same `turnId`. Keep following the stream until one of the settling events above.
 - On disconnect, reconnect from the next unread remote stream index. On refresh mid-turn, resume from saved `activeChat.session` and layer resumed events until the final snapshot catches up.
 
 ## Connections And Tools

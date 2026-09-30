@@ -10,7 +10,7 @@ Start with [`read.eval.ts`](./read.eval.ts): leave a change's approval pending, 
 
 ## Scenario syntax and classification
 
-Each body uses **Given / When / Then** comments to identify the initial state, accepted input, and observable outcome. `defineEval.description` names the scenario. Native `tags` classify role (`regression` or `control`), triggering input (`user-message` or `input-response`), and behavior (`tool-result`, `tool-error`, `validation`, `workflow`, `provider-result`, `background-task`, `runtime-control`, `approval`, `authorization`, `partial-approval`, `stale-response`, `budget`, or `text-reply`). Every case also carries `hitl` and `continuation`.
+Each body uses **Given / When / Then** comments to identify the initial state, accepted input, and observable outcome. `defineEval.description` names the scenario. Native `tags` classify role (`regression` or `control`), triggering input (`user-message` or `input-response`), and behavior (`tool-result`, `tool-error`, `validation`, `workflow`, `provider-result`, `approval`, `authorization`, `partial-approval`, `stale-response`, `budget`, or `text-reply`). Every case also carries `hitl` and `continuation`.
 
 The tags are filters, not expected verdicts: every case must pass. `eve eval --tag regression`, `--tag control`, or `--tag partial-approval` selects the corresponding conversations. This is ordinary executable `defineEval` code with native assertions; Given / When / Then is not a separate executable spec language.
 
@@ -18,7 +18,7 @@ The tags are filters, not expected verdicts: every case must pass. `eve eval --t
 
 [`expectReply`](./helpers.ts) requires exactly one matching `message.completed`, followed by exactly one `turn.completed`, both attributed to the same turn. A tool result, unrelated reply, or completion without an answer cannot pass. New messages use their own `message.received` turn ID. Approval responses require successful resolution of the saved request before its matching reply and completion in the delivery's resumed turn. Multiple responses accepted together can resolve across several steps of that one turn; a later resolution need not emit another `turn.started`.
 
-Each approval ID is saved when emitted. The driver's latest-turn request list is not treated as durable pending state. Tests check that unrelated replies do not execute the old change, then generally approve the saved request and require its execution and completed reply. Runtime-control coverage stops after its answer to avoid mixing later background notifications into that assertion. Budget cases require the next budget request instead of an answer beyond the granted limit.
+Each approval ID is saved when emitted. The driver's latest-turn request list is not treated as durable pending state. Tests check that unrelated replies do not execute the old change, then generally approve the saved request and require its execution and completed reply. Budget cases require the next budget request instead of an answer beyond the granted limit.
 
 ## Regressions
 
@@ -38,8 +38,6 @@ Each row maps to exactly one eval. “Response authorization” here means the f
 | Approve older response-authorized request while newer A waits            | Read and reply; A remains answerable                                                     | [authorized older sibling](./authorized-older-sibling.eval.ts)       |
 | Approve older ordinary A while a newer response-authorized request waits | Reply for A; newer request remains answerable                                            | [ordinary older sibling](./ordinary-older-sibling.eval.ts)           |
 | Workflow completes while A waits                                         | Interpret its result                                                                     | [workflow result](./workflow-result.eval.ts)                         |
-| Cancel a background task while A waits                                   | Interpret the runtime control result                                                     | [runtime control](./runtime-control.eval.ts)                         |
-| Start a background task while A waits                                    | Acknowledge its working receipt                                                          | [background receipt](./background-receipt.eval.ts)                   |
 | Provider supplies a tool result while A waits                            | Report the distinct provider result                                                      | [provider result](./provider-result.eval.ts)                         |
 | Submit A from a same-batch A+B pair, then request a read                 | Complete the read; later B executes both changes once and completes a reply              | [partial approval, tool](./partial-approval-tool.eval.ts)            |
 | Submit A from a same-batch A+B pair, then request text only              | Complete a reply without tools; later B executes both changes once and completes a reply | [partial approval, text](./partial-approval-text.eval.ts)            |
@@ -57,8 +55,6 @@ Each row maps to exactly one eval. “Response authorization” here means the f
 | Tool throws without older input                         | Explain the error                                                                | [tool error](./tool-error.control.eval.ts)                       |
 | Invalid input without older input                       | Correct input and report result                                                  | [invalid input](./invalid-input.control.eval.ts)                 |
 | Workflow without older input                            | Interpret its result                                                             | [workflow result](./workflow-result.control.eval.ts)             |
-| Runtime control without older input                     | Interpret cancellation result                                                    | [runtime control](./runtime-control.control.eval.ts)             |
-| Background admission without older input                | Acknowledge working receipt                                                      | [background receipt](./background-receipt.control.eval.ts)       |
 | Provider result without older input                     | Report distinct provider result                                                  | [provider result](./provider-result.control.eval.ts)             |
 | Budget renewal without older approval                   | Run one tool, then request next grant                                            | [budget grant](./budget-grant.control.eval.ts)                   |
 | Text-only message while A waits                         | Reply without tools; A remains answerable                                        | [text only](./text-only.control.eval.ts)                         |
@@ -68,8 +64,8 @@ Each row maps to exactly one eval. “Response authorization” here means the f
 
 ## Evidence boundaries
 
-The [adversarial integration probes](../../../../../../packages/eve/src/harness/issue-3494-adversarial.integration.test.ts) also cover `final_output` with an older approval, multiple independent approvals plus an internally deferred message, and a complete independent batch beside a partially answered batch. Those exact scenarios are **integration-only**, not extra E2E cases. Integration workflow/control results and background receipts are injected at runtime boundaries; the E2E cases execute fixture tools through the durable runtime.
+The [adversarial integration probes](../../../../../../packages/eve/src/harness/issue-3494-adversarial.integration.test.ts) also cover `final_output` with an older approval, multiple independent approvals plus an internally deferred message, and a complete independent batch beside a partially answered batch. Those exact scenarios are **integration-only**, not extra E2E cases. Integration workflow results are injected at runtime boundaries; the E2E cases execute fixture tools through the durable runtime.
 
-Partial approvals in E2E use an accepted HTTP response followed by a separate user message; the API rejects combined message/response payloads. The provider cases supply a provider-executed result at the scripted model stream boundary; they do not contact a provider that performs the tool. Background coverage establishes admission and acknowledgement, not completion or wake correctness. Runtime control cancels an actual task using its returned ID. Budget scripts report synthetic token usage against the fixture's one-million-output-token limit.
+Partial approvals in E2E use an accepted HTTP response followed by a separate user message; the API rejects combined message/response payloads. The provider cases supply a provider-executed result at the scripted model stream boundary; they do not contact a provider that performs the tool. Budget scripts report synthetic token usage against the fixture's one-million-output-token limit.
 
 These tests serialize inputs. They do not establish restart/replay safety, concurrent-delivery correctness, child-agent settlement, OAuth recovery, or every provider/channel combination. Run E2E only in CI. A timeout identifies a runtime regression only when the captured events establish that the intended setup and tool path ran; a fixture error is not such evidence.

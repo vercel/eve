@@ -31,6 +31,7 @@ function create(input: {
   return createApprovalCandidate({
     candidateIdPrefix: input.candidateId,
     createdAt: 100,
+    decision: "approve",
     expiresAt: 700,
     requestId: input.requestId ?? "request-1",
     responder: responder(input.principalId),
@@ -47,6 +48,7 @@ describe("approval candidate state", () => {
       {
         candidateId: "candidate-1",
         createdAt: 100,
+        decision: "approve",
         expiresAt: 700,
         requestId: "request-1",
         responder: {
@@ -158,6 +160,7 @@ describe("approval candidate state", () => {
     const next = createApprovalCandidate({
       candidateIdPrefix: "candidate-2",
       createdAt: 800,
+      decision: "approve",
       expiresAt: 1_400,
       requestId: "request-1",
       responder: responder("U2"),
@@ -177,6 +180,7 @@ describe("approval candidate state", () => {
     const second = createApprovalCandidate({
       candidateIdPrefix: "candidate-2",
       createdAt: 100,
+      decision: "approve",
       expiresAt: 900,
       requestId: "request-1",
       responder: responder("U2"),
@@ -275,5 +279,23 @@ describe("approval candidate state", () => {
     expect(getApprovalAuditState(settled.state).activeCandidates).toEqual([
       expect.objectContaining({ candidateId: "candidate-2", requestId: "request-2" }),
     ]);
+  });
+
+  it("reads a candidate persisted without a decision as an Approve", () => {
+    const { decision: _decision, ...persisted } = getApprovalAuditState(
+      create({ candidateId: "candidate-1", principalId: "U1" }).state,
+    ).activeCandidates[0]!;
+    const state: SessionStateMap = {
+      "eve.runtime.hitl.approvalState": {
+        activeCandidates: { "candidate-1": persisted },
+        candidateHistory: [],
+        nextCandidateSequence: 1,
+        settlements: {},
+      },
+    };
+
+    expect(getApprovalAuditState(state).activeCandidates[0]?.decision).toBe("approve");
+    const settled = settleAllowedCandidate({ candidateId: "candidate-1", settledAt: 200, state });
+    expect(getApprovalAuditState(settled.state).settlements[0]?.outcome).toBe("allowed");
   });
 });

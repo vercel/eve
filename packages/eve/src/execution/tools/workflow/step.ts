@@ -1,4 +1,5 @@
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
 import type { ToolContext } from "#tools/definition.js";
@@ -7,7 +8,6 @@ import {
   type WorkflowToolRunContext,
 } from "#execution/tools/workflow/ask.js";
 import { disposeHook } from "#execution/hook-ownership.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import {
   createAuthorizationRequiredEvent,
   createAuthorizationCompletedEvent,
@@ -222,12 +222,11 @@ async function reportAuthorization(
   outcome?: "authorized" | "failed",
 ): Promise<void> {
   const eventInput = {
-    attemptId: challenge.attemptId,
-    name: challenge.name,
+    ...authorizationEventFields(challenge),
     sequence: run.from.sequence,
     stepIndex: run.from.stepIndex,
+    taskId: run.from.taskId,
     turnId: run.from.turnId,
-    authorization: challenge.challenge,
   };
   const event =
     outcome === undefined
@@ -240,7 +239,7 @@ async function reportAuthorization(
   const acknowledged = createHook<void>();
   try {
     await withAbort(
-      resumeHookStep(run.owner.inbox, {
+      run.owner.send({
         kind: "request",
         from: run.from,
         replyTo: acknowledged.token,

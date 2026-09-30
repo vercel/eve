@@ -55,7 +55,7 @@ export function resolveLocalTraces(
   );
   if (matches.length === 0) {
     throw new Error(
-      `No local trace matches "${sanitizeForTerminal(reference)}". Run \`eve traces ls\` to list traces.`,
+      `No local trace matches "${sanitizeForTerminal(reference)}". Run \`eve traces list\` to list traces.`,
     );
   }
   if (matches.length === 1) return matches;

@@ -2,6 +2,7 @@ import type { DevelopmentRequestHeaders } from "#cli/dev/url-target.js";
 import type {
   AssistantResponseStatsMode,
   LogDisplayMode,
+  SubagentDisplayMode,
   TerminalPartDisplayMode,
 } from "#cli/dev/tui/types.js";
 
@@ -19,7 +20,8 @@ export interface DevelopmentCliOptions {
   name?: string;
   port?: number;
   reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
+  resume?: boolean;
+  subagents?: SubagentDisplayMode;
   tools?: TerminalPartDisplayMode;
   ui?: boolean;
   url?: string;

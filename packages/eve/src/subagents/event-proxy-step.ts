@@ -1,201 +1,81 @@
-import { buildAdapterContext } from "#channel/adapter-context.js";
 import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import type { ContextContainer } from "#context/container.js";
-import { ModeKey } from "#context/keys.js";
-import { withContextScope } from "#context/run-step.js";
-import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { publishChannelEvent } from "#execution/publish-channel-event.js";
 import {
-  createDurableSessionState,
-  type DurableSession,
-  type DurableSessionState,
-  readDurableSession,
-} from "#execution/durable-session-store.js";
-import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
-import { hydrateDurableSession } from "#execution/session.js";
+  publishFromSessionStep,
+  restoreSessionStep,
+  type PublishedSessionEvents,
+  type RestoredSessionStep,
+  type SessionStepState,
+} from "#execution/publish-session-events.js";
 import {
-  emitTurnEpilogue,
-  getHarnessEmissionState,
-  setHarnessEmissionState,
-} from "#harness/emission.js";
-import { emitProxiedInputRequest } from "#subagents/hitl-proxy.js";
+  withSessionStateDelta,
+  type SessionStateTransition,
+} from "#execution/session/state-delta.js";
+import { emitProxiedAuthorizationEvent, emitProxiedInputRequest } from "#subagents/hitl-proxy.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
-import type { HarnessSession } from "#harness/types.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
-import type { RunMode } from "#shared/run-mode.js";
-import type { TaskInputRequestDelivery } from "#tasks/types.js";
+import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
 
 type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
-type ProxyInputRequestEntries = readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-
-interface ProxySubagentEventResult {
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}
-
 /** Proxies one child event through its parent channel across a durable step boundary. */
-export async function runProxySubagentEventStep(input: {
-  readonly answerHook?: AnswerHookRoute;
-  readonly hookPayload: SubagentEventHookPayload;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<ProxySubagentEventResult> {
+export async function runProxySubagentEventStep(
+  input: SessionStepState & {
+    readonly workflowAsk?: WorkflowAskRoute;
+    readonly hookPayload: SubagentEventHookPayload;
+  },
+): Promise<SessionStateTransition> {
   "use step";
 
-  const durableSession = readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
-
-  return emitProxiedSubagentEvent({
-    answerHook: input.answerHook,
-    ctx,
-    durableSession,
-    hookPayload: input.hookPayload,
-    sessionWritable: input.sessionWritable,
-  });
+  return await withSessionStateDelta(input, async (target) =>
+    emitProxiedSubagentEvent({
+      ...(await restoreSessionStep(target)),
+      workflowAsk: target.workflowAsk,
+      hookPayload: target.hookPayload,
+    }),
+  );
 }
 
-/** Emits a task request whose proxy routes were committed by a prior step. */
-export async function emitRecordedTaskInputRequestStep(input: {
-  readonly request: TaskInputRequestDelivery;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<ProxySubagentEventResult> {
-  "use step";
-
-  const durableSession = readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
-  return await emitProxiedSubagentEvent({
-    ctx,
-    durableSession,
-    hookPayload: {
-      callId: input.request.taskId,
-      childContinuationToken: input.request.replyTo,
-      childSessionId: input.request.taskId,
-      event: {
-        requests: (input.request.requests ?? [input.request.request]) as never,
-        sequence: input.request.sequence,
-        stepIndex: input.request.stepIndex,
-        turnId: input.request.turnId,
-      },
-      kind: "subagent-input-request",
-      subagentName: input.request.taskId,
-    },
-    sessionWritable: input.sessionWritable,
-    recordProxyInputRequests: false,
-  });
-}
-
-/** Applies one proxied child event to an already-hydrated parent context. */
-export async function emitProxiedSubagentEvent(input: {
-  readonly answerHook?: AnswerHookRoute;
-  readonly ctx: ContextContainer;
-  readonly durableSession: DurableSession;
-  readonly hookPayload: SubagentEventHookPayload;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly recordProxyInputRequests?: boolean;
-}): Promise<ProxySubagentEventResult> {
-  const { ctx } = input;
-  const adapter = ctx.require(ChannelKey);
-  const bundle = ctx.require(BundleKey);
-  const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const session = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
-    durable: input.durableSession,
-    turnAgent: effectiveAgent.turnAgent,
-  });
-  const adapterCtx = buildAdapterContext(adapter, ctx);
-  const writer = input.sessionWritable.getWriter();
-
-  let proxyEntries: ProxyInputRequestEntries | undefined;
-  let scopedSession: HarnessSession;
-  try {
-    // A re-emitted child event is a distinct event on the parent stream, so it
-    // gets its own id rather than the child's.
-    const emit = async (event: UnstampedMessageStreamEvent): Promise<void> => {
-      // The child event is already routed; do not forward it again or apply
-      // the parent's scheduled-turn suppression from createSessionEventSink.
-      await publishChannelEvent({ adapter, adapterCtx, ctx, event, writer });
-    };
-
-    const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
-      if (input.hookPayload.kind === "subagent-authorization-event") {
-        await emit(input.hookPayload.event);
-        return {
-          result: undefined,
-          session: await closeStandaloneAuthorizationEvent({
-            emit,
-            eventType: input.hookPayload.event.type,
-            mode: ctx.require(ModeKey),
-            session: enrichedSession,
-          }),
-        };
+/** Relays one child event through the parent session's channel. */
+export async function emitProxiedSubagentEvent(
+  input: RestoredSessionStep & {
+    readonly workflowAsk?: WorkflowAskRoute;
+    readonly hookPayload: SubagentEventHookPayload;
+  },
+): Promise<PublishedSessionEvents> {
+  const { hookPayload, workflowAsk } = input;
+  const { published } = await publishFromSessionStep(input, {
+    origin: "relayed",
+    inputSource:
+      hookPayload.kind === "subagent-input-request"
+        ? JSON.stringify([hookPayload.childContinuationToken, hookPayload.inputSource ?? null])
+        : undefined,
+    async publish(emit, session) {
+      if (hookPayload.kind === "subagent-authorization-event") {
+        await emitProxiedAuthorizationEvent({ emit, hookPayload, session });
+        return undefined;
       }
-
-      const proxyResult = await emitProxiedInputRequest({
-        emit,
-        hookPayload: input.hookPayload,
-        mode: ctx.require(ModeKey),
-        session: enrichedSession,
-      });
-      return { result: proxyResult.entries, session: proxyResult.session };
-    });
-    proxyEntries = scopeResult.result;
-    scopedSession = scopeResult.session;
-  } finally {
-    writer.releaseLock();
-  }
-
-  if (
-    input.recordProxyInputRequests !== false &&
-    proxyEntries !== undefined &&
-    input.hookPayload.kind === "subagent-input-request"
-  ) {
-    const answerHook = input.answerHook;
-    scopedSession = upsertProxyInputRequests({
-      entries:
-        answerHook === undefined
-          ? proxyEntries
-          : proxyEntries.map(([requestId, route]) => [requestId, { ...route, answerHook }]),
-      forChildContinuationToken: input.hookPayload.childContinuationToken,
-      session: scopedSession,
-    });
-  }
-
-  const nextSession = reconcileSessionContinuationToken(ctx, scopedSession);
-
-  return {
-    serializedContext: serializeContext(ctx),
-    sessionState: createDurableSessionState({ session: nextSession }),
-  };
-}
-
-async function closeStandaloneAuthorizationEvent(input: {
-  readonly emit: (event: UnstampedMessageStreamEvent) => Promise<void>;
-  readonly eventType: SubagentAuthorizationEventHookPayload["event"]["type"];
-  readonly mode: RunMode;
-  readonly session: HarnessSession;
-}): Promise<HarnessSession> {
-  if (
-    input.mode !== "conversation" ||
-    (input.eventType !== "authorization.required" && input.eventType !== "authorization.completed")
-  ) {
-    return input.session;
-  }
-
-  const state = getHarnessEmissionState(input.session.state);
-  const nextState = await emitTurnEpilogue(input.emit, state, input.mode);
-  return setHarnessEmissionState(input.session, nextState);
+      return await emitProxiedInputRequest({ emit, hookPayload, session });
+    },
+    updateSession(session, entries) {
+      if (entries === undefined || hookPayload.kind !== "subagent-input-request") {
+        return { session };
+      }
+      return {
+        session: upsertProxyInputRequests({
+          entries:
+            workflowAsk === undefined
+              ? entries
+              : entries.map(([requestId, route]) => [requestId, { ...route, workflowAsk }]),
+          forChildContinuationToken: hookPayload.childContinuationToken,
+          inputSource: hookPayload.inputSource,
+          session,
+        }),
+      };
+    },
+  });
+  return published;
 }

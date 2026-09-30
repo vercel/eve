@@ -141,6 +141,9 @@ Fixture eval configs use the shared `e2eJudgeModel()` helper, which returns an O
 `agent-workflow-stress` uses eve's `mockModel` fixture helper so its 100-turn
 runs stay fast and deterministic. Its concurrent and sequential evals cover
 high-volume session execution and repeated session resumption respectively.
+Its parallel-tool-calls eval scripts ten tool calls into one model step and
+proves the durable runtime executes them concurrently, which a live model
+cannot guarantee because it may split the calls across steps.
 
 ## Fixtures
 
@@ -149,6 +152,12 @@ fixture contains source-generation and repair examples using `eve eval`. It
 checks generated tools through real calls in fresh sessions and restores source
 after retiring the parent and child sessions. Routing-only self-modification
 coverage stays in `agent-subagents`.
+
+`agent-tasks` is the real-model gate for how models plan around tasks: waiting
+for a needed result, fanning out, keeping or correcting tasks after a new
+message, and ordering a side effect after the result it depends on. Every eval
+in it is tagged `real-model`. Deterministic task coverage lives with the
+surfaces it exercises, in `agent-workflow-tools` and `agent-subagents`.
 
 E2E fixtures live under `e2e/fixtures/*`. Fixture discovery also accepts
 `apps/fixtures/*` apps with an `evals/` directory, but shared development apps

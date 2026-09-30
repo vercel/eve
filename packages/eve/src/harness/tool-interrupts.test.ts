@@ -7,9 +7,7 @@ import {
   type AuthorizationSignal,
   authorizationPendingAsJsonObject,
   isAuthorizationPendingModelOutput,
-  isAuthorizationSignal,
   modelFacingAuthorizationOutput,
-  redactSignalResume,
   requestAuthorization,
 } from "#harness/authorization.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
@@ -61,22 +59,6 @@ describe("authorizationPendingAsJsonObject", () => {
       __eveAuthorizationPending: true,
       connections: ["linear"],
     });
-  });
-});
-
-describe("redactSignalResume", () => {
-  it("strips runtime-only state but keeps the model-safe challenge fields", () => {
-    const redacted = redactSignalResume(signalWithVerifier());
-    expect(isAuthorizationSignal(redacted)).toBe(true);
-    expect(redacted.challenges[0]).toEqual({
-      attemptId: "attempt-linear",
-      name: "linear",
-      challenge: { url: "https://idp.example/auth" },
-      hookUrl: "https://app.example/cb",
-    });
-    expect(redacted.challenges[0]).not.toHaveProperty("instanceId");
-    expect(redacted.challenges[0]).not.toHaveProperty("resume");
-    expect(redacted.challenges[0]).not.toHaveProperty("principal");
   });
 });
 

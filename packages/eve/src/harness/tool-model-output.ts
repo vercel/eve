@@ -12,7 +12,7 @@ import { withToolOutputSerializationError } from "#harness/tool-output-serializa
  * `json` values are proven JSON-serializable and `content` arrays are
  * mutable so the value is assignable to the SDK's `ToolResultOutput`.
  */
-export type ToolModelOutputValue =
+type ToolModelOutputValue =
   | { readonly type: "json"; readonly value: JSONValue }
   | { readonly type: "text"; readonly value: string }
   | { readonly type: "content"; readonly value: ToolModelOutputPart[] };

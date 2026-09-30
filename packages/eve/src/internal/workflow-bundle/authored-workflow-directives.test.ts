@@ -56,6 +56,21 @@ describe("prepareAuthoredWorkflowDirectives", () => {
     expect(prepared.source).not.toContain("async execute(");
   });
 
+  it("hoists a task method, the other workflow entry point", async () => {
+    const source = toolModule(
+      ["  async *task({ service }) {", '    "use workflow";', "    yield service;", "  },"].join(
+        "\n",
+      ),
+    );
+
+    const prepared = await prepareAuthoredWorkflowDirectives({ filePath: FILE, source });
+
+    expect(prepared.source).toContain("  task,\n  toModelOutput: (output) => output,");
+    expect(prepared.source).toContain(
+      'async function* task({ service }) {\n    "use workflow";\n    yield service;\n  }',
+    );
+  });
+
   it("hoists an arrow function execute property", async () => {
     const source = toolModule(
       [
@@ -131,6 +146,24 @@ return inner();
     await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).resolves.toEqual({
       hasDirectives: true,
       hasWorkflowDirective: true,
+      source,
+    });
+  });
+
+  it("rejects the removed eve/workflow import", async () => {
+    const source = `import { defineTool } from "eve/tools";
+import { agent } from "eve/workflow";
+export default defineTool({ async execute(input, ctx) { return agent(ctx, input); } });`;
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      /"eve\/workflow" has been removed/u,
+    );
+  });
+
+  it("ignores a workflow directive that is not the executor's first statement", async () => {
+    const source = toolModule('  async execute() { void 0; "use workflow"; return 1; },');
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).resolves.toEqual({
+      hasDirectives: true,
+      hasWorkflowDirective: false,
       source,
     });
   });

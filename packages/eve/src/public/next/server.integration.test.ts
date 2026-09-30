@@ -113,6 +113,7 @@ describe("resolveEveDestinationPrefix", () => {
     vi.stubEnv("NODE_ENV", "development");
     const appRoot = await createTempAppRoot();
     const child = createMockChildProcess();
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     spawnMock.mockReturnValue(child);
 
     const destination = resolveEveDestinationPrefix({

@@ -58,7 +58,6 @@ describe("eve channel production audience", () => {
           adapter: channel.adapter,
           auth,
           input: { message: "private message" },
-          mode: "conversation",
         } satisfies RunInput,
         "production",
       );
@@ -82,6 +81,7 @@ describe("eve channel production audience", () => {
             stepIndex: 0,
             turnId: "turn-1",
           },
+          0,
           0,
         ),
         input: { instructions: "private instructions", messages: [] },

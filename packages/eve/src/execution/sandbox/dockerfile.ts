@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import type { SandboxProviderFiles } from "#shared/sandbox-provider.js";
@@ -63,24 +63,6 @@ export async function materializeSandboxDockerfile(input: {
     await rm(temporaryPath, { force: true, recursive: true });
   }
   return { contentHash, contextPath, path: join(contextPath, "Dockerfile") };
-}
-
-export async function resolveSandboxDockerfile(
-  agentRoot: string,
-): Promise<SandboxDockerfile | undefined> {
-  const path = join(agentRoot, "sandbox", "Dockerfile");
-  try {
-    await readFile(path);
-  } catch (error) {
-    if (isFileNotFoundError(error)) return undefined;
-    throw error;
-  }
-  const contextPath = dirname(path);
-  return {
-    contextPath,
-    contentHash: await hashDirectory(contextPath),
-    path,
-  };
 }
 
 export function dockerfileImageReference(input: {
@@ -159,26 +141,4 @@ export async function publishDockerImageForMicrosandbox(input: {
 
 function isFileNotFoundError(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
-}
-
-async function hashDirectory(root: string): Promise<string> {
-  const hash = createHash("sha256");
-  const paths = await collectFilePaths(root);
-  for (const path of paths) {
-    hash.update(relative(root, path));
-    hash.update("\0");
-    hash.update(await readFile(path));
-    hash.update("\0");
-  }
-  return hash.digest("hex");
-}
-
-async function collectFilePaths(root: string): Promise<string[]> {
-  const paths: string[] = [];
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    const path = join(root, entry.name);
-    if (entry.isDirectory()) paths.push(...(await collectFilePaths(path)));
-    else if (entry.isFile()) paths.push(path);
-  }
-  return paths.sort();
 }

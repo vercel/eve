@@ -35,7 +35,7 @@ const headersGetter: TextMapGetter<Headers> = {
 };
 
 /** Inputs for {@link traceChannelRequest}. */
-export interface TraceChannelRequestInput {
+interface TraceChannelRequestInput {
   readonly request: Request;
   readonly routeKey: string;
 }

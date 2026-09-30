@@ -7,7 +7,6 @@ import type {
   StepStartedStreamEvent,
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { InputResponse } from "#shared/input.js";
@@ -95,8 +94,6 @@ export interface HarnessSession {
   readonly sessionId: string;
   readonly sandboxState?: SandboxState;
   readonly state?: SessionStateMap;
-  /** Framework task that owns this durable session, when present. */
-  readonly taskId?: string;
 }
 
 export function requireSessionModelReference(session: HarnessSession): RuntimeModelReference {
@@ -180,9 +177,9 @@ export interface StepDone {
   readonly done: true;
   readonly output: unknown;
   /**
-   * Marks a terminal turn that failed (e.g. a task-mode turn that could not
-   * fulfil its output schema). For a delegated subagent this routes the result
-   * to the parent as an error tool-result rather than an empty success.
+   * Marks a terminal turn that failed. For a delegated subagent this routes
+   * the result to the parent as an error tool-result rather than an empty
+   * success.
    */
   readonly isError?: boolean;
 }
@@ -213,15 +210,6 @@ export interface SettledTurn {
  */
 export interface StepResult {
   readonly steered?: true;
-  /** Background-tool effects projected onto the session that entered this step. */
-  readonly backgroundTaskSession?: HarnessSession;
-  /** Durable tasks started by background tools and awaiting the parent commit barrier. */
-  readonly backgroundTasks?: readonly {
-    readonly callId?: string;
-    readonly taskInboxToken: string;
-    readonly taskId: string;
-    readonly taskRunId: string;
-  }[];
   readonly next: StepNext;
   readonly session: HarnessSession;
   /**
@@ -229,6 +217,11 @@ export interface StepResult {
    * across the park boundary so a delegated parent can be notified.
    */
   readonly settledTurn?: SettledTurn;
+  /**
+   * Present when the model ended the turn while tasks are working. The turn
+   * stays open until one settles.
+   */
+  readonly held?: { readonly taskIds: readonly string[] };
 }
 
 /**
@@ -280,7 +273,7 @@ export interface ToolLoopHarnessConfig {
   /**
    * Session-level capabilities. The harness reads
    * {@link SessionCapabilities.requestInput} to decide whether a session-limit
-   * continuation prompt may park a task-mode session.
+   * continuation prompt may park the session.
    */
   readonly capabilities?: SessionCapabilities;
   /** Clears model-message history without running a model turn. */
@@ -297,23 +290,11 @@ export interface ToolLoopHarnessConfig {
    * Omitted in production until an instrumentation runtime opts in.
    */
   readonly instrumentation?: SessionInstrumentation;
-  /**
-   * Execution mode for the current harness.
-   *
-   * Conversation mode parks after a final assistant reply so the runtime can
-   * await the next user message. Task mode must return `{ done: true, output }`
-   * for terminal assistant text inside the current invocation.
-   */
-  readonly mode: RunMode;
-  /** Whether this node enables framework background-task behavior. */
-  readonly tasksEnabled?: boolean;
   /** Restores runtime resources for the originating turn before approval work. */
   readonly prepareApprovalTurn?: (event: {
     readonly sequence: number;
     readonly turnId: string;
   }) => Promise<void>;
-  /** Opaque runtime identity retained by a pending approval batch. */
-  readonly toolReplayIdentity?: (toolName: string) => string | undefined;
   /** Resolves persisted step-scoped tools before an approval policy reads them. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

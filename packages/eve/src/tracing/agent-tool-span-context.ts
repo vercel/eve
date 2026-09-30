@@ -5,12 +5,12 @@ import {
   type Context,
 } from "#compiled/@opentelemetry/api/index.js";
 
-export interface AgentToolContentPolicy {
+interface AgentToolContentPolicy {
   readonly recordInputs: boolean;
   readonly recordOutputs: boolean;
 }
 
-export interface AgentToolSpanContext extends AgentToolContentPolicy {
+interface AgentToolSpanContext extends AgentToolContentPolicy {
   readonly recordError?: (error: unknown, errorType?: string) => void;
   readonly setAttributes?: (attributes: Attributes) => void;
 }

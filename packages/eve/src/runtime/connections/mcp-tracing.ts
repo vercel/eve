@@ -87,7 +87,7 @@ export function createMcpTraceFetch(input: {
   };
 }
 
-export function injectMcpTraceContext(
+function injectMcpTraceContext(
   message: JsonRpcRequest,
   activeContext: Context,
   injectContext: McpTraceContextInjector = injectOpenTelemetryTraceContext,
@@ -295,7 +295,7 @@ interface JsonRpcRequest extends Record<string, unknown> {
   readonly params?: unknown;
 }
 
-export type McpTraceContextInjector = (context: Context, carrier: Record<string, string>) => void;
+type McpTraceContextInjector = (context: Context, carrier: Record<string, string>) => void;
 
 function injectOpenTelemetryTraceContext(context: Context, carrier: Record<string, string>): void {
   propagation.inject(context, carrier, traceContextSetter);

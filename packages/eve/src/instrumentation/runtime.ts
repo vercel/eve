@@ -28,10 +28,6 @@ import {
   publishInputResolutions,
   type CreateInstrumentationHandleEventInput,
 } from "#instrumentation/native-events.js";
-import {
-  createBackgroundTaskInstrumentation,
-  type BackgroundTaskInstrumentation,
-} from "#instrumentation/background-task-runtime.js";
 import type { ResolvedInputBatch } from "#harness/input-requests.js";
 import type { HandleEventFn } from "#harness/types.js";
 import {
@@ -65,7 +61,7 @@ import { readInstrumentationSessionContext } from "#instrumentation/session-cont
 import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
-import { readConversationId } from "#tracing/conversation-context.js";
+import { readConversationId } from "#shared/conversation-identity.js";
 import {
   getInstrumentationRuntime,
   registerInstrumentationRuntime,
@@ -140,8 +136,6 @@ export interface BoundInstrumentationSession {
 
 /** Process-wide runtime consumed by every harness execution surface. */
 export interface InstrumentationRuntime {
-  /** Materializes settled invocation spans without draining the exporter pipeline. */
-  readonly flushSettledInvocations?: () => Promise<void>;
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
   readonly idGenerator?: AgentSpanIdGenerator;
@@ -175,7 +169,7 @@ export interface SessionInstrumentation {
   ) => Promise<TResult>;
 }
 
-export interface ExecutionInstrumentation extends BackgroundTaskInstrumentation {
+export interface ExecutionInstrumentation {
   readonly createHandleEvent: (input: {
     readonly handleEvent?: HandleEventFn;
     readonly turnId?: string;
@@ -484,11 +478,6 @@ export function bindInstrumentationRuntime(
     };
   };
   return {
-    ...createBackgroundTaskInstrumentation({
-      ctx,
-      hooks: () => bindHooks(readSessionContext()),
-      sessionId: boundSession.sessionId,
-    }),
     createHandleEvent: (input) => {
       const sessionContext = readSessionContext();
       return createInstrumentationHandleEvent({

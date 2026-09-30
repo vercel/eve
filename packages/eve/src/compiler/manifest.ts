@@ -1,4 +1,5 @@
 import { z } from "#compiled/zod/index.js";
+import { mountIdSchema } from "#shared/extension-mount.js";
 
 import {
   type DiscoverDiagnosticsSummary,
@@ -13,6 +14,7 @@ import type { ChannelRouteMethod } from "#public/definitions/channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { InternalInstructionsDefinition } from "#shared/instructions-definition.js";
 import { jsonObjectSchema } from "#shared/json-schemas.js";
+import type { JsonObject } from "#shared/json.js";
 import type { Node } from "#shared/node.js";
 import type {
   MarkdownSourceRef,
@@ -28,6 +30,7 @@ import {
   type AgentBuildDefinition,
   type ModelRouting,
 } from "#shared/agent-definition.js";
+import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { CompiledToolBehavior } from "#tools/behavior.js";
 import type {
@@ -55,12 +58,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 51;
-
-/**
- * Compiled channel entry preserved in the compiled manifest.
- */
-export type CompiledChannelEntry = CompiledChannelDefinition;
+export const COMPILED_AGENT_MANIFEST_VERSION = 54;
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.
@@ -89,6 +87,8 @@ export interface CompiledChannelDefinition {
    * channel leaves CORS untouched.
    */
   readonly cors?: NormalizedChannelCorsOptions;
+  readonly manifest?: JsonObject;
+  readonly vercelConnect?: VercelConnectMetadata;
 }
 
 /**
@@ -352,6 +352,7 @@ const agentSourceOwnerSchema: z.ZodType<AgentSourceOwner> = z.discriminatedUnion
   z
     .object({
       kind: z.literal("extension"),
+      mountId: mountIdSchema,
       namespace: z.string().min(1),
       packageName: z.string().min(1),
     })
@@ -371,6 +372,7 @@ const filesystemModuleBackingSchema = z
   .object({
     externalDependencies: z.array(z.string()).readonly(),
     extensionScope: z.object({ namespace: z.string(), sourceRoot: z.string() }).strict().optional(),
+    mountId: z.string().optional(),
     kind: z.literal("filesystem"),
     sourcePath: z.string(),
   })
@@ -380,6 +382,7 @@ const programmaticModuleBackingSchema = z
   .object({
     dependencies: z.record(z.string(), z.string()).readonly().optional(),
     kind: z.literal("programmatic"),
+    mountId: z.string().optional(),
     moduleId: z.string(),
     parameters: jsonObjectSchema.optional(),
     registryId: z.string(),
@@ -488,6 +491,21 @@ const compiledChannelCorsSchema = z
   })
   .strict() satisfies z.ZodType<NormalizedChannelCorsOptions>;
 
+const compiledVercelConnectMetadataSchema = z
+  .object({
+    connector: z.string(),
+    requirement: z
+      .object({
+        method: z.string().optional(),
+        reference: z.string(),
+        service: z.string(),
+        subjectTypes: z.array(z.enum(["app", "user"])).readonly(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict() satisfies z.ZodType<VercelConnectMetadata>;
+
 const compiledChannelDefinitionSchema = z
   .object({
     kind: z.literal("channel"),
@@ -500,6 +518,8 @@ const compiledChannelDefinitionSchema = z
     exportName: z.string().optional(),
     adapterKind: z.string().optional(),
     cors: compiledChannelCorsSchema.optional(),
+    manifest: jsonObjectSchema.optional(),
+    vercelConnect: compiledVercelConnectMetadataSchema.optional(),
   })
   .strict();
 
@@ -604,7 +624,6 @@ const compiledAgentConfigBaseFields = {
     .strict()
     .optional(),
   name: z.string(),
-  outputSchema: jsonObjectSchema.optional(),
   reasoning: z
     .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
     .optional(),
@@ -781,12 +800,7 @@ const compiledConnectionDefinitionSchema = z
      * or opaque service-connector key (`"scl_..."`); both forms address
      * the same connector on the Vercel Connect side.
      */
-    vercelConnect: z
-      .object({
-        connector: z.string(),
-      })
-      .strict()
-      .optional(),
+    vercelConnect: compiledVercelConnectMetadataSchema.optional(),
   })
   .strict();
 
@@ -804,12 +818,12 @@ const compiledDynamicConnectionDefinitionSchema: z.ZodType<CompiledDynamicConnec
 
 const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
   .object({
-    availability: z.array(z.enum(["delegated-task-child", "root-session"])).readonly(),
+    availability: z.array(z.literal("root-session")).readonly(),
     handling: z
       .discriminatedUnion("kind", [
         z
           .object({
-            action: z.enum(["self-agent", "task-cancel"]),
+            action: z.literal("self-agent"),
             kind: z.literal("dispatch"),
           })
           .strict(),
@@ -821,6 +835,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
           .strict(),
         z
           .object({
+            entryPoint: z.enum(["execute", "task", "serve"]),
             kind: z.literal("workflow-tool"),
             workflowId: z.string(),
           })
@@ -830,7 +845,6 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
     presentation: z.literal("load-skill").optional(),
     shape: z
       .object({
-        lifetime: z.enum(["step", "task"]),
         suspend: z.enum(["none", "workflow"]),
       })
       .strict()
@@ -843,7 +857,6 @@ const compiledToolDefinitionSchema = z
     availableInSubagents: z.boolean().optional(),
     behavior: compiledToolBehaviorSchema.optional(),
     description: z.string(),
-    execution: z.literal("background").optional(),
     exportName: z.string().optional(),
     hasExecute: z.boolean(),
     hasModelOutputProjection: z.boolean(),
@@ -928,10 +941,20 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
     externalDependencies: z.array(z.string()).readonly(),
     namespace: z.string(),
     packageName: z.string(),
-    packageNamespace: z.string(),
+    specifier: z.string(),
+    mountId: mountIdSchema,
     sourceRoot: z.string(),
     mountSourceId: z.string(),
+    mountSourcePath: z.string(),
     mountLogicalPath: z.string(),
+    programmaticImport: z
+      .object({
+        specifier: z.string(),
+        entryPath: z.string(),
+        config: jsonObjectSchema,
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -1015,7 +1038,7 @@ const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z.union([
 /**
  * One mounted extension recorded on a compiled agent manifest. The runtime
  * evaluates {@link mountLogicalPath} at module-map load so the mount's factory
- * call binds the extension's config before any tool runs.
+ * call binds the extension's config on its instance handle before any tool runs.
  */
 export interface CompiledExtensionMount {
   /** Runtime packages this extension requires the consuming application to externalize. */
@@ -1023,20 +1046,20 @@ export interface CompiledExtensionMount {
   /** Mount-derived namespace that prefixes the extension's tool/skill names. */
   readonly namespace: string;
   readonly packageName: string;
-  /**
-   * Package-derived namespace that scopes the extension's durable state keys and
-   * config binding. Distinct from {@link namespace}: state stays keyed to the
-   * package so a consumer renaming the mount file cannot orphan persisted state.
-   */
-  readonly packageNamespace: string;
-  /**
-   * Absolute path to the extension's source root on disk. The extension-scope
-   * bundler plugin treats any module under this root as extension-owned and
-   * rewrites its `eve/context`/`eve/extension` imports to bake in the namespace.
-   */
+  /** Package export imported by the mount declaration. */
+  readonly specifier: string;
+  /** Canonical path of this mount in the root agent tree. */
+  readonly mountId: string;
+  /** Absolute path to the extension's distributed source root. */
   readonly sourceRoot: string;
   readonly mountSourceId: string;
+  readonly mountSourcePath: string;
   readonly mountLogicalPath: string;
+  readonly programmaticImport?: {
+    readonly specifier: string;
+    readonly entryPath: string;
+    readonly config: JsonObject;
+  };
 }
 
 /**
@@ -1191,7 +1214,6 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
                   },
           },
     name: config.name,
-    outputSchema: config.outputSchema,
     reasoning: config.reasoning,
     limits:
       config.limits === undefined

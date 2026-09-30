@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Nitro } from "nitro/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
   COMPILE_METADATA_KIND,
   COMPILE_METADATA_VERSION,
@@ -19,7 +19,6 @@ import {
   resolveInstalledPackageInfo,
   resolveWorkflowModulePath,
 } from "#internal/application/package.js";
-import { resolveNitroBuildDirectory } from "#internal/application/paths.js";
 import type {
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
@@ -32,6 +31,8 @@ import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-build
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { defineChannel, WS } from "#public/definitions/channel.js";
 import { defineTool } from "#tools/definition.js";
+import { JustBashSandbox } from "#sandbox/providers/just-bash.js";
+import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 
@@ -103,8 +104,15 @@ async function createPreparedHost(
 ): Promise<PreparedDevelopmentApplicationHost> {
   const appRoot = "/tmp/weather-agent";
   const paths = resolveCompilerArtifactPaths(appRoot);
-  const modules: Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]> =
-    [];
+  const modules: Array<NonNullable<Parameters<typeof compileFromMemory>[0]["modules"]>[number]> = [
+    {
+      logicalPath: "sandbox.ts",
+      loadNamespace: async () => {
+        const environment = JustBashSandbox.environment();
+        return { environment, default: defineSandbox(() => environment.open()) };
+      },
+    },
+  ];
   if (input.websocket === true) {
     modules.push({
       logicalPath: "channels/voice.ts",
@@ -228,6 +236,10 @@ async function createPreparedHost(
       workflowBuildDir: `${appRoot}/.eve/dev-hosts/test/workflow`,
     },
   };
+}
+
+function resolveNitroBuildDirectory(appRoot: string): string {
+  return join(appRoot, ".eve", "nitro");
 }
 
 function createProductionOptions(preparedHost: PreparedApplicationHost) {
@@ -644,9 +656,11 @@ describe("application Nitro creation", () => {
         externalDependencies: ["zod", "sharp"],
         mountLogicalPath: "extensions/layout.ts",
         mountSourceId: "extensions/layout.ts",
+        mountSourcePath: join(sourceRoot, "layout.ts"),
         namespace: "layout",
         packageName: "layout-extension",
-        packageNamespace: "layout-extension",
+        specifier: "layout-extension",
+        mountId: "extensions/layout",
         sourceRoot,
       },
     ];
@@ -726,7 +740,7 @@ describe("application Nitro creation", () => {
     );
   });
 
-  it("leaves Nitro to classify unconfigured hosted dependencies", async () => {
+  it("traces only the configured sandbox engine and leaves other dependencies to Nitro", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);
 
@@ -736,7 +750,7 @@ describe("application Nitro creation", () => {
 
     await createProductionApplicationNitro(preparedHost, createProductionOptions(preparedHost));
 
-    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual([]);
+    expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(["just-bash"]);
   });
 
   it("includes the workflow sandbox runtime plugin only for generated-program tools", async () => {

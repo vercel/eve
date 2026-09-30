@@ -48,7 +48,7 @@ export default githubChannel({
 });
 ```
 
-A GitHub channel event handler cannot fire for a Slack-owned session, so platform-specific side effects do not depend on an early-return guard. On a built-in channel, an authored handler replaces that channel's default handler for the same event key. Check the channel page before overriding events that deliver replies, progress, errors, or human-input prompts.
+A GitHub channel event handler cannot fire for a Slack-owned session, so platform-specific side effects do not depend on an early-return guard. On a built-in channel, an authored handler replaces that channel's default handler for the same event key. Check the channel page before overriding events that deliver replies, progress, errors, or human-input prompts. The [Slack channel](/docs/channels/slack#customize-rendering) takes renderers instead: a renderer's handler keeps Slack's default by calling `next()` and replaces it by skipping `next`.
 
 Use `ctx.channel.kind` inside a global hook only when the operation is otherwise agent-wide and conditional handling is intentional. For typed channel metadata in dynamic resolvers or instrumentation, import the channel definition and narrow with `isChannel`; see [OpenTelemetry runtime context](../observability/otel#add-runtime-context).
 
@@ -61,6 +61,7 @@ helpers documented in [Session context](./session-context):
 interface HookContext extends SessionContext {
   readonly agent: { readonly name: string; readonly nodeId?: string };
   readonly channel: { readonly kind?: string; readonly continuationToken?: string };
+  cancel(): void;
 }
 ```
 
@@ -86,10 +87,13 @@ handle can also automatically resume on later I/O. A hook failure, including a
 failed stop, follows the normal
 [hook failure behavior](#what-happens-when-a-hook-throws).
 
-For `subagent.called` and `subagent.completed`, `ctx.session.id` identifies the
-parent session. Typed handlers and `*` handlers receive this context even when
-the subagent event arrives between parent turns. These hooks can use
-`ctx.getSandbox()` against the parent session.
+For `task.started`, `task.settled`, and `agent.started`, `ctx.session.id`
+identifies the session that started the task or opened the subagent session.
+Typed handlers and `*` handlers receive this context even when the event
+arrives between turns. These hooks can use `ctx.getSandbox()` against that
+session. Session state and sandbox changes they make are kept for the
+session's next turn. `agent.started` appears when the child session opens, or
+when the parent's current model step ends if one is running.
 
 ### Narrowing tool results
 
@@ -171,25 +175,57 @@ See [the event envelope](../concepts/sessions-runs-and-streaming#the-event-envel
 
 ## Execution order
 
-When a stream event fires, three things happen in order:
+When a session publishes a stream event while it runs, the step that owns the session does four things in order:
 
-1. Emit. The channel adapter handler runs, the event is stamped with its `meta` envelope, then it is written to the durable stream.
-2. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
-3. Model preparation, for model lifecycle events. Dynamic resolvers subscribed to those events update the model context. Subagent notifications do not run model preparation.
+1. Channel delivery. The channel adapter handler runs.
+2. Write. The event is stamped with its `meta` envelope, then written to the durable stream.
+3. Hooks. Stream-event hooks fire (typed handlers first, then the `*` wildcard). Return values are ignored.
+4. Model preparation, for model lifecycle events. Dynamic resolvers subscribed to those events update the model context. Subagent notifications do not run model preparation.
 
 Hooks always run after the event is durably recorded, so if a hook throws, the stream stays consistent. The persisted event and every hook observe the same `meta.id`.
 
 ## What happens when a hook throws
 
-A thrown handler during a model turn propagates through turn execution and surfaces as `turn.failed`. In a conversation session, this includes handlers for `turn.started` and the first `step.started` of a model call: the failed turn ends with `session.waiting`, and the next message can start another turn. Task-mode boundary failures remain terminal. If a hook subscribed to a failure-cascade event also throws, it escalates to `session.failed`. For belt-and-suspenders semantics inside a hook, wrap the body in `try`/`catch`. eve treats a thrown hook as a real failure.
+eve logs a thrown or rejected handler with the hook slug, subscription, event type, event ID, and session ID, then runs the remaining subscribers in order. The current turn, subagent notification, and session continue. This applies to every stream-event hook, including `turn.started`, `step.started`, and failure events. Throwing from a hook does not reject work or veto a turn. To stop the running turn, call [`ctx.cancel()`](#cancel-the-running-turn-from-a-hook).
 
-For `subagent.called`, `subagent.completed`, and events proxied from a child, a thrown handler fails the publishing step and follows the workflow runtime's step retry policy. A retry can publish the event again before rerunning its hooks. Parent execution waits for the publishing step to finish or exhaust its retries. Exhausting retries fails the session.
+A hook failure does not trigger a retry. State changes and external side effects made before the exception are not rolled back. If a side effect needs retries or compensation, handle that inside the hook. Runtime failures outside the authored handler, such as failures setting up context or persisting state, still propagate. If persisting state after a `task.started`, `task.settled`, or `agent.started` event fails, the workflow runtime retries the publishing step, which can publish the event again.
+
+## Cancel the running turn from a hook
+
+Call `ctx.cancel()` when a hook finds that the turn cannot proceed. For example, a `turn.started` hook that cannot load the caller's credentials can stop the turn before the model runs, instead of letting every tool call fail:
+
+```ts title="agent/hooks/require-credentials.ts"
+import { defineHook } from "eve/hooks";
+import { loadWorkspaceCredentials } from "../lib/credentials";
+
+export default defineHook({
+  events: {
+    async "turn.started"(_event, ctx) {
+      try {
+        await loadWorkspaceCredentials(ctx.session.auth.current);
+      } catch (error) {
+        console.warn("cancelling turn: workspace credentials unavailable", {
+          error,
+          sessionId: ctx.session.id,
+        });
+        ctx.cancel();
+      }
+    },
+  },
+});
+```
+
+The remaining subscribers for the event still run. Then eve cancels the turn the same way [`session.cancel()`](./client/streaming) does: in-flight model and tool work is aborted, delegated child turns are cancelled, and the turn ends with `turn.cancelled` followed by `session.waiting`. No failure event is emitted. A cancel from `turn.started` or `step.started` takes effect before that model call. In a conversation, the next message starts a new turn. A delegated task reports the cancellation to its caller.
+
+`ctx.cancel()` returns `void` rather than a promise. The turn stops after the hook returns, so there is nothing to await. Call it before the handler's promise settles: eve ignores a call from work the handler does not await and logs a warning.
+
+`ctx.cancel()` only stops a running turn. eve logs a warning and ignores the call on `step.failed`, `turn.completed`, `turn.failed`, `turn.cancelled`, `turn.waiting`, `session.waiting`, `session.completed`, `session.failed`, `context.cleared`, `task.started`, `task.settled`, and `agent.started`, and during clear or compact requests.
 
 ## Subagent isolation
 
 Subagents may carry their own `agent/hooks/` directory. Subagent hooks fire only inside the subagent scope. Parent-agent hooks do not fire for subagent turns, and subagent hooks see only the subagent's own context.
 
-Interactive events such as `input.requested` and `authorization.required` are also published on the parent stream. Parent hooks observe these events after the parent channel handler and stream write, with the parent's session, agent, and channel context. The event retains the child's turn coordinates, so `event.data.turnId` can differ from `ctx.session.turn.id`. The accompanying parent `turn.completed` and `session.waiting` events also invoke parent hooks; they do not resolve pending input requests.
+Interactive events such as `input.requested` and `authorization.required` are also published on the parent stream. Parent hooks observe these events after the parent channel handler and stream write, with the parent's session, agent, and channel context. The event retains the child's turn coordinates, so `event.data.turnId` can differ from `ctx.session.turn.id`. The parent follows a proxied `input.requested` or `authorization.required` with `turn.waiting` for its own open turn, which stays open until the running call finishes. A proxied `authorization.completed` is not followed by a parent turn event. These parent events also invoke parent hooks; they do not resolve pending input requests.
 
 ## Hook vs tool vs provider
 

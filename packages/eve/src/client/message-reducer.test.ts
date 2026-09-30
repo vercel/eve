@@ -18,9 +18,12 @@ import {
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
+  createTaskSettledEvent,
   createTurnCancelledEvent,
+  createTurnCompletedEvent,
   createTurnFailedEvent,
   type MessageStreamEvent,
+  type TaskSettledStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
@@ -1279,39 +1282,62 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
-  it("removes streamed text for a null message completion", () => {
-    const reducer = defaultMessageReducer();
-    const data = reduceServerEvents(reducer, reducer.initial(), [
-      createMessageCompletedEvent({
-        message: "Earlier step.",
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_1",
-      }),
-      createMessageAppendedEvent({
-        messageDelta: "<eve-empty-delivery/>",
-        sequence: 1,
-        stepIndex: 1,
-        turnId: "turn_1",
-      }),
-      createMessageCompletedEvent({
-        message: null,
-        sequence: 1,
-        stepIndex: 1,
-        turnId: "turn_1",
-      }),
-    ]);
+  describe("task tool parts", () => {
+    function settleResearchTask(settled: TaskSettledStreamEvent["data"]) {
+      const reducer = defaultMessageReducer();
+      const data = reduceServerEvents(reducer, reducer.initial(), [
+        createActionResultEvent({
+          result: {
+            callId: "call_1",
+            kind: "tool-result",
+            output: "Started task task_1.",
+            toolName: "research",
+          },
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        createTurnCompletedEvent({ sequence: 0, turnId: "turn_1" }),
+        createTaskSettledEvent(settled),
+      ]);
+      const [message] = data.messages;
+      return { status: message?.metadata?.status, toolPart: message?.parts[1] };
+    }
 
-    expect(data.messages[0]?.parts).toEqual([
-      { type: "step-start" },
-      {
-        state: "done",
-        stepIndex: 0,
-        text: "Earlier step.",
-        type: "text",
-      },
-      { type: "step-start" },
-    ]);
+    it("replaces the receipt with the output of a completed task", () => {
+      expect(
+        settleResearchTask({
+          callId: "call_1",
+          output: { summary: "done" },
+          status: "completed",
+          taskId: "task_1",
+          turnId: "turn_1",
+        }),
+      ).toMatchObject({
+        status: "complete",
+        toolPart: { output: { summary: "done" }, state: "output-available" },
+      });
+    });
+
+    it("shows a failed or cancelled task as a tool error", () => {
+      expect(
+        settleResearchTask({
+          callId: "call_1",
+          error: { message: "Remote agent unavailable." },
+          status: "failed",
+          taskId: "task_1",
+          turnId: "turn_1",
+        }).toolPart,
+      ).toMatchObject({ errorText: "Remote agent unavailable.", state: "output-error" });
+      expect(
+        settleResearchTask({
+          callId: "call_1",
+          status: "cancelled",
+          taskId: "task_1",
+          turnId: "turn_1",
+        }).toolPart,
+      ).toMatchObject({ errorText: "Task was cancelled.", state: "output-error" });
+    });
   });
 
   it("preserves separate participant messages received within one turn", () => {
@@ -1364,20 +1390,6 @@ describe("defaultMessageReducer", () => {
 
     const data = reducer.reduce(reducer.initial(), event);
     expect(data.messages[0]?.id).toBe("turn_1:2:user");
-  });
-
-  it("does not project framework-authored task input", () => {
-    const reducer = defaultMessageReducer();
-    const [event] = stampTestEvents([
-      createMessageReceivedEvent({
-        kind: "execution.background_task",
-        message: "Task completed",
-        sequence: 1,
-        turnId: "turn_1",
-      }),
-    ]);
-
-    expect(reducer.reduce(reducer.initial(), event!).messages).toEqual([]);
   });
 
   it("projects structured file parts from message.received onto the user message", () => {

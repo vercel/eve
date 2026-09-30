@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { serializeCompiledManifestForFingerprint } from "#internal/compiled-manifest-fingerprint.js";
 
 async function manifestWithRoot(runtimeAppRoot: string, agentRoot = join(runtimeAppRoot, "agent")) {

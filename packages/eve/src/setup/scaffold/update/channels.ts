@@ -63,8 +63,6 @@ export interface PackageJsonMutation {
   scripts: string[];
 }
 
-export type ChannelMutationAction = "created" | "overwritten" | "skipped";
-
 export type ChannelMutationResult = SlackChannelMutationResult | WebChannelMutationResult;
 
 interface SlackChannelWrittenResult {

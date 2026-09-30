@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { compileFromMemory } from "../src/compiler/compile-from-memory.js";
+import { compileFromMemory } from "../src/internal/testing/compile-from-memory.js";
 import { defineSchedule } from "../src/public/definitions/schedule.js";
 import { resolveSchedules } from "../src/runtime/schedules/resolve-schedule.js";
 

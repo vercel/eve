@@ -21,6 +21,7 @@ export interface HookEventMap {
   readonly "approval.candidate": ProtocolEvent<"approval.candidate">;
   readonly "approval.settled": ProtocolEvent<"approval.settled">;
   readonly "actions.requested": ProtocolEvent<"actions.requested">;
+  readonly "agent.started": ProtocolEvent<"agent.started">;
   readonly "authorization.completed": ProtocolEvent<"authorization.completed">;
   readonly "authorization.required": ProtocolEvent<"authorization.required">;
   readonly "compaction.completed": ProtocolEvent<"compaction.completed">;
@@ -41,14 +42,13 @@ export interface HookEventMap {
   readonly "step.completed": ProtocolEvent<"step.completed">;
   readonly "step.failed": ProtocolEvent<"step.failed">;
   readonly "step.started": ProtocolEvent<"step.started">;
-  readonly "subagent.called": ProtocolEvent<"subagent.called">;
-  readonly "subagent.completed": ProtocolEvent<"subagent.completed">;
-  readonly "subagent.event": ProtocolEvent<"subagent.event">;
-  readonly "subagent.started": ProtocolEvent<"subagent.started">;
+  readonly "task.settled": ProtocolEvent<"task.settled">;
+  readonly "task.started": ProtocolEvent<"task.started">;
   readonly "turn.cancelled": ProtocolEvent<"turn.cancelled">;
   readonly "turn.completed": ProtocolEvent<"turn.completed">;
   readonly "turn.failed": ProtocolEvent<"turn.failed">;
   readonly "turn.started": ProtocolEvent<"turn.started">;
+  readonly "turn.waiting": ProtocolEvent<"turn.waiting">;
 }
 
 /** Event type discriminators available to authored hooks. */
@@ -77,6 +77,18 @@ export interface HookContext extends SessionContext {
     readonly kind?: string;
     readonly continuationToken?: string;
   };
+  /**
+   * Cancels the running turn. The event's remaining subscribers still run,
+   * then the turn settles like `session.cancel()`: `turn.cancelled`, then
+   * `session.waiting`. Returns `void` because the turn stops after the hook
+   * returns; call it before the handler's promise settles.
+   *
+   * eve logs a warning and ignores the call when the event cannot stop a
+   * running turn (`step.failed`, turn and session terminal events,
+   * `context.cleared`, `subagent.*`, and clear or compact requests) or when
+   * it arrives after the event's hooks returned.
+   */
+  cancel(): void;
 }
 
 /**

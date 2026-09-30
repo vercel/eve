@@ -1,6 +1,11 @@
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
+import {
+  type BundlerDefaultLogHandler,
+  onVendoredDependencyLog,
+} from "#internal/bundler/vendored-dependency-log.js";
+
 type RolldownOutputChunk = {
   readonly type: "chunk";
   readonly code: string;
@@ -25,7 +30,7 @@ type RolldownParseAst = (
   options?: Record<string, unknown> | null,
   filename?: string,
 ) => unknown;
-export type RolldownParserLanguage = "js" | "jsx" | "ts" | "tsx";
+type RolldownParserLanguage = "js" | "jsx" | "ts" | "tsx";
 
 type RolldownModule = {
   readonly build: RolldownBuild;
@@ -57,7 +62,7 @@ function loadNitroRolldown(): Promise<RolldownModule> {
  * Loads Rolldown's parser from Nitro's dependency tree so workflow directive
  * transforms can use the same bundler dependency without exposing it publicly.
  */
-export function loadNitroRolldownParseAst(): Promise<RolldownParseAstModule> {
+function loadNitroRolldownParseAst(): Promise<RolldownParseAstModule> {
   rolldownParseAstPromise ??= (async () => {
     const require = createRequire(import.meta.url);
     const nitroRequire = createRequire(require.resolve("nitro/package.json"));
@@ -68,7 +73,7 @@ export function loadNitroRolldownParseAst(): Promise<RolldownParseAstModule> {
   return rolldownParseAstPromise;
 }
 
-export function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
+function inferRolldownParserLanguage(filename: string): RolldownParserLanguage {
   if (filename.endsWith(".tsx")) return "tsx";
   if (filename.endsWith(".jsx")) return "jsx";
   if (/\.[cm]?ts$/.test(filename)) return "ts";
@@ -95,14 +100,31 @@ export async function parseWithNitroRolldownAst(
 /**
  * Runs a raw Rolldown build. Prefer {@link buildSingleRolldownChunk} for any
  * bundle whose consumer expects one in-memory file; use this directly only
- * for multi-file, written-to-disk output.
+ * for multi-file, written-to-disk output. Warnings raised only by dependency
+ * code are dropped unless the caller supplies its own `onLog`, except
+ * unresolved imports.
  */
 export async function buildWithNitroRolldown(
   options: Record<string, unknown>,
 ): Promise<RolldownOutput> {
   assertCustomRolldownConditionNames(options);
   const { build } = await loadNitroRolldown();
-  return await build(options);
+  return await build({ onLog: onRolldownBuildLog, ...options });
+}
+
+// Unlike the Nitro host build, whose dependency graph deliberately leaves
+// optional imports such as `just-bash` unresolved, these bundles inline their
+// dependencies, so an unresolved import there only fails once the bundle loads.
+function onRolldownBuildLog(
+  level: string,
+  log: unknown,
+  defaultHandler: BundlerDefaultLogHandler,
+): void {
+  if (level === "warn" && (log as { code?: unknown } | null)?.code === "UNRESOLVED_IMPORT") {
+    defaultHandler(level, log);
+    return;
+  }
+  onVendoredDependencyLog(level, log, defaultHandler);
 }
 
 export const ROLLDOWN_STANDARD_CONDITION_NAMES: ReadonlySet<string> = new Set([

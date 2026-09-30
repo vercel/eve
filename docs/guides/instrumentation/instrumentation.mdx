@@ -83,8 +83,8 @@ export default defineInstrumentation({
 });
 ```
 
-The function receives `agentName`, `channel`, `audience`, `mode`,
-`environment`, and `principalType`. `audience` is `"public"`, `"private"`, or
+The function receives `agentName`, `channel`, `audience`, `environment`, and
+`principalType`. `audience` is `"public"`, `"private"`, or
 `"unknown"`; `environment` is `"development"`, `"preview"`, or
 `"production"`.
 
@@ -168,6 +168,8 @@ operation key when upserting records across replays.
 | Memory operation | `memory.operation.started`, `memory.operation.completed`, `memory.operation.failed`                               | Track a memory-store search or write. Events include the operation name, phase, and memory slot; completion may include a record count and records.                              |
 
 An ordinary tool emits both `action.*` and `tool.call.*` events. Use `action.*` for eve's durable dispatch lifecycle, including tools, skills, subagents, and remote agents. Use `tool.call.*` only when you need the AI SDK's in-process tool execution boundary.
+
+For local and remote subagents, `action.completed` and `action.failed` include the child turn's `usage` directly. Token counts are always present when the child reports usage; `usage.costUsd` is present only when the model provider reports a price. Without the action-level usage, consumers would have to correlate child model events through trace lineage and sum their provider metadata, which is harder to do reliably across retries and parked turns.
 
 Handlers from different files run concurrently and are failure-isolated. Do
 not depend on execution order. Use `flush` to drain buffered records and

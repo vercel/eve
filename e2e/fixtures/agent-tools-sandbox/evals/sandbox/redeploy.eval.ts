@@ -39,6 +39,7 @@ const ALIAS_SETTLE_MATCHES = 5;
 
 const FILE_PATH = "/workspace/redeploy-note.txt";
 const FILE_TOKEN = "sandbox-redeploy-ok-K4W";
+const DYNAMIC_TURN_REPLAY_TOKEN = "dynamic-turn-replay-ok-V6N";
 
 const INSTRUCTIONS_PATH = resolve("agent", "instructions.md");
 const INSTRUCTIONS_MARKER = "redeploy-instructions-marker-T8B";
@@ -82,6 +83,18 @@ export default defineEval({
 
     const originalInstructions = await readFile(INSTRUCTIONS_PATH, "utf8");
     try {
+      // Resolve a turn-scoped dynamic tool, then park that same turn inside a
+      // workflow tool. Resuming after the deployment switch below must restore
+      // the dynamic callback in the new process before the model calls it.
+      const dynamicParked = await t.send("DYNAMIC-TURN-REPLAY-START");
+      const dynamicSession = dynamicParked.session;
+      dynamicSession.requireInputRequest({
+        display: "confirmation",
+        optionIds: ["approve", "cancel"],
+        toolName: "dynamic-turn-replay-gate",
+      });
+      dynamicParked.calledTool("dynamic-turn-replay-gate", { status: "pending", count: 1 });
+
       // t0: write a marker file into this session's sandbox workspace.
       const write = await t.send(
         `Run the bash command \`printf %s ${FILE_TOKEN} > ${FILE_PATH}\`. ` +
@@ -98,6 +111,14 @@ export default defineEval({
       );
       await deployToAlias(t, alias, "instructions");
       await waitForAliasToServe(t, INSTRUCTIONS_MARKER);
+
+      const dynamicResumed = await dynamicSession.respondAll("approve");
+      dynamicResumed.expectOk();
+      dynamicResumed.calledTool("dynamic_turn_replay_probe", {
+        count: 1,
+        output: new RegExp(DYNAMIC_TURN_REPLAY_TOKEN),
+      });
+      dynamicResumed.messageIncludes(DYNAMIC_TURN_REPLAY_TOKEN);
 
       // t2: the same session reattaches to the same sandbox.
       const persist = await session.send(

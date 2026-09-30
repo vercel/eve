@@ -10,7 +10,7 @@ import { eveCliBanner } from "#cli/banner.js";
 import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
-import { registerDevelopmentCommand } from "#cli/dev/command.js";
+import { registerDevelopmentCommand, registerRemoteCommands } from "#cli/dev/command.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
   registerAcpCommand,
@@ -56,10 +56,6 @@ interface CliLogger {
 interface CliRuntimeDependencies {
   isCodingAgentLaunch(): Promise<boolean>;
   findApplicationRoot(cwd: string): Promise<string | undefined>;
-  isActiveDevelopmentServerForApp(input: {
-    readonly appRoot: string;
-    readonly serverUrl: string;
-  }): Promise<boolean>;
   buildHost: BuildHost;
   resolveVerifiedRemoteDevelopmentClient: ResolveVerifiedRemoteDevelopmentClient;
   runAcpServer: RunAcpServer;
@@ -134,20 +130,6 @@ export function createCliProgram(
       writeOut: (message) => {
         logger.log(message.trimEnd());
       },
-    });
-
-  agentCommand(
-    program
-      .command("channels")
-      .description("Manage user-authored channels in the current project.")
-      .command("list"),
-    applicationContext,
-  )
-    .description("List user-authored channels in the current project.")
-    .option("--json", "Output as JSON")
-    .action(async (options: { json?: boolean }) => {
-      const { runChannelsListCommand } = await import("#cli/commands/channels.js");
-      await runChannelsListCommand(logger, applicationContext.project!, options);
     });
 
   registerEveTelemetryCommands(program, logger);
@@ -242,18 +224,23 @@ export function createCliProgram(
       },
     );
 
-  agentCommand(program.command("set"), applicationContext)
-    .description("Change root agent model settings.")
-    .option("--model <model>", "Set the agent model (provider/model-id)")
+  const set = program.command("set").description("Change root agent model settings.");
+  agentCommand(set.command("model [model]"), applicationContext)
+    .description("Set the agent model and reasoning effort.")
     .option(
       "--reasoning <effort>",
       "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
       parseReasoningOption,
     )
-    .action(async (options: { model?: string; reasoning?: AgentReasoningDefinition }) => {
-      const { runSetCommand } = await import("#cli/commands/set.js");
-      await runSetCommand(logger, applicationContext.root, options);
-    });
+    .action(
+      async (model: string | undefined, options: { reasoning?: AgentReasoningDefinition }) => {
+        const { runSetCommand } = await import("#cli/commands/set.js");
+        await runSetCommand(logger, applicationContext.root, {
+          model,
+          reasoning: options.reasoning,
+        });
+      },
+    );
 
   registerProjectCommands({ program, logger, applicationContext });
 
@@ -290,7 +277,9 @@ export function createCliProgram(
       await waitForShutdownSignal({ close: () => server.close(), wait: () => server.wait() });
     });
 
-  registerRuntimeInvokeCommand({ applicationContext, logger, program, runtime });
+  const remote = program.command("remote").description("Connect to an existing eve agent.");
+  registerRemoteCommands({ applicationContext, logger, program: remote, runtime, telemetry });
+  registerRuntimeInvokeCommand({ applicationContext, logger, program: remote, runtime });
 
   registerAcpCommand({
     applicationContext,
@@ -322,7 +311,7 @@ export function createCliProgram(
       await runLogsShowCommand(logger, applicationContext.root, logId, options);
     });
 
-  agentCommand(logs.command("ls"), applicationContext)
+  agentCommand(logs.command("list").alias("ls"), applicationContext)
     .description("List diagnostic logs, most recent first.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {
@@ -330,9 +319,13 @@ export function createCliProgram(
       await runLogsListCommand(logger, applicationContext.root, options);
     });
 
-  const traces = agentCommand(program.command("traces [trace]"), applicationContext)
-    .usage("[options] [trace]\n       eve traces ls [options]")
-    .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
+  const traces = program
+    .command("traces")
+    .usage("[options] [trace]\n       eve traces list [options]")
+    .description("Inspect local `eve dev` traces.");
+
+  agentCommand(traces.command("show [trace]", { isDefault: true }), applicationContext)
+    .description("Show a local trace (the most recent when trace is omitted).")
     .option("--verbose", "Expand every span with all attributes and events")
     .option("--json", "Output as JSON")
     .action(
@@ -342,8 +335,7 @@ export function createCliProgram(
       },
     );
 
-  traces
-    .command("ls")
+  agentCommand(traces.command("list").alias("ls"), applicationContext)
     .description("List local traces, most recent first.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {

@@ -24,7 +24,7 @@ export interface SlackConnectLifecycleDeps {
   runVercel: typeof runVercel;
 }
 
-export type SlackConnectorInventory =
+type SlackConnectorInventory =
   | { state: "ok"; body: unknown; connectors: readonly RawSlackConnector[] }
   | { state: "failed"; message: string };
 
@@ -35,7 +35,7 @@ export type SlackConnectorCleanupResult =
 type CommandOutput = ReturnType<typeof createPromptCommandOutput>;
 
 /** Shared dependencies and output routing for one connector cleanup operation. */
-export interface SlackConnectorCleanupContext {
+interface SlackConnectorCleanupContext {
   log: ChannelSetupLog;
   deps: SlackConnectLifecycleDeps;
   projectRoot: string;
@@ -115,7 +115,7 @@ export async function findSlackConnector(
  * while an old trigger destination may still exist. A `detach-failed` connector
  * is left in a known-stale state the caller surfaces with manual recovery steps.
  */
-export type SlackConnectorAttachmentResult = ConnectTriggerAttachmentResult;
+type SlackConnectorAttachmentResult = ConnectTriggerAttachmentResult;
 
 /**
  * Replaces the connector's default trigger destination with the eve route:
@@ -140,12 +140,12 @@ export async function attachSlackConnector(
   });
 }
 
-export type SlackWorkspaceLookup =
+type SlackWorkspaceLookup =
   | { state: "connected"; workspace: SlackWorkspaceConnection }
   | { state: "pending" }
   | { state: "failed"; message: string };
 
-export type SlackConnectorDetailsLookup =
+type SlackConnectorDetailsLookup =
   | { state: "found"; details: SlackConnectorDetails }
   | { state: "failed"; message: string };
 

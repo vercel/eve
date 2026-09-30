@@ -1,11 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
 
-export interface AppendEnvOptions {
+interface AppendEnvOptions {
   /** Replace existing keys. Default: false (existing keys are preserved). */
   force?: boolean;
 }
 
-export interface AppendEnvResult {
+interface AppendEnvResult {
   /** Keys that were inserted or replaced. */
   written: string[];
   /** Keys that already existed and were preserved (only when `force` is false). */

@@ -8,10 +8,7 @@ const sessionCursorSchema = z
     streamIndex: z.number().int().nonnegative(),
   })
   .strict();
-const targetSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("local") }).strict(),
-  z.object({ kind: z.literal("remote"), serverUrl: z.url() }).strict(),
-]);
+const targetSchema = z.object({ kind: z.literal("remote"), serverUrl: z.url() }).strict();
 const invokeResumeSchema = z
   .object({ session: sessionCursorSchema, target: targetSchema })
   .strict();
@@ -70,9 +67,9 @@ const invokeResultSchema = z.discriminatedUnion("status", [
     .strict(),
 ]);
 
-/** Durable session coordinates emitted by `eve invoke`. Credentials are deliberately excluded. */
+/** Durable session coordinates emitted by `eve remote invoke`. Credentials are deliberately excluded. */
 export type InvokeResume = z.infer<typeof invokeResumeSchema>;
-export type InvocationInputRequest = z.infer<typeof invocationInputRequestSchema>;
+type InvocationInputRequest = z.infer<typeof invocationInputRequestSchema>;
 /** Result emitted by one non-interactive agent invocation. */
 export type InvokeResult = z.infer<typeof invokeResultSchema>;
 export type InvokeAuthenticationFailure = Extract<
@@ -92,22 +89,11 @@ export function projectInvocationInputRequest(request: InputRequest): Invocation
   };
 }
 
-/** Parses a complete, resumable result from a previous `eve invoke` command. */
+/** Parses a complete, resumable result from a previous `eve remote invoke` command. */
 export function parseInvokeResumeInput(value: unknown): InvokeResult & { resume: InvokeResume } {
   const result = invokeResultSchema.safeParse(value);
   if (result.success && "resume" in result.data && result.data.resume !== undefined) {
     return result.data as InvokeResult & { resume: InvokeResume };
   }
-  throw new Error("Resume JSON is not a valid resumable eve invoke result.");
+  throw new Error("Resume JSON is not a valid resumable eve remote invoke result.");
 }
-
-/** JSON Schema generated from the canonical invoke result runtime schema. */
-export const invokeResultJsonSchema = {
-  ...z.toJSONSchema(invokeResultSchema, {
-    io: "input",
-    target: "draft-2020-12",
-    unrepresentable: "any",
-  }),
-  $id: "https://eve.dev/schemas/invoke-result.json",
-  title: "eve invoke result",
-};

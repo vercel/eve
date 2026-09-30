@@ -2,10 +2,8 @@ import { SpanKind, SpanStatusCode, trace as apiTrace } from "@opentelemetry/api"
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
-  SamplingDecision,
   SimpleSpanProcessor,
   type ReadableSpan,
-  type Sampler,
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it, vi } from "vitest";
@@ -29,12 +27,9 @@ import {
   type AgentOtelInstrumentationInput,
 } from "#tracing/agent-otel-provider.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
-import {
-  type AgentTraceStateStore,
-  InMemoryAgentTraceStateStore,
-} from "#tracing/agent-trace-state.js";
+import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+import { InMemoryAgentTraceStateStore } from "#internal/testing/in-memory-agent-trace-state-store.js";
 import {
   createInstrumentationHooks,
   type InstrumentationActionKind,
@@ -67,12 +62,6 @@ import {
   sessionIdempotencyKey,
   turnIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
-import {
-  rememberInstrumentationActionScope,
-  rememberInstrumentationBackgroundTask,
-  takeInstrumentationActionScopeForTask,
-} from "#instrumentation/state.js";
-import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 import { isRuntimeWorkflowToolAction } from "#shared/action-types.js";
 
 const traceContext = (audience: ChannelAudience = "public") => ({
@@ -80,7 +69,6 @@ const traceContext = (audience: ChannelAudience = "public") => ({
   audience,
   channel: { kind: "http" as const },
   environment: "production" as const,
-  mode: "conversation" as const,
   principalType: "anonymous",
 });
 
@@ -108,13 +96,11 @@ function createRuntime(
   }),
   extraSpanProcessors: readonly SpanProcessor[] = [],
   samplesTrace?: AgentOtelInstrumentationInput["samplesTrace"],
-  sampler?: Sampler,
 ): TestRuntime {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
   const provider = new BasicTracerProvider({
     idGenerator,
-    sampler,
     spanProcessors: [new SimpleSpanProcessor(exporter), ...extraSpanProcessors],
   });
   const tracer = provider.getTracer("eve.agent");
@@ -336,6 +322,7 @@ async function emitAttempt(input: {
 
 async function publishTurnStarted(input: {
   readonly channelAudience?: ChannelAudience;
+  readonly channelKind?: string;
   readonly currentPrincipal?: InstrumentationPrincipalSummary;
   readonly hooks: InstrumentationHooks;
   readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
@@ -353,7 +340,7 @@ async function publishTurnStarted(input: {
   await input.hooks.publish({
     agentName: "weather",
     channelAudience: input.channelAudience ?? "public",
-    channelKind: "http",
+    channelKind: input.channelKind ?? "http",
     idempotencyKey: sessionIdempotencyKey(input.sessionId),
     parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
@@ -407,6 +394,53 @@ function nanos(hrTime: readonly [number, number]): bigint {
 }
 
 describe("createAgentOtelInstrumentation", () => {
+  it.each([
+    { channelKind: "channel:eve", expectedKind: "channel:eve", expectedOrigin: "channel" },
+    { channelKind: "unknown", expectedKind: undefined, expectedOrigin: undefined },
+  ])("classifies a step before the invocation span exists ($channelKind)", async (input) => {
+    const runtime = createRuntime();
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-1:turn_0:0:0",
+      attemptIndex: 0,
+      functionId: "weather",
+      sessionId: "session-1",
+      stepIndex: 0,
+      turnId: "turn_0",
+    };
+    await publishTurnStarted({
+      channelKind: input.channelKind,
+      hooks: runtime.hooks,
+      sessionId: scope.sessionId,
+      turnId: scope.turnId,
+      turnSequence: 0,
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+      scope,
+      type: "step.attempt.started",
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      scope,
+      type: "step.attempt.completed",
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    expect(byName(spans, "invoke_agent weather")).toHaveLength(0);
+    const attributes = byName(spans, "agent.step")[0]?.attributes;
+    if (input.expectedKind === undefined) {
+      expect(attributes).not.toHaveProperty("agent.channel.kind");
+      expect(attributes).not.toHaveProperty("agent.session.origin");
+    } else {
+      expect(attributes).toMatchObject({
+        "agent.channel.kind": input.expectedKind,
+        "agent.session.origin": input.expectedOrigin,
+      });
+    }
+  });
+
   it.each(["public", "private"] as const)(
     "exports explicit names for %s spans across bounded activation traces",
     async (channelAudience) => {
@@ -745,6 +779,25 @@ describe("createAgentOtelInstrumentation", () => {
       turnId: "child-turn",
       turnSequence: 0,
     });
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "child-session:child-turn:0:0",
+      attemptIndex: 0,
+      functionId: "weather",
+      sessionId: "child-session",
+      stepIndex: 0,
+      turnId: "child-turn",
+    };
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+      scope,
+      type: "step.attempt.started",
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      scope,
+      type: "step.attempt.completed",
+    });
     await completeTurn(runtime.hooks, "child-session", "child-turn");
     await runtime.provider.forceFlush();
 
@@ -776,6 +829,9 @@ describe("createAgentOtelInstrumentation", () => {
     expect(invocation.attributes).not.toHaveProperty("agent.schedule.id");
     expect(invocation.attributes).not.toHaveProperty("agent.session.origin");
     expect(invocation.attributes).not.toHaveProperty("agent.session.title");
+    const step = byName(spans, "agent.step")[0]!;
+    expect(step.attributes).not.toHaveProperty("agent.channel.kind");
+    expect(step.attributes).not.toHaveProperty("agent.session.origin");
     expect(invocation.attributes).not.toHaveProperty("agent.principal.initiator.id");
     expect(invocation.attributes).not.toHaveProperty("agent.root_run.id");
     expect(invocation.attributes).not.toHaveProperty("agent.session.id");
@@ -1458,23 +1514,12 @@ describe("createAgentOtelInstrumentation", () => {
     });
   });
 
-  it("projects production workflow actions and classifies only GenAI composition", async () => {
-    const samplerCalls: {
-      readonly attributes: Readonly<Record<string, unknown>>;
-      readonly name: string;
-    }[] = [];
-    const sampler: Sampler = {
-      shouldSample(_context, _traceId, name, _kind, attributes) {
-        samplerCalls.push({ attributes, name });
-        return { decision: SamplingDecision.RECORD_AND_SAMPLED };
-      },
-      toString: () => "recording-sampler",
-    };
+  it("projects production workflow tool calls as agent.action spans", async () => {
     const context = new ContextContainer();
     let runtime: TestRuntime | undefined;
 
     await contextStorage.run(context, async () => {
-      runtime = createRuntime(new ContextAgentTraceStateStore(), undefined, [], undefined, sampler);
+      runtime = createRuntime(new ContextAgentTraceStateStore());
       const scope: InstrumentationAttemptScope = {
         attemptId: "session-workflow:turn-1:0:0",
         attemptIndex: 0,
@@ -1554,218 +1599,41 @@ describe("createAgentOtelInstrumentation", () => {
         }),
       );
 
-      const nested = prepareAgentInvocationTrace({
-        invocation: {
-          callId: "workflow:child",
-          kind: "subagent-call",
-          name: "research",
-        },
-        ownerId: "workflow-run",
-        serializedContext: serializeContext(context),
-        sessionId: scope.sessionId,
-        sessionState: {
-          "eve.workflowTool": {
-            version: 3,
-            runs: [
-              {
-                callId: "workflow",
-                toolName: "coordinate",
-                lifetime: "turn" as const,
-                origin: { turnId: "turn-1", stepIndex: 0 },
-                address: { runId: "workflow-run", hookToken: "workflow-hook" },
-              },
-            ],
-          },
-        },
-        startTimeMs: 2,
-        turnId: scope.turnId,
+      for (const [callId, toolName] of [
+        ["workflow", "coordinate"],
+        ["wait", "wait"],
+      ] as const) {
+        await handleEvent(
+          createActionResultEvent({
+            result: {
+              callId,
+              kind: "tool-result",
+              output: { done: true },
+              toolName,
+            },
+            sequence: 0,
+            stepIndex: 0,
+            turnId: scope.turnId,
+          }),
+        );
+      }
+      await runtime.hooks.publish({
+        idempotencyKey: attemptIdempotencyKey(scope),
+        scope,
+        type: "step.attempt.completed",
       });
-      const settled = nested.fail({
-        callId: "workflow:child",
-        isError: true,
-        kind: "subagent-result",
-        origin: "dispatch",
-        output: "unavailable",
-        subagentName: "research",
-      });
-      const restored = await deserializeContext(settled);
-      await contextStorage.run(restored, async () => {
-        const terminal = createInstrumentationHandleEvent({
-          handleEvent: async () => {},
-          hooks: runtime!.hooks,
-          sessionId: scope.sessionId,
-        })!;
-        for (const [callId, toolName] of [
-          ["workflow", "coordinate"],
-          ["wait", "wait"],
-        ] as const) {
-          await terminal(
-            createActionResultEvent({
-              result: {
-                callId,
-                kind: "tool-result",
-                output: { done: true },
-                toolName,
-              },
-              sequence: 0,
-              stepIndex: 0,
-              turnId: scope.turnId,
-            }),
-          );
-        }
-        await runtime!.hooks.publish({
-          idempotencyKey: attemptIdempotencyKey(scope),
-          scope,
-          type: "step.attempt.completed",
-        });
-        await completeTurn(runtime!.hooks, scope.sessionId, scope.turnId);
-      });
+      await completeTurn(runtime.hooks, scope.sessionId, scope.turnId);
     });
 
     await runtime!.provider.forceFlush();
-    const spans = runtime!.exporter.getFinishedSpans();
-    const workflow = byName(spans, "invoke_workflow coordinate")[0]!;
-    const wait = spans.find((span) => span.attributes["agent.action.call_id"] === "wait")!;
-    const sampledWorkflow = samplerCalls.find(
-      ({ attributes }) => attributes["agent.action.call_id"] === "workflow",
-    )!;
-
-    expect(workflow.attributes).toMatchObject({
-      "gen_ai.operation.name": "invoke_workflow",
-      "gen_ai.workflow.name": "coordinate",
-    });
-    expect(wait.name).toBe("agent.action");
-    expect(wait.attributes).not.toHaveProperty("gen_ai.operation.name");
-    expect(sampledWorkflow).toMatchObject({
-      attributes: {
-        "gen_ai.operation.name": "invoke_workflow",
-        "gen_ai.workflow.name": "coordinate",
-      },
-      name: "agent.action",
-    });
-  });
-
-  it("keeps a composed workflow intact while emitting independent nested callers", async () => {
-    const stateStore = new InMemoryAgentTraceStateStore();
-    const runtime = createRuntime(stateStore);
-    const scope: InstrumentationAttemptScope = {
-      attemptId: "session-nested:turn-1:0:0",
-      attemptIndex: 0,
-      functionId: "weather",
-      sessionId: "session-nested",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
-    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "workflow");
-    const toolKey = `tool:${scope.attemptId}:workflow:0`;
-
-    await publishTurnStarted({
-      hooks: runtime.hooks,
-      sessionId: scope.sessionId,
-      turnId: scope.turnId,
-      turnSequence: 0,
-    });
-    await runtime.hooks.publish({
-      idempotencyKey: attemptIdempotencyKey(scope),
-      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
-      scope,
-      type: "step.attempt.started",
-    });
-    await runtime.hooks.publish({
-      callId: "workflow",
-      idempotencyKey: actionKey,
-      input: {},
-      isWorkflowTool: true,
-      kind: "tool-call",
-      name: "coordinate",
-      scope,
-      type: "action.started",
-    });
-    await runtime.hooks.publish({
-      callId: "workflow",
-      idempotencyKey: toolKey,
-      input: {},
-      scope,
-      toolName: "coordinate",
-      type: "tool.call.started",
-    });
-    await runtime.hooks.publish({
-      idempotencyKey: toolKey,
-      output: { output: "done", type: "result" },
-      scope,
-      type: "tool.call.completed",
-    });
-
-    const action = stateStore.getAction(actionKey)!;
-    const anchor = { ...action, workflowName: "coordinate" };
-    stateStore.setAction(actionKey, anchor);
-    stateStore.setActionAnchor(actionKey, anchor);
-    stateStore.setInvocation(
-      actionIdempotencyKey(scope.sessionId, scope.turnId, "workflow:first"),
-      {
-        ...anchor,
-        callId: "workflow:first",
-        kind: "subagent-call",
-        name: "research",
-        parent: { ...anchor.parent, spanId: anchor.spanId },
-        parentActionCallId: "workflow",
-        spanId: "b".repeat(16),
-        terminal: { outcome: "completed" },
-      },
-    );
-    stateStore.setInvocation(
-      actionIdempotencyKey(scope.sessionId, scope.turnId, "workflow:second"),
-      {
-        ...anchor,
-        callId: "workflow:second",
-        kind: "remote-agent-call",
-        name: "review",
-        parent: { ...anchor.parent, spanId: anchor.spanId },
-        parentActionCallId: "workflow",
-        spanId: "d".repeat(16),
-        terminal: { error: new Error("review failed"), outcome: "failed" },
-      },
-    );
-    await runtime.hooks.publish({
-      idempotencyKey: actionKey,
-      outcome: "completed",
-      output: { output: "done", type: "result" },
-      scope,
-      type: "action.completed",
-    });
-    await runtime.hooks.publish({
-      idempotencyKey: attemptIdempotencyKey(scope),
-      scope,
-      type: "step.attempt.completed",
-    });
-    await completeTurn(runtime.hooks, scope.sessionId, scope.turnId);
-    await runtime.provider.forceFlush();
-
-    const spans = runtime.exporter.getFinishedSpans();
-    const outer = byName(spans, "invoke_workflow coordinate")[0]!;
-    const tool = byName(spans, "execute_tool coordinate")[0]!;
-    const first = spans.find(
-      (span) => span.attributes["agent.action.call_id"] === "workflow:first",
-    )!;
-    const second = spans.find(
-      (span) => span.attributes["agent.action.call_id"] === "workflow:second",
-    )!;
-    expect(byName(spans, "agent.action")).toHaveLength(2);
-    expect(outer.attributes).toMatchObject({
-      "agent.action.call_id": "workflow",
-      "agent.action.kind": "tool-call",
-      "agent.action.name": "coordinate",
-      "gen_ai.operation.name": "invoke_workflow",
-      "gen_ai.workflow.name": "coordinate",
-      "operation.name": "invoke_workflow",
-      "resource.name": "invoke_workflow coordinate",
-    });
-    expect(first.attributes).not.toHaveProperty("gen_ai.operation.name");
-    expect(second.attributes).not.toHaveProperty("gen_ai.operation.name");
-    expect(tool.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
-    expect(first.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
-    expect(second.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
-    expect(second.status.code).toBe(SpanStatusCode.ERROR);
+    const actions = byName(runtime!.exporter.getFinishedSpans(), "agent.action");
+    expect(actions.map((span) => span.attributes["agent.action.call_id"]).sort()).toEqual([
+      "wait",
+      "workflow",
+    ]);
+    for (const action of actions) {
+      expect(action.attributes).toMatchObject({ "agent.action.kind": "tool-call" });
+    }
   });
 
   it.each(["private", "unknown"] as const)(
@@ -2694,86 +2562,8 @@ describe("createAgentOtelInstrumentation", () => {
     expect(byName(spans, "agent.step")).toHaveLength(1);
   });
 
-  it("keeps a background action open after its initiating turn is cancelled", async () => {
-    const runtime = createRuntime();
-    const ctx = new ContextContainer();
-    const scope: InstrumentationAttemptScope = {
-      attemptId: "session-1:turn-1:0:0",
-      attemptIndex: 0,
-      sessionId: "session-1",
-      stepIndex: 0,
-      turnId: "turn-1",
-    };
-    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "tool-1");
-
-    await contextStorage.run(ctx, async () => {
-      await publishTurnStarted({
-        hooks: runtime.hooks,
-        sessionId: scope.sessionId,
-        turnId: scope.turnId,
-        turnSequence: 0,
-      });
-      await runtime.hooks.publish({
-        idempotencyKey: attemptIdempotencyKey(scope),
-        operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
-        scope,
-        type: "step.attempt.started",
-      });
-      rememberInstrumentationActionScope(actionKey, scope);
-      await runtime.hooks.publish({
-        callId: "tool-1",
-        idempotencyKey: actionKey,
-        input: { report: "weekly" },
-        kind: "tool-call",
-        name: "publish",
-        scope,
-        type: "action.started",
-      });
-      rememberInstrumentationBackgroundTask("task-1", { idempotencyKey: actionKey, scope });
-      await runtime.hooks.publish({
-        idempotencyKey: attemptIdempotencyKey(scope),
-        scope,
-        type: "step.attempt.completed",
-      });
-      await runtime.hooks.publish({
-        idempotencyKey: turnIdempotencyKey(scope.sessionId, scope.turnId),
-        sessionId: scope.sessionId,
-        turnId: scope.turnId,
-        type: "turn.cancelled",
-      });
-    });
-    await runtime.provider.forceFlush();
-    expect(byName(runtime.exporter.getFinishedSpans(), "agent.action")).toHaveLength(0);
-
-    const restored = await deserializeContext(
-      preserveSerializedBackgroundTaskObservabilityState({}, serializeContext(ctx), [
-        { taskId: "task-1" },
-      ]),
-    );
-    const acceptedAtMs = Date.now() + 1_000;
-    await contextStorage.run(restored, async () => {
-      const correlation = takeInstrumentationActionScopeForTask("task-1")!;
-      await runtime.hooks.publish({
-        acceptedAtMs,
-        idempotencyKey: correlation.idempotencyKey,
-        outcome: "completed",
-        output: { output: { reportId: "report-1" }, type: "result" },
-        scope: correlation.scope,
-        type: "action.completed",
-      });
-    });
-    await runtime.provider.forceFlush();
-
-    const action = byName(runtime.exporter.getFinishedSpans(), "agent.action")[0]!;
-    expect(action.attributes).toMatchObject({
-      "agent.action.outcome": "completed",
-      "gen_ai.tool.call.result": expect.stringContaining("report-1"),
-    });
-    expect(nanos(action.endTime)).toBe(BigInt(acceptedAtMs) * 1_000_000n);
-  });
-
-  it("records serialized task error detail only when output content is admitted", async () => {
-    const taskError = {
+  it("records serialized action error detail only when output content is admitted", async () => {
+    const publishError = {
       code: "PUBLISH_FAILED",
       detail: "x".repeat(CONTENT_ATTRIBUTE_LIMIT * 2),
       message: "private publish failure",
@@ -2802,8 +2592,8 @@ describe("createAgentOtelInstrumentation", () => {
         type: "action.started",
       });
       await runtime.hooks.publish({
-        error: taskError,
-        errorCode: "BACKGROUND_TASK_FAILED",
+        error: publishError,
+        errorCode: "PUBLISH_FAILED",
         idempotencyKey: actionIdempotencyKey(sessionId, scope.turnId, "tool-1"),
         outcome: "failed",
         scope,
@@ -2815,9 +2605,9 @@ describe("createAgentOtelInstrumentation", () => {
 
     const recorded = await run(createRuntime(), "recorded");
     expect(recorded.attributes).toMatchObject({
-      "agent.action.error.code": "BACKGROUND_TASK_FAILED",
+      "agent.action.error.code": "PUBLISH_FAILED",
       "agent.action.outcome": "failed",
-      "error.type": "BACKGROUND_TASK_FAILED",
+      "error.type": "PUBLISH_FAILED",
     });
     expect(recorded.status.code).toBe(SpanStatusCode.ERROR);
     expect(recorded.status.message).toContain("private publish failure");
@@ -2827,7 +2617,7 @@ describe("createAgentOtelInstrumentation", () => {
       expect.objectContaining({
         attributes: expect.objectContaining({
           "exception.message": recorded.status.message,
-          "exception.type": "BACKGROUND_TASK_FAILED",
+          "exception.type": "PUBLISH_FAILED",
         }),
         name: "exception",
       }),
@@ -2842,9 +2632,9 @@ describe("createAgentOtelInstrumentation", () => {
       "redacted",
     );
     expect(redacted.attributes).toMatchObject({
-      "agent.action.error.code": "BACKGROUND_TASK_FAILED",
+      "agent.action.error.code": "PUBLISH_FAILED",
       "agent.action.outcome": "failed",
-      "error.type": "BACKGROUND_TASK_FAILED",
+      "error.type": "PUBLISH_FAILED",
     });
     expect(redacted.status).toEqual({ code: SpanStatusCode.ERROR });
     expect(redacted.events.filter((event) => event.name === "exception")).toEqual([]);
@@ -2890,6 +2680,7 @@ describe("createAgentOtelInstrumentation", () => {
     const runtime = createRuntime();
     await emitAttempt({
       actionUsage: {
+        costUsd: 0.012,
         inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
         inputTokens: 10,
         outputTokens: 5,
@@ -2909,6 +2700,7 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.action.kind": "subagent-call",
       "agent.action.name": "weather",
       "agent.action.outcome": "completed",
+      "agent.usage.cost_usd": 0.012,
       "agent.usage.cache_read_tokens": 3,
       "agent.usage.cache_write_tokens": 4,
       "agent.usage.input_tokens": 10,
@@ -3134,7 +2926,7 @@ describe("createAgentOtelInstrumentation", () => {
       scope,
       type: "step.attempt.started",
     });
-    const idempotencyKey = modelCallIdempotencyKey(scope, 0);
+    const idempotencyKey = modelCallIdempotencyKey(scope, 0, 0);
     await runtime.hooks.publish({
       idempotencyKey,
       input: { messages: [] },

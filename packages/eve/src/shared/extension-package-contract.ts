@@ -1,5 +1,5 @@
 /** Authoring and distribution roots declared by an extension package. */
-export interface ExtensionPackageRoots {
+interface ExtensionPackageRoots {
   /**
    * Authoring root. Optional so published packages can ship `dist` only;
    * `eve extension build` requires it.

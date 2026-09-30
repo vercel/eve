@@ -9,6 +9,7 @@ import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import type { InputRequest } from "#shared/input.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
 import { bindTurnCallerContextStep } from "#subagents/parent-notification.js";
+import { runSessionStateStep } from "#internal/testing/session-state-step.js";
 
 const SUBAGENT_INPUT_REQUESTED = SUBAGENT_ADAPTER["input.requested"];
 const SUBAGENT_AUTHORIZATION_REQUIRED = SUBAGENT_ADAPTER["authorization.required"];
@@ -159,21 +160,26 @@ describe("SUBAGENT_ADAPTER input.requested handler", () => {
 
   it("forwards continuation HITL to the newly bound parent turn", async () => {
     resumeHookMock.mockClear();
-    const rebound = await bindTurnCallerContextStep({
-      caller: {
-        callId: "call-continued",
-        replyTo: { kind: "hook", token: "parent-token-current" },
-        subagentName: "linear",
-      },
-      serializedContext: {
-        [ChannelKey.name]: {
-          kind: "subagent",
-          state: makeContext().state,
+    const rebound = await runSessionStateStep(
+      {
+        caller: {
+          callId: "call-continued",
+          replyTo: { kind: "hook", token: "parent-token-current" },
+          subagentName: "linear",
+        },
+        serializedContext: {
+          [ChannelKey.name]: {
+            kind: "subagent",
+            state: makeContext().state,
+          },
         },
       },
-    });
+      bindTurnCallerContextStep,
+    );
     const base = makeContext();
-    const channel = rebound[ChannelKey.name] as { readonly state: Record<string, unknown> };
+    const channel = rebound.serializedContext[ChannelKey.name] as {
+      readonly state: Record<string, unknown>;
+    };
 
     await SUBAGENT_INPUT_REQUESTED(
       {

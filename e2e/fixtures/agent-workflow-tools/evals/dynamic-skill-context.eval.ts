@@ -1,4 +1,4 @@
-import { defineEval, type EveEvalTargetHandle } from "eve/evals";
+import { defineEval, type EveEvalTargetHandle, type EveEvalTurn } from "eve/evals";
 import { equals } from "eve/evals/expect";
 import type { DynamicSkillContextObservation } from "../dynamic-skill-context-audit";
 
@@ -28,7 +28,20 @@ function expectedAuth(actor: "alice" | "bob") {
   };
 }
 
-export default (["direct", "waiting", "background"] as const).map((mode) =>
+/** The child's reply: the agent tool's task result, or the waiting tool's result for `ctx.agent`. */
+function readChildOutput(turn: EveEvalTurn, mode: "direct" | "waiting"): string {
+  if (mode === "waiting") {
+    const output = turn.toolCalls.find((call) => call.name === "blocking_agent")?.output;
+    if (typeof output !== "string") throw new Error("The waiting tool's child reply is missing.");
+    return output;
+  }
+  const completion = turn.events.find((event) => event.type === "task.settled");
+  if (completion?.type !== "task.settled" || typeof completion.data.output !== "string")
+    throw new Error("The delegated child's completion event is missing.");
+  return completion.data.output;
+}
+
+export default (["direct", "waiting"] as const).map((mode) =>
   defineEval({
     description: `${mode} delegation preserves every dynamic-skill resolver context field across session start and later turns.`,
     async test(t) {
@@ -40,30 +53,15 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
       const initial = await t.target.watchTurn(started.sessionId).result();
       initial.expectOk();
       initial.calledTool("load_skill", { count: 1, status: "completed" });
-      const completed =
-        mode === "waiting"
-          ? initial
-          : await t.target
-              .watchTurn(started.sessionId, { startIndex: initial.session.state.streamIndex })
-              .result();
-      completed.expectOk();
-      const marker =
-        mode === "direct"
-          ? "Alice's hook audit"
-          : `hook-audit:${mode === "waiting" ? "blocking" : "background"}`;
-      const completion = [...initial.events, ...completed.events].find(
-        (event) => event.type === "subagent.completed",
-      );
-      if (completion?.type !== "subagent.completed")
-        throw new Error("The delegated child's completion event is missing.");
-      const childOutput = completion.data.output;
+      const marker = mode === "direct" ? "Alice's hook audit" : "hook-audit:blocking";
+      const childOutput = readChildOutput(initial, mode);
       t.check(childOutput.startsWith("WORKFLOW-CHILD:"), equals(true)).label(
         "child returned its report",
       );
       t.check(childOutput.includes(marker), equals(true)).label("child report includes its task");
-      completed.messageIncludes(childOutput);
+      initial.messageIncludes(childOutput);
 
-      const startIndex = completed.session.state.streamIndex;
+      const startIndex = initial.session.state.streamIndex;
       const resumed = await send(t.target, threadId, "bob", followUp);
       t.check(resumed.sessionId, equals(started.sessionId)).label(
         "same parent session after delegation",
@@ -80,12 +78,7 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
       const observations = output as DynamicSkillContextObservation[];
       t.check(
         observations.map((entry) => entry.event),
-        equals([
-          "session.started",
-          "turn.started",
-          ...(mode === "waiting" ? [] : ["turn.started"]),
-          "turn.started",
-        ]),
+        equals(["session.started", "turn.started", "turn.started"]),
       ).label("resolver runs once at session start and at every parent turn boundary");
 
       for (const [index, { context, event }] of observations.entries()) {
@@ -109,7 +102,6 @@ export default (["direct", "waiting", "background"] as const).map((mode) =>
           conversation: {
             audience: "private",
             channel: { kind: "channel:skill-context", name: "skill-context" },
-            mode: "conversation",
             environment: started.environment,
             principalType: "user",
           },

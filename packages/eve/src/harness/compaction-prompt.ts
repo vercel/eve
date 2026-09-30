@@ -33,7 +33,7 @@ interface CompactionTranscriptEntry {
   readonly role: ModelMessage["role"];
 }
 
-export interface CompactionPrompt {
+interface CompactionPrompt {
   readonly prompt: string;
   readonly system: string;
 }

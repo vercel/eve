@@ -28,6 +28,7 @@ import {
   upsertMessage,
 } from "#client/message-reducer-primitives.js";
 import { messageRun } from "#client/message-run-parts.js";
+import { createSettledTaskPart } from "#client/message-task-parts.js";
 import type { InputResponse } from "#shared/input.js";
 import type { AuthorizationCompletedStreamEvent, InputResolution } from "#protocol/message.js";
 
@@ -104,7 +105,6 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
     }
 
     case "message.received":
-      if (event.data.kind === "execution.background_task") return data;
       return upsertMessage(data, {
         id: `${receivedMessageEventId(event)}:user`,
         metadata: {
@@ -337,6 +337,12 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       );
     }
 
+    case "task.settled": {
+      const existing = findToolPart(data, event.data.callId);
+      if (existing === undefined) return data;
+      return replaceToolPart(data, createSettledTaskPart(existing, event));
+    }
+
     case "authorization.required":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
         upsertPart(
@@ -359,10 +365,6 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "message.completed":
       return updateAssistantMessage(data, event.data.turnId, (message) => {
-        if (event.data.message === null) {
-          return removeTextPart(message, event.data.stepIndex);
-        }
-
         return messageRun.upsert(ensureStepStartPart(message, event.data.stepIndex), {
           state: "done",
           stepIndex: event.data.stepIndex,
@@ -533,24 +535,6 @@ function upsertPart(message: EveAssistantMessage, next: EveMessagePart): EveAssi
   };
 }
 
-function removeTextPart(message: EveAssistantMessage, stepIndex: number): EveAssistantMessage {
-  const parts = message.parts.filter(
-    (part) => part.type !== "text" || part.stepIndex !== stepIndex,
-  );
-  if (parts.length === message.parts.length) {
-    return message;
-  }
-
-  return {
-    ...message,
-    metadata: {
-      ...message.metadata,
-      status: "complete",
-    },
-    parts,
-  };
-}
-
 function updateToolPart(
   data: EveMessageData,
   toolCallId: string,
@@ -569,6 +553,24 @@ function updateToolPart(
   }
 
   return upsertMessage(data, upsertPart(message, next));
+}
+
+/**
+ * Swaps a tool part in place without touching the message status: a task
+ * usually settles after the turn that called it has completed.
+ */
+function replaceToolPart(data: EveMessageData, next: EveDynamicToolPart): EveMessageData {
+  const message = data.messages.find((candidate) =>
+    candidate.parts.some(
+      (part) => part.type === "dynamic-tool" && part.toolCallId === next.toolCallId,
+    ),
+  );
+  if (message === undefined) return data;
+
+  return upsertMessage(data, {
+    ...message,
+    parts: message.parts.map((part) => (partKey(part) === partKey(next) ? next : part)),
+  });
 }
 
 function completeAuthorization(

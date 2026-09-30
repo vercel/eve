@@ -1,3 +1,4 @@
+import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import type {
@@ -13,7 +14,7 @@ import type {
  * plain tool calls onto a single `dynamic-tool` UI part; this descriptor is the
  * shared shape those variants collapse to before rendering.
  */
-export interface ActionDescriptor {
+interface ActionDescriptor {
   readonly kind: "load-skill" | "subagent-call" | "tool-call";
   readonly name: string;
   readonly toolName: string;
@@ -94,32 +95,16 @@ export function approvedApproval(part: EveDynamicToolPart | undefined):
 
 /** Maps a runtime action request onto its normalized tool descriptor. */
 export function normalizeActionRequest(action: RuntimeActionRequest): ActionDescriptor {
+  const name = actionRequestName(action);
   switch (action.kind) {
     case "load-skill":
-      return {
-        kind: "load-skill",
-        name: "load_skill",
-        toolName: "eve:load-skill",
-      };
+      return { kind: "load-skill", name, toolName: "eve:load-skill" };
     case "tool-call":
     case "workflow-tool-call":
-      return {
-        kind: "tool-call",
-        name: action.toolName,
-        toolName: action.toolName,
-      };
+      return { kind: "tool-call", name, toolName: name };
     case "subagent-call":
-      return {
-        kind: "subagent-call",
-        name: action.subagentName,
-        toolName: `eve:subagent:${action.subagentName}`,
-      };
     case "remote-agent-call":
-      return {
-        kind: "subagent-call",
-        name: action.remoteAgentName,
-        toolName: `eve:subagent:${action.remoteAgentName}`,
-      };
+      return { kind: "subagent-call", name, toolName: `eve:subagent:${name}` };
   }
 }
 

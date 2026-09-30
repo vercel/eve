@@ -142,6 +142,7 @@ describe("WorkflowBundleBuilder", () => {
       resolvePackageSourceDirectoryPath("src/execution"),
       resolvePackageSourceDirectoryPath("src/runtime/subagents"),
       resolvePackageSourceDirectoryPath("src/subagents"),
+      resolvePackageSourceDirectoryPath("src/tools/provided"),
     ]);
   });
 
@@ -660,13 +661,9 @@ describe("WorkflowBundleBuilder", () => {
   });
 
   it.each([
-    ["sleep tool", "src/execution/tools/sleep-workflow.ts", "executeSleepTool"],
+    ["sleep tool", "src/tools/provided/sleep-workflow.ts", "executeSleepTool"],
     ["session owner", "src/execution/session/entry.ts", "nextTurnDelivery"],
-    [
-      "workflow tool owner",
-      "src/execution/tools/workflow/workflow.ts",
-      "createBackgroundWorkflowOwner",
-    ],
+    ["workflow tool owner", "src/execution/tools/workflow/workflow.ts", "workflowToolRunWorkflow"],
   ])("keeps the %s schemas out of the workflow driver", async (_name, sourcePath, marker) => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-no-schemas-"));
     const outDir = join(tempRoot, "workflow-build");
@@ -880,28 +877,45 @@ describe("WorkflowBundleBuilder", () => {
       await rm(tempRoot, { force: true, recursive: true });
     }
   });
-  it("rejects unresolved workflow imports before emitting a VM bundle", async () => {
-    const root = await mkdtemp(join(tmpdir(), "eve-workflow-missing-import-"));
-    const flow = join(root, "flow.ts");
-    try {
-      await writeFile(
-        flow,
-        'import { value } from "missing-workflow-package"; export async function flow() { "use workflow"; return value; }',
-      );
-      const builder = new FixtureWorkflowBundleBuilder(
-        {
-          agentName: "missing-import",
-          appRoot: root,
-          rootDir: root,
-          outDir: join(root, "out"),
-          compiledArtifactsBootstrapPath: join(root, "bootstrap.mjs"),
-          watch: false,
-        },
-        [flow],
-      );
-      await expect(builder.build()).rejects.toThrow("missing-workflow-package");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
+  it.each([
+    { importer: "workflow code", specifier: "missing-workflow-package" },
+    // Dependency warnings are otherwise filtered as non-actionable.
+    { importer: "a dependency", specifier: "dep" },
+  ])(
+    "rejects unresolved imports from $importer before emitting a VM bundle",
+    async ({ specifier }) => {
+      const root = await mkdtemp(join(tmpdir(), "eve-workflow-missing-import-"));
+      const flow = join(root, "flow.ts");
+      const dependencyRoot = join(root, "node_modules", "dep");
+      try {
+        await mkdir(dependencyRoot, { recursive: true });
+        await writeFile(
+          join(dependencyRoot, "package.json"),
+          `${JSON.stringify({ main: "./index.js", name: "dep", version: "1.0.0" })}\n`,
+        );
+        await writeFile(
+          join(dependencyRoot, "index.js"),
+          'export { value } from "missing-workflow-package";\n',
+        );
+        await writeFile(
+          flow,
+          `import { value } from "${specifier}"; export async function flow() { "use workflow"; return value; }`,
+        );
+        const builder = new FixtureWorkflowBundleBuilder(
+          {
+            agentName: "missing-import",
+            appRoot: root,
+            rootDir: root,
+            outDir: join(root, "out"),
+            compiledArtifactsBootstrapPath: join(root, "bootstrap.mjs"),
+            watch: false,
+          },
+          [flow],
+        );
+        await expect(builder.build()).rejects.toThrow("missing-workflow-package");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 });

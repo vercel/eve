@@ -1,6 +1,5 @@
 import { getLocalDevCapability, type LocalDevCapability } from "eve/local-dev";
 import { defineDynamic, defineTool, type ToolContext } from "eve/tools";
-import { once } from "eve/tools/approval";
 
 import {
   resolveSelfModificationConfig,
@@ -247,6 +246,9 @@ export async function addLocalRegistryItem(
   }
 
   const classification = classifyCatalogEntry(entry);
+  if (classification.kind === "self-modification-mount") {
+    throw new Error(classification.reason);
+  }
   if (classification.kind === "needs-terminal") {
     const handoff = handoffMessage({
       address,
@@ -341,6 +343,10 @@ async function addProductionRegistryItem(
   if (entry === undefined) {
     throw new Error(`No official eve registry item is published at "${address}".`);
   }
+  const classification = classifyCatalogEntry(entry);
+  if (classification.kind === "self-modification-mount") {
+    throw new Error(classification.reason);
+  }
   const sandbox = await context.getSandbox();
   const result = await withSelfModificationWorkspaceLock(
     `sandbox:${context.session.id}`,
@@ -365,7 +371,6 @@ async function addProductionRegistryItem(
 
 function localRegistryAddTool() {
   return defineTool({
-    approval: once(),
     description:
       "Install an item from the configured eve registry into this project. Items that need setup are handed to the local setup flow instead. Search first, then call this with the exact item address.",
     inputSchema: localInputSchema,
@@ -382,7 +387,6 @@ function localRegistryAddTool() {
 
 function productionRegistryAddTool(deployed: ResolvedDeployedSelfModificationConfig) {
   return defineTool({
-    approval: once(),
     description:
       "Install an exact item from the official eve registry into the current production change proposal. If setup pauses, call this tool again with the non-secret answers and the installed state from its result. External authorization and secret binding must be completed by the developer.",
     inputSchema: productionInputSchema,

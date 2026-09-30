@@ -22,7 +22,6 @@ function input(principalType: string | null): Omit<AudienceContext<undefined>, "
           },
     channel: { kind: "http" },
     environment: "production",
-    mode: "conversation",
   };
 }
 

@@ -28,7 +28,6 @@ const publicConversation = {
   audience: "public",
   channel: { kind: "channel:slack", name: "slack" },
   environment: "production",
-  mode: "conversation",
   principalType: "anonymous",
 } as const;
 
@@ -36,7 +35,6 @@ const unknownConversation = {
   audience: "unknown",
   channel: { kind: "http" },
   environment: "production",
-  mode: "conversation",
   principalType: "anonymous",
 } as const;
 

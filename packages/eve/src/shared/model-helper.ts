@@ -3,13 +3,13 @@ export const MODEL_HELPERS = {
   chatgpt: {
     module: "eve/models/openai",
     prefix: "chatgpt/",
-    defaultModel: "gpt-5.6-luna-fast",
+    defaultModel: "gpt-6-luna-fast",
     provider: "codex",
   },
   openai: {
     module: "eve/models/openai",
     prefix: "openai-api/",
-    defaultModel: "gpt-5.6-luna-fast",
+    defaultModel: "gpt-6-luna-fast",
     provider: "openai",
   },
   anthropic: {

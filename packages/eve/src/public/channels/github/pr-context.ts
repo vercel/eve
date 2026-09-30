@@ -51,7 +51,7 @@ export interface GitHubPullRequestContextConfig {
 }
 
 /** Input for building one-shot model context for a pull request. */
-export interface GitHubPullRequestContextInput {
+interface GitHubPullRequestContextInput {
   readonly api?: GitHubApiOptions;
   /**
    * When set with {@link headSha}, file patches load via the compare API for
@@ -239,7 +239,7 @@ function renderFileSummary(file: GitHubPullRequestFile): string {
 }
 
 /** Returns true when a file path matches any of the provided glob patterns. */
-export function fileMatchesAnyGlob(filename: string, patterns: readonly string[]): boolean {
+function fileMatchesAnyGlob(filename: string, patterns: readonly string[]): boolean {
   return patterns.some((pattern) => globToRegExp(pattern).test(filename));
 }
 

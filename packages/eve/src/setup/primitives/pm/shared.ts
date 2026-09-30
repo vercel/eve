@@ -2,7 +2,7 @@ import { extname } from "node:path";
 
 import type { PackageManagerInvocation } from "./types.js";
 
-export type StandardExecutablePackageManager = "bun" | "npm" | "yarn";
+type StandardExecutablePackageManager = "bun" | "npm" | "yarn";
 
 /** Resolves a manager executable, preserving test and package-runner interposition. */
 export function resolveStandardInvocation(

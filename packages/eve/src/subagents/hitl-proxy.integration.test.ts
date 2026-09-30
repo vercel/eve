@@ -9,13 +9,14 @@ import { ContextContainer } from "#context/container.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
+import { setHarnessEmissionState } from "#harness/emission-state.js";
 import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
 import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
-import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import { emitProxiedInputRequest, routeDeliverPayload } from "#subagents/hitl-proxy.js";
 
@@ -53,7 +54,7 @@ function buildMockBundle(adapters: readonly ChannelAdapter[]): CompiledBundle {
     adapterRegistry: createRuntimeAdapterRegistry({ channels }),
     compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
     graph: {} as CompiledBundle["graph"],
-    hookRegistry: createEmptyHookRegistry(),
+    hookRegistry: createRuntimeHookRegistry([]),
     moduleMap: {} as CompiledBundle["moduleMap"],
     resolvedAgent: {} as CompiledBundle["resolvedAgent"],
     subagentRegistry: {} as CompiledBundle["subagentRegistry"],
@@ -164,6 +165,15 @@ function buildEmptySession(continuationToken: string, sessionId: string): Harnes
   };
 }
 
+function buildOpenTurnSession(continuationToken: string, sessionId: string): HarnessSession {
+  return setHarnessEmissionState(buildEmptySession(continuationToken, sessionId), {
+    sessionStarted: true,
+    sequence: 3,
+    stepIndex: 1,
+    turnId: "turn_3",
+  });
+}
+
 /**
  * Builds an adapter-aware emit helper and a captured-events sink
  * paired to one parent context. The returned `emit` mirrors the
@@ -220,11 +230,11 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     });
 
     const { emit, events, persistAdapterState } = buildCapturingEmit(ctx);
-    const { entries, session: sessionAfterEmit } = await emitProxiedInputRequest({
+    const parentSession = buildOpenTurnSession("parent-token", "sess-parent");
+    const entries = await emitProxiedInputRequest({
       emit,
       hookPayload,
-      mode: "conversation",
-      session: buildEmptySession("parent-token", "sess-parent"),
+      session: parentSession,
     });
     // Simulate the workflow step's post-step
     // `ctx.set(ChannelKey, { …adapter, state })` — the mutation the
@@ -247,21 +257,19 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
             requestIds: ["req-approve-1"],
           },
           childContinuationToken: "subagent:parent:call-1",
+          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
           kind: "tool-approval",
         },
       ],
     ]);
 
-    // The parent is in conversation mode, so the helper follows the
-    // proxied `input.requested` with a `turn.completed` +
-    // `session.waiting` pair so client event-stream readers stop
-    // draining and prompt for the HITL response.
-    const emittedTypes = events.map((event) => event.type);
-    expect(emittedTypes).toEqual(["input.requested", "turn.completed", "session.waiting"]);
-
-    // The returned session carries the advanced emission state so
-    // the next harness step starts a fresh logical turn.
-    expect(sessionAfterEmit.state?.["eve.harness.emission"]).toBeDefined();
+    // The proxied `input.requested` parks the parent's open turn with
+    // `turn.waiting`; the call that asked is still running, so the turn
+    // neither completes nor resets.
+    expect(events.slice(1)).toEqual([
+      { data: { sequence: 3, turnId: "turn_3" }, type: "turn.waiting" },
+    ]);
+    expect(events[0]?.type).toBe("input.requested");
 
     // The serialized adapter state must include mutations made while
     // rendering the proxied input request.
@@ -314,39 +322,19 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
         payload: {
           inputResponses: [{ optionId: "approve", requestId: "req-approve-1" }],
         },
-        retireRequestIds: ["req-approve-1"],
+        resolved: {
+          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+          resolutions: [
+            {
+              kind: "tool-approval",
+              outcome: "approved",
+              requestId: "req-approve-1",
+              response: { optionId: "approve", requestId: "req-approve-1" },
+            },
+          ],
+        },
       },
     ]);
-  });
-
-  it("in task mode, skips the `turn.completed` + `session.waiting` boundary so scheduled chains do not fake a wait", async () => {
-    // Scheduled-task roots must not emit `session.waiting` — a proxied
-    // HITL there signals an impending `SUBAGENT_EXECUTION_FAILED`, not
-    // a client-facing park. This test pins the mode-gating in place
-    // so a refactor cannot re-introduce the boundary pair for task
-    // mode.
-    const slackishAdapter = buildSlackishAdapter();
-    const bundle = buildMockBundle([slackishAdapter]);
-
-    const ctx = new ContextContainer();
-    ctx.set(BundleKey, bundle);
-    ctx.set(ChannelKey, slackishAdapter);
-
-    const { emit, events } = buildCapturingEmit(ctx);
-    await emitProxiedInputRequest({
-      emit,
-      hookPayload: buildHitlPayload({
-        callId: "call-task-1",
-        childContinuationToken: "subagent:task-parent:call-task-1",
-        childSessionId: "sess-task-child",
-        request: buildApprovalRequest("req-task-1"),
-        subagentName: "linear",
-      }),
-      mode: "task",
-      session: buildEmptySession("task-parent-token", "sess-task-parent"),
-    });
-
-    expect(events.map((event) => event.type)).toEqual(["input.requested"]);
   });
 });
 
@@ -380,10 +368,9 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       request: requestA,
       subagentName: "descendantA",
     });
-    const { entries: entriesA } = await emitProxiedInputRequest({
+    const entriesA = await emitProxiedInputRequest({
       emit,
       hookPayload: payloadA,
-      mode: "conversation",
       session: buildEmptySession("parent-token", "sess-parent"),
     });
 
@@ -396,10 +383,9 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       request: requestB,
       subagentName: "descendantB",
     });
-    const { entries: entriesB } = await emitProxiedInputRequest({
+    const entriesB = await emitProxiedInputRequest({
       emit,
       hookPayload: payloadB,
-      mode: "conversation",
       session: buildEmptySession("parent-token", "sess-parent"),
     });
     persistAdapterState();

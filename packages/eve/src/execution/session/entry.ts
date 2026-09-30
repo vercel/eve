@@ -3,7 +3,6 @@ import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index
 
 import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel/types.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
@@ -12,6 +11,7 @@ import { isHookConflictError } from "#execution/hook-ownership.js";
 import { createSessionInbox, type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import { DEFAULT_SESSION_TIMEOUT_MS, sessionTimeoutDeadline } from "#execution/session/timeout.js";
+import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
@@ -80,7 +80,6 @@ async function bootInitialOwner(
 ): Promise<BootOutcome | undefined> {
   const serializedContext = stampSessionIdentity(input.serializedContext, sessionId);
   const sessionWritable = getWritable<Uint8Array>();
-  const mode = serializedContext["eve.mode"] as RunMode;
   const inbox = createSessionInbox(sessionId);
   const { workflowStartedAt } = getWorkflowMetadata();
   const sessionTimeoutMs = input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
@@ -90,9 +89,6 @@ async function bootInitialOwner(
     nodeId?: string;
   };
   try {
-    if (input.input.message === undefined && mode !== "conversation") {
-      throw new Error("A message-free session must use conversation mode.");
-    }
     const [sessionCreation, stableClaim, aliasClaim] = await Promise.allSettled([
       createSessionStep({
         compiledArtifactsSource: serializedBundle.source,
@@ -105,7 +101,6 @@ async function bootInitialOwner(
         outputSchema: input.input.outputSchema,
         rootSessionId: readRootSessionId(serializedContext),
         sessionId,
-        taskId: input.taskId,
       }),
       inbox.claimSessionHook(sessionCommandHookToken(sessionId)),
       continuationToken === "" ? Promise.resolve() : inbox.claimSessionHook(continuationToken),
@@ -114,12 +109,8 @@ async function bootInitialOwner(
     if (stableClaim.status === "rejected") throw stableClaim.reason;
     if (aliasClaim.status === "rejected") {
       if (!isHookConflictError(aliasClaim.reason)) throw aliasClaim.reason;
-      if (
-        input.activityCollectorRunId !== undefined ||
-        input.continuationConflictCommand !== undefined
-      ) {
+      if (input.continuationConflictCommand !== undefined) {
         await settleContinuationConflictStep({
-          activityCollectorRunId: input.activityCollectorRunId,
           command: input.continuationConflictCommand,
           continuationToken,
         });
@@ -131,14 +122,13 @@ async function bootInitialOwner(
       inbox,
       session: {
         anchor: { kind: "self" },
-        caller: hasDelegatedCallerContext(serializedContext)
+        caller: hasDelegatedSessionContext(serializedContext)
           ? await resolveInitialTurnCallerStep({ serializedContext })
           : undefined,
         capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
         deploymentId: input.ownerDeploymentId,
         initialInput: createInitialDelivery(input, serializedContext),
         awaitFirstMessage: input.input.message === undefined,
-        mode,
         retention: input.retention,
         serializedContext,
         sessionId,
@@ -155,7 +145,6 @@ async function bootInitialOwner(
     await inbox.dispose();
     return await failSession({
       error,
-      mode,
       serializedContext,
       sessionId,
       sessionState: undefined,
@@ -172,7 +161,15 @@ async function bootHandoffOwner(
   const serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
   const inbox = createSessionInbox(sessionId);
   try {
-    await validateSessionCheckpointStep({ checkpoint });
+    const validation = await validateSessionCheckpointStep({ checkpoint });
+    if (validation.kind === "incompatible") {
+      const payloads = await inbox.release();
+      await signalSessionOwnerActivationStep({
+        activation: { kind: "incompatible", payloads, reason: validation.reason },
+        token: input.activationToken,
+      });
+      return undefined;
+    }
     await inbox.claimSessionHooks(
       sessionHookTokens({ serializedContext, sessionState: checkpoint.sessionState }),
     );
@@ -197,7 +194,6 @@ async function bootHandoffOwner(
       deploymentId: input.ownerDeploymentId,
       initialInput: input.delivery,
       awaitFirstMessage: false,
-      mode: checkpoint.mode,
       retention: checkpoint.retention,
       serializedContext,
       sessionId,
@@ -207,14 +203,6 @@ async function bootHandoffOwner(
       sessionWritable: input.sessionWritable,
     },
   };
-}
-
-function hasDelegatedCallerContext(serializedContext: Record<string, unknown>): boolean {
-  if (serializedContext["eve.sessionCallback"] !== undefined) return true;
-  const channel = serializedContext["eve.channel"];
-  return (
-    typeof channel === "object" && channel !== null && Reflect.get(channel, "kind") === "subagent"
-  );
 }
 
 function createInitialDelivery(
@@ -239,6 +227,7 @@ function createInitialDelivery(
           message: input.input.message,
           context: input.input.context,
           outputSchema: input.input.outputSchema,
+          state: input.input.state,
         },
         readClientContext(input.input),
       ),

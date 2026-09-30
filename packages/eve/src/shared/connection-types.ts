@@ -1,9 +1,8 @@
 /**
  * Protocol-agnostic interfaces for the connection system.
  *
- * Framework tools (`connection_search`) and the context provider
- * depend only on these interfaces, not on any
- * protocol-specific implementation such as MCP.
+ * Framework tools and the context provider depend only on these
+ * interfaces, not on any protocol-specific implementation such as MCP.
  */
 
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";

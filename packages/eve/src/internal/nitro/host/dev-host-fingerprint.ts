@@ -26,10 +26,10 @@ export async function computeDevelopmentHostFingerprint(
       extensionScopes: agentNodes
         .flatMap((node) => node.extensionMounts)
         .map((mount) => ({
-          packageNamespace: mount.packageNamespace,
+          mountId: mount.mountId,
           sourceRoot: mount.sourceRoot,
         }))
-        .sort((left, right) => left.sourceRoot.localeCompare(right.sourceRoot)),
+        .sort((left, right) => left.mountId.localeCompare(right.mountId)),
       sandboxProviders: [
         ...new Set(
           agentNodes

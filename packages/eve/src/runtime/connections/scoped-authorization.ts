@@ -36,7 +36,7 @@ import {
   resolveConnectionPrincipal,
   resolveConnectionPrincipalFromAuth,
 } from "#runtime/connections/principal.js";
-import type { SessionAuthContext } from "#context/keys.js";
+import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import {
   type AuthorizationDefinition,
   type ConnectionAuthorizationContext,
@@ -314,7 +314,7 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
  * callback URL can be minted (for example outside a deployment), so
  * callers can fall through to rethrowing the original `Required` error.
  */
-export async function startScopedAuthorization(
+async function startScopedAuthorization(
   input: ScopedAuthorization,
 ): Promise<AuthorizationSignal | undefined> {
   const { scope, authorization, connection } = input;
@@ -325,6 +325,8 @@ export async function startScopedAuthorization(
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const principal = resolveScopedPrincipal(input);
+  const principalId = (input.boundResponder ?? contextStorage.getStore()?.get(AuthKey))
+    ?.principalId;
   const callbackUrl = resolveAuthorizationCallbackUrl({
     authorization,
     callbackUrl: attempt.hookUrl,
@@ -342,6 +344,7 @@ export async function startScopedAuthorization(
       instanceId: input.instanceId,
       name: scope,
       principal,
+      principalId,
       resume,
     },
   ]);

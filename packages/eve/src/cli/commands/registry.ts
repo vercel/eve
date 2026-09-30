@@ -155,20 +155,6 @@ function itemAddress(item: string): string {
     : `${OFFICIAL_REGISTRY}/${item}.json`;
 }
 
-/** Installs an official registry item without running its declared setup command. */
-export async function installOfficialRegistryItem(
-  appRoot: string,
-  item: string,
-  options: AddCommandOptions = {},
-): Promise<void> {
-  const config = await readEveRegistryConfig(appRoot);
-  await addRegistryItems([itemAddress(item)], {
-    config,
-    cwd: appRoot,
-    overwrite: options.overwrite,
-  });
-}
-
 function assertCompatibleEveVersion(requiredVersion: string | undefined): void {
   if (requiredVersion === undefined) return;
   const installedVersion = resolveInstalledPackageInfo().version;
@@ -415,13 +401,6 @@ async function browseRegistryItems(
     logger.error(`${error.registry}: ${error.message}`);
   }
   if (errors.length > 0) process.exitCode = 1;
-}
-
-/** Resolves one official, configured, or URL-addressed item manifest. */
-export async function getRegistryItemManifest(appRoot: string, item: string): Promise<unknown> {
-  const config = await readEveRegistryConfig(appRoot);
-  const items = await getRegistryItems([itemAddress(item)], { config });
-  return items.length === 1 ? items[0] : items;
 }
 
 /** Installs an official, configured, or URL-addressed registry item. */

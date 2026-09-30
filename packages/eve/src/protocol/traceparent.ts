@@ -1,6 +1,6 @@
 import { createTraceState, type TraceState } from "#compiled/@opentelemetry/api/index.js";
 
-export interface TraceparentContext {
+interface TraceparentContext {
   readonly isRemote?: boolean;
   readonly spanId: string;
   readonly traceFlags: number;

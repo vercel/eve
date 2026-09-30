@@ -34,6 +34,12 @@ const config = e2eAgentConfig({
         ? { toolCalls: [{ name: "call_child", input: {} }] }
         : JSON.stringify(result.output);
     }
+    if (lastUserMessage?.includes("read_audit_outbox")) {
+      const result = toolResults.find((entry) => entry.name === "read_audit_outbox");
+      return result === undefined
+        ? { toolCalls: [{ name: "read_audit_outbox", input: {} }] }
+        : JSON.stringify(result.output);
+    }
     if (lastUserMessage === CHILD_REQUEST) {
       return {
         toolCalls: [{ name: "final_output", input: { answer: "client-recursion-ok" } }],

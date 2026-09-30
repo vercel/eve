@@ -10,7 +10,6 @@ import { readProjectLink } from "./project-resolution.js";
 import { configureTraceSampling } from "./vercel-trace-sampling.js";
 import {
   assertNewProjectNameAvailable,
-  ensureLinkedVercelProject,
   getVercelAuthStatus,
   linkProject,
   pickNewProjectName,
@@ -19,7 +18,6 @@ import {
   requireAuth,
   resolveProjectByNameOrId,
   validateTeam,
-  vercelAuthBlockerReason,
 } from "./vercel-project.js";
 
 vi.mock("#setup/primitives/index.js", async (importOriginal) => {
@@ -77,22 +75,6 @@ beforeEach(() => {
   mockedRunVercel.mockResolvedValue(true);
   mockedConfigureTraceSampling.mockReset();
   mockedReadProjectLink.mockReset();
-});
-
-describe("vercelAuthBlockerReason", () => {
-  it("maps non-authenticated states to their setup blockers", () => {
-    expect([
-      vercelAuthBlockerReason("authenticated"),
-      vercelAuthBlockerReason("cli-missing"),
-      vercelAuthBlockerReason("logged-out"),
-      vercelAuthBlockerReason("unavailable"),
-    ]).toEqual([
-      undefined,
-      "Vercel CLI not found, see /deploy",
-      "Log in to Vercel first, see /deploy",
-      "Couldn't reach Vercel, check your connection",
-    ]);
-  });
 });
 
 describe("getVercelAuthStatus", () => {
@@ -593,47 +575,6 @@ describe("resolveProjectByNameOrId", () => {
       ["api", "/v9/projects/my-agent", "--scope", "team-a", "--raw"],
       { cwd: "/tmp/eve-agent", signal: undefined, timeoutMs: 15_000 },
     );
-  });
-});
-
-describe("ensureLinkedVercelProject", () => {
-  it("returns the existing project link without invoking the CLI", async () => {
-    mockedReadProjectLink.mockResolvedValue({ orgId: "team_a", projectId: "prj_a" });
-    const { prompter } = createFakePrompter();
-
-    await expect(
-      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
-    ).resolves.toEqual({ orgId: "team_a", projectId: "prj_a" });
-
-    expect(mockedRunVercel).not.toHaveBeenCalled();
-  });
-
-  it("links interactively and reads the resulting project link", async () => {
-    mockedReadProjectLink
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce({ orgId: "team_a", projectId: "prj_a" });
-    const { prompter } = createFakePrompter();
-    prompter.withInheritedStdio = vi.fn((task) => task());
-
-    await expect(
-      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
-    ).resolves.toEqual({ orgId: "team_a", projectId: "prj_a" });
-
-    expect(prompter.withInheritedStdio).toHaveBeenCalledOnce();
-    expect(mockedRunVercel).toHaveBeenCalledWith(["link"], {
-      cwd: "/tmp/eve-agent",
-      signal: undefined,
-    });
-  });
-
-  it("fails when the interactive link does not complete", async () => {
-    mockedReadProjectLink.mockResolvedValue(undefined);
-    mockedRunVercel.mockResolvedValue(false);
-    const { prompter } = createFakePrompter();
-
-    await expect(
-      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
-    ).rejects.toThrow("Vercel project linking failed.");
   });
 });
 

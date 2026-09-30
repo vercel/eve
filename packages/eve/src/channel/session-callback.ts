@@ -5,7 +5,7 @@ import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { normalizePublicEveRoutePath } from "#shared/eve-route-path.js";
 import { isReservedIpAddress } from "#shared/network-address.js";
 
-export type SessionCallbackParseResult =
+type SessionCallbackParseResult =
   | {
       readonly callback: SessionCallback;
       readonly ok: true;
@@ -20,7 +20,6 @@ const sessionCallbackSchema = z
   .object({
     callId: z.string().min(1),
     subagentName: z.string().min(1),
-    taskId: z.string().min(1).optional(),
     token: z.string().min(1),
     url: z.string().min(1),
   })

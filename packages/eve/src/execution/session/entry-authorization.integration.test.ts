@@ -1,4 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createChannelOperations } from "#channel/channel-operations.js";
+import { isCompiledChannel } from "#channel/compiled-channel.js";
+import { isHttpRouteDefinition } from "#channel/routes.js";
+import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
+import { slackChannel } from "#public/channels/slack/slackChannel.js";
+import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { resumeHook, start } from "#internal/workflow/runtime.js";
 import { filterEventsByType } from "#internal/testing/events.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
@@ -28,7 +36,101 @@ import {
   expectSingleTurn,
 } from "#internal/testing/entry-test-helpers.js";
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("workflowEntry integration", () => {
+  it("sends a first-turn sign-in privately to a custom-auth Slack author", async () => {
+    const signingSecret = "first-turn-signing-secret";
+    const ephemeral: Record<string, unknown>[] = [];
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.hostname !== "slack.com") return realFetch(input, init);
+      if (url.pathname.endsWith("/chat.postEphemeral")) {
+        ephemeral.push(Object.fromEntries(new URLSearchParams(String(init?.body))));
+      }
+      return Response.json({ ok: true, ts: "1700000000.000900", messages: [] });
+    });
+    const slack = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret },
+      onDirectMessage: () => ({
+        auth: {
+          attributes: {},
+          authenticator: "employee-directory",
+          principalId: "employee:alice",
+          principalType: "user",
+        },
+      }),
+    });
+    if (!isCompiledChannel(slack)) throw new Error("Expected a compiled Slack channel.");
+    const route = slack.routes.find((candidate) => candidate.method === "POST");
+    if (route === undefined || !isHttpRouteDefinition(route)) {
+      throw new Error("Expected the Slack events route.");
+    }
+    const { runtime } = await createWeatherAuthRuntime("workflow-entry-slack-first-turn-auth", [
+      { logicalPath: "channels/slack.ts", loadNamespace: async () => ({ default: slack }) },
+    ]);
+
+    await runtime.run(async () => {
+      const bundle = await getCompiledRuntimeAgentBundle({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const resolved = bundle.graph.root.channels.find((channel) => channel.name === "slack");
+      if (resolved?.adapter === undefined) throw new Error("Expected the resolved Slack channel.");
+      const operations = createChannelOperations<unknown>({
+        adapter: resolved.adapter,
+        channelName: "slack",
+        runtime: createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        }),
+      });
+      const body = JSON.stringify({
+        event: {
+          channel: "D_ALICE",
+          channel_type: "im",
+          event_ts: "1700000000.000100",
+          text: "Use the get_weather tool to check the weather in Lisbon.",
+          ts: "1700000000.000100",
+          type: "message",
+          user: "U_ALICE",
+        },
+        event_id: "Ev_first_turn_auth",
+        team_id: "T01",
+        type: "event_callback",
+      });
+      const timestamp = Math.floor(Date.now() / 1000);
+      const signature = `v0=${createHmac("sha256", signingSecret)
+        .update(`v0:${timestamp}:${body}`)
+        .digest("hex")}`;
+      const pending: Promise<unknown>[] = [];
+      await route.handler(
+        new Request("https://agent.example.com/eve/v1/slack", {
+          body,
+          headers: {
+            "content-type": "application/json",
+            "x-slack-request-timestamp": String(timestamp),
+            "x-slack-signature": signature,
+          },
+          method: "POST",
+        }),
+        {
+          ...operations,
+          attachSession: vi.fn() as never,
+          params: {},
+          requestIp: null,
+          to: vi.fn() as never,
+          waitUntil: (task) => void pending.push(task),
+        },
+      );
+      await Promise.all(pending);
+
+      await vi.waitFor(() => expect(ephemeral).toHaveLength(1), { timeout: 20_000 });
+      expect(ephemeral[0]).toMatchObject({ channel: "D_ALICE", user: "U_ALICE" });
+    });
+  });
+
   it("resumes normal follow-ups after an interactive authorization callback", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-followup",
@@ -51,7 +153,6 @@ describe("workflowEntry integration", () => {
             },
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -172,7 +273,6 @@ describe("workflowEntry integration", () => {
             },
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -248,9 +348,14 @@ describe("workflowEntry integration", () => {
         const completed = filterEventsByType(callbackTurn, "authorization.completed");
         expectSingleTurn(callbackTurn, "turn_2");
         expect(completed).toHaveLength(1);
+        // The attempt stays bound to user-1 even though user-2 spoke last.
+        expect(filterEventsByType(firstTurn, "authorization.required")[0]?.data.principalId).toBe(
+          "user-1",
+        );
         expect(completed[0]?.data).toMatchObject({
           name: "weather",
           outcome: "authorized",
+          principalId: "user-1",
         });
 
         // The granted authorization serves the next explicit tool request.
@@ -291,78 +396,6 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it("defers ordinary deliveries while a task waits for authorization", async () => {
-    const { completeCalls, runtime } = await createWeatherAuthRuntime(
-      "workflow-entry-task-auth-open",
-    );
-    const continuationToken = "http:workflow-entry-task-auth-open";
-
-    await runtime.run(async () => {
-      const run = await start(workflowEntry, [
-        {
-          kind: "initial",
-          ownerDeploymentId: "dpl_inline",
-          input: { message: "Use the get_weather tool to check the weather in Lisbon." },
-          serializedContext: buildSerializedContext({
-            auth: {
-              attributes: {},
-              authenticator: "test-idp",
-              issuer: "test-idp",
-              principalId: "user-1",
-              principalType: "user",
-            },
-            channelKind: "http",
-            continuationToken,
-            mode: "task",
-          }),
-        },
-      ]);
-      const stream = captureEvents(run);
-
-      try {
-        const firstTurn = await stream.nextUntil(
-          "initial task auth-required event",
-          (event) => event.type === "authorization.required",
-        );
-
-        await waitForHook(
-          { runId: run.runId },
-          { token: sessionInboxHookToken(continuationToken) },
-        );
-        await resumeHook(sessionInboxHookToken(continuationToken), {
-          kind: "send",
-          payload: { message: "This must not become a second task turn." },
-        });
-        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
-          kind: "authorization-callback",
-          payloads: [
-            {
-              authorizationCallback: {
-                attemptId: authorizationAttemptId(firstTurn),
-                callback: { method: "GET", params: { code: "oauth-code" } },
-                connectionName: "weather",
-              },
-            },
-          ],
-        });
-
-        const completion = await stream.nextUntil(
-          "authorized task completion",
-          (event) => event.type === "session.completed",
-        );
-        const allEvents = [...firstTurn, ...completion];
-        expect(filterEventsByType(allEvents, "turn.started")).toHaveLength(1);
-        expect(filterEventsByType(allEvents, "message.received")).toHaveLength(1);
-        expect(filterEventsByType(allEvents, "authorization.completed")).toHaveLength(1);
-        expect(filterEventsByType(allEvents, "session.waiting")).toHaveLength(0);
-        expect(completeCalls()).toBe(1);
-      } finally {
-        stream.dispose();
-        await run.cancel();
-      }
-    });
-  });
-
   it("ignores stale and duplicate callbacks after a challenge is replaced", async () => {
     const { completeCalls, runtime } = await createWeatherAuthRuntime(
       "workflow-entry-auth-replaced",
@@ -385,7 +418,6 @@ describe("workflowEntry integration", () => {
             },
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -483,7 +515,6 @@ describe("workflowEntry integration", () => {
             },
             channelKind: "http",
             continuationToken,
-            mode: "conversation",
           }),
         },
       ]);
@@ -566,7 +597,10 @@ interface WeatherAuthRuntime {
  * `oauth-code` callback. Shared by the callback-resume and
  * challenge-stays-open owner tests.
  */
-async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthRuntime> {
+async function createWeatherAuthRuntime(
+  agentName: string,
+  modules: NonNullable<Parameters<typeof createTestRuntime>[0]>["modules"] = [],
+): Promise<WeatherAuthRuntime> {
   let completeCalls = 0;
   const completedPrincipals: ConnectionPrincipal[] = [];
   const weatherAuth: AuthorizationDefinition<{ nonce: string }> = {
@@ -632,6 +666,7 @@ async function createWeatherAuthRuntime(agentName: string): Promise<WeatherAuthR
   };
   const runtime = await createTestRuntime({
     agent: { name: agentName },
+    modules,
     tools: [getWeatherTool],
   });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === getWeatherTool.name);

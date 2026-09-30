@@ -5,7 +5,10 @@ import {
   getDevelopmentExtensionSourceRegistry,
   prepareDevelopmentExtensions,
 } from "#compiler/development-extensions.js";
-import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
+import {
+  createCompiledModuleMapSource,
+  createProgrammaticCompiledModuleMap,
+} from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import { createAgentSourceManifest } from "#discover/manifest.js";
@@ -35,10 +38,12 @@ describe("development extensions", () => {
     expect(compiled.extensionMounts).toMatchObject([
       {
         mountLogicalPath: "extensions/self-modification.ts",
+        mountId: "extensions/self-modification",
         namespace: "self-modification",
         packageName: "eve",
       },
     ]);
+    expect(subagent.owner).toMatchObject({ mountId: "extensions/self-modification" });
     expect(subagent.agent.tools.map((tool) => tool.name)).toEqual(
       expect.arrayContaining(["edit_file", "search_models", "search_registry"]),
     );
@@ -52,6 +57,11 @@ describe("development extensions", () => {
       getDevelopmentExtensionSourceRegistry(),
     ]);
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
+    const generated = createCompiledModuleMapSource({
+      manifest: compiled,
+      moduleMapPath: "/virtual/source-test/.eve/compile/module-map.mjs",
+    });
+    expect(generated).toContain("eve/self-modification?eve-mount=extensions%2Fself-modification");
   });
 
   it("does not replace an authored self-modification mount", async () => {

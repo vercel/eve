@@ -190,6 +190,6 @@ An approval durably pauses the session and a later request resumes it. Your HTTP
 - `POST /eve/v1/session/:sessionId`, including `inputResponses`;
 - `GET /eve/v1/session/:sessionId/stream`.
 
-Built-in approval confirms that a human with access to the session approved the call. It is not a four-eyes workflow that proves a different person or role approved it. For that requirement, create an application-owned approval request, notify eligible approvers through a channel, and have policy return allow only after that request records an authorized decision.
+Built-in approval confirms that a human with access to the session approved the call. To restrict who may respond, add an [approval response policy](/docs/human-in-the-loop#authorizing-approval-responses): it receives who responded as `response.principal` and who asked for the call as `request.principal`, and runs for both Approve and Cancel. For a four-eyes workflow, where a different person or role must approve, branch on `response.decision`: allow `cancel` so the requester can still withdraw the call, and for `approve` reject a `response.principal` that matches `request.principal` and check the responder's role.
 
 The complete eve integration is one async adapter reused by tools and both connection protocols. The tenant's rule storage and governance model remain application concerns.

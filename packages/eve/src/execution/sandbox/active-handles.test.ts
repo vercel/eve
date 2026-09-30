@@ -1,14 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  clearActiveSandboxHandlesForTest,
-  countActiveSandboxHandles,
   shutdownActiveSandboxHandles,
   trackActiveSandboxHandle,
 } from "#execution/sandbox/active-handles.js";
 
-afterEach(() => {
-  clearActiveSandboxHandlesForTest();
+afterEach(async () => {
+  await shutdownActiveSandboxHandles();
 });
 
 describe("shutdownActiveSandboxHandles", () => {
@@ -19,10 +17,10 @@ describe("shutdownActiveSandboxHandles", () => {
     trackActiveSandboxHandle({ providerName: "docker", handle: second, sessionId: "session-2" });
 
     await shutdownActiveSandboxHandles();
+    await shutdownActiveSandboxHandles();
 
     expect(first.onRuntimeShutdown).toHaveBeenCalledTimes(1);
     expect(second.onRuntimeShutdown).toHaveBeenCalledTimes(1);
-    expect(countActiveSandboxHandles()).toBe(0);
   });
 
   it("replaces the tracked handle when the same session is reopened", async () => {
@@ -31,7 +29,6 @@ describe("shutdownActiveSandboxHandles", () => {
     trackActiveSandboxHandle({ providerName: "docker", handle: stale, sessionId: "session-1" });
     trackActiveSandboxHandle({ providerName: "docker", handle: fresh, sessionId: "session-1" });
 
-    expect(countActiveSandboxHandles()).toBe(1);
     await shutdownActiveSandboxHandles();
 
     expect(stale.onRuntimeShutdown).not.toHaveBeenCalled();

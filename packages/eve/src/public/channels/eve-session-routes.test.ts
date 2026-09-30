@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
@@ -7,6 +8,7 @@ import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operati
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, type TrustedForwarders } from "#public/channels/eve.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 function route(
   method: "GET" | "POST",
@@ -85,7 +87,6 @@ describe("eve ID-addressed session routes", () => {
           message: undefined,
           outputSchema: undefined,
         },
-        mode: "conversation",
       }),
     );
   });
@@ -173,7 +174,7 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
-          mode: "conversation",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -214,7 +215,7 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
-          mode: "conversation",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -256,6 +257,7 @@ describe("eve ID-addressed session routes", () => {
             url: "https://caller.example.com/eve/v1/callback/tok123",
           },
           message: "hello",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
         }),
         headers: {
           "content-type": "application/json",
@@ -305,6 +307,7 @@ describe("eve ID-addressed session routes", () => {
                 }
               : undefined,
             message: "hello",
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           }),
           headers: {
             "content-type": "application/json",
@@ -318,7 +321,7 @@ describe("eve ID-addressed session routes", () => {
       );
 
       expect(response.status).toBe(202);
-      await expect(response.json()).resolves.toEqual({
+      await expect(response.json()).resolves.toMatchObject({
         ok: true,
         sessionId: "wrun_A",
         status: "accepted",
@@ -343,6 +346,7 @@ describe("eve ID-addressed session routes", () => {
   it.each([true, false])(
     "promotes remote parent lineage only from a trusted forwarder (%s)",
     async (trusted) => {
+      const logs = captureLogRecords();
       const createSession = vi.fn().mockResolvedValue({
         events: new ReadableStream(),
         sessionId: "wrun_A",
@@ -369,6 +373,7 @@ describe("eve ID-addressed session routes", () => {
               url: "https://caller.example.com/eve/v1/callback/tok123",
             },
             message: "hello",
+            protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
           }),
           headers: {
             "content-type": "application/json",
@@ -388,6 +393,10 @@ describe("eve ID-addressed session routes", () => {
           parent: trusted ? parent : undefined,
         }),
       );
+      const untrusted = logs.records.filter(
+        (record) => record.message === "ignoring remote parent lineage from an untrusted forwarder",
+      );
+      expect(untrusted).toHaveLength(trusted ? 0 : 1);
     },
   );
 
@@ -482,21 +491,17 @@ describe("eve ID-addressed session routes", () => {
     expect(session[operation]).toHaveBeenCalledTimes(1);
   });
 
-  it("forwards owned-task cancellation without changing the response", async () => {
+  it("forwards the turn guard without changing the response", async () => {
     const session = createFixedSession();
     const response = await route("POST", "/eve/v1/session/:sessionId/cancel")(
       new Request("https://eve.test/eve/v1/session/wrun_A/cancel", {
-        body: JSON.stringify({ tasks: true, turnId: "turn_1" }),
+        body: JSON.stringify({ turnId: "turn_1" }),
         method: "POST",
       }),
       createArgs(session),
     );
 
-    expect(session.cancel).toHaveBeenCalledWith({
-      taskId: undefined,
-      tasks: true,
-      turnId: "turn_1",
-    });
+    expect(session.cancel).toHaveBeenCalledWith({ turnId: "turn_1" });
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toEqual({
       ok: true,

@@ -55,6 +55,8 @@ export type EveChannelCors = boolean | EveChannelCorsOptions;
 export interface EveHandle {
   /** Route-auth result for the request; `onMessage` chooses session auth by returning `{ auth }`. */
   readonly caller: SessionAuthContext | null;
+  /** Replay-stable identity of a trusted remote-subagent create operation. */
+  readonly invocation?: { readonly operationId: string };
   readonly request: Request;
   /** Existing runtime session id for follow-up requests. */
   readonly sessionId?: string;
@@ -106,7 +108,7 @@ export interface EveChannelInput {
    * trace consumers treat as non-public.
    *
    * Pass a constant audience, or a function receiving the authenticated
-   * principal, channel, run mode, and deployment environment. Continuation
+   * principal, channel, and deployment environment. Continuation
    * turns from a different caller do not reclassify an existing session.
    */
   readonly audience?:

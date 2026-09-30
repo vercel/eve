@@ -1,6 +1,8 @@
-import type { JsonObject } from "#shared/json.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { compileFromMemory, type CompileFromMemoryInput } from "#compiler/compile-from-memory.js";
+import {
+  compileFromMemory,
+  type CompileFromMemoryInput,
+} from "#internal/testing/compile-from-memory.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
@@ -37,7 +39,7 @@ import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sand
  * no tools, skills, or subagents. The harness installs an in-memory sandbox
  * backend so runtime tests never depend on a host container or VM service.
  */
-export interface TestAppDescriptor {
+interface TestAppDescriptor {
   readonly agent?: {
     readonly limits?: {
       readonly maxInputTokensPerSession?: number | false;
@@ -47,7 +49,6 @@ export interface TestAppDescriptor {
     };
     readonly model?: string;
     readonly name?: string;
-    readonly outputSchema?: JsonObject;
   };
   /**
    * Authored tools projected into the compiled manifest and available to
@@ -178,7 +179,6 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
       },
       ...(descriptor.modules ?? []),
     ],
-    outputSchema: descriptor.agent?.outputSchema,
   };
 
   if (descriptor.tools !== undefined && descriptor.tools.length > 0) {

@@ -9,7 +9,6 @@ import {
   initAgentDevHandoff,
   initAgentInstructions,
   initAgentReadySummary,
-  initAgentReplPrompt,
   initExtensionHandoff,
   initExtensionInstructions,
   SETUP_SECTIONS,
@@ -59,7 +58,7 @@ describe("initAgentInstructions", () => {
 describe("initAgentReadySummary", () => {
   it("reports the model and generated instructions path", () => {
     expect(stripAnsi(initAgentReadySummary(undefined, "/app"))).toBe(
-      "✓ Model spacexai/grok-4.7 (eve default)\n✓ Instructions /app/agent/instructions.md",
+      "✓ Model openai/gpt-6-luna-fast (eve default)\n✓ Instructions /app/agent/instructions.md",
     );
     expect(stripAnsi(initAgentReadySummary("openai/gpt-5.5", "/app"))).toContain(
       "✓ Model openai/gpt-5.5\n",
@@ -68,7 +67,7 @@ describe("initAgentReadySummary", () => {
 
   it("reports the agents directory for a workspace", () => {
     expect(stripAnsi(initAgentReadySummary(undefined, "/app", { workspace: true }))).toBe(
-      "✓ Model spacexai/grok-4.7 (eve default)\n✓ Agents /app/agents",
+      "✓ Model openai/gpt-6-luna-fast (eve default)\n✓ Agents /app/agents",
     );
   });
 });
@@ -106,18 +105,6 @@ describe("initAgentDevHandoff", () => {
     expect(handoff).toContain("npm exec -- eve dev --no-ui");
     expect(handoff).toMatch(/give them the interactive\s+command/);
     expect(handoff).not.toContain("{{");
-  });
-});
-
-describe("initAgentReplPrompt", () => {
-  it("uses the shared guidance without interpolating the project path into the launch argument", () => {
-    const prompt = initAgentReplPrompt({ devCommand: "pnpm exec eve dev" });
-
-    expect(prompt).toContain("The project at `.` is already scaffolded.");
-    expect(prompt).toContain("What should the agent do?");
-    expect(prompt).toContain("`eve registry search <query>`");
-    expect(prompt).toContain("pnpm exec eve dev --no-ui");
-    expect(prompt).not.toContain("{{");
   });
 });
 

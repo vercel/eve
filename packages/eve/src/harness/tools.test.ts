@@ -17,7 +17,6 @@ import {
 } from "#harness/provider-tool-schemas.js";
 import type { JsonObject } from "#shared/json.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
-import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
@@ -65,6 +64,7 @@ async function resolveApproval(
 
 async function executeSdkTool(input: {
   readonly abortSignal?: AbortSignal;
+  readonly messages?: ToolExecuteOptions["messages"];
   readonly tool: unknown;
   readonly toolCallId?: string;
   readonly toolInput?: unknown;
@@ -80,7 +80,7 @@ async function executeSdkTool(input: {
   expect(execute).toBeTypeOf("function");
   return await execute!(input.toolInput ?? {}, {
     abortSignal: input.abortSignal,
-    messages: [],
+    messages: input.messages ?? [],
     toolCallId: input.toolCallId ?? "call_1",
   });
 }
@@ -135,57 +135,6 @@ describe("buildToolSet", () => {
 
     expect(receivedOptions?.abortSignal).toBe(abortController.signal);
     expect(receivedOptions?.toolCallId).toBe("call_observe");
-  });
-
-  it("registers background calls at execution when input callbacks are skipped or repeated", async () => {
-    const observedBatches: string[][] = [];
-    const ctx = new ContextContainer();
-    ctx.set(BackgroundToolExecutorKey, {
-      async execute({ batch }) {
-        observedBatches.push(batch.calls.map((call) => call.callId));
-        return { status: "working" };
-      },
-    });
-    const tools: HarnessToolMap = new Map([
-      [
-        "background_work",
-        {
-          description: "Start background work.",
-          execute: async () => ({ status: "working" }),
-          execution: "background",
-          inputSchema: jsonSchema({ type: "object" }),
-          name: "background_work",
-          workflowId: "workflow//test//background_work",
-        },
-      ],
-    ]);
-
-    const result = buildToolSet({ tools });
-    const backgroundTool = result.background_work as typeof result.background_work & {
-      readonly onInputAvailable: (input: {
-        readonly input: unknown;
-        readonly toolCallId: string;
-      }) => void;
-    };
-    await contextStorage.run(ctx, async () => {
-      await executeSdkTool({
-        tool: backgroundTool,
-        toolCallId: "approved-call",
-        toolInput: { task: "resume" },
-      });
-
-      backgroundTool.onInputAvailable({
-        input: { task: "new" },
-        toolCallId: "new-call",
-      });
-      await executeSdkTool({
-        tool: backgroundTool,
-        toolCallId: "new-call",
-        toolInput: { task: "new" },
-      });
-    });
-
-    expect(observedBatches).toEqual([["approved-call"], ["approved-call", "new-call"]]);
   });
 
   it("passes the AI SDK abort signal to the authored tool context", async () => {
@@ -339,6 +288,44 @@ describe("buildToolSet", () => {
     );
 
     expect(receivedCallId).toBe("call_observe");
+  });
+
+  it("passes the AI SDK step messages to the authored tool context", async () => {
+    let receivedMessages: ToolContext["messages"] | undefined;
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "observe_messages",
+        {
+          description: "Observe the step messages.",
+          execute: createToolExecuteWithAuth({
+            execute(_input, ctx) {
+              receivedMessages = (ctx as ToolContext).messages;
+              return { ok: true };
+            },
+            scope: "observe_messages",
+          }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "observe_messages",
+        },
+      ],
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+    const messages: ToolExecuteOptions["messages"] = [
+      { content: "Can I talk to a person?", role: "user" },
+      { content: "Let me check.", role: "assistant" },
+    ];
+
+    const result = buildToolSet({ tools });
+    await contextStorage.run(ctx, () =>
+      executeSdkTool({ messages, tool: result.observe_messages }),
+    );
+
+    expect(receivedMessages).toEqual(messages);
   });
 
   it("passes through the input schema to the SDK tool", () => {

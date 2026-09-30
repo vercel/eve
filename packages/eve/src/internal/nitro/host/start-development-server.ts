@@ -69,34 +69,6 @@ const PORT_ENV = "PORT";
 
 export { normalizeDevelopmentServerClientUrl };
 
-/**
- * Returns whether a supplied URL identifies this app's healthy local development
- * server. Only that server receives the local TUI credential path.
- */
-export async function isActiveDevelopmentServerForApp(input: {
-  readonly appRoot: string;
-  readonly serverUrl: string;
-}): Promise<boolean> {
-  try {
-    const project = await resolveDiscoveryProject(input.appRoot);
-    const recordedServerUrl = await new DevelopmentServerState(project).read();
-    if (
-      recordedServerUrl === undefined ||
-      !isLoopbackServerUrl(recordedServerUrl) ||
-      !(await isDevelopmentServerReady(recordedServerUrl))
-    ) {
-      return false;
-    }
-
-    return (
-      new URL(recordedServerUrl).origin ===
-      new URL(normalizeDevelopmentServerClientUrl(input.serverUrl)).origin
-    );
-  } catch {
-    return false;
-  }
-}
-
 async function isDevelopmentServerReady(serverUrl: string): Promise<boolean> {
   return (
     (await readDevelopmentRuntimeArtifactsRevision({
@@ -162,7 +134,14 @@ async function formatDevelopmentServerConnectCommand(
   serverUrl: string,
 ): Promise<string> {
   const packageManager = await detectDevelopmentCommandPackageManager(appRoot);
-  return [packageManager, ...eveDevArguments(packageManager), serverUrl].join(" ");
+  return [
+    packageManager,
+    ...eveDevArguments(packageManager).slice(0, -1),
+    "remote",
+    "connect",
+    "--url",
+    serverUrl,
+  ].join(" ");
 }
 
 async function createDevelopmentServerAlreadyRunningError(
@@ -396,6 +375,7 @@ async function startNitroDevelopmentServer(
   const environmentPort = readEnvironmentPort();
   const requestedPort = options.port ?? environmentPort;
   const hasExplicitServerConfiguration =
+    options.resume === true ||
     options.developmentExtensions !== undefined ||
     options.host !== undefined ||
     options.port !== undefined ||
@@ -456,8 +436,14 @@ async function startNitroDevelopmentServer(
     workflowWorld = createDevelopmentWorkflowWorld({
       appRoot: project.appRoot,
       preparedHost,
+      resume: options.resume,
       transportSecret: workflowTransportSecret,
     });
+    const localWorkflowWorld = workflowWorld;
+    const onRuntimePruned =
+      localWorkflowWorld === undefined
+        ? undefined
+        : () => localWorkflowWorld.reconcileExpiredRuns();
     // Parent-owned control routes must answer before the World starts: queue
     // redelivery begins at start(), and a delivery's World calls would
     // otherwise fall through to the worker and 404.
@@ -513,6 +499,7 @@ async function startNitroDevelopmentServer(
         await activateDevelopmentGeneration({
           appRoot: preparedHost.appRoot,
           generation: preparedHost.generation,
+          onRuntimePruned,
         });
         initialGenerationPublished = true;
       },
@@ -524,6 +511,7 @@ async function startNitroDevelopmentServer(
       developmentExtensions,
       devServer: activeDevServer,
       initialHost: preparedHost,
+      onRuntimePruned,
     });
 
     authoredSourceWatcher = await devBootPhase(

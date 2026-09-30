@@ -1,7 +1,7 @@
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionCheckpoint } from "#execution/session/handoff.js";
+import { SESSION_CHECKPOINT_VERSION, type SessionCheckpoint } from "#execution/session/handoff.js";
 import { validateSessionCheckpointStep } from "#execution/session/handoff-steps.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 
@@ -27,33 +27,24 @@ describe("validateSessionCheckpointStep", () => {
     readDurableSessionMock.mockReturnValue({});
     const checkpoint = createCheckpoint();
 
-    await validateSessionCheckpointStep({ checkpoint });
+    await expect(validateSessionCheckpointStep({ checkpoint })).resolves.toEqual({ kind: "valid" });
 
     expect(require).toHaveBeenCalledWith(BundleKey);
     expect(readDurableSessionMock).toHaveBeenCalledWith(checkpoint.sessionState);
   });
 
-  it("rejects an incompatible settled task with the current checkpoint version", async () => {
+  it("rejects an incompatible workflow tool run with the current checkpoint version", async () => {
     deserializeContextMock.mockResolvedValue({ require: vi.fn() });
     readDurableSessionMock.mockReturnValue({
       state: {
         "eve.workflowTool": {
-          version: 3,
+          version: 4,
           runs: [
             {
-              callId: "task",
+              callId: "call",
               toolName: "research",
-              lifetime: "session" as const,
               origin: { turnId: "turn", stepIndex: 0 },
               address: { runId: "run", hookToken: 42 },
-              task: {
-                taskId: "task",
-                metadata: { kind: "tool", name: "research" },
-                outcome: {
-                  status: "cancelled",
-                },
-                dispatchContext: { auth: { current: null, initiator: null } },
-              },
             },
           ],
         },
@@ -64,16 +55,17 @@ describe("validateSessionCheckpointStep", () => {
     );
   });
 
-  it.each([5, 6, 7, 9])(
-    "rejects checkpoint version %s before reading nested state",
+  it.each([5, 6, 7, 8, 9, 11])(
+    "reports checkpoint version %s as incompatible before reading nested state",
     async (version) => {
       const checkpoint = createCheckpoint();
       // Simulate an incompatible checkpoint received over the wire.
       Object.assign(checkpoint, { version });
 
-      await expect(validateSessionCheckpointStep({ checkpoint })).rejects.toThrow(
-        `Unsupported session checkpoint version ${version}`,
-      );
+      await expect(validateSessionCheckpointStep({ checkpoint })).resolves.toEqual({
+        kind: "incompatible",
+        reason: "checkpoint-version",
+      });
       expect(deserializeContextMock).not.toHaveBeenCalled();
       expect(readDurableSessionMock).not.toHaveBeenCalled();
     },
@@ -93,9 +85,8 @@ describe("validateSessionCheckpointStep", () => {
 
 function createCheckpoint(): SessionCheckpoint {
   return {
-    version: 8,
+    version: SESSION_CHECKPOINT_VERSION,
     sessionTimeoutMs: false,
-    mode: "conversation",
     serializedContext: {},
     sessionState: createTestSessionState({
       continuationToken: "channel:current",

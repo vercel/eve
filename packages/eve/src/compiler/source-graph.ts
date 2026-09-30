@@ -61,7 +61,7 @@ export interface AgentSourceRegistration {
   readonly source: ProgrammaticAgentSource;
 }
 
-export interface AgentSourceRegistryOptions {
+interface AgentSourceRegistryOptions {
   /** Programmatic extension declarations loaded by compiled virtual mounts. */
   readonly extensionDeclarations?: readonly ProgrammaticAgentSource[];
   readonly templates?: readonly ProgrammaticAgentSource[];
@@ -131,9 +131,14 @@ export type AgentSourceOwner =
   | { readonly feature: string; readonly kind: "framework" }
   | {
       readonly kind: "extension";
+      readonly mountId: string;
       readonly namespace: string;
       readonly packageName: string;
     };
+
+export function extensionMountId(nodePath: string, namespace: string): string {
+  return posix.join(nodePath, "extensions", namespace);
+}
 
 export type AgentSourceLayer =
   | "framework-default"
@@ -146,6 +151,7 @@ export type AgentSourceForm = "derived" | "direct";
 export type AgentModuleBacking =
   | {
       readonly externalDependencies: readonly string[];
+      readonly mountId?: string;
       readonly extensionScope?: {
         readonly namespace: string;
         readonly sourceRoot: string;
@@ -155,6 +161,7 @@ export type AgentModuleBacking =
     }
   | {
       readonly dependencies?: Readonly<Record<string, string>>;
+      readonly mountId?: string;
       readonly kind: "programmatic";
       readonly moduleId: string;
       readonly parameters?: JsonObject;
@@ -179,6 +186,14 @@ export interface AgentModuleCandidate {
   readonly nodeId: string;
   readonly owner: AgentSourceOwner;
   readonly sourceId: string;
+}
+
+export function bindingMountId(binding: AgentModuleBinding): string | undefined {
+  return binding.backing.kind === "filesystem" && binding.backing.mountId !== undefined
+    ? binding.backing.mountId
+    : binding.owner.kind === "extension"
+      ? binding.owner.mountId
+      : undefined;
 }
 
 export interface AgentModuleBinding {
@@ -587,11 +602,6 @@ export async function loadProgrammaticModuleNamespace(input: {
     );
   }
   return namespace;
-}
-
-export function canonicalModuleSlot(logicalPath: string): string {
-  validateProgrammaticLogicalPath(logicalPath);
-  return canonicalSourceSlot(logicalPath);
 }
 
 /**

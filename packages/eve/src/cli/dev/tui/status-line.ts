@@ -21,14 +21,16 @@ function formatDevBuildStatus(status: DevBuildStatus, theme: Theme): string {
   return `${glyph} ${summary}`;
 }
 
-export interface StatusLineInput {
+interface StatusLineInput {
   /** Transient authored-source build state, independent of the server log filter. */
   devBuild?: DevBuildStatus;
   /** Resolved model slug, e.g. "anthropic/claude-sonnet-5"; absent when `/eve/v1/info` failed. */
   model?: string;
-  /** Authored reasoning effort, rendered bold after the model id, e.g. `(xhigh)`. */
+  /** Keep the dynamic-model label separate from the resolved model id. */
+  dynamicModel?: boolean;
+  /** Authored reasoning effort, shown after the model label, e.g. `· high`. */
   reasoning?: string;
-  /** True when the Gateway priority tier is on; renders a `»fast` marker. */
+  /** True when the Gateway priority tier is on; adds a speed marker. */
   fastMode?: boolean;
   /**
    * Transient dev-TUI log-display mode shown after a Ctrl+L cycle, e.g.
@@ -48,22 +50,29 @@ export interface StatusLineInput {
 }
 
 function renderModel(
-  input: Pick<StatusLineInput, "model" | "reasoning" | "fastMode" | "remote" | "theme">,
+  input: Pick<
+    StatusLineInput,
+    "model" | "dynamicModel" | "reasoning" | "fastMode" | "remote" | "theme"
+  >,
 ): string | undefined {
-  if (input.model === undefined) return undefined;
   const c = input.theme.colors;
-  const summary: Parameters<typeof formatModelSummary>[0] = { model: input.model };
+  if (input.model === undefined && input.dynamicModel !== true) return undefined;
+  const summary: Parameters<typeof formatModelSummary>[0] = {
+    model: input.model ?? "dynamic model",
+  };
   if (input.reasoning !== undefined) summary.reasoning = input.reasoning;
-  if (input.fastMode === true) summary.fastGlyph = input.theme.glyph.fast;
   if (input.remote !== undefined) {
     // Sanitize the untrusted remote id before appending suffixes, so its
     // trailing whitespace is trimmed instead of collapsing into an interior
     // space ahead of the reasoning level.
-    summary.model = stripAnsi(input.model).replace(/\s+/gu, " ").trim();
-    const plain = stripAnsi(formatModelSummary(summary)).replace(/\s+/gu, " ").trim();
-    return c.dim(plain);
+    summary.model = stripAnsi(summary.model).replace(/\s+/gu, " ").trim();
   }
-  return c.dim(formatModelSummary(summary));
+  if (input.fastMode === true || summary.model.endsWith("-fast")) {
+    summary.fastGlyph = input.theme.glyph.fast;
+  }
+  const prefix = input.dynamicModel === true && input.model !== undefined ? "dynamic model · " : "";
+  const label = `${prefix}${formatModelSummary(summary)}`;
+  return c.dim(input.remote === undefined ? label : stripAnsi(label).replace(/\s+/gu, " ").trim());
 }
 
 /** Provider slugs whose display name differs from the AI SDK's identifier. */

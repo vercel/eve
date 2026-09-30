@@ -13,12 +13,12 @@ import type {
   VercelServiceConfig,
 } from "#internal/vercel/vercel-services-config.js";
 
-export interface EveVercelServiceTarget {
+interface EveVercelServiceTarget {
   readonly agent: EveVercelAgentTarget;
   readonly target: EveVercelBuildTarget;
 }
 
-export interface AssembledEveVercelServices {
+interface AssembledEveVercelServices {
   readonly rootDirectories: readonly string[];
   readonly routes: readonly VercelRouteConfig[];
   readonly services: Readonly<Record<string, VercelServiceConfig>>;

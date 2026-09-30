@@ -8,8 +8,8 @@ import type { PreparedSelfModificationWorkspace } from "./git-workspace.js";
 import { gitOutput, runGitCommand } from "./git.js";
 import { assertFullSha } from "./identifiers.js";
 
-export const MAX_PROPOSAL_CHANGED_BYTES = 1_000_000;
-export const MAX_PROPOSAL_CHANGED_FILES = 100;
+const MAX_PROPOSAL_CHANGED_BYTES = 1_000_000;
+const MAX_PROPOSAL_CHANGED_FILES = 100;
 
 export interface ProposalChange {
   readonly bytes: number;

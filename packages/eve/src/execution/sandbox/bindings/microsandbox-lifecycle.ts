@@ -421,7 +421,3 @@ function cacheHandle(
   activeMicrosandboxSessionHandles.set(key, handle);
   return handle;
 }
-
-export function clearActiveMicrosandboxSessionHandlesForTest(): void {
-  activeMicrosandboxSessionHandles.clear();
-}

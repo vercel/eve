@@ -12,7 +12,6 @@ export const SESSION_HANDOFF_VERSION = 2;
  * and deserialized at each `"use step"` boundary.
  */
 export interface InitialWorkflowEntryInput {
-  readonly activityCollectorRunId?: string;
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   readonly input: RunInput["input"];
   readonly kind: "initial";
@@ -21,7 +20,6 @@ export interface InitialWorkflowEntryInput {
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly sessionTimeoutMs?: number | false;
   readonly serializedContext: Record<string, unknown>;
-  readonly taskId?: string;
 }
 
 /** A successor owner started by a previous owner during a deployment handoff. */

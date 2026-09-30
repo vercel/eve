@@ -1,20 +1,12 @@
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
-import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
-import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { StepResult } from "#harness/types.js";
-import type { RunMode } from "#shared/run-mode.js";
-import { preserveSerializedBackgroundTaskObservabilityState } from "#shared/serialized-observability-state.js";
 
 export function resolveSessionStepResult(
   stepResult: StepResult,
   nextSerializedContext: Record<string, unknown>,
-  mode: RunMode,
-  beforeStepContext: Record<string, unknown>,
-  /** The turn this step belongs to. */
-  turnId: string,
 ): DurableStepResult {
   const nextState = createDurableSessionState({ session: stepResult.session });
   if (stepResult.steered)
@@ -23,33 +15,15 @@ export function resolveSessionStepResult(
       serializedContext: nextSerializedContext,
       sessionState: nextState,
     };
-  const backgroundTransition =
-    stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
-      ? {}
-      : {
-          backgroundTaskContext: preserveSerializedBackgroundTaskObservabilityState(
-            beforeStepContext,
-            nextSerializedContext,
-            stepResult.backgroundTasks,
-          ),
-          backgroundTaskState: createDurableSessionState({
-            session: stepResult.backgroundTaskSession,
-          }),
-          backgroundTasks: stepResult.backgroundTasks,
-        };
 
   if (
     stepResult.next !== null &&
     typeof stepResult.next === "object" &&
     "done" in stepResult.next
   ) {
-    if (mode === "task" && hasPendingInputBatch(stepResult.session.state)) {
-      throw new Error("Task mode cannot complete while input requests remain pending.");
-    }
     const sessionTotals = getTurnUsageState(stepResult.session.state)?.session;
     return {
       action: "done",
-      ...backgroundTransition,
       output: stepResult.next.output,
       isError: stepResult.next.isError,
       serializedContext: nextSerializedContext,
@@ -59,35 +33,27 @@ export function resolveSessionStepResult(
     };
   }
 
+  if (stepResult.held !== undefined) {
+    return {
+      action: "held",
+      serializedContext: nextSerializedContext,
+      sessionState: nextState,
+      taskIds: stepResult.held.taskIds,
+    };
+  }
+
   if (stepResult.next === null) {
     const pending = derivePendingState(stepResult.session);
 
-    // A turn that ends while its own background tasks are working yields: its answer is interim.
-    // Usage stays unreported so the caller's final result includes every yielded turn. An error
-    // is final and always answers the caller.
+    // Usage stays unreported until the turn settles, so the caller's result includes all of it.
     if (stepResult.settledTurn !== undefined) {
-      const yielded =
-        stepResult.settledTurn.isError !== true &&
-        getBackgroundTasks(stepResult.session.state).query({ state: "working", turnId }).length > 0;
-      if (yielded) {
-        return {
-          action: "park",
-          ...backgroundTransition,
-          ...pending,
-          settled: { ...stepResult.settledTurn, notifyCaller: false },
-          serializedContext: nextSerializedContext,
-          sessionState: nextState,
-        };
-      }
       const { delta, session: reportedSession } = takeSessionUsageDelta(stepResult.session);
       return {
         action: "park",
-        ...backgroundTransition,
         ...pending,
         serializedContext: nextSerializedContext,
         sessionState: createDurableSessionState({ session: reportedSession }),
         settled: {
-          notifyCaller: true,
           output: stepResult.settledTurn.output,
           isError: stepResult.settledTurn.isError,
           usage: delta,
@@ -97,7 +63,6 @@ export function resolveSessionStepResult(
 
     return {
       action: "park",
-      ...backgroundTransition,
       ...pending,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
@@ -106,7 +71,6 @@ export function resolveSessionStepResult(
 
   return {
     action: "continue",
-    ...backgroundTransition,
     serializedContext: nextSerializedContext,
     sessionState: nextState,
   };

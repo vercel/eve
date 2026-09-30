@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { authoredModuleConditions } from "./authored-module-conditions.js";
 
 describe("authoredModuleConditions", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
   it("leaves ordinary builds on eve's source condition", () => {
     expect(authoredModuleConditions(["--enable-source-maps"], "")).toEqual(["eve-source"]);
   });
@@ -15,13 +17,17 @@ describe("authoredModuleConditions", () => {
     expect(authoredModuleConditions(args, "")).toEqual(["eve-source", "react-server"]);
   });
 
-  it("reads quoted NODE_OPTIONS and combines repeated conditions", () => {
-    expect(
-      authoredModuleConditions(
-        ["--conditions=react-server", "-C", "custom"],
-        '--conditions="react-server" --require "./path with spaces/preload.js" -C "custom condition"',
-      ),
-    ).toEqual(["eve-source", "react-server", "custom condition", "custom"]);
+  it("reads quoted NODE_OPTIONS from the environment and combines repeated conditions", () => {
+    vi.stubEnv(
+      "NODE_OPTIONS",
+      '--conditions="react-server" --require "./path with spaces/preload.js" -C "custom condition"',
+    );
+    expect(authoredModuleConditions(["--conditions=react-server", "-C", "custom"])).toEqual([
+      "eve-source",
+      "react-server",
+      "custom condition",
+      "custom",
+    ]);
   });
 
   it("preserves escaped quotes in NODE_OPTIONS", () => {

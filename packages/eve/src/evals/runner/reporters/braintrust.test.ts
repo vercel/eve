@@ -105,14 +105,6 @@ describe("Braintrust", () => {
     });
   });
 
-  it("creates a reporter", () => {
-    const reporter = Braintrust(makeConfig());
-    expect(reporter).toBeDefined();
-    expect(reporter.onRunStart).toBeTypeOf("function");
-    expect(reporter.onEvalComplete).toBeTypeOf("function");
-    expect(reporter.onRunComplete).toBeTypeOf("function");
-  });
-
   it("onEvalComplete is a no-op when experiment is not initialized", () => {
     const reporter = Braintrust(makeConfig());
 
@@ -214,7 +206,7 @@ describe("Braintrust", () => {
     );
   });
 
-  it("keeps duplicate assertion scores under stable keys", async () => {
+  it("scores repeated assertions by their lowest member and keeps each score in metadata", async () => {
     const reporter = Braintrust(makeConfig());
     await reporter.onRunStart([makeEval()], makeTarget());
 
@@ -223,16 +215,21 @@ describe("Braintrust", () => {
         assertions: [
           { name: "similarity", passed: true, score: 0.8, severity: "soft", errored: false },
           { name: "similarity", passed: true, score: 0.6, severity: "soft", errored: false },
+          { name: "similarity", passed: true, score: 1, severity: "gate", errored: false },
         ],
       }),
     );
 
     expect(braintrustMocks.log).toHaveBeenCalledWith(
       expect.objectContaining({
-        scores: {
-          similarity: 0.8,
-          "similarity#2": 0.6,
-        },
+        scores: { similarity: 0.6, "gate:similarity": 1 },
+        metadata: expect.objectContaining({
+          eveAssertionScores: [
+            { name: "similarity", severity: "soft", score: 0.8 },
+            { name: "similarity", severity: "soft", score: 0.6 },
+            { name: "similarity", severity: "gate", score: 1 },
+          ],
+        }),
       }),
     );
   });

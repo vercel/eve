@@ -12,6 +12,7 @@ import {
   hydrateSandboxAttachments,
   stageAttachmentsToSandbox,
 } from "#harness/attachment-staging.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 /**
  * Integration coverage for {@link stageAttachmentsToSandbox}.
@@ -27,44 +28,6 @@ import {
  */
 
 describe("stageAttachmentsToSandbox (integration)", () => {
-  it("writes FilePart bytes into the active sandbox and rewrites data to an eve-sandbox: ref", async () => {
-    const sandbox = mockSandbox({ id: "sbx_integration" });
-    const runtime = await createTestRuntime();
-    const csvBytes = Buffer.from("id,name\n1,alpha\n", "utf8");
-
-    const content: UserContent = [
-      { type: "text", text: "summarize this csv" },
-      { data: csvBytes, filename: "report.csv", mediaType: "text/csv", type: "file" },
-    ];
-
-    const staged = (await runtime.runAsSession({ sandbox }, async () =>
-      stageAttachmentsToSandbox(content),
-    )) as UserContent;
-
-    expect(Array.isArray(staged)).toBe(true);
-    expect(staged).toHaveLength(2);
-    expect(staged[0]).toEqual({ type: "text", text: "summarize this csv" });
-
-    const filePart = staged[1] as FilePart;
-    expect(filePart.mediaType).toBe("text/csv");
-    // Staged `data` is an eve-sandbox: ref (NOT raw bytes). The
-    // refactor's key invariant: bytes never travel on the message,
-    // only the ref does.
-    expect(isSandboxRefUrl(filePart.data)).toBe(true);
-    const ref = decodeSandboxRef(filePart.data as URL);
-    expect(ref.mediaType).toBe("text/csv");
-    expect(ref.size).toBe(csvBytes.byteLength);
-    expect(ref.path).toMatch(/^\/workspace\/attachments\/[0-9a-f]{16}\/report\.csv$/);
-    expect(filePart.filename).toBe(ref.path);
-
-    expect(sandbox.writes).toHaveLength(1);
-    const write = sandbox.writes[0];
-    expect(write?.path).toMatch(new RegExp(`^${ATTACHMENTS_ROOT}/[0-9a-f]{16}/report\\.csv$`));
-    const writtenBytes = write?.content as Buffer;
-    expect(Buffer.isBuffer(writtenBytes)).toBe(true);
-    expect(writtenBytes.equals(csvBytes)).toBe(true);
-  });
-
   it("exposes the staged path to authored tools via getSandbox().readFile", async () => {
     const sandbox = mockSandbox({ id: "sbx_roundtrip" });
     const readTool = mockTool({
@@ -94,18 +57,6 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     });
 
     expect(result).toBe(payload);
-  });
-
-  it("passes text-only messages through without touching the sandbox", async () => {
-    const sandbox = mockSandbox({ id: "sbx_text" });
-    const runtime = await createTestRuntime();
-
-    const result = await runtime.runAsSession({ sandbox }, async () =>
-      stageAttachmentsToSandbox("hello"),
-    );
-
-    expect(result).toBe("hello");
-    expect(sandbox.writes).toHaveLength(0);
   });
 
   it("passes UserContent arrays with no FileParts through untouched", async () => {
@@ -299,6 +250,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
   });
 
   it("degrades plain resolver errors to a channel-neutral safe note", async () => {
+    const logs = captureLogRecords();
     const upstream = new Error("boom https://secret.example/file?token=private");
     const adapter: ChannelAdapter<any> = {
       async fetchFile() {
@@ -330,9 +282,16 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     ]);
     expect(staged[0]).not.toHaveProperty("text", expect.stringContaining("secret.example"));
     expect(sandbox.writes).toHaveLength(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "attachment resolver failed — degrading to text part",
+      }),
+    );
   });
 
   it("exposes a channel-authored safe resolver error to the model", async () => {
+    const logs = captureLogRecords();
     const resolverError = new EveAttachmentError({
       adapterKind: "custom-channel",
       kind: "resolver-threw",
@@ -367,9 +326,16 @@ describe("stageAttachmentsToSandbox (integration)", () => {
       },
     ]);
     expect(sandbox.writes).toHaveLength(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "attachment resolver failed — degrading to text part",
+      }),
+    );
   });
 
   it("stages sibling attachments when one resolver call fails", async () => {
+    const logs = captureLogRecords();
     const adapter: ChannelAdapter<any> = {
       async fetchFile(url) {
         if (url.endsWith("missing.bin")) {
@@ -411,6 +377,12 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     });
     expect((staged[1] as FilePart).filename).toMatch(/\/available\.bin$/);
     expect(sandbox.writes).toHaveLength(1);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "attachment resolver failed — degrading to text part",
+      }),
+    );
   });
 
   it("works alongside non-file parts in the same user message", async () => {
@@ -670,6 +642,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
   });
 
   it("degrades to a text reference when an inlinable sandbox ref points at a missing file", async () => {
+    const logs = captureLogRecords();
     // Resuming a durable session whose staging sandbox was torn down
     // leaves historical attachment refs pointing at bytes that are gone.
     // Hydration must not fail the whole turn over it — it degrades to a
@@ -712,9 +685,16 @@ describe("hydrateSandboxAttachments (integration)", () => {
     });
     const fileParts = hydratedContent.filter((p) => (p as FilePart).type === "file");
     expect(fileParts).toHaveLength(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "sandbox-ref attachment bytes missing on hydration — degrading to text reference",
+      }),
+    );
   });
 
   it("survives a resume after the staging sandbox was torn down (#276)", async () => {
+    const logs = captureLogRecords();
     // Stage an image into one sandbox, then hydrate the resulting
     // ref-only message against a fresh sandbox — the same shape as
     // resuming a durable session whose ephemeral sandbox is gone. The
@@ -745,6 +725,12 @@ describe("hydrateSandboxAttachments (integration)", () => {
       type: "text",
     });
     expect(hydratedContent.filter((p) => (p as FilePart).type === "file")).toHaveLength(0);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "sandbox-ref attachment bytes missing on hydration — degrading to text reference",
+      }),
+    );
   });
 
   it("does not touch the sandbox when every ref is non-inlinable — text references carry all the info", async () => {

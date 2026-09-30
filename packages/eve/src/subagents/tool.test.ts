@@ -51,11 +51,17 @@ function makeParent(
   };
 }
 
+const NO_LIMITS = { maxInputTokensPerSession: false, maxOutputTokensPerSession: false } as const;
+
 function buildRuntimeSubagentRunInput(
-  input: Omit<BuildSubagentRunInput, "selfAgent" | "source"> & { readonly selfAgent?: boolean },
+  input: Omit<BuildSubagentRunInput, "continuationKey" | "limits" | "selfAgent" | "source"> & {
+    readonly selfAgent?: boolean;
+  },
 ): ReturnType<typeof buildSubagentRunInput> {
   return buildSubagentRunInput({
     ...input,
+    continuationKey: `${input.session.sessionId}:${input.action.callId}`,
+    limits: NO_LIMITS,
     selfAgent: input.selfAgent ?? false,
     source: { type: "runtime" },
   });
@@ -119,7 +125,6 @@ describe("buildSubagentRunInput", () => {
     });
     expect(runInput.continuationToken).toBe(childContinuationToken);
     expect(childContinuationToken).toMatch(/^subagent:parent-session:call-1$/);
-    expect(runInput.mode).toBe("conversation");
   });
 
   it("routes parent notifications to an active turn inbox when supplied", () => {
@@ -138,27 +143,6 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.adapter.state).toMatchObject({
       parentContinuationToken: "turn-inbox",
     });
-  });
-
-  it("retains a background task identity beside an opaque parent reply hook", () => {
-    const { runInput } = buildRuntimeSubagentRunInput({
-      action: makeAction(),
-      auth: null,
-      initiatorAuth: null,
-      session: makeSession(),
-      taskId: "task-1",
-      parent: makeParent(
-        makeSession(),
-        { id: "turn-0", sequence: 0 },
-        { continuationToken: "invocation-reply-hook" },
-      ),
-    });
-
-    expect(runInput.adapter.state).toMatchObject({
-      parentContinuationToken: "invocation-reply-hook",
-      taskId: "task-1",
-    });
-    expect(runInput.taskId).toBe("task-1");
   });
 
   it("forwards channelMetadata to the child run input", () => {
@@ -238,28 +222,6 @@ describe("buildSubagentRunInput", () => {
     });
   });
 
-  it("threads inherited limits through the child run input", () => {
-    const { runInput } = buildRuntimeSubagentRunInput({
-      action: makeAction(),
-      auth: null,
-      initiatorAuth: null,
-      session: {
-        ...makeSession(),
-      },
-      parent: makeParent(
-        {
-          ...makeSession(),
-        },
-        { id: "turn-0", sequence: 0 },
-      ),
-    });
-
-    expect(runInput.limits).toEqual({
-      maxInputTokensPerSession: false,
-      maxOutputTokensPerSession: false,
-    });
-  });
-
   it("threads outputSchema from action input to RunInput", () => {
     const schema = { type: "object", properties: { result: { type: "string" } } };
     const action: RuntimeSubagentDispatchRequest = {
@@ -275,39 +237,6 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.input.outputSchema).toEqual(schema);
-    expect(runInput.mode).toBe("conversation");
-  });
-
-  it("uses a declared local outputSchema on the persistent child's first turn", () => {
-    const schema = { properties: { result: { type: "string" } }, type: "object" };
-    const { runInput } = buildSubagentRunInput({
-      action: makeAction(),
-      auth: null,
-      initiatorAuth: null,
-      selfAgent: false,
-      session: makeSession(),
-      source: { description: "Research the request.", outputSchema: schema, type: "local" },
-      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
-    });
-
-    expect(runInput.input.outputSchema).toEqual(schema);
-    expect(runInput.mode).toBe("conversation");
-  });
-
-  it("lets a per-call outputSchema override the local child's declared schema", () => {
-    const declared = { properties: { declared: { type: "string" } }, type: "object" };
-    const requested = { properties: { requested: { type: "number" } }, type: "object" };
-    const { runInput } = buildSubagentRunInput({
-      action: { ...makeAction(), input: { message: "do something", outputSchema: requested } },
-      auth: null,
-      initiatorAuth: null,
-      selfAgent: false,
-      session: makeSession(),
-      source: { description: "Research the request.", outputSchema: declared, type: "local" },
-      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
-    });
-
-    expect(runInput.input.outputSchema).toEqual(requested);
   });
 
   it("hands the parent's trace window down to the child, and omits it when absent", () => {
@@ -342,7 +271,9 @@ describe("buildSubagentRunInput", () => {
         description: "Runtime action event description.",
       },
       auth: null,
+      continuationKey: "parent-session:call-1",
       initiatorAuth: null,
+      limits: NO_LIMITS,
       selfAgent: false,
       session: makeSession(),
       source: { description: "Local delegate subagent description.", type: "local" },
@@ -392,41 +323,9 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.input.message).not.toContain(action.description);
   });
 
-  it("uses the root agent's declared outputSchema for a fresh built-in copy", () => {
-    const schema = { properties: { result: { type: "string" } }, type: "object" };
-    const { runInput } = buildSubagentRunInput({
-      action: { ...makeAction(), name: "agent", nodeId: "root", subagentName: "agent" },
-      auth: null,
-      initiatorAuth: null,
-      selfAgent: true,
-      session: makeSession(),
-      source: { outputSchema: schema, type: "runtime" },
-      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
-    });
-
-    expect(runInput.input.outputSchema).toEqual(schema);
-    expect(runInput.mode).toBe("conversation");
-  });
-
   it("leaves outputSchema undefined when not provided", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
-      auth: null,
-      initiatorAuth: null,
-      session: makeSession(),
-      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
-    });
-
-    expect(runInput.input.outputSchema).toBeUndefined();
-  });
-
-  it("treats an empty outputSchema as absent", () => {
-    const action: RuntimeSubagentDispatchRequest = {
-      ...makeAction(),
-      input: { message: "do something", outputSchema: {} },
-    };
-    const { runInput } = buildRuntimeSubagentRunInput({
-      action,
       auth: null,
       initiatorAuth: null,
       session: makeSession(),

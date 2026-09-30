@@ -12,13 +12,13 @@ import type {
   MemoryScopeResolverResult,
 } from "#public/memory/index.js";
 
-export const MEMORY_NAMESPACE_MAX_BYTES = 1_024;
-export const MEMORY_SCOPE_COMPONENT_MAX_BYTES = 1_024;
-export const MEMORY_SCOPE_TUPLE_MAX_COMPONENTS = 16;
-export const MEMORY_CANONICAL_KEY_INPUT_MAX_BYTES = 4_096;
-export const MEMORY_ITEM_ID_MAX_BYTES = 1_024;
-export const MEMORY_RAW_RECORD_MAX_COUNT = 512;
-export const MEMORY_RAW_RECORD_MAX_BYTES = 262_144;
+const MEMORY_NAMESPACE_MAX_BYTES = 1_024;
+const MEMORY_SCOPE_COMPONENT_MAX_BYTES = 1_024;
+const MEMORY_SCOPE_TUPLE_MAX_COMPONENTS = 16;
+const MEMORY_CANONICAL_KEY_INPUT_MAX_BYTES = 4_096;
+const MEMORY_ITEM_ID_MAX_BYTES = 1_024;
+const MEMORY_RAW_RECORD_MAX_COUNT = 512;
+const MEMORY_RAW_RECORD_MAX_BYTES = 262_144;
 
 const MEMORY_MESSAGE_METADATA_KEY = "eve.memory";
 const MEMORY_SESSION_STATE_KEY = "eve.memory";
@@ -150,7 +150,11 @@ export function applyMemoryRecallBatches(input: {
   readonly batches: readonly MemoryRecallBatch[];
   readonly history: readonly ModelMessage[];
   readonly state: SessionStateMap | undefined;
-}): { readonly history: ModelMessage[]; readonly state: SessionStateMap } {
+}): {
+  readonly history: ModelMessage[];
+  readonly recalledMessages: ModelMessage[];
+  readonly state: SessionStateMap;
+} {
   const prior = readMemorySessionState(input.state);
   const operationDigests: Record<string, string> = { ...prior.operationDigests };
   const latest = latestKeyedRecords(input.history);
@@ -193,6 +197,7 @@ export function applyMemoryRecallBatches(input: {
   );
   return {
     history: [...input.history, ...appended],
+    recalledMessages: appended,
     state: writeMemorySessionState(input.state, {
       locks: Object.fromEntries(input.batches.map((batch) => [batch.lock.slot, batch.lock])),
       operationDigests: trimmedDigests,
@@ -275,12 +280,6 @@ export function clearMemorySessionState(state: SessionStateMap | undefined): Ses
   if (state === undefined || !Object.hasOwn(state, MEMORY_SESSION_STATE_KEY)) return state ?? {};
   const { [MEMORY_SESSION_STATE_KEY]: _memory, ...remaining } = state;
   return remaining;
-}
-
-export function readMemoryLocks(
-  state: SessionStateMap | undefined,
-): Readonly<Record<string, InternalMemoryLock>> {
-  return readMemorySessionState(state).locks;
 }
 
 function validateMemoryNamespace(namespace: string): void {

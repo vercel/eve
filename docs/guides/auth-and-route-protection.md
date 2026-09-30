@@ -292,7 +292,7 @@ Inside runtime code, `ctx.session.auth` carries the result of the channel's rout
 - `auth.current`: the caller on the active inbound turn.
 - `auth.initiator`: the caller that started the durable session.
 - A follow-up message updates `auth.current` but leaves `auth.initiator` alone. When a different caller follows up on the same session, `auth.current` tracks the new caller for that turn while `auth.initiator` stays pinned to whoever started it.
-- Both are `null` only on internal runtime paths (subagents, for instance) that never went through an authored route. HTTP traffic always populates `auth.current`, since the walk either accepts with a `SessionAuthContext` or returns `401`.
+- `auth.current` is whatever the channel passed as `auth` when it dispatched the message. Route auth either accepts the request or returns `401`, but a route handler or channel hook can still dispatch with `auth: null`, such as `source.send(message, { auth: null })` or a Slack `onMessage` hook that returns `{ auth: null }`. On a new session, both values are then `null`. On a continuation, `auth.current` is `null` while `auth.initiator` stays pinned to the session's original caller. Internal runtime paths, such as subagents, can also have no caller auth.
 
 Use the principal on `auth.current` (or `auth.initiator`) to scope tools, resolve [dynamic capabilities](./dynamic-capabilities) per principal, or enforce tenant boundaries. There's no second per-session ownership ACL stacked on top of route auth. Access is decided at the HTTP boundary, and the durable session carries the caller snapshot forward into your runtime code.
 

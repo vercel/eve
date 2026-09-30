@@ -47,7 +47,7 @@ export const DISCOVER_LOCAL_SUBAGENT_SCHEDULES_INVALID =
   "discover/local-subagent-schedules-invalid";
 export const DISCOVER_REQUIRED_SUBAGENT_CONFIG_MODULE_MISSING =
   "discover/required-subagent-config-module-missing";
-export const DISCOVER_SUBAGENTS_DIRECTORY_INVALID = "discover/subagents-directory-invalid";
+const DISCOVER_SUBAGENTS_DIRECTORY_INVALID = "discover/subagents-directory-invalid";
 
 /**
  * Input for discovering subagent entries beneath one authored source root.

@@ -8,7 +8,7 @@ import {
 
 export { INVOCATION_OWNER_ATTRIBUTE, INVOCATION_TOKEN_ATTRIBUTE };
 
-export type ExternalInvocationMetadata = NonNullable<RunInput["externalInvocation"]>;
+type ExternalInvocationMetadata = NonNullable<RunInput["externalInvocation"]>;
 
 /** Batch-scoped request id exposed to MCP clients for one durable pending-input event. */
 export function invocationInputRequestId(pendingBatchId: string, requestId: string): string {

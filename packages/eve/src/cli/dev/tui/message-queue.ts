@@ -23,7 +23,7 @@ import { clipVisible, stripTerminalControls } from "#cli/ui/terminal-text.js";
 export const MESSAGE_QUEUE_LIMIT = 5;
 
 /** What one Esc press did to the queue state. */
-export type MessageQueueEscapeOutcome =
+type MessageQueueEscapeOutcome =
   /**
    * A message is staged for steering. The caller sends it to the active
    * session; repeated presses may select more queued messages.
@@ -33,7 +33,7 @@ export type MessageQueueEscapeOutcome =
   | "cancel";
 
 /** Read-only projection consumed by {@link renderMessageQueueRows}. */
-export interface MessageQueueView {
+interface MessageQueueView {
   readonly messages: readonly string[];
   readonly full: boolean;
   /** A popped message is awaiting steering admission. */
@@ -169,7 +169,7 @@ function joinOptionalMessages(a: string | undefined, b: string | undefined): str
   return joinMessages(a, b);
 }
 
-export interface MessageQueuePanelRowsInput {
+interface MessageQueuePanelRowsInput {
   readonly view: MessageQueueView;
   readonly width: number;
   readonly theme: Theme;

@@ -75,13 +75,17 @@ export function resolveSessionLimitInput(
   });
 }
 
+/** A batch of only harness-authored session-limit prompts, which a cancel drops. */
+export function isSessionLimitPromptBatch(batch: PendingInputBatch): boolean {
+  return (
+    batch.requests.length > 0 &&
+    batch.requests.every((request) => isSessionLimitContinuationRequest(request))
+  );
+}
+
 /** Drops only harness-authored session-limit prompts from a parked session. */
 export function clearPendingSessionLimitPrompt(session: HarnessSession): HarnessSession {
-  const dropped = getPendingInputBatches(session.state).filter(
-    (batch) =>
-      batch.requests.length > 0 &&
-      batch.requests.every((request) => isSessionLimitContinuationRequest(request)),
-  );
+  const dropped = getPendingInputBatches(session.state).filter(isSessionLimitPromptBatch);
   if (dropped.length === 0) {
     return session;
   }

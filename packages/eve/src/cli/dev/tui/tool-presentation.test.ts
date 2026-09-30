@@ -11,10 +11,10 @@ describe("presentPreparingTool", () => {
     expect(presentPreparingTool("final_output").title).toBe("Return final output");
   });
 
-  it("keeps unknown tools on their name with a quiet hint", () => {
+  it("leads unknown tools with their name", () => {
     const presentation = presentPreparingTool("linear__list_issues");
-    expect(presentation.title).toBe("linear__list_issues");
-    expect(presentation.subtitle).toBe("preparing…");
+    expect(presentation.title).toBe("linear__list_issues …");
+    expect(presentation.subtitle).toBe("");
   });
 });
 
@@ -146,9 +146,12 @@ describe("presentTool", () => {
     expect(presentTool("agent", { message: "Audit the auth flow.\nDetails…" }).title).toBe(
       "Delegate Audit the auth flow.",
     );
-    expect(presentTool("connection_search", { keywords: "linear issues" }).title).toBe(
-      "Discover linear issues",
+    expect(presentTool("connection_search", { query: "linear issues" }).title).toBe(
+      "Search linear issues",
     );
+    expect(
+      presentTool("connection_execute", { connection: "linear", tool: "list_issues" }).title,
+    ).toBe("Call linear.list_issues");
     expect(presentTool("final_output", { anything: true }).title).toBe("Return final output");
   });
 
@@ -161,7 +164,6 @@ describe("presentTool", () => {
       grep: { pattern: "useEve" },
       load_skill: { skill: "commit" },
       read_file: { filePath: "/workspace/a.ts" },
-      task_cancel: { taskIds: ["task_abc"] },
       web_fetch: { url: "https://example.com" },
       web_search: { query: "eve framework" },
       write_file: { filePath: "/workspace/a.ts", content: "x" },
@@ -190,9 +192,16 @@ describe("presentTool", () => {
     expect(presentation.group).toBeUndefined();
     expect(presentation.doneTitle).toBeUndefined();
     expect(presentPreparingTool("task_update")).toMatchObject({
-      title: "task_update",
-      subtitle: "preparing…",
+      title: "task_update …",
+      subtitle: "",
     });
+  });
+
+  it("keeps eve's own copy for builtin tools over their provided labels", () => {
+    // Provided tools define labels too; eve's copy keeps them groupable.
+    const presentation = presentTool("bash", { command: "ls" }, { label: "bash ls" });
+    expect(presentation.title).toBe("Run ls");
+    expect(presentation.group?.verb).toBe("Run");
   });
 
   it("presents a named subagent dispatch as a delegation", () => {

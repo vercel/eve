@@ -8,6 +8,7 @@ export const AGENT_SPAN_NAMES = {
 } as const;
 
 export const AGENT_USAGE_ATTRIBUTES = {
+  costUsd: "agent.usage.cost_usd",
   inputTokens: "agent.usage.input_tokens",
   outputTokens: "agent.usage.output_tokens",
   cacheReadTokens: "agent.usage.cache_read_tokens",
@@ -16,10 +17,6 @@ export const AGENT_USAGE_ATTRIBUTES = {
 
 export function agentInvocationSpanName(agentName: string | undefined): string {
   return agentName === undefined ? "invoke_agent" : `invoke_agent ${agentName}`;
-}
-
-export function workflowInvocationSpanName(workflowName: string): string {
-  return `invoke_workflow ${workflowName}`;
 }
 
 export function modelSpanName(modelId: string): string {

@@ -27,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "25";
+export const EVE_MESSAGE_STREAM_VERSION = "26";
 
 /** Version of transport control records understood by this eve release. */
 export const EVE_STREAM_CONTROL_VERSION = "1";
@@ -202,8 +202,6 @@ export interface TurnStartedStreamEvent {
  */
 export interface MessageReceivedStreamEvent {
   data: {
-    /** Present when eve, rather than a channel participant, authored the input. */
-    kind?: "execution.background_task";
     message: string;
     parts?: readonly MessageReceivedPart[];
     sequence: number;
@@ -291,13 +289,21 @@ export interface InputRequestedStreamEvent {
     requests: readonly InputRequest[];
     sequence: number;
     stepIndex: number;
+    /** The task that asks, when the request comes from a task's run. */
+    taskId?: string;
     turnId: string;
   };
   type: "input.requested";
 }
 
 /** Authoritative terminal outcome for one human-input request. */
-export type InputResolutionOutcome = "answered" | "approved" | "denied" | "ignored" | "invalid";
+export type InputResolutionOutcome =
+  | "answered"
+  | "approved"
+  | "cancelled"
+  | "denied"
+  | "ignored"
+  | "invalid";
 
 /** One server-accepted resolution from a pending human-input batch. */
 export interface InputResolution {
@@ -354,82 +360,79 @@ export interface ActionPartialStreamEvent {
 }
 
 /**
- * Stream event emitted when the parent workflow starts a child subagent session.
+ * Stream event emitted when a workflow run opens a session with `ctx.agent`.
+ * `callId` and `turnId` name the tool call whose run opened it; follow the
+ * session with `session.agent(event).stream()`. For a task's run it comes
+ * after that call's `task.started`.
  */
-export interface SubagentCalledStreamEvent {
+export interface AgentStartedStreamEvent {
   data: {
-    agentId?: string;
     callId: string;
-    childSessionId: string;
-    childStreamPath: string;
-    sessionId: string;
-    sequence: number;
+    /** The turn of the call whose run opened the session. */
+    turnId: string;
+    /** The task whose run opened the session; absent when an `execute` call opened it. */
+    taskId?: string;
     name: string;
+    /** The opened session's id. */
+    sessionId: string;
+    /** A local session's stream route, or the parent-origin proxy for a remote one. */
+    streamPath: string;
+    /**
+     * Where a remote session runs, read by the parent's stream proxy.
+     * `resolverId` keys the authored credential functions (`auth` and
+     * `headers`): a static agent's node id, or a dynamic agent's
+     * `credentialsStepId`. The event is persisted and streamed to clients, so
+     * it carries this key, never resolved header values.
+     */
     remote?: {
-      /**
-       * Key to the authored credential functions (`auth`/`headers`) for this
-       * remote child, resolved at stream-proxy time by
-       * `resolveRemoteAgentStreamHeaders`. Static subagent → the node id in
-       * `subagentRegistry.subagentsByNodeId`; dynamic subagent → its
-       * `credentialsStepId` in the step registry. The event stores this key —
-       * never resolved header values — because tokens expire and this event
-       * is persisted and streamed to clients. Absent when the remote child
-       * has no authored credentials.
-       */
       resolverId?: string;
       url: string;
     };
-    toolName: string;
-    turnId: string;
-    workflowId: string;
   };
-  type: "subagent.called";
+  type: "agent.started";
 }
 
 /**
- * Stream event emitted when an inline subagent execution starts.
+ * Stream event emitted when a call starts a task. `(taskId, callId)`
+ * identifies the call; `callId` is the tool call clients attach status to.
+ * It comes before every event the task's run causes for the call, such as
+ * `agent.started` and the call's `task.settled`.
  */
-export interface SubagentStartedStreamEvent {
+export interface TaskStartedStreamEvent {
   data: {
     callId: string;
-    subagentName: string;
-  };
-  type: "subagent.started";
-}
-
-/**
- * Stream event (`type: "subagent.event"`) wrapping one child stream event
- * produced by an inline subagent, under `data.event`, tagged with the
- * originating `data.callId` and `data.subagentName`.
- */
-export interface SubagentChildEventStreamEvent {
-  data: {
-    callId: string;
-    event: UnstampedMessageStreamEvent;
-    subagentName: string;
-  };
-  type: "subagent.event";
-}
-
-/**
- * Stream event emitted after the parent accepts a successful subagent invocation result.
- */
-export interface SubagentCompletedStreamEvent {
-  data: {
     /**
-     * Historical admission marker retained for reading existing streams.
-     * A marked event is a working receipt, not a completed invocation.
-     * New receipts are published only as action.result tool outputs.
+     * `"agent"` for a subagent's generated tool, local or remote; `"tool"`
+     * for an authored tool, including one that opens sessions with
+     * `ctx.agent`. An agent call that fails before its session opens has no
+     * `agent.started`, so this is how a client tells it is an agent call.
      */
-    backgroundTask?: {
-      taskId: string;
-      status: "working";
-    };
-    callId: string;
-    output: string;
-    subagentName: string;
+    kind: "agent" | "tool";
+    /** The tool whose call started the task. */
+    name: string;
+    taskId: string;
+    turnId: string;
   };
-  type: "subagent.completed";
+  type: "task.started";
+}
+
+/**
+ * Stream event emitted once when a task's call settles: by the run's return
+ * or failure, or by a cancel. `turnId` is the call's turn, the same as on its
+ * `task.started`.
+ */
+export interface TaskSettledStreamEvent {
+  data: {
+    callId: string;
+    /** Why the call failed; present only when `status` is `"failed"`. */
+    error?: { message: string };
+    /** The call's result; present only when `status` is `"completed"`. */
+    output?: JsonValue;
+    status: "completed" | "failed" | "cancelled";
+    taskId: string;
+    turnId: string;
+  };
+  type: "task.settled";
 }
 
 /**
@@ -487,7 +490,7 @@ export interface ReasoningAppendedStreamEvent {
 export interface MessageCompletedStreamEvent {
   data: {
     finishReason: AssistantStepFinishReason;
-    message: string | null;
+    message: string;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -584,6 +587,20 @@ export interface TurnCompletedStreamEvent {
 }
 
 /**
+ * Stream event emitted each time an open turn parks, such as when a call it is
+ * running asks a question. The turn stays open: the next `step.started` with
+ * the same `turnId` means it resumed, and only `turn.completed`,
+ * `turn.failed`, or `turn.cancelled` end it.
+ */
+export interface TurnWaitingStreamEvent {
+  data: {
+    sequence: number;
+    turnId: string;
+  };
+  type: "turn.waiting";
+}
+
+/**
  * Stream event emitted when one turn fails.
  */
 export interface TurnFailedStreamEvent {
@@ -667,8 +684,15 @@ export interface AuthorizationRequiredStreamEvent {
     candidateId?: string;
     description: string;
     name: string;
+    /**
+     * Session principal that started this sign-in, matching `responderPrincipalId`
+     * on approval events. Channels use it to deliver the challenge privately.
+     */
+    principalId?: string;
     sequence: number;
     stepIndex: number;
+    /** The task that needs the sign-in, when it comes from a task's run. */
+    taskId?: string;
     turnId: string;
     webhookUrl?: string;
   };
@@ -707,9 +731,13 @@ export interface AuthorizationCompletedStreamEvent {
     authorization?: ConnectionAuthorizationChallenge;
     name: string;
     outcome: AuthorizationOutcome;
+    /** Session principal that started the matching sign-in. */
+    principalId?: string;
     reason?: string;
     sequence: number;
     stepIndex: number;
+    /** The task that needed the sign-in, when it comes from a task's run. */
+    taskId?: string;
     turnId: string;
   };
   type: "authorization.completed";
@@ -756,6 +784,7 @@ export interface SessionCompletedStreamEvent {
  */
 export type UnstampedMessageStreamEvent =
   | ActionInputAppendedStreamEvent
+  | AgentStartedStreamEvent
   | ApprovalCandidateStreamEvent
   | ApprovalSettledStreamEvent
   | ContextClearedStreamEvent
@@ -772,10 +801,8 @@ export type UnstampedMessageStreamEvent =
   | SessionStartedStreamEvent
   | SessionWaitingStreamEvent
   | ResultCompletedStreamEvent
-  | SubagentCalledStreamEvent
-  | SubagentChildEventStreamEvent
-  | SubagentCompletedStreamEvent
-  | SubagentStartedStreamEvent
+  | TaskSettledStreamEvent
+  | TaskStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
   | InputResolvedStreamEvent
@@ -788,7 +815,8 @@ export type UnstampedMessageStreamEvent =
   | TurnCancelledStreamEvent
   | TurnCompletedStreamEvent
   | TurnFailedStreamEvent
-  | TurnStartedStreamEvent;
+  | TurnStartedStreamEvent
+  | TurnWaitingStreamEvent;
 
 /**
  * Stream events that represent an unrecovered turn/session failure.
@@ -901,15 +929,12 @@ export function createTurnStartedEvent(input: {
  * consumers while preserving the authored turn content upstream.
  */
 export function createMessageReceivedEvent(input: {
-  /** Present when eve, rather than a channel participant, authored the input. */
-  readonly kind?: "execution.background_task";
   readonly message: string | UserContent;
   readonly sequence: number;
   readonly turnId: string;
 }): MessageReceivedStreamEvent {
   return {
     data: {
-      kind: input.kind,
       message: summarizeUserContent(input.message),
       parts: projectUserContentParts(input.message),
       sequence: input.sequence,
@@ -1169,8 +1194,10 @@ export function createAuthorizationRequiredEvent(input: {
   readonly candidateId?: string;
   readonly description: string;
   readonly name: string;
+  readonly principalId?: string;
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly turnId: string;
   readonly webhookUrl?: string;
 }): AuthorizationRequiredStreamEvent {
@@ -1190,8 +1217,14 @@ export function createAuthorizationRequiredEvent(input: {
   if (input.candidateId !== undefined) {
     data.candidateId = input.candidateId;
   }
+  if (input.principalId !== undefined) {
+    data.principalId = input.principalId;
+  }
   if (input.webhookUrl !== undefined) {
     data.webhookUrl = input.webhookUrl;
+  }
+  if (input.taskId !== undefined) {
+    data.taskId = input.taskId;
   }
   return {
     data,
@@ -1210,9 +1243,11 @@ export function createAuthorizationCompletedEvent(input: {
   readonly candidateId?: string;
   readonly name: string;
   readonly outcome: AuthorizationOutcome;
+  readonly principalId?: string;
   readonly reason?: string;
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly turnId: string;
 }): AuthorizationCompletedStreamEvent {
   const data: AuthorizationCompletedStreamEvent["data"] = {
@@ -1231,8 +1266,14 @@ export function createAuthorizationCompletedEvent(input: {
   if (input.candidateId !== undefined) {
     data.candidateId = input.candidateId;
   }
+  if (input.principalId !== undefined) {
+    data.principalId = input.principalId;
+  }
   if (input.reason !== undefined) {
     data.reason = input.reason;
+  }
+  if (input.taskId !== undefined) {
+    data.taskId = input.taskId;
   }
   return {
     data,
@@ -1261,17 +1302,17 @@ export function createInputRequestedEvent(input: {
   readonly requests: readonly InputRequest[];
   readonly sequence: number;
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly turnId: string;
 }): InputRequestedStreamEvent {
-  return {
-    data: {
-      requests: input.requests,
-      sequence: input.sequence,
-      stepIndex: input.stepIndex,
-      turnId: input.turnId,
-    },
-    type: "input.requested",
+  const data: InputRequestedStreamEvent["data"] = {
+    requests: input.requests,
+    sequence: input.sequence,
+    stepIndex: input.stepIndex,
+    turnId: input.turnId,
   };
+  if (input.taskId !== undefined) data.taskId = input.taskId;
+  return { data, type: "input.requested" };
 }
 
 /** Creates the authoritative `input.resolved` event for one pending HITL batch. */
@@ -1346,47 +1387,69 @@ export function createActionPartialEvent(input: {
   };
 }
 
+/** Creates the `task.started` event for one call that starts a task. */
+export function createTaskStartedEvent(
+  input: TaskStartedStreamEvent["data"],
+): TaskStartedStreamEvent {
+  return {
+    data: {
+      callId: input.callId,
+      kind: input.kind,
+      name: input.name,
+      taskId: input.taskId,
+      turnId: input.turnId,
+    },
+    type: "task.started",
+  };
+}
+
+/** Creates the `task.settled` event for one settled task call. */
+export function createTaskSettledEvent(
+  input: TaskSettledStreamEvent["data"],
+): TaskSettledStreamEvent {
+  const data: TaskSettledStreamEvent["data"] = {
+    callId: input.callId,
+    status: input.status,
+    taskId: input.taskId,
+    turnId: input.turnId,
+  };
+  if (input.output !== undefined) data.output = input.output;
+  if (input.error !== undefined) data.error = input.error;
+  return { data, type: "task.settled" };
+}
+
 /**
- * Creates the `subagent.called` event for one started child workflow session.
+ * Creates the `agent.started` event for one session a workflow run opened.
  */
-export function createSubagentCalledEvent(input: {
-  readonly agentId?: string;
+export function createAgentStartedEvent(input: {
   readonly callId: string;
-  readonly childSessionId: string;
-  readonly sessionId: string;
-  readonly sequence: number;
   readonly name: string;
+  readonly parentSessionId: string;
   readonly remote?: {
     readonly resolverId?: string;
     readonly url: string;
   };
-  readonly toolName: string;
+  readonly sessionId: string;
+  readonly taskId?: string;
   readonly turnId: string;
-  readonly workflowId: string;
-}): SubagentCalledStreamEvent {
-  return {
-    data: {
-      agentId: input.agentId,
-      callId: input.callId,
-      childSessionId: input.childSessionId,
-      childStreamPath:
-        input.remote === undefined
-          ? createEveSessionStreamRoutePath(input.childSessionId)
-          : createEveSubagentStreamRoutePath({
-              callId: input.callId,
-              childSessionId: input.childSessionId,
-              parentSessionId: input.sessionId,
-            }),
-      sessionId: input.sessionId,
-      sequence: input.sequence,
-      name: input.name,
-      remote: input.remote,
-      toolName: input.toolName,
-      turnId: input.turnId,
-      workflowId: input.workflowId,
-    },
-    type: "subagent.called",
+}): AgentStartedStreamEvent {
+  const data: AgentStartedStreamEvent["data"] = {
+    callId: input.callId,
+    turnId: input.turnId,
+    name: input.name,
+    sessionId: input.sessionId,
+    streamPath: createEveSessionStreamRoutePath(input.sessionId),
   };
+  if (input.taskId !== undefined) data.taskId = input.taskId;
+  if (input.remote !== undefined) {
+    data.remote = input.remote;
+    data.streamPath = createEveSubagentStreamRoutePath({
+      callId: input.callId,
+      childSessionId: input.sessionId,
+      parentSessionId: input.parentSessionId,
+    });
+  }
+  return { data, type: "agent.started" };
 }
 
 /**
@@ -1434,7 +1497,7 @@ export function createReasoningAppendedEvent(input: {
  */
 export function createMessageCompletedEvent(input: {
   readonly finishReason?: AssistantStepFinishReason;
-  readonly message: string | null;
+  readonly message: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1585,6 +1648,22 @@ export function createTurnCompletedEvent(input: {
       turnId: input.turnId,
     },
     type: "turn.completed",
+  };
+}
+
+/**
+ * Creates the `turn.waiting` event for one open turn that parked.
+ */
+export function createTurnWaitingEvent(input: {
+  readonly sequence: number;
+  readonly turnId: string;
+}): TurnWaitingStreamEvent {
+  return {
+    data: {
+      sequence: input.sequence,
+      turnId: input.turnId,
+    },
+    type: "turn.waiting",
   };
 }
 

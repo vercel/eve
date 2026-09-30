@@ -3,40 +3,28 @@ import type {
   FinalizedNodeSourceState,
   PhaseOneNodeSourceState,
 } from "#compiler/node-source-state.js";
-import type { CompiledToolEntry } from "#compiler/normalize-tool.js";
 import {
   canonicalSourceSlot,
   composeAgentModuleCandidates,
   type AgentSourceCandidate,
 } from "#compiler/source-graph.js";
 
-const REQUIRED_FRAMEWORK_TOOL_SLOTS = new Set(["tools/connection_search"]);
+const CONNECTION_TOOLS_SLOT = "tools/connection_tools";
+/** Slots of the closed connection tools and the framework module that provides them. */
+const CONNECTION_TOOL_SLOTS = new Set([
+  CONNECTION_TOOLS_SLOT,
+  "tools/connection_search",
+  "tools/connection_execute",
+]);
 
-export function assertFrameworkToolPolicy(
-  candidate: AgentSourceCandidate,
-  result: CompiledToolEntry,
-): void {
+/** Rejects authored sources that would replace or disable the connection tools. */
+export function assertFrameworkToolPolicy(candidate: AgentSourceCandidate): void {
+  if (candidate.layer === "framework-default") return;
   const slot = canonicalSourceSlot(candidate.logicalPath);
-  if (slot === "tools/connection_search" && result.kind === "disabled") {
-    throw new Error(
-      'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
-    );
-  }
-  const closedDispatchSlots = {
-    "tools/task_cancel": "task-cancel",
-  } as const;
-  const expectedAction = closedDispatchSlots[slot as keyof typeof closedDispatchSlots];
-  if (
-    expectedAction !== undefined &&
-    result.kind === "tool" &&
-    (result.definition.behavior?.handling?.kind !== "dispatch" ||
-      result.definition.behavior.handling.action !== expectedAction)
-  ) {
-    const toolName = slot.slice("tools/".length);
-    throw new Error(
-      `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
-    );
-  }
+  if (!CONNECTION_TOOL_SLOTS.has(slot)) return;
+  throw new Error(
+    `"agent/${slot}.ts" is reserved. connection_search and connection_execute are framework tools that cannot be replaced or disabled; they exist only while the agent has connections. Rename the file.`,
+  );
 }
 
 export function applyAgentToolPolicy(
@@ -85,7 +73,7 @@ export function applyDefaultToolPolicy(
       return (
         candidate.layer !== "framework-default" ||
         !slot.startsWith("tools/") ||
-        REQUIRED_FRAMEWORK_TOOL_SLOTS.has(slot) ||
+        slot === CONNECTION_TOOLS_SLOT ||
         overriddenSlots.has(slot)
       );
     }),

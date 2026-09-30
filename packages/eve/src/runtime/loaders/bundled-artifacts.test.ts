@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createCompileMetadata, resolveCompilerArtifactPaths } from "#compiler/artifacts.js";
-import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
   readBundledCompiledArtifacts,
   withBundledCompiledArtifacts,

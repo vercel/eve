@@ -39,10 +39,9 @@ async function executeLoadSkillTool(args: LoadSkillInput): Promise<unknown> {
     ?.getConnectionNames()
     .find((name) => name.toLowerCase() === skill.toLowerCase());
   if (connectionName === undefined) throw new Error(message);
-
   throw new Error(
-    `${message} "${connectionName}" is an installed connection, not a skill. ` +
-      `Use connection_search with connection "${connectionName}" to find its tools.`,
+    `${message} "${connectionName}" is a connection, not a skill. ` +
+      `Find its tools with connection_search and connection "${connectionName}", then call them with connection_execute.`,
   );
 }
 

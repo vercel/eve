@@ -1,9 +1,13 @@
 import type { LanguageModel, ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 const usage = {
   inputTokens: {
@@ -31,7 +35,7 @@ function findToolResult(messages: readonly ModelMessage[], toolCallId: string): 
 }
 
 describe("framework tool input validation (real AI SDK)", () => {
-  it("rejects invalid final_output input instead of terminating the task", async () => {
+  it("rejects invalid final_output input instead of settling the turn", async () => {
     const invalidCallId = "final-invalid";
     const validCallId = "final-valid";
     const outputSchema = {
@@ -73,7 +77,6 @@ describe("framework tool input validation (real AI SDK)", () => {
       provider: "eve-integration-mock",
     });
     const config: ToolLoopHarnessConfig = {
-      mode: "task",
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map(),
     };
@@ -106,6 +109,7 @@ describe("framework tool input validation (real AI SDK)", () => {
 
     expect(model.doGenerateCalls).toHaveLength(2);
     expect(findToolResult(model.doGenerateCalls[1]?.prompt ?? [], invalidCallId)).toBeDefined();
-    expect(validStep.next).toEqual({ done: true, output: { answer: "done" } });
+    expect(validStep.next).toBeNull();
+    expect(validStep.settledTurn).toEqual({ output: { answer: "done" } });
   });
 });

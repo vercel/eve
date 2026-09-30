@@ -45,13 +45,15 @@ npx eve@latest init my-agent
 ```
 
 This creates a new `my-agent` directory, installs its dependencies, initializes Git, and starts
-the interactive terminal UI.
+the interactive terminal UI. The generated agent uses `openai/gpt-6-luna-fast` with high reasoning.
 
 To start with another AI Gateway model, pass its model ID:
 
 ```bash
 npx eve@latest init my-agent --model openai/gpt-5.6-terra
 ```
+
+Passing `--model` without `--reasoning` uses the provider's default reasoning. Pass `--reasoning` to set it explicitly.
 
 To add eve to an existing project, pass a path:
 
@@ -93,7 +95,8 @@ Choose the model in `agent/agent.ts`:
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "spacexai/grok-4.7",
+  model: "openai/gpt-6-luna-fast",
+  reasoning: "high",
 });
 ```
 

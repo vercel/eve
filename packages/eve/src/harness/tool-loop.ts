@@ -1,5 +1,4 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import {
@@ -35,8 +34,6 @@ import {
   ScheduleIdKey,
   SessionCallbackKey,
   StaticModelReferenceKey,
-  TurnTaskDeliveryKey,
-  TaskDeliveryPolicyKey,
 } from "#context/keys.js";
 import {
   buildDynamicInstructionMessages,
@@ -56,6 +53,7 @@ import {
 } from "#context/build-dynamic-tools.js";
 import { buildDynamicSubagentTools } from "#context/dynamic-subagent-lifecycle.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
+import { getPendingAnnouncements } from "#harness/announcements.js";
 import { toErrorMessage } from "#shared/errors.js";
 import {
   createActionResultEvent,
@@ -68,12 +66,11 @@ import {
   createInputRequestedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
+  createTurnWaitingEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { projectParkedAgentHandles, resolveAgentsAnnouncement } from "#subagents/handles/prompt.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   hydrateSandboxAttachments,
@@ -85,8 +82,8 @@ import {
   resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction.js";
-import { createCurrentMessages } from "#harness/current-messages.js";
-import { getBackgroundTasks } from "#harness/workflow-tool-runs.js";
+import { createCurrentMessages, hasTailApprovalResponse } from "#harness/current-messages.js";
+import { collectDeferredCalls, dispatchApprovedWorkflowCalls } from "#harness/workflow-dispatch.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import {
   accumulateTurnUsage,
@@ -136,13 +133,16 @@ import {
   getApprovedTools,
   getPendingInputRequestIds,
   hasRunnableDeferredStepInput,
-  hasPendingApprovalBatch,
   hasStepInput,
   resolvePendingInput,
   selectApprovalReplayBatch,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
-import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
+import {
+  getPendingInputBatches,
+  queueDeferredStepInput,
+  type PendingInputBatchEvent,
+} from "#harness/pending-input-batches.js";
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
@@ -154,12 +154,15 @@ import {
   normalizeModelMessages,
   normalizeUserContent,
   createTurnInputMessages,
+  followsToolResults,
   resolveAssistantStepText,
+  TOOL_RESULT_BOUNDARY,
   type HarnessModelMessage,
   type UserModelMessage,
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
+import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import {
   getPendingAuthorization,
   getSupersededAuthorizationChallenges,
@@ -173,6 +176,14 @@ import {
   createStepStartedEvent,
 } from "#protocol/message.js";
 import {
+  appendTaskContext,
+  isTaskTool,
+  taskSystemMessages,
+  withTaskTools,
+  workingTaskIds,
+} from "#execution/tasks/model-step.js";
+import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
+import {
   classifyModelCallError,
   ContentFilteredModelResponseError,
   EmptyModelResponseError,
@@ -185,15 +196,8 @@ import {
 import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semantic-errors/index.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
-import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
-import { resolveInitiatingTaskContext } from "#tasks/delivery-context.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
-import {
-  BackgroundToolExecutorKey,
-  createBackgroundToolCallBatch,
-} from "#harness/background-tools.js";
 import {
   applyLastToolCacheBreakpoint,
   applySystemCacheBreakpoint,
@@ -202,7 +206,6 @@ import {
 } from "#harness/prompt-cache.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 import {
-  createCoordinationRequestFromToolCall,
   getPendingCoordinationBatch,
   resolvePendingCoordination,
   setPendingCoordinationBatch,
@@ -217,7 +220,8 @@ import {
   readGatewayGenerationId,
   type HarnessStepResult,
 } from "#harness/step-hooks.js";
-import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
+import { resolveCallProviderOptions } from "#harness/provider-safety.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
 import {
   buildToolApproval,
   buildToolSetFromDefinitions,
@@ -226,7 +230,6 @@ import {
 import { buildFinalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
 import { toModelSchema } from "#tools/schema.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { RunMode } from "#shared/run-mode.js";
 import { createHistoryViewPreparer, type HistoryViewProjector } from "#shared/history-view.js";
 import {
   canonicalizeMemoryRecords,
@@ -272,7 +275,9 @@ function logToolExecutionError(event: {
   readonly toolCall: { readonly toolName: string; readonly toolCallId: string };
   readonly toolOutput: { readonly type: string; readonly error?: unknown };
 }): void {
-  if (event.toolOutput.type !== "tool-error") {
+  // A tool unwinding because its turn was cancelled is the expected outcome
+  // of a user action, not a failure worth an error log.
+  if (event.toolOutput.type !== "tool-error" || isTurnCancellation(event.toolOutput.error)) {
     return;
   }
   logError(log, "tool execution failed", event.toolOutput.error, {
@@ -506,6 +511,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const parent = store?.get(ParentSessionKey);
     const callback = store?.get(SessionCallbackKey);
     const hasDelegatedCaller = parent !== undefined || callback !== undefined;
+    // A child's caller and a schedule hear only the turn's real end, so a held
+    // turn's text isn't posted as their reply. A person reads a root session.
+    const hidesHeldText = hasDelegatedCaller || store?.get(ScheduleIdKey) !== undefined;
     let activeAttemptScope: InstrumentationAttempt | undefined;
     const instrumentedEmit =
       stepInstrumentation?.createHandleEvent({
@@ -546,10 +554,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
 
       return {
-        next:
-          config.mode === "task" || hasDelegatedCaller
-            ? { done: true, isError: true, output: message }
-            : { done: true, output: "" },
+        next: hasDelegatedCaller
+          ? { done: true, isError: true, output: message }
+          : { done: true, output: "" },
         session,
       };
     };
@@ -560,30 +567,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       throwIfTurnAborted(config.abortSignal);
       if (isTurnCancellation(error)) throw error;
       if (isDynamicModelSelectionError(error)) return failModelSelection(error, failureState);
-      if (!emit || config.mode !== "conversation" || !(error instanceof BoundaryHookError)) {
-        throw error;
-      }
-
-      stepInstrumentation?.recordError(error);
-      const errorId = createErrorId();
-      const message = toErrorMessage(error);
-      log.error("turn boundary handler failed — parking session", {
-        error,
-        errorId,
-        sessionId: session.sessionId,
-        turnId: failureState.turnId,
-      });
-      emissionState = await emitRecoverableFailedTurn(emit, failureState, {
-        code: "EVENT_HANDLER_FAILED",
-        continuationToken: session.continuationToken,
-        details: { errorId },
-        message,
-      });
-      return {
-        next: null,
-        session: setHarnessEmissionState({ ...session, outputSchema: undefined }, emissionState),
-        settledTurn: { isError: true, output: message },
-      };
+      throw error;
     };
     const preparePreambleTrace = async (): Promise<RuntimeTraceContext | undefined> => {
       return await stepInstrumentation?.preparePreamble({
@@ -652,15 +636,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Resolve deferred input, task/control coordination, then HITL input; each stage
     // may park when its resume payload has not arrived.
 
-    const stepInput = consumeDeferredStepInput({
-      input,
-      preferCurrentInput:
-        config.mode !== "conversation" && input !== undefined && hasPendingApprovalBatch(session),
-      session,
-    });
-    session = stepInput.session;
-
     const pendingCoordination = getPendingCoordinationBatch(session.state);
+    // Queued input waits for the pending batch: coalescing would drop its
+    // runtimeActionResults, and input queued behind approved workflows must
+    // replay only after they finish.
+    const stepInput =
+      pendingCoordination === undefined
+        ? consumeDeferredStepInput({ input, session })
+        : { input, session };
+    session = stepInput.session;
     const resolvedCoordination = await resolvePendingCoordination({
       emit,
       session,
@@ -692,7 +676,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     const approvalContext = contextStorage.getStore();
     const prepareApprovalTools = async (
-      batch: ReturnType<typeof getPendingInputBatches>[number] | undefined,
+      batch: { readonly event?: PendingInputBatchEvent } | undefined,
     ) => {
       if (batch?.event !== undefined) await config.prepareApprovalTurn?.(batch.event);
       if (approvalContext !== undefined) {
@@ -719,17 +703,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         const batch = getPendingInputBatches(session.state).find((batch) =>
           batch.requests.some((entry) => entry.requestId === request.requestId),
         );
-        const tools = await prepareApprovalTools(batch);
-        const expected = batch?.toolReplayIdentities?.[request.requestId];
-        if (
-          expected !== undefined &&
-          config.toolReplayIdentity?.(request.action.toolName) !== expected
-        ) {
-          const available = new Map(tools);
-          available.delete(request.action.toolName);
-          return available;
-        }
-        return tools;
+        return await prepareApprovalTools(batch);
       },
     });
     session = coordinated.session;
@@ -757,10 +731,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           continue;
         await emit(
           createAuthorizationCompletedEvent({
-            attemptId: challenge.attemptId,
-            authorization: challenge.challenge,
-            candidateId: challenge.candidateId,
-            name: challenge.name,
+            ...authorizationEventFields(challenge),
             outcome: "failed",
             reason: "The approval response expired. Please submit a new response.",
             sequence: emissionState.sequence,
@@ -850,11 +821,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         for (const challenge of coordinated.challenges) {
           await emit(
             createAuthorizationRequiredEvent({
-              authorization: challenge.challenge,
-              candidateId: challenge.candidateId,
+              ...authorizationEventFields(challenge),
               description:
                 challenge.challenge.instructions ?? `Authorization required for ${challenge.name}`,
-              name: challenge.name,
               sequence: emissionState.sequence,
               stepIndex: emissionState.stepIndex,
               turnId: emissionState.turnId,
@@ -878,12 +847,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       };
     }
 
-    const replayBatch = selectApprovalReplayBatch(session, coordinated.stepInput);
+    // Approved siblings of a finished workflow run with their approval turn's tools.
+    const replayBatch =
+      pendingCoordination !== undefined && hasTailApprovalResponse(resolvedCoordination.messages)
+        ? pendingCoordination
+        : selectApprovalReplayBatch(session, coordinated.stepInput);
     const responseAuthorizationTools =
       replayBatch === undefined ? config.tools : await prepareApprovalTools(replayBatch);
     const pending = resolvePendingInput({
       activeTurnId: pendingCoordination?.event.turnId ?? activeTurnId(emissionState),
-      deferMessagesWhileApprovalsPending: config.mode !== "conversation",
       history: resolvedCoordination.messages,
       internalStep: !isHarnessBetweenTurns(session),
       resolveApprovalKey: resolveApprovalKeyFromTools(responseAuthorizationTools),
@@ -901,12 +873,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }
           : pending.session;
 
-      if (
-        emit &&
-        config.mode === "conversation" &&
-        pending.deferredMessage === true &&
-        hasStepInput(input)
-      ) {
+      if (emit && pending.deferredMessage === true && hasStepInput(input)) {
         const deferredInput = createTurnInputMessages(effectiveStepInput);
         if (store !== undefined) {
           prepareDynamicInstructionPreamble(
@@ -939,7 +906,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           parkedSession = {
             ...parkedSession,
             history: validateHarnessModelMessages([
-              ...(memoryCommit?.history ?? parkedSession.history),
+              ...parkedSession.history,
+              ...(memoryCommit?.recalledMessages ?? []),
               ...instructionMessages,
             ]),
             state: memoryCommit?.state ?? parkedSession.state,
@@ -957,12 +925,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         parkedSession = {
           ...parkedSession,
           history: validateHarnessModelMessages([
-            ...(memoryCommit?.history ?? parkedSession.history),
+            ...parkedSession.history,
+            ...(memoryCommit?.recalledMessages ?? []),
             ...instructionMessages,
           ]),
           state: memoryCommit?.state ?? parkedSession.state,
         };
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        emissionState = await emitTurnEpilogue(emit, emissionState, parkedSession.history);
         return {
           next: null,
           session: setHarnessEmissionState(parkedSession, emissionState),
@@ -970,8 +939,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
 
       if (resolvedCoordination.outcome === "resolved") {
-        if (emit && config.mode === "conversation") {
-          emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
+        if (emit) {
+          emissionState = await emitTurnEpilogue(emit, emissionState, parkedSession.history);
           parkedSession = setHarnessEmissionState(parkedSession, emissionState);
         }
         return { next: null, session: parkedSession };
@@ -979,11 +948,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       if (
         coordinated.kind === "responses-completed" &&
-        config.mode === "conversation" &&
         isHarnessBetweenTurns(pending.session) &&
         getPendingAuthorization(pending.session.state) === undefined
       ) {
-        // Like a conversation turn, a completed response may wait while background work continues.
         await emit?.(createSessionWaitingEvent());
       }
       return { next: null, session: pending.session };
@@ -1101,7 +1068,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         session = {
           ...pending.session,
           history: validateHarnessModelMessages([
-            ...(memoryCommit?.history ?? pending.session.history),
+            ...pending.session.history,
+            ...(memoryCommit?.recalledMessages ?? []),
             ...instructionMessages,
           ]),
           state: memoryCommit?.state ?? pending.session.state,
@@ -1119,20 +1087,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInstrumentation?.setTurnId(emissionState.turnId);
     }
 
-    const committedHistory = memoryCommit?.history ?? pending.session.history;
     const historyLength = pending.session.history.length;
+    const preambleMessages = [...(memoryCommit?.recalledMessages ?? []), ...instructionMessages];
     session = setHarnessEmissionState(
       {
         ...pending.session,
-        history: validateHarnessModelMessages([...committedHistory, ...instructionMessages]),
+        history: validateHarnessModelMessages([...pending.session.history, ...preambleMessages]),
         state: memoryCommit?.state ?? pending.session.state,
       },
       emissionState,
     );
+    // Preamble messages go before the pending transcript so an approval
+    // response stays in the final tool message, where the AI SDK reads it.
     let messages: HarnessModelMessage[] = validateHarnessModelMessages([
-      ...(memoryCommit?.history ?? pending.messages.slice(0, historyLength)),
-      ...instructionMessages,
-      ...(memoryCommit === undefined ? pending.messages.slice(historyLength) : []),
+      ...pending.messages.slice(0, historyLength),
+      ...preambleMessages,
+      ...pending.messages.slice(historyLength),
     ]);
 
     // A resolved session-limit continuation prompt grants a fresh token
@@ -1149,35 +1119,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     session = continuation.session;
 
-    // Announce the parked-agents listing as framework-injected user-role
-    // content, before any new user input so a message present on this step
-    // stays the turn's focus. On a no-input settle resume it trails the tool
-    // results, keeping the request user-final for providers that reject
-    // assistant-final histories. See resolveAgentsAnnouncement for the role
-    // rationale (assistant-final rejection, prompt-cache preservation).
-    const agentStore = getAgentHandleStore(session.state);
     if (!hasUnansweredToolCall(messages)) {
-      const taskAgentViews = await store?.get(BackgroundToolExecutorKey)?.readAgentViews?.();
-      const agentViews =
-        taskAgentViews === undefined || taskAgentViews.length === 0
-          ? undefined
-          : [
-              ...projectParkedAgentHandles(agentStore ?? { handles: [] }).map((handle) => ({
-                availability: "available" as const,
-                id: handle.identity.id,
-                name: handle.identity.name,
-                statusLine: handle.phase === "parked" ? handle.lastStatus : undefined,
-              })),
-              ...taskAgentViews,
-            ];
-      const announcement = resolveAgentsAnnouncement({
-        agentViews,
-        messages: projectHistory(messages, session.state),
-        store: agentStore,
+      const taskContext = await appendTaskContext({
+        messages,
+        projectHistory,
+        session,
+        tools: config.tools,
       });
-      if (announcement !== undefined) {
-        messages.push(createFrameworkUserMessage("context.state", announcement));
-      }
+      session = taskContext.session;
+      messages.push(...taskContext.messages);
     }
 
     // Keep ephemeral client context at the same position across durable steps.
@@ -1193,7 +1143,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       session = setTurnClientContextState(session, turnClientContext);
     }
 
-    messages = [...messages, ...preparedTurnInput];
+    const separatesToolResults =
+      stagedTurnContent !== undefined &&
+      frameworkMessageKind === undefined &&
+      followsToolResults(messages);
+    messages = [
+      ...messages,
+      ...(separatesToolResults
+        ? [{ content: TOOL_RESULT_BOUNDARY, role: "assistant" } as const]
+        : []),
+      ...preparedTurnInput,
+    ];
 
     const createModelMessages = (
       durableMessages: readonly HarnessModelMessage[],
@@ -1277,15 +1237,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         authoredTools: config.tools,
         context: ctx,
       });
-      for (const { request, toolReplayIdentity } of replayRequests) {
-        if (
-          toolReplayIdentity !== undefined &&
-          config.toolReplayIdentity?.(request.action.toolName) !== toolReplayIdentity
-        ) {
-          throw new Error(
-            "The connection for this tool call changed or is unavailable. Request a new tool call and approval.",
-          );
-        }
+      for (const { request } of replayRequests) {
         if (!replayTools.has(request.action.toolName)) {
           throw new Error(
             "The approved tool is no longer available. Request a new tool call and approval.",
@@ -1300,17 +1252,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       ),
     );
 
-    const isFirstTurn = emissionState.sequence === 0;
-    const hasScheduleProvenance = isFirstTurn && ctx?.get(ScheduleIdKey) !== undefined;
-    const deliveryPolicy = resolveDeliveryPolicy({
-      hasScheduleProvenance,
-      hasOutputSchema: session.outputSchema !== undefined,
-      isChild: ctx?.get(ParentSessionKey) !== undefined,
-      isFirstTurn,
-      taskDeliveryPhase: ctx?.get(TurnTaskDeliveryKey),
-      taskDeliveryPolicy: ctx?.get(TaskDeliveryPolicyKey),
-    });
-
     // --- Execute via ToolLoopAgent ------------------------------------------
 
     /*
@@ -1318,6 +1259,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
      * `console.error(error)` handler inside `streamText`. Errors are
      * handled by the harness catch block and emitted as stream events.
      */
+    // The tools advertised to the latest model call; they decide which tool calls defer.
+    let modelCallCoordinationTools = config.tools;
     const createRequestMessages = () => {
       // Persist framework announcements before the new input, or after earlier
       // tool results on a continuation, so later requests retain the full prefix.
@@ -1329,14 +1272,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (ctx !== undefined) {
         currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
       }
-      const taskContext =
-        ctx?.get(TurnTaskDeliveryKey) === "initiating"
-          ? resolveInitiatingTaskContext({ state: session.state, turnId })
-          : undefined;
+      currentMessages.addSystem(
+        taskSystemMessages(modelCallCoordinationTools, { finalReplyOnly: hidesHeldText }),
+      );
       currentMessages.addAnnouncements({
         availableSkills: ctx?.get(PendingSkillAnnouncementKey),
-        taskState: taskContext?.context,
-        deliveryInstruction: deliveryPolicy.instruction,
+        keyed: getPendingAnnouncements(ctx),
       });
       const pendingApprovals = renderPendingApprovalsInstruction(
         getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
@@ -1440,7 +1381,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       suppressStepStartedEmission?: boolean;
       trailingUserNote?: string;
     };
-    let modelCallCoordinationTools = config.tools;
     let requestEnvelopeTokens = 0;
     let compactionFailure: { readonly error: unknown } | undefined;
     const throwIfCompactionFailed = () => {
@@ -1449,21 +1389,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     const prepareModelTools = async (opts: ModelCallOptions) => {
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
-      const backgroundBatch = createBackgroundToolCallBatch();
-      const advertisedHarnessTools = getAdvertisedTools({
-        session,
-        tools: harnessTools,
-      });
+      const advertisedHarnessTools = withTaskTools(
+        getAdvertisedTools({
+          session,
+          tools: harnessTools,
+        }),
+      );
       modelCallCoordinationTools = advertisedHarnessTools;
 
       const flatTools = await buildToolSetWithProviderTools({
         approvedTools,
-        backgroundBatch,
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: requireSessionModelReference(session),
         tools: advertisedHarnessTools,
       });
 
+      // Stream emitters resolve label callbacks by tool name, so they need the
+      // dynamic tools the model can call, not only the authored ones.
+      const presentationTools = new Map(advertisedHarnessTools);
       if (ctx !== undefined) {
         const dynamicTools = getAdvertisedTools({
           session,
@@ -1471,19 +1414,26 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         });
         const dynamicToolSet = buildToolSetFromDefinitions({
           approvedTools,
-          backgroundBatch,
           disabledProviderTools: opts.disabledProviderTools,
           tools: dynamicTools,
         });
         // Dynamic tools override a same-named authored tool.
         for (const [name, toolDefinition] of Object.entries(dynamicToolSet)) {
           const advertised = advertisedHarnessTools.get(name);
-          if (advertised?.runtimeAction !== undefined || advertised?.workflowId !== undefined) {
+          if (advertised?.workflowId !== undefined) {
             throw new Error(
               `Dynamic tool "${name}" collides with a coordination-visible deferred tool.`,
             );
           }
           flatTools[name] = toolDefinition;
+        }
+        // Match `buildToolSetFromDefinitions`: the first dynamic definition of a
+        // name (step, then turn, then session) wins, and still overrides authored.
+        const presentedDynamicNames = new Set<string>();
+        for (const tool of dynamicTools) {
+          if (presentedDynamicNames.has(tool.name)) continue;
+          presentedDynamicNames.add(tool.name);
+          presentationTools.set(tool.name, tool);
         }
       }
 
@@ -1513,22 +1463,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             generation.protectToolExecution();
             return execute(...args);
           };
-        const onInputAvailable = tool.onInputAvailable;
-        if (onInputAvailable !== undefined)
-          tool.onInputAvailable = (...args: Parameters<typeof onInputAvailable>) => {
-            generation.protectToolExecution();
-            return onInputAvailable(...args);
-          };
       }
 
-      return { effectiveTools, backgroundBatch, advertisedHarnessTools, modelTools };
+      return { effectiveTools, modelTools, presentationTools };
     };
 
     const runSingleModelCall = async (
       opts: ModelCallOptions & { readonly attemptIndex: number },
     ): Promise<HarnessStepResult> => {
-      let { effectiveTools, backgroundBatch, advertisedHarnessTools, modelTools } =
-        await prepareModelTools(opts);
+      let { effectiveTools, modelTools, presentationTools } = await prepareModelTools(opts);
       currentMessages = createRequestMessages();
       requestEnvelopeTokens = await estimateRequestEnvelope({
         history: projectedMessages,
@@ -1584,8 +1527,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           normalizeModelMessages(projectHistory(createModelMessages(messages), session.state)),
         );
         currentMessages = createRequestMessages();
-        ({ effectiveTools, backgroundBatch, advertisedHarnessTools, modelTools } =
-          await prepareModelTools(opts));
+        ({ effectiveTools, modelTools, presentationTools } = await prepareModelTools(opts));
         requestEnvelopeTokens = await estimateRequestEnvelope({
           history: projectedMessages,
           instructions: prepareModelInstructions(opts.extraSystemNote),
@@ -1646,20 +1588,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             usage: event.usage,
             costUsd: extractGatewayCostUsd(event.providerMetadata),
           });
-          for (const part of event.content) {
-            if (
-              part.type !== "tool-call" ||
-              part.providerExecuted === true ||
-              isInvalidToolCall(part)
-            ) {
-              continue;
-            }
-            backgroundBatch.register({
-              callId: part.toolCallId,
-              input: part.input,
-              toolName: part.toolName,
-            });
-          }
         },
         onToolExecutionEnd: logToolExecutionError,
         // Replaces the AI SDK's default `console.error`; the harness still
@@ -1688,16 +1616,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
       const executeModelCall = async (): Promise<HarnessStepResult> => {
         if (emit) {
-          const hiddenRuntimeActionToolNames = [...config.tools]
-            .filter(
-              ([name, tool]) =>
-                tool.runtimeAction !== undefined && advertisedHarnessTools.get(name) === undefined,
-            )
-            .map(([name]) => name);
-          const excludedActionToolNames = new Set([
-            FINAL_OUTPUT_TOOL_NAME,
-            ...hiddenRuntimeActionToolNames,
-          ]);
+          const excludedActionToolNames = new Set([FINAL_OUTPUT_TOOL_NAME]);
           const streamResult = await agent.stream({
             abortSignal: generation.signal,
             messages: callMessages,
@@ -1714,7 +1633,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             interruptStreamOnFailure(streamResult.fullStream, generation.signal),
             {
               excludedActionToolNames,
-              tools: advertisedHarnessTools,
+              hidesHeldText: hidesHeldText && workingTaskIds(session).length > 0,
+              tools: presentationTools,
             },
           );
           throwIfTurnAborted(config.abortSignal);
@@ -1741,7 +1661,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             excludedActionCallIds: invalidInputToolCallIds,
             excludedActionToolNames,
             handledInlineToolResultCallIds,
-            tools: advertisedHarnessTools,
+            tools: presentationTools,
           });
           const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
           const toolResultsByCallId = new Map(
@@ -1813,6 +1733,20 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         generation.signal,
       );
 
+    // Approved workflows start like ungated ones: session limits gate model calls.
+    const dispatchedSession = dispatchApprovedWorkflowCalls({
+      messages,
+      resolvedInputs: pending.resolvedInputs,
+      session,
+      tools: buildResponseAuthorizationTools({ authoredTools: config.tools, context: ctx }),
+    });
+    if (dispatchedSession !== undefined) {
+      return {
+        next: null,
+        session: setHarnessEmissionState(dispatchedSession, advanceStep(emissionState)),
+      };
+    }
+
     const limitResult = await enforceSessionUsageLimit({
       config,
       emit,
@@ -1852,7 +1786,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }),
           (current) =>
             attemptEmptyResponseRecovery({
-              emptyDeliveryEnabled: deliveryPolicy.allowsEmptyDelivery,
               error: current.error,
               retryCallOptions: current.retryCallOptions,
               runOneModelCall,
@@ -1969,49 +1902,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           // failed `subagent-result`; top-level conversation failures already
           // emit `session.failed` here.
           return {
-            next:
-              config.mode === "task" || hasDelegatedCaller
-                ? { done: true, isError: true, output: taskFailureOutput }
-                : { done: true, output: "" },
-            session,
-          };
-        }
-
-        if (config.mode === "task") {
-          if (
-            classification === "recoverable" &&
-            !(finalError instanceof EmptyModelResponseError) &&
-            !(finalError instanceof ContentFilteredModelResponseError)
-          ) {
-            // Task runs cannot park for user-driven recovery. Let the durable
-            // step retry from committed session state, but only for errors
-            // that did not already consume the in-process transient budget or
-            // the dedicated empty-response reissue. Filtering is an explicit
-            // rejection, so it must not receive durable retries either.
-            log.warn(
-              upstreamRejection?.message ??
-                "model call failed recoverably in task mode — rethrowing for durable step retry",
-              modelCallLogFields,
-            );
-            throw finalError;
-          }
-
-          // A task run cannot park for a user retry (turnWorkflow rejects
-          // `next: null` in task mode). Classified transient errors arrive
-          // here only after their bounded in-process retries are exhausted;
-          // empty responses already received their specialized reissue.
-          log.error(
-            upstreamRejection?.message ?? "model call failed; failing the task run",
-            modelCallLogFields,
-          );
-          await emitFailedStep(emit, emissionState, {
-            code: "MODEL_CALL_FAILED",
-            details,
-            message: errorMessage,
-            sessionId: session.sessionId,
-          });
-          return {
-            next: { done: true, isError: true, output: taskFailureOutput },
+            next: hasDelegatedCaller
+              ? { done: true, isError: true, output: taskFailureOutput }
+              : { done: true, output: "" },
             session,
           };
         }
@@ -2409,7 +2302,7 @@ function getInvalidToolCallInputErrors(input: {
  * history normalization, which runs after the backfill paths), so a
  * tool-message-only scan would let a synthesized result duplicate them.
  */
-function extractToolResultCallIds(messages: readonly StepResponseMessage[]): ReadonlySet<string> {
+function extractToolResultCallIds(messages: readonly ModelMessage[]): ReadonlySet<string> {
   const callIds = new Set<string>();
 
   for (const message of messages) {
@@ -2525,9 +2418,9 @@ function buildDisabledToolNote(toolNames: readonly string[]): string {
 }
 
 /**
- * True when a step produced no assistant text and no tool calls. Intentional
- * silence uses {@link EMPTY_DELIVERY_SENTINEL}; a genuinely blank response is
- * ambiguous and must be retried instead of silently dropping a HITL reply.
+ * True when a step produced no assistant text and no tool calls. A blank
+ * response is ambiguous and must be retried instead of silently dropping a
+ * HITL reply.
  */
 function isEmptyModelResponse(step: HarnessStepResult): boolean {
   return (
@@ -2566,13 +2459,6 @@ function rethrowNoOutputAsEmptyResponse(error: unknown): never {
 const EMPTY_RESPONSE_NUDGE =
   "Your previous reply was empty and was not delivered. Continue the current user request. Reuse completed results when they satisfy the request. If existing results are stale or insufficient, use the appropriate read tools to get fresh results. Do not repeat writes or other side effects that already completed. Do not mention this notice.";
 
-function buildEmptyResponseNudge(emptyDeliveryEnabled: boolean): string {
-  if (!emptyDeliveryEnabled) {
-    return EMPTY_RESPONSE_NUDGE;
-  }
-  return `${EMPTY_RESPONSE_NUDGE} If the current task explicitly requires conditional delivery and there is nothing to report, reply with exactly ${EMPTY_DELIVERY_SENTINEL}.`;
-}
-
 /**
  * Recovers a model call that completed without content (see
  * {@link EmptyModelResponseError}) by reissuing the same call once, with
@@ -2590,7 +2476,6 @@ function buildEmptyResponseNudge(emptyDeliveryEnabled: boolean): string {
  * restore what the earlier recovery removed.
  */
 async function attemptEmptyResponseRecovery(input: {
-  readonly emptyDeliveryEnabled: boolean;
   readonly error: unknown;
   readonly retryCallOptions?: RecoveryRetryCallOptions;
   readonly runOneModelCall: RecoveryModelCallFn;
@@ -2611,7 +2496,7 @@ async function attemptEmptyResponseRecovery(input: {
       ...input.retryCallOptions,
       retryReason: "empty-response",
       suppressStepStartedEmission: true,
-      trailingUserNote: buildEmptyResponseNudge(input.emptyDeliveryEnabled),
+      trailingUserNote: EMPTY_RESPONSE_NUDGE,
     });
     return { outcome: "recovered", result };
   } catch (retryError) {
@@ -2642,11 +2527,7 @@ async function handleStepResult(input: {
   const { config, emit, promptMessages, result, runStep } = input;
   let { emissionState, session } = input;
 
-  const resolvedStepOutput = resolveAssistantStepText(result.response.messages, result.text);
-  const emptyDelivery =
-    result.finishReason !== "tool-calls" &&
-    result.toolCalls.length === 0 &&
-    hasEmptyDeliverySentinel(resolvedStepOutput);
+  const stepOutput = resolveAssistantStepText(result.response.messages, result.text);
   const invalidInputToolErrors = getInvalidToolCallInputErrors({
     toolCalls: result.toolCalls as TypedToolCall<ToolSet>[],
   });
@@ -2658,15 +2539,12 @@ async function handleStepResult(input: {
     ...result.toolCalls.filter(isInvalidToolCall).map((toolCall) => toolCall.toolCallId),
     ...invalidInputToolErrors.map((toolError) => toolError.toolCallId),
   ]);
-  const rawResponseMessages = emptyDelivery
-    ? []
-    : appendMissingToolResultMessages({
-        append: invalidInputToolErrors.map((toolError) =>
-          createToolResultMessagePartFromToolError(toolError),
-        ),
-        responseMessages: result.response.messages,
-      });
-  const stepOutput = emptyDelivery ? null : resolvedStepOutput;
+  const rawResponseMessages = appendMissingToolResultMessages({
+    append: invalidInputToolErrors.map((toolError) =>
+      createToolResultMessagePartFromToolError(toolError),
+    ),
+    responseMessages: result.response.messages,
+  });
 
   const providerExecutedOutcomeIds = new Set<string>();
   for (const part of [...(result.content ?? []), ...(result.toolResults ?? [])]) {
@@ -2722,8 +2600,14 @@ async function handleStepResult(input: {
     session: baseSession,
     tools: input.coordinationTools,
   });
-  const pendingCoordination = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
+  // Only unanswered calls can dispatch: automatic denials already have results.
+  const blockedCallIds = new Set([
+    ...approvalRequests.map((request) => request.action.callId),
+    ...extractToolResultCallIds(responseMessages),
+  ]);
+  const deferredToolCalls = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
+    .filter((toolCall) => !blockedCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => isDeferredHarnessTool(input.coordinationTools.get(toolCall.toolName)))
     .filter((toolCall) => {
       if (isDeferredHarnessTool(advertisedCoordinationTools.get(toolCall.toolName))) {
@@ -2735,21 +2619,16 @@ async function handleStepResult(input: {
         toolName: toolCall.toolName,
       });
       return false;
-    })
-    .map((toolCall) =>
-      createCoordinationRequestFromToolCall({
-        toolCall,
-        tools: advertisedCoordinationTools,
-      }),
-    );
+    });
+  const deferred = collectDeferredCalls({
+    session: baseSession,
+    toolCalls: deferredToolCalls,
+    tools: advertisedCoordinationTools,
+    turnId: emissionState.turnId,
+  });
+  const tasks = deferred.workflowRequests;
 
-  if (pendingCoordination.length > 0) {
-    const runtimeActions = pendingCoordination.flatMap((entry) =>
-      entry.kind === "runtime-action" ? [entry.request] : [],
-    );
-    const tasks = pendingCoordination.flatMap((entry) =>
-      entry.kind === "task" ? [entry.request] : [],
-    );
+  if (deferredToolCalls.length > 0) {
     // Stamp the live emission state onto the parked session so the
     // resume turn is classified as a continuation (turnId set), not a
     // fresh turn. Every other park path does this; without it the
@@ -2761,7 +2640,6 @@ async function handleStepResult(input: {
         next: null,
         session: setHarnessEmissionState(
           setPendingCoordinationBatch({
-            runtimeActions,
             tasks,
             event: {
               sequence: emissionState.sequence,
@@ -2769,7 +2647,7 @@ async function handleStepResult(input: {
               turnId: emissionState.turnId,
             },
             responseMessages,
-            session: { ...baseSession, history: validateHarnessModelMessages(promptMessages) },
+            session: { ...deferred.session, history: validateHarnessModelMessages(promptMessages) },
           }),
           advanceStep(emissionState),
         ),
@@ -2777,7 +2655,6 @@ async function handleStepResult(input: {
     }
 
     let parkedSession = setPendingCoordinationBatch({
-      runtimeActions,
       tasks,
       event: {
         sequence: emissionState.sequence,
@@ -2785,7 +2662,7 @@ async function handleStepResult(input: {
         turnId: emissionState.turnId,
       },
       responseMessages: pendingResponseMessages,
-      session: { ...baseSession, history: parkedInputHistory },
+      session: { ...deferred.session, history: parkedInputHistory },
     });
 
     // The coordination batch already owns the shared assistant response.
@@ -2796,7 +2673,7 @@ async function handleStepResult(input: {
         turnId: emissionState.turnId,
       },
       requests: inputRequests,
-      toolReplayIdentities: captureToolReplayIdentities(config, approvalRequests),
+      responseAuthRequiredRequestIds: responsePolicyRequestIds(config, approvalRequests),
       responseMessages: [],
       session: parkedSession,
     });
@@ -2821,10 +2698,6 @@ async function handleStepResult(input: {
   // --- Park on input requests -----------------------------------------------
 
   if (inputRequests.length > 0) {
-    const responseAuthorizationTools = buildResponseAuthorizationTools({
-      authoredTools: config.tools,
-      context: contextStorage.getStore(),
-    });
     let parkedSession = appendPendingInputBatch({
       event: {
         sequence: emissionState.sequence,
@@ -2832,17 +2705,7 @@ async function handleStepResult(input: {
         turnId: emissionState.turnId,
       },
       requests: inputRequests,
-      toolReplayIdentities: captureToolReplayIdentities(config, approvalRequests),
-      responseAuthRequiredRequestIds: approvalRequests
-        .filter((request) => {
-          const approval = responseAuthorizationTools.get(request.action.toolName)?.approval;
-          return (
-            approval !== undefined &&
-            typeof approval !== "function" &&
-            approval.response !== undefined
-          );
-        })
-        .map((request) => request.requestId),
+      responseAuthRequiredRequestIds: responsePolicyRequestIds(config, approvalRequests),
       responseMessages: pendingResponseMessages,
       session: { ...baseSession, history: parkedInputHistory },
     });
@@ -2857,10 +2720,8 @@ async function handleStepResult(input: {
         }),
       );
 
-      if (config.mode === "conversation") {
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
-        parkedSession = setHarnessEmissionState(parkedSession, emissionState);
-      }
+      emissionState = await emitTurnEpilogue(emit, emissionState, parkedSession.history);
+      parkedSession = setHarnessEmissionState(parkedSession, emissionState);
     }
 
     return {
@@ -2885,9 +2746,7 @@ async function handleStepResult(input: {
       )) {
         await emit(
           createAuthorizationCompletedEvent({
-            attemptId: superseded.attemptId,
-            authorization: superseded.challenge,
-            name: superseded.name,
+            ...authorizationEventFields(superseded),
             outcome: "failed",
             reason: "Superseded by a newer authorization attempt.",
             sequence: emissionState.sequence,
@@ -2899,9 +2758,7 @@ async function handleStepResult(input: {
       for (const ch of challenges) {
         await emit(
           createAuthorizationRequiredEvent({
-            attemptId: ch.attemptId,
-            authorization: ch.challenge,
-            name: ch.name,
+            ...authorizationEventFields(ch),
             description: ch.challenge.instructions ?? `Authorization required for ${ch.name}`,
             webhookUrl: ch.hookUrl,
             sequence: emissionState.sequence,
@@ -2915,9 +2772,7 @@ async function handleStepResult(input: {
       // above: the session keeps serving ordinary turns while the challenge
       // is open, so the stream must close its turn boundary — clients wait
       // on `session.waiting` and would otherwise hang on the parked turn.
-      if (config.mode === "conversation") {
-        emissionState = await emitTurnEpilogue(emit, emissionState, config.mode);
-      }
+      emissionState = await emitTurnEpilogue(emit, emissionState, authorizationHistory);
     }
 
     return {
@@ -2951,50 +2806,46 @@ async function handleStepResult(input: {
   // dangling tool_use the next provider call rejects, and drop the result.
   const calledFinalOutput =
     nextSession.outputSchema !== undefined && extractFinalOutput(result) !== undefined;
+  const workingTasks = workingTaskIds(nextSession);
+  const finalOutputRejected = calledFinalOutput && workingTasks.length > 0;
+  let responseTail: readonly ModelMessage[] = continuationMessages;
+  if (finalOutputRejected) {
+    responseTail = rejectFinalOutput(continuationMessages, result, workingTasks);
+    nextSession = {
+      ...nextSession,
+      history: validateHarnessModelMessages([...promptMessages, ...responseTail]),
+    };
+  }
 
   const continueLoop =
-    !calledFinalOutput &&
-    (continuationMessages.at(-1)?.role === "tool" ||
+    (!calledFinalOutput || finalOutputRejected) &&
+    (responseTail.at(-1)?.role === "tool" ||
       normalizedProviderHistory.outcomeEndsResponse ||
       hasRunnableDeferredStepInput(nextSession));
-  if (continueLoop) {
+  const holdsTurn = !continueLoop && workingTasks.length > 0;
+  if (continueLoop || holdsTurn) {
     if (emit) {
       emissionState = advanceStep(emissionState);
       nextSession = setHarnessEmissionState(nextSession, emissionState);
     }
-
+    // The turn rule: no turn ends while its tasks work. The session waits for
+    // one to settle, then calls the model again in the same turn. The turn
+    // stays open, so it parks with `turn.waiting` rather than completing.
+    if (holdsTurn) {
+      if (emit) {
+        await emit(
+          createTurnWaitingEvent({
+            sequence: emissionState.sequence,
+            turnId: emissionState.turnId,
+          }),
+        );
+      }
+      return { held: { taskIds: workingTasks }, next: null, session: nextSession };
+    }
     return { next: runStep, session: nextSession };
   }
 
-  if (
-    config.mode === "task" &&
-    (getBackgroundTasks(nextSession.state).query({ state: "working" }).length > 0 ||
-      contextStorage.getStore()?.get(BackgroundToolExecutorKey)?.hasPendingTasks?.() === true)
-  ) {
-    return deferTaskTurn({
-      emissionState,
-      emit,
-      history: promptMessages,
-      result,
-      schema: nextSession.outputSchema,
-      session: nextSession,
-      stepOutput,
-    });
-  }
-
-  if (config.mode === "task") {
-    return finishTaskTurn({
-      emissionState,
-      emit,
-      history: promptMessages,
-      result,
-      schema: nextSession.outputSchema,
-      session: nextSession,
-      stepOutput,
-    });
-  }
-
-  return finishConversationTurn({
+  return finishTurn({
     emissionState,
     emit,
     history: promptMessages,
@@ -3005,42 +2856,27 @@ async function handleStepResult(input: {
   });
 }
 
-/** Keeps a task session open until its background work settles. */
-async function deferTaskTurn(input: {
-  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
-  readonly history: readonly HarnessModelMessage[];
-  readonly result: HarnessStepResult;
-  readonly schema: JsonObject | undefined;
-  readonly session: HarnessSession;
-  readonly stepOutput: string | null;
-}): Promise<StepResult> {
-  const { emit, history, result, schema, stepOutput } = input;
-  let { emissionState, session } = input;
-  session = clearTurnClientContextState(session);
-  const structured = schema === undefined ? undefined : extractFinalOutput(result);
-  if (structured !== undefined) {
-    session = {
-      ...persistStructuredAssistantTurn(session, history, structured),
-      outputSchema: schema,
-    };
-  }
-  if (emit) {
-    emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
-    session = setHarnessEmissionState(session, emissionState);
-  }
-  return {
-    next: null,
-    session,
-    settledTurn: { output: structured ?? stepOutput ?? "" },
-  };
+function isDeferredHarnessTool(tool: HarnessToolDefinition | undefined): boolean {
+  return tool?.workflowId !== undefined || isTaskTool(tool);
 }
 
-function isDeferredHarnessTool(tool: HarnessToolDefinition | undefined): boolean {
-  return (
-    tool?.runtimeAction !== undefined ||
-    (tool?.workflowId !== undefined && tool.execution !== "background")
+/** Answers a `final_output` call made while tasks work with an error naming them. */
+function rejectFinalOutput(
+  responseMessages: readonly ModelMessage[],
+  result: HarnessStepResult,
+  workingTasks: readonly string[],
+): ModelMessage[] {
+  const call = (result.toolCalls ?? []).find(
+    (toolCall) => toolCall.toolName === FINAL_OUTPUT_TOOL_NAME,
   );
+  if (call === undefined) return [...responseMessages];
+  const rejection: ToolResultPart = {
+    output: { type: "error-text", value: renderFinalOutputWhileWorkingError(workingTasks) },
+    toolCallId: call.toolCallId,
+    toolName: FINAL_OUTPUT_TOOL_NAME,
+    type: "tool-result",
+  };
+  return [...responseMessages, { content: [rejection], role: "tool" }];
 }
 
 const OUTPUT_SCHEMA_NOT_FULFILLED = {
@@ -3075,12 +2911,12 @@ function persistStructuredAssistantTurn(
   };
 }
 
-/** Emits `result.completed` followed by the turn epilogue for `mode`. */
+/** Emits `result.completed` followed by the turn epilogue. */
 async function emitStructuredResult(
   emit: NonNullable<ToolLoopHarnessConfig["handleEvent"]>,
   emissionState: ReturnType<typeof getHarnessEmissionState>,
   structured: JsonValue,
-  mode: RunMode,
+  history: readonly HarnessModelMessage[],
 ): Promise<ReturnType<typeof getHarnessEmissionState>> {
   await emit(
     createResultCompletedEvent({
@@ -3090,15 +2926,15 @@ async function emitStructuredResult(
       turnId: emissionState.turnId,
     }),
   );
-  return emitTurnEpilogue(emit, emissionState, mode);
+  return emitTurnEpilogue(emit, emissionState, history);
 }
 
 /**
- * Closes a terminal task turn. Task runs cannot park, so an unmet output
- * schema fails as an error a delegating parent can surface; otherwise the
- * structured value — or the plain assistant text — is the run's output.
+ * Closes a terminal turn. An unmet output schema fails the turn recoverably;
+ * otherwise the structured value (or prose) ends the turn and the session
+ * waits for the next message.
  */
-async function finishTaskTurn(input: {
+async function finishTurn(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly history: readonly HarnessModelMessage[];
@@ -3113,57 +2949,7 @@ async function finishTaskTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "task");
-      session = setHarnessEmissionState(session, emissionState);
-    }
-    return { next: { done: true, output: stepOutput ?? "" }, session };
-  }
-
-  const structured = extractFinalOutput(result);
-  if (structured === undefined) {
-    // The schema belongs to the settled invocation.
-    session = { ...session, outputSchema: undefined };
-    if (emit) {
-      await emitFailedStep(emit, emissionState, {
-        ...OUTPUT_SCHEMA_NOT_FULFILLED,
-        sessionId: session.sessionId,
-      });
-    }
-    return {
-      next: { done: true, isError: true, output: OUTPUT_SCHEMA_NOT_FULFILLED.message },
-      session,
-    };
-  }
-
-  session = persistStructuredAssistantTurn(session, history, structured);
-  if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, "task");
-    session = setHarnessEmissionState(session, emissionState);
-  }
-  return { next: { done: true, output: structured }, session };
-}
-
-/**
- * Closes a terminal conversation turn. Conversation runs may park, so an unmet
- * output schema parks recoverably; otherwise the structured value (or prose)
- * ends the turn and the session waits for the next message.
- */
-async function finishConversationTurn(input: {
-  readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
-  readonly history: readonly HarnessModelMessage[];
-  readonly result: HarnessStepResult;
-  readonly schema: JsonObject | undefined;
-  readonly session: HarnessSession;
-  readonly stepOutput: string | null;
-}): Promise<StepResult> {
-  const { emit, history, result, schema, stepOutput } = input;
-  let { emissionState, session } = input;
-  session = clearTurnClientContextState(session);
-
-  if (schema === undefined) {
-    if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, "conversation");
+      emissionState = await emitTurnEpilogue(emit, emissionState, session.history);
       session = setHarnessEmissionState(session, emissionState);
     }
     const settledTurn = { output: stepOutput ?? "" } satisfies SettledTurn;
@@ -3191,7 +2977,7 @@ async function finishConversationTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, "conversation");
+    emissionState = await emitStructuredResult(emit, emissionState, structured, session.history);
     session = setHarnessEmissionState(session, emissionState);
   }
   const settledTurn = { output: structured } satisfies SettledTurn;
@@ -3298,11 +3084,13 @@ async function maybeCompact(input: {
   });
   const compactionModelReference =
     session.agent.compactionModelReference ?? requireSessionModelReference(session);
-  const providerOptions = mergeProviderSafetyIdentifier(
-    compactionModelReference,
-    compaction.providerOptions,
-    input.auth,
-  ) as Parameters<typeof compactMessages>[3];
+  const providerOptions = resolveCallProviderOptions({
+    auth: input.auth,
+    conversationId: resolveConversationId(session.rootSessionId ?? session.sessionId),
+    model: compaction.model,
+    modelReference: compactionModelReference,
+    providerOptions: compaction.providerOptions,
+  }) as Parameters<typeof compactMessages>[3];
 
   if (emit) {
     const ctx = contextStorage.getStore();
@@ -3388,7 +3176,7 @@ async function maybeCompact(input: {
     if (ctx !== undefined) {
       const commit = drainMemoryCommit(ctx);
       if (commit !== undefined) {
-        messages = validateHarnessModelMessages(commit.history);
+        messages = validateHarnessModelMessages([...messages, ...commit.recalledMessages]);
         session = { ...session, state: commit.state };
       }
     }
@@ -3398,21 +3186,32 @@ async function maybeCompact(input: {
 }
 
 /**
+ * The approvals whose tool defines a response policy. Every park path records
+ * them, so no Approve or Cancel of such an approval skips the policy.
+ */
+function responsePolicyRequestIds(
+  config: ToolLoopHarnessConfig,
+  requests: readonly InputRequest[],
+): readonly string[] {
+  const tools = buildResponseAuthorizationTools({
+    authoredTools: config.tools,
+    context: contextStorage.getStore(),
+  });
+  return requests
+    .filter((request) => {
+      const approval = tools.get(request.action.toolName)?.approval;
+      return (
+        approval !== undefined && typeof approval !== "function" && approval.response !== undefined
+      );
+    })
+    .map((request) => request.requestId);
+}
+
+/**
  * Creates an approval-key resolver from the tool map. The resolver computes
  * compound keys at recording time instead of pre-computing and persisting
  * them on the pending batch.
  */
-function captureToolReplayIdentities(
-  config: ToolLoopHarnessConfig,
-  requests: readonly InputRequest[],
-): Readonly<Record<string, string>> | undefined {
-  const identities = requests.flatMap((request) => {
-    const identity = config.toolReplayIdentity?.(request.action.toolName);
-    return identity === undefined ? [] : [[request.requestId, identity]];
-  });
-  return identities.length === 0 ? undefined : Object.fromEntries(identities);
-}
-
 function resolveApprovalKeyFromTools(
   tools: HarnessToolMap,
 ): (request: InputRequest) => string | undefined {

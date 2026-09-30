@@ -1,4 +1,3 @@
-import type { Dirent } from "node:fs";
 import { join } from "node:path";
 
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -78,7 +77,7 @@ export const DISCOVER_TOOL_NAME_INVALID = "discover/tool-name-invalid";
  * Shared diagnostic emitted when an authored `connections/*.{ts,…}` filename
  * does not satisfy the connection slug charset rule.
  */
-export const DISCOVER_CONNECTION_NAME_INVALID = "discover/connection-name-invalid";
+const DISCOVER_CONNECTION_NAME_INVALID = "discover/connection-name-invalid";
 
 /**
  * Shared diagnostic emitted when the authored `sandbox/` root is not a
@@ -91,13 +90,13 @@ export const DISCOVER_SANDBOX_DIRECTORY_INVALID = "discover/sandbox-directory-in
  * Shared diagnostic emitted when the authored `instructions/` root is not a
  * directory.
  */
-export const DISCOVER_INSTRUCTIONS_DIRECTORY_INVALID = "discover/instructions-directory-invalid";
+const DISCOVER_INSTRUCTIONS_DIRECTORY_INVALID = "discover/instructions-directory-invalid";
 
 /**
  * Shared diagnostic emitted when an authored `channels/**` filename or
  * directory segment does not satisfy the channel slug charset rule.
  */
-export const DISCOVER_CHANNEL_NAME_INVALID = "discover/channel-name-invalid";
+const DISCOVER_CHANNEL_NAME_INVALID = "discover/channel-name-invalid";
 
 /**
  * Shared diagnostic emitted when an authored `hooks/**` filename or
@@ -132,7 +131,7 @@ export const CONNECTION_SLUG_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 /**
  * Channel filename / directory segment charset.
  */
-export const CHANNEL_SLUG_PATTERN = /^(\.?[a-z][a-z0-9-]{0,63}|\[[a-zA-Z][a-zA-Z0-9_]{0,63}\])$/;
+const CHANNEL_SLUG_PATTERN = /^(\.?[a-z][a-z0-9-]{0,63}|\[[a-zA-Z][a-zA-Z0-9_]{0,63}\])$/;
 
 /**
  * Hook filename / directory segment charset. Each segment of the
@@ -141,7 +140,7 @@ export const CHANNEL_SLUG_PATTERN = /^(\.?[a-z][a-z0-9-]{0,63}|\[[a-zA-Z][a-zA-Z
  * letter, up to 64 characters per segment. Bracketed parameter forms
  * are not allowed — hooks have no URL semantics.
  */
-export const HOOK_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+const HOOK_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
 /**
  * Extension mount filename charset. The basename becomes the namespace the
@@ -150,23 +149,12 @@ export const HOOK_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
  * digits, underscores, and dashes, starting with a letter, up to 64
  * characters.
  */
-export const EXTENSION_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
+const EXTENSION_SLUG_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
 
 /**
  * Shared diagnostic emitted when discovery ignores one unsupported directory.
  */
 export const DISCOVER_UNSUPPORTED_DIRECTORY = "discover/unsupported-directory";
-
-/**
- * Structural `Dirent`-like entry used throughout discovery.
- *
- * Legacy alias preserved for backwards compatibility inside `src/discover/`.
- * Every discover function now consumes {@link ProjectSourceEntry}, which
- * has the same three properties (`name`, `isDirectory()`, `isFile()`). Real
- * `Dirent<string>` values from `node:fs` satisfy this shape, so
- * {@link createDiskProjectSource} returns them directly.
- */
-export type StringDirent = Dirent<string>;
 
 /**
  * Reads sorted agent source entries, excluding colocated tests unless reading resources.

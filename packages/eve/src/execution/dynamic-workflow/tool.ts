@@ -8,7 +8,7 @@ export interface WorkflowProgramToolInput {
 }
 
 /** Static workflow executor used by the provided `workflow` tool. */
-export async function executeWorkflowProgram(
+export async function runWorkflowProgramTask(
   input: WorkflowProgramToolInput,
   ctx: WorkflowToolContext,
 ): Promise<JsonValue> {

@@ -14,7 +14,6 @@ import type {
   InstrumentationActionTerminalEvent,
   InstrumentationAttemptScope,
   InstrumentationProviderDefinition,
-  InstrumentationSessionTransitionEvent,
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
@@ -22,27 +21,20 @@ import { contentAttribute, textContentAttribute } from "#tracing/agent-otel-cont
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import type {
-  AgentActionTraceState,
-  AgentActionTraceTerminalState,
-  AgentInvocationTraceState,
-  AgentTraceStateStore,
-} from "#tracing/agent-trace-state.js";
+import type { AgentActionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
-import { AGENT_SPAN_NAMES, workflowInvocationSpanName } from "#tracing/agent-span-contract.js";
+import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 
-export interface AgentActionInstrumentation {
+interface AgentActionInstrumentation {
   readonly events: Pick<
     NonNullable<InstrumentationProviderDefinition["events"]>,
     "action.completed" | "action.failed" | "action.started"
   >;
   deleteForSession(sessionId: string): void | PromiseLike<void>;
   failForAttempt(scope: InstrumentationAttemptScope, error: unknown): Promise<void>;
-  flushSettledInvocations(): Promise<void>;
-  flushForSessionTransition(event: InstrumentationSessionTransitionEvent): Promise<void>;
   contextFor(
     sessionId: string,
     turnId: string,
@@ -79,7 +71,6 @@ export function createAgentActionInstrumentation(input: {
       callId: event.callId,
       channelAudience: normalizeChannelAudience(event.scope.channelAudience),
       inputAttribute: input.recordInputs ? contentAttribute(event.input) : undefined,
-      isWorkflowTool: event.isWorkflowTool === true,
       kind: event.kind,
       name: event.name,
       parent: {
@@ -116,11 +107,6 @@ export function createAgentActionInstrumentation(input: {
 
   const startSpan = (state: AgentActionTraceState): Span => {
     const invocation = isAgentInvocation(state.kind);
-    const workflowName = state.kind === "tool-call" ? state.workflowName : undefined;
-    const spanName =
-      workflowName === undefined
-        ? AGENT_SPAN_NAMES.action
-        : workflowInvocationSpanName(workflowName);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
         AGENT_SPAN_NAMES.action,
@@ -134,20 +120,11 @@ export function createAgentActionInstrumentation(input: {
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
-            ...agentSpanNamingAttributes(
-              spanName,
-              workflowName === undefined ? undefined : "invoke_workflow",
-            ),
+            ...agentSpanNamingAttributes(AGENT_SPAN_NAMES.action),
             ...agentTraceIdentityAttributes({
               rootSessionId: state.rootSessionId,
               sessionId: state.sessionId,
             }),
-            ...(workflowName === undefined
-              ? undefined
-              : {
-                  "gen_ai.operation.name": "invoke_workflow",
-                  "gen_ai.workflow.name": workflowName,
-                }),
             ...(invocation
               ? {
                   "gen_ai.agent.name": state.name,
@@ -161,7 +138,6 @@ export function createAgentActionInstrumentation(input: {
         contextFromActionState(state),
       ),
     );
-    if (workflowName !== undefined) updateSpanName(span, spanName);
     if (!invocation && state.inputAttribute !== undefined) {
       span.setAttribute("gen_ai.tool.call.arguments", state.inputAttribute);
     }
@@ -179,7 +155,6 @@ export function createAgentActionInstrumentation(input: {
     async deleteForSession(sessionId) {
       await input.stateStore.deleteActions(sessionId);
       await input.stateStore.deleteActionAnchors(sessionId);
-      await input.stateStore.deleteInvocations(sessionId);
     },
     async failForAttempt(scope, error) {
       const keys = byAttempt.get(scope.attemptId);
@@ -194,36 +169,12 @@ export function createAgentActionInstrumentation(input: {
         await input.stateStore.deleteAction(key);
       }
     },
-    flushSettledInvocations: () => flushInvocations(),
-    async flushForSessionTransition(event) {
-      const terminal =
-        event.type === "session.completed"
-          ? { outcome: "abandoned" as const }
-          : event.type === "session.failed"
-            ? { error: event.error, outcome: "failed" as const }
-            : undefined;
-      await flushInvocations(event.sessionId, terminal);
-    },
     events: {
       "action.completed": onTerminal,
       "action.failed": onTerminal,
       "action.started": onStarted,
     },
   };
-
-  async function flushInvocations(
-    sessionId?: string,
-    fallback?: AgentActionTraceTerminalState,
-  ): Promise<void> {
-    for (const invocation of await input.stateStore.findInvocations(sessionId)) {
-      const terminal = invocation.terminal ?? fallback;
-      if (terminal === undefined) continue;
-      finishInvocationSpan(invocation, terminal);
-      await input.stateStore.deleteInvocation(
-        actionIdempotencyKey(invocation.sessionId, invocation.turnId, invocation.callId),
-      );
-    }
-  }
 
   function forget(idempotencyKey: string): void {
     for (const [attemptId, keys] of byAttempt) {
@@ -238,6 +189,9 @@ export function createAgentActionInstrumentation(input: {
   ): void {
     const span = startSpan(state);
     span.setAttribute("agent.action.outcome", event.outcome);
+    if (event.usage !== undefined) {
+      setAgentUsage(span, event.usage);
+    }
     if (event.type === "action.failed") {
       if (event.errorCode !== undefined) {
         span.setAttribute("agent.action.error.code", event.errorCode);
@@ -246,33 +200,12 @@ export function createAgentActionInstrumentation(input: {
     } else if (event.output.type === "error") {
       recordActionError(span, event.output.error);
     } else {
-      if (event.usage !== undefined) {
-        setAgentUsage(span, event.usage);
-      }
       if (input.recordOutputs && !isAgentInvocation(state.kind)) {
         const result = contentAttribute(event.output.output);
         if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
       }
     }
     span.end(event.acceptedAtMs);
-  }
-
-  function finishInvocationSpan(
-    state: AgentInvocationTraceState,
-    terminal: AgentActionTraceTerminalState,
-  ): void {
-    const span = startSpan(state);
-    span.setAttribute("agent.action.outcome", terminal.outcome);
-    if (terminal.usage !== undefined) {
-      setAgentUsage(span, terminal.usage);
-    }
-    if (terminal.outcome === "failed") {
-      recordError(
-        span,
-        input.recordOutputs && state.recordOutputs === true ? terminal.error : undefined,
-      );
-    }
-    span.end(terminal.acceptedAtMs);
   }
 }
 
@@ -301,11 +234,6 @@ function contextFromActionState(state: AgentActionTraceState): Context {
 
 function isAgentInvocation(kind: InstrumentationActionKind): boolean {
   return kind === "subagent-call" || kind === "remote-agent-call";
-}
-
-function updateSpanName(span: Span, name: string): void {
-  const updateName = Reflect.get(span, "updateName");
-  if (typeof updateName === "function") Reflect.apply(updateName, span, [name]);
 }
 
 function recordActionError(span: Span, error: unknown, errorType?: string): void {

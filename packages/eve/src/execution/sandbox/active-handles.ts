@@ -5,7 +5,7 @@ import { toErrorMessage } from "#shared/errors.js";
  * Structural so handles of any session-options generic register without
  * variance friction.
  */
-export interface ShutdownCapableSandboxHandle {
+interface ShutdownCapableSandboxHandle {
   onRuntimeShutdown(): Promise<void>;
 }
 
@@ -60,13 +60,4 @@ export async function shutdownActiveSandboxHandles(input?: {
       );
     }
   }
-}
-
-/** Returns the number of tracked handles. Exposed for tests and logging. */
-export function countActiveSandboxHandles(): number {
-  return activeSandboxHandles.size;
-}
-
-export function clearActiveSandboxHandlesForTest(): void {
-  activeSandboxHandles.clear();
 }

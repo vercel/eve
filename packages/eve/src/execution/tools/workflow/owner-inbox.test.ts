@@ -7,7 +7,6 @@ import {
 
 const from = {
   callId: "call-1",
-  execution: "background" as const,
   input: { message: "Find it" },
   runId: "run-1",
   sequence: 0,
@@ -47,6 +46,23 @@ describe("workflow-tool task input", () => {
     });
   });
 
+  it("keeps the producer identity when forwarding a child request", () => {
+    const request = {
+      action: { callId: "child-call", input: {}, kind: "tool-call" as const, toolName: "ask" },
+      kind: "question" as const,
+      prompt: "What is Alice's answer?",
+      requestId: "alice-ask",
+    };
+    expect(
+      workflowToolRunRequestToInputRequestPayload({
+        from,
+        inputSource: "child:alice",
+        replyTo: "child-inbox",
+        request,
+      }),
+    ).toMatchObject({ inputSource: "child:alice", event: { requests: [request] } });
+  });
+
   it("uses child event coordinates for repeated forwarded requests", () => {
     const request = {
       action: {
@@ -76,20 +92,6 @@ describe("workflow-tool task input", () => {
         turnId: "turn-child",
       },
     });
-  });
-
-  it("does not normalize workflow agent requests as human input", () => {
-    expect(() =>
-      workflowToolRunRequestToInputRequestPayload({
-        from,
-        replyTo: "subagent:parent:call-1",
-        request: {
-          input: { message: "Find it", target: "research" },
-          invocationId: "call-1",
-          kind: "agent-invoke",
-        },
-      }),
-    ).toThrow("A workflow agent request cannot be normalized as human input.");
   });
 });
 

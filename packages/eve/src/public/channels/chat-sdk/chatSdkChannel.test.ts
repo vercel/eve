@@ -169,7 +169,6 @@ describe("chatSdkChannel", () => {
         caller: { type: "anonymous" },
         channel: { kind: "channel:chat-sdk" },
         environment: "production",
-        mode: "conversation",
         state: adapter.state,
       }),
     ).toBe(audience);
@@ -196,6 +195,8 @@ describe("chatSdkChannel", () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       state: memoryState(),
+      // Tests that initialize Chat SDK keep its warnings but not its info-level startup lines.
+      logger: "warn",
       userName: "bot",
     });
     const compiled = asCompiled<ChatSdkChannelState>(bridge.channel);
@@ -228,6 +229,7 @@ describe("chatSdkChannel", () => {
       adapters: { test: adapter },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
 
@@ -236,7 +238,6 @@ describe("chatSdkChannel", () => {
         auth: AUTH,
         thread,
         title: "mention",
-        taskDeliveryPolicy: "cohort",
       });
     });
 
@@ -260,7 +261,6 @@ describe("chatSdkChannel", () => {
         },
       },
       title: "mention",
-      taskDeliveryPolicy: "cohort",
     });
   });
 
@@ -269,6 +269,7 @@ describe("chatSdkChannel", () => {
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
 
@@ -304,6 +305,7 @@ describe("chatSdkChannel", () => {
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
 
@@ -717,6 +719,7 @@ describe("chatSdkChannel", () => {
       adapters: { test: adapter },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
     const channelAdapter = withState(getAdapter(bridge.channel), {

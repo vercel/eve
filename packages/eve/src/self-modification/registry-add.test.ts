@@ -37,6 +37,11 @@ const INDEX = {
       files: [{ target: "agent/extensions/browserbase.ts" }],
     },
     {
+      name: "eve/self-modification",
+      title: "Self-modification",
+      files: [{ target: "agent/extensions/self-modification/extension.ts" }],
+    },
+    {
       name: "channel/slack",
       title: "Slack",
       meta: {
@@ -257,6 +262,12 @@ describe("addLocalRegistryItem", () => {
     await expect(
       addLocalRegistryItem("channel/nonexistent", { getCapability: () => capability() }),
     ).rejects.toThrow(/No item in the configured eve registry is published/u);
+  });
+
+  it("directs self-modification mount changes to the authored mount", async () => {
+    await expect(
+      addLocalRegistryItem("eve/self-modification", { getCapability: () => capability() }),
+    ).rejects.toThrow(/cannot replace the self-modification subagent's own mount/u);
   });
 
   it("installs a no-setup item with a fixed argv and reports unset envVars", async () => {

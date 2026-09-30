@@ -6,7 +6,7 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 const NUXT_VERSION = "^4.0.0";
 const VUE_VERSION = "^3.5.0";
 
-export interface NuxtEveServiceDescriptorOptions {
+interface NuxtEveServiceDescriptorOptions {
   readonly installDependencies?: boolean;
 }
 

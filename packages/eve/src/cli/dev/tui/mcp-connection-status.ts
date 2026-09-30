@@ -46,7 +46,7 @@ export interface McpConnectionStatusTracker {
   dispose(): void;
 }
 
-export interface McpConnectionStatusTrackerOptions {
+interface McpConnectionStatusTrackerOptions {
   onChange: (disabledConnectionReasons: Readonly<Record<string, string>>) => void;
   probe?: McpConnectionProbe;
   intervalMs?: number;

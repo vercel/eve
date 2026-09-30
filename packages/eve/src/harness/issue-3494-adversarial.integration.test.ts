@@ -10,8 +10,6 @@ import { setPendingAuthorization } from "#harness/authorization.js";
 import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
-import { getBackgroundTasks, registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
@@ -24,6 +22,11 @@ import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
 import { createTurnStartedEvent } from "#protocol/message.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 // Diagnostic probes assert desired outcomes. Pending state is created by the
 // real harness and SDK; only provider output and runtime result delivery are scripted.
@@ -40,7 +43,6 @@ function fixture(
   responseAuthorized: boolean | ApprovalResponsePolicy = false,
   outputLimit?: number,
   outputSchema?: HarnessSession["outputSchema"],
-  executorHasPendingTasks = false,
 ) {
   const script: Reply[] = [];
   const events: UnstampedMessageStreamEvent[] = [];
@@ -143,22 +145,6 @@ function fixture(
     inputSchema: jsonSchema({ type: "object" }),
     workflowId: "diagnostic-workflow",
   });
-  tools.set("control", {
-    name: "control",
-    description: "Deferred runtime control",
-    inputSchema: jsonSchema({ type: "object" }),
-    runtimeAction: { kind: "task-control" },
-  });
-  tools.set("background", {
-    name: "background",
-    description: "Background workflow",
-    inputSchema: jsonSchema({ type: "object" }),
-    workflowId: "diagnostic-background",
-    execution: "background",
-    execute: async () => {
-      throw new Error("Must dispatch through executor");
-    },
-  });
   const restoredTurns: string[] = [];
   const harness = createToolLoopHarness({
     prepareApprovalTurn: async (event) => {
@@ -184,7 +170,6 @@ function fixture(
         ],
       }).dispatch(createTurnStartedEvent(event));
     },
-    mode: "conversation",
     capabilities: { requestInput: true },
     tools,
     resolveModel: async () => model,
@@ -201,14 +186,6 @@ function fixture(
       sessionId: session.sessionId,
       auth: { current: null, initiator: null },
       turn: { id: emission.turnId || `turn_${emission.sequence}`, sequence: emission.sequence },
-    });
-    ctx.set(BackgroundToolExecutorKey, {
-      hasPendingTasks: () => executorHasPendingTasks,
-      async execute({ batch, options }) {
-        expect(batch.calls.some((call) => call.callId === options.toolCallId)).toBe(true);
-        executions.push("background-admitted");
-        return { status: "working", taskId: "diagnostic-background-task" };
-      },
     });
     const result = await contextStorage.run(ctx, () => harness(session, input));
     session = result.session;
@@ -271,7 +248,7 @@ function fixture(
       const batch = getPendingCoordinationBatch(session.state);
       if (!batch) throw new Error("Expected actual pending coordination batch");
       return drive({
-        runtimeActionResults: [...batch.tasks, ...batch.runtimeActions].map((r) => ({
+        runtimeActionResults: batch.tasks.map((r) => ({
           kind: "tool-result" as const,
           callId: r.callId,
           toolName: r.toolName,
@@ -291,6 +268,7 @@ for (const variant of [
   "response-authorized",
 ] as const) {
   it(`finishes unrelated ${variant} tool turn while an approval stays open`, async () => {
+    const logs = captureLogRecords();
     const f = fixture(variant, variant === "response-authorized");
     await f.gate("gateA");
     f.script.push(
@@ -314,6 +292,9 @@ for (const variant of [
     }[variant];
     expect([...f.executions].sort()).toEqual(expectedExecutions.sort());
     expect(result.settledTurn?.output).toBe("FINAL");
+    expect(
+      logs.records.filter((record) => record.message === "tool execution failed"),
+    ).toHaveLength(variant === "fail" ? 1 : 0);
   });
 }
 
@@ -332,18 +313,16 @@ for (const variant of ["approve", "cancel"] as const) {
   });
 }
 
-for (const tool of ["workflow", "control"]) {
-  it(`interprets a completed ${tool} result while an earlier approval remains`, async () => {
-    const f = fixture(tool);
-    await f.gate("gateA");
-    f.script.push(calls(tool), "FINAL");
-    await f.drive({ message: `Run unrelated ${tool}.` });
-    const result = await f.finishRuntime();
-    expect(JSON.stringify(result.session.history)).toContain("runtime-RESULT");
-    expect(f.pending()).toHaveLength(1);
-    expect(result.settledTurn?.output).toBe("FINAL");
-  });
-}
+it("interprets a completed workflow result while an earlier approval remains", async () => {
+  const f = fixture("workflow");
+  await f.gate("gateA");
+  f.script.push(calls("workflow"), "FINAL");
+  await f.drive({ message: "Run unrelated workflow." });
+  const result = await f.finishRuntime();
+  expect(JSON.stringify(result.session.history)).toContain("runtime-RESULT");
+  expect(f.pending()).toHaveLength(1);
+  expect(result.settledTurn?.output).toBe("FINAL");
+});
 
 it("completes a plain tool turn without any pending input [control]", async () => {
   const f = fixture("control-no-pending");
@@ -426,6 +405,7 @@ it("reaches the next budget prompt after a grant while an earlier approval remai
 
 for (const variant of ["fail", "invalid"]) {
   it(`recovers from ${variant} without pending input [control]`, async () => {
+    const logs = captureLogRecords();
     const f = fixture(`control-${variant}`);
     f.script.push(
       variant === "invalid" ? [{ toolName: "read", input: { n: "invalid" } }] : calls("fail"),
@@ -433,6 +413,9 @@ for (const variant of ["fail", "invalid"]) {
     );
     expect((await f.drive({ message: "Try the tool." })).settledTurn?.output).toBe("FINAL");
     if (variant === "invalid") expect(f.executions).toHaveLength(0);
+    expect(
+      logs.records.filter((record) => record.message === "tool execution failed"),
+    ).toHaveLength(variant === "fail" ? 1 : 0);
   });
 }
 
@@ -492,14 +475,6 @@ it("reaches the next budget prompt after a grant without an older approval [cont
 });
 
 for (const pending of [true, false]) {
-  it(`continues after a background admission receipt ${pending ? "with pending approval" : "[control]"}`, async () => {
-    const f = fixture(`background-${pending}`);
-    if (pending) await f.gate("gateA");
-    f.script.push(calls("background"), "FINAL");
-    const result = await f.drive({ message: "Start background work and acknowledge admission." });
-    expect(f.executions).toEqual(["background-admitted"]);
-    expect(result.settledTurn?.output).toBe("FINAL");
-  });
   it(`continues after a provider-executed result ${pending ? "with pending approval" : "[control]"}`, async () => {
     const f = fixture(`provider-${pending}`);
     if (pending) await f.gate("gateA");
@@ -635,64 +610,6 @@ it.each(["rejected", "failed", "timed-out"] as const)(
     expect(
       f.events.slice(retryStart).filter((event) => event.type === "session.waiting"),
     ).toHaveLength(1);
-  },
-);
-
-it.each(["persisted", "executor"] as const)(
-  "finishes a refusal while unrelated background work is %s, like an ordinary conversation turn",
-  async (source) => {
-    const f = fixture(
-      `refusal-with-background-${source}`,
-      () => ({ status: "rejected", reason: "Bob must approve Alice's note." }),
-      undefined,
-      undefined,
-      source === "executor",
-    );
-    await f.gate("gateA");
-    if (source === "persisted") {
-      f.updateSession((session) =>
-        registerWorkflowToolRun(session, {
-          callId: "report-call",
-          toolName: "report",
-          lifetime: "session",
-          origin: { turnId: "report-turn", stepIndex: 0 },
-          address: { runId: "report-run", hookToken: "report-hook" },
-          task: {
-            taskId: "report-task",
-            metadata: { kind: "workflow", name: "report" },
-            dispatchContext: { auth: { current: null, initiator: null } },
-          },
-        }),
-      );
-    }
-    const ordinaryStart = f.events.length;
-    f.script.push("The report is still running.");
-    await f.drive({ message: "What is the report's status?" });
-    expect(f.events.slice(ordinaryStart).at(-1)?.type).toBe("session.waiting");
-
-    const responseStart = f.events.length;
-    await f.drive({
-      attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
-        response,
-        auth: {
-          attributes: {},
-          authenticator: "test",
-          issuer: "test",
-          principalId: "alice",
-          principalType: "user" as const,
-        },
-      })),
-    });
-    expect(f.events.slice(responseStart).map((event) => event.type)).toEqual([
-      "approval.candidate",
-      "approval.candidate",
-      "session.waiting",
-    ]);
-    expect(f.pending()).toHaveLength(1);
-    expect(f.executions).toEqual([]);
-    if (source === "persisted") {
-      expect(getBackgroundTasks(f.session.state).query({ state: "working" })).toHaveLength(1);
-    }
   },
 );
 

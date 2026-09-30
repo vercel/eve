@@ -63,7 +63,7 @@ const SWAGGER_PARAMETER_SCHEMA_KEYS = [
  * tool result so it can react to the status and body of any response,
  * including non-2xx responses.
  */
-export interface OpenApiToolResult {
+interface OpenApiToolResult {
   readonly status: number;
   readonly statusText: string;
   readonly body: unknown;

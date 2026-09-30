@@ -1,15 +1,18 @@
 import { e2eSubagentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 
-const RECOVERY_REQUEST = "RESUME-CANCELLED-SLEEPER";
-const RECOVERY_RESULT = "CANCELLED-SUBAGENT-RECOVERED";
 const HITL_REQUEST = "GENERATED-PROGRAM-CHILD-HITL";
 
 export default defineAgent({
-  description: "Waits until its delegated turn is cancelled, then supports a recovery probe.",
+  description: "Waits until its delegated turn is cancelled.",
   ...e2eSubagentConfig({
-    mock: ({ lastUserMessage, toolResults }) => {
-      if (lastUserMessage?.includes(RECOVERY_REQUEST) === true) return RECOVERY_RESULT;
+    mock: ({ lastUserMessage, toolResults, userMessages }) => {
+      // A continued task reaches the same session, so the first message is still in it.
+      if (lastUserMessage?.includes("SLEEPER-FOLLOW-UP") === true) {
+        return `SLEEPER-REMEMBERS=${String(
+          userMessages.some((entry) => entry.includes("Please wait for cancellation.")),
+        )}`;
+      }
       if (lastUserMessage?.includes(HITL_REQUEST) === true) {
         const answer = toolResults.find((result) => result.id === "child-question");
         return answer === undefined

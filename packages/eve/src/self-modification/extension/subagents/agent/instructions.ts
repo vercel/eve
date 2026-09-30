@@ -3,6 +3,7 @@ import { defineDynamic, defineInstructions } from "eve/instructions";
 import { resolveSelfModificationConfig } from "../../../config.js";
 import { resolveSelfModificationMode } from "../../../mode.js";
 import selfModification from "../../extension.js";
+import { renderLocalSelfModificationExtension } from "../../../scaffold.js";
 
 const role = `## Role
 
@@ -64,6 +65,12 @@ Local eve dev logs are mounted read-only at /logs. Local trace segments are moun
 
 The application package.json is not mounted. Do not search outside /source for application files. You cannot run host binaries such as git, node, pnpm, or tsc. Use existing imports and registry_add for supported registry installations.`;
 
+const selfModificationSubagentGuidance = `## Changing the self-modification subagent
+
+Only when the requester explicitly names the self-modification subagent, edit whichever of /source/extensions/self-modification.ts or /source/extensions/self-modification/extension.ts exists. If neither exists, create /source/extensions/self-modification/extension.ts with write_file using this content, then make the requested model or reasoning change:
+\`\`\`ts
+${renderLocalSelfModificationExtension()}\`\`\``;
+
 const deployedGuidance = `## Deployed environment
 
 The registry_add tool may return \`completed\`, \`input-required\`, \`external-action-required\`, \`cancelled\`, or \`failed\`. Supply only non-secret structured answers when continuing an \`input-required\` setup; set \`installed: true\` so the continuation does not reinstall source. Never request, accept, or repeat secret values. External authorization and secret binding are incomplete follow-up boundaries, not evidence that an integration is active.
@@ -71,12 +78,6 @@ The registry_add tool may return \`completed\`, \`input-required\`, \`external-a
 The configured target branch is checked out as a disposable workspace under /workspace/repository. Make ordinary changes through /source, which is the writable view of the configured application's agent/ directory. Publication validates the final repository snapshot, including registry, manifest, and lockfile changes. Never modify Git refs, access GitHub directly, or use shell commands to write files. The sandbox has no reusable GitHub credential after checkout.
 
 Complete all edits and registry installations before publication, and call publish by itself. Before publication, review and summarize the complete intended scope. Call publish once with a concise title and summary. A successful result is only a draft pull request. Return its URL and changed paths, and state that merge and deployment have not occurred.`;
-
-const packagedSubagentGuidance = `## Changing this subagent
-
-When the user explicitly asks to change the self-modification subagent's model, reasoning, or policy, make edits only through its authored mount. For such requests, check /source/extensions/self-modification.ts and /source/extensions/self-modification/extension.ts; modify whichever exists. If neither file exists, this subagent is the bundled eve development default and is using the default settings: first call registry_add with the exact address eve/self-modification to scaffold the authored mount. This known scaffold does not require search_registry.
-
-After registry_add reports successful installation, try to read /source/extensions/self-modification.ts and /source/extensions/self-modification/extension.ts. If either is available, modify it. If neither is yet available, you may need to wait for the next turn, by asking the requester to confirm.`;
 
 function renderInstructions(sections: readonly string[]): string {
   return sections.filter((section) => section.length > 0).join("\n\n");
@@ -94,13 +95,13 @@ export default defineDynamic({
         markdown: renderInstructions([
           role,
           sourceWorkspace,
-          packagedSubagentGuidance,
           sourceEditing,
           toolAuthoring,
           registryWorkflow,
           documentationGuidance,
           mode === "local" ? localGuidance : deployedGuidance,
           workingGuidance,
+          selfModificationSubagentGuidance,
           mode === "local" ? localReportingGuidance : deployedReportingGuidance,
         ]),
       });

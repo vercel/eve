@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { jsonSchema } from "ai";
 import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { SessionKey } from "#context/keys.js";
+import { AuthKey, SessionKey } from "#context/keys.js";
 import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
@@ -76,18 +76,98 @@ describe("coordinateApprovalDelivery", () => {
     );
   }
 
-  async function ingest(session = parkedSession()) {
+  async function ingest(session = parkedSession(), optionId = "approve") {
     return coordinateApprovalDelivery({
       now: 100,
       session,
       stepInput: {
         attributedInputResponses: [
-          { auth: responder, response: { requestId: request.requestId, optionId: "approve" } },
+          { auth: responder, response: { requestId: request.requestId, optionId } },
         ],
       },
       tools: new Map(),
     });
   }
+
+  function parkedBy(auth: SessionAuthContext): HarnessSession {
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, auth);
+    return contextStorage.run(ctx, parkedSession);
+  }
+
+  it("passes the requester the batch parked with to the response policy", async () => {
+    const requester: SessionAuthContext = { ...responder, principalId: "bob" };
+    const ingested = await ingest(parkedBy(requester));
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
+    await authorize(ingested.session, response);
+    expect(response).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ principal: requester }),
+        response: { decision: "approve", principal: responder },
+      }),
+    );
+  });
+
+  it("authorizes Cancel, leaving a rejected Cancel pending for the requester", async () => {
+    const requester: SessionAuthContext = { ...responder, principalId: "bob" };
+    const ingested = await ingest(parkedBy(requester), "cancel");
+    expect(ingested.kind).toBe("continue-coordination");
+
+    const onlyRequester: ApprovalResponsePolicy = ({ request, response }) =>
+      response.principal.principalId === request.principal?.principalId
+        ? { status: "allowed" }
+        : { reason: "Only the requester can respond.", status: "rejected" };
+    const response = vi.fn(onlyRequester);
+    const rejected = await authorize(ingested.session, response);
+    expect(response).toHaveBeenCalledWith(
+      expect.objectContaining({ response: { decision: "cancel", principal: responder } }),
+    );
+    expect(rejected.stepInput?.inputResponses ?? []).toEqual([]);
+    expect(getApprovalAuditState(rejected.session.state).settlements).toEqual([]);
+    expect(getPendingInputBatches(rejected.session.state)).toHaveLength(1);
+
+    const requesterCancel = await coordinateApprovalDelivery({
+      now: 102,
+      session: rejected.session,
+      stepInput: {
+        attributedInputResponses: [
+          { auth: requester, response: { optionId: "cancel", requestId: request.requestId } },
+        ],
+      },
+      tools: new Map(),
+    });
+    const settled = await authorize(requesterCancel.session, onlyRequester);
+    expect(settled.stepInput?.inputResponses).toEqual([
+      { optionId: "cancel", requestId: request.requestId },
+    ]);
+  });
+
+  it("authorizes ACP's Deny as a Cancel", async () => {
+    const ingested = await ingest(parkedSession(), "deny");
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
+    const settled = await authorize(ingested.session, response);
+    expect(response).toHaveBeenCalledWith(
+      expect.objectContaining({ response: { decision: "cancel", principal: responder } }),
+    );
+    expect(settled.stepInput?.inputResponses).toEqual([
+      { optionId: "cancel", requestId: request.requestId },
+    ]);
+  });
+
+  it("records no requester for an anonymous caller", async () => {
+    const anonymous: SessionAuthContext = {
+      attributes: {},
+      authenticator: "none",
+      principalId: "anonymous",
+      principalType: "anonymous",
+    };
+    const ingested = await ingest(parkedBy(anonymous));
+    const response = vi.fn<ApprovalResponsePolicy>(() => ({ status: "allowed" }));
+    await authorize(ingested.session, response);
+    expect(response).toHaveBeenCalledWith(
+      expect.objectContaining({ request: expect.objectContaining({ principal: null }) }),
+    );
+  });
 
   it.each(["rejected", "failed", "allowed"] as const)(
     "explicitly completes %s candidates only after ingestion",

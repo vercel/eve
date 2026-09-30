@@ -37,7 +37,7 @@ export interface AddAgentToProjectOptions {
   zodPackageVersion?: string;
 }
 
-export interface AddAgentToProjectResult {
+interface AddAgentToProjectResult {
   filesWritten: string[];
   configurationFilesChanged: string[];
   /** Dependencies added to package.json; ones the project already declares anywhere are left untouched. */

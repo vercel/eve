@@ -18,7 +18,7 @@ const DEFAULTS = {
 } as const;
 
 /** @internal — exposed for tests; authors get the defaults. */
-export interface BatchSpanProcessorOptions {
+interface BatchSpanProcessorOptions {
   readonly exportTimeoutMillis?: number;
   readonly maxExportBatchSize?: number;
   readonly maxQueueSize?: number;

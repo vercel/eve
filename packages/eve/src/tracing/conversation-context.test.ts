@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ConversationIdKey } from "#context/keys.js";
+import { readConversationId, resolveConversationId } from "#shared/conversation-identity.js";
 import {
   readConversationBaggage,
-  readConversationId,
-  resolveConversationId,
   writeConversationBaggage,
 } from "#tracing/conversation-context.js";
 

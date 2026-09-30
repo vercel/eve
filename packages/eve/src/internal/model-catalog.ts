@@ -28,7 +28,7 @@ export const modelCatalogResponseSchema = z
 export type CatalogModelProvider = z.infer<typeof catalogModelProviderSchema>;
 export type CatalogModel = z.infer<typeof catalogModelSchema>;
 
-export interface ModelCatalogLimits {
+interface ModelCatalogLimits {
   readonly contextWindowTokens: number;
   readonly maxOutputTokens?: number;
 }

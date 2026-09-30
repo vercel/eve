@@ -1,5 +1,6 @@
 import type { ContextContainer } from "#context/container.js";
 import { dispatchDynamicConnectionEvent } from "#context/dynamic-connection-lifecycle.js";
+import { announceConnections } from "#execution/connection-announcement.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import {
   createSessionStartedEvent,
@@ -15,8 +16,10 @@ export function bindDynamicConnections(
   agent: Pick<ResolvedAgent, "dynamicConnectionResolvers">,
 ) {
   const resolvers = agent.dynamicConnectionResolvers ?? [];
-  const dispatch = (event: UnstampedMessageStreamEvent): Promise<void> =>
-    dispatchDynamicConnectionEvent({ ctx, event, resolvers });
+  const dispatch = async (event: UnstampedMessageStreamEvent): Promise<void> => {
+    await dispatchDynamicConnectionEvent({ ctx, event, resolvers });
+    if (event.type === "step.started") announceConnections(ctx);
+  };
 
   return {
     dispatch,

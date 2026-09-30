@@ -53,14 +53,21 @@ function createChildProcess(): ChildProcess {
 describe("startProductionServer", () => {
   const originalFetch = globalThis.fetch;
   const originalPort = process.env.PORT;
+  let stdoutWrites: string[] = [];
 
   beforeEach(() => {
     vi.clearAllMocks();
+    stdoutWrites = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
+      stdoutWrites.push(String(chunk));
+      return true;
+    });
     delete process.env.PORT;
     globalThis.fetch = vi.fn(async () => new Response('{"ok":true}', { status: 200 }));
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     globalThis.fetch = originalFetch;
     if (originalPort === undefined) {
       delete process.env.PORT;
@@ -92,6 +99,7 @@ describe("startProductionServer", () => {
     });
 
     expect(server.url).toBe("http://127.0.0.1:4321/");
+    expect(stdoutWrites).toContain("Listening on http://127.0.0.1:4321/\n");
     expect(mocks.loadDevelopmentEnvironmentFiles).toHaveBeenCalledWith("/tmp/app");
     expect(mocks.spawn).toHaveBeenCalledWith(
       process.execPath,

@@ -19,7 +19,7 @@ import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js"
 import { hasConversationRelease, type LocalTracesProcessor } from "#tracing/local-traces.js";
 import type { CollectedOtel, RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import { registerOtelPipeline, type RegisteredOtelPipeline } from "#tracing/otel-registration.js";
-import { readConversationId } from "#tracing/conversation-context.js";
+import { readConversationId } from "#shared/conversation-identity.js";
 
 const log = createLogger("tracing.install-instrumentation-runtime");
 
@@ -42,7 +42,6 @@ export function installInstrumentationRuntime(input: {
   const serialBefore: InstrumentationProviderDefinition[] = [];
   const serialAfter: InstrumentationProviderDefinition[] = [];
   let otelRuntime: RegisteredOtelPipeline | undefined;
-  let flushSettledInvocations: InstrumentationRuntime["flushSettledInvocations"];
   let prepareSessionTrace: InstrumentationRuntime["prepareSessionTrace"];
   let prepareTurnTrace: InstrumentationRuntime["prepareTurnTrace"];
   let runInContext: InstrumentationRuntime["runInContext"] = (_operation, execute) => execute();
@@ -65,9 +64,6 @@ export function installInstrumentationRuntime(input: {
     });
     // The span must exist before authored providers observe the lifecycle event.
     serialBefore.push({ ...agentOtel.hook, stateNamespace: "internal:otel" });
-    flushSettledInvocations = async () => {
-      await agentOtel.hook.flush?.();
-    };
     prepareSessionTrace = agentOtel.prepareSessionTrace;
     prepareTurnTrace = agentOtel.prepareTurnTrace;
     runInContext = agentOtel.runInContext;
@@ -81,7 +77,6 @@ export function installInstrumentationRuntime(input: {
   const allProviders = [...serialBefore, ...input.providers, ...serialAfter];
   let shutdown: Promise<void> | undefined;
   return registerInstrumentationRuntime({
-    flushSettledInvocations,
     forceFlush: async () => {
       await settleAll(allProviders.map((provider) => () => provider.flush?.()));
       await settleAll(otelRuntime === undefined ? [] : [otelRuntime.forceFlush]);

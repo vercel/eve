@@ -174,7 +174,6 @@ async function resolveRuntimeAgentNode(
     toolRegistry,
     turnAgent: createResolvedRuntimeTurnAgent({
       agent,
-      dynamicSubagentsAvailable: subagentRegistry.dynamicResolvers.length > 0,
       id: input.agentId,
       nodeId,
       tools: [...toolRegistry.preparedTools, ...subagentRegistry.preparedTools],
@@ -305,7 +304,6 @@ async function resolveRuntimeRemoteAgent(input: {
     logicalPath: string;
     name: string;
     nodeId: string;
-    outputSchema?: ResolvedRuntimeRemoteAgentNode["outputSchema"];
     path: string;
     sourceId: string;
     sourceKind: "module";
@@ -317,7 +315,6 @@ async function resolveRuntimeRemoteAgent(input: {
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
     nodeId: toRuntimeNodeId(input.sourceRef.nodeId),
-    outputSchema: input.sourceRef.outputSchema,
     path: input.sourceRef.path,
     sourceId: input.sourceRef.sourceId,
     sourceKind: "module",

@@ -18,7 +18,6 @@ import type { CommandLifecycle } from "../shutdown.js";
 
 export async function runInteractiveDevelopmentUi(input: {
   readonly applicationRoot: string;
-  readonly existingLocalServer: boolean;
   readonly lifecycle?: CommandLifecycle;
   readonly options: DevelopmentCliOptions;
   readonly remoteTarget?: DevelopmentUrlTarget;
@@ -40,7 +39,7 @@ export async function runInteractiveDevelopmentUi(input: {
   const agentRoot =
     projectContext?.kind === "workspace-member" ? projectContext.member.appRoot : undefined;
   const target =
-    input.remoteTarget === undefined || input.existingLocalServer
+    input.remoteTarget === undefined
       ? { kind: "local" as const, serverUrl: input.server.serverUrl, workspaceRoot, agentRoot }
       : { kind: "remote" as const, serverUrl: input.server.serverUrl, workspaceRoot, agentRoot };
   const display = resolveTuiDisplayOptions(input.options);

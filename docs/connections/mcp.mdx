@@ -3,13 +3,13 @@ title: "MCP Connections"
 description: "Connect an eve agent to a remote MCP server, authorize it with Vercel Connect or static credentials, and control which tools the model can discover."
 ---
 
-MCP connections point eve at a remote MCP server you do not author. The server publishes its tools and schemas, and eve exposes matching tools to the model through `connection_search`.
+MCP connections point eve at a remote MCP server you do not author. The server publishes its tools and schemas, and the model finds and calls them through `connection_search` and `connection_execute`.
 
 Use MCP when the service already has an MCP server, when the server owns tool schemas dynamically, or when one connection should expose a family of related remote tools. Use an [OpenAPI connection](./openapi) instead when the service publishes an HTTP API contract and you want eve to generate one tool per operation.
 
 ## Define an MCP connection
 
-Create one file under `agent/connections/`. The filename becomes the runtime connection name, so `agent/connections/linear.ts` registers as `linear`, and discovered tools are called as `linear__<tool>`.
+Create one file under `agent/connections/`. The filename becomes the runtime connection name, so `agent/connections/linear.ts` registers as `linear`, and events report its tools as `linear__<tool>`.
 
 ```ts title="agent/connections/linear.ts"
 import { connect } from "@vercel/connect/eve";
@@ -22,7 +22,7 @@ export default defineMcpClientConnection({
 });
 ```
 
-The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself: it is the main signal `connection_search` uses when deciding which connection to query.
+The `url` must speak Streamable HTTP or SSE. Write the `description` for the model, not for yourself: eve lists it next to the connection name, and it is the main signal the model uses to decide which connection to search.
 
 ## Configure protocol discovery
 
@@ -150,7 +150,7 @@ Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"
 
 ## Control result size
 
-eve sends an MCP tool's returned content to the model as the tool result. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
+`connection_execute` returns an MCP tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).
 
 When a remote tool returns more data than the model needs, narrow the result at the MCP server. Prefer a purpose-built search or summary tool, or return a stable handle that another call can use to fetch a smaller slice. If you do not control the server and an equivalent upstream API is available, replace only that operation with an authored tool that stores the full payload outside model context and projects the needed fields through `toModelOutput`. Block the original MCP operation through [`tools.block`](#tool-filters) so the model does not see duplicate tools.
 

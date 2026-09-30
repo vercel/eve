@@ -40,7 +40,7 @@ interface ToolSpanState {
   pendingError?: { readonly error: unknown; readonly errorType?: string };
 }
 
-export interface AgentToolInstrumentation {
+interface AgentToolInstrumentation {
   actionStarted(event: InstrumentationActionStartedEvent): Promise<void>;
   contextFor(attemptId: string, idempotencyKey: string): Context | undefined;
   drain(attemptId: string, failure?: { readonly error: unknown }): void;

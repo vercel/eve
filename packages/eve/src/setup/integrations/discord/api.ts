@@ -9,7 +9,7 @@ const DiscordApplicationSchema = z.object({
 });
 
 /** Non-secret Discord application metadata resolved from a bot token. */
-export interface DiscordApplication {
+interface DiscordApplication {
   id: string;
   name: string;
   publicKey: string;

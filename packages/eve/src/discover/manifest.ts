@@ -1,4 +1,5 @@
 import { basename, relative, resolve } from "node:path";
+import type { JsonObject } from "#shared/json.js";
 import type {
   MarkdownSourceRef,
   ModuleSourceRef,
@@ -151,6 +152,9 @@ export interface ResolvedExtensionMount {
   readonly programmaticDeclaration?: {
     readonly logicalPath: string;
     readonly sourceId: string;
+    readonly importSpecifier: string;
+    readonly entryPath: string;
+    readonly config: JsonObject;
   };
   /** Mount namespace derived from the mount filename (e.g. `crm`). */
   readonly namespace: string;
@@ -183,7 +187,7 @@ export type SubagentSourceRef = LocalSubagentSourceRef;
 /**
  * Input used to build a manifest-ready connection source ref.
  */
-export interface CreateConnectionSourceRefInput extends CreateModuleSourceRefInput {
+interface CreateConnectionSourceRefInput extends CreateModuleSourceRefInput {
   connectionName: string;
 }
 
@@ -279,7 +283,7 @@ export interface CreateAgentSourceManifestInput {
 /**
  * Input used to build a manifest-ready skill package source ref.
  */
-export interface CreateSkillPackageSourceRefInput {
+interface CreateSkillPackageSourceRefInput {
   assetsPath?: string;
   description: string;
   license?: string;
@@ -298,7 +302,7 @@ export interface CreateSkillPackageSourceRefInput {
 /**
  * Input used to build a manifest-ready module source ref.
  */
-export interface CreateModuleSourceRefInput {
+interface CreateModuleSourceRefInput {
   exportName?: string;
   logicalPath: string;
   sourceId?: string;
@@ -307,7 +311,7 @@ export interface CreateModuleSourceRefInput {
 /**
  * Input used to build a manifest-ready local subagent source ref.
  */
-export interface CreateLocalSubagentSourceRefInput {
+interface CreateLocalSubagentSourceRefInput {
   entryPath: string;
   logicalPath: string;
   manifest: AgentSourceManifest;

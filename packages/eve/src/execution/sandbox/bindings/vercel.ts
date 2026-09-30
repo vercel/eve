@@ -91,7 +91,7 @@ export function createVercelSandboxProvider(
   return createVercelSandbox({ createOptions: authoredCreateOptions, prepare });
 }
 
-export interface CreateVercelSandboxInput {
+interface CreateVercelSandboxInput {
   readonly createSandbox?: CreateVercelSandbox;
   readonly createOptions?: VercelCreateOptions;
   readonly loadDeleteSandboxModule?: () => Promise<VercelModule>;

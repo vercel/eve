@@ -22,15 +22,15 @@ describe("formatConnectionDisplayName", () => {
 });
 
 describe("buildAuthRequiredPublicText", () => {
-  it("invites the triggering user to connect when one is known", () => {
-    expect(buildAuthRequiredPublicText({ displayName: "Linear", hasUser: true })).toBe(
+  it("invites the recipient to connect when the link was sent privately", () => {
+    expect(buildAuthRequiredPublicText({ displayName: "Linear", hasRecipient: true })).toBe(
       "Connect with Linear to continue",
     );
   });
 
-  it("notes the missing actor when no user is known", () => {
-    expect(buildAuthRequiredPublicText({ displayName: "Linear", hasUser: false })).toBe(
-      "Authorization required for Linear (no triggering user)",
+  it("notes when the link could not be sent privately", () => {
+    expect(buildAuthRequiredPublicText({ displayName: "Linear", hasRecipient: false })).toBe(
+      "Authorization required for Linear (couldn't send the sign-in link privately)",
     );
   });
 });

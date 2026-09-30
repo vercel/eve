@@ -16,7 +16,7 @@ import {
   type PhotonManagedProject,
 } from "./management.js";
 
-export interface PhotonSetupPlan {
+interface PhotonSetupPlan {
   agentName: string;
   credentials: "vercel-connect" | "environment";
   photonProject: "create" | { projectId: string; projectSecret: string };

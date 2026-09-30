@@ -118,7 +118,7 @@ function writtenPaths(sandbox: ReturnType<typeof mockSandbox>): string[] {
 }
 
 describe("dispatchDynamicSkillEvent", () => {
-  it.each(["subagent.called", "subagent.completed", "turn.completed"] as const)(
+  it.each(["task.started", "task.settled", "turn.completed"] as const)(
     "does not access the sandbox to rebuild announcements on %s",
     async (type) => {
       const ctx = new ContextContainer();

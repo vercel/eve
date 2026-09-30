@@ -1,6 +1,5 @@
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
-import type { RunMode } from "#shared/run-mode.js";
 import {
   bindTurnCallerContextStep,
   notifyCancelledTaskCallerStep,
@@ -13,6 +12,8 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { SessionInputQueue } from "#execution/session/input-queue.js";
 import { SessionExecution } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { cancelWorkingTasks, sessionTaskTable } from "#execution/tasks/session.js";
+import { workingTasks } from "#execution/tasks/table.js";
 import type { TurnOutcome, TurnStepPayload } from "#execution/session/turn-step-types.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
@@ -50,7 +51,6 @@ export interface SessionBoot {
   readonly initialInput: DeliverHookPayload | undefined;
   /** Parks on the inbox before any session-scoped lifecycle work. */
   readonly awaitFirstMessage: boolean;
-  readonly mode: RunMode;
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
@@ -92,7 +92,6 @@ export async function runPreparedSession(
   const handoff = new SessionHandoff({
     checkpoint: {
       capabilities: boot.capabilities,
-      mode: boot.mode,
       retention: boot.retention,
       sessionTimeoutMs: boot.sessionTimeoutMs,
     },
@@ -117,7 +116,6 @@ export async function runPreparedSession(
     result = await finalizeSession(loop.outcome, {
       caller: progress.caller,
       cursor,
-      mode: boot.mode,
       sessionWritable: boot.sessionWritable,
     });
     progress.terminalEmitted = true;
@@ -126,7 +124,7 @@ export async function runPreparedSession(
     if (!progress.terminalEmitted) {
       await finalizeSession(
         { error, kind: "failed", turnId: progress.turnId },
-        { caller: progress.caller, cursor, mode: boot.mode, sessionWritable: boot.sessionWritable },
+        { caller: progress.caller, cursor, sessionWritable: boot.sessionWritable },
       );
     }
     throw createSafeOuterWorkflowError();
@@ -141,7 +139,6 @@ export async function runPreparedSession(
  */
 export async function failSession(input: {
   readonly error: unknown;
-  readonly mode: RunMode;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionId: string;
   readonly sessionState: DurableSessionState | undefined;
@@ -161,7 +158,6 @@ export async function failSession(input: {
         serializedContext: input.serializedContext,
         sessionState: input.sessionState,
       },
-      mode: input.mode,
       sessionWritable: input.sessionWritable,
     },
   );
@@ -201,7 +197,6 @@ async function runSessionLoop(
     capabilities: boot.capabilities,
     cursor,
     inbox,
-    mode: boot.mode,
     queue,
     sessionId: boot.sessionId,
   });
@@ -215,34 +210,39 @@ async function runSessionLoop(
 
   const nextParkedActivity = async (
     expectedAttemptIds: ReadonlySet<string>,
-  ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" }>> => {
+  ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>> => {
     while (true) {
       const next = await nextTurnDelivery({
         cursor,
-        deferDeliveries: boot.mode === "task" && expectedAttemptIds.size > 0,
         expectedAttemptIds,
+        hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
         inbox,
         queue,
       });
-      if (next.kind !== "workflow") return next;
-      await execution.handleWorkflowMessage(next.message);
+      if (next.kind === "workflow") {
+        await execution.handleWorkflowMessage(next.message);
+        continue;
+      }
+      if (next.kind === "cancel-working-tasks") {
+        await cancelWorkingTasks(cursor);
+        continue;
+      }
+      return next;
     }
   };
 
   let turnIndex = 0;
   const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
-    if (caller?.taskId !== undefined) queue.rememberTask(caller.taskId);
     if (caller !== undefined) {
-      await cursor.apply({
-        serializedContext: await bindTurnCallerContextStep({
-          caller,
-          serializedContext: cursor.serializedContext,
-        }),
-      });
+      await cursor.advance((state) =>
+        bindTurnCallerContextStep({ caller, serializedContext: state.serializedContext }),
+      );
     }
     progress.turnId = `turn_${String(turnIndex++)}`;
-    return await execution.runTurn(payload);
+    const outcome = await execution.runTurn(payload, { caller });
+    if (outcome.caller !== undefined) progress.caller = outcome.caller;
+    return outcome;
   };
   const runDeliveredTurn = async (
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
@@ -255,13 +255,10 @@ async function runSessionLoop(
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
-  const settleCancelledTurn = async () => {
-    const settled = await settleCancelledTurnStep({
-      sessionWritable: boot.sessionWritable,
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
-    });
-    await cursor.apply(settled);
+  const settleCancelledTurn = async (reportUsage: boolean) => {
+    const settled = await cursor.advance((state) =>
+      settleCancelledTurnStep({ ...state, reportUsage }),
+    );
     progress.caller = undefined;
     return settled;
   };
@@ -310,13 +307,13 @@ async function runSessionLoop(
 
       if (action.cancelled === true) {
         const cancelledCaller = { caller: progress.caller, sessionId: boot.sessionId };
-        const settled = await settleCancelledTurn();
+        const settled = await settleCancelledTurn(progress.caller !== undefined);
         await notifyCancelledTaskCallerStep(
           settled.usage === undefined
             ? cancelledCaller
             : { ...cancelledCaller, usage: settled.usage },
         );
-      } else if (action.settled?.notifyCaller === true) {
+      } else if (action.settled !== undefined) {
         if (progress.caller !== undefined) {
           await notifyTurnCallerStep({
             caller: progress.caller,
@@ -349,10 +346,10 @@ async function runSessionLoop(
           continue;
         case "cancel-turn":
           await cancelDescendantTurnsStep({
-            serializedContext: cursor.serializedContext,
             sessionState: cursor.sessionState,
           });
-          await settleCancelledTurn();
+          await cancelWorkingTasks(cursor);
+          await settleCancelledTurn(false);
           // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };
           continue;

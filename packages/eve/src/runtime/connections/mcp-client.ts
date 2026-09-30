@@ -386,8 +386,7 @@ export function passesToolFilter(
  * {@link SessionContext}, then resolves the {@link ConnectionPrincipal}
  * and invokes `authorization.getToken({ principal })` to produce the bearer.
  * `getToken` may throw {@link ConnectionAuthorizationRequiredError};
- * callers (`connection_search`, wrapped connection tools) catch it
- * and it propagates as-is from here.
+ * callers catch it and it propagates as-is from here.
  */
 export async function resolveHeaders(
   connection: ResolvedConnectionDefinition,

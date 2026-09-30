@@ -10,12 +10,7 @@ export async function verifyRegistryHandoff(input: {
 }): Promise<void> {
   const { address, run, selfMod } = input;
   assertDiscovered(run, address);
-  const pending = run.child.toolCalls.filter((call) => call.name === "registry_add");
-  if (pending.length !== 1 || pending[0]?.input.address !== address) {
-    throw new Error(`Self-modification did not request ${address} exactly once.`);
-  }
-  const handoff = await selfMod.approveRegistry(run);
-  const result = handoff.toolCalls.find((call) => call.name === "registry_add");
+  const result = requireSingleRegistryAdd(run, address);
   if (
     result?.status !== "completed" ||
     (result.output as { nextCommand?: unknown; status?: unknown } | undefined)?.status !==
@@ -36,12 +31,7 @@ export async function verifyRegistryInstall(input: {
 }): Promise<void> {
   const { address, source, target, run, selfMod } = input;
   assertDiscovered(run, address);
-  const pending = run.child.toolCalls.filter((call) => call.name === "registry_add");
-  if (pending.length !== 1 || pending[0]?.input.address !== address) {
-    throw new Error(`Self-modification did not request ${address} exactly once.`);
-  }
-  const installed = await selfMod.approveRegistry(run);
-  const result = installed.toolCalls.find((call) => call.name === "registry_add");
+  const result = requireSingleRegistryAdd(run, address);
   if (
     result?.status !== "completed" ||
     (result.output as { status?: unknown } | undefined)?.status !== "installed"
@@ -52,6 +42,15 @@ export async function verifyRegistryInstall(input: {
   const expected = await readFile(resolve(process.cwd(), "../../../apps/docs", source), "utf8");
   const actual = await selfMod.readSource(target);
   if (actual !== expected) throw new Error(`${target} is not the official registry scaffold.`);
+}
+
+function requireSingleRegistryAdd(run: SelfModificationRun, address: string) {
+  const calls = run.child.toolCalls.filter((call) => call.name === "registry_add");
+  const [call] = calls;
+  if (calls.length !== 1 || call?.input.address !== address) {
+    throw new Error(`Self-modification did not request ${address} exactly once.`);
+  }
+  return call;
 }
 
 function assertDiscovered(run: SelfModificationRun, address: string): void {

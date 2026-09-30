@@ -97,7 +97,7 @@ export interface AgentOtelInstrumentationInput {
 }
 
 /** OTel event definition and its trusted framework context runner. */
-export interface AgentOtelInstrumentation {
+interface AgentOtelInstrumentation {
   readonly hook: InstrumentationProviderDefinition;
   readonly prepareSessionTrace: (
     event: InstrumentationSessionStartedEvent,
@@ -221,6 +221,7 @@ export function createAgentOtelInstrumentation(
   const onStepStarted = async (event: InstrumentationStepAttemptStartedEvent): Promise<void> => {
     const turn = await input.stateStore.getTurn(event.scope.sessionId, event.scope.turnId);
     if (turn === undefined || !isSampledTrace(turn.context)) return;
+    const session = await input.stateStore.getSession(event.scope.sessionId);
     const turnContext = withChannelAudience(
       contextFromSpanContext(turn.context),
       event.scope.channelAudience,
@@ -232,20 +233,12 @@ export function createAgentOtelInstrumentation(
         input.tracer.startSpan(
           AGENT_SPAN_NAMES.step,
           {
-            attributes: {
-              "agent.framework.name": "eve",
-              "agent.framework.version": input.frameworkVersion,
-              "agent.step.attempt": event.scope.attemptIndex,
-              "agent.step.index": event.scope.stepIndex,
-              "agent.turn.id": event.scope.turnId,
-              "agent.name": event.scope.functionId,
-              ...agentSpanNamingAttributes("agent.step"),
-              ...agentTraceIdentityAttributes({
-                rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
-                sessionId: event.scope.sessionId,
-              }),
-              ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
-            },
+            attributes: runtimeAttributes.agentStepAttributes({
+              event,
+              frameworkVersion: input.frameworkVersion,
+              session,
+              turn,
+            }),
             links:
               activeSpanContext === undefined || activeSpanContext.traceId === turn.context.traceId
                 ? undefined
@@ -302,7 +295,6 @@ export function createAgentOtelInstrumentation(
   const onSessionTransition = async (
     event: InstrumentationSessionTransitionEvent,
   ): Promise<void> => {
-    await actions.flushForSessionTransition(event);
     if (event.type === "session.failed" && event.turnId !== undefined) {
       await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
         ...turn,
@@ -534,7 +526,6 @@ export function createAgentOtelInstrumentation(
 
   return {
     hook: {
-      flush: actions.flushSettledInvocations,
       events: {
         ...channelDeliveries,
         "action.completed": actions.events["action.completed"],

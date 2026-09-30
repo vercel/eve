@@ -14,6 +14,7 @@ import {
   type InstrumentationToolCallStartedEvent,
   type InstrumentationToolCallTerminalEvent,
 } from "#instrumentation/lifecycle.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const scope: InstrumentationAttemptScope = {
   attemptId: "turn-1:step-0:attempt-0",
@@ -28,7 +29,6 @@ const traceContext = (audience: "public" | "private" | "unknown" = "unknown") =>
   audience,
   channel: { kind: "http" as const },
   environment: "production" as const,
-  mode: "conversation" as const,
   principalType: "anonymous",
 });
 
@@ -97,12 +97,81 @@ describe("createAiSdkHookBridge", () => {
       },
     ]);
 
-    const id = modelCallIdempotencyKey(scope, 0);
+    const id = modelCallIdempotencyKey(scope, 0, 0);
     expect(calls).toEqual([
       `a:started:${id}`,
       `b:started:${id}`,
       `a:completed:${id}:a-state`,
       `b:completed:${id}:b-state`,
+    ]);
+  });
+
+  it("gives provider retries distinct identities and terminalizes failed calls", async () => {
+    const started: InstrumentationModelCallStartedEvent[] = [];
+    const terminal: InstrumentationModelCallTerminalEvent[] = [];
+    const hooks = createInstrumentationHooks([
+      {
+        events: {
+          "model.call.completed": (event) => void terminal.push(event),
+          "model.call.failed": (event) => void terminal.push(event),
+          "model.call.started": (event) => void started.push(event),
+        },
+        name: "retry",
+        tracePolicy: contentTracePolicy,
+      },
+    ]);
+    const bridge = createAiSdkHookBridge(scope, hooks);
+    const call = {
+      callId: "call-1",
+      messages: [],
+      modelId: "model",
+      provider: "test",
+      tools: undefined,
+    };
+    await Reflect.apply(bridge.onStepStart!, bridge, [{ callId: "stream-1", stepNumber: 0 }]);
+
+    await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [call]);
+    const retryableError = new Error("provider request failed");
+    await expect(
+      bridge.executeLanguageModelCall!({
+        callId: "call-1",
+        execute: async () => {
+          throw retryableError;
+        },
+      }),
+    ).rejects.toBe(retryableError);
+
+    await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [call]);
+    await bridge.executeLanguageModelCall!({
+      callId: "call-1",
+      execute: async () => "stream",
+    });
+    await Reflect.apply(bridge.onLanguageModelCallEnd!, bridge, [
+      {
+        callId: "call-1",
+        content: [],
+        finishReason: "stop",
+        performance: { responseTimeMs: 1 },
+        responseId: "response-1",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      },
+    ]);
+
+    expect(started.map((event) => event.idempotencyKey)).toEqual([
+      modelCallIdempotencyKey(scope, 0, 0),
+      modelCallIdempotencyKey(scope, 0, 1),
+    ]);
+    expect(terminal).toMatchObject([
+      {
+        error: retryableError,
+        idempotencyKey: modelCallIdempotencyKey(scope, 0, 0),
+        type: "model.call.failed",
+      },
+      {
+        finishReason: "stop",
+        idempotencyKey: modelCallIdempotencyKey(scope, 0, 1),
+        type: "model.call.completed",
+      },
     ]);
   });
 
@@ -190,7 +259,7 @@ describe("createAiSdkHookBridge", () => {
 
     await bridge.executeLanguageModelCall!({ callId: "call-1", execute: async () => "result" });
 
-    const expected = modelCallIdempotencyKey(scope, 0);
+    const expected = modelCallIdempotencyKey(scope, 0, 0);
     expect(ids).toEqual([expected, expected]);
   });
 
@@ -225,7 +294,10 @@ describe("createAiSdkHookBridge", () => {
       ]);
     }
 
-    expect(keys).toEqual([modelCallIdempotencyKey(scope, 2), modelCallIdempotencyKey(scope, 2)]);
+    expect(keys).toEqual([
+      modelCallIdempotencyKey(scope, 2, 0),
+      modelCallIdempotencyKey(scope, 2, 0),
+    ]);
   });
 
   it("attaches merged runtime context to step and model started events", async () => {
@@ -314,6 +386,7 @@ describe("createAiSdkHookBridge", () => {
   });
 
   it("isolates a failing provider from the remaining providers", async () => {
+    const logs = captureLogRecords();
     const after = vi.fn();
     const hooks = createInstrumentationHooks([
       {
@@ -348,6 +421,9 @@ describe("createAiSdkHookBridge", () => {
     ]);
 
     expect(after).toHaveBeenCalledOnce();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "instrumentation provider failed" }),
+    );
   });
 
   it("terminalizes started operations when the attempt errors", async () => {
@@ -498,7 +574,7 @@ describe("createAiSdkHookBridge", () => {
 
     expect(before).toHaveBeenCalledExactlyOnceWith(
       {
-        idempotencyKey: modelCallIdempotencyKey(scope, 0),
+        idempotencyKey: modelCallIdempotencyKey(scope, 0, 0),
         input: { instructions: "be brief", messages: [{ content: "hi", role: "user" }] },
         model: { modelId: "model", provider: "test" },
         scope,
@@ -530,7 +606,7 @@ describe("createAiSdkHookBridge", () => {
           },
         ],
         finishReason: "tool-calls",
-        idempotencyKey: modelCallIdempotencyKey(scope, 0),
+        idempotencyKey: modelCallIdempotencyKey(scope, 0, 0),
         responseModelId: "response-model",
         responseId: "response-1",
         scope,

@@ -1,12 +1,27 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { latestTaskResult } from "@eve-e2e/config/mock-script";
 import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
+
+import { RESEARCH_INTERIM_MESSAGE } from "../task-scenario-text.ts";
+import { respondToTaskScenario } from "./lib/task-scenarios.ts";
+
+/**
+ * The child-opening call each SUBAGENT-HOOKS mode makes: an agent call the
+ * model waits on, a task whose run opens a helper while the model keeps
+ * answering, or a waiting workflow tool.
+ */
+const HOOK_SCENARIO_CALLS = {
+  direct: { name: "workflow-marker", input: { message: "Alice's hook audit" } },
+  background: { name: "research_brief", input: { topic: "Alice's hook audit" } },
+  waiting: { name: "blocking_agent", input: { service: "hook-audit" } },
+} as const;
 
 /**
  * Deterministic script: each directive names the workflow tool to call with
  * service "api"; once the turn holds a tool result the reply echoes it.
  */
-function respond(request: MockModelRequest): MockModelResponse | string {
+async function respond(request: MockModelRequest): Promise<MockModelResponse | string> {
   const hookScenario = request.userMessages.find((entry) => entry.includes("SUBAGENT-HOOKS:"));
   if (hookScenario !== undefined) {
     const auditing = request.lastUserMessage?.includes("SUBAGENT-HOOKS:AUDIT");
@@ -16,7 +31,8 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         toolCalls: [{ id: skillCallId, name: "load_skill", input: { skill: "delegation-policy" } }],
       };
     }
-    const mode = /SUBAGENT-HOOKS:(direct|waiting|background)/u.exec(hookScenario)?.[1];
+    const mode = (/SUBAGENT-HOOKS:(direct|background|waiting)/u.exec(hookScenario)?.[1] ??
+      "waiting") as keyof typeof HOOK_SCENARIO_CALLS;
     if (auditing) {
       const auditTool = request.lastUserMessage?.includes("DYNAMIC-SKILL-CONTEXT")
         ? "read_dynamic_skill_context"
@@ -26,54 +42,45 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         ? { toolCalls: [{ name: auditTool, input: {} }] }
         : JSON.stringify(audit.output);
     }
-    const tool =
-      mode === "direct"
-        ? "workflow-marker"
-        : mode === "waiting"
-          ? "blocking_agent"
-          : "background_agent";
-    if (!request.toolResults.some((entry) => entry.name === tool)) {
-      return {
-        toolCalls: [
-          {
-            name: tool,
-            input:
-              mode === "direct" ? { message: "Alice's hook audit" } : { service: "hook-audit" },
-          },
-        ],
-      };
+    const { name: tool, input } = HOOK_SCENARIO_CALLS[mode];
+    const call = request.toolResults.find((entry) => entry.name === tool);
+    if (call === undefined) return { toolCalls: [{ name: tool, input }] };
+    // An agent call or task returned a receipt; its result arrives in a <task_result> message.
+    if (mode === "direct") {
+      return latestTaskResult(request, tool) ?? { toolCalls: [{ name: "task_wait", input: {} }] };
     }
-    const delivery = [...request.userMessages]
-      .reverse()
-      .find((entry) => entry.startsWith("[Task state]\n") || entry.startsWith("Background task "));
-    const result = request.toolResults.find((entry) => entry.name === tool);
-    return (
-      delivery ??
-      (typeof result?.output === "string" ? result.output : JSON.stringify(result?.output))
-    );
+    // Ends the step with text while the task works, which holds the turn. The
+    // step takes a few seconds, so the task's helper most likely opens while it
+    // runs; that is likely, not guaranteed, and the hook assertions hold
+    // whether the helper opens mid-step or while the turn is held.
+    if (mode === "background") {
+      const result = latestTaskResult(request, tool);
+      if (result !== undefined) return result;
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      return RESEARCH_INTERIM_MESSAGE;
+    }
+    return typeof call.output === "string" ? call.output : JSON.stringify(call.output);
   }
 
   const message =
     [...request.userMessages]
       .reverse()
-      .find(
-        (entry) =>
-          /^(WORKFLOW-|(?:Background task|Deploy) task_)/u.test(entry) ||
-          entry.includes("private-catalog"),
-      ) ?? "";
+      .find((entry) => entry.startsWith("WORKFLOW-") || entry.includes("private-catalog")) ?? "";
+  const scenario = respondToTaskScenario(request, directiveOf(message));
+  if (scenario !== undefined) return scenario;
   if (message.includes("private-catalog")) {
-    const result = request.toolResults.find((entry) => entry.name === "connection_search");
-    if (result === undefined) {
+    const search = request.toolResults.find((entry) => entry.name === "connection_search");
+    if (search === undefined) {
       return {
         toolCalls: [
           {
             name: "connection_search",
-            input: { connection: "private-catalog", keywords: "items" },
+            input: { connection: "private-catalog", query: "items" },
           },
         ],
       };
     }
-    return JSON.stringify(result.output);
+    return JSON.stringify(search.output);
   }
 
   const stepAuth = /WORKFLOW-STEP-AUTH-(IMPLICIT|EXPLICIT|REJECTED)/u.exec(message);
@@ -93,25 +100,11 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     }
     return `WORKFLOW-PROBE-RESULT ${String(result.output)}`;
   }
-  if (message.includes("WORKFLOW-MIXED-AGENTS-START")) {
-    const mixedResults = request.toolResults.filter(
-      (result) => result.id === "blocking-agent-call" || result.id === "background-agent-call",
-    );
-    if (mixedResults.length < 2) {
-      return {
-        toolCalls: [
-          { id: "blocking-agent-call", input: { service: "api" }, name: "blocking_agent" },
-          { id: "background-agent-call", input: { service: "api" }, name: "background_agent" },
-        ],
-      };
-    }
-    return "WORKFLOW-MIXED-AGENTS-INITIAL-RESULT";
-  }
-
-  for (const [directive, tool] of [
+  for (const [directive, tool, service = "api"] of [
+    ["WORKFLOW-APPROVAL-START", "gated_deploy"],
+    ["WORKFLOW-APPROVAL-DENIED-START", "gated_deploy", "review-only"],
     ["WORKFLOW-DEPLOY-START", "deploy_service"],
     ["WORKFLOW-CONFIRM-START", "confirm_deploy"],
-    ["WORKFLOW-REPORT-START", "report_deploy"],
     ["WORKFLOW-ESCALATE-START", "escalate_deploy"],
     ["WORKFLOW-HOLD-START", "hold_deploy"],
     ["WORKFLOW-FANOUT-START", "fanout_deploy"],
@@ -121,7 +114,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     if (!message.includes(directive)) continue;
     const result = [...request.toolResults].reverse().find((entry) => entry.name === tool);
     if (result === undefined) {
-      return { toolCalls: [{ input: { service: "api" }, name: tool }] };
+      return { toolCalls: [{ input: { service }, name: tool }] };
     }
     const output = result.output;
     return `${directive.replace("-START", "-RESULT")} ${
@@ -129,17 +122,12 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     }`;
   }
 
-  if (message.includes("is completed") && message.includes("WORKFLOW-REPORT-COMPLETE")) {
-    return "WORKFLOW-REPORT-DONE";
-  }
-  if (message.includes("is completed") && message.includes("WORKFLOW-CHILD:api:background")) {
-    return "WORKFLOW-MIXED-AGENTS-BACKGROUND-DONE";
-  }
-  if (message.startsWith("Background task ")) {
-    return "WORKFLOW-REPORT-ACK";
-  }
-
   return "WORKFLOW-IDLE";
+}
+
+/** A directive is the first word of its message; any text after it is for people reading it. */
+function directiveOf(message: string): string {
+  return message.trim().split(/\s+/u)[0] ?? "";
 }
 
 const base = e2eAgentConfig({ mock: respond });

@@ -22,16 +22,6 @@ async function packageDeclaresEve(
   return isJsonObject(dependencies) && typeof dependencies.eve === "string";
 }
 
-export async function isEveProjectRoot(
-  root: string,
-  options: { readonly source?: ProjectSource } = {},
-): Promise<boolean> {
-  const source = options.source ?? createDiskProjectSource();
-  const packageJsonPath = join(resolve(root), "package.json");
-  if ((await source.stat(packageJsonPath)) !== "file") return false;
-  return packageDeclaresEve(packageJsonPath, source);
-}
-
 /** Find the nearest package boundary and return it only when it owns an eve project. */
 export async function findEveProjectRoot(
   startPath: string,

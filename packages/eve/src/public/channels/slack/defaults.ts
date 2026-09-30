@@ -1,8 +1,14 @@
+import { workingTaskNames } from "#channel/task-card.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
-import { describeActionRequests } from "#public/channels/slack/action-status.js";
-import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
+import { describeActionRequests, waitingOnTasks } from "#public/channels/slack/action-status.js";
+import { isTaskControlTool } from "#protocol/task-tools.js";
+import {
+  buildSlackAuthContext,
+  slackUserIdForPrincipal,
+  slackUserIdFromAuthContext,
+} from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
   buildAuthEphemeralBlocks,
@@ -26,10 +32,10 @@ import {
 } from "#public/channels/slack/limits.js";
 import type {
   SlackApprovalChannelResolver,
-  SlackChannelEvents,
   SlackChannelInternalEvents,
   SlackChannelState,
   SlackContext,
+  SlackEventContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
 import type { InputRequest } from "#shared/input.js";
@@ -139,7 +145,7 @@ function blockContainsRequestAction(block: unknown, requestId: string): boolean 
 /**
  * Workspace-scoped projection of the Slack actor that produced
  * `message`, derived into a {@link SessionAuthContext}. Used by both
- * {@link defaultOnAppMention} and {@link defaultOnDirectMessage} when
+ * {@link defaultOnMessage} when
  * the customer hasn't supplied their own `onAppMention` /
  * `onDirectMessage`. Returns `null` when the message has no author.
  */
@@ -162,29 +168,17 @@ export function defaultSlackAuth(
 }
 
 /**
- * Default `onAppMention` — derives auth from the Slack actor and posts
- * a `"Thinking…"` typing indicator before the workflow runtime starts.
+ * Default `onAppMention` and `onDirectMessage`: dispatches with auth derived
+ * from the Slack actor. Acknowledging the message is the renderer chain's
+ * `received`, so replacing a message hook never drops it.
  */
-export async function defaultOnAppMention(
-  ctx: SlackContext,
-  message: SlackMessage,
-): Promise<SlackMentionResult> {
-  await ctx.thread.startTyping("Thinking...");
+export function defaultOnMessage(ctx: SlackContext, message: SlackMessage): SlackMentionResult {
   return { auth: defaultSlackAuth(message, ctx) };
 }
 
-/**
- * Default `onDirectMessage` — derives auth from the Slack actor and
- * posts a `"Thinking…"` typing indicator before the workflow runtime
- * starts. Matches the default mention behavior; replace the option to
- * customize gating, auth derivation, or pre-dispatch side effects.
- */
-export async function defaultOnDirectMessage(
-  ctx: SlackContext,
-  message: SlackMessage,
-): Promise<SlackMentionResult> {
+/** eve's default `received`: the `Thinking...` status, set the moment a message arrives. */
+export async function defaultReceived(_message: SlackMessage, ctx: SlackContext): Promise<void> {
   await ctx.thread.startTyping("Thinking...");
-  return { auth: defaultSlackAuth(message, ctx) };
 }
 
 /**
@@ -205,8 +199,7 @@ function firstNonEmptyLine(text: string): string | undefined {
  * request as Slack `block_actions`. Buttons by default; radio for
  * ≤6-option select requests; static_select for >6-option select
  * requests. Batches split into multiple posts when they would exceed
- * Slack's 50-block message cap. Override by declaring
- * `events["input.requested"]`.
+ * Slack's 50-block message cap.
  */
 export function defaultInputRequestedHandler(
   approvalChannel?: SlackApprovalChannelResolver,
@@ -254,7 +247,7 @@ export function defaultInputRequestedHandler(
 
 async function postPublicInputRequests(
   requests: readonly InputRequest[],
-  channel: Parameters<NonNullable<SlackChannelEvents["input.requested"]>>[1],
+  channel: SlackEventContext,
 ): Promise<void> {
   for (const post of buildInputRequestPosts(requests)) {
     const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
@@ -353,25 +346,27 @@ export async function postCompletedSlackReply(
 }
 
 /**
- * Built-in Slack event handlers — typing indicators, error replies,
- * and the connection-authorization status flow. Each is overridable
- * per-event by passing the same key under `slackChannel({ events })`.
- * Typed as the internal full-context map because the default
- * `authorization.required` handler owns the public link-free status,
- * which user overrides cannot express.
+ * eve's default Slack event rendering: status lines, replies, errors, and the
+ * connection-authorization flow. It is the innermost link of every channel's
+ * renderer chain. Typed as the internal full-context map because the default
+ * `authorization.required` handler owns the public link-free status, which
+ * authored renderers cannot express.
  */
 export const defaultEvents: SlackChannelInternalEvents = {
   async "approval.candidate"(event, channel, _ctx) {
-    const userId = channel.state.pendingApprovalCandidateUsers?.[event.candidateId];
+    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
     if (event.outcome === "pending" && userId !== undefined) {
-      await channel.thread.postEphemeral(userId, "Checking whether you can approve this action…");
+      await channel.thread.postEphemeral(
+        userId,
+        "Checking whether you can respond to this approval…",
+      );
       return;
     }
     if (userId === undefined) return;
     if (event.outcome === "rejected" || event.outcome === "failed") {
       await channel.thread.postEphemeral(
         userId,
-        event.reason ?? "We couldn’t verify your approval. Please try again.",
+        event.reason ?? "We couldn’t verify your response. Please try again.",
       );
     }
   },
@@ -383,7 +378,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     const messageChannelId = card.messageChannelId ?? channel.state.channelId;
     if (messageChannelId === null) return;
     const answerLabel = event.outcome === "approved" ? "Approve" : "Cancel";
-    const userId = channel.state.approvalResponderUsers?.[event.responderPrincipalId];
+    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
     const blocks = card.messageBlocks.flatMap((block) => {
       if (!blockContainsRequestAction(block, event.requestId)) return [block];
       if (typeof block !== "object" || block === null) return [];
@@ -412,6 +407,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
       }
     }
     channel.state.pendingApprovalCards = next;
+  },
+
+  async "turn.waiting"(event, channel, _ctx) {
+    const working = workingTaskNames(channel.state.taskCards?.[event.turnId]?.turn);
+    if (working.length > 0) await channel.thread.startTyping(waitingOnTasks(working));
   },
 
   async "turn.started"(_event, channel, _ctx) {
@@ -473,7 +473,13 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await channel.thread.startTyping(truncateTypingStatus(buffered));
       return;
     }
-    await channel.thread.startTyping(truncateTypingStatus(describeActionRequests(event.actions)));
+    const actions = event.actions.filter(
+      (action) => action.kind !== "tool-call" || !isTaskControlTool(action.toolName),
+    );
+    if (actions.length === 0) return;
+    await channel.thread.startTyping(
+      truncateTypingStatus(describeActionRequests(actions, event.presentation)),
+    );
   },
 
   async "message.completed"(event, channel, _ctx) {
@@ -544,14 +550,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
     );
   },
 
-  async "authorization.required"(event, channel, ctx) {
+  async "authorization.required"(event, channel, _ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
-    const triggeringUserId =
-      event.candidateId === undefined
-        ? (slackUserIdFromAuthContext(ctx.session.auth.current) ??
-          channel.state.triggeringUserId ??
-          null)
-        : (channel.state.pendingApprovalCandidateUsers?.[event.candidateId] ?? null);
+    const recipientUserId = slackUserIdForPrincipal(channel.state, event.principalId) ?? null;
     const challengeUrl = event.authorization?.url;
 
     // Post a public, link-free status so everyone in the thread can see
@@ -561,7 +562,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     if (event.candidateId === undefined && pending[event.name] === undefined) {
       const publicText = buildAuthRequiredPublicText({
         displayName,
-        hasUser: triggeringUserId !== null,
+        hasRecipient: recipientUserId !== null,
       });
       try {
         const sent = await channel.thread.post(publicText);
@@ -580,12 +581,12 @@ export const defaultEvents: SlackChannelInternalEvents = {
     }
 
     // The challenge is user-specific: the sign-in link (and device code)
-    // must only ever be visible to the triggering user, never posted into
+    // must only ever be visible to the person who started the sign-in, never posted into
     // the shared thread.
-    if (triggeringUserId && challengeUrl) {
+    if (recipientUserId && challengeUrl) {
       const userCode = event.authorization?.userCode;
       try {
-        await channel.thread.postEphemeral(triggeringUserId, {
+        await channel.thread.postEphemeral(recipientUserId, {
           blocks: buildAuthEphemeralBlocks({
             displayName,
             url: challengeUrl,

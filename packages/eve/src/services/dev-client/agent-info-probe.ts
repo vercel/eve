@@ -7,7 +7,7 @@ import {
 
 const RETRY_DELAY_MS = 100;
 
-export type AgentInfoProbeResult =
+type AgentInfoProbeResult =
   | { readonly kind: "ready"; readonly info: AgentInfoResult }
   | { readonly kind: "unavailable"; readonly error: unknown };
 

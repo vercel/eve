@@ -6,6 +6,7 @@ import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import { authorizedDeployWorkflow } from "#internal/testing/workflow-tool-fixtures.js";
+import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
@@ -13,17 +14,12 @@ import {
 } from "#internal/testing/workflow-tool-run-harness.js";
 
 describe("workflow step authorization failures", () => {
-  it.each([
-    { background: false, disposition: "denied" },
-    { background: false, disposition: "rejected" },
-    { background: false, disposition: "cancel" },
-    { background: true, disposition: "cancel" },
-  ])(
-    "closes authorization on $disposition (background=$background)",
-    async ({ background, disposition }) => {
+  it.each(["denied", "rejected", "cancel"])(
+    "closes authorization on %s",
+    async (disposition) => {
+      const output = captureConsoleOutput();
       const runtime = await createWorkflowToolRuntime({
         agentName: "workflow-step-auth-failure",
-        background,
         execute: authorizedDeployWorkflow,
         toolName: "deploy_service",
       });
@@ -36,7 +32,6 @@ describe("workflow step authorization failures", () => {
             serializedContext: {
               ...buildWorkflowToolSerializedContext({
                 continuationToken: "http:step-auth-failure",
-                mode: "conversation",
                 requestInput: true,
               }),
               "eve.auth": {
@@ -51,25 +46,21 @@ describe("workflow step authorization failures", () => {
         ]);
         const stream = captureTurnEvents(run);
         try {
-          const events = [];
-          for (
-            let i = 0;
-            i < 5 && filterEventsByType(events, "authorization.required").length === 0;
-            i++
-          )
-            events.push(...(await stream.nextTurn()));
+          // The sign-in parks the open turn; the run keeps waiting for its callback.
+          const events = await stream.nextUntil((event) => event.type === "turn.waiting");
+          expect(events.at(-2)?.type).toBe("authorization.required");
+          expect(filterEventsByType(events, "turn.completed")).toHaveLength(0);
           const required = filterEventsByType(events, "authorization.required")[0]!;
-          expect(required).toBeDefined();
           const url = new URL(required.data.webhookUrl!);
           const token = decodeURIComponent(url.pathname.split("/").at(-1)!);
           const world = await getWorld();
           const executorRunId = (await world.hooks.getByToken(token)).runId;
           const params = { token, attemptId: required.data.attemptId!, name: required.data.name };
           if (disposition === "cancel") {
-            await resumeSessionInbox(
-              sessionCommandHookToken(run.runId),
-              background ? { kind: "cancel", tasks: true } : { kind: "cancel", turnId: "turn_0" },
-            );
+            await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+              kind: "cancel",
+              turnId: "turn_0",
+            });
           } else {
             url.searchParams.set("code", disposition === "denied" ? "denied" : "approved");
             expect(
@@ -77,10 +68,8 @@ describe("workflow step authorization failures", () => {
             ).toBe(200);
           }
           if (disposition === "cancel") {
-            if (!background) {
-              events.push(...(await stream.nextTurn()));
-              expect(filterEventsByType(events, "turn.cancelled")).toHaveLength(1);
-            }
+            events.push(...(await stream.nextTurn()));
+            expect(filterEventsByType(events, "turn.cancelled")).toHaveLength(1);
           } else {
             for (
               let i = 0;
@@ -105,6 +94,11 @@ describe("workflow step authorization failures", () => {
           await run.cancel();
         }
       });
+      // A denied or rejected authorization fails the step fatally.
+      expect(
+        output.lines.filter((line) => line.startsWith(workflowSdkNotice.fatalStep)),
+      ).toHaveLength(disposition === "cancel" ? 0 : 1);
+      expect(output.unexpected(workflowSdkNotice.fatalStep)).toEqual([]);
     },
     60_000,
   );

@@ -91,9 +91,9 @@ async function runTurn(input: { readonly message: string; readonly principalId: 
           principalType: "user",
         },
         "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+        "eve.stateLayout": 1,
         "eve.channel": { kind: "http", state: {} },
         "eve.continuationToken": `http:file-memory:${input.principalId}:${crypto.randomUUID()}`,
-        "eve.mode": "conversation",
       },
     },
   ]);

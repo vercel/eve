@@ -19,6 +19,7 @@ describe.each(["static", "dynamic"] as const)(
     let client: McpConnectionClient;
     let discoveryError: { code: number; message: string; data?: unknown } | undefined;
     let initializeError: { code: number; message: string } | undefined;
+    let callResult: Record<string, unknown>;
 
     async function createClient(protocolVersionDiscovery?: boolean) {
       const authored = defineMcpClientConnection({
@@ -67,6 +68,7 @@ describe.each(["static", "dynamic"] as const)(
         message: "Unsupported protocol version",
       };
       initializeError = undefined;
+      callResult = { content: [{ type: "text", text: "fixture-user" }] };
 
       // Replace only HTTP I/O: eve's connection, bundled SDK, and protocol parsing stay real.
       vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
@@ -112,7 +114,7 @@ describe.each(["static", "dynamic"] as const)(
             break;
           case "tools/call":
             expect(message.params?.name).toBe("getMyUser");
-            result = { content: [{ type: "text", text: "fixture-user" }] };
+            result = callResult;
             break;
           default:
             throw new Error(`Unexpected MCP method: ${message.method}`);

@@ -328,38 +328,6 @@ describe("eve build process output", () => {
     expect(result.stderr).toContain(`source: ${join(resolvedAppRoot, "agent")}`);
   }, 120_000);
 
-  it("prints bundled missing-import errors to stderr when build fails", async () => {
-    const appRoot = await createTemporaryAppRoot({
-      prefix: "eve-bin-build-output-missing-import-",
-    });
-
-    await mkdir(join(appRoot, "agent", "tools"), {
-      recursive: true,
-    });
-    await writeFile(
-      join(appRoot, "agent", "tools", "bad.ts"),
-      [
-        'import { missing } from "./does-not-exist";',
-        "export default {",
-        '  description: "Missing import test.",',
-        '  inputSchema: { type: "object", properties: {}, required: [] },',
-        "  execute: async () => String(missing),",
-        "};",
-        "",
-      ].join("\n"),
-    );
-
-    const result = await runEveBuild(appRoot);
-
-    expect(result.code).toBe(1);
-    expect(result.signal).toBeNull();
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("Could not resolve './does-not-exist'");
-    expect(result.stderr).toContain("Build failed with 1 error:");
-    expect(result.stderr).toContain("agent/tools/bad.ts");
-    expect(result.stderr).not.toContain("Diagnostics artifact:");
-  }, 120_000);
-
   it("prints bundled syntax errors to stderr when build fails", async () => {
     const appRoot = await createTemporaryAppRoot({
       prefix: "eve-bin-build-output-syntax-error-",

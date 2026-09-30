@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveLocalTraceRetentionSettings } from "#tracing/local-trace-retention.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1_000;
 const FIVE_HUNDRED_TWELVE_MIB = 512 * 1024 * 1024;
@@ -51,6 +52,7 @@ describe("resolveLocalTraceRetentionSettings", () => {
   });
 
   it("falls back to the default rather than throwing on an unparseable value", () => {
+    const logs = captureLogRecords();
     const settings = resolveLocalTraceRetentionSettings({
       EVE_TRACES_MAX_AGE_MS: "sometimes",
       EVE_TRACES_RETAIN_COUNT: "-4",
@@ -58,5 +60,11 @@ describe("resolveLocalTraceRetentionSettings", () => {
 
     expect(settings.maxAgeMs).toBe(SEVEN_DAYS_MS);
     expect(settings.retainCount).toBe(20);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "ignoring invalid local trace retention value",
+      }),
+    );
   });
 });

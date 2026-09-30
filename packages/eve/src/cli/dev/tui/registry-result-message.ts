@@ -20,7 +20,7 @@ export function registryItemProgress(renderer: {
   };
 }
 
-export interface RegistryCommandOutcome {
+interface RegistryCommandOutcome {
   failed: boolean;
   /** Replaces the echoed `/add` once it settles. */
   summary: string;
@@ -50,7 +50,7 @@ function outcomeDetails(outcome: RegistrySessionOutcome): string[] {
 }
 
 /** The one-line record of an `/add` item left in place of its invocation. */
-export function registryOutcomeSummary(outcome: RegistrySessionOutcome): string {
+function registryOutcomeSummary(outcome: RegistrySessionOutcome): string {
   switch (outcome.kind) {
     case "installed":
       return `Added ${outcome.title}`;

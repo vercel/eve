@@ -1,6 +1,6 @@
 export const MOBILE_AUTO_ROTATE_SPEED = 0.15;
 
-export type EvePointerInteractionMode = {
+type EvePointerInteractionMode = {
   paintEnabled: boolean;
   autoRotateEnvYaw: boolean;
 };

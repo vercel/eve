@@ -17,7 +17,7 @@ interface RegistryPackage {
   config: RegistryConfig;
 }
 
-export interface AddRegistryMappingsResult {
+interface AddRegistryMappingsResult {
   added: string[];
   skippedBuiltIn: string[];
   skippedExisting: string[];

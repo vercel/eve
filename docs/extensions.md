@@ -85,7 +85,7 @@ export default defineTool({
 
 If no configuration is needed, export `defineExtension()` and let consumers re-export it directly. Config schemas must validate synchronously.
 
-`defineState` is automatically scoped to the extension package, so the same state name does not collide with the consumer or another extension.
+`defineState` uses a durable key scoped to the logical mount path and the authored state name. Two mounts of the same package can use the same state name without sharing a slot in one context. Contributed subagents use their parent extension's mount identity, but retain their own runtime contexts.
 
 ### Add a subagent
 
@@ -193,7 +193,16 @@ For an extension with no configuration, mount its default export directly:
 export { default } from "@acme/gizmo";
 ```
 
-The same mount shape works with an npm package, a workspace dependency, or a linked local package.
+The same mount shape works with an npm package, a workspace dependency, or a linked local package. Each mount binds its own configuration, even when two mounts use the same package. Moving or renaming a mount creates a new instance.
+
+Extension state belongs to the logical mount path (for example, `extensions/crm` or `subagents/research/extensions/crm`). A flat `crm.ts` mount and a directory `crm/extension.ts` mount have the same identity; moving or renaming the mount changes its state keys. Application-defined state keys are unchanged.
+
+### Upgrade from package-scoped extension state
+
+Deployments before this release stored extension state under package-prefixed keys. eve does not migrate that state to mount-owned keys or reset it during restore.
+
+- Session handoffs across this upgrade boundary are rejected in both directions, including for agents without extensions. Keep each session's owning deployment available until the session finishes, or start a new session on the deployment you want to use.
+- Local context snapshots use a separate state-layout check. Older snapshots for agents with extensions are incompatible; snapshots for agents without extensions can restore if they contain no unrecognized state keys.
 
 ### Use an extension in a workspace
 

@@ -1,8 +1,9 @@
 import type { BootstrapPrompt } from "#runtime/agent/bootstrap-model-utils.js";
 import {
   getPromptContentText,
-  isAgentsAnnouncementText,
+  isFrameworkAnnouncementText,
 } from "#runtime/agent/bootstrap-model-utils.js";
+import { TASK_ID_INPUT } from "#execution/tasks/task-id-input.js";
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
@@ -14,10 +15,12 @@ export interface AvailableBootstrapTool {
 }
 
 export function createMockAuthoredToolInput(
-  tool: AvailableBootstrapTool,
+  offered: AvailableBootstrapTool,
   message: string,
   city: string,
 ): Record<string, unknown> {
+  // The mock only starts tasks; it never names one to continue.
+  const tool = { ...offered, inputSchema: withoutTaskIdInput(offered.inputSchema) };
   const inputPropertyNames = getToolInputPropertyNames(tool.inputSchema);
   if (inputPropertyNames.includes("question")) {
     return createQuestionInput(message);
@@ -49,6 +52,12 @@ export function createMockAuthoredToolInput(
 
   const sample = createJsonSchemaSample(tool.inputSchema);
   return isRecord(sample) ? sample : {};
+}
+
+function withoutTaskIdInput(schema: unknown): unknown {
+  if (!isRecord(schema) || !isRecord(schema.properties)) return schema;
+  const { [TASK_ID_INPUT]: _taskId, ...properties } = schema.properties;
+  return { ...schema, properties };
 }
 
 /**
@@ -142,9 +151,9 @@ function getTrailingUserText(prompt: BootstrapPrompt): string {
     if (message.role === "system") continue;
     if (message.role !== "user") break;
     const text = getPromptContentText(message.content);
-    // Framework-injected [Agents] announcements are scaffolding, not part
-    // of the turn's authored ask.
-    if (isAgentsAnnouncementText(text.trim())) continue;
+    // Framework-injected [Tasks] notes are scaffolding, not part of the
+    // turn's authored ask.
+    if (isFrameworkAnnouncementText(text.trim())) continue;
     texts.unshift(text);
   }
 

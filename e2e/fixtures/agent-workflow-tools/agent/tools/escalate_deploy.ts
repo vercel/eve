@@ -5,7 +5,7 @@ import { z } from "zod";
 import { describePlan } from "../lib/plan.ts";
 
 /**
- * `ask` returns the hook, so the question can be raced against a deadline: if
+ * `ask` returns a promise, so the question can be raced against a deadline: if
  * nobody answers before the sleep, the run withdraws the request and returns
  * a timeout instead of parking forever.
  */

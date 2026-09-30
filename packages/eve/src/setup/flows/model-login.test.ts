@@ -80,7 +80,7 @@ beforeEach(() => {
     compiledState: {
       manifest: {
         config: {
-          model: { id: "spacexai/grok-4.7", routing: { kind: "gateway", target: "spacexai" } },
+          model: { id: "openai/gpt-6-luna-fast", routing: { kind: "gateway", target: "openai" } },
         },
       },
     },
@@ -90,42 +90,48 @@ beforeEach(() => {
   vi.stubEnv("EVE_MODEL_CONNECTION", undefined);
   mocks.session.mockResolvedValue({ accessToken: "access", teamId: "team_123", teamName: "Alice" });
   mocks.readSession.mockResolvedValue({ refreshToken: "refresh" });
-  mocks.authored.mockResolvedValue("spacexai/grok-4.7");
+  mocks.authored.mockResolvedValue("openai/gpt-6-luna-fast");
   mocks.oauth.mockResolvedValue({ teamId: "team_123", teamName: "Alice" });
-  mocks.catalog.mockResolvedValue([{ id: "spacexai/grok-4.7", type: "language" }]);
+  mocks.catalog.mockResolvedValue([{ id: "openai/gpt-6-luna-fast", type: "language" }]);
   mocks.change.mockResolvedValue({ kind: "changed" });
   mocks.readSecret.mockResolvedValue("stored-key");
   mocks.models.mockResolvedValue({
-    data: [{ id: "gpt-5.6-luna-fast" }, { id: "claude-sonnet-5" }],
-    models: [{ slug: "gpt-5.6-luna-fast" }],
+    data: [{ id: "gpt-5.6-luna-fast" }, { id: "gpt-6-luna-fast" }, { id: "claude-sonnet-5" }],
+    models: [{ slug: "gpt-5.6-luna-fast" }, { slug: "gpt-6-luna-fast" }],
   });
   mocks.gateway.mockResolvedValue({ kind: "valid" });
   mocks.chatgptState.mockResolvedValue({ kind: "ready", reload: true });
 });
 
 describe("model login", () => {
-  it.each(["vercel", "ai-gateway-key", "chatgpt", "openai", "anthropic"])(
-    "connects %s and returns directly to chat",
-    async (selected) => {
-      const fake = createFakePrompter({ single: () => selected, password: () => "new-key" });
-      expect(await runModelLogin({ appRoot: "/agent", prompter: fake.prompter })).toMatchObject({
-        kind: "ready",
-        reload: ["openai", "anthropic", "chatgpt"].includes(selected),
-      });
-      expect(fake.selectMessages).toEqual(["Choose a connection"]);
-      expect(mocks.writeSelection.mock.calls[0]?.slice(0, 2)).toEqual(["/agent", selected]);
-      expect(mocks.writeDefault).toHaveBeenCalledWith(selected);
-      if (["openai", "anthropic", "ai-gateway-key"].includes(selected))
-        expect(mocks.writeSecret).toHaveBeenCalledWith(
-          selected === "ai-gateway-key" ? selected : `${selected}-key`,
-          "new-key",
-        );
-      if (selected === "vercel") expect(mocks.oauth).toHaveBeenCalledOnce();
-      if (selected === "chatgpt") expect(mocks.chatgpt).toHaveBeenCalledOnce();
-    },
-  );
+  it.each([
+    ["vercel", undefined],
+    ["ai-gateway-key", undefined],
+    ["chatgpt", "chatgpt/gpt-6-luna-fast"],
+    ["openai", "openai-api/gpt-6-luna-fast"],
+    ["anthropic", "anthropic-api/claude-sonnet-5"],
+  ] as const)("connects %s and returns directly to chat", async (selected, selection) => {
+    const fake = createFakePrompter({ single: () => selected, password: () => "new-key" });
+    expect(await runModelLogin({ appRoot: "/agent", prompter: fake.prompter })).toMatchObject({
+      kind: "ready",
+      reload: ["openai", "anthropic", "chatgpt"].includes(selected),
+    });
+    expect(fake.selectMessages).toEqual(["Choose a connection"]);
+    expect(mocks.writeSelection.mock.calls[0]?.slice(0, 2)).toEqual(["/agent", selected]);
+    expect(mocks.writeDefault).toHaveBeenCalledWith(selected);
+    if (["openai", "anthropic", "ai-gateway-key"].includes(selected))
+      expect(mocks.writeSecret).toHaveBeenCalledWith(
+        selected === "ai-gateway-key" ? selected : `${selected}-key`,
+        "new-key",
+      );
+    if (selection !== undefined)
+      expect(mocks.change).toHaveBeenCalledWith({ appRoot: "/agent", slug: selection });
+    else expect(mocks.change).not.toHaveBeenCalled();
+    if (selected === "vercel") expect(mocks.oauth).toHaveBeenCalledOnce();
+    if (selected === "chatgpt") expect(mocks.chatgpt).toHaveBeenCalledOnce();
+  });
   it.each(["vercel", "ai-gateway-key"])(
-    "selects Grok when switching from ChatGPT to %s",
+    "selects Luna Fast when switching from ChatGPT to %s",
     async (selected) => {
       mocks.authored.mockResolvedValue("chatgpt/gpt-5.6-luna-fast");
       const fake = createFakePrompter({ single: () => selected, password: () => "new-key" });
@@ -135,7 +141,10 @@ describe("model login", () => {
         reload: true,
       });
       expect(fake.selectMessages).toEqual(["Choose a connection"]);
-      expect(mocks.change).toHaveBeenCalledWith({ appRoot: "/agent", slug: "spacexai/grok-4.7" });
+      expect(mocks.change).toHaveBeenCalledWith({
+        appRoot: "/agent",
+        slug: "openai/gpt-6-luna-fast",
+      });
     },
   );
   it("reuses the CLI team without any prompts or project linking", async () => {
@@ -318,28 +327,20 @@ it.each(["openai", "anthropic"] as const)(
     expect(mocks.writeDefault).not.toHaveBeenCalled();
   },
 );
-it("preserves an explicitly authored eve helper's compatible custom model", async () => {
-  mocks.inspect.mockResolvedValue({
-    compiledState: {
-      manifest: {
-        config: {
-          model: {
-            id: "custom-model",
-            source: {},
-            routing: { kind: "external", provider: "openai" },
-          },
-        },
-      },
-    },
-  });
-  mocks.authored.mockResolvedValue("openai-api/custom-model");
-  const fake = createFakePrompter({ single: () => "openai", password: () => "new-key" });
+it.each([
+  ["openai", "openai-api/custom-model"],
+  ["openai", "openai-api/gpt-5.6-luna-fast"],
+  ["chatgpt", "chatgpt/gpt-5.6-luna-fast"],
+])("preserves an explicitly authored compatible %s model %s", async (connection, selection) => {
+  mocks.authored.mockResolvedValue(selection);
+  const fake = createFakePrompter({ single: () => connection, password: () => "new-key" });
   await expect(
     runModelLogin({ appRoot: "/agent", prompter: fake.prompter }),
   ).resolves.toMatchObject({
     kind: "ready",
     reload: false,
   });
+  expect(fake.selectMessages).toEqual(["Choose a connection"]);
   expect(mocks.change).not.toHaveBeenCalled();
 });
 
@@ -377,7 +378,7 @@ it("overlaps Gateway catalog loading with OAuth and does not validate the return
   mocks.oauth.mockReturnValue(oauth.promise);
   mocks.catalog.mockImplementation(async () => {
     catalogStarted.resolve();
-    return [{ id: "spacexai/grok-4.7", type: "language" }];
+    return [{ id: "openai/gpt-6-luna-fast", type: "language" }];
   });
   const result = runModelLogin({
     appRoot: "/agent",
@@ -468,7 +469,7 @@ it("changes teams without recompiling an unchanged Gateway model", async () => {
     kind: "ready",
     reload: false,
     model: {
-      id: "spacexai/grok-4.7",
+      id: "openai/gpt-6-luna-fast",
       endpoint: { kind: "gateway", connected: true, credential: "oauth", team: "Alice" },
     },
   });

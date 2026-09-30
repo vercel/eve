@@ -2,7 +2,6 @@ import type { ModelMessage } from "ai";
 
 import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
 
-import { replayDynamicTools } from "#context/build-dynamic-tools.js";
 import { contextStorage, type AlsContext } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
@@ -19,7 +18,6 @@ import {
   type PersistedDynamicToolMetadata,
 } from "#context/dynamic-tool-metadata.js";
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
-import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import type {
   SessionStartedStreamEvent,
@@ -67,15 +65,6 @@ function qualifyDynamicToolNames(
     entryKey,
     name: `${prefix}${entryKey}`,
   }));
-}
-
-/** Kept as the session-specific entry point for existing runtime consumers. */
-export function replayDynamicSessionTools(
-  metadata: readonly CurrentDynamicToolMetadata[],
-  _resolvers: readonly ResolvedDynamicToolResolver[],
-  sessionId: string,
-): readonly HarnessToolDefinition[] {
-  return replayDynamicTools(metadata, { sessionId, scope: "session" });
 }
 
 function durableKeyForEvent(
@@ -558,7 +547,7 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
   input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
 }
 
-/** Re-registers callbacks for compiled resolvers that explicitly support cold replay. */
+/** Re-registers missing callbacks while preserving the active turn's persisted tool set. */
 export async function rebindMissingCompiledDynamicToolCallbacks(input: {
   readonly ctx: AlsContext;
   readonly event: UnstampedMessageStreamEvent;
@@ -577,15 +566,19 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
   );
   if (needsResolution.length === 0) return;
   const resolverSlugs = new Set(needsResolution.map((entry) => entry.resolverSlug));
+  const matching = input.resolvers.filter((resolver) => resolverSlugs.has(resolver.slug));
+  // Framework resolvers opt into strict recovery because their persisted tool
+  // set represents locked runtime state. Authored resolvers rebind best-effort;
+  // a missing callback stays local to execution instead of blocking the turn.
+  const strictResolverSlugs = new Set(
+    matching
+      .filter((resolver) => resolver.rebindMissingCallbacks === true)
+      .map((resolver) => resolver.slug),
+  );
   const oldResolverSlugs = new Set(
     persisted
       .filter((entry) => !isCurrentDynamicToolMetadata(entry))
       .map((entry) => entry.resolverSlug),
-  );
-  const matching = input.resolvers.filter(
-    (resolver) =>
-      resolverSlugs.has(resolver.slug) &&
-      (oldResolverSlugs.has(resolver.slug) || resolver.rebindMissingCallbacks === true),
   );
   if (matching.length === 0) {
     input.ctx.set(TurnDynamicToolMetadataKey, toCurrentDynamicToolMetadataList(persisted));
@@ -596,11 +589,14 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
     input.ctx,
     async () => await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages),
   );
+  // Keep the active turn's persisted tools and closures. Re-resolution only
+  // registers callback implementations; newly returned tools are not advertised.
   const updated = toCurrentDynamicToolMetadataList(persisted, resolved.metadata);
   input.ctx.set(TurnDynamicToolMetadataKey, updated);
 
   const unresolved = updated.filter(
     (entry) =>
+      (strictResolverSlugs.has(entry.resolverSlug) || oldResolverSlugs.has(entry.resolverSlug)) &&
       needsResolution.some(
         (candidate) =>
           candidate.resolverSlug === entry.resolverSlug && candidate.name === entry.name,

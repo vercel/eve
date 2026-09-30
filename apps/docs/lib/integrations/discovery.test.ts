@@ -1,6 +1,17 @@
+import { getIntegrationEntry } from "@eve/catalog";
 import { describe, expect, it } from "vitest";
 import { getIntegration, integrations } from "./data";
 import { integrationMarkdown, integrationPaths, integrationSearchText } from "./discovery";
+
+const SECTIONS = ["## Install", "## Quick start", "## Configure"] as const;
+
+function sectionBody(markdown: string, heading: string): string {
+  const start = markdown.indexOf(`${heading}\n\n`);
+  if (start === -1) return "";
+  const bodyStart = start + heading.length + 2;
+  const next = markdown.indexOf("\n\n## ", bodyStart);
+  return markdown.slice(bodyStart, next === -1 ? undefined : next).trim();
+}
 
 describe("integration discovery", () => {
   it("includes the landing page and every detail page in crawler paths", () => {
@@ -32,6 +43,31 @@ describe("integration discovery", () => {
     expect(markdown).toContain("eve add channel/slack");
   });
 
+  it.each(integrations.map((integration) => [integration.slug, integration] as const))(
+    "renders %s as complete agent-readable setup",
+    (slug, integration) => {
+      const markdown = integrationMarkdown(integration);
+      const offsets = SECTIONS.map((heading) => markdown.indexOf(`${heading}\n\n`));
+
+      expect(offsets.every((offset) => offset !== -1)).toBe(true);
+      expect([...offsets].sort((a, b) => a - b)).toEqual(offsets);
+      for (const heading of SECTIONS) expect(sectionBody(markdown, heading)).not.toBe("");
+      expect(markdown).toContain(`](${integration.docsHref})`);
+      expect(integrationSearchText(integration)).toContain(integration.name);
+      if (getIntegrationEntry(slug)?.surfaces.registry) expect(markdown).toContain("eve add ");
+
+      const related = markdown.indexOf("## Related resources");
+      if (!integration.relatedResources?.length) {
+        expect(related).toBe(-1);
+        return;
+      }
+      expect(related).toBeGreaterThan(offsets[2]!);
+      for (const resource of integration.relatedResources) {
+        expect(markdown).toContain(`- [${resource.title}](${resource.href})`);
+      }
+    },
+  );
+
   it("renders Buzz as an ACP channel with explicit authorization guidance", () => {
     const buzz = getIntegration("buzz");
     expect(buzz).toBeDefined();
@@ -48,227 +84,6 @@ describe("integration discovery", () => {
     expect(markdown).toContain("Accepted senders share one eve identity");
     expect(markdown).toContain("## Configure");
     expect(integrationSearchText(buzz!)).toContain("acp");
-  });
-
-  it("renders the Web Chat setup for every host framework it documents", () => {
-    const web = getIntegration("eve");
-    expect(web).toBeDefined();
-
-    const markdown = integrationMarkdown(web!);
-    expect(markdown).toContain("eve add channel/web");
-    expect(markdown).toContain("/docs/guides/frontend/nextjs");
-    expect(markdown).toContain("/docs/guides/frontend/nuxt");
-    expect(markdown).toContain("/docs/guides/frontend/sveltekit");
-    expect(integrationSearchText(web!)).toContain("svelte");
-  });
-
-  it("renders the Browserbase extension setup", () => {
-    const browserbase = getIntegration("browserbase");
-    expect(browserbase).toBeDefined();
-
-    const markdown = integrationMarkdown(browserbase!);
-    expect(markdown).toContain("eve add extension/browserbase");
-    expect(markdown).toContain('import browserbase from "@browserbasehq/eve"');
-    expect(markdown).toContain("BROWSERBASE_API_KEY");
-    expect(integrationSearchText(browserbase!)).toContain("Stagehand");
-  });
-
-  it("renders related resources after Configure and omits the section when empty", () => {
-    const kernel = getIntegration("kernel");
-    expect(kernel).toBeDefined();
-
-    const markdown = integrationMarkdown(kernel!);
-    expect(markdown).toContain("## Related resources");
-    expect(markdown.indexOf("## Related resources")).toBeGreaterThan(
-      markdown.indexOf("## Configure"),
-    );
-    expect(markdown).toContain(
-      "- [How to build a browser agent that works behind a login](https://vercel.com/kb/guide/build-a-browser-agent)",
-    );
-    expect(markdown).toContain(
-      "- [Give your software factory a browser](https://vercel.com/kb/guide/software-factory-browser)",
-    );
-
-    const agentBrowser = getIntegration("agent-browser");
-    expect(agentBrowser).toBeDefined();
-    expect(integrationMarkdown(agentBrowser!)).toContain(
-      "- [Give your eve agent a browser](https://vercel.com/changelog/give-your-eve-agent-a-browser)",
-    );
-
-    for (const slug of ["github", "linear-agent", "github-tools", "linear", "vercel"]) {
-      const integration = getIntegration(slug);
-      expect(integration).toBeDefined();
-      expect(integrationMarkdown(integration!)).toContain(
-        "- [Build a software factory with eve](https://vercel.com/kb/guide/eve-software-factory)",
-      );
-    }
-
-    const vercel = getIntegration("vercel");
-    expect(integrationMarkdown(vercel!)).toContain(
-      "- [Manage Vercel projects with a software factory](https://vercel.com/kb/guide/software-factory-vercel-mcp)",
-    );
-
-    for (const slug of [
-      "slack",
-      "github",
-      "github-tools",
-      "datadog",
-      "datadog-instrumentation",
-      "vercel",
-    ]) {
-      const integration = getIntegration(slug);
-      expect(integration).toBeDefined();
-      expect(integrationMarkdown(integration!)).toContain(
-        "- [Build an incident response SRE agent with eve](https://vercel.com/kb/guide/eve-incident-sre-agent)",
-      );
-    }
-
-    const vercelMarkdown = integrationMarkdown(vercel!);
-    expect(vercelMarkdown.indexOf("eve-incident-sre-agent")).toBeLessThan(
-      vercelMarkdown.indexOf("eve-software-factory"),
-    );
-
-    for (const slug of ["slack", "notion"]) {
-      const integration = getIntegration(slug);
-      expect(integration).toBeDefined();
-      expect(integrationMarkdown(integration!)).toContain(
-        "- [Run a marketing team from Slack with eve](https://vercel.com/kb/guide/marketing-team-eve)",
-      );
-    }
-
-    const resend = getIntegration("chat-sdk-resend");
-    expect(resend).toBeDefined();
-    expect(integrationMarkdown(resend!)).toContain(
-      "- [Give your eve agent an email inbox with Resend](https://vercel.com/kb/guide/eve-agent-with-resend)",
-    );
-
-    const browserbase = getIntegration("browserbase");
-    expect(browserbase).toBeDefined();
-    expect(integrationMarkdown(browserbase!)).not.toContain("## Related resources");
-  });
-
-  it("renders the BlitzReels extension setup", () => {
-    const blitzreels = getIntegration("blitzreels");
-    expect(blitzreels).toBeDefined();
-
-    const markdown = integrationMarkdown(blitzreels!);
-    expect(markdown).toContain("eve add extension/blitzreels");
-    expect(markdown).toContain('import blitzreels from "@blitzreels/eve"');
-    expect(markdown).toContain("BLITZREELS_API_KEY");
-    expect(markdown).toContain("blitzreels__create_clip_batch");
-    expect(markdown).toContain("require eve approval");
-    expect(integrationSearchText(blitzreels!)).toContain("video editing");
-  });
-
-  it("renders the Mux Video extension setup", () => {
-    const muxVideo = getIntegration("mux-video");
-    expect(muxVideo).toBeDefined();
-
-    const markdown = integrationMarkdown(muxVideo!);
-    expect(markdown).toContain("github.com/muxinc/mux-video-agent.git");
-    expect(markdown).toContain('import muxVideo from "@mux/eve-video"');
-    expect(markdown).toContain("MUX_TOKEN_ID");
-    expect(markdown).toContain("mux_video__run_workflow");
-    expect(markdown).toContain("require explicit human approval");
-    expect(integrationSearchText(muxVideo!)).toContain("Mux Robots");
-  });
-
-  it("renders the Jetty extension and eval reporter setup", () => {
-    const jetty = getIntegration("jetty");
-    expect(jetty).toBeDefined();
-
-    const markdown = integrationMarkdown(jetty!);
-    expect(markdown).toContain("eve add extension/jetty");
-    expect(markdown).toContain('import jetty from "@jetty/eve"');
-    expect(markdown).toContain('import { Jetty } from "@jetty/eve/reporter"');
-    expect(markdown).toContain("JETTY_API_TOKEN");
-    expect(integrationSearchText(jetty!)).toContain("grading");
-  });
-
-  it("renders the Upstash AgentKit memory provider setup", () => {
-    const agentkitMemory = getIntegration("upstash-agentkit");
-    expect(agentkitMemory).toBeDefined();
-
-    const markdown = integrationMarkdown(agentkitMemory!);
-    expect(markdown).toContain("eve add memory/upstash-agentkit");
-    expect(markdown).toContain('import { redisMemory } from "@upstash/agentkit-eve/memory"');
-    expect(markdown).toContain("UPSTASH_REDIS_REST_URL");
-    expect(markdown).toContain("redisDocuments()");
-    expect(markdown).toContain("upstash-agentkit__search_memory");
-    expect(integrationSearchText(agentkitMemory!)).toContain("Memory provider");
-  });
-
-  it("renders the Kybernesis Arcana memory provider setup", () => {
-    const arcana = getIntegration("arcana");
-    expect(arcana).toBeDefined();
-
-    const markdown = integrationMarkdown(arcana!);
-    expect(markdown).toContain("eve add memory/arcana");
-    expect(markdown).toContain('import { arcanaMemory } from "@kybernesis/arcana/memory"');
-    expect(markdown).toContain("ARCANA_API_KEY");
-    expect(markdown).toContain("ARCANA_WORKSPACE");
-    expect(markdown).toContain("capture: { enabled: true }");
-    expect(integrationSearchText(arcana!)).toContain("Memory provider");
-  });
-
-  it("renders the Supermemory provider setup", () => {
-    const supermemory = getIntegration("supermemory");
-    expect(supermemory).toBeDefined();
-
-    const markdown = integrationMarkdown(supermemory!);
-    expect(markdown).toContain("eve add memory/supermemory");
-    expect(markdown).toContain('import supermemory from "@supermemory/eve"');
-    expect(markdown).toContain("SUPERMEMORY_API_KEY");
-    expect(markdown).toContain("supermemory__search");
-    expect(integrationSearchText(supermemory!)).toContain("Memory provider");
-  });
-
-  it("renders built-in file-memory provisioning guidance", () => {
-    const file = getIntegration("file");
-    expect(file).toBeDefined();
-
-    const markdown = integrationMarkdown(file!);
-    expect(markdown).toContain("eve add memory/file");
-    expect(markdown).toContain("eve integration setup file-memory");
-    expect(markdown).toContain("EVE_MEMORY_BLOB_STORE_ID");
-    expect(integrationSearchText(file!)).toContain("Memory provider");
-  });
-
-  it("renders the Hindsight memory extension setup", () => {
-    const hindsight = getIntegration("hindsight");
-    expect(hindsight).toBeDefined();
-
-    const markdown = integrationMarkdown(hindsight!);
-    expect(markdown).toContain("eve add extension/hindsight");
-    expect(markdown).toContain('import { hindsightMemory } from "@vectorize-io/hindsight-eve"');
-    expect(markdown).toContain("hindsightRetainHook");
-    expect(markdown).toContain("HINDSIGHT_API_KEY");
-    expect(markdown).toContain("HINDSIGHT_BANK_ID");
-    expect(integrationSearchText(hindsight!)).toContain("long-term memory");
-  });
-
-  it("renders the GitHub Tools extension setup", () => {
-    const githubTools = getIntegration("github-tools");
-    expect(githubTools).toBeDefined();
-
-    const markdown = integrationMarkdown(githubTools!);
-    expect(markdown).toContain("eve add extension/github-tools");
-    expect(markdown).toContain('connector: "github/my-connector"');
-    expect(markdown).toContain('preset: "maintainer"');
-    expect(markdown).toContain("github__addPullRequestComment");
-    expect(integrationSearchText(githubTools!)).toContain("code review");
-  });
-
-  it("renders the Blooio channel setup", () => {
-    const blooio = getIntegration("blooio");
-    expect(blooio).toBeDefined();
-
-    const markdown = integrationMarkdown(blooio!);
-    expect(markdown).toContain("eve add channel/blooio");
-    expect(markdown).toContain('import { blooioChannel } from "eve-channel-blooio"');
-    expect(markdown).toContain("BLOOIO_API_KEY");
-    expect(markdown).toContain("BLOOIO_WEBHOOK_SECRET");
-    expect(integrationSearchText(blooio!)).toContain("iMessage");
   });
 
   it("renders every connection setup variant", () => {
@@ -289,25 +104,5 @@ describe("integration discovery", () => {
     expect(markdown).toContain('process.env.EVE_DEV === "1"');
     expect(markdown).toContain("SHOPIFY_STORE_DOMAIN");
     expect(markdown).not.toContain("### MCP ·");
-  });
-
-  it("renders instrumentation integrations with registry installation", () => {
-    const braintrust = getIntegration("braintrust");
-    expect(braintrust).toBeDefined();
-
-    const markdown = integrationMarkdown(braintrust!);
-    expect(markdown).toContain("eve add instrumentation/braintrust");
-    expect(markdown).toContain("agent/instrumentation/braintrust.ts");
-    expect(markdown).toContain("braintrustEveInstrumentation");
-    expect(markdown).not.toContain("// agent/hooks/braintrust.ts");
-    expect(markdown).toContain("BRAINTRUST_API_KEY");
-
-    const posthog = getIntegration("posthog-instrumentation");
-    expect(posthog).toBeDefined();
-
-    const posthogMarkdown = integrationMarkdown(posthog!);
-    expect(posthogMarkdown).toContain("eve add instrumentation/posthog");
-    expect(posthogMarkdown).toContain("PostHogTraceExporter");
-    expect(posthogMarkdown).toContain("POSTHOG_PROJECT_TOKEN");
   });
 });

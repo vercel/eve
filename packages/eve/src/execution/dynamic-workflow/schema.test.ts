@@ -23,7 +23,6 @@ describe("workflow program schema", () => {
       readWorkflowProgramAgentCall({
         target: "researcher",
         input: {
-          agentId: "agent-1",
           message: "continue",
           outputSchema: { properties: { ok: { type: "boolean" } }, type: "object" },
         },
@@ -31,7 +30,6 @@ describe("workflow program schema", () => {
     ).toEqual({
       target: "researcher",
       input: {
-        agentId: "agent-1",
         message: "continue",
         outputSchema: { properties: { ok: { type: "boolean" } }, type: "object" },
       },

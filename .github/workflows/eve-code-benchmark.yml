@@ -6,8 +6,10 @@ on:
       - ".github/workflows/eve-code-benchmark.yml"
       - ".github/scripts/resolve-benchmark-request*"
       - "packages/eve-code/**"
-  # Every eve-code change on main publishes a fresh result per harness, so PRs
-  # compare their HEAD against the latest main as the baseline.
+  # Every eve-code change on main publishes a fresh swe-lean result per harness,
+  # so PRs compare their HEAD against the latest main as the baseline. Pushes do
+  # not run deepswe-lean: its baseline is only as fresh as the last manual
+  # dispatch, so a PR's delta there also includes eve-code changes merged since.
   push:
     branches: [main]
     paths:
@@ -17,9 +19,14 @@ on:
   workflow_dispatch:
     inputs:
       harness:
-        description: Comma-separated harnesses to benchmark on SWE-lean
+        description: Comma-separated harnesses to benchmark
         type: string
         default: eve-code,opencode,pi
+      dataset:
+        description: eve-bench dataset to run
+        type: choice
+        options: [swe-lean, deepswe-lean]
+        default: swe-lean
 
 # OIDC alternative: add `id-token: write` here and omit `vercel-token` below
 # after configuring a matching Vercel team OIDC policy.
@@ -42,6 +49,9 @@ jobs:
       run: ${{ steps.request.outputs.run }}
       harness: ${{ steps.request.outputs.harness }}
       slug: ${{ steps.request.outputs.slug }}
+      dataset: ${{ steps.request.outputs.dataset }}
+      reasoning: ${{ steps.request.outputs.reasoning }}
+      attempts: ${{ steps.request.outputs.attempts }}
       sha: ${{ steps.request.outputs.sha }}
       pr: ${{ steps.request.outputs.pr }}
     steps:
@@ -64,12 +74,13 @@ jobs:
     needs: request
     if: needs.request.outputs.run == 'true'
     concurrency:
-      group: eve-code-${{ needs.request.outputs.pr || github.ref }}-${{ needs.request.outputs.slug }}
+      group: eve-code-${{ needs.request.outputs.pr || github.ref }}-${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    # Every trial runs in parallel, so a run lasts about as long as its slowest
-    # trial (15-minute agent timeout plus preparation and verification).
-    timeout-minutes: 90
+    # Trials run in waves of up to 16 sandboxes; each trial can take up to its
+    # dataset's agent timeout (20 minutes on deepswe-lean) plus preparation and
+    # verification.
+    timeout-minutes: 120
     steps:
       # vercel/eve is public and eve-bench is private; GitHub never lets a public
       # repository `uses:` a private action, so fetch main with a read-only deploy
@@ -87,23 +98,26 @@ jobs:
         with:
           harness: ${{ needs.request.outputs.harness }}
           agent-repository: vercel/eve
-          agent-path: packages/eve-code
+          agent-paths: '["packages/eve-code"]'
           agent-ref: ${{ needs.request.outputs.sha }}
-          dataset: swe-lean
+          dataset: ${{ needs.request.outputs.dataset }}
           # The PR comment's ranking tables show these plus each dimension's winner.
           contenders: eve-code@baseline,eve-code@head
-          model: ${{ vars.EVE_CODE_BENCH_MODEL || 'openai/gpt-6-luna' }}
-          # opencode drops Gemini's tool-call thought signatures, so Gemini stops reasoning
-          # after its first steps there; gpt-6-luna needs no signature to keep reasoning.
-          reasoning: low
-          attempts: "1"
-          # Per harness: one sandbox per task, so all trials start at once.
-          concurrency: "8"
+          # Sonnet keeps Anthropic's prompt-cache behavior (tools first, cache writes)
+          # visible at half Opus's price. Avoid Gemini: opencode drops its tool-call
+          # thought signatures, so it stops reasoning after the first steps there.
+          model: ${{ vars.EVE_CODE_BENCH_MODEL || 'anthropic/claude-sonnet-5.5' }}
+          # Reasoning and attempts are calibrated per dataset; see
+          # .github/scripts/resolve-benchmark-request.mjs.
+          reasoning: ${{ needs.request.outputs.reasoning }}
+          attempts: ${{ needs.request.outputs.attempts }}
+          # The action's maximum; each contender's tasks x attempts run in waves.
+          concurrency: "16"
           native-build: "false"
           # Baselines and cross-harness references resolve automatically from the
           # durable result store; only dispatch/push/schedule runs publish to it.
           blob-token: ${{ secrets.EVE_BENCH_BLOB_READ_WRITE_TOKEN }}
-          artifact-name: swe-lean-${{ needs.request.outputs.slug }}
+          artifact-name: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}
           gateway-key: ${{ secrets.AI_GATEWAY_API_KEY }}
           github-token: ${{ github.token }}
           vercel-token: ${{ secrets.VERCEL_TOKEN }}

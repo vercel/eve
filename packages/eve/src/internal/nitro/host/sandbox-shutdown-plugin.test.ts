@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  clearActiveSandboxHandlesForTest,
+  shutdownActiveSandboxHandles,
   trackActiveSandboxHandle,
 } from "#execution/sandbox/active-handles.js";
 import {
@@ -29,8 +29,8 @@ function createFakeProcess(env: Record<string, string | undefined> = {}) {
   };
 }
 
-afterEach(() => {
-  clearActiveSandboxHandlesForTest();
+afterEach(async () => {
+  await shutdownActiveSandboxHandles();
   vi.unstubAllEnvs();
 });
 

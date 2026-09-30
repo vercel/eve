@@ -2,7 +2,7 @@ import type { LocalTraceSummary } from "#tracing/local-trace-summary.js";
 
 export type LocalTraceSortBy = "duration" | "failures" | "inputTokens" | "latest";
 
-export interface LocalTraceQueryFilter {
+interface LocalTraceQueryFilter {
   readonly agentName?: string;
   /** Selects traces containing error spans, not necessarily failed activations. */
   readonly failedOnly?: boolean;

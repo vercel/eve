@@ -3,7 +3,7 @@ import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
 /** Renderer-ready copy derived from a tool call without owning its lifecycle. */
-export interface ToolPresentation {
+interface ToolPresentation {
   readonly title: string;
   readonly subtitle: string;
   readonly summarizeResult: (output: unknown) => string | undefined;
@@ -30,6 +30,10 @@ export interface ToolPresentationContext {
    * `Delegate stock-price` — instead of a generic tool call.
    */
   readonly isSubagent?: boolean;
+  /** The tool's own `label.start` copy, used when eve has no copy of its own for the tool. */
+  readonly label?: string;
+  /** The tool's own `label.complete` copy, shown once the call succeeds. */
+  readonly completeLabel?: string;
 }
 
 /** Copy needed to aggregate equivalent calls without merging their state. */
@@ -88,10 +92,23 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     singularNoun: "command",
     pluralNoun: "commands",
   },
+  connection_execute: {
+    verb: "Call",
+    pastVerb: "Called",
+    argKey: "",
+    extractItem: (input) => {
+      const connection = salientArg(input, "connection");
+      const tool = salientArg(input, "tool");
+      return connection === undefined || tool === undefined ? undefined : `${connection}.${tool}`;
+    },
+    singularNoun: "connection tool",
+    pluralNoun: "connection tools",
+  },
   connection_search: {
-    verb: "Discover",
-    pastVerb: "Discovered",
-    argKey: "keywords",
+    verb: "Search",
+    pastVerb: "Searched",
+    argKey: "query",
+    extractItem: (input) => salientArg(input, "connection"),
     singularNoun: "tool search",
     pluralNoun: "tool searches",
   },
@@ -122,14 +139,6 @@ const BUILTIN_TOOL_COPY: Readonly<Record<string, BuiltinToolCopy>> = {
     argKey: "filePath",
     singularNoun: "file",
     pluralNoun: "files",
-  },
-  task_cancel: {
-    verb: "Cancel",
-    pastVerb: "Cancelled",
-    argKey: "taskIds",
-    extractItem: taskIdsArg,
-    singularNoun: "task",
-    pluralNoun: "tasks",
   },
   web_fetch: {
     verb: "Fetch",
@@ -223,17 +232,18 @@ export function presentTool(
   if (baseName === "write_file") return presentWriteFileTool(toolName, input, context);
   if (context?.isSubagent === true) {
     // Named subagent dispatch: the tool name is the delegation target; the
-    // message rides as the quiet subtitle. The block is transient — the
-    // nested subagent section replaces it once the child registers.
+    // message rides as the quiet subtitle. The row is transient — the
+    // task's start line replaces it once the call becomes a task.
+    const name = agentDisplayName(toolName);
     return {
-      title: `${DELEGATE_VERB} ${baseName}`,
-      doneTitle: `Delegated ${baseName}`,
+      title: `${DELEGATE_VERB} ${name}`,
+      doneTitle: `Delegated ${name}`,
       subtitle: salientArg(input, "message") ?? "",
       summarizeResult: () => undefined,
     };
   }
   if (baseName === "final_output") {
-    // Task-mode terminal signal (subagent streams): its input is the
+    // Structured-output terminal signal: its input is the
     // structured result itself, kept behind the expanded `--tools full` view.
     return { title: FINAL_OUTPUT_TITLE, subtitle: "", summarizeResult: () => undefined };
   }
@@ -260,6 +270,18 @@ export function presentTool(
     }
   }
 
+  if (context?.label !== undefined) {
+    // Authored activity copy replaces the raw name and argument dump.
+    const presentation = {
+      title: context.label,
+      subtitle: "",
+      summarizeResult: summarizeToolResult,
+    };
+    return context.completeLabel === undefined
+      ? presentation
+      : { ...presentation, doneTitle: context.completeLabel };
+  }
+
   return {
     title: toolName,
     subtitle: summarizeToolArgs(input),
@@ -268,10 +290,19 @@ export function presentTool(
 }
 
 /**
+ * The name an agent task goes by. The generic self-delegation tool is
+ * literally named `agent`, which reads as `subagent` to a person.
+ */
+export function agentDisplayName(toolName: string): string {
+  const baseName = toolBaseName(toolName);
+  return baseName === "agent" ? "subagent" : baseName;
+}
+
+/**
  * Placeholder copy for a call whose input is still streaming from the model
- * (`action.preparing`). Known tools lead with their activity verb so the row
- * already reads as intent (`Fetch …`); unknown tools keep their name with a
- * quiet hint. The full presentation replaces this once the input arrives.
+ * (`action.input.appended`). Known tools lead with their activity verb so the
+ * row already reads as intent (`Fetch …`); unknown tools lead with their name.
+ * The full presentation replaces this once the input arrives.
  */
 export function presentPreparingTool(
   toolName: string,
@@ -285,15 +316,15 @@ export function presentPreparingTool(
     // A named subagent's tool carries the delegation target in its name —
     // showable before the message finishes streaming.
     return {
-      title: `${DELEGATE_VERB} ${baseName} …`,
+      title: `${DELEGATE_VERB} ${agentDisplayName(toolName)} …`,
       subtitle: "",
       summarizeResult: () => undefined,
     };
   }
   const verb = baseName === "write_file" ? WRITE_FILE_VERB : BUILTIN_TOOL_COPY[baseName]?.verb;
   return {
-    title: verb === undefined ? toolName : `${verb} …`,
-    subtitle: verb === undefined ? "preparing…" : "",
+    title: `${verb ?? toolName} …`,
+    subtitle: "",
     summarizeResult: () => undefined,
   };
 }
@@ -345,16 +376,6 @@ function webSearchActionArg(input: unknown): string | undefined {
  * renders verbatim in aggregated rows, so a model-controlled value must lose
  * its terminal controls here, not at the render call sites.
  */
-/** Joins a `taskIds: string[]` argument into one salient line. */
-function taskIdsArg(input: unknown): string | undefined {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
-  const value = (input as Record<string, unknown>).taskIds;
-  if (!Array.isArray(value)) return undefined;
-  const ids = value.filter((id): id is string => typeof id === "string");
-  if (ids.length === 0) return undefined;
-  return salientLine(ids.join(", "));
-}
-
 function salientArg(input: unknown, key: string): string | undefined {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return undefined;
   const value = (input as Record<string, unknown>)[key];

@@ -14,7 +14,7 @@ import type {
 } from "#public/channels/twilio/twilioChannel.js";
 
 /** Default phone-number auth projection for Twilio webhook actors. */
-export function defaultTwilioAuth(input: {
+function defaultTwilioAuth(input: {
   readonly from: string;
   readonly to?: string;
   readonly channel: "text" | "voice";

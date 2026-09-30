@@ -1,12 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { start } from "#internal/workflow/runtime.js";
-import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
+import {
+  captureTurnEvents,
+  filterEventsByType,
+  readFirstTurnReply,
+} from "#internal/testing/events.js";
 import { workflowEntry } from "#execution/session/entry.js";
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
-import { SLEEP_INPUT_SCHEMA, executeSleepTool } from "#execution/tools/sleep.js";
+import { SLEEP_INPUT_SCHEMA } from "#tools/provided/sleep.js";
+import { executeSleepTool } from "#tools/provided/sleep-workflow.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
   askThenRaceWorkflow,
+  answerWithResponderWorkflow,
   confirmDeployWorkflow,
   deployServiceWorkflow,
   failingDeployWorkflow,
@@ -19,6 +25,7 @@ import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
 } from "#internal/testing/workflow-tool-run-harness.js";
+import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 
 describe("workflow tools", () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -36,11 +43,10 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:step-reference",
-            mode: "task",
           }),
         },
       ]);
-      return String((await run.returnValue).output);
+      return String(await readFirstTurnReply(run));
     });
     expect(output).toContain('"argument":"plan:api"');
     expect(output).toContain('"receiver":"api"');
@@ -61,12 +67,10 @@ describe("workflow tools", () => {
           input: { message: "Run sleep" },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-tool-sleep",
-            mode: "task",
           }),
         },
       ]);
-      const result = await run.returnValue;
-      return String(result.output);
+      return String(await readFirstTurnReply(run));
     });
 
     expect(output).toContain('"waitedSeconds":1');
@@ -87,12 +91,10 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-tool-wait",
-            mode: "task",
           }),
         },
       ]);
-      const result = await run.returnValue;
-      return String(result.output);
+      return String(await readFirstTurnReply(run));
     });
 
     expect(output).toContain('"plan":"plan:api"');
@@ -100,6 +102,7 @@ describe("workflow tools", () => {
   });
 
   it("fails workflow-context misuse in a step with actionable guidance", async () => {
+    const consoleOutput = captureConsoleOutput();
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-step-context-misuse",
       execute: workflowContextMisuseWorkflow,
@@ -114,12 +117,10 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-step-context-misuse",
-            mode: "task",
           }),
         },
       ]);
-      const result = await run.returnValue;
-      return String(result.output);
+      return String(await readFirstTurnReply(run));
     });
 
     expect(output).toContain('ctx.agents is unavailable inside a "use step" function.');
@@ -127,6 +128,10 @@ describe("workflow tools", () => {
       "Read ctx.agents in the workflow body and pass the required serializable metadata into the step.",
     );
     expect(output).toContain("Attempt 1.");
+    expect(consoleOutput.lines).toContainEqual(
+      expect.stringContaining(workflowSdkNotice.fatalStep),
+    );
+    expect(consoleOutput.unexpected(workflowSdkNotice.fatalStep)).toEqual([]);
   });
 
   it("settles the call with an error when the workflow body throws", async () => {
@@ -144,18 +149,17 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "schedule:workflow-tool-fail",
-            mode: "task",
           }),
         },
       ]);
-      const result = await run.returnValue;
-      return String(result.output);
+      return String(await readFirstTurnReply(run));
     });
 
     expect(output).toContain("deploy of api exploded");
   });
 
   it("routes workflow reports, human input, and outcome through the session owner", async () => {
+    const output = captureConsoleOutput();
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-hitl",
@@ -172,7 +176,6 @@ describe("workflow tools", () => {
           serializedContext: buildWorkflowToolSerializedContext({
             acceptedDeploymentId: "dpl_inline",
             continuationToken: "http:workflow-tool-hitl",
-            mode: "conversation",
             requestInput: true,
           }),
         },
@@ -194,6 +197,10 @@ describe("workflow tools", () => {
           prompt: "Apply plan:api?",
         });
         expect(request.options?.map((option) => option.id)).toEqual(["approve", "cancel"]);
+        // The call is still running, so the question parks the open turn.
+        const [parked] = filterEventsByType(asked, "turn.waiting");
+        expect(asked.at(-1)).toBe(parked);
+        expect(filterEventsByType(asked, "turn.completed")).toHaveLength(0);
 
         const commandToken = sessionCommandHookToken(run.runId);
         await resumeSessionInbox(commandToken, {
@@ -202,6 +209,9 @@ describe("workflow tools", () => {
         });
 
         const answered = await stream.nextTurn();
+        expect(filterEventsByType(answered, "input.resolved")).toMatchObject([
+          { data: { resolutions: [{ outcome: "answered", requestId: request.requestId }] } },
+        ]);
         const progress = answered.findIndex(
           (event) =>
             event.type === "action.partial" && event.data.result.output === "approval received",
@@ -219,6 +229,86 @@ describe("workflow tools", () => {
           JSON.stringify({ approved: true, service: "api" }),
         );
         expect(filterEventsByType(answered, "turn.failed")).toHaveLength(0);
+        // The answer resumes the same turn, which completes once.
+        const turnIds = new Set(
+          answered.flatMap((event) =>
+            "data" in event && "turnId" in event.data ? [event.data.turnId] : [],
+          ),
+        );
+        expect([...turnIds]).toEqual([parked!.data.turnId]);
+        expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
+        expect(filterEventsByType(answered, "turn.completed")).toHaveLength(1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+    expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
+  }, 60_000);
+
+  it("exposes the principal that answered ctx.ask", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const bob = {
+      ...alice,
+      attributes: { private: "channel-only" },
+      principalId: "bob",
+    };
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-ask-responder",
+      execute: answerWithResponderWorkflow,
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: {
+            ...buildWorkflowToolSerializedContext({
+              continuationToken: "http:workflow-tool-ask-responder",
+              requestInput: true,
+            }),
+            "eve.auth": alice,
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const requested = await stream.nextTurn();
+        const request = (
+          filterEventsByType(requested, "input.requested")[0] as InputRequestedStreamEvent
+        ).data.requests[0]!;
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          auth: bob,
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request.requestId }] },
+        });
+
+        const answered = await stream.nextTurn();
+        const result = filterEventsByType(answered, "action.result").find(
+          (event) =>
+            event.data.result.kind === "tool-result" &&
+            event.data.result.toolName === "confirm_deploy",
+        );
+        expect(JSON.parse(String(result?.data.result.output))).toEqual({
+          answer: {
+            optionId: "approve",
+            responder: {
+              authenticator: "test",
+              principalId: "bob",
+              principalType: "user",
+            },
+            status: "answered",
+          },
+          runStartPrincipal: "alice",
+        });
       } finally {
         stream.dispose();
         await run.cancel();
@@ -241,7 +331,6 @@ describe("workflow tools", () => {
           input: { message: 'Run confirm_deploy with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:workflow-tool-ask-deadline",
-            mode: "conversation",
             requestInput: true,
           }),
         },
@@ -287,7 +376,6 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildWorkflowToolSerializedContext({
             continuationToken: "http:workflow-tool-progress",
-            mode: "conversation",
           }),
         },
       ]);

@@ -3,7 +3,7 @@ import { defineTool } from "eve/tools";
 import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import { queryLocalTraceSummaries, type LocalTraceSortBy } from "#tracing/local-trace-query.js";
 import { summarizeLocalTrace, type LocalTraceSummary } from "#tracing/local-trace-summary.js";
-import { resolveConversationId } from "#tracing/conversation-context.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
 import {
   localTraceConversationMarker,
   localTraceIndexedMarker,

@@ -163,7 +163,7 @@ describe("load_skill executor", () => {
     await expect(
       contextStorage.run(ctx, () => execute({ skill: "linear" }, {} as never)),
     ).rejects.toThrow(
-      '"linear" is an installed connection, not a skill. Use connection_search with connection "linear" to find its tools.',
+      '"linear" is a connection, not a skill. Find its tools with connection_search and connection "linear", then call them with connection_execute.',
     );
   });
 });

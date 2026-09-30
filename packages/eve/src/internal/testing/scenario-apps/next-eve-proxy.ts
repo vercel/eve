@@ -5,7 +5,7 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
 const require = createRequire(import.meta.url);
 const nextRequire = createRequire(require.resolve("next/package.json"));
 
-export interface NextEveProxyDescriptorOptions {
+interface NextEveProxyDescriptorOptions {
   readonly installDependencies?: boolean;
   readonly vercelVersion?: string;
 }

@@ -36,6 +36,8 @@ export interface InstrumentationModelRef {
 
 /** Token usage for one model call. A field is absent when the provider omits it. */
 export interface InstrumentationUsage {
+  /** Provider-reported cost in US dollars. Absent when the provider omits pricing. */
+  readonly costUsd?: number;
   readonly inputTokenDetails?: {
     readonly cacheReadTokens?: number;
     readonly cacheWriteTokens?: number;
@@ -121,12 +123,13 @@ export function attemptIdempotencyKey(scope: InstrumentationAttemptScope): strin
   return `step:${scope.attemptId}`;
 }
 
-/** One model call occurs per AI SDK step within an eve attempt. */
+/** Identifies one provider call, including retries, within an AI SDK step. */
 export function modelCallIdempotencyKey(
   scope: InstrumentationAttemptScope,
   stepNumber: number,
+  callIndex: number,
 ): string {
-  return `model:${scope.attemptId}:${String(stepNumber)}`;
+  return `model:${scope.attemptId}:${String(stepNumber)}:${String(callIndex)}`;
 }
 
 export function toolCallIdempotencyKey(
@@ -528,6 +531,7 @@ export interface InstrumentationActionFailedEvent {
   readonly idempotencyKey: string;
   readonly outcome: Exclude<InstrumentationActionOutcome, "completed">;
   readonly scope: InstrumentationAttemptScope;
+  readonly usage?: InstrumentationUsage;
 }
 
 export type InstrumentationActionTerminalEvent =

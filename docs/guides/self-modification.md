@@ -3,7 +3,7 @@ title: "Self-Modification"
 description: "Ask your agent to update its own instructions, tools, skills, and other authored files during local development."
 ---
 
-When `eve dev` starts a local server, it mounts the bundled self-modification extension by default. Ask your agent to change its instructions, tools, skills, or other files under `agent/`; eve delegates the source work to the `self-modification__agent` subagent. Connecting to an existing server with `eve dev <url>` does not add the bundled extension to that server.
+When `eve dev` starts a local server, it mounts the bundled self-modification extension by default. Ask your agent to change its instructions, tools, skills, or other files under `agent/`; eve delegates the source work to the `self-modification__agent` subagent. Connecting to an existing server with `eve remote connect --url <url>` does not add the bundled extension to that server.
 
 The bundled extension is for local development and is not included in production builds.
 
@@ -18,6 +18,16 @@ Add a tool that converts temperatures between Celsius and Fahrenheit.
 ```
 
 The self-modification subagent changes the authored files in your project. Review the diff and test the new behavior as you would for any other source change. `eve dev` reloads changes while you work.
+
+## Change the self-modification model
+
+The subagent uses your agent's model by default. To give it a different model or reasoning level, ask for it directly:
+
+```text
+Switch the self-modification subagent to openai/gpt-6-sol with low reasoning.
+```
+
+The first time, this creates `agent/extensions/self-modification/extension.ts` with those settings. After that file exists, later changes edit it. You can also edit the file yourself: it accepts `model` and `reasoning` options.
 
 ## Run without self-modification
 

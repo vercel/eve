@@ -13,7 +13,7 @@ import type {
   JudgeQuestionConstraint,
 } from "#evals/types.js";
 
-export interface JudgeDeps {
+interface JudgeDeps {
   readonly collector: AssertionCollector;
   readonly getReply: () => string | null;
   readonly getInput: () => string;

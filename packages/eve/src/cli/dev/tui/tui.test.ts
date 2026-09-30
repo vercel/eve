@@ -43,6 +43,45 @@ describe("runDevelopmentTui", () => {
     expect(second.session).toBeUndefined();
   });
 
+  it("offers default but no incompatible effort for toggle-only models", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: "anthropic/claude-toggle-only",
+                name: "Claude Toggle Only",
+                type: "language",
+                owned_by: "anthropic",
+                tags: ["reasoning", "web-search"],
+                reasoning_options: [{ type: "toggle" }],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    await runDevelopmentTui({
+      target: {
+        kind: "local",
+        serverUrl: "http://127.0.0.1:4321/",
+        workspaceRoot: "/tmp/app",
+      },
+    });
+
+    const suggestions = await mocks.runnerOptions[0]?.argumentSuggestions?.("model");
+    expect(suggestions).toEqual([
+      {
+        value: "anthropic/claude-toggle-only",
+        label: "anthropic/claude-toggle-only",
+        hint: "Anthropic",
+        next: [{ value: "default", label: "default" }],
+      },
+    ]);
+  });
+
   it.each([
     [
       "remote",

@@ -9,16 +9,16 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   clearPendingSessionLimitPrompt,
   consumeDeferredStepInput,
-  createRuntimeToolCallActionFromToolCall,
   getApprovedTools,
   getPendingInputRequestIds,
-  hasDeferredStepInput,
   hasPendingInputBatch,
   hasStepInput,
   resolvePendingInput,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
+import { getDeferredStepInput } from "#harness/pending-input-batches.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
+import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
 import { buildToolApproval, buildToolSet } from "#harness/tools.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
@@ -176,7 +176,7 @@ describe("resolvePendingInput", () => {
 
     // The follow-up message should be deferred.
     expect(result.deferredMessage).toBe(true);
-    expect(hasDeferredStepInput(result.session)).toBe(true);
+    expect(getDeferredStepInput(result.session)).toBeDefined();
 
     const deferred = consumeDeferredStepInput({
       session: result.session,
@@ -185,7 +185,7 @@ describe("resolvePendingInput", () => {
     expect(deferred.input).toEqual({
       message: "Ignore that and say hi instead.",
     });
-    expect(hasDeferredStepInput(deferred.session)).toBe(false);
+    expect(getDeferredStepInput(deferred.session)).toBeUndefined();
   });
 
   it("defers channel context until after tool approvals are resolved", () => {
@@ -241,11 +241,11 @@ describe("resolvePendingInput", () => {
 
     expect(result.outcome).toBe("resolved");
     expect(result.messages.at(-1)?.role).toBe("tool");
-    expect(hasDeferredStepInput(result.session)).toBe(true);
+    expect(getDeferredStepInput(result.session)).toBeDefined();
 
     const deferred = consumeDeferredStepInput({ session: result.session });
     expect(deferred.input).toEqual({ context: [context] });
-    expect(hasDeferredStepInput(deferred.session)).toBe(false);
+    expect(getDeferredStepInput(deferred.session)).toBeUndefined();
   });
 
   it("resolves approval when follow-up text matches an option", () => {
@@ -310,7 +310,7 @@ describe("resolvePendingInput", () => {
       role: "tool",
     });
     expect(getApprovedTools(result.session).has("bash")).toBe(true);
-    expect(hasDeferredStepInput(result.session)).toBe(false);
+    expect(getDeferredStepInput(result.session)).toBeUndefined();
   });
 
   it("records compound approval key when resolveApprovalKey is provided", () => {
@@ -652,7 +652,7 @@ describe("resolvePendingInput", () => {
     expect(result.outcome).toBe("continue");
     expect(result.rejectedActions).toBeUndefined();
     expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
-    expect(hasDeferredStepInput(result.session)).toBe(false);
+    expect(getDeferredStepInput(result.session)).toBeUndefined();
     expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
@@ -1061,7 +1061,7 @@ describe("pending input batch collection", () => {
 
     expect(result.outcome).toBe("continue");
     expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
-    expect(hasDeferredStepInput(result.session)).toBe(false);
+    expect(getDeferredStepInput(result.session)).toBeUndefined();
     expect(getPendingInputRequestIds(result.session.state)).toEqual(
       new Set(["approval-1", "approval-2"]),
     );
@@ -1180,7 +1180,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     expect(result.outcome).toBe("unresolved");
     expect(result.limitContinuation).toBeUndefined();
     expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
-    expect(hasDeferredStepInput(result.session)).toBe(true);
+    expect(getDeferredStepInput(result.session)).toBeDefined();
 
     const deferred = consumeDeferredStepInput({ session: result.session });
     expect(deferred.input).toEqual({ message: "also do this other thing" });
@@ -1209,7 +1209,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     expect(result.limitContinuation).toEqual({ granted: true });
     expect(result.consumedMessage).toBe(true);
     expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
-    expect(hasDeferredStepInput(result.session)).toBe(false);
+    expect(getDeferredStepInput(result.session)).toBeUndefined();
   });
 
   it("defers an approval response while the limit batch remains open", () => {
@@ -1264,7 +1264,7 @@ describe("clearPendingSessionLimitPrompt", () => {
     // No stale batch left: the follow-up message flows to the step (where
     // the pre-model gate re-raises the prompt) instead of deferring forever.
     expect(result.outcome).toBe("continue");
-    expect(hasDeferredStepInput(cleared)).toBe(false);
+    expect(getDeferredStepInput(cleared)).toBeUndefined();
   });
 
   it("keeps model-anchored batches (tool approvals) intact", () => {
@@ -1299,7 +1299,7 @@ describe("clearPendingSessionLimitPrompt", () => {
     // answerable; the follow-up message continues as an ordinary turn.
     expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
     expect(result.outcome).toBe("continue");
-    expect(hasDeferredStepInput(result.session)).toBe(false);
+    expect(getDeferredStepInput(result.session)).toBeUndefined();
   });
 
   it("is a no-op without a pending batch", () => {

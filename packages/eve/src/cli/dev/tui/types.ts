@@ -8,6 +8,14 @@ export type { LogDisplayMode };
 export type TerminalPartDisplayMode = "full" | "collapsed" | "auto-collapsed" | "hidden";
 
 /**
+ * Controls how subagent tasks render. `collapsed` writes a line when a
+ * subagent task starts and when it ends, and shows its current activity in
+ * the task panel above the prompt; `full` also writes each finished child
+ * message and tool call; `hidden` shows neither lines nor panel rows.
+ */
+export type SubagentDisplayMode = "full" | "collapsed" | "hidden";
+
+/**
  * Controls which usage statistic is shown for assistant responses.
  */
 export type AssistantResponseStatsMode = "tokens" | "tokensPerSecond";
@@ -32,12 +40,11 @@ export type TuiDisplayOptions = {
   reasoning?: TerminalPartDisplayMode;
 
   /**
-   * How subagent sections should render. `full` shows every nested child
-   * event line and the subagent's output; `auto-collapsed` collapses the
-   * section once the subagent reaches `done`; `collapsed` always shows
-   * only the header; `hidden` skips the section entirely.
+   * How subagent tasks render.
+   *
+   * @default "collapsed"
    */
-  subagents?: TerminalPartDisplayMode;
+  subagents?: SubagentDisplayMode;
 
   /**
    * How MCP connection authorization sections should render. `full`

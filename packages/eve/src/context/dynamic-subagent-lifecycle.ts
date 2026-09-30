@@ -9,7 +9,7 @@ import {
   TurnDynamicSubagentSelectionsKey,
   type DurableDynamicSubagentSelection,
 } from "#context/keys.js";
-import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/background.js";
+import { createPreparedWorkflowToolHarnessDefinition } from "#execution/tools/workflow/harness-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -54,7 +54,6 @@ async function resolveSelections(input: {
           logicalPath: resolver.logicalPath,
           name: resolver.name,
           nodeId: resolver.nodeId,
-          outputSchema: effectiveRemoteAgent.outputSchema,
           path: effectiveRemoteAgent.path,
           sourceId: resolver.sourceId,
           sourceKind: resolver.sourceKind,
@@ -194,11 +193,18 @@ export function getDynamicSubagentSelection(
   input: ContextReader,
   nodeId: string,
 ): Exclude<DurableDynamicSubagentSelection, null> | undefined {
-  const turn = input.get(TurnDynamicSubagentSelectionsKey) ?? {};
-  if (Object.hasOwn(turn, nodeId)) {
-    return turn[nodeId] ?? undefined;
-  }
+  return readDynamicSubagentSelections(input)[nodeId] ?? undefined;
+}
 
-  const session = input.get(SessionDynamicSubagentSelectionsKey) ?? {};
-  return session[nodeId] ?? undefined;
+/**
+ * The dynamic subagents selected for the current turn, by node id. A turn
+ * selection overrides the session's, and `null` withdraws one.
+ */
+export function readDynamicSubagentSelections(
+  input: ContextReader,
+): Readonly<Record<string, DurableDynamicSubagentSelection>> {
+  return {
+    ...input.get(SessionDynamicSubagentSelectionsKey),
+    ...input.get(TurnDynamicSubagentSelectionsKey),
+  };
 }

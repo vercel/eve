@@ -12,6 +12,7 @@ import {
   type SlackTransportOptions,
 } from "#public/channels/slack/transport.js";
 import { DEFAULT_UPLOAD_POLICY, mergeUploadPolicy } from "#public/channels/upload-policy.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const DISABLED_POLICY = mergeUploadPolicy("disabled");
 const ZERO_BYTES_POLICY = mergeUploadPolicy({ maxBytes: 0 });
@@ -76,6 +77,7 @@ describe("collectSlackFileParts", () => {
   });
 
   it("drops attachments missing a url (nothing for fetchFile to fetch)", () => {
+    const logs = captureLogRecords();
     const attachments = makeAttachments([
       { type: "file", url: undefined, name: "ghost.csv", mimeType: "text/csv" },
       { type: "file", url: "https://files.slack.com/a/b/real.csv", mimeType: "text/csv" },
@@ -85,6 +87,9 @@ describe("collectSlackFileParts", () => {
 
     expect(parts).toHaveLength(1);
     expect((parts[0]!.data as URL).href).toBe("https://files.slack.com/a/b/real.csv");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "dropped attachment — no url available" }),
+    );
   });
 
   it("falls back to a generic mediaType when the attachment lacks one", () => {
@@ -134,6 +139,7 @@ describe("collectSlackFileParts", () => {
   });
 
   it("drops attachments whose mediaType is not in the policy allowlist", () => {
+    const logs = captureLogRecords();
     const policy = mergeUploadPolicy({ allowedMediaTypes: ["image/*"] });
     const attachments = makeAttachments([
       { type: "file", url: "https://files.slack.com/a/b/x.csv", mimeType: "text/csv" },
@@ -144,6 +150,13 @@ describe("collectSlackFileParts", () => {
 
     expect(parts).toHaveLength(1);
     expect(parts[0]?.mediaType).toBe("image/png");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          'dropped attachment — attachment-0 has media type "text/csv" which is not allowed by this route. Allowed: image/*.',
+      }),
+    );
   });
 
   it("returns an empty array when the message has no attachments", () => {
@@ -484,6 +497,7 @@ describe("collectInboundFileParts", () => {
   });
 
   it("drops 'disabled'-policy inline mention attachments at the per-file check", async () => {
+    const logs = captureLogRecords();
     const refresh = vi.fn().mockResolvedValue(undefined);
     const thread = makeSlackThread({ refresh });
 
@@ -495,6 +509,13 @@ describe("collectInboundFileParts", () => {
 
     expect(parts).toEqual([]);
     expect(refresh).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          'dropped attachment — mention.csv has media type "text/csv" which is not allowed by this route.',
+      }),
+    );
   });
 
   it("keeps inline mention attachments with maxBytes: 0 (size unknown until fetch)", async () => {
@@ -512,6 +533,7 @@ describe("collectInboundFileParts", () => {
   });
 
   it("returns an empty array when refresh throws", async () => {
+    const logs = captureLogRecords();
     const refresh = vi.fn().mockRejectedValue(new Error("Slack 500"));
     const thread = makeSlackThread({ refresh });
 
@@ -522,6 +544,12 @@ describe("collectInboundFileParts", () => {
     });
 
     expect(parts).toEqual([]);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "slack thread refresh failed for attachment collection",
+      }),
+    );
   });
 });
 

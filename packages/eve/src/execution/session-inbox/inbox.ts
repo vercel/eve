@@ -37,6 +37,8 @@ export interface SessionInboxReader {
   /** Removes every payload accepted so far, in arrival order. */
   drain(): SessionInboxPayload[];
   hasPending(): boolean;
+  /** Resolves once a payload is ready or the inbox closes, without consuming anything. */
+  whenPending(): Promise<void>;
   /**
    * Called from the pump the moment an interrupt (`cancel`, `reset`,
    * `session-timeout`) is accepted, ahead of any consumer read. Handlers must
@@ -174,6 +176,9 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       if (failure !== undefined) throw failure.error;
       return queue.length > 0;
     },
+    async whenPending() {
+      while (failure === undefined && queue.length === 0 && !closed()) await wait();
+    },
     onInterrupt(handler) {
       interruptHandlers.add(handler);
       return () => interruptHandlers.delete(handler);
@@ -212,5 +217,14 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
 }
 
 export function isWorkflowMessage(value: SessionInboxPayload): value is WorkflowToolRunMessage {
-  return value.kind === "report" || value.kind === "request" || value.kind === "outcome";
+  return (
+    value.kind === "agent-started" ||
+    value.kind === "started" ||
+    value.kind === "report" ||
+    value.kind === "reply" ||
+    value.kind === "request" ||
+    value.kind === "withdraw" ||
+    value.kind === "usage" ||
+    value.kind === "outcome"
+  );
 }

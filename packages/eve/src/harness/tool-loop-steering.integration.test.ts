@@ -2,13 +2,23 @@ import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { getHarnessEmissionState } from "#harness/emission-state.js";
+import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission-state.js";
+import {
+  createFrameworkUserMessage,
+  createUserMessage,
+  TOOL_RESULT_BOUNDARY,
+} from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { always } from "#tools/approval/policies.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 type StreamResult = Awaited<ReturnType<MockLanguageModelV3["doStream"]>>;
 type Part = StreamResult["stream"] extends ReadableStream<infer T> ? T : never;
@@ -42,6 +52,7 @@ describe("generation steering with the real AI SDK", () => {
     const warning = vi.spyOn(console, "warn").mockImplementation((message) => {
       if (String(message).includes("retrying")) retrying.resolve();
     });
+    const streamError = vi.spyOn(console, "error").mockImplementation(() => {});
     const steering = new AbortController();
     const cancellation = new AbortController();
     const doStream = vi.fn<MockLanguageModelV3["doStream"]>(async () => ({
@@ -57,7 +68,6 @@ describe("generation steering with the real AI SDK", () => {
     }));
     try {
       const running = createToolLoopHarness({
-        mode: "conversation",
         abortSignal: cancellation.signal,
         steeringSignal: steering.signal,
         tools: new Map(),
@@ -70,8 +80,13 @@ describe("generation steering with the real AI SDK", () => {
       if (kind === "cancel") await expect(running).rejects.toBeInstanceOf(TurnCancelledError);
       else expect((await running).steered).toBe(true);
       expect(doStream).toHaveBeenCalledOnce();
+      expect(streamError).toHaveBeenCalledWith(
+        "[eve:harness.tool-loop] tool-loop stream error",
+        expect.anything(),
+      );
     } finally {
       warning.mockRestore();
+      streamError.mockRestore();
       vi.useRealTimers();
     }
   });
@@ -79,6 +94,7 @@ describe("generation steering with the real AI SDK", () => {
   it.each(["input.requested", "turn.completed", "step.failed"] as const)(
     "finishes committing %s when a correction arrives during publication",
     async (boundary) => {
+      const logs = captureLogRecords();
       const steering = new AbortController();
       const events: UnstampedMessageStreamEvent[] = [];
       const model = new MockLanguageModelV3({
@@ -105,7 +121,6 @@ describe("generation steering with the real AI SDK", () => {
         },
       });
       const harness = createToolLoopHarness({
-        mode: "conversation",
         capabilities: { requestInput: true },
         steeringSignal: steering.signal,
         tools: new Map([
@@ -140,6 +155,10 @@ describe("generation steering with the real AI SDK", () => {
       expect(events.filter((event) => event.type === boundary)).toHaveLength(1);
       expect(events.filter((event) => event.type === "session.waiting")).toHaveLength(1);
       expect(events.filter((event) => event.type === "message.appended")).toHaveLength(0);
+      const parked = logs.records.filter(
+        (record) => record.message === "model call failed — parking session for retry by the user",
+      );
+      expect(parked).toHaveLength(boundary === "step.failed" ? 1 : 0);
     },
   );
 
@@ -150,7 +169,6 @@ describe("generation steering with the real AI SDK", () => {
     const model = new MockLanguageModelV3({ doStream });
     const events: UnstampedMessageStreamEvent[] = [];
     const result = await createToolLoopHarness({
-      mode: "conversation",
       steeringSignal: steering.signal,
       tools: new Map(),
       resolveModel: async () => model,
@@ -201,7 +219,6 @@ describe("generation steering with the real AI SDK", () => {
     const model = new MockLanguageModelV3({ doStream });
     const createStep = (signal?: AbortSignal) =>
       createToolLoopHarness({
-        mode: "conversation",
         resolveModel: async () => model,
         tools: new Map(),
         steeringSignal: signal,
@@ -283,7 +300,6 @@ describe("generation steering with the real AI SDK", () => {
     const model = new MockLanguageModelV3({ doStream });
     const createStep = (signal?: AbortSignal) =>
       createToolLoopHarness({
-        mode: "conversation",
         steeringSignal: signal,
         resolveModel: async () => model,
         handleEvent: async () => {},
@@ -310,6 +326,66 @@ describe("generation steering with the real AI SDK", () => {
     const prompt = JSON.stringify(doStream.mock.calls[1]?.[0].prompt);
     expect(prompt).toContain("saved");
     expect(prompt).toContain("Use the corrected year");
+    // The correction starts its own user turn instead of joining the tool result's.
+    const roles = (call: number) => doStream.mock.calls[call]![0].prompt.map(({ role }) => role);
+    expect(roles(0)).toEqual(["system", "user"]);
+    expect(roles(1)).toEqual(["system", "user", "assistant", "tool", "assistant", "user"]);
+    expect(doStream.mock.calls[1]![0].prompt.at(-2)).toMatchObject({
+      content: [{ text: TOOL_RESULT_BOUNDARY, type: "text" }],
+    });
+  });
+
+  it("starts a steering message's own user turn after tool results followed by a framework note", async () => {
+    const doStream = vi.fn<MockLanguageModelV3["doStream"]>(async () => ({
+      stream: new ReadableStream<Part>({
+        start(controller) {
+          finish(controller, "Quarterly Business Review");
+        },
+      }),
+    }));
+    const heldTurn = setHarnessEmissionState(
+      {
+        ...session(),
+        history: [
+          createUserMessage("user", "Compile Alice's churn report"),
+          {
+            role: "assistant",
+            content: [{ type: "tool-call", toolCallId: "report-1", toolName: "report", input: {} }],
+          },
+          {
+            role: "tool",
+            content: [
+              {
+                type: "tool-result",
+                toolCallId: "report-1",
+                toolName: "report",
+                output: { type: "text", value: "Started task report-1." },
+              },
+            ],
+          },
+          createFrameworkUserMessage("context.state", "Alice's reports are due Monday."),
+        ],
+      },
+      { sessionStarted: true, sequence: 0, stepIndex: 1, turnId: "turn_0" },
+    );
+    await createToolLoopHarness({
+      handleEvent: async () => {},
+      resolveModel: async () => new MockLanguageModelV3({ doStream }),
+      tools: new Map(),
+    })(heldTurn, { message: "What does QBR stand for?" });
+    const prompt = doStream.mock.calls[0]![0].prompt;
+    expect(prompt.map(({ role }) => role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+      "tool",
+      "user",
+      "assistant",
+      "user",
+    ]);
+    expect(prompt.at(-2)).toMatchObject({
+      content: [{ text: TOOL_RESULT_BOUNDARY, type: "text" }],
+    });
   });
 
   it("does not interrupt after assistant text has been published", async () => {
@@ -329,7 +405,6 @@ describe("generation steering with the real AI SDK", () => {
       },
     });
     const result = await createToolLoopHarness({
-      mode: "conversation",
       steeringSignal: steering.signal,
       tools: new Map(),
       resolveModel: async () => model,

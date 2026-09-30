@@ -1,0 +1,21 @@
+// Text the mock models write while a turn waits on a task, shared with the
+// evals that check where it appears.
+
+/** The root agent's text before its turn waits on `stage_deploy`. */
+export const STAGE_INTERIM_MESSAGE = "Staging api now; I'll report back with the digest.";
+
+/** The root agent's text before its turn waits on `approve_rollout`. */
+export const ROLLOUT_INTERIM_MESSAGE = "Asked for approval to roll out api; I'll report back.";
+
+/** The root agent's text before its turn waits on `sign_off_plan`. */
+export const SIGN_OFF_INTERIM_MESSAGE = "Asked for sign-off on the api plan; I'll report back.";
+
+/** The root agent's text before its turn waits on the `workflow-stager` agent. */
+export const DELEGATE_INTERIM_MESSAGE = "Asked workflow-stager to stage api; I'll report back.";
+
+/** The root agent's text while `research_brief` works in the background. */
+export const RESEARCH_INTERIM_MESSAGE =
+  "Researching Alice's report in the background; I'll share the findings when they arrive.";
+
+/** The `workflow-stager` child's text before its own turn waits on its staging task. */
+export const STAGER_INTERIM_MESSAGE = "Staging api for the parent now.";

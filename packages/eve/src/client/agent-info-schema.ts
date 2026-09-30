@@ -1,10 +1,16 @@
 import { z } from "#compiled/zod/index.js";
+import { mountIdSchema } from "#shared/extension-mount.js";
 
 const owner = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("application") }).strict(),
   z.object({ feature: z.string(), kind: z.literal("framework") }).strict(),
   z
-    .object({ kind: z.literal("extension"), namespace: z.string(), packageName: z.string() })
+    .object({
+      kind: z.literal("extension"),
+      mountId: mountIdSchema.optional(),
+      namespace: z.string(),
+      packageName: z.string(),
+    })
     .strict(),
 ]);
 
@@ -17,6 +23,7 @@ const moduleBacking = z.discriminatedUnion("kind", [
         .strict()
         .optional(),
       kind: z.literal("filesystem"),
+      mountId: z.string().optional(),
       sourcePath: z.string(),
     })
     .strict(),
@@ -24,6 +31,7 @@ const moduleBacking = z.discriminatedUnion("kind", [
     .object({
       dependencies: z.record(z.string(), z.string()).optional(),
       kind: z.literal("programmatic"),
+      mountId: z.string().optional(),
       moduleId: z.string(),
       parameters: z.record(z.string(), z.unknown()).optional(),
       registryId: z.string(),
@@ -250,11 +258,21 @@ const remoteAgent = entry
   })
   .strict();
 
+// Kernel effects are inspection metadata only. Deployments can retain removed
+// effects across framework versions, so preserve the response and identify an
+// option this client cannot interpret instead of rejecting agent info entirely.
 const kernelEffect = z
   .object({
-    action: z.enum(["subagent-call", "task-cancel", "workflow-tool-call"]).optional(),
-    audience: z.array(z.enum(["root-session", "delegated-task-child"])),
-    kind: z.enum(["dispatch", "provider-tool"]),
+    action: z
+      .union([z.enum(["subagent-call", "workflow-tool-call"]), z.literal("unrecognized")])
+      .catch("unrecognized")
+      .optional(),
+    audience: z.array(
+      z.union([z.literal("root-session"), z.literal("unrecognized")]).catch("unrecognized"),
+    ),
+    kind: z
+      .union([z.enum(["dispatch", "provider-tool"]), z.literal("unrecognized")])
+      .catch("unrecognized"),
     sourceId: z.string(),
   })
   .strict();

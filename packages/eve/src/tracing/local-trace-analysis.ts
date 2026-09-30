@@ -10,7 +10,7 @@ import {
 } from "#tracing/local-trace-operations.js";
 import { summarizeLocalTrace, type LocalTraceSummary } from "#tracing/local-trace-summary.js";
 
-export interface TraceAnalysisSelector {
+interface TraceAnalysisSelector {
   readonly excludeSessionId?: string;
   readonly fromMs?: number;
   readonly sessionId?: string;
@@ -25,7 +25,7 @@ export interface TraceTokenUsage {
   readonly cacheWriteTokens?: number;
 }
 
-export interface TraceTimelineRecord {
+interface TraceTimelineRecord {
   readonly actionDurationMs?: number;
   readonly actionName?: string;
   readonly callId?: string;
@@ -44,7 +44,7 @@ export interface TraceTimelineRecord {
   readonly usage?: TraceTokenUsage;
 }
 
-export interface TraceAnalysis {
+interface TraceAnalysis {
   readonly summary: LocalTraceSummary;
   readonly groups: readonly TraceAnalysisGroup[];
   /** Accumulated operation time, not elapsed time; parallel calls can overlap. */
