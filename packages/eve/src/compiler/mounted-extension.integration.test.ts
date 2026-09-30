@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
+import { EXTENSION_CAPABILITY_VERSIONS } from "#compiler/extension-compatibility.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
@@ -549,6 +550,39 @@ describe("mounted extension without config", () => {
     await expect(tool?.execute?.({}, { messages: [], toolCallId: "call_1" })).resolves.toEqual({
       token: "widget-ok",
     });
+  });
+});
+
+describe("mounted extension with an unsupported capability contract", () => {
+  it("fails compilation with the capability diagnostic", async () => {
+    // One past the current epoch is unsupported by construction.
+    const unsupportedToolVersion = EXTENSION_CAPABILITY_VERSIONS.tool + 1;
+    const app = await createAppRoot("eve-mounted-extension-incompatible-", {
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "You are a precise assistant.\n",
+        "agent/extensions/widget.mjs": 'export { default } from "@acme/widget";\n',
+        "node_modules/@acme/widget/package.json": `${JSON.stringify({
+          name: "@acme/widget",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        })}\n`,
+        "node_modules/@acme/widget/extension/_manifest.json": compatibilityManifest({
+          extension: 1,
+          tool: unsupportedToolVersion,
+        }),
+        "node_modules/@acme/widget/extension/extension.mjs": [
+          'import { defineExtension } from "eve/extension";',
+          "export default defineExtension();",
+          "",
+        ].join("\n"),
+      },
+    });
+
+    await expect(compileAgent({ startPath: app.appRoot })).rejects.toThrow(
+      `Extension "@acme/widget" requires tool contract v${unsupportedToolVersion}`,
+    );
   });
 });
 
