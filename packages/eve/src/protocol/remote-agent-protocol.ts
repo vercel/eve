@@ -1,8 +1,8 @@
 /**
  * Version of the protocol a parent deployment speaks with a remote agent's
  * deployment. A create-session request that delegates work names the caller's
- * version, and the receiver's response names its own; both deployments must
- * speak the same one. Deployments from before the version existed speak 1.
+ * version, and the receiver's response names its own. Deployments from before
+ * the version existed speak 1.
  */
 export const REMOTE_AGENT_PROTOCOL_VERSION = 2;
 

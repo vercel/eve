@@ -82,19 +82,7 @@ export function encodeLegacyCommand(command: Command, declaredVersion: unknown):
     return { ...command, version };
   }
   const payloads = command.kind === "send" ? [command.payload] : command.payloads;
-  let caller = command.caller;
-  if (caller?.activityObserver !== undefined && version < 7) {
-    const { activityObserver, ...rest } = caller;
-    if (version < 2) caller = rest;
-    else {
-      const workIdentity =
-        activityObserver.workIdentity === undefined
-          ? undefined
-          : { ...activityObserver.workIdentity };
-      if (workIdentity !== undefined) delete workIdentity.label;
-      caller = { ...rest, activityObserver: { ...activityObserver, workIdentity } };
-    }
-  }
+  const caller = command.caller;
   let deliveryMetadata =
     command.kind === "send"
       ? command.delivery === undefined

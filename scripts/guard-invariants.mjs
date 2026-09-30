@@ -122,6 +122,10 @@
  *             after the turn loop returns, and `execution/session/finalization.ts`
  *             when the session ends. A held turn is still open, so nothing
  *             inside the turn loop or the harness may reply.
+ *   rule 48 — Remote agent protocol 1 stays in
+ *             `execution/legacy-remote-agent/`. Only the ingress files that
+ *             route protocol-1 callers into it may import it, so deleting the
+ *             directory removes protocol 1 without a search.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -221,6 +225,7 @@ function isTsLike(relPath) {
  *   rule45: { allowlist: Set<string>; violations: Violation[] };
  *   rule46: Violation[];
  *   rule47: Violation[];
+ *   rule48: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -254,6 +259,7 @@ async function scanRepo(state) {
     checkRule45(posix, lines, state.rule45);
     checkRule46(posix, lines, state.rule46);
     checkRule47(posix, lines, state.rule47);
+    checkRule48(posix, lines, state.rule48);
   }
 }
 
@@ -456,6 +462,41 @@ function checkRule47(posix, lines, violations) {
       line: idx + 1,
       message:
         "sends a caller's reply outside execution/session/program.ts and execution/session/finalization.ts. A turn replies to its caller only at its real end, which the session program owns; finalization replies when the session ends.",
+    });
+  });
+}
+
+// ---------- Rule 48: remote agent protocol 1 stays compartmentalized ----------
+
+const LEGACY_REMOTE_AGENT_DIR = "packages/eve/src/execution/legacy-remote-agent/";
+const LEGACY_REMOTE_AGENT_INGRESS_FILES = new Set([
+  "packages/eve/src/channel/types.ts",
+  "packages/eve/src/context/keys.ts",
+  "packages/eve/src/eve-channel/create-request.ts",
+  "packages/eve/src/eve-channel/index.ts",
+  "packages/eve/src/eve-channel/request.ts",
+  "packages/eve/src/execution/forward-session-input.ts",
+]);
+// `from "…"` covers imports and re-exports; `import "…"` and `import("…")` cover side effects and dynamic imports.
+const LEGACY_REMOTE_AGENT_IMPORT_RE = /\b(?:from|import)\s*\(?\s*["'][^"']*legacy-remote-agent\//;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule48(posix, lines, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith(LEGACY_REMOTE_AGENT_DIR) ||
+    /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix) ||
+    LEGACY_REMOTE_AGENT_INGRESS_FILES.has(posix)
+  )
+    return;
+  lines.forEach((line, idx) => {
+    if (!LEGACY_REMOTE_AGENT_IMPORT_RE.test(line)) return;
+    violations.push({
+      rule: 48,
+      file: posix,
+      line: idx + 1,
+      message:
+        "imports remote agent protocol 1 outside its ingress files. Route protocol-1 behavior through execution/legacy-remote-agent/ from an existing ingress so the legacy path stays removable in one place.",
     });
   });
 }
@@ -1516,6 +1557,7 @@ async function main() {
     },
     rule46: /** @type {Violation[]} */ ([]),
     rule47: /** @type {Violation[]} */ ([]),
+    rule48: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1632,6 +1674,7 @@ async function main() {
 
   // Rule 47
   violations.push(...state.rule47);
+  violations.push(...state.rule48);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

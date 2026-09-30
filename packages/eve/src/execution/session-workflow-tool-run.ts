@@ -5,6 +5,7 @@ import {
 } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import type {
   WorkflowToolAskRequest,
+  WorkflowToolRunAgentStartedMessage,
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunRef,
@@ -54,9 +55,28 @@ export async function handleWorkflowToolRunMessage(
       );
       return undefined;
     case "agent-started":
-      await input.cursor.advance((state) => emitAgentStartedStep({ ...state, message }));
+      await input.cursor.advance((state) =>
+        emitAgentStartedStep({ ...state, messages: [message] }),
+      );
       return undefined;
   }
+}
+
+/** Boundary messages in admission order, with consecutive `agent-started` messages grouped. */
+type BoundaryBatch =
+  | { readonly kind: "agent-started"; readonly messages: WorkflowToolRunAgentStartedMessage[] }
+  | { readonly kind: "message"; readonly message: WorkflowToolRunMessage };
+
+/** Groups consecutive `agent-started` messages so one `emitAgentStartedStep` publishes each group. */
+export function batchAgentStarts(messages: readonly WorkflowToolRunMessage[]): BoundaryBatch[] {
+  const batches: BoundaryBatch[] = [];
+  for (const message of messages) {
+    const last = batches.at(-1);
+    if (message.kind !== "agent-started") batches.push({ kind: "message", message });
+    else if (last?.kind === "agent-started") last.messages.push(message);
+    else batches.push({ kind: "agent-started", messages: [message] });
+  }
+  return batches;
 }
 
 /**

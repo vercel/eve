@@ -236,7 +236,8 @@ final reply rather than the text written before the wait. `result()` stops at `t
 while a question is pending, and returns `status: "waiting"` with it; `respond()` then reads the
 same turn to its end. See [Aggregate a turn](/docs/guides/client/streaming#aggregate-a-turn).
 Channels such as [Slack](/docs/channels/slack) post a root session's text before the wait as an
-ordinary reply, then post the reply after the results as another message.
+ordinary reply, then post the reply after the results as another message. Slack also shows each
+turn's tasks in a live [task card](/docs/channels/slack#task-card).
 
 A steering message from the turn's own caller, one sent with `turnPolicy: "steer"`, the default,
 ends a `task_wait` and aborts the `abortSignal` of any `execute` call the turn waits on, but it

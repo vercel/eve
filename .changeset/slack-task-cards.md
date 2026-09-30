@@ -1,0 +1,7 @@
+---
+"eve": minor
+---
+
+Slack now shows each turn's tasks in a live task card: one message, updated in place, with a row per task that shows whether it is working or waiting on a person, and how it ended. Slack also acknowledges a mention or DM with `Thinking...` right away, even with a custom `onAppMention` or `onDirectMessage`, and clears it if the hook drops the message. While a turn waits on its tasks, the status names them. Outside DMs and private channels, the card shows a failed task as `Failed` without its error text, and a blocked task without the request's prompt. Channels can now handle `input.resolved` to learn when each question or approval ends, however it ended.
+
+`slackChannel({ events })` is replaced by `renderers`, which wrap eve's default rendering instead of replacing it; without `renderers`, eve renders with its default. Move `events: { … }` to `renderers: [{ events: { … } }]` and handlers behave as before; call the new `next` argument to keep eve's default; `next` also replaces `input.requested`'s `defaultDeliver`. A renderer can also shape the task card with `taskCard(view, next)`, whose view includes the turn's other tool calls and their input, so your own tools, such as a checklist, can appear on the card. The experimental `activity` option, the `experimental_slackActivity*` renderers, and the activity collector behind them are removed, along with the `activityObserver` field on delegated and remote-agent sessions; remote agents ignore it when an older caller still sends it.

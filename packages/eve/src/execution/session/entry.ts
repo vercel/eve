@@ -109,12 +109,8 @@ async function bootInitialOwner(
     if (stableClaim.status === "rejected") throw stableClaim.reason;
     if (aliasClaim.status === "rejected") {
       if (!isHookConflictError(aliasClaim.reason)) throw aliasClaim.reason;
-      if (
-        input.activityCollectorRunId !== undefined ||
-        input.continuationConflictCommand !== undefined
-      ) {
+      if (input.continuationConflictCommand !== undefined) {
         await settleContinuationConflictStep({
-          activityCollectorRunId: input.activityCollectorRunId,
           command: input.continuationConflictCommand,
           continuationToken,
         });

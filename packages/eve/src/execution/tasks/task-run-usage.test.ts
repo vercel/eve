@@ -80,7 +80,6 @@ function sessionWithTask(input: {
   );
   const inbox = {
     claimSessionHooks: vi.fn(),
-    onAgentStarted: () => () => {},
     onDelivery: () => () => {},
     onInterrupt: () => () => {},
   } as Partial<SessionInbox> as SessionInbox;

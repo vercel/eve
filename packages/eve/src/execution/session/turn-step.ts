@@ -57,7 +57,7 @@ import type {
 } from "#execution/session/turn-step-types.js";
 import { resolveSessionStepResult } from "#execution/session/turn-step-result.js";
 import { withSessionStateDelta } from "#execution/session/state-delta.js";
-import { createSessionEventSink } from "#execution/publish-session-events.js";
+import { openSessionEventPublisher } from "#execution/publish-session-events.js";
 import { createTurnEventHandler } from "#execution/session/turn-event-handler.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import {
@@ -88,7 +88,6 @@ import {
   createCancelledModelCallBatchResult,
   type CompletedModelCallCheckpoint,
 } from "#execution/cancelled-model-call-batch.js";
-import * as activityCohort from "#execution/activity-cohort.js";
 
 function channelDeliveryErrorCode(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {
@@ -143,11 +142,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     );
     delivery = { ...delivery, payloads: remainingPayloads };
     if (matches.length > 0) {
-      const matchedAttemptIds = activityCohort.restoreAuthorizationActivity({
-        ctx,
-        matches,
-        pending: pendingAuth,
-      });
+      const matchedAttemptIds = matches.map((match) => match.result.attemptId);
       const authResults = matches.map((match) => match.result);
       ctx.set(PendingAuthorizationResultKey, authResults);
       durableSession = {
@@ -230,12 +225,12 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     );
     await instrumentation?.flush();
   };
-  const sink = createSessionEventSink({
+  const publisher = openSessionEventPublisher({
     ctx,
+    origin: "own",
     sessionWritable: input.sessionWritable,
-    sessionId: initialSession.sessionId,
   });
-  const { adapterCtx } = sink;
+  const { adapterCtx } = publisher.dispatcher;
   // A hook's `ctx.cancel()` aborts the same signal the harness already honors
   // for `session.cancel()`, so both settle through one cancellation path.
   const hookCancellation = new AbortController();
@@ -256,7 +251,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       effectiveAgent,
       effectiveNode,
       instrumentation,
-      sink,
+      publisher,
     });
     const previousAdapterState =
       delivery !== undefined && !isHarnessBetweenTurns(initialSession)
@@ -314,13 +309,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       }
       resolved = { ...resolved, runtimeActionResults: runtimeResults.results };
     }
-
-    activityCohort.updateActivityRootForDelivery({
-      activeTurnId: activeTurnId(initialEmissionState),
-      ctx,
-      delivery: ignoredActiveDelivery ? undefined : rawDelivery,
-      sessionState: durableSession.state,
-    });
 
     if (rawDelivery !== undefined) {
       const updatedAdapter = { ...adapter, state: { ...adapterCtx.state } };
@@ -561,9 +549,9 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     stepResult = { ...stepResult, session: aliased };
 
     const durableResult = resolveSessionStepResult(stepResult, nextSerializedContext);
-    if (durableResult.action === "done") await sink.close();
+    if (durableResult.action === "done") await publisher.writer.close();
     return durableResult;
   } finally {
-    sink.release();
+    publisher.writer.release();
   }
 }

@@ -1,5 +1,4 @@
 import type {
-  ActivityObserverConfig,
   ChannelInstrumentationProjection,
   RunSessionLimits,
   SessionCapabilities,
@@ -8,7 +7,6 @@ import type {
 import type { LocalDevRequestProvenance } from "#context/keys.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
 import type { PreparedCoordinationDispatch } from "#execution/coordination-dispatch-shared.js";
-import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import {
   serializeDurableCompiledArtifactsSource,
   type DurableCompiledArtifactsSource,
@@ -34,9 +32,6 @@ import {
  * of it: each message carries the auth of the call that sends it.
  */
 export interface AgentSessionContext {
-  readonly activityObserver?: ActivityObserverConfig & {
-    readonly workIdentity: ActivityWorkIdentityV1;
-  };
   /** The agents the call may open, by name, which `ctx.agents` lists. */
   readonly agents: Readonly<Record<string, WorkflowAgentMetadata>>;
   readonly bundle: AgentSessionBundle;
@@ -69,7 +64,6 @@ export interface AgentSessionSandbox {
 
 type CallerDispatch = Pick<
   PreparedCoordinationDispatch<unknown>,
-  | "activityObserver"
   | "batch"
   | "bundle"
   | "capabilities"
@@ -109,7 +103,6 @@ export function captureAgentSessionContext(
 ): AgentSessionContext {
   const { batch, session } = caller;
   return {
-    activityObserver: caller.activityObserver,
     agents: caller.workflowAgents,
     bundle: {
       nodeId: caller.bundle.nodeId,

@@ -115,9 +115,6 @@ export const EVE_CONNECTION_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/connec
  */
 export const EVE_CALLBACK_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/callback/:token`;
 
-/** Capability route for best-effort activity batches. */
-export const EVE_ACTIVITY_ROUTE_PATTERN = `${EVE_ROUTE_PREFIX}/activity/:token`;
-
 /** Builds the ID-addressed message route for one session. */
 export function createEveSessionRoutePath(sessionId: string): string {
   return `${EVE_SESSION_ROUTE_PATH}/${encodeURIComponent(sessionId)}`;
@@ -185,9 +182,4 @@ export function createEveCallbackRoutePath(token: string): string {
 /** Builds the capability path used to answer one remote child turn. */
 export function createEveTaskInputRoutePath(token: string): string {
   return `${EVE_ROUTE_PREFIX}/task-input/${encodeURIComponent(token)}`;
-}
-
-/** Builds the capability path for one root activity collector. */
-export function createEveActivityRoutePath(token: string): string {
-  return `${EVE_ROUTE_PREFIX}/activity/${encodeURIComponent(token)}`;
 }

@@ -1,14 +1,15 @@
-import { defineChannel, POST } from "#public/channels/index.js";
+import { defineChannel } from "#public/channels/index.js";
 
-// Epoch 37 tool-call action requests had no `parentCallId`; epoch 38 adds it as optional.
+// Epoch 37 channels had no `task.started`, `task.settled`, `turn.waiting`, or `input.resolved`
+// handlers, which are additive, and could pass an `activityObserver` that eve now ignores.
 export default defineChannel({
-  routes: [
-    POST("/answer/:sessionId", async (_request, { attachSession, params }) => {
-      await attachSession(params.sessionId!).respond(
-        [{ optionId: "approve", requestId: "approval-1" }],
-        { auth: null },
-      );
-      return new Response("ok");
-    }),
-  ],
+  routes: [],
+  events: {
+    "turn.started"(event) {
+      console.info("turn started", { turnId: event.turnId });
+    },
+    "turn.completed"(event) {
+      console.info("turn completed", { turnId: event.turnId });
+    },
+  },
 });

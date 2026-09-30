@@ -1,3 +1,4 @@
+import type { MessageStreamEvent } from "eve/client";
 import { defineEval } from "eve/evals";
 
 const SUBAGENT_TOKEN = "SUBAGENT_TOKEN=echo-marker-9F2X";
@@ -41,7 +42,17 @@ export default defineEval({
       firstChild,
       secondChild,
     ]);
-    const latestCallAt = [firstStarted.meta.at, secondStarted.meta.at].sort().at(-1)!;
+    // Each child's own turn start, not the parent's `agent.started`: the parent
+    // publishes that at its next step boundary, which can be after a quick child
+    // finished.
+    const childStartedAt = (events: readonly MessageStreamEvent[]) =>
+      (events.find((event) => event.type === "turn.started") ?? events[0])!.meta.at;
+    const latestCallAt = [
+      childStartedAt(firstChildTurn.events),
+      childStartedAt(secondChildTurn.events),
+    ]
+      .sort()
+      .at(-1)!;
 
     t.succeeded();
     t.calledTool("workflow", { input: isFanOutProgram, count: 1 });
