@@ -65,6 +65,7 @@ import {
   createSessionStartedEvent,
   createTurnStartedEvent,
 } from "#protocol/message.js";
+import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import {
   CallbackBaseUrlKey,
   clearPendingAuthorization,
@@ -473,7 +474,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
             if (firstCall && completedAuths) {
               let emissionState = getHarnessEmissionState(schemaSession.state);
               const startsTurn = completedAuths.some(
-                ({ candidateId }) => candidateId === undefined,
+                ({ challenge }) => challenge.candidateId === undefined,
               );
               if (startsTurn && isHarnessBetweenTurns(schemaSession)) {
                 const turnInput = createTurnInputMessages(
@@ -518,13 +519,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                 }
                 schemaSession = setHarnessEmissionState(schemaSession, emissionState);
               }
-              for (const { authorization, result, candidateId } of completedAuths) {
+              for (const { challenge } of completedAuths) {
                 await handleEvent(
                   createAuthorizationCompletedEvent({
-                    attemptId: result.attemptId,
-                    authorization,
-                    candidateId,
-                    name: result.name,
+                    ...authorizationEventFields(challenge),
                     outcome: "authorized",
                     sequence: emissionState.sequence,
                     stepIndex: emissionState.stepIndex,

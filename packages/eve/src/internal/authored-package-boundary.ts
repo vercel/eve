@@ -40,6 +40,8 @@ interface ResolvedAuthoredExternalModule {
 export function createGenerationPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
+  readonly extensionSpecifiers?: ReadonlySet<string>;
+  readonly resolveExternalPaths?: boolean;
 }): Record<string, unknown> {
   return {
     name: "eve-generation-package-boundary",
@@ -53,7 +55,9 @@ export function createGenerationPackageBoundaryPlugin(input: {
         return undefined;
       }
 
+      if (input.extensionSpecifiers?.has(source)) return undefined;
       if (isFrameworkRuntimeImport(source, importer)) {
+        if (input.extensionSpecifiers?.has(source)) return undefined;
         return { external: true, id: resolveFrameworkRuntimeImport(source) };
       }
 
@@ -77,7 +81,12 @@ export function createGenerationPackageBoundaryPlugin(input: {
         return undefined;
       }
 
-      return { external: true, id: source };
+      return {
+        external: true,
+        id: input.resolveExternalPaths
+          ? normalizeEsmImportSpecifier(externalModule.resolvedId)
+          : source,
+      };
     },
   };
 }
@@ -85,6 +94,7 @@ export function createGenerationPackageBoundaryPlugin(input: {
 export function createRuntimeLoaderPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
+  readonly extensionSpecifier?: string;
 }): Record<string, unknown> {
   const canonicalPackageRoot = toCanonicalPath(input.packageRoot);
 
@@ -100,6 +110,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         return undefined;
       }
 
+      if (source === input.extensionSpecifier) return undefined;
       if (isFrameworkRuntimeImport(source, importer)) {
         return {
           external: true,

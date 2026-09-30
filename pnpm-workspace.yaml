@@ -83,4 +83,6 @@ minimumReleaseAgeExclude:
   - "@chat-adapter/state-redis@4.41.0"
   - "@chat-adapter/whatsapp@4.41.0"
   - "@chat-adapter/x@4.41.0"
+  - "@stripe/link-integrations-eve@0.2.0"
+  - "@stripe/link-sdk@0.9.0"
   - "chat@4.41.0"

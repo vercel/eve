@@ -197,6 +197,17 @@ export function computerUseDriverStartCommand(sandbox: PathSandbox): string {
   ].join("\n");
 }
 
+/** Exit 0 only when the display, window manager, and driver are all live. */
+export function computerUseReadyCommand(sandbox: PathSandbox): string {
+  const paths = computerUsePaths(sandbox);
+  return [
+    "set -euo pipefail",
+    `xdpyinfo -display ${DISPLAY} >/dev/null 2>&1`,
+    `DISPLAY=${DISPLAY} xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -Eq 'window id # 0x[1-9a-f]'`,
+    `COMPUTER_USE_REQUEST='{"action":"health"}' COMPUTER_USE_SOCKET_PATH=${shellQuote(paths.driverSocket)} node ${shellQuote(`${paths.driverRoot}/client.mjs`)} >/dev/null 2>&1`,
+  ].join("\n");
+}
+
 export function computerUseDisplayCommand(sandbox: PathSandbox): string {
   const { root } = computerUsePaths(sandbox);
   const xfconf = [

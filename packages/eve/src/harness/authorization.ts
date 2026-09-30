@@ -63,6 +63,8 @@ export interface AuthorizationChallenge {
   readonly hookUrl: string;
   /** Principal passed to `startAuthorization`; omitted from model-facing copies. */
   readonly principal?: ConnectionPrincipal;
+  /** Session principal that started this attempt; projected onto authorization events. */
+  readonly principalId?: string;
   /**
    * Opaque resume value from the strategy's `startAuthorization`,
    * journaled across the park. Absent for provider-owned flows.

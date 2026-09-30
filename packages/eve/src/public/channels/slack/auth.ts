@@ -1,4 +1,5 @@
 import type { SessionAuthContext } from "#channel/types.js";
+import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 
 interface SlackAuthContextInput {
   readonly channelId: string;
@@ -15,6 +16,14 @@ export function slackUserIdFromAuthContext(auth: SessionAuthContext | null): str
   if (auth?.authenticator !== "slack-webhook") return undefined;
   const userId = auth.attributes.user_id;
   return typeof userId === "string" && userId.length > 0 ? userId : undefined;
+}
+
+/** Returns the Slack user recorded for a principal, if one has been seen in this thread. */
+export function slackUserIdForPrincipal(
+  state: Pick<SlackChannelState, "slackUsersByPrincipal">,
+  principalId: string | undefined,
+): string | undefined {
+  return principalId === undefined ? undefined : state.slackUsersByPrincipal?.[principalId];
 }
 
 /**

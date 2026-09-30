@@ -1,8 +1,12 @@
 import { defineEval } from "eve/evals";
 import { DIRECT_AUTHORIZATION } from "../agent/lib/remote-direct-hitl-script.js";
 
+/** Alice's fixture principal; the remote hop itself runs as the `router-app` service. */
+const ALICE = "e2e-user";
+
 export default defineEval({
-  description: "Alice authorizes a tool called directly in her remote agent.",
+  description:
+    "Alice authorizes a tool called directly in her remote agent. The forwarded sign-in names Alice, not the service hop that reached the child.",
   timeoutMs: 90_000,
   async test(t) {
     const session = await t.session();
@@ -22,10 +26,11 @@ export default defineEval({
       data: {
         name: "direct-release-authorization",
         authorization: { userCode: "direct-release-code" },
+        principalId: ALICE,
       },
     });
     turn.event("authorization.completed", {
-      data: { name: "direct-release-authorization", outcome: "authorized" },
+      data: { name: "direct-release-authorization", outcome: "authorized", principalId: ALICE },
     });
     turn.messageIncludes("PARENT-DIRECT-COMPLETE: DIRECT-AUTHORIZATION-COMPLETE");
     t.calledSubagent("remote-loopback", { status: "completed", count: 1 });

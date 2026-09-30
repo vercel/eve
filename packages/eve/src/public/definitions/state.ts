@@ -15,14 +15,14 @@ export interface StateHandle<T> {
   update(fn: (current: T) => T): void;
 }
 
-const RESERVED_STATE_NAME_PREFIX = "eve.";
+const RESERVED_STATE_NAME_PREFIXES = ["eve.", "eve:mount."] as const;
 
 /**
  * Creates a typed, named state slot backed by a durable `ContextKey`.
  * `initial()` produces the value on first access within a context.
  *
- * The name must not start with the reserved `"eve."` prefix (reserved
- * for framework context keys); doing so throws.
+ * Names starting with `"eve."` or `"eve:mount."` are reserved for framework
+ * context keys; using either prefix throws.
  *
  * All operations require an active eve context. Calling `get()` or
  * `update()` outside of tools, hooks, or other framework-managed code
@@ -41,12 +41,28 @@ const RESERVED_STATE_NAME_PREFIX = "eve.";
  * ```
  */
 export function defineState<T>(name: string, initial: () => T): StateHandle<T> {
-  if (name.startsWith(RESERVED_STATE_NAME_PREFIX)) {
+  const reserved = RESERVED_STATE_NAME_PREFIXES.find((prefix) => name.startsWith(prefix));
+  if (reserved !== undefined) {
     throw new Error(
-      `defineState() name "${name}" uses the reserved "${RESERVED_STATE_NAME_PREFIX}" prefix, which eve reserves for its own framework context keys (e.g. "eve.channel", "eve.bundle"). Colliding with one silently corrupts context serialization. Use your own namespace, e.g. "my-agent.${name.slice(RESERVED_STATE_NAME_PREFIX.length)}".`,
+      `defineState() name "${name}" uses the reserved "${reserved}" prefix. Use an application-owned namespace instead.`,
     );
   }
+  return createStateHandle(name, initial);
+}
 
+/** Internal registration of generated, mount-owned keys. */
+export function defineMountedState<T>(
+  mountId: string,
+  name: string,
+  initial: () => T,
+): StateHandle<T> {
+  return createStateHandle(
+    `eve:mount.v1:${encodeURIComponent(mountId)}:${encodeURIComponent(name)}`,
+    initial,
+  );
+}
+
+function createStateHandle<T>(name: string, initial: () => T): StateHandle<T> {
   const key = new ContextKey<T>(name);
 
   return {

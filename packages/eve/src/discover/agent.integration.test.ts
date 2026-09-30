@@ -849,6 +849,7 @@ describe("discoverAgent (memory)", () => {
       externalDependencies: [],
       manifest: result.manifest,
       nodeId: "root",
+      nodePath: "",
     });
     const composed = composeAgentModuleCandidates(projected.candidates);
 
@@ -858,12 +859,22 @@ describe("discoverAgent (memory)", () => {
     expect(composed.selected.get("instructions/crm")).toMatchObject({
       layer: "extension-package",
       logicalPath: "instructions/crm.md",
-      owner: { kind: "extension", namespace: "crm", packageName: "@acme/crm" },
+      owner: {
+        kind: "extension",
+        mountId: "extensions/crm",
+        namespace: "crm",
+        packageName: "@acme/crm",
+      },
     });
     expect(composed.selected.get("instructions/gizmo")).toMatchObject({
       layer: "extension-package",
       logicalPath: "instructions/gizmo.md",
-      owner: { kind: "extension", namespace: "gizmo", packageName: "@acme/gizmo" },
+      owner: {
+        kind: "extension",
+        mountId: "extensions/gizmo",
+        namespace: "gizmo",
+        packageName: "@acme/gizmo",
+      },
     });
   });
 
@@ -1240,6 +1251,7 @@ describe("discoverAgent (memory)", () => {
       externalDependencies: [],
       manifest: result.manifest,
       nodeId: "root",
+      nodePath: "",
     });
     const composed = composeAgentModuleCandidates(projected.candidates);
     expect(composed.selected.get("tools/crm__search")).toMatchObject({
@@ -1421,6 +1433,7 @@ describe("discoverAgent (memory)", () => {
         externalDependencies: [],
         manifest: result.manifest,
         nodeId: "root",
+        nodePath: "",
       }),
     ).not.toThrow();
   });

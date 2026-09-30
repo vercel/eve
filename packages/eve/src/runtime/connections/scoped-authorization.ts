@@ -36,7 +36,7 @@ import {
   resolveConnectionPrincipal,
   resolveConnectionPrincipalFromAuth,
 } from "#runtime/connections/principal.js";
-import type { SessionAuthContext } from "#context/keys.js";
+import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import {
   type AuthorizationDefinition,
   type ConnectionAuthorizationContext,
@@ -325,6 +325,8 @@ async function startScopedAuthorization(
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const principal = resolveScopedPrincipal(input);
+  const principalId = (input.boundResponder ?? contextStorage.getStore()?.get(AuthKey))
+    ?.principalId;
   const callbackUrl = resolveAuthorizationCallbackUrl({
     authorization,
     callbackUrl: attempt.hookUrl,
@@ -342,6 +344,7 @@ async function startScopedAuthorization(
       instanceId: input.instanceId,
       name: scope,
       principal,
+      principalId,
       resume,
     },
   ]);

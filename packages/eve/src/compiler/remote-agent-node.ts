@@ -1,4 +1,5 @@
 import { z } from "#compiled/zod/index.js";
+import { mountIdSchema } from "#shared/extension-mount.js";
 
 import type { Node } from "#shared/node.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -51,12 +52,14 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
                 .strict()
                 .optional(),
               kind: z.literal("filesystem"),
+              mountId: z.string().optional(),
               sourcePath: z.string(),
             })
             .strict(),
           z
             .object({
               kind: z.literal("programmatic"),
+              mountId: z.string().optional(),
               moduleId: z.string(),
               registryId: z.string(),
               revision: z.string(),
@@ -71,6 +74,7 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
           z
             .object({
               kind: z.literal("extension"),
+              mountId: mountIdSchema,
               namespace: z.string(),
               packageName: z.string(),
             })
@@ -89,7 +93,12 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
       z.object({ kind: z.literal("application") }).strict(),
       z.object({ feature: z.string(), kind: z.literal("framework") }).strict(),
       z
-        .object({ kind: z.literal("extension"), namespace: z.string(), packageName: z.string() })
+        .object({
+          kind: z.literal("extension"),
+          mountId: mountIdSchema,
+          namespace: z.string(),
+          packageName: z.string(),
+        })
         .strict(),
     ]),
     parentNodeId: z.string(),

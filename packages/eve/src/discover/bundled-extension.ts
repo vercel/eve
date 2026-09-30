@@ -34,6 +34,9 @@ export async function discoverBundledExtension(input: {
       programmaticDeclaration: {
         logicalPath: declaration.logicalPath,
         sourceId: `${input.mount.declaration.id}:${declaration.logicalPath}`,
+        importSpecifier: input.mount.importSpecifier,
+        entryPath: input.mount.entryPath,
+        config: input.mount.config,
       },
       sourceRoot: input.mount.sourceRoot,
       specifier: input.mount.specifier,

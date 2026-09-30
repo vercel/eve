@@ -43,7 +43,7 @@ describe("SessionHandoff", () => {
       anchorRunId: "session-1",
       checkpoint: expect.objectContaining({
         sessionTimeoutMs: 60_000,
-        version: 9,
+        version: 10,
       }),
       delivery: trigger.delivery,
       targetDeploymentId: "deployment-b",

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { parseGatewayModelCatalog } from "#shared/gateway-model-catalog.js";
 
 import {
@@ -47,10 +46,10 @@ const CATALOG: GatewayCatalogModel[] = [
     reasoningEfforts: [],
   },
   {
-    id: "spacexai/grok-4.7",
-    name: "Grok 4.7",
+    id: "openai/gpt-6-luna-fast",
+    name: "GPT-6 Luna Fast",
     type: "language",
-    owned_by: "spacexai",
+    owned_by: "openai",
     released: 100,
     tags: ["reasoning"],
     reasoningEfforts: [],
@@ -79,21 +78,27 @@ describe("modelOptionsFromCatalog", () => {
     const options = modelOptionsFromCatalog(CATALOG);
 
     expect(options.map((option) => option.value)).toEqual([
-      "spacexai/grok-4.7",
+      "openai/gpt-6-luna-fast",
       "zai/glm-4.6",
       "openai/gpt-5-mini",
     ]);
     expect(options.filter((option) => option.featured).map((o) => o.value)).toEqual([
-      "spacexai/grok-4.7",
+      "openai/gpt-6-luna-fast",
     ]);
-    expect(options[0]?.hint).toBe("SpaceXAI");
+    expect(options[0]?.hint).toBe("OpenAI");
   });
 
   it("falls back to the static shortlist without a catalog or matches", () => {
     for (const catalog of [undefined, [] as GatewayCatalogModel[]]) {
-      const values = modelOptionsFromCatalog(catalog).map((option) => option.value);
-      expect(values).toContain(DEFAULT_AGENT_MODEL_ID);
-      expect(values).toContain("google/gemini-3.5");
+      const options = modelOptionsFromCatalog(catalog);
+      expect(options[0]).toEqual({
+        id: "openai/gpt-6-luna-fast",
+        value: "openai/gpt-6-luna-fast",
+        label: "GPT-6 Luna Fast",
+        hint: "OpenAI",
+        featured: true,
+      });
+      expect(options.map((option) => option.value)).toContain("google/gemini-3.5");
     }
   });
 
@@ -113,13 +118,13 @@ describe("modelOptionsFromCatalog", () => {
     ]);
 
     expect(options.map((option) => option.value)).toEqual([
-      "spacexai/grok-4.7",
+      "openai/gpt-6-luna-fast",
       "anthropic/claude-opus-4.8",
       "zai/glm-4.6",
       "openai/gpt-5-mini",
     ]);
     expect(options.filter((option) => option.featured).map((o) => o.value)).toEqual([
-      "spacexai/grok-4.7",
+      "openai/gpt-6-luna-fast",
       "anthropic/claude-opus-4.8",
     ]);
   });
