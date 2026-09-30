@@ -1346,7 +1346,8 @@ describe("slackChannel() default event handlers", () => {
       }),
     );
 
-    await adapter.deliver!({ message: "hello" }, ctx);
+    // Slack-derived auth wins over the author stamped in delivery state.
+    await adapter.deliver!({ message: "hello", state: { triggeringUserId: "U_OTHER" } }, ctx);
 
     expect(ctx.state.slackUsersByPrincipal).toEqual({ "slack:T01:U_ALICE": "U_ALICE" });
   });
@@ -2088,6 +2089,57 @@ describe("slackChannel() inbound mention pipeline", () => {
     });
   });
 
+  it("routes every inbound message through a route wrapper's from(address).send", async () => {
+    const channel = asCompiled<SlackChannelState>(
+      slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        onAppMention: () => ({ auth: null }),
+        onDirectMessage: () => ({ auth: null }),
+      }),
+    );
+    const seen: string[] = [];
+    const failures: unknown[] = [];
+    const wrapped = {
+      ...channel,
+      routes: channel.routes.map((route) =>
+        isHttpRouteDefinition(route)
+          ? {
+              ...route,
+              handler: (request: Request, args: Parameters<typeof route.handler>[1]) =>
+                route.handler(request, {
+                  ...args,
+                  from: (address) => {
+                    const source = args.from(address);
+                    return {
+                      ...source,
+                      async send(message, options) {
+                        seen.push(address);
+                        try {
+                          return await source.send(message, options);
+                        } catch (error) {
+                          failures.push(error);
+                          throw error;
+                        }
+                      },
+                    };
+                  },
+                }),
+            }
+          : route,
+      ),
+    };
+    const rejection = new Error("delivery rejected");
+    const send = vi.fn().mockResolvedValueOnce({ id: "s1" }).mockRejectedValueOnce(rejection);
+
+    const mention = buildMentionBody({ channel: "C_WRAP" });
+    await firePost(wrapped, buildSignedRequest({ body: mention.body }), { send });
+    const dm = buildDirectMessageBody({ channel: "D_WRAP" });
+    await firePost(wrapped, buildSignedRequest({ body: dm.body }), { send });
+
+    expect(seen).toEqual([`C_WRAP:${mention.ts}`, `D_WRAP:${dm.ts}`]);
+    expect(failures).toEqual([rejection]);
+  });
+
   it("uses the app installation workspace for mention credentials", async () => {
     const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
     const channel = slackChannel({
@@ -2173,6 +2225,7 @@ describe("slackChannel() inbound mention pipeline", () => {
     const { body } = buildMentionBody({
       channel: "C_BOUND",
       threadTs: "1700000000.000300",
+      ts: "1700000000.000005",
     });
 
     const { send } = await firePost(channel, buildSignedRequest({ body }));

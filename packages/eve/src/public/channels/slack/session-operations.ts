@@ -1,11 +1,9 @@
-import {
-  INTERNAL_CHANNEL_DELIVER,
-  type ChannelFrom,
-  type ChannelResolveSession,
-  type ChannelRespondOptions,
-  type ChannelSendOptions,
-  type ChannelSource,
-  type InternalChannelSource,
+import type {
+  ChannelFrom,
+  ChannelResolveSession,
+  ChannelRespondOptions,
+  ChannelSendOptions,
+  ChannelSource,
 } from "#channel/channel-operations.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { InputResponse, StrictInputResponses } from "#shared/input.js";
@@ -46,13 +44,13 @@ export function bindSlackSessionOperations(input: {
   readonly resolveSession: ChannelResolveSession;
   readonly state: SlackChannelState;
 }): SlackSessionOperations {
-  const source = input.from(input.address) as InternalChannelSource<SlackChannelState>;
+  const source = input.from(input.address);
   const auth = (value: SessionAuthContext | null | undefined) =>
     value === undefined ? input.defaultAuth : value;
 
   return {
     async send(message, options = {}) {
-      return await sendAsSlackUser(source, message, {
+      return await source.send(message, {
         ...options,
         auth: auth(options.auth),
         state: input.state,
@@ -81,25 +79,6 @@ export function bindSlackSessionOperations(input: {
       return await input.resolveSession(input.address);
     },
   };
-}
-
-/**
- * Sends a message and stamps its Slack author on the payload, so `deliver` can
- * map a custom-auth principal to the Slack user who wrote the message.
- */
-export async function sendAsSlackUser(
-  source: InternalChannelSource<SlackChannelState>,
-  message: string | UserContent,
-  options: ChannelSendOptions<SlackChannelState>,
-): ReturnType<SlackSource["send"]> {
-  return await source[INTERNAL_CHANNEL_DELIVER](
-    {
-      context: options.context,
-      message,
-      state: { triggeringUserId: options.state?.triggeringUserId ?? null },
-    },
-    options,
-  );
 }
 
 /**

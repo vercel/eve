@@ -103,10 +103,13 @@ export function createChannelOperations<TState = undefined>(input: {
       const bound = channelAddress(address);
       const source: InternalChannelSource<TState> = {
         async send(message, options) {
+          // Deliver hooks read per-delivery state (such as the message author)
+          // from the payload, as they do for `respond()`.
           return await bound.deliver(
             {
               context: options.context,
               message,
+              state: (options as { readonly state?: TState }).state,
             },
             options,
           );
