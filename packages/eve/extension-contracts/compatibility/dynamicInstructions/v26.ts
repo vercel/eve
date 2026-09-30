@@ -1,6 +1,6 @@
 import { defineDynamic, defineInstructions } from "#public/instructions/index.js";
 
-// Epoch 26 tool-call action requests had no `parentCallId`; epoch 27 adds it as optional.
+// Epoch 26 authorization events had no `principalId`; it is additive.
 export default defineDynamic({
   events: {
     "turn.started": (_event, ctx) =>

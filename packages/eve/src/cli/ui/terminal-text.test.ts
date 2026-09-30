@@ -54,6 +54,8 @@ describe("editable input geometry", () => {
     expect(inputTextWidth("🇺🇸")).toBe(2);
     expect(inputTextWidth("1️⃣")).toBe(2);
     expect(inputTextWidth("©️")).toBe(2);
+    expect(inputTextWidth("⚡︎")).toBe(1);
+    expect(inputTextWidth("⚡️")).toBe(2);
     expect(inputTextWidth("A\uFE0F")).toBe(1);
     expect(inputTextWidth("\t")).toBe(4);
   });

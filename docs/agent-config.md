@@ -21,7 +21,7 @@ For a static AI Gateway model ID, you can make the same source change from the
 project root with `eve set model anthropic/claude-opus-5.5` or from the local
 dev TUI with `/model anthropic/claude-opus-5.5`.
 
-The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `spacexai/grok-4.7`; authoring the file replaces that source.
+The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `openai/gpt-6-luna-fast` and `reasoning: "high"`; authoring the file replaces that source.
 When `agent.ts` is present, `model` is required.
 
 A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider `LanguageModel` remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
@@ -121,6 +121,8 @@ dynamic agent. Each public `step.started` event reports the concrete `modelId`
 selected for that model call.
 
 ## Reasoning effort
+
+In an authored `agent.ts` with a static model, omitting `reasoning` uses the provider's default.
 
 Set `reasoning` to control the model's reasoning effort through AI SDK's
 provider-agnostic option:

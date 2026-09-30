@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { compiledRemoteAgentNodeSchema } from "#compiler/remote-agent-node.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import {
   COMPILED_AGENT_MANIFEST_VERSION,
@@ -40,6 +41,44 @@ describe("compiled agent manifest v50", () => {
     const parsed = compiledAgentManifestSchema.parse(manifest);
 
     expect(parsed.config.tool).toBe(false);
+  });
+
+  it("rejects empty mount identities on remote subagents and their bindings", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const owner = {
+      kind: "extension" as const,
+      mountId: "extensions/crm",
+      namespace: "crm",
+      packageName: "@acme/crm",
+    };
+    const binding = { ...manifest.bindings[manifest.config.source.sourceId]!, owner };
+    const remote = {
+      backing: { kind: "resource", sourcePath: "/virtual/subagents/reviewer.ts" },
+      binding,
+      description: "Reviews customer requests.",
+      entryPath: "/virtual/subagents/reviewer.ts",
+      logicalPath: "subagents/crm__reviewer.ts",
+      name: "crm__reviewer",
+      nodeId: "reviewer",
+      owner,
+      parentNodeId: "__root__",
+      path: "/virtual/subagents/reviewer.ts",
+      rootPath: "/virtual",
+      sourceId: "reviewer",
+      sourceKind: "module",
+      url: "https://reviewer.example.com",
+    };
+    expect(compiledRemoteAgentNodeSchema.safeParse(remote).success).toBe(true);
+    const invalidOwner = { ...owner, mountId: "" };
+    expect(
+      compiledRemoteAgentNodeSchema.safeParse({ ...remote, owner: invalidOwner }).success,
+    ).toBe(false);
+    expect(
+      compiledRemoteAgentNodeSchema.safeParse({
+        ...remote,
+        binding: { ...binding, owner: invalidOwner },
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects a missing required binding", async () => {

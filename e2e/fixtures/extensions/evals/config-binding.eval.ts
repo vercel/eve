@@ -1,16 +1,18 @@
 import { defineEval } from "eve/evals";
 
 export default defineEval({
-  tags: ["real-model"],
-  description: "Mounted extension tool returns the config bound at the mount site.",
+  description: "Two mounts of one extension keep their configured accounts separate.",
   async test(t) {
     await t.send(
-      "Call the `toolkit__toolkit_lookup` tool with account 'acme' and report exactly what it returned.",
+      "Alice is checking the primary account and Bob is checking the secondary account. Use `toolkit__toolkit_lookup` with account 'primary' for Alice, then `toolkit-alt__toolkit_lookup` with account 'secondary' for Bob. Report each lookup result.",
     );
 
     t.succeeded();
     t.calledTool("toolkit__toolkit_lookup", {
-      output: { account: "acme", apiKey: "sk-e2e-toolkit", tier: "pro" },
+      output: { account: "primary", apiKey: "sk-e2e-toolkit", tier: "pro" },
+    });
+    t.calledTool("toolkit-alt__toolkit_lookup", {
+      output: { account: "secondary", apiKey: "sk-e2e-toolkit-alt", tier: "enterprise" },
     });
   },
 });

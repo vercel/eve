@@ -1,4 +1,5 @@
 import { z } from "#compiled/zod/index.js";
+import { mountIdSchema } from "#shared/extension-mount.js";
 
 import {
   type DiscoverDiagnosticsSummary,
@@ -57,7 +58,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 52;
+export const COMPILED_AGENT_MANIFEST_VERSION = 54;
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.
@@ -351,6 +352,7 @@ const agentSourceOwnerSchema: z.ZodType<AgentSourceOwner> = z.discriminatedUnion
   z
     .object({
       kind: z.literal("extension"),
+      mountId: mountIdSchema,
       namespace: z.string().min(1),
       packageName: z.string().min(1),
     })
@@ -370,6 +372,7 @@ const filesystemModuleBackingSchema = z
   .object({
     externalDependencies: z.array(z.string()).readonly(),
     extensionScope: z.object({ namespace: z.string(), sourceRoot: z.string() }).strict().optional(),
+    mountId: z.string().optional(),
     kind: z.literal("filesystem"),
     sourcePath: z.string(),
   })
@@ -379,6 +382,7 @@ const programmaticModuleBackingSchema = z
   .object({
     dependencies: z.record(z.string(), z.string()).readonly().optional(),
     kind: z.literal("programmatic"),
+    mountId: z.string().optional(),
     moduleId: z.string(),
     parameters: jsonObjectSchema.optional(),
     registryId: z.string(),
@@ -937,10 +941,20 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
     externalDependencies: z.array(z.string()).readonly(),
     namespace: z.string(),
     packageName: z.string(),
-    packageNamespace: z.string(),
+    specifier: z.string(),
+    mountId: mountIdSchema,
     sourceRoot: z.string(),
     mountSourceId: z.string(),
+    mountSourcePath: z.string(),
     mountLogicalPath: z.string(),
+    programmaticImport: z
+      .object({
+        specifier: z.string(),
+        entryPath: z.string(),
+        config: jsonObjectSchema,
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -1024,7 +1038,7 @@ const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z.union([
 /**
  * One mounted extension recorded on a compiled agent manifest. The runtime
  * evaluates {@link mountLogicalPath} at module-map load so the mount's factory
- * call binds the extension's config before any tool runs.
+ * call binds the extension's config on its instance handle before any tool runs.
  */
 export interface CompiledExtensionMount {
   /** Runtime packages this extension requires the consuming application to externalize. */
@@ -1032,20 +1046,20 @@ export interface CompiledExtensionMount {
   /** Mount-derived namespace that prefixes the extension's tool/skill names. */
   readonly namespace: string;
   readonly packageName: string;
-  /**
-   * Package-derived namespace that scopes the extension's durable state keys and
-   * config binding. Distinct from {@link namespace}: state stays keyed to the
-   * package so a consumer renaming the mount file cannot orphan persisted state.
-   */
-  readonly packageNamespace: string;
-  /**
-   * Absolute path to the extension's source root on disk. The extension-scope
-   * bundler plugin treats any module under this root as extension-owned and
-   * rewrites its `eve/context`/`eve/extension` imports to bake in the namespace.
-   */
+  /** Package export imported by the mount declaration. */
+  readonly specifier: string;
+  /** Canonical path of this mount in the root agent tree. */
+  readonly mountId: string;
+  /** Absolute path to the extension's distributed source root. */
   readonly sourceRoot: string;
   readonly mountSourceId: string;
+  readonly mountSourcePath: string;
   readonly mountLogicalPath: string;
+  readonly programmaticImport?: {
+    readonly specifier: string;
+    readonly entryPath: string;
+    readonly config: JsonObject;
+  };
 }
 
 /**

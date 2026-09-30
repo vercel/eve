@@ -1,14 +1,14 @@
-import { defineChannel, POST } from "#public/channels/index.js";
+import { defineChannel } from "#public/channels/index.js";
 
-// Epoch 36 tool-call action requests had no `parentCallId`; epoch 37 adds it as optional.
+// Epoch 36 authorization events had no `principalId`; it is additive.
 export default defineChannel({
-  routes: [
-    POST("/answer/:sessionId", async (_request, { attachSession, params }) => {
-      await attachSession(params.sessionId!).respond(
-        [{ optionId: "approve", requestId: "approval-1" }],
-        { auth: null },
-      );
-      return new Response("ok");
-    }),
-  ],
+  routes: [],
+  events: {
+    "authorization.required"(event) {
+      console.info("sign-in required", { name: event.name, url: event.authorization?.url });
+    },
+    "authorization.completed"(event) {
+      console.info("sign-in completed", { name: event.name, outcome: event.outcome });
+    },
+  },
 });

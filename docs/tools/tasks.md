@@ -161,9 +161,14 @@ text is cut and marked `[truncated]`.
 <task_result id="deploy-4hd8sa" tool="deploy" status="completed">{"url":"https://…"}</task_result>
 ```
 
-**`task_wait({ timeoutSeconds? })`** parks the turn until any task has a result, a new message
-arrives, or `timeoutSeconds` pass. `timeoutSeconds` is a whole number of at least 1, in seconds
-like `sleep`. It returns at once when a result is already waiting. Waiting never stops a task. The
+**`task_wait({ timeoutSeconds? })`** controls when the model replies. The model should call it
+sparingly, only when it deliberately wants to withhold a message from the user while waiting for
+a task result. Tasks keep running and their results reach the model without this call; the model
+can reply now if the user should hear from it.
+
+The call parks the turn until any task has a result, a new message arrives, or `timeoutSeconds`
+pass. `timeoutSeconds` is a whole number of at least 1, in seconds like `sleep`. It returns at once
+when a result is already waiting. Waiting never stops a task. The
 model reads which tasks settled and which are still working, for example:
 
 ```text

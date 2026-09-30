@@ -143,7 +143,7 @@ function terminalGraphemeWidth(grapheme: string): number {
     if (codePoint !== undefined) width = Math.max(width, codePointWidth(codePoint));
   }
   const emojiPresentation =
-    emojiPresentationPattern.test(grapheme) ||
+    (emojiPresentationPattern.test(grapheme) && !grapheme.includes("\u{fe0e}")) ||
     keycapPattern.test(grapheme) ||
     (grapheme.includes("\u{fe0f}") && extendedPictographicPattern.test(grapheme));
   return emojiPresentation ? Math.max(2, width) : width;

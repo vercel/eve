@@ -196,7 +196,7 @@ if (compiled.subagents.length !== 1 || subagent === undefined || !subagent.agent
 `,
     );
     await run("node", ["verify-development-extension.mjs"], appRoot);
-    const build = await run("pnpm", ["build"], appRoot);
+    const build = await run("pnpm", ["exec", "eve", "build", "--skip-sandbox-prewarm"], appRoot);
     const output = `${build.stdout}\n${build.stderr}`;
     if (output.includes("Could not resolve '#shared/")) {
       throw new Error(

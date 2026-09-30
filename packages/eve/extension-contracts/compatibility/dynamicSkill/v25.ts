@@ -1,12 +1,12 @@
 import { defineDynamic, defineSkill } from "#public/skills/index.js";
 
-// Epoch 25 tool-call action requests had no `parentCallId`; epoch 26 adds it as optional.
+// Epoch 25 authorization events had no `principalId`; it is additive.
 export default defineDynamic({
   events: {
     "turn.started": (_event, ctx) =>
       defineSkill({
-        description: "Review the active request.",
-        markdown: `Review evidence for session ${ctx.session.id}.`,
+        description: `Review evidence for session ${ctx.session.id}.`,
+        markdown: "# Evidence review\n\nCheck every claim against its source.",
       }),
   },
 });

@@ -1,11 +1,14 @@
-import { defineMcpClientConnection } from "#public/connections/index.js";
+import { defineDynamic, defineMcpClientConnection } from "#public/connections/index.js";
 
-// Epoch 32 tool-call action requests had no `parentCallId`; epoch 33 adds it as optional.
-// Connection approval policies keep receiving the qualified tool name.
-export default defineMcpClientConnection({
-  description: "Search the support knowledge base.",
-  url: "https://support.example.com/mcp",
-  approval({ toolName }) {
-    return toolName.endsWith("__search") ? "approved" : "user-approval";
+// Epoch 32 authorization events had no `principalId`; it is additive.
+export default defineDynamic({
+  events: {
+    "turn.started": (_event, ctx) =>
+      ctx.session.auth.current === null
+        ? null
+        : defineMcpClientConnection({
+            description: "Search the support knowledge base.",
+            url: "https://support.example.com/mcp",
+          }),
   },
 });

@@ -494,6 +494,8 @@ export interface RunInput {
     readonly message?: string | UserContent;
     readonly context?: readonly string[];
     readonly outputSchema?: JsonObject;
+    /** Channel payload state for the first delivery, as later deliveries carry it. */
+    readonly state?: unknown;
   };
   /** Observability correlation only; never grants delegated-session privileges. */
   readonly conversationId?: string;

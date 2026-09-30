@@ -39,10 +39,7 @@ import {
   updateAnsweredFreeformCard,
   updateAnsweredHitlCard,
 } from "#public/channels/slack/interaction-cards.js";
-import {
-  approvalResponderStatePatch,
-  authorizeInputResponse,
-} from "#public/channels/slack/input-response.js";
+import { authorizeInputResponse } from "#public/channels/slack/input-response.js";
 import type {
   SlackChannelConfig,
   SlackChannelState,
@@ -54,7 +51,10 @@ import type {
   SlackShortcutContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
-import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
+import {
+  bindSlackSessionOperations,
+  withSlackResponder,
+} from "#public/channels/slack/session-operations.js";
 import { dispatchSlashCommand } from "#public/channels/slack/slash-command.js";
 import { parseInputResponse } from "#shared/input.js";
 
@@ -495,7 +495,7 @@ async function dispatchBlockInputResponses(input: {
       .from(slackContinuationToken(channelId, threadTs))
       .respond(input.submission.inputResponses, {
         auth: result.auth,
-        state: approvalResponderStatePatch(input.submission, result.auth),
+        state: withSlackResponder(undefined, input.submission.user.id),
       });
   } catch (error) {
     log.error("HITL interaction delivery failed", { error });
@@ -672,6 +672,7 @@ async function dispatchViewInputResponse(input: {
       .from(input.metadata.continuationToken)
       .respond(input.submission.inputResponses, {
         auth: result.auth,
+        state: withSlackResponder(undefined, input.submission.user.id),
       });
   } catch (error) {
     log.error("freeform answer delivery failed", { error });

@@ -1,14 +1,17 @@
 import { defineHook } from "#public/hooks/index.js";
 
-// Epoch 31 tool-call action requests had no `parentCallId`; epoch 32 adds it
-// as optional for nested actions. Hooks that read tool calls keep working.
+// Epoch 31 authorization events had no `principalId`; it is additive.
 export default defineHook({
   events: {
-    "actions.requested"(event) {
-      for (const action of event.data.actions) {
-        if (action.kind !== "tool-call") continue;
-        console.info("tool requested", { callId: action.callId, toolName: action.toolName });
-      }
+    "authorization.required"(event, ctx) {
+      console.info("sign-in required", {
+        attemptId: event.data.attemptId,
+        name: event.data.name,
+        sessionId: ctx.session.id,
+      });
+    },
+    "authorization.completed"(event) {
+      console.info("sign-in completed", { name: event.data.name, outcome: event.data.outcome });
     },
   },
 });

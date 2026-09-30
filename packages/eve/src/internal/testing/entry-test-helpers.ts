@@ -30,6 +30,7 @@ export function buildSerializedContext(overrides: {
   const context: Record<string, unknown> = {
     "eve.auth": overrides.auth ?? null,
     "eve.bundle": { source: createBundledRuntimeCompiledArtifactsSource() },
+    "eve.stateLayout": 1,
     "eve.channel": channel,
   };
   if (overrides.audience !== undefined) {

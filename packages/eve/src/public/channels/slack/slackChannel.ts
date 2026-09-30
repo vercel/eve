@@ -5,11 +5,12 @@ import type {
   ChannelFrom,
   ChannelResolveSession,
   ChannelSource,
+  InternalChannelSource,
 } from "#channel/channel-operations.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import { setChannelActivityRenderers, setChannelBuildMetadata } from "#channel/compiled-channel.js";
-import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { VercelConnectMetadata } from "#shared/vercel-connect-metadata.js";
 import type { CardElement } from "#compiled/chat/index.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -75,6 +76,8 @@ import { defineSlackAppManifest } from "#public/channels/slack/app-manifest.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
   bindSlackSessionOperations,
+  sendAsSlackUser,
+  withSlackResponder,
   type SlackSendOptions,
   type SlackSessionOperations,
 } from "#public/channels/slack/session-operations.js";
@@ -184,8 +187,8 @@ export interface SlackAuthorizationEventContext {
    */
   readonly postDirectMessage: SlackThread["postDirectMessage"];
   /**
-   * Hydrated per-session channel state — read `triggeringUserId` to
-   * target the delivery.
+   * Hydrated per-session channel state. Resolve the recipient with
+   * `slackUsersByPrincipal[eventData.principalId]`.
    */
   readonly state: SlackChannelState;
 }
@@ -234,9 +237,8 @@ export interface SlackChannelState {
   installationTeamId?: string | null;
   /**
    * Slack user id of the actor that triggered the current session/turn.
-   * Captured on every inbound mention so default handlers (e.g.
-   * `authorization.required`) can target ephemeral feedback at the right
-   * user without re-parsing the mention payload.
+   * A later message can change it, so sign-in and approval handlers address
+   * recipients through `slackUsersByPrincipal` instead.
    */
   triggeringUserId?: string | null;
   /**
@@ -263,8 +265,12 @@ export interface SlackChannelState {
    */
   pendingAuthMessageTs?: Record<string, string>;
   pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
-  pendingApprovalCandidateUsers?: Record<string, string>;
-  approvalResponderUsers?: Record<string, string>;
+  /**
+   * Principal id to Slack user id, recorded as each message or input response
+   * is delivered. Default handlers use it to address the principal named on
+   * `authorization.required` and approval events.
+   */
+  slackUsersByPrincipal?: Record<string, string>;
 }
 
 /**
@@ -892,8 +898,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   });
   const onInputResponse = config.onInputResponse ?? defaultOnInputResponse;
   const authorizationRequiredOverride = config.events?.["authorization.required"];
-  const candidateHandler =
-    config.events?.["approval.candidate"] ?? defaultEvents["approval.candidate"]!;
   const activityOwnsTypingStatus = hasSlackActivityStatus(config.activity?.renderers);
   const turnStartedHandler =
     config.events?.["turn.started"] ??
@@ -921,21 +925,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const mergedEvents: SlackChannelInternalEvents = {
     ...defaultEvents,
     ...config.events,
-    async "approval.candidate"(data, channel, ctx) {
-      const responderUserId = channel.state.approvalResponderUsers?.[data.responderPrincipalId];
-      if (data.outcome === "pending" && responderUserId !== undefined) {
-        channel.state.pendingApprovalCandidateUsers = {
-          ...channel.state.pendingApprovalCandidateUsers,
-          [data.candidateId]: responderUserId,
-        };
-      }
-      await candidateHandler(data, channel, ctx);
-      if (data.outcome !== "pending") {
-        const users = { ...channel.state.pendingApprovalCandidateUsers };
-        delete users[data.candidateId];
-        channel.state.pendingApprovalCandidateUsers = users;
-      }
-    },
     async "turn.started"(data, channel, ctx) {
       const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
       if (triggeringUserId !== undefined) {
@@ -977,8 +966,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       lastReasoningTypingStatus: null,
       pendingAuthMessageTs: {},
       pendingApprovalCards: {},
-      pendingApprovalCandidateUsers: {},
-      approvalResponderUsers: {},
+      slackUsersByPrincipal: {},
     },
     fetchFile: slackFetchFile,
     metadata(state): SlackInstrumentationMetadata {
@@ -995,19 +983,14 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       return rebuildSlackContext(state, session, api, config.credentials);
     },
 
-    deliver(payload, channel) {
+    // The runtime hands `deliver` the full adapter context; `session.auth.current`
+    // is the caller of this delivery.
+    deliver(payload, channel: SlackChannelContext & { readonly session: SessionHandle }) {
       const cards = payload.pendingApprovalCards;
       if (typeof cards === "object" && cards !== null) {
         channel.state.pendingApprovalCards = { ...channel.state.pendingApprovalCards, ...cards };
       }
-      const responders = (payload.state as Partial<SlackChannelState> | undefined)
-        ?.approvalResponderUsers;
-      if (typeof responders === "object" && responders !== null) {
-        channel.state.approvalResponderUsers = {
-          ...channel.state.approvalResponderUsers,
-          ...responders,
-        };
-      }
+      recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
       return defaultDeliverResult(payload);
     },
 
@@ -1162,11 +1145,10 @@ async function receiveOnSlack(
     state.audience = audience;
   }
 
-  return deps.from(slackContinuationToken(channelId, continuationThreadTs)).send(input.message, {
-    auth: input.auth,
-    state,
-    title: input.title,
-  });
+  const source = deps.from(
+    slackContinuationToken(channelId, continuationThreadTs),
+  ) as InternalChannelSource<SlackChannelState>;
+  return sendAsSlackUser(source, input.message, { auth: input.auth, state, title: input.title });
 }
 
 /**
@@ -1498,7 +1480,13 @@ async function dispatchSlackEvent(input: {
     resolveSession: ({ target }) =>
       input.resolveSession(slackContinuationToken(target.channelId, target.threadTs)),
     respond: (inputResponses, { auth, target }) =>
-      sourceFor(target).respond(inputResponses, { auth }),
+      sourceFor(target).respond(inputResponses, {
+        auth,
+        state: withSlackResponder(
+          undefined,
+          typeof input.envelope.event.user === "string" ? input.envelope.event.user : undefined,
+        ),
+      }),
     send: (message, { auth, target, title }) =>
       receiveOnSlack(
         { auth, message, target, title },
@@ -1614,4 +1602,25 @@ async function deliverSlackMessage(input: {
   } catch (error) {
     logError(log, `${input.kind} delivery failed`, error, { channelId: message.channelId });
   }
+}
+
+/**
+ * Records the Slack user behind a delivery's principal. Slack-authenticated
+ * callers carry their user id; custom auth relies on the message author or
+ * clicking user stamped on the payload.
+ */
+function recordSlackPrincipal(
+  state: SlackChannelState,
+  caller: SessionAuthContext | null,
+  payload: DeliverPayload,
+): void {
+  if (caller === null) return;
+  const stamped = (payload.state as Partial<SlackChannelState> | undefined)?.triggeringUserId;
+  const slackUserId =
+    slackUserIdFromAuthContext(caller) ?? (typeof stamped === "string" ? stamped : undefined);
+  if (slackUserId === undefined) return;
+  state.slackUsersByPrincipal = {
+    ...state.slackUsersByPrincipal,
+    [caller.principalId]: slackUserId,
+  };
 }

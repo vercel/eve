@@ -1,6 +1,6 @@
 import { defineAgent, defineDynamic } from "#public/index.js";
 
-// Epoch 23 tool-call action requests had no `parentCallId`; epoch 24 adds it as optional.
+// Epoch 23 authorization events had no `principalId`; it is additive.
 export default defineDynamic({
   events: {
     "turn.started": (_event, ctx) =>

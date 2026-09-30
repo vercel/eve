@@ -1,17 +1,18 @@
+import { z } from "zod";
 import { defineTool } from "#public/tools/index.js";
 
-// Epoch 63 tool-call action requests had no `parentCallId`; epoch 64 adds it
-// as optional for nested actions. Approval policies keep reading the same fields.
+// Epoch 63 authorization events had no `principalId`. Compiled epoch 63 tools
+// still park on sign-in through ctx.getToken; `principalId` is additive.
 export default defineTool({
-  description: "Look up an order by id.",
-  inputSchema: {
-    type: "object",
-    properties: { id: { type: "string" } },
-    required: ["id"],
+  description: "List the caller's open tickets.",
+  inputSchema: z.object({ project: z.string() }),
+  async execute({ project }, ctx) {
+    const { token } = await ctx.getToken({
+      principalType: "user",
+      async getToken() {
+        return { token: "ticket-token" };
+      },
+    });
+    return { authorized: token.length > 0, project };
   },
-  approval: ({ toolName, toolInput }) =>
-    toolName === "lookup_order" && typeof toolInput?.id === "string"
-      ? "not-applicable"
-      : "user-approval",
-  execute: (input) => ({ id: (input as { readonly id: string }).id }),
 });

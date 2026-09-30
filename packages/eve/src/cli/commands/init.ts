@@ -14,7 +14,7 @@ import { eveCliBanner, EVE_WORDMARK } from "#cli/banner.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import { resolveInitAgentSettings } from "#shared/default-agent-model.js";
 import type { NodeEngineOverride } from "#setup/node-engine.js";
 import {
   detectInvokingPackageManager,
@@ -149,8 +149,7 @@ async function addToExistingProject(
   const manager = await dependencies.detectPackageManager(targetPath);
   const result = await dependencies.addAgentToProject({
     projectRoot: targetPath,
-    model: options.model ?? DEFAULT_AGENT_MODEL_ID,
-    reasoning: options.reasoning,
+    ...resolveInitAgentSettings(options),
     packageManager: manager.kind,
     evePackage,
   });
@@ -208,8 +207,7 @@ async function scaffoldProject(
           : projectName;
     const scaffoldOptions = {
       projectName: stagedProjectName,
-      model: options.model ?? DEFAULT_AGENT_MODEL_ID,
-      reasoning: options.reasoning,
+      ...resolveInitAgentSettings(options),
       evePackage,
       targetDirectory: scaffoldDirectory,
       overwriteExisting,
