@@ -39,6 +39,8 @@ import {
   isActive,
   isToolCallRow,
   labelContext,
+  nestedTaskRecord,
+  startLine,
   subagentSteps,
   taskCallsById,
   toolBlock,
@@ -97,6 +99,7 @@ export class ConversationTranscript {
   #optimistic = new Map<string, string>();
   readonly #confirmed = new Set<string>();
   readonly #tasks = new Map<string, TaskRecord>();
+  readonly #nestedTasks = new Map<string, TaskRecord>();
   #placed: PlacedBlock[] = [];
   readonly #placedIds = new Set<string>();
   #working: readonly TaskEntry[] = [];
@@ -108,6 +111,7 @@ export class ConversationTranscript {
     this.#optimistic = new Map();
     this.#confirmed.clear();
     this.#tasks.clear();
+    this.#nestedTasks.clear();
     this.#placed = [];
     this.#placedIds.clear();
     this.#working = [];
@@ -274,19 +278,13 @@ export class ConversationTranscript {
         toolName: part.toolName,
         input: part.input,
         label,
+        purpose: summary || label,
         startedAtMs: now,
         ended: false,
       };
       this.#tasks.set(callId, record);
     }
-    const { name } = record;
-    return this.#memoize(`task:${callId}:start`, [name, summary, task.kind], () => ({
-      kind: "task",
-      taskKind: task.kind,
-      title: name,
-      subtitle: summary,
-      live: false,
-    }));
+    return this.#memoize(`task:${callId}:start`, [record], () => startLine(record));
   }
 
   /** Parallel calls to one agent read `researcher`, `researcher #2`, …; a name is never renamed. */
@@ -358,6 +356,8 @@ export class ConversationTranscript {
         toolName: record.toolName,
         input: record.input,
         label: record.label,
+        purpose: record.purpose,
+        children: activity.children,
         startedAtMs: record.startedAtMs,
         childTools: new Map(activity.tools.map((block) => [block.id!, block])),
       };
@@ -376,7 +376,9 @@ export class ConversationTranscript {
     call: ConversationTaskCall,
     conversation: ConversationState,
     options: TranscriptOptions,
-  ): { tools: Block[]; rows: Block[]; step?: string; pending: boolean } {
+    depth = 0,
+    traversal = { remaining: 128 },
+  ): { tools: Block[]; rows: Block[]; children?: TaskEntry[]; step?: string; pending: boolean } {
     const agent = task.kind === "agent" ? agentToolSession(conversation, task) : undefined;
     const child =
       agent === undefined || agent.observation.status === "not-followed"
@@ -396,6 +398,7 @@ export class ConversationTranscript {
     const childTasks = taskCallsById(child);
     const ordered: Array<{ order: number; block: Block; settled: boolean }> = [];
     const tools: Block[] = [];
+    const children: TaskEntry[] = [];
     let order = 0;
     for (const message of messages) {
       for (const part of message.parts) {
@@ -417,7 +420,41 @@ export class ConversationTranscript {
             live: false,
           };
         });
-        tools.push(block);
+        const childVisible =
+          childTask?.task.kind === "agent"
+            ? options.subagents !== "hidden"
+            : options.tools !== "hidden";
+        if (
+          childTask?.call.status === "working" &&
+          childVisible &&
+          depth < 8 &&
+          traversal.remaining > 0
+        ) {
+          traversal.remaining -= 1;
+          const key = `${record.callId}/${part.toolCallId}`;
+          let nested = this.#nestedTasks.get(key);
+          if (nested === undefined) {
+            nested = nestedTaskRecord(key, part, childTask.task, block);
+            this.#nestedTasks.set(key, nested);
+          }
+          const activity = this.#agentActivity(
+            nested,
+            childTask.task,
+            childTask.call,
+            child,
+            options,
+            depth + 1,
+            traversal,
+          );
+          children.push({
+            ...nested,
+            step: activity.step,
+            children: activity.children,
+            childTools: new Map(activity.tools.map((tool) => [tool.id!, tool])),
+          });
+        } else {
+          tools.push(block);
+        }
         ordered.push({ order, block, settled: !isActive(state.status) });
       }
     }
@@ -444,9 +481,16 @@ export class ConversationTranscript {
       .sort((left, right) => left.order - right.order)
       .map((row) => row.block);
     const latest = steps.at(-1);
-    const result: { tools: Block[]; rows: Block[]; step?: string; pending: boolean } = {
+    const result: {
+      tools: Block[];
+      rows: Block[];
+      children: TaskEntry[];
+      step?: string;
+      pending: boolean;
+    } = {
       tools,
       rows,
+      children,
       pending,
     };
     if (latest !== undefined) result.step = firstLine(latest.message) ?? "Thinking";

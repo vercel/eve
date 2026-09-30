@@ -3842,8 +3842,9 @@ describe("TerminalRenderer conversation", () => {
     ];
     renderer.renderConversation(conversationOf(working, { working: true }));
     const during = screen.snapshot();
-    expect(during).toContain("※ number_picker  Pick a number for Alice.");
-    expect(during).toMatch(/※ number_picker +Starting/);
+    expect(during).toContain("▪ Delegate number_picker  Pick a number for Alice.");
+    expect(during).toContain("Working · 1 task");
+    expect(during).toMatch(/number_picker · Pick a number for Alice\.\n\s+Starting ·/);
     expect(during).toContain("Waiting for number_picker");
     expect(during).not.toContain("task_wait");
 
@@ -3858,7 +3859,7 @@ describe("TerminalRenderer conversation", () => {
     );
     const after = screen.snapshot();
     expect(after).toMatch(/✓ number_picker +finished in/);
-    expect(after).not.toMatch(/※ number_picker +Starting/);
+    expect(after).not.toContain("Working · 1 task");
     renderer.requestInterrupt();
     await prompt.catch(() => {});
   });

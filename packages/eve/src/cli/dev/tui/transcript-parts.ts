@@ -17,6 +17,7 @@ import { formatTurnDuration } from "./stream-format.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import { summarizeChildTools } from "./tool-block-groups.js";
 import {
+  agentDisplayName,
   presentPreparingTool,
   presentTool,
   type ToolPresentationContext,
@@ -36,9 +37,49 @@ export interface TaskRecord {
   readonly toolName: string;
   readonly input: unknown;
   readonly label: string | undefined;
+  readonly purpose?: string;
   readonly startedAtMs: number;
   settledAtMs?: number;
   ended: boolean;
+}
+
+export function startLine(record: TaskRecord): Block {
+  const presentation = presentTool(record.toolName, record.input, {
+    ...labelContext(record.label),
+    isSubagent: record.kind === "agent",
+  });
+  return {
+    kind: "task",
+    taskKind: record.kind,
+    title: stripTerminalControls(presentation.title),
+    subtitle: stripTerminalControls(presentation.subtitle),
+    live: false,
+  };
+}
+
+export function nestedTaskRecord(
+  callId: string,
+  part: EveDynamicToolPart,
+  task: ConversationTask,
+  block: Block,
+): TaskRecord {
+  return {
+    callId,
+    kind: task.kind,
+    name:
+      task.kind === "agent"
+        ? agentDisplayName(stripTerminalControls(part.toolName))
+        : stripTerminalControls(part.toolName),
+    toolName: part.toolName,
+    input: part.input,
+    label: undefined,
+    purpose:
+      task.kind === "agent"
+        ? agentTaskSummary(part.input)
+        : block.subtitle || (block.title === part.toolName ? undefined : block.title),
+    startedAtMs: Date.now(),
+    ended: false,
+  };
 }
 
 export function toolState(

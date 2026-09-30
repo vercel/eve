@@ -3152,6 +3152,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       width,
       theme: this.#theme,
       nowMs: Date.now(),
+      maxRows: Math.max(2, Math.floor(this.#height() / 3)),
       pulse: this.#progressPulseGlyph(
         this.#activityPulseStartedAtMs,
         this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,

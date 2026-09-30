@@ -316,7 +316,7 @@ describe("ConversationTranscript", () => {
         id: "task:call_1:start",
         kind: "task",
         taskKind: "agent",
-        title: "summarize",
+        title: "Delegate summarize",
         live: false,
       }),
     ]);
@@ -358,7 +358,7 @@ describe("ConversationTranscript", () => {
     ]);
     const transcript = new ConversationTranscript();
     expect(summarize(transcript.project(view(called, true), options))).toEqual([
-      ["task", "research", undefined],
+      ["task", "Delegate research", undefined],
       ["subagent-step", "research", "Bob's notes found."],
     ]);
     expect(transcript.tasks[0]).toMatchObject({ name: "research", step: "Bob's notes found." });
@@ -376,7 +376,7 @@ describe("ConversationTranscript", () => {
       reported,
     );
     expect(summarize(transcript.project(view(ended, true), options))).toEqual([
-      ["task", "research", undefined],
+      ["task", "Delegate research", undefined],
       ["subagent-step", "research", "Bob's notes found."],
       ["assistant", undefined, "Bob found his notes."],
       ["task", "research", "finished in 1min 12s"],
@@ -411,10 +411,79 @@ describe("ConversationTranscript", () => {
     );
     expect(summarize(transcript.project(view(continued, true), options)).slice(3)).toEqual([
       ["task", "research", "finished in 1min 12s"],
-      ["task", "research", undefined],
+      ["task", "Delegate research", undefined],
       ["subagent-step", "research", "Bob's summary is attached."],
       ["task", "research", "failed · The agent's session ended."],
     ]);
+  });
+
+  it("follows nested background work without duplicating it as the owning agent's activity", () => {
+    vi.useFakeTimers({ now: 0 });
+    onTestFinished(() => void vi.useRealTimers());
+    const started = conversation([
+      turn,
+      toolCall("call_1", "research"),
+      taskStarted("call_1", "research"),
+      agentStarted("call_1"),
+      { type: "client.agent.following", data: { sessionId: "child_1" } },
+      ...observe([
+        createTurnStartedEvent({ sequence: 0, turnId: "child_turn" }),
+        createMessageReceivedEvent({
+          message: "Find Alice's notes",
+          sequence: 0,
+          turnId: "child_turn",
+        }),
+        createActionsRequestedEvent({
+          actions: [
+            {
+              callId: "download",
+              toolName: "download",
+              kind: "tool-call",
+              input: { file: "notes.md" },
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "child_turn",
+        }),
+        createTaskStartedEvent({
+          callId: "download",
+          taskId: "download_task",
+          name: "download",
+          kind: "tool",
+          turnId: "child_turn",
+        }),
+      ]),
+    ]);
+    const transcript = new ConversationTranscript();
+    transcript.project(view(started, true), options);
+    expect(transcript.tasks[0]).toMatchObject({
+      name: "research",
+      children: [{ name: "download", kind: "tool", startedAtMs: 0 }],
+    });
+    expect(transcript.tasks[0]!.childTools.size).toBe(0);
+    vi.setSystemTime(12_000);
+    transcript.project(view(started, true), options);
+    expect(transcript.tasks[0]!.children![0]!.startedAtMs).toBe(0);
+    const finished = conversation(
+      observe([
+        createTaskSettledEvent({
+          callId: "download",
+          taskId: "download_task",
+          turnId: "child_turn",
+          status: "completed",
+          output: "saved",
+        }),
+      ]),
+      started,
+    );
+    transcript.project(view(finished, true), options);
+    expect(transcript.tasks[0]!.children).toEqual([]);
+    expect([...transcript.tasks[0]!.childTools.values()]).toEqual([
+      expect.objectContaining({ status: "done" }),
+    ]);
+    transcript.project(view(started, true), { ...options, tools: "hidden" });
+    expect(transcript.tasks[0]!.children).toEqual([]);
   });
 
   it("names parallel calls apart, stops tasks a cancelled turn leaves working, and hides hidden ones", () => {

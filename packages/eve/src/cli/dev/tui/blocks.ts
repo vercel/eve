@@ -237,7 +237,7 @@ function renderBody(
     case "log":
       return renderLog(block, width, theme);
     case "task":
-      return renderTask(block, width, theme);
+      return renderTask(block, width, theme, context);
     case "turn-stats":
       return renderTurnStats(block, width, theme);
     case "session-boundary":
@@ -549,7 +549,15 @@ function renderTurnStats(block: Block, width: number, theme: Theme): string[] {
  * as it ends. Each is written once; what the task does in between lives in
  * the task panel above the prompt.
  */
-function renderTask(block: Block, width: number, theme: Theme): string[] {
+function renderTask(
+  block: DisplayBlock,
+  width: number,
+  theme: Theme,
+  context: RenderBlockContext,
+): string[] {
+  if (block.status === undefined) {
+    return renderTool({ ...block, status: "done" }, width, theme, context).slice(0, 1);
+  }
   const c = theme.colors;
   const { mark, detail, color } = taskLineStyle(block, theme);
   const head = `${TOOL_COLUMN_LEAD}${mark} ${c.bold(truncate(block.title ?? "task", width - 4))}`;

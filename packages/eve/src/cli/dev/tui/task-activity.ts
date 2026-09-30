@@ -12,7 +12,7 @@ import { formatTurnDuration } from "./stream-format.js";
 import { TOOL_COLUMN_LEAD } from "./rail.js";
 import { truncate } from "./tool-format.js";
 import { isSelfModificationAgent } from "./tool-presentation.js";
-import { clipVisible, visibleLength } from "#cli/ui/terminal-text.js";
+import { clipVisible } from "#cli/ui/terminal-text.js";
 
 export type TaskKind = "agent" | "tool";
 
@@ -25,6 +25,8 @@ export interface TaskEntry {
   readonly input: unknown;
   readonly label: string | undefined;
   readonly startedAtMs: number;
+  readonly purpose?: string;
+  readonly children?: readonly TaskEntry[];
   /** An agent's latest words or thinking, one line. */
   step?: string;
   /** Settled, waiting only for the agent's own last events. */
@@ -33,8 +35,8 @@ export interface TaskEntry {
   readonly childTools: Map<string, Block>;
 }
 
-/** The panel shows this many tasks; the rest collapse into one counted row. */
-const maxPanelRows = 4;
+/** Includes the heading and overflow summary, regardless of nesting. */
+const maxPanelRows = 9;
 
 export class TaskActivity {
   readonly #entries = new Map<string, TaskEntry>();
@@ -122,13 +124,24 @@ function currentActivity(entry: TaskEntry): { text: string; attention: boolean }
   const running = tools.findLast((tool) => tool.status === "running");
   if (running !== undefined) return { text: running.title ?? "Working", attention: false };
   if (entry.step !== undefined) return { text: entry.step, attention: false };
-  return { text: entry.kind === "agent" ? "Starting" : "Working", attention: false };
+  return { text: entry.kind === "agent" ? "Starting" : "Running", attention: false };
 }
 
-/**
- * One row per working task — mark, name, current activity, elapsed time —
- * capped so a wide fan-out cannot push the prompt off screen.
- */
+/** Stable ownership order, with only one visible level of indentation. */
+function panelEntries(entries: readonly TaskEntry[]): Array<{ entry: TaskEntry; path: string[] }> {
+  const rows: Array<{ entry: TaskEntry; path: string[] }> = [];
+  const visit = (tasks: readonly TaskEntry[], path: string[], depth: number): void => {
+    if (depth > 8 || rows.length >= 128) return;
+    for (const entry of tasks) {
+      if (rows.length >= 128) break;
+      rows.push({ entry, path });
+      visit(entry.children ?? [], [...path, entry.name], depth + 1);
+    }
+  };
+  visit(entries, [], 0);
+  return rows;
+}
+
 export function renderTaskPanelRows(
   entries: readonly TaskEntry[],
   options: {
@@ -136,33 +149,56 @@ export function renderTaskPanelRows(
     readonly theme: Theme;
     readonly nowMs: number;
     readonly pulse: string;
+    readonly maxRows?: number;
   },
 ): string[] {
+  if (entries.length === 0) return [];
   const { width, theme, nowMs } = options;
   const c = theme.colors;
-  const shown = entries.length > maxPanelRows ? entries.slice(0, maxPanelRows - 1) : entries;
-  const nameWidth = Math.min(24, Math.max(...shown.map((entry) => visibleLength(entry.name)), 0));
-  const rows = shown.map((entry) => {
-    const mark =
-      options.pulse.trim().length > 0
-        ? c.orange(theme.glyph.subagent)
-        : c.dim(theme.glyph.subagent);
-    const name = truncate(entry.name, nameWidth);
-    const padded = name + " ".repeat(Math.max(0, nameWidth - visibleLength(name)));
-    const elapsed = formatTurnDuration(nowMs - entry.startedAtMs);
-    const lead = `${TOOL_COLUMN_LEAD}${mark} ${padded}  `;
-    const budget = width - visibleLength(lead) - elapsed.length - 2;
-    const activity = currentActivity(entry);
-    const text = budget >= 4 ? truncate(activity.text, budget) : "";
-    const color = activity.attention ? c.yellow : c.dim;
-    const gap = Math.max(1, width - visibleLength(lead) - visibleLength(text) - elapsed.length);
-    return clipVisible(`${lead}${color(text)}${" ".repeat(gap)}${c.dim(elapsed)}`, width);
-  });
-  const hidden = entries.length - shown.length;
-  if (hidden > 0) {
+  const tasks = panelEntries(entries);
+  const budget = Math.max(1, Math.min(maxPanelRows, options.maxRows ?? maxPanelRows));
+  const overflow = tasks.length * 2 + 1 > budget;
+  const capacity = Math.max(0, Math.floor((budget - 1 - (overflow ? 1 : 0)) / 2));
+  // Approval requests must not disappear behind a busy branch's overflow summary.
+  const attention = tasks.filter(({ entry }) => currentActivity(entry).attention);
+  const selected = new Set(
+    [...attention, ...tasks.filter((task) => !attention.includes(task))].slice(0, capacity),
+  );
+  const shown = tasks.filter((task) => selected.has(task));
+  const mark = options.pulse.trim().length > 0 ? options.pulse : theme.glyph.square;
+  const rows = [
+    clipVisible(
+      `${TOOL_COLUMN_LEAD}${c.yellow(mark)} ${c.bold("Working")} ${c.dim(`${theme.glyph.dot} ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`)}`,
+      width,
+    ),
+  ];
+  for (const { entry, path } of shown) {
+    const nested = path.length > 0;
+    const lead = `${TOOL_COLUMN_LEAD}  ${nested ? `${theme.glyph.corner} ` : ""}`;
+    const parentShown = shown.some((task) => task.entry.name === path.at(-1));
+    const owners = parentShown ? path.slice(1) : path;
+    const ownership =
+      owners.length > 0 ? `${owners.join(` ${theme.glyph.arrow} `)} ${theme.glyph.arrow} ` : "";
+    const purpose = entry.purpose?.trim();
     rows.push(
       clipVisible(
-        `${TOOL_COLUMN_LEAD}${c.dim(`${theme.glyph.ellipsis} ${String(hidden)} more working`)}`,
+        `${lead}${c.bold(`${ownership}${entry.name}`)}${c.dim(purpose ? ` ${theme.glyph.dot} ${purpose}` : "")}`,
+        width,
+      ),
+    );
+    const activity = currentActivity(entry);
+    const elapsed = formatTurnDuration(nowMs - entry.startedAtMs);
+    const detailLead = `${TOOL_COLUMN_LEAD}    ${nested ? "  " : ""}`;
+    const suffix = ` ${theme.glyph.dot} ${elapsed}`;
+    const text = truncate(activity.text, Math.max(0, width - detailLead.length - suffix.length));
+    const color = activity.attention ? c.yellow : c.dim;
+    rows.push(clipVisible(`${detailLead}${color(text)}${c.dim(suffix)}`, width));
+  }
+  const hidden = tasks.length - shown.length;
+  if (hidden > 0 && rows.length < budget) {
+    rows.push(
+      clipVisible(
+        `${TOOL_COLUMN_LEAD}  ${c.dim(`${theme.glyph.ellipsis} ${hidden} more working`)}`,
         width,
       ),
     );
