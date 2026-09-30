@@ -17,19 +17,20 @@ const task = (name: string, children: readonly TaskEntry[] = []): TaskEntry => (
   children,
 });
 const render = (entries: readonly TaskEntry[], width = 80, maxRows = 9) =>
-  renderTaskPanelRows(entries, { width, maxRows, theme, nowMs: 12_000, pulse: "▪" }).map(stripAnsi);
+  renderTaskPanelRows(entries, { width, maxRows, theme, nowMs: 12_000 }).map(stripAnsi);
 
 describe("live task panel", () => {
   it("keeps purpose separate from activity and flattens deeper ownership paths", () => {
     const rows = render([task("researcher", [task("analyst", [task("download")])])]);
-    expect(rows).toEqual([
-      "  ▪ Working · 3 tasks",
-      "    researcher · Find Alice's notes",
-      "      Starting · 12s",
-      "    └ analyst · Find Alice's notes",
-      "        Starting · 12s",
-      "    └ analyst → download · Find Alice's notes",
-      "        Starting · 12s",
+    expect(rows[0]).toMatch(/^  ── Working · 3 tasks ─+$/);
+    expect(visibleLength(rows[0]!)).toBe(80);
+    expect(rows.slice(1)).toEqual([
+      "  │ researcher · Find Alice's notes",
+      "  │   Starting · 12s",
+      "  │ └ analyst · Find Alice's notes",
+      "  │     Starting · 12s",
+      "  │ └ analyst → download · Find Alice's notes",
+      "  │     Starting · 12s",
     ]);
   });
 
@@ -54,6 +55,19 @@ describe("live task panel", () => {
     expect(rows.join("\n")).toContain("Needs your approval: run command");
     expect(rows.at(-1)).toContain("4 more working");
     expect(rows.join("\n")).not.toContain("download ·");
+  });
+
+  it("keeps turn status inside the rail and includes it in the panel's row budget", () => {
+    const rows = renderTaskPanelRows([task("researcher")], {
+      width: 80,
+      maxRows: 5,
+      theme,
+      nowMs: 12_000,
+      turnStatus: "Waiting for researcher (16s)",
+    }).map(stripAnsi);
+    expect(rows).toHaveLength(5);
+    expect(rows.slice(-2)).toEqual(["  │", "  │ Waiting for researcher (16s)"]);
+    expect(rows[1]).toContain("researcher · Find Alice's notes");
   });
 
   it("fits narrow terminals and small row budgets without retaining an empty panel", () => {

@@ -12,7 +12,7 @@ import { formatTurnDuration } from "./stream-format.js";
 import { TOOL_COLUMN_LEAD } from "./rail.js";
 import { truncate } from "./tool-format.js";
 import { isSelfModificationAgent } from "./tool-presentation.js";
-import { clipVisible } from "#cli/ui/terminal-text.js";
+import { clipVisible, visibleLength } from "#cli/ui/terminal-text.js";
 
 export type TaskKind = "agent" | "tool";
 
@@ -148,7 +148,7 @@ export function renderTaskPanelRows(
     readonly width: number;
     readonly theme: Theme;
     readonly nowMs: number;
-    readonly pulse: string;
+    readonly turnStatus?: string;
     readonly maxRows?: number;
   },
 ): string[] {
@@ -157,24 +157,27 @@ export function renderTaskPanelRows(
   const c = theme.colors;
   const tasks = panelEntries(entries);
   const budget = Math.max(1, Math.min(maxPanelRows, options.maxRows ?? maxPanelRows));
-  const overflow = tasks.length * 2 + 1 > budget;
-  const capacity = Math.max(0, Math.floor((budget - 1 - (overflow ? 1 : 0)) / 2));
+  const statusRows = options.turnStatus === undefined ? 0 : 2;
+  const contentBudget = Math.max(1, budget - statusRows);
+  const overflow = tasks.length * 2 + 1 > contentBudget;
+  const capacity = Math.max(0, Math.floor((contentBudget - 1 - (overflow ? 1 : 0)) / 2));
   // Approval requests must not disappear behind a busy branch's overflow summary.
   const attention = tasks.filter(({ entry }) => currentActivity(entry).attention);
   const selected = new Set(
     [...attention, ...tasks.filter((task) => !attention.includes(task))].slice(0, capacity),
   );
   const shown = tasks.filter((task) => selected.has(task));
-  const mark = options.pulse.trim().length > 0 ? options.pulse : theme.glyph.square;
+  const heading = `${TOOL_COLUMN_LEAD}${c.dim(theme.glyph.dash.repeat(2))} ${c.bold("Working")} ${c.dim(`${theme.glyph.dot} ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`)} `;
   const rows = [
     clipVisible(
-      `${TOOL_COLUMN_LEAD}${c.yellow(mark)} ${c.bold("Working")} ${c.dim(`${theme.glyph.dot} ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`)}`,
+      `${heading}${c.dim(theme.glyph.dash.repeat(Math.max(0, width - visibleLength(heading))))}`,
       width,
     ),
   ];
+  const rail = `${TOOL_COLUMN_LEAD}${c.dim(theme.glyph.rule)}`;
   for (const { entry, path } of shown) {
     const nested = path.length > 0;
-    const lead = `${TOOL_COLUMN_LEAD}  ${nested ? `${theme.glyph.corner} ` : ""}`;
+    const lead = `${rail} ${nested ? `${theme.glyph.corner} ` : ""}`;
     const parentShown = shown.some((task) => task.entry.name === path.at(-1));
     const owners = parentShown ? path.slice(1) : path;
     const ownership =
@@ -188,20 +191,23 @@ export function renderTaskPanelRows(
     );
     const activity = currentActivity(entry);
     const elapsed = formatTurnDuration(nowMs - entry.startedAtMs);
-    const detailLead = `${TOOL_COLUMN_LEAD}    ${nested ? "  " : ""}`;
+    const detailLead = `${rail}   ${nested ? "  " : ""}`;
     const suffix = ` ${theme.glyph.dot} ${elapsed}`;
-    const text = truncate(activity.text, Math.max(0, width - detailLead.length - suffix.length));
+    const text = truncate(
+      activity.text,
+      Math.max(0, width - visibleLength(detailLead) - suffix.length),
+    );
     const color = activity.attention ? c.yellow : c.dim;
     rows.push(clipVisible(`${detailLead}${color(text)}${c.dim(suffix)}`, width));
   }
   const hidden = tasks.length - shown.length;
-  if (hidden > 0 && rows.length < budget) {
+  if (hidden > 0 && rows.length < contentBudget) {
     rows.push(
-      clipVisible(
-        `${TOOL_COLUMN_LEAD}  ${c.dim(`${theme.glyph.ellipsis} ${hidden} more working`)}`,
-        width,
-      ),
+      clipVisible(`${rail} ${c.dim(`${theme.glyph.ellipsis} ${hidden} more working`)}`, width),
     );
+  }
+  if (options.turnStatus !== undefined && rows.length + 2 <= budget) {
+    rows.push(clipVisible(rail, width), clipVisible(`${rail} ${options.turnStatus}`, width));
   }
   return rows;
 }

@@ -3145,18 +3145,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#taskEndGraceTimer = undefined;
   }
 
-  #taskPanelRows(width: number): string[] {
+  #taskPanelRows(width: number, turnStatus?: string): string[] {
     const working = this.#transcript.tasks;
     if (working.length === 0) return [];
     return renderTaskPanelRows(working, {
       width,
       theme: this.#theme,
       nowMs: Date.now(),
-      maxRows: Math.max(2, Math.floor(this.#height() / 3)),
-      pulse: this.#progressPulseGlyph(
-        this.#activityPulseStartedAtMs,
-        this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
-      ),
+      maxRows: Math.max(turnStatus === undefined ? 2 : 5, Math.floor(this.#height() / 3)),
+      turnStatus,
     });
   }
 
@@ -3629,7 +3626,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     // The task panel is the one region that redraws in place while tasks
     // work, so it sits in the footer rather than the transcript.
-    const taskRows = this.#taskPanelRows(width);
+    const working = this.#view?.working === true && this.#flowlessStatus === undefined;
+    const taskRows = this.#taskPanelRows(
+      width,
+      working ? this.#streamingTurnBar(width - 4) : undefined,
+    );
     if (taskRows.length > 0) {
       rows.push(...taskRows);
       if (this.#inputActive) rows.push("");
@@ -3646,9 +3647,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     // While work runs, the one live turn bar rides above the composer. The
     // `Done in … (↑ … ↓ …)` coda is this bar's settled form.
-    const working = this.#view?.working === true && this.#flowlessStatus === undefined;
     if (working) {
-      rows.push(this.#streamingTurnBar(width));
+      if (taskRows.length === 0) rows.push(this.#streamingTurnBar(width));
       if (this.#cancelRequested) {
         rows.push(
           clip(
@@ -3657,7 +3657,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           ),
         );
       }
-      rows.push("");
+      if (taskRows.length === 0 || !this.#inputActive || this.#cancelRequested) rows.push("");
     }
 
     if (this.#inputActive) {

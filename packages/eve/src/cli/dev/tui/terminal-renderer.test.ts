@@ -3844,7 +3844,10 @@ describe("TerminalRenderer conversation", () => {
     const during = screen.snapshot();
     expect(during).toContain("▪ Delegate number_picker  Pick a number for Alice.");
     expect(during).toContain("Working · 1 task");
-    expect(during).toMatch(/number_picker · Pick a number for Alice\.\n\s+Starting ·/);
+    expect(during).toMatch(/── Working · 1 task ─+/);
+    expect(during).toMatch(/│ number_picker · Pick a number for Alice\.\n\s+│\s+Starting ·/);
+    expect(during).toMatch(/│ [• ] Waiting for number_picker/);
+    expect(countOccurrences(during, "Waiting for number_picker")).toBe(1);
     expect(during).toContain("Waiting for number_picker");
     expect(during).not.toContain("task_wait");
 
