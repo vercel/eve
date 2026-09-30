@@ -37,12 +37,12 @@ import { publishTurnWaitingStep } from "#execution/session/turn-waiting-step.js"
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
-import { emitAgentStartedStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import {
+  batchAgentStarts,
+  emitAgentStartedStep,
+} from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
-import type {
-  WorkflowToolRunAgentStartedMessage,
-  WorkflowToolRunMessage,
-} from "#execution/tools/workflow/messages.js";
+import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type {
   RuntimeActionResultStepInput,
   TurnOutcome,
@@ -130,8 +130,7 @@ export class SessionExecution {
 
   /**
    * Applies what runs reported while the model step ran, so the next step sees
-   * it. Consecutive `agent-started` messages, such as a fan-out's, share one
-   * step, so each child does not add a step to the turn.
+   * it. Consecutive `agent-started` messages, such as a fan-out's, share one step.
    */
   private async handleBoundaryMessages(turn: ActiveTurn): Promise<void> {
     for (const batch of batchAgentStarts(turn.takeBoundaryMessages())) {
@@ -686,20 +685,6 @@ class ActiveTurn {
     if (this.controller.signal.aborted) return;
     this.controller.abort(new TurnCancelledError());
   }
-}
-
-/** Groups consecutive `agent-started` messages, keeping every message in admission order. */
-function batchAgentStarts(
-  messages: readonly WorkflowToolRunMessage[],
-): (WorkflowToolRunMessage | WorkflowToolRunAgentStartedMessage[])[] {
-  const batches: (WorkflowToolRunMessage | WorkflowToolRunAgentStartedMessage[])[] = [];
-  for (const message of messages) {
-    const last = batches.at(-1);
-    if (message.kind !== "agent-started") batches.push(message);
-    else if (Array.isArray(last)) last.push(message);
-    else batches.push([message]);
-  }
-  return batches;
 }
 
 function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefined {

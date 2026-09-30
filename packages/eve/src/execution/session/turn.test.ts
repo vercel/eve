@@ -60,10 +60,14 @@ vi.mock("#execution/tools/workflow/interrupt.js", () => ({
 vi.mock("#execution/session/turn-waiting-step.js", () => ({
   publishTurnWaitingStep: vi.fn(async () => ({ stateDelta: {} })),
 }));
-vi.mock("#execution/tools/workflow/emit-workflow-tool-run-report-step.js", () => ({
-  emitAgentStartedStep: vi.fn(),
-  emitWorkflowToolRunReportStep: vi.fn(),
-}));
+vi.mock(
+  "#execution/tools/workflow/emit-workflow-tool-run-report-step.js",
+  async (importOriginal) => ({
+    ...(await importOriginal()),
+    emitAgentStartedStep: vi.fn(),
+    emitWorkflowToolRunReportStep: vi.fn(),
+  }),
+);
 
 beforeEach(() => {
   vi.mocked(routeDeliverToChildren)
