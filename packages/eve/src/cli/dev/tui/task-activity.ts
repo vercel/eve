@@ -9,7 +9,7 @@
 import type { Block } from "./blocks.js";
 import type { Theme } from "./theme.js";
 import { formatTurnDuration } from "./stream-format.js";
-import { TOOL_COLUMN_LEAD } from "./rail.js";
+import { renderTransientDrawer } from "./flow-drawer.js";
 import { truncate } from "./tool-format.js";
 import { isSelfModificationAgent } from "./tool-presentation.js";
 import { clipVisible, visibleLength } from "#cli/ui/terminal-text.js";
@@ -156,42 +156,29 @@ export function renderTaskPanelRows(
   const { width, theme, nowMs } = options;
   const c = theme.colors;
   const tasks = panelEntries(entries);
-  const budget = Math.max(1, Math.min(maxPanelRows, options.maxRows ?? maxPanelRows));
-  const statusRows = options.turnStatus === undefined ? 0 : 2;
-  const contentBudget = Math.max(1, budget - statusRows);
-  const overflow = tasks.length * 2 + 1 > contentBudget;
-  const capacity = Math.max(0, Math.floor((contentBudget - 1 - (overflow ? 1 : 0)) / 2));
+  const budget = Math.max(2, Math.min(maxPanelRows, options.maxRows ?? maxPanelRows));
+  const statusRows = options.turnStatus === undefined ? 0 : 1;
+  const contentBudget = Math.max(0, budget - 2 - statusRows);
+  const overflow = tasks.length * 2 > contentBudget;
+  const capacity = Math.max(0, Math.floor((contentBudget - (overflow ? 1 : 0)) / 2));
   // Approval requests must not disappear behind a busy branch's overflow summary.
   const attention = tasks.filter(({ entry }) => currentActivity(entry).attention);
   const selected = new Set(
     [...attention, ...tasks.filter((task) => !attention.includes(task))].slice(0, capacity),
   );
   const shown = tasks.filter((task) => selected.has(task));
-  const heading = `${TOOL_COLUMN_LEAD}${c.dim(theme.glyph.dash.repeat(2))} ${c.bold("Working")} ${c.dim(`${theme.glyph.dot} ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`)} `;
-  const rows = [
-    clipVisible(
-      `${heading}${c.dim(theme.glyph.dash.repeat(Math.max(0, width - visibleLength(heading))))}`,
-      width,
-    ),
-  ];
-  const rail = `${TOOL_COLUMN_LEAD}${c.dim(theme.glyph.rule)}`;
+  const rows: string[] = [];
   for (const { entry, path } of shown) {
     const nested = path.length > 0;
-    const lead = `${rail} ${nested ? `${theme.glyph.corner} ` : ""}`;
+    const lead = `  ${nested ? `${theme.glyph.corner} ` : ""}`;
     const parentShown = shown.some((task) => task.entry.name === path.at(-1));
     const owners = parentShown ? path.slice(1) : path;
     const ownership =
       owners.length > 0 ? `${owners.join(` ${theme.glyph.arrow} `)} ${theme.glyph.arrow} ` : "";
-    const purpose = entry.purpose?.trim();
-    rows.push(
-      clipVisible(
-        `${lead}${c.bold(`${ownership}${entry.name}`)}${c.dim(purpose ? ` ${theme.glyph.dot} ${purpose}` : "")}`,
-        width,
-      ),
-    );
+    rows.push(clipVisible(`${lead}${c.bold(`${ownership}${entry.name}`)}`, width));
     const activity = currentActivity(entry);
     const elapsed = formatTurnDuration(nowMs - entry.startedAtMs);
-    const detailLead = `${rail}   ${nested ? "  " : ""}`;
+    const detailLead = `    ${nested ? "  " : ""}`;
     const suffix = ` ${theme.glyph.dot} ${elapsed}`;
     const text = truncate(
       activity.text,
@@ -202,12 +189,17 @@ export function renderTaskPanelRows(
   }
   const hidden = tasks.length - shown.length;
   if (hidden > 0 && rows.length < contentBudget) {
-    rows.push(
-      clipVisible(`${rail} ${c.dim(`${theme.glyph.ellipsis} ${hidden} more working`)}`, width),
-    );
+    rows.push(clipVisible(`  ${c.dim(`${theme.glyph.ellipsis} ${hidden} more working`)}`, width));
   }
-  if (options.turnStatus !== undefined && rows.length + 2 <= budget) {
-    rows.push(clipVisible(rail, width), clipVisible(`${rail} ${options.turnStatus}`, width));
+  if (options.turnStatus !== undefined && rows.length + 3 <= budget) {
+    rows.push(clipVisible(`  ${options.turnStatus}`, width));
   }
-  return rows;
+  return renderTransientDrawer(
+    rows,
+    [],
+    theme,
+    width,
+    `Working ${theme.glyph.dot} ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`,
+    true,
+  ).rows;
 }

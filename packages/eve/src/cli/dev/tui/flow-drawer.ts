@@ -28,9 +28,10 @@ export function renderTransientDrawer(
   theme: Theme,
   width: number,
   corner?: string,
+  compact = false,
 ): FlowDrawer {
   return {
-    rows: frameDrawer(body, theme, width, corner),
+    rows: frameDrawer(body, theme, width, corner, compact),
     controls: controls.map((control) => `  ${theme.colors.dim(control)}`),
   };
 }
@@ -40,13 +41,14 @@ function frameDrawer(
   theme: Theme,
   width: number,
   corner?: string,
+  compact = false,
 ): string[] {
   const divider = theme.colors.dim(theme.glyph.dash.repeat(Math.max(1, width)));
   return [
     corner === undefined ? divider : labeledRule(corner, theme, width),
-    "",
+    ...(compact ? [] : [""]),
     ...body,
-    "",
+    ...(compact ? [] : [""]),
     divider,
   ];
 }

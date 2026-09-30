@@ -1127,6 +1127,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(request.context),
+        true,
       );
     this.#paint();
 
@@ -1233,6 +1234,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(question.context),
+        true,
       );
 
     const textPanel = (width: number) => {
@@ -1256,6 +1258,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(question.context),
+        true,
       );
     };
 
@@ -3152,7 +3155,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       width,
       theme: this.#theme,
       nowMs: Date.now(),
-      maxRows: Math.max(turnStatus === undefined ? 2 : 5, Math.floor(this.#height() / 3)),
+      maxRows: Math.max(turnStatus === undefined ? 4 : 6, Math.floor(this.#height() / 3)),
       turnStatus,
     });
   }
@@ -3537,11 +3540,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return [...drawer.rows, ...drawer.controls];
     }
 
-    // The HITL drawer opens one row below the transcript, then owns the
-    // footer down to its controls with no status line beneath it.
+    // HITL replaces activity and owns the footer through its controls.
     if (this.#hitlDrawer !== undefined) {
       const drawer = this.#hitlDrawer(width);
-      return [...rows, ...drawer.rows, ...drawer.controls];
+      return [...drawer.rows, ...drawer.controls];
     }
 
     const flow = this.#setupFlow;

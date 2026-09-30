@@ -22,16 +22,18 @@ const render = (entries: readonly TaskEntry[], width = 80, maxRows = 9) =>
 describe("live task panel", () => {
   it("keeps purpose separate from activity and flattens deeper ownership paths", () => {
     const rows = render([task("researcher", [task("analyst", [task("download")])])]);
-    expect(rows[0]).toMatch(/^  ── Working · 3 tasks ─+$/);
+    expect(rows[0]).toMatch(/^─+ Working · 3 tasks ──$/);
     expect(visibleLength(rows[0]!)).toBe(80);
-    expect(rows.slice(1)).toEqual([
-      "  │ researcher · Find Alice's notes",
-      "  │   Starting · 12s",
-      "  │ └ analyst · Find Alice's notes",
-      "  │     Starting · 12s",
-      "  │ └ analyst → download · Find Alice's notes",
-      "  │     Starting · 12s",
+    expect(rows.slice(1, -1)).toEqual([
+      "  researcher",
+      "    Starting · 12s",
+      "  └ analyst",
+      "      Starting · 12s",
+      "  └ analyst → download",
+      "      Starting · 12s",
     ]);
+    expect(rows.at(-1)).toBe("─".repeat(80));
+    expect(rows.join("\n")).not.toContain("Find Alice's notes");
   });
 
   it("bounds fan-out and keeps nested approvals visible ahead of ordinary work", () => {
@@ -51,13 +53,13 @@ describe("live task panel", () => {
       80,
       6,
     );
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(5);
     expect(rows.join("\n")).toContain("Needs your approval: run command");
-    expect(rows.at(-1)).toContain("4 more working");
+    expect(rows.at(-2)).toContain("5 more working");
     expect(rows.join("\n")).not.toContain("download ·");
   });
 
-  it("keeps turn status inside the rail and includes it in the panel's row budget", () => {
+  it("keeps turn status inside the drawer and includes it in the panel's row budget", () => {
     const rows = renderTaskPanelRows([task("researcher")], {
       width: 80,
       maxRows: 5,
@@ -66,8 +68,8 @@ describe("live task panel", () => {
       turnStatus: "Waiting for researcher (16s)",
     }).map(stripAnsi);
     expect(rows).toHaveLength(5);
-    expect(rows.slice(-2)).toEqual(["  │", "  │ Waiting for researcher (16s)"]);
-    expect(rows[1]).toContain("researcher · Find Alice's notes");
+    expect(rows.slice(-2)).toEqual(["  Waiting for researcher (16s)", "─".repeat(80)]);
+    expect(rows[1]).toBe("  researcher");
   });
 
   it("fits narrow terminals and small row budgets without retaining an empty panel", () => {
