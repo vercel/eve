@@ -142,56 +142,6 @@ const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
   };
 };
 
-const collectLogoColors = (node: ReactNode, colors = new Set<string>()): Set<string> => {
-  if (!isValidElement(node)) return colors;
-
-  const element = node as ReactElement<LogoElementProps>;
-  if (element.type === "mask") return colors;
-
-  const { children, fill, stroke } = element.props;
-  for (const color of [fill, stroke]) {
-    if (color && color !== "none" && color !== "currentColor") colors.add(color.toLowerCase());
-  }
-  Children.forEach(children, (child) => collectLogoColors(child, colors));
-  return colors;
-};
-
-const grayscaleColor = (color: string): string => {
-  const normalized = color.toLowerCase();
-  if (normalized === "currentcolor") return "white";
-  if (normalized === "white") return "black";
-  if (normalized === "black") return "white";
-
-  const hex = normalized.slice(1);
-  const expanded = hex.length === 3 ? [...hex].map((digit) => digit.repeat(2)).join("") : hex;
-  if (!/^[\da-f]{6}$/.test(expanded)) return "white";
-
-  const red = Number.parseInt(expanded.slice(0, 2), 16);
-  const green = Number.parseInt(expanded.slice(2, 4), 16);
-  const blue = Number.parseInt(expanded.slice(4, 6), 16);
-  const gray = 255 - Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue);
-  return `rgb(${gray}, ${gray}, ${gray})`;
-};
-
-const recolorLogo = (node: ReactNode, preserveTones: boolean): ReactNode => {
-  if (!isValidElement(node)) return node;
-
-  const element = node as ReactElement<LogoElementProps>;
-  if (element.type === "mask") return element;
-
-  const props = element.props;
-  const recolor = (color: string | undefined): string | undefined => {
-    if (!color || color === "none") return color;
-    return preserveTones ? grayscaleColor(color) : "white";
-  };
-
-  return cloneElement(
-    element,
-    { ...props, fill: recolor(props.fill), stroke: recolor(props.stroke) },
-    Children.map(props.children, (child) => recolorLogo(child, preserveTones)),
-  );
-};
-
 const balanceLogoWeight = (logo: RasterizedLogo, referenceCoverage: number): SizedLogo => {
   const aspectRatio = logo.width / logo.height;
   const fittedWidth = Math.min(180, 132 * aspectRatio);
@@ -225,8 +175,7 @@ const getRasterizedLogo = (integration: Integration): Promise<RasterizedLogo> =>
 
   const Logo = logos[integration.logo];
   const resolvedLogo = resolveLogo(<Logo aria-hidden />);
-  const recoloredLogo = recolorLogo(resolvedLogo, collectLogoColors(resolvedLogo).size > 1);
-  const rasterized = rasterizeLogo(recoloredLogo);
+  const rasterized = rasterizeLogo(resolvedLogo);
   rasterizedLogos.set(integration.logo, rasterized);
   return rasterized;
 };
