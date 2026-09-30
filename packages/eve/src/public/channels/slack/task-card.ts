@@ -46,8 +46,9 @@ interface SlackTaskObject {
 /**
  * eve's default task card: a `task_card` block for one task, or a `plan` block
  * for several, and no card for a turn that started none. A settled task shows
- * one line about how it ended. A stopped task shows as an error, never as a
- * success.
+ * one line about how it ended. Only a failed task shows as an error: a stopped
+ * task, usually one the model cancelled because it no longer needed it, shows
+ * as done.
  */
 export function renderDefaultSlackTaskCard(view: TaskCardView): SlackTaskCard | null {
   if (view.tasks.length === 0) return null;
@@ -75,12 +76,8 @@ function planTitle(view: TaskCardView): string {
       : `${String(done)} of ${countTasks(total)} done`;
   }
   const failed = statuses.filter((status) => status === "failed").length;
-  const stopped = statuses.filter((status) => status === "cancelled").length;
-  const outcomes: string[] = [];
-  if (failed > 0) outcomes.push(`${String(failed)} failed`);
-  if (stopped > 0) outcomes.push(`${String(stopped)} stopped`);
   const finished = `Finished ${countTasks(total)}`;
-  return outcomes.length === 0 ? finished : `${finished}: ${outcomes.join(", ")}`;
+  return failed === 0 ? finished : `${finished}: ${String(failed)} failed`;
 }
 
 function countTasks(count: number): string {
@@ -99,9 +96,7 @@ function collapseEarlierRows(tasks: readonly TaskCardTask[]): readonly TaskCardT
   );
   const kept = tasks.filter((task) => !folded.has(task.id));
   if (folded.size === 0) return kept.slice(-MAX_PLAN_ROWS);
-  const foldedFailure = tasks.some(
-    (task) => folded.has(task.id) && (task.status === "failed" || task.status === "cancelled"),
-  );
+  const foldedFailure = tasks.some((task) => folded.has(task.id) && task.status === "failed");
   const earlier: TaskCardTask = {
     id: "earlier",
     kind: "tool",
@@ -132,9 +127,9 @@ function slackStatus(task: TaskCardTask): SlackTaskStatus {
     case "blocked":
       return "in_progress";
     case "completed":
+    case "cancelled":
       return "complete";
     case "failed":
-    case "cancelled":
       return "error";
   }
 }
@@ -146,7 +141,7 @@ function outputLine(task: TaskCardTask): string | undefined {
     case "failed":
       return task.summary === undefined ? "Failed" : `Failed: ${task.summary}`;
     case "cancelled":
-      return "Stopped";
+      return "Stopped early since it was no longer needed";
     default:
       return undefined;
   }
