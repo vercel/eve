@@ -152,12 +152,13 @@ Alongside `type` and `data`, every event carries a `meta` envelope:
     "stepIndex": 0,
     "turnId": "turn_0"
   },
-  "meta": { "id": "evt_01KYJBZA88B4M9XN3RTC5FDGHJ", "at": "2026-07-27T18:04:11.912Z" }
+  "meta": { "id": "evt_01KYJBZA88B4M9XN3RTC5FDGHJ", "at": "2026-07-27T18:04:11.912Z", "index": 7 }
 }
 ```
 
 - **`meta.id`** uniquely identifies the event. It is an `evt_`-prefixed [ULID](https://github.com/ulid/spec): a millisecond timestamp followed by random bits, so ids are broadly time-ordered.
 - **`meta.at`** is the ISO-8601 time the event was emitted.
+- **`meta.index`** is the event's absolute zero-based position in the session stream: the same number `startIndex` addresses. It is present on events read from a session stream, including reads that start from a tail-relative (negative) `startIndex`, and absent on events delivered to [hooks](../guides/hooks) and channel adapter handlers, which observe each event before the stream assigns its position. A subagent's stream counts from its own first event.
 - **`meta.deliveryIds`**, when present, identifies the accepted messages that own
   the turn. `POST /eve/v1/session/:sessionId` returns its `deliveryId`, allowing
   clients to skip earlier turns when resuming from an old cursor. Coalesced
@@ -165,7 +166,7 @@ Alongside `type` and `data`, every event carries a `meta` envelope:
 
 `meta.id` is stable. eve mints it once, when the event is written to the durable stream, and stores it with the event. Reconnecting from a cursor, rewinding to `startIndex=0`, or replaying a finished session all return the same id for the same event.
 
-`meta.at` has always been there; `meta.id` arrived in stream version 20, `action.input.appended` arrived in version 24, and delta-only message and reasoning appends replaced cumulative snapshots in version 25. Events written by an earlier version are stored with the envelope but no id inside it, so rewinding into the part of a session that ran before you upgraded yields events whose `meta.id` is absent, even though the type says it is always a string. eve passes those events through rather than dropping them, and they cannot be deduplicated. The exposure ends when the sessions that predate your upgrade do.
+`meta.at` has always been there; `meta.id` arrived in stream version 20, `action.input.appended` arrived in version 24, and delta-only message and reasoning appends replaced cumulative snapshots in version 25. Events written by an earlier version are stored with the envelope but no id inside it, so rewinding into the part of a session that ran before you upgraded yields events whose `meta.id` is absent, even though the type says it is always a string. eve passes those events through rather than dropping them, and they cannot be deduplicated. They still carry `meta.index`, because eve assigns it on read rather than storing it; `meta.index` needs no stream version because it is never stored and clients that predate it ignore it. The exposure ends when the sessions that predate your upgrade do.
 
 That makes it the key for ingesting a stream into a database without duplicating rows when you re-read it:
 
@@ -175,7 +176,7 @@ values ($1, $2, $3, $4, $5)
 on conflict (id) do nothing;
 ```
 
-Because ids lead with a timestamp, a `primary key (id)` stays roughly append-ordered and keeps inserts clustered.
+Because ids lead with a timestamp, a `primary key (id)` stays roughly append-ordered and keeps inserts clustered. When you need exact stream order, store `meta.index` alongside it, or key the table on `(session_id, index)`: one position holds exactly one event, so a re-read writes the same rows.
 
 **What the id covers.** Reconnecting is not the only way the same event reaches you twice. Keying on `meta.id` is what makes ingestion correct in all of these:
 
@@ -189,11 +190,11 @@ Replaying a _completed_ step is a different thing and emits nothing at all: eve 
 
 Three more things to know:
 
-- **Ids are time-ordered, not a total order.** The turn steps of one session can run in different processes, each generating ids from its own clock and its own random bits. Two events emitted in the same millisecond by different steps may sort either way, and clock skew between machines can invert neighbours. Record your own ingestion sequence, or read the stream in order and store the index, when you need an exact ordering to page against — do not use `where id > $cursor` as a lossless cursor. The stream itself is authoritative: `startIndex` is an absolute event count.
+- **Ids are time-ordered, not a total order.** The turn steps of one session can run in different processes, each generating ids from its own clock and its own random bits. Two events emitted in the same millisecond by different steps may sort either way, and clock skew between machines can invert neighbours. Order by `meta.index` when you need an exact ordering to page against — do not use `where id > $cursor` as a lossless cursor. The stream itself is authoritative: `meta.index + 1` is the `startIndex` that resumes after an event.
 - **Ids identify events, not intent.** Two events with identical payloads — the `step.failed` → `turn.failed` → `session.failed` cascade, or two identical text deltas in one step — are distinct events with distinct ids. Deduplicate on `meta.id` only; matching on content would drop real data.
 - **A subagent's event is re-emitted, not shared.** When a parent forwards a child's event onto its own stream, the parent's copy is a separate event with its own id. Correlate the two streams through `agent.started.data.sessionId`.
 
-Authored [hooks](../guides/hooks) receive the same envelope, but observe each event as it is emitted rather than as it is read — so a hook sees a retry as new events, and `meta.id` is a key for a stored row rather than a retry guard. Two things a hook does not have to defend against: a turn that parks for human input resumes without re-emitting anything it already sent, and a retried turn dispatch cannot double-stream a turn, because one session owner executes it.
+Authored [hooks](../guides/hooks) receive the same envelope without `meta.index`, because they observe each event as it is emitted rather than as it is read — so a hook sees a retry as new events, and `meta.id` is a key for a stored row rather than a retry guard. Two things a hook does not have to defend against: a turn that parks for human input resumes without re-emitting anything it already sent, and a retried turn dispatch cannot double-stream a turn, because one session owner executes it.
 
 ## Send a follow-up message
 

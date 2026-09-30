@@ -187,11 +187,50 @@ describe("followStreamIterable", () => {
         if (follow && received.length === events.length - 1) break;
       }
 
-      expect(received).toEqual(events.slice(1));
+      // This server predates `meta.index`, so the client labels events from its cursor.
+      expect(received).toEqual(
+        events.slice(1).map((event, offset) => ({
+          ...event,
+          meta: { ...event.meta, index: offset + 1 },
+        })),
+      );
       expect(cursors).toEqual([1, 3, 5]);
       expect(tailRequests).toEqual(follow ? [null, null, null] : ["1", null, null]);
     },
   );
+
+  it("keeps server-reported indexes and leaves tail-relative reads from older servers unlabeled", async () => {
+    const event = (index?: number) => ({
+      type: "session.completed",
+      meta: { id: `evt_${index}`, at: "2026-09-15T00:00:00.000Z", index },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Parameters<typeof fetch>[0]) => {
+        const labeled = new URL(String(input)).searchParams.get("startIndex") === "-2";
+        // Four events carry the local cursor from -3 past zero.
+        const records = labeled ? [event(40), event(41)] : [event(), event(), event(), event()];
+        return new Response(`${records.map((record) => JSON.stringify(record)).join("\n")}\n`, {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        });
+      }),
+    );
+    const read = async (startIndex: number) => {
+      const indexes = [];
+      for await (const received of followStreamIterable({
+        host: "https://agent.example",
+        resolveHeaders: () => Promise.resolve(new Headers()),
+        path: "/eve/v1/session/session_1/stream",
+        startIndex,
+      })) {
+        indexes.push(received.meta.index);
+      }
+      return indexes;
+    };
+
+    expect(await read(-2)).toEqual([40, 41]);
+    expect(await read(-3)).toEqual([undefined, undefined, undefined, undefined]);
+  });
 
   it("renews an explicitly ended lease without charging the idle budget", async () => {
     let connections = 0;

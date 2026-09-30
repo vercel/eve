@@ -3,6 +3,7 @@ import {
   EVE_STREAM_CONTROL_VERSION,
   EVE_STREAM_CONTROL_VERSION_QUERY,
   EVE_STREAM_TAIL_INDEX_HEADER,
+  withMessageStreamEventIndex,
 } from "#protocol/message.js";
 import type { MessageStreamVersion } from "#protocol/message-version.js";
 import { ClientError } from "#client/client-error.js";
@@ -189,7 +190,7 @@ export async function* followStreamIterable(
     let deliveredEvent = false;
     let leaseEnded = false;
     try {
-      for await (const event of readNdjsonStream(connection.body, {
+      for await (const received of readNdjsonStream(connection.body, {
         signal: input.signal,
         controlVersion: connection.controlVersion,
         idleTimeoutMs: input.streamReadIdleTimeoutMs ?? DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS,
@@ -198,6 +199,12 @@ export async function* followStreamIterable(
         },
         streamVersion: connection.streamVersion,
       })) {
+        // Older servers omit `meta.index`; from an absolute cursor the client's
+        // count is the same position.
+        const event =
+          received.meta?.index === undefined && input.startIndex >= 0
+            ? withMessageStreamEventIndex(received, startIndex)
+            : received;
         startIndex += 1;
         deliveredEvent = true;
         reconnectDelayMs = idleRetryPolicy.baseDelayMs;

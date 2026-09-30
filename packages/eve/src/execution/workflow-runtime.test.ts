@@ -1006,7 +1006,7 @@ describe("createWorkflowRuntime#createSession", () => {
     const event = await reader.read();
     reader.releaseLock();
 
-    expect(event.value).toEqual({ type: "test.event" });
+    expect(event.value).toEqual({ meta: { index: 0 }, type: "test.event" });
     expect(getRunMock).toHaveBeenCalledWith("owner-run");
     expect(getReadable).toHaveBeenCalledTimes(1);
   });
@@ -1047,7 +1047,7 @@ describe("createWorkflowRuntime#createSession", () => {
           stepIndex: 0,
           turnId: "turn-1",
         },
-        meta: legacy.meta,
+        meta: { ...legacy.meta, index: 0 },
         type: "message.appended",
       },
     });

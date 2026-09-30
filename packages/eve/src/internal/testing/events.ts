@@ -1,4 +1,8 @@
-import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import {
+  withMessageStreamEventIndex,
+  type MessageStreamEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import { isTurnSegmentBoundary, updatePendingInputRequests } from "#client/session-utils.js";
 
 /**
@@ -222,4 +226,15 @@ export function stampTestEvents(
   events: readonly UnstampedMessageStreamEvent[],
 ): MessageStreamEvent[] {
   return events.map((event, index) => stampTestEvent(event, index));
+}
+
+/**
+ * Labels events with the `meta.index` a session stream reader attaches: their
+ * absolute stream positions, counting up from `startIndex`.
+ */
+export function indexTestEvents(
+  events: readonly MessageStreamEvent[],
+  startIndex = 0,
+): MessageStreamEvent[] {
+  return events.map((event, offset) => withMessageStreamEventIndex(event, startIndex + offset));
 }

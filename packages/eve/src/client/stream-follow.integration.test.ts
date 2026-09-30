@@ -77,8 +77,10 @@ describe("stream following over real sockets", () => {
     const session = client.sessions.attach("s1");
 
     const received: string[] = [];
+    const indexes: Array<number | undefined> = [];
     for await (const event of session.stream()) {
       received.push(event.type);
+      indexes.push(event.meta.index);
       if (event.type === "session.waiting") {
         break;
       }
@@ -92,6 +94,8 @@ describe("stream following over real sockets", () => {
       "step.started",
       "session.waiting",
     ]);
+    // Legacy events without `meta` from an older server stay continuous across reconnects.
+    expect(indexes).toEqual([0, 1, 2, 3, 4, 5]);
     expect(connections).toBe(6);
     expect(session.state).toMatchObject({ sessionId: "s1", streamIndex: 6 });
   });

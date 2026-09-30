@@ -61,6 +61,8 @@ describe("ClientSession.agent through the parent proxy", () => {
       "message.completed",
       "turn.completed",
     ]);
+    // Child streams count from their own first event.
+    expect(received.map((event) => event.meta.index)).toEqual([0, 1, 2]);
     expect(remoteRequests).toHaveLength(1);
     const remoteUrl = new URL(remoteRequests[0]!.url);
     expect(`${remoteUrl.origin}${remoteUrl.pathname}`).toBe(

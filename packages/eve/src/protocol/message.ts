@@ -82,6 +82,17 @@ export interface MessageStreamEventMeta {
    * and those cannot be deduplicated.
    */
   readonly id: string;
+  /**
+   * Absolute zero-based position of this event in its session stream: the
+   * same number `startIndex` addresses. Subagent streams count from their own
+   * first event.
+   *
+   * Present on events read from a session stream; absent on events delivered
+   * to hooks and channel adapter handlers, which observe events as they are
+   * written, before the stream assigns a position. Never persisted with the
+   * event. Use it, not `id`, as the exact ordering key when storing events.
+   */
+  readonly index?: number;
 }
 
 /**
@@ -1828,6 +1839,20 @@ export function stampMessageStreamEvent(
     ...event,
     meta,
   };
+}
+
+/**
+ * Returns a copy of one event read from a session stream with `meta.index`
+ * set to its absolute stream position.
+ *
+ * Stream readers only. Events written before stream version 20 carry no
+ * `meta`; they still receive an index.
+ */
+export function withMessageStreamEventIndex(
+  event: MessageStreamEvent,
+  index: number,
+): MessageStreamEvent {
+  return { ...event, meta: { ...event.meta, index } };
 }
 
 /**

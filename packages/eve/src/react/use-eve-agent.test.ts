@@ -18,7 +18,7 @@ import {
   createTurnFailedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import { stampTestEvents } from "#internal/testing/events.js";
+import { indexTestEvents, stampTestEvents } from "#internal/testing/events.js";
 import type { ClientSessionState } from "#client/types.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
@@ -522,7 +522,7 @@ describe("useEveAgent", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(lifecycle[0]).toBe("session:0");
-    expect(seenEvents).toEqual(stampTestEvents(events));
+    expect(seenEvents).toEqual(indexTestEvents(stampTestEvents(events)));
     expect(seenSessions.map((session) => session?.streamIndex)).toEqual([0, 1, 2, 3, 3]);
     expect(helpers?.status).toBe("ready");
     expect(helpers?.session).toEqual({
@@ -845,7 +845,7 @@ describe("useEveAgent", () => {
     expect(seenErrors.map((error) => error.name)).toEqual(["MODEL_CALL_FAILED"]);
     expect(helpers?.status).toBe("error");
     expect(helpers?.error?.message).toBe("Bad Request");
-    expect(helpers?.events).toEqual(stampTestEvents(events));
+    expect(helpers?.events).toEqual(indexTestEvents(stampTestEvents(events)));
     expect(helpers?.data).toEqual(
       completedTurnData({
         turnId: "turn_1",
@@ -913,7 +913,7 @@ describe("useEveAgent", () => {
     expect(seenErrors).toEqual([]);
     expect(helpers?.status).toBe("ready");
     expect(helpers?.error).toBeUndefined();
-    expect(helpers?.events).toEqual(stampTestEvents(events));
+    expect(helpers?.events).toEqual(indexTestEvents(stampTestEvents(events)));
   });
 
   it("requires a session when automatic resume is enabled", async () => {

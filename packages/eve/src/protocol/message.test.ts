@@ -21,6 +21,8 @@ import {
   createTurnCancelledEvent,
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
+  withMessageStreamEventIndex,
+  type MessageStreamEvent,
 } from "#protocol/message.js";
 import {
   normalizeMessageStreamEvent,
@@ -409,6 +411,19 @@ describe("message stream protocol", () => {
     });
 
     expect(stampMessageStreamEvent(event).meta.id).not.toBe(stampMessageStreamEvent(event).meta.id);
+  });
+
+  it("stamps no stream index at write time and indexes events read without meta", () => {
+    const stamped = stampMessageStreamEvent({ type: "session.completed" });
+    expect(stamped.meta).not.toHaveProperty("index");
+    expect(withMessageStreamEventIndex(stamped, 7).meta).toEqual({ ...stamped.meta, index: 7 });
+
+    // Events written before stream version 20 carry no `meta`.
+    const legacy = { type: "session.completed" } as MessageStreamEvent;
+    expect(withMessageStreamEventIndex(legacy, 0)).toEqual({
+      meta: { index: 0 },
+      type: "session.completed",
+    });
   });
 
   it("builds authorization.required with optional challenge and webhookUrl", () => {

@@ -12,7 +12,7 @@ import {
   createSessionWaitingEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import { stampTestEvents } from "#internal/testing/events.js";
+import { indexTestEvents, stampTestEvents } from "#internal/testing/events.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -125,7 +125,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
       },
     });
 
-    await vi.waitFor(() => expect(seenEvents).toEqual(stampTestEvents(events)));
+    await vi.waitFor(() => expect(seenEvents).toEqual(indexTestEvents(stampTestEvents(events))));
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -149,6 +149,6 @@ describe("useEveAgent (Svelte rune binding)", () => {
 
     await agent.send("Hello");
 
-    expect(seenEvents).toEqual(stampTestEvents(events));
+    expect(seenEvents).toEqual(indexTestEvents(stampTestEvents(events)));
   });
 });

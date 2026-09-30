@@ -174,7 +174,7 @@ HTTP connections can end before a run does. The client reconnects from the numbe
 
 Browser failures while reading a response body, including `TypeError: Load failed` and `TypeError: network error`, use the same reconnect policy. Invalid stream events still fail the read.
 
-If your consumer persists events, key on `event.meta.id`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. See [the event envelope](../../concepts/sessions-runs-and-streaming#the-event-envelope).
+If your consumer persists events, key on `event.meta.id`. It is stable across reconnects and rewinds, so an overlapping replay is safe to ingest twice. Order stored events by `event.meta.index`, the event's absolute position in the session stream; it stays continuous across reconnects, and `meta.index + 1` is the `startIndex` that resumes after an event. See [the event envelope](../../concepts/sessions-runs-and-streaming#the-event-envelope).
 
 Set `streamReconnectPolicy: { reconnect: false }` when a relay or proxy owns the cursor and reconnection policy. This makes a single stream GET attempt and returns when that connection ends; it does not stop the server-side turn:
 
@@ -221,7 +221,7 @@ for await (const event of session.stream({ startIndex: -1 })) {
 }
 ```
 
-Tail-relative attachments do not automatically reconnect or advance the session's stored absolute `streamIndex`. Break after the event you need when using one as a tail lookup.
+Tail-relative attachments do not automatically reconnect or advance the session's stored absolute `streamIndex`. Break after the event you need when using one as a tail lookup. Events read this way still carry their absolute `meta.index`, except from agents running an eve release that predates `meta.index`.
 
 ## Bounded catch-up reads
 

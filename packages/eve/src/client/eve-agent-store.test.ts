@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { detachEveAgentStore, EveAgentStore } from "#client/eve-agent-store.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
-import { stampTestEvents } from "#internal/testing/events.js";
+import { indexTestEvents, stampTestEvents } from "#internal/testing/events.js";
 import {
   createApprovalCandidateEvent,
   createInputRequestedEvent,
@@ -258,7 +258,7 @@ describe("EveAgentStore lifecycle", () => {
     start.resolve(startedResponse());
     await sending;
 
-    expect(seenEvents).toEqual(events);
+    expect(seenEvents).toEqual(indexTestEvents(events));
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.data).toEqual({
       messages: [
@@ -671,7 +671,10 @@ describe("EveAgentStore prewarming", () => {
     await vi.waitFor(() => expect(store.snapshot.status).toBe("streaming"));
     for (const event of unsolicited.slice(1)) live.emit(event);
     await vi.waitFor(() =>
-      expect(store.snapshot.events).toEqual([...initialEvents, ...refusal, ...unsolicited]),
+      expect(store.snapshot.events).toEqual([
+        ...initialEvents,
+        ...indexTestEvents([...refusal, ...unsolicited], initialEvents.length),
+      ]),
     );
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.data.messages.flatMap((message) => message.parts)).toEqual(
@@ -729,7 +732,7 @@ describe("EveAgentStore prewarming", () => {
     await vi.waitFor(() => expect(store.snapshot.events).toHaveLength(6));
     await sending;
 
-    expect(store.snapshot.events).toEqual([...unsolicited, ...messageTurn]);
+    expect(store.snapshot.events).toEqual(indexTestEvents([...unsolicited, ...messageTurn]));
     expect(store.snapshot.data.messages.some((message) => message.metadata?.optimistic)).toBe(
       false,
     );
@@ -976,8 +979,8 @@ describe("EveAgentStore stream overlap", () => {
 
     await store.send({ message: "Hello" });
 
-    expect(seen).toEqual([legacy, boundary]);
-    expect(store.snapshot.events).toEqual([legacy, boundary]);
+    expect(seen).toEqual(indexTestEvents([legacy, boundary]));
+    expect(store.snapshot.events).toEqual(indexTestEvents([legacy, boundary]));
     const assistant = store.snapshot.data.messages.find((message) => message.role === "assistant");
     expect(assistant?.parts).toEqual([
       { type: "step-start" },
@@ -1048,7 +1051,7 @@ describe("EveAgentStore session resume", () => {
         detachFreshStore(store);
       }
 
-      expect(store.snapshot.events).toEqual(events);
+      expect(store.snapshot.events).toEqual(indexTestEvents(events));
       expect(store.snapshot.status).toBe("ready");
     } finally {
       Object.defineProperty(globalThis, "Symbol", {
@@ -1135,7 +1138,7 @@ describe("EveAgentStore session resume", () => {
 
       await vi.waitFor(() => expect(store.snapshot.status).toBe("ready"));
       await Promise.all([resuming, steering]);
-      expect(store.snapshot.events).toEqual(events);
+      expect(store.snapshot.events).toEqual(indexTestEvents(events));
       expect(onFinish).toHaveBeenCalledOnce();
     },
   );
@@ -1189,7 +1192,7 @@ describe("EveAgentStore session resume", () => {
 
     await store.resume();
 
-    expect(store.snapshot.events).toEqual(events);
+    expect(store.snapshot.events).toEqual(indexTestEvents(events));
     expect(store.snapshot.status).toBe("ready");
   });
 
@@ -1310,7 +1313,8 @@ describe("EveAgentStore session resume", () => {
         "startIndex",
       ),
     ).toBeNull();
-    expect(store.snapshot.events).toEqual(events);
+    // The hydrated first event is kept; replayed events after it carry their index.
+    expect(store.snapshot.events).toEqual([events[0], ...indexTestEvents(events.slice(1), 1)]);
     expect(store.snapshot.status).toBe("ready");
   });
 
@@ -1413,7 +1417,7 @@ describe("EveAgentStore session resume", () => {
     ).toBe("1");
     expect(publishedEventCounts).toContain(events.length);
     expect(store.snapshot.status).toBe("ready");
-    expect(store.snapshot.events).toEqual(events);
+    expect(store.snapshot.events).toEqual(indexTestEvents(events));
     expect(store.snapshot.session).toEqual({ sessionId: "session_1", streamIndex: events.length });
   });
 
@@ -1496,7 +1500,7 @@ describe("EveAgentStore session resume", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(store.snapshot.status).toBe("ready");
-    expect(store.snapshot.events).toEqual(events);
+    expect(store.snapshot.events).toEqual(indexTestEvents(events));
     expect(store.snapshot.session?.streamIndex).toBe(events.length);
   });
 
@@ -1698,7 +1702,7 @@ describe("EveAgentStore steering", () => {
       active.close();
       await Promise.all([initial, steering]);
       expect(store.snapshot.status).toBe("ready");
-      expect(store.snapshot.events).toEqual(events);
+      expect(store.snapshot.events).toEqual(indexTestEvents(events));
       expect(fetchMock).toHaveBeenCalledTimes(3);
     },
   );
@@ -1823,16 +1827,18 @@ describe("EveAgentStore steering", () => {
     await finished;
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(store.snapshot.status).toBe("ready");
-    expect(store.snapshot.events).toEqual([
-      firstReceived,
-      firstStarted,
-      firstCompleted,
-      firstWaiting,
-      secondReceived,
-      secondStarted,
-      secondCompleted,
-      secondWaiting,
-    ]);
+    expect(store.snapshot.events).toEqual(
+      indexTestEvents([
+        firstReceived!,
+        firstStarted!,
+        firstCompleted!,
+        firstWaiting!,
+        secondReceived!,
+        secondStarted!,
+        secondCompleted!,
+        secondWaiting!,
+      ]),
+    );
     expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
       state: "done",
       stepIndex: 0,
@@ -1915,7 +1921,9 @@ describe("EveAgentStore cancellation", () => {
     await sending;
 
     expect(store.snapshot.status).toBe("ready");
-    expect(store.snapshot.events).toEqual([turnStarted, turnCancelled, boundary]);
+    expect(store.snapshot.events).toEqual(
+      indexTestEvents([turnStarted!, turnCancelled!, boundary!]),
+    );
   });
 
   it("returns no_active_turn when idle", async () => {

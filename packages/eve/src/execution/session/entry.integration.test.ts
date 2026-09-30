@@ -367,6 +367,90 @@ describe("workflowEntry integration", () => {
     });
   });
 
+  it("labels events read from the durable stream with their absolute index, but not hook events", async () => {
+    const hookEvents: MessageStreamEvent[] = [];
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-event-index" },
+      modules: [
+        {
+          logicalPath: "hooks/record-events.ts",
+          loadNamespace: async () => ({
+            default: defineHook({
+              events: {
+                async "*"(event) {
+                  hookEvents.push(event as MessageStreamEvent);
+                },
+              },
+            }),
+          }),
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "index these events" },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken: "http:workflow-entry-event-index",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      let firstTurn: readonly MessageStreamEvent[];
+      try {
+        firstTurn = await stream.nextTurn();
+      } finally {
+        stream.dispose();
+      }
+
+      const workflowRuntime = createWorkflowRuntime({
+        compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      });
+      const readIndexes = async (startIndex: number, count: number) => {
+        const reader = (
+          await workflowRuntime.getEventStream(run.runId, { startIndex })
+        ).getReader();
+        const events: MessageStreamEvent[] = [];
+        try {
+          while (events.length < count) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            events.push(value);
+          }
+        } finally {
+          await reader.cancel();
+        }
+        return events;
+      };
+
+      try {
+        expect(firstTurn.length).toBeGreaterThan(3);
+        // The durable chunk carries no index; only reads attach it.
+        expect(firstTurn.every((event) => event.meta.index === undefined)).toBe(true);
+        expect(hookEvents.length).toBeGreaterThan(0);
+        expect(hookEvents.every((event) => !("index" in event.meta))).toBe(true);
+
+        const all = await readIndexes(0, firstTurn.length);
+        expect(all.map((event) => event.meta.index)).toEqual(firstTurn.map((_, index) => index));
+
+        const fromTwo = await readIndexes(2, firstTurn.length - 2);
+        expect(fromTwo.map((event) => [event.meta.index, event.meta.id])).toEqual(
+          all.slice(2).map((event) => [event.meta.index, event.meta.id]),
+        );
+
+        const tailIndex = await workflowRuntime.getStreamTailIndex(run.runId);
+        const lastTwo = await readIndexes(-2, 2);
+        expect(lastTwo.map((event) => event.meta.index)).toEqual([tailIndex - 1, tailIndex]);
+      } finally {
+        await run.cancel();
+      }
+    });
+  });
+
   it("completes an expired conversation and lets its channel start a fresh session", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-timeout" } });
     const continuationToken = "http:workflow-entry-timeout";
