@@ -6,6 +6,8 @@
  * them back to full input responses inside the channel deliver hook.
  */
 
+import type { UserContent } from "ai";
+
 import {
   type InputRequest,
   type InputResponse,
@@ -20,7 +22,7 @@ export const TELEGRAM_HITL_CALLBACK_PREFIX = "eve:";
 /** Synthetic request id prefix sent through `send()` for callback queries. */
 export const TELEGRAM_CALLBACK_RESPONSE_PREFIX = "telegram_callback:";
 
-/** Synthetic request id prefix sent through `send()` for replies to ForceReply prompts. */
+/** Synthetic request id prefix the deliver hook uses for replies to ForceReply prompts. */
 export const TELEGRAM_REPLY_RESPONSE_PREFIX = "telegram_reply:";
 
 const TELEGRAM_BUTTON_LABEL_MAX_LENGTH = 64;
@@ -118,6 +120,23 @@ export function telegramReplyInputResponse(input: {
     requestId: `${TELEGRAM_REPLY_RESPONSE_PREFIX}${input.messageId}`,
     text: input.text,
   });
+}
+
+/**
+ * Wraps a text message that replied to a bot message as a synthetic response,
+ * so the deliver hook can match it to a pending ForceReply prompt.
+ */
+export function telegramReplyInputResponses(
+  replyToBotMessageId: unknown,
+  message: string | UserContent | undefined,
+): ValidatedInputResponse[] {
+  if (typeof replyToBotMessageId !== "string") return [];
+  const text =
+    typeof message === "string"
+      ? message
+      : (message ?? []).flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+  if (text.trim().length === 0) return [];
+  return [telegramReplyInputResponse({ messageId: replyToBotMessageId, text })];
 }
 
 /** True when an input response needs Telegram-specific durable-state remapping. */

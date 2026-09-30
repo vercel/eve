@@ -1,11 +1,13 @@
-import { z } from "zod";
 import { defineTool } from "#public/tools/index.js";
 
-// Epoch 66 tool definitions had no `endsTurn`; epoch 67 adds it as optional to
-// every defineTool overload. A tool that omits it continues the turn as before.
+// Epoch 66 `task.settled` events had no `name` or `kind`; epoch 67 adds both
+// as optional. Tools that never read task events keep working.
 export default defineTool({
-  description: "Add a reaction to the current message.",
-  inputSchema: z.object({ emoji: z.string() }),
-  outputSchema: z.object({ emoji: z.string() }),
-  execute: ({ emoji }) => ({ emoji }),
+  description: "Look up an order by id.",
+  inputSchema: {
+    type: "object",
+    properties: { id: { type: "string" } },
+    required: ["id"],
+  },
+  execute: (input) => ({ id: (input as { readonly id: string }).id }),
 });

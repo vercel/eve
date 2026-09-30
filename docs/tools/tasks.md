@@ -263,17 +263,18 @@ same `taskId` continues where it left off. A `serve` body that doesn't return to
 
 ## Stream events
 
-| Event           | When                                                                     | Data                                                                             |
-| --------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| `task.started`  | A call starts a task, or reaches a resumable task by its `taskId`        | `taskId`, `callId`, `turnId`, the tool `name`, and `kind`                        |
-| `task.settled`  | A reply, return, failure, or cancel settles one call                     | `taskId`, `callId`, `turnId`, `status`, and `output` or `error` unless cancelled |
-| `agent.started` | A workflow run, including an agent tool's, opens a session with an agent | `callId`, `turnId`, `taskId`, `name`, `sessionId`, `streamPath`                  |
-| `turn.waiting`  | An open turn parks on its tasks, a `task_wait`, a question, or a sign-in | `turnId` and `sequence`                                                          |
+| Event           | When                                                                     | Data                                                                                             |
+| --------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `task.started`  | A call starts a task, or reaches a resumable task by its `taskId`        | `taskId`, `callId`, `turnId`, the tool `name`, and `kind`                                        |
+| `task.settled`  | A reply, return, failure, or cancel settles one call                     | `taskId`, `callId`, `turnId`, `name`, `kind`, `status`, and `output` or `error` unless cancelled |
+| `agent.started` | A workflow run, including an agent tool's, opens a session with an agent | `callId`, `turnId`, `taskId`, `name`, `sessionId`, `streamPath`                                  |
+| `turn.waiting`  | An open turn parks on its tasks, a `task_wait`, a question, or a sign-in | `turnId` and `sequence`                                                                          |
 
 `task.started` and `task.settled` come once each per call, and `(taskId, callId)` identifies the
 call. Both carry that call's `turnId`, which for a resumable task's later call can be a later turn
-than the one that started the task. `kind` is `"agent"` for an agent tool's call and `"tool"`
-otherwise. `status` is `"completed"`, `"failed"`, or `"cancelled"`. A completed call carries
+than the one that started the task, and the task's tool `name` and `kind`. `kind` is `"agent"` for
+an agent tool's call and `"tool"` otherwise. Events recorded by earlier eve versions omit `name`
+and `kind` on `task.settled`; match those to their `task.started` by `callId`. `status` is `"completed"`, `"failed"`, or `"cancelled"`. A completed call carries
 `output`, a failed call carries `error`, and a cancelled call carries neither.
 `agent.started` names the call and turn whose run opened the session, and its `taskId` is absent
 when an `execute` call opened it. Results reach the model as a message in its history, not as a

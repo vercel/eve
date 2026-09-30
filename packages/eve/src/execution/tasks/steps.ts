@@ -16,6 +16,7 @@ import {
   writeTaskTable,
   type TaskCall,
   type TaskOutcome,
+  type TaskRecord,
   type TaskRunCommand,
   type TaskRunCommands,
   type TaskTable,
@@ -80,9 +81,10 @@ async function applyTaskRunMessage(
     case "reply": {
       ({ session, table } = countTaskRunUsage(session, table, taskId, message));
       const outcome: TaskOutcome = { output: message.output, status: "completed" };
+      const record = findTask(table, taskId);
       const settled = settleTaskCalls(table, { callIds: message.callIds, outcome, taskId });
       table = settled.table;
-      events.push(...settled.settled.map((call) => taskSettledEvent(taskId, call, outcome)));
+      events.push(...taskSettledEvents(record, settled.settled, outcome));
       break;
     }
     case "usage":
@@ -91,8 +93,9 @@ async function applyTaskRunMessage(
     case "outcome": {
       ({ session, table } = countTaskRunUsage(session, table, taskId, message));
       const outcome = toOutcome(message);
+      const record = findTask(table, taskId);
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
-      events.push(...settled.settled.map((call) => taskSettledEvent(taskId, call, outcome)));
+      events.push(...taskSettledEvents(record, settled.settled, outcome));
       table = finishTaskRun(settled.table, taskId, message.from.runId);
       session = forgetRunQuestions(session, message.from.runId);
       break;
@@ -126,12 +129,12 @@ async function cancelTasks(
   const events: TaskSettledStreamEvent[] = [];
   const stoppedRunIds = new Set<string>();
   for (const taskId of input.taskIds) {
-    const resumable = findTask(table, taskId)?.resumable;
+    const record = findTask(table, taskId);
     const cancelled = cancelTask(table, taskId);
     table = cancelled.table;
-    events.push(...cancelled.settled.map((call) => taskSettledEvent(taskId, call, CANCELLED)));
+    events.push(...taskSettledEvents(record, cancelled.settled, CANCELLED));
     if (cancelled.send === undefined) continue;
-    if (resumable === false) stoppedRunIds.add(cancelled.send.run.runId);
+    if (record?.resumable === false) stoppedRunIds.add(cancelled.send.run.runId);
     await sendTaskRunCommands(cancelled.send);
   }
   const withdrawn = withdrawWorkflowAsks(session, (_requestId, runId) => stoppedRunIds.has(runId));
@@ -144,13 +147,28 @@ async function cancelTasks(
 
 const CANCELLED: TaskOutcome = { status: "cancelled" };
 
-/** The `task.settled` event for one settled call. */
+/** The `task.settled` events for a task's settled calls; calls only settle on a known task. */
+function taskSettledEvents(
+  record: TaskRecord | undefined,
+  settled: readonly TaskCall[],
+  outcome: TaskOutcome,
+): TaskSettledStreamEvent[] {
+  if (record === undefined) return [];
+  return settled.map((call) => taskSettledEvent(record, call, outcome));
+}
+
 function taskSettledEvent(
-  taskId: string,
+  record: TaskRecord,
   call: TaskCall,
   outcome: TaskOutcome,
 ): TaskSettledStreamEvent {
-  const base = { callId: call.callId, taskId, turnId: call.turnId };
+  const base = {
+    callId: call.callId,
+    kind: record.kind,
+    name: record.name,
+    taskId: record.id,
+    turnId: call.turnId,
+  };
   switch (outcome.status) {
     case "completed":
       return createTaskSettledEvent({ ...base, output: outcome.output, status: "completed" });

@@ -133,6 +133,8 @@ const TWO_TASKS_STARTED: readonly UnstampedMessageStreamEvent[] = [
 const BOTH_TASKS_SETTLED: readonly UnstampedMessageStreamEvent[] = [
   createTaskSettledEvent({
     callId: DEPLOY_CALL,
+    kind: "tool",
+    name: "deploy",
     output:
       "The 14:02 deploy changed the cache TTL for every storefront route, so checkout requests missed the cache and queued at the origin. Full log attached.",
     status: "completed",
@@ -142,6 +144,8 @@ const BOTH_TASKS_SETTLED: readonly UnstampedMessageStreamEvent[] = [
   createTaskSettledEvent({
     callId: RESEARCH_CALL,
     error: { message: "Rate limited by the incidents API\nRetry after 60s." },
+    kind: "agent",
+    name: "researcher",
     status: "failed",
     taskId: "researcher-7k2m9q",
     turnId: TURN_ID,

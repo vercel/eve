@@ -5,7 +5,6 @@ import type {
   ChannelFrom,
   ChannelResolveSession,
   ChannelSource,
-  InternalChannelSource,
 } from "#channel/channel-operations.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
 import type { Session, SessionHandle } from "#channel/session.js";
@@ -86,7 +85,6 @@ import { defineSlackAppManifest } from "#public/channels/slack/app-manifest.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
   bindSlackSessionOperations,
-  sendAsSlackUser,
   withSlackResponder,
   type SlackSendOptions,
   type SlackSessionOperations,
@@ -875,10 +873,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     // The runtime hands `deliver` the full adapter context; `session.auth.current`
     // is the caller of this delivery.
     deliver(payload, channel: SlackChannelContext & { readonly session: SessionHandle }) {
-      const cards = payload.pendingApprovalCards;
-      if (typeof cards === "object" && cards !== null) {
-        channel.state.pendingApprovalCards = { ...channel.state.pendingApprovalCards, ...cards };
-      }
       recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
       return defaultDeliverResult(payload);
     },
@@ -1022,10 +1016,9 @@ async function receiveOnSlack(
     state.audience = audience;
   }
 
-  const source = deps.from(
-    slackContinuationToken(channelId, continuationThreadTs),
-  ) as InternalChannelSource<SlackChannelState>;
-  return sendAsSlackUser(source, input.message, { auth: input.auth, state, title: input.title });
+  return deps
+    .from(slackContinuationToken(channelId, continuationThreadTs))
+    .send(input.message, { auth: input.auth, state, title: input.title });
 }
 
 function shouldDropSlackHttpTimeoutRetry(headers: Headers): boolean {

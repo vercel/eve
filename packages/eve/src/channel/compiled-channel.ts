@@ -81,9 +81,11 @@ export function setChannelBuildMetadata(
   factory: ChannelBuildMetadataFactory,
 ): void {
   if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
+  // Enumerable so `{ ...channel, routes }` keeps build metadata when an app
+  // wraps a channel's routes.
   Object.defineProperty(channel, CHANNEL_BUILD_METADATA, {
     configurable: true,
-    enumerable: false,
+    enumerable: true,
     value: factory,
   });
 }

@@ -1,5 +1,6 @@
 import { type ApplicationInspection, inspectApplication } from "#services/inspect-application.js";
-import type { CompiledInstructionsDefinition } from "#compiler/manifest.js";
+import type { CompiledInstructionsDefinition, CompiledToolDefinition } from "#compiler/manifest.js";
+import type { JsonObject } from "#shared/json.js";
 import { type CliRow, createCliTheme, renderCliSection } from "#cli/ui/output.js";
 
 interface CliInfoLogger {
@@ -23,6 +24,13 @@ export interface ApplicationInfoJson {
   instructions: string | null;
   skills: string[];
   tools: string[];
+  /** Each static tool's input schema as eve sends it to a model, keyed by tool name. */
+  toolInputSchemas: {
+    /** The root agent's tools, including tools from mounted extensions. */
+    root: Record<string, JsonObject>;
+    /** Each declared subagent's own tools, keyed by subagent name. */
+    subagents: Record<string, Record<string, JsonObject>>;
+  };
   subagents: string[];
   schedules: string[];
   channels: { name: string; kind: string | null; method: string | null; urlPath: string | null }[];
@@ -67,6 +75,15 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
         : formatInstructions(compiledState.manifest.instructions),
     skills: (compiledState?.manifest.skills ?? []).map((skill) => skill.name),
     tools: (compiledState?.manifest.tools ?? []).map((tool) => tool.name),
+    toolInputSchemas: {
+      root: modelInputSchemas(compiledState?.manifest.tools ?? []),
+      subagents: Object.fromEntries(
+        (compiledState?.manifest.subagents ?? []).map((subagent) => [
+          subagent.name,
+          modelInputSchemas(subagent.agent.tools),
+        ]),
+      ),
+    },
     subagents: (compiledState?.manifest.subagents ?? []).map((subagent) => subagent.name),
     schedules: (compiledState?.manifest.schedules ?? []).map((schedule) => schedule.name),
     channels: (compiledState?.manifest.channelRoutes.effective ?? []).map((channel) => ({
@@ -90,6 +107,15 @@ export function buildApplicationInfoJson(inspection: ApplicationInspection): App
         }
       : null,
   };
+}
+
+/** Provider-managed tools, such as `web_search`, have no eve input schema and are omitted. */
+function modelInputSchemas(tools: readonly CompiledToolDefinition[]): Record<string, JsonObject> {
+  return Object.fromEntries(
+    tools.flatMap((tool) =>
+      tool.modelInputSchema === undefined ? [] : [[tool.name, tool.modelInputSchema]],
+    ),
+  );
 }
 
 function pluralize(count: number, noun: string): string {

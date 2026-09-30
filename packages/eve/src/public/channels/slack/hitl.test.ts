@@ -6,17 +6,19 @@ import {
   buildFreeformModalView,
   decodeFreeformHitlActionId,
   decodeHitlActionId,
-  deriveHitlResponse,
   formatInputRequestFallbackText,
-  HITL_ACTION_PREFIX,
   HITL_FREEFORM_ACTION_PREFIX,
   HITL_FREEFORM_MODAL_ACTION_ID,
   HITL_FREEFORM_MODAL_BLOCK_ID,
   HITL_FREEFORM_MODAL_CALLBACK_ID,
   isFreeformAction,
   isHitlAction,
-  renderInputRequestBlocks,
 } from "#public/channels/slack/hitl.js";
+import {
+  deriveHitlResponse,
+  HITL_ACTION_PREFIX,
+  renderInputRequestBlocks,
+} from "#public/channels/slack/index.js";
 import {
   SLACK_CARD_BODY_TEXT_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,

@@ -1,5 +1,6 @@
 export {
   defineSchedule,
+  isScheduleAuth,
   type ScheduleDefinition,
   type ScheduleHandlerArgs,
   type ScheduleRunHandler,

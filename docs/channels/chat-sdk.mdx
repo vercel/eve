@@ -51,7 +51,7 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 export default channel;
 ```
 
-`adapters` is a map of adapter name to adapter instance; each entry mounts its own webhook (see below). `state` takes any Chat SDK state adapter: `createMemoryState()` is fine for local development, but use a durable adapter (Redis, Upstash, etc.) in production so thread subscriptions and inbound deduplication survive restarts. `send` accepts a plain string, an AI SDK `UserContent` array, or a `SendPayload`, and must be called from inside a Chat SDK handler — it dispatches the turn on the webhook that is currently running.
+`adapters` is a map of adapter name to adapter instance; each entry mounts its own webhook (see below). `state` takes any Chat SDK state adapter: `createMemoryState()` is fine for local development, but use a durable adapter (Redis, Upstash, etc.) in production so thread subscriptions and inbound deduplication survive restarts. `send` accepts a plain string or an AI SDK `UserContent` array, and must be called from inside a Chat SDK handler — it dispatches the turn on the webhook that is currently running.
 
 Deploy once the channel file is in place:
 
@@ -96,7 +96,7 @@ You choose which Chat SDK events start a turn by registering handlers on `bot` a
 - `bot.onSubscribedMessage(thread, message)` fires on subsequent messages in a subscribed thread.
 - `bot.onAction`, `bot.onReaction`, and `bot.onSlashCommand` are available for adapters that emit them.
 
-`send(input, options)` starts or resumes the eve session. The `thread` you pass determines the continuation token and the persisted channel state, so replies land back on the originating thread:
+`send(message, options)` starts or resumes the eve session. The `thread` you pass determines the continuation token and the persisted channel state, so replies land back on the originating thread:
 
 ```ts
 bot.onNewMention(async (thread, message) => {
@@ -104,7 +104,18 @@ bot.onNewMention(async (thread, message) => {
 });
 ```
 
-`options` accepts `{ thread, auth?, title?, callback?, adapterName?, turnPolicy? }`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn.
+`options` accepts `thread` and `adapterName`, plus the channel send options `auth`, `context`, `outputSchema`, `title`, `callback`, and `turnPolicy`. `title` sets the eve session's display title without changing the model message; `auth` attaches an authenticated principal to the turn. `auth` defaults to `null`.
+
+To answer pending input requests from a handler you render yourself, call `respond(inputResponses, { thread, auth?, context? })`. Like a channel's `respond()`, it never creates a session. This example answers a custom button whose `value` carries the eve request id:
+
+```ts
+export const { bot, channel, send, respond } = chatSdkChannel({/* ... */});
+
+bot.onAction("approve_deploy", async (event) => {
+  if (!event.thread || !event.value) return;
+  await respond([{ requestId: event.value, optionId: "approve" }], { thread: event.thread });
+});
+```
 
 ### Steering
 
@@ -168,7 +179,7 @@ chatSdkChannel({
 
 ### Human-in-the-loop (HITL)
 
-HITL prompts render as a Chat SDK `Card` with buttons. Button clicks resume the parked session automatically — the channel wires `bot.onAction` for you. Change the action-id prefix with `inputActionPrefix` (default `eve_input:`) if your app already uses it, and provide `resolveInputAuth` to carry user or tenant auth across the resume:
+HITL prompts render as a Chat SDK `Card` with buttons. Button clicks resume the parked session automatically — the channel wires `bot.onAction` to `respond` for you. Change the action-id prefix with `inputActionPrefix` (default `eve_input:`) if your app already uses it, and provide `resolveInputAuth` to carry user or tenant auth across the resume:
 
 ```ts
 chatSdkChannel({

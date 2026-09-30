@@ -85,6 +85,20 @@ Every run delivers the agent's reply to the channel. To skip a run when there is
 
 The `auth` option controls which principal the session runs as. A handler may instead supply a user principal when scheduled work needs that user's grants; a session created by that dispatch still retains schedule provenance.
 
+### Detect the app principal
+
+`isScheduleAuth(auth)` returns `true` when `auth` is the app principal that schedules pass as `appAuth` and that markdown-form sessions run as. Use it in tools, hooks, or channel handlers to treat the agent's own work differently from a user's:
+
+```ts
+import { isScheduleAuth } from "eve/schedules";
+
+if (isScheduleAuth(ctx.session.auth.current)) {
+  // The turn runs as the app principal, not as a user.
+}
+```
+
+`isScheduleAuth` identifies the principal, not how the turn started. A turn from a schedule handler that sends with a user principal returns `false`, and any code that passes `appAuth` along returns `true`.
+
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Markdown-form sessions park too, but no channel is attached, so they cannot receive follow-up messages.
 
 ## Session continuity

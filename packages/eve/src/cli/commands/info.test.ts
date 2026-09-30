@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import { z } from "zod";
 
 import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
@@ -7,6 +8,7 @@ import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { getApplicationInfo } from "#internal/application/paths.js";
 import { inspectApplication } from "#services/inspect-application.js";
+import { defineTool } from "#tools/definition.js";
 
 import { buildApplicationInfoJson, printApplicationInfo } from "./info.js";
 
@@ -37,6 +39,16 @@ async function makeCompiledState(): Promise<CompileAgentResult> {
           default: defineSchedule({ cron: "0 9 * * *", markdown: "Run the digest." }),
         }),
         logicalPath: "schedules/morning-digest.ts",
+      },
+      {
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Look up an order.",
+            execute: () => null,
+            inputSchema: z.object({ id: z.string() }),
+          }),
+        }),
+        logicalPath: "tools/lookup_order.ts",
       },
     ],
     name: "triage-bot",
@@ -90,6 +102,35 @@ describe("buildApplicationInfoJson", () => {
       status: "ready",
     });
     expect(json.tools).toContain("create_ticket");
+    // Library schemas are closed for the model; plain JSON Schema is sent as written.
+    expect(json.toolInputSchemas.root.lookup_order).toEqual({
+      additionalProperties: false,
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      type: "object",
+    });
+    expect(json.toolInputSchemas.root.create_ticket).toEqual({
+      additionalProperties: true,
+      type: "object",
+    });
+  });
+
+  test("keys each subagent's tool input schemas by subagent name", async () => {
+    const compiledState = await makeCompiledState();
+    const lookupOrder = compiledState.manifest.tools.find((tool) => tool.name === "lookup_order")!;
+    const researcher = { agent: { tools: [lookupOrder] }, name: "researcher" };
+    const json = buildApplicationInfoJson({
+      application: getApplicationInfo(APP_ROOT),
+      compiledState: {
+        ...compiledState,
+        manifest: { ...compiledState.manifest, subagents: [researcher as never] },
+      },
+      messaging: MESSAGING,
+    });
+
+    expect(json.toolInputSchemas.subagents).toEqual({
+      researcher: { lookup_order: lookupOrder.modelInputSchema },
+    });
     expect(json.channels).toContainEqual(
       expect.objectContaining({ method: "GET", urlPath: "/eve/v1/health" }),
     );

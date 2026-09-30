@@ -114,11 +114,11 @@ failed task reports its error in `task.settled` and in its `task.result` block.
 The `subagent.called`, `subagent.started`, `subagent.completed`, and `subagent.event` events are
 removed. Use these instead:
 
-| Event           | Replaces             | Data                                                                             |
-| --------------- | -------------------- | -------------------------------------------------------------------------------- |
-| `task.started`  | `subagent.called`    | `taskId`, `callId`, `turnId`, `name`, `kind`                                     |
-| `task.settled`  | `subagent.completed` | `taskId`, `callId`, `turnId`, `status`, and `output` or `error` unless cancelled |
-| `agent.started` | `subagent.started`   | `callId`, `turnId`, `taskId`, `name`, `sessionId`, `streamPath`                  |
+| Event           | Replaces             | Data                                                                                             |
+| --------------- | -------------------- | ------------------------------------------------------------------------------------------------ |
+| `task.started`  | `subagent.called`    | `taskId`, `callId`, `turnId`, `name`, `kind`                                                     |
+| `task.settled`  | `subagent.completed` | `taskId`, `callId`, `turnId`, `name`, `kind`, `status`, and `output` or `error` unless cancelled |
+| `agent.started` | `subagent.started`   | `callId`, `turnId`, `taskId`, `name`, `sessionId`, `streamPath`                                  |
 
 Follow a child's own events, which `subagent.event` used to relay, on its stream:
 `session.streamSubagent()` is now `session.agent(started).stream()`, and it takes the `agent.started` event.

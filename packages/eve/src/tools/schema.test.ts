@@ -13,6 +13,7 @@ import {
   toModelSchema,
   toOutputSchema,
 } from "#tools/schema.js";
+import { serializeModelInputSchema } from "#public/tools/index.js";
 
 const AI_SDK_SCHEMA = Symbol.for("vercel.ai.schema");
 
@@ -410,6 +411,10 @@ describe("toModelSchema", () => {
     expect(await asSchema(toModelSchema(defineJsonSchema(jsonSource), "input")).jsonSchema).toEqual(
       jsonSource,
     );
+    // The public serializer reports the same model-facing JSON, from live or plain sources.
+    expect(serializeModelInputSchema(zodSchema)).toEqual(aiSdkJsonSchema);
+    expect(serializeModelInputSchema(jsonSource)).toEqual(jsonSource);
+    expect(serializeModelInputSchema(null)).toBeNull();
   });
 
   it("emits the requested direction of a transforming schema", async () => {

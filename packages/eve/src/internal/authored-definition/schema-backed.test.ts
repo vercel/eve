@@ -6,6 +6,7 @@ import { defineDynamic } from "#dynamic/definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { once } from "#tools/approval/policies.js";
 import { webSearch } from "#tools/provided/web-search.js";
+import { defineWorkflowTool } from "#tools/workflow-definition.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
 const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.";
@@ -64,6 +65,27 @@ describe("normalizeToolDefinition", () => {
       additionalProperties: false,
       properties: { city: { type: "string" } },
       required: ["city"],
+      type: "object",
+    });
+  });
+
+  it("captures a serve tool's model input schema with the taskId eve adds", () => {
+    async function serve() {}
+    Reflect.set(serve, "workflowId", "workflow//test//review");
+    const tool = defineWorkflowTool({
+      description: "Reviews a pull request.",
+      inputSchema: z.object({ pr: z.number() }),
+      serve,
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    if (entry.kind !== "tool") throw new Error("expected tool kind");
+    expect(entry.definition.inputSchema).not.toHaveProperty("properties.taskId");
+    expect(entry.definition.modelInputSchema).toMatchObject({
+      additionalProperties: false,
+      properties: { pr: { type: "number" }, taskId: { type: "string" } },
+      required: ["pr"],
       type: "object",
     });
   });
