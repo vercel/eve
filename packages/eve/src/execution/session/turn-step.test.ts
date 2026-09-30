@@ -352,7 +352,6 @@ describe("routeProxiedDeliverStep", () => {
     installSessionStoreMocks([session]);
 
     await routeProxiedDeliverStep({
-      pendingDispatches: [],
       serializedContext: createSerializedContext(),
       sessionWritable: createTestWritable(),
       delivery: {
@@ -414,7 +413,6 @@ describe("routeProxiedDeliverStep", () => {
     installSessionStoreMocks([session]);
 
     const result = await routeProxiedDeliverStep({
-      pendingDispatches: [],
       serializedContext: createSerializedContext(),
       delivery: {
         kind: "deliver",
@@ -475,7 +473,6 @@ describe("routeProxiedDeliverStep", () => {
     installSessionStoreMocks([session]);
 
     const result = await routeProxiedDeliverStep({
-      pendingDispatches: [],
       delivery: { kind: "deliver", payloads: [{ message: "Approve" }] },
       serializedContext,
       sessionWritable: createTestWritable(),
@@ -516,7 +513,6 @@ describe("routeProxiedDeliverStep", () => {
     installSessionStoreMocks([session]);
 
     const result = await routeProxiedDeliverStep({
-      pendingDispatches: [],
       serializedContext: createSerializedContext(),
       sessionWritable: createTestWritable(),
       delivery: {
@@ -606,7 +602,6 @@ describe("routeProxiedDeliverStep", () => {
     };
 
     const result = await routeProxiedDeliverStep({
-      pendingDispatches: [],
       serializedContext: createSerializedContext(),
       delivery,
       sessionWritable: createTestWritable(),
@@ -3004,7 +2999,6 @@ describe("runProxySubagentEventStep", () => {
       const sessionWritable = createTestWritable();
       if (delivery === "proxied") {
         await runProxySubagentEventStep({
-          pendingDispatches: [],
           hookPayload,
           sessionWritable,
           serializedContext,
@@ -3058,7 +3052,6 @@ describe("runProxySubagentEventStep", () => {
 
     const result = await runSessionStateStep(
       {
-        pendingDispatches: [],
         hookPayload: buildHookPayload(),
         sessionWritable: createTestWritable(),
         serializedContext: buildSerializedContextForAdapter(cachingAdapter, {
@@ -3131,7 +3124,6 @@ describe("runProxySubagentEventStep", () => {
 
     const result = await runSessionStateStep(
       {
-        pendingDispatches: [],
         hookPayload: buildHookPayload(),
         sessionWritable: createTestWritable(),
         serializedContext: buildSerializedContextForAdapter(aliasingAdapter),

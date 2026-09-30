@@ -52,10 +52,6 @@ export async function nextTurnDelivery(input: {
       return routed;
     }
 
-    // Hooks must not wait for the next input, or leave with the session in a
-    // handoff that input starts.
-    await cursor.drainPendingDispatches();
-
     // A delivery may already be in the pump queue by the time the owner exits
     // its committed waiting step. It is still an idle arrival when no earlier
     // input was admitted; the post-read `hasPending()` check below rejects a

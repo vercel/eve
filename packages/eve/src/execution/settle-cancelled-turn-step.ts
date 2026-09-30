@@ -4,11 +4,7 @@ import {
 } from "#harness/coordination.js";
 import { retainAnswerableActivityBlockers } from "#execution/activity-cohort.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import {
-  publishFromSessionStep,
-  restoreSessionStep,
-  type SessionStepState,
-} from "#execution/publish-session-events.js";
+import { publishFromSessionStep, restoreSessionStep } from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
   type WithSessionStateDelta,
@@ -46,7 +42,7 @@ interface CancelledTurnSettleInput {
  * cancel hook, so a queued cancel wake cannot re-dispatch it.
  */
 export async function settleCancelledTurnStep(
-  input: SessionStepState & Pick<CancelledTurnSettleInput, "reportUsage">,
+  input: CancelledTurnSettleInput,
 ): Promise<WithSessionStateDelta<CancelledTurnSettleResult>> {
   "use step";
   return await withSessionStateDelta(input, settleCancelledTurn);

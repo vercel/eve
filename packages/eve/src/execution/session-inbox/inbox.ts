@@ -48,11 +48,6 @@ export interface SessionInboxReader {
   onInterrupt(handler: (payload: SessionInboxPayload) => void): () => void;
   /** Observes deliveries without consuming them; replays unread deliveries on subscription. */
   onDelivery(handler: (payload: SessionInboxPayload) => void): () => void;
-  /**
-   * Observes workflow runs' messages without consuming them; replays unread
-   * ones on subscription. Handlers must be synchronous.
-   */
-  onWorkflowMessage(handler: (message: WorkflowToolRunMessage) => void): () => void;
   restore(payloads: readonly SessionInboxPayload[]): void;
 }
 
@@ -87,7 +82,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
   const waiters = new Set<() => void>();
   const interruptHandlers = new Set<(payload: SessionInboxPayload) => void>();
   const deliveryHandlers = new Set<(payload: SessionInboxPayload) => void>();
-  const workflowMessageHandlers = new Set<(message: WorkflowToolRunMessage) => void>();
   let failure: { error: unknown } | undefined;
 
   const notify = (): void => {
@@ -110,8 +104,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
           for (const handler of deliveryHandlers) handler(result.value);
         if (isInterrupt(result.value))
           for (const handler of interruptHandlers) handler(result.value);
-        if (isWorkflowMessage(result.value))
-          for (const handler of workflowMessageHandlers) handler(result.value);
         notify();
       }
     } catch (error) {
@@ -196,11 +188,6 @@ export function createSessionInbox(sessionId: string): SessionInboxHandle {
       for (const payload of queue)
         if (payload.kind === "send" || payload.kind === "deliver") handler(payload);
       return () => deliveryHandlers.delete(handler);
-    },
-    onWorkflowMessage(handler) {
-      workflowMessageHandlers.add(handler);
-      for (const payload of queue) if (isWorkflowMessage(payload)) handler(payload);
-      return () => workflowMessageHandlers.delete(handler);
     },
     restore(payloads) {
       if (sources.length === 0)

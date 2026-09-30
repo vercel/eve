@@ -36,10 +36,8 @@ import type { SessionInboxPayload, SessionInboxReader } from "#execution/session
 import { publishTurnWaitingStep } from "#execution/session/turn-waiting-step.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
-import { MidStepWrites } from "#execution/session/mid-step-writes.js";
 import { handleWorkflowToolRunMessage } from "#execution/session-workflow-tool-run.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
-import { isEarlyWritableRunMessage } from "#execution/tools/workflow/early-write.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type {
   RuntimeActionResultStepInput,
@@ -140,14 +138,12 @@ export class SessionExecution {
     while (true) {
       const { cursor } = this.input;
       const result = await cursor.advance((state) =>
-        turn.during(
-          turnStep({
-            ...state,
-            abortSignal: turn.signal,
-            input: nextStepInput,
-            steeringSignal: turn.steeringSignal,
-          }),
-        ),
+        turnStep({
+          ...state,
+          abortSignal: turn.signal,
+          input: nextStepInput,
+          steeringSignal: turn.steeringSignal,
+        }),
       );
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
@@ -477,7 +473,6 @@ class ActiveTurn {
   private readonly identity: SteeringTurn;
   private readonly unsubscribe: () => void;
   private unsubscribeDelivery: () => void;
-  private readonly midStepWrites: MidStepWrites;
   private steeringController = new AbortController();
   /** The delegated caller of the latest message the turn read. */
   caller: TurnCaller | undefined;
@@ -494,7 +489,6 @@ class ActiveTurn {
       if (this.cancelsThisTurn(payload)) this.abort();
     });
     this.unsubscribeDelivery = input.inbox.onDelivery(this.signalSteering);
-    this.midStepWrites = new MidStepWrites(input.inbox, input.cursor);
   }
 
   private readonly signalSteering = (payload: SessionInboxPayload): void => {
@@ -514,11 +508,6 @@ class ActiveTurn {
 
   get signal(): AbortSignal {
     return this.controller.signal;
-  }
-
-  /** Resolves as a model step does, writing the events of messages that arrive while it runs. */
-  async during<T>(step: Promise<T>): Promise<T> {
-    return await this.midStepWrites.during(step);
   }
 
   dispose(): void {
@@ -596,8 +585,6 @@ class ActiveTurn {
       if (steered) return { kind: "steering" };
       const event = this.runtimeResults.shift();
       if (event !== undefined) return event;
-      // Nothing is left to act on, so the turn waits, and hooks must not wait with it.
-      await this.input.cursor.drainPendingDispatches();
       const elapsed = await this.waitForInboxOrTimer(timers);
       if (elapsed !== undefined) return { callId: elapsed, kind: "timeout" };
       const payload = await this.input.inbox.next();
@@ -635,7 +622,6 @@ class ActiveTurn {
         });
         return;
       case "workflow":
-        if (this.midStepWrites.consume(admitted.message)) return;
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
         return;
       case "cancel":
@@ -691,9 +677,8 @@ function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefi
   // Tasks run beside the turn, so everything their runs send, such as a
   // question, reaches the session at the next boundary rather than at turn end.
   if (event.message.from.taskId !== undefined) return event.message;
-  // An `execute` run can send it after its call returns, when the turn may have
-  // no wait left to take it, and a message the session may write before
-  // dispatching needs no wait.
-  if (isEarlyWritableRunMessage(event.message)) return event.message;
+  // An `execute` run can open a session after its call returns, when the turn
+  // may have no wait left to take the message, and publishing it needs none.
+  if (event.message.kind === "agent-started") return event.message;
   return undefined;
 }

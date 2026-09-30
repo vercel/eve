@@ -92,7 +92,6 @@ describe("SessionExecution checkpoints", () => {
       next: vi.fn(),
       restore: vi.fn(),
       onDelivery: () => () => {},
-      onWorkflowMessage: () => () => {},
       onInterrupt: () => () => {},
     };
     let signal: AbortSignal | undefined;
@@ -140,7 +139,6 @@ describe("SessionExecution checkpoints", () => {
           deliver = handler;
           return () => {};
         },
-        onWorkflowMessage: () => () => {},
         onInterrupt: (handler) => {
           interrupt = handler;
           return () => {};
@@ -200,7 +198,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(),
       restore: vi.fn(),
-      onWorkflowMessage: () => () => {},
       onInterrupt: () => () => {},
       onDelivery: (handler) => {
         notify = handler;
@@ -258,7 +255,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(),
       restore: vi.fn(),
-      onWorkflowMessage: () => () => {},
       onInterrupt: () => () => {},
       onDelivery: (handler) => {
         notify = handler;
@@ -330,7 +326,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(),
       restore: vi.fn(),
-      onWorkflowMessage: () => () => {},
       onInterrupt: () => () => {},
       onDelivery: (handler) => {
         notify = handler;
@@ -391,7 +386,6 @@ describe("SessionExecution checkpoints", () => {
         whenPending: () => new Promise<void>(() => {}),
         next: vi.fn(),
         restore: vi.fn(),
-        onWorkflowMessage: () => () => {},
         onInterrupt: () => () => {},
         onDelivery: (handler) => {
           notify = handler;
@@ -428,7 +422,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
-      onWorkflowMessage: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -484,7 +477,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
-      onWorkflowMessage: () => () => {},
       onInterrupt: vi.fn((handler) => {
         interrupt = handler;
         return () => {};
@@ -535,7 +527,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
-      onWorkflowMessage: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -600,7 +591,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(() => new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
-      onWorkflowMessage: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -651,7 +641,6 @@ describe("SessionExecution checkpoints", () => {
         whenPending: () => new Promise<void>(() => {}),
         next: vi.fn(() => new Promise<never>(() => {})),
         onDelivery: vi.fn(() => () => {}),
-        onWorkflowMessage: () => () => {},
         onInterrupt: vi.fn(() => () => {}),
         restore: vi.fn(),
       };
@@ -703,7 +692,6 @@ describe("SessionExecution checkpoints", () => {
       next: vi.fn(),
       restore: vi.fn(),
       onDelivery: () => () => {},
-      onWorkflowMessage: () => () => {},
       onInterrupt: (handler) => {
         interrupt = handler;
         return () => {};
@@ -754,7 +742,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => runtimePayloads.shift()),
       onDelivery: vi.fn(() => () => {}),
-      onWorkflowMessage: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -831,7 +818,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => runtimePayloads.shift()),
       onDelivery: vi.fn(() => () => {}),
-      onWorkflowMessage: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -917,7 +903,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => runtimePayloads.shift()),
       onDelivery: vi.fn(() => () => {}),
-      onWorkflowMessage: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -1002,7 +987,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => payloads.shift()),
       onDelivery: vi.fn(() => () => {}),
-      onWorkflowMessage: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -1097,7 +1081,6 @@ describe("SessionExecution checkpoints", () => {
       whenPending: () => new Promise<void>(() => {}),
       next: vi.fn(async () => payloads.shift() ?? new Promise<never>(() => {})),
       onDelivery: vi.fn(() => () => {}),
-      onWorkflowMessage: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
@@ -1173,7 +1156,6 @@ describe("SessionExecution checkpoints", () => {
         signalDelivery = handler;
         return () => {};
       }),
-      onWorkflowMessage: () => () => {},
       onInterrupt: vi.fn(() => () => {}),
       restore: vi.fn(),
     };
