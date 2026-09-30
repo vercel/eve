@@ -134,7 +134,7 @@ describe("createCurrentMessages", () => {
     ]);
   });
 
-  it("keeps later context out of the tail when history ends with an approval response", () => {
+  it("defers announcements when history ends with an approval response", () => {
     const approvalTail = {
       role: "tool" as const,
       content: [
@@ -157,9 +157,14 @@ describe("createCurrentMessages", () => {
       approvalTail,
     ]);
 
-    current.addAnnouncements({ availableSkills: "skills" });
+    current.addAnnouncements({
+      availableSkills: "skills",
+      keyed: { connections: { value: "[]", render: () => "connections" } },
+    });
 
-    expect(current.systemMessages).toEqual([{ role: "system", content: "skills" }]);
+    // A system-message fallback would change the cached prefix; nothing is
+    // recorded, so the next step appends both announcements.
+    expect(current.systemMessages).toEqual([]);
     expect(current.nonSystemMessages.at(-1)).toBe(approvalTail);
     expect(current.historyState).toEqual({});
   });

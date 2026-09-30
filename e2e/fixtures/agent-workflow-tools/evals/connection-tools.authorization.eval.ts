@@ -3,16 +3,19 @@ import { z } from "zod";
 
 import { fixtureAuthorizationCallback } from "../agent/lib/fake-service.ts";
 
-const searchResult = z.array(z.object({ qualifiedName: z.string() }));
+const searchResult = z.object({
+  tools: z.array(z.object({ connection: z.string(), tool: z.string(), signature: z.string() })),
+});
+const items = z.object({ items: z.array(z.string()) });
 
 export default defineEval({
   description:
-    "Connection search pauses for sign-in, then discovers tools over authenticated HTTP.",
+    "Connection search pauses for sign-in, then finds and calls a tool over authenticated HTTP.",
   timeoutMs: 90_000,
 
   async test(t) {
     const started = await t.send(
-      "Alice wants to see which tools are available in private-catalog. Search for its items tools, then report the available tool names.",
+      "Alice wants to know what is in private-catalog. Search that connection for its items tool, call it, and tell her which items it lists.",
     );
     const session = started.session;
     started.expectOk();
@@ -51,10 +54,19 @@ export default defineEval({
         const result = searchResult.safeParse(value);
         return (
           result.success &&
-          result.data.some((entry) => entry.qualifiedName === "private-catalog__list_items")
+          result.data.tools.some(
+            (entry) =>
+              entry.connection === "private-catalog" &&
+              entry.tool === "list_items" &&
+              entry.signature.startsWith("list_items("),
+          )
         );
       },
     });
-    completed.messageIncludes("private-catalog__list_items");
+    // The call is reported as a nested action whose result is the MCP structuredContent.
+    completed.calledTool("private-catalog__list_items", {
+      output: (value) => items.safeParse(value).data?.items.includes("oak desk") === true,
+    });
+    completed.messageIncludes(/oak desk/iu);
   },
 });

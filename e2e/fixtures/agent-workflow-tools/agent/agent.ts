@@ -56,18 +56,29 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const scenario = respondToTaskScenario(request, directiveOf(message));
   if (scenario !== undefined) return scenario;
   if (message.includes("private-catalog")) {
-    const result = request.toolResults.find((entry) => entry.name === "connection_search");
-    if (result === undefined) {
+    const search = request.toolResults.find((entry) => entry.name === "connection_search");
+    if (search === undefined) {
       return {
         toolCalls: [
           {
             name: "connection_search",
-            input: { connection: "private-catalog", keywords: "items" },
+            input: { connection: "private-catalog", query: "items" },
           },
         ],
       };
     }
-    return JSON.stringify(result.output);
+    const execute = request.toolResults.find((entry) => entry.name === "connection_execute");
+    if (execute === undefined) {
+      return {
+        toolCalls: [
+          {
+            name: "connection_execute",
+            input: { connection: "private-catalog", tool: "list_items", input: {} },
+          },
+        ],
+      };
+    }
+    return `Items: ${JSON.stringify(execute.output)}`;
   }
 
   const stepAuth = /WORKFLOW-STEP-AUTH-(IMPLICIT|EXPLICIT|REJECTED)/u.exec(message);

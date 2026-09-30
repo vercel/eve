@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 
 export default defineEval({
-  description: "A session-scoped dynamic OpenAPI connection participates in connection_search.",
+  description: "A session-scoped dynamic OpenAPI connection is announced and searchable.",
 
   async test(t) {
     if (process.env.EVE_E2E_MODEL !== "mock") {
@@ -18,14 +18,15 @@ export default defineEval({
 });
 
 function hasDynamicStatusTool(value: unknown): boolean {
+  const tools = typeof value === "object" && value !== null ? Reflect.get(value, "tools") : [];
   return (
-    Array.isArray(value) &&
-    value.some(
+    Array.isArray(tools) &&
+    tools.some(
       (entry) =>
         typeof entry === "object" &&
         entry !== null &&
         Reflect.get(entry, "connection") === "dynamic-catalog" &&
-        Reflect.get(entry, "qualifiedName") === "dynamic-catalog__getStatus",
+        Reflect.get(entry, "tool") === "getStatus",
     )
   );
 }

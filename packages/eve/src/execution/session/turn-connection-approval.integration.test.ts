@@ -28,7 +28,7 @@ import type {
   ResolvedDynamicConnectionResolver,
   ResolvedDynamicToolResolver,
 } from "#runtime/types.js";
-import connectionSearch from "#tools/framework/connection-search.js";
+import connectionTools from "#tools/framework/connection-tools.js";
 import { clearDurableDynamicCallbacks } from "#tools/durable-callbacks.js";
 import type { ApprovalResponseContext } from "#approval/definition.js";
 
@@ -57,22 +57,23 @@ const usage = {
 };
 const sessionId = "turn-connection-approval";
 
-function modelResponse(toolName?: string, callId?: string, connection = "notes") {
+/** A model step that saves a note through `connection_execute`, or replies when `callId` is omitted. */
+function modelResponse(callId?: string, connection = "notes") {
   return {
     stream: simulateReadableStream({
       chunks: [
         { type: "stream-start" as const, warnings: [] },
-        ...(toolName
+        ...(callId
           ? [
               {
                 type: "tool-call" as const,
-                toolCallId: callId ?? (toolName === "connection_search" ? "search" : "save"),
-                toolName,
-                input: JSON.stringify(
-                  toolName === "connection_search"
-                    ? { connection, keywords: "save" }
-                    : { body: { note: "hello" } },
-                ),
+                toolCallId: callId,
+                toolName: "connection_execute",
+                input: JSON.stringify({
+                  connection,
+                  tool: "saveNote",
+                  input: { body: { note: "hello" } },
+                }),
               },
             ]
           : [
@@ -84,7 +85,7 @@ function modelResponse(toolName?: string, callId?: string, connection = "notes")
           type: "finish" as const,
           finishReason: {
             raw: undefined,
-            unified: toolName ? ("tool-calls" as const) : ("stop" as const),
+            unified: callId ? ("tool-calls" as const) : ("stop" as const),
           },
           usage,
         },
@@ -96,7 +97,7 @@ function modelResponse(toolName?: string, callId?: string, connection = "notes")
 function setup(
   scope: "turn.started" | "session.started" = "turn.started",
   reject = false,
-  variation?: "destination" | "name" | "request-only",
+  variation?: "destination" | "name" | "request-only" | "unapproved-name",
 ) {
   const response = vi.fn((context: ApprovalResponseContext) => {
     expect(context.response.principal.principalId).toBe("bob");
@@ -111,7 +112,9 @@ function setup(
     if (removed) return {};
     const sequence = (event as { data: { sequence?: number } }).data.sequence ?? 0;
     return {
-      [variation === "name" && sequence > 0 ? "second-notes" : "notes"]: defineOpenAPIConnection({
+      [(variation === "name" || variation === "unapproved-name") && sequence > 0
+        ? "second-notes"
+        : "notes"]: defineOpenAPIConnection({
         baseUrl:
           variation === "destination"
             ? `https://notes-${sequence}.example.com`
@@ -143,18 +146,21 @@ function setup(
             },
           },
         },
-        approval: {
-          request: () => "user-approval",
-          response:
-            variation === "request-only"
-              ? undefined
-              : (context) => {
-                  policyTurns.push(
-                    (event as { data: { turnId?: string } }).data.turnId ?? "session",
-                  );
-                  return response(context);
-                },
-        },
+        approval:
+          variation === "unapproved-name"
+            ? undefined
+            : {
+                request: () => "user-approval",
+                response:
+                  variation === "request-only"
+                    ? undefined
+                    : (context) => {
+                        policyTurns.push(
+                          (event as { data: { turnId?: string } }).data.turnId ?? "session",
+                        );
+                        return response(context);
+                      },
+              },
       }),
     };
   });
@@ -171,10 +177,10 @@ function setup(
   const dynamicToolResolvers: ResolvedDynamicToolResolver[] = [
     {
       eventNames: ["step.started"],
-      events: connectionSearch.events as ResolvedDynamicToolResolver["events"],
-      logicalPath: "tools/connection-search.ts",
-      slug: "connection-search",
-      sourceId: "eve:connection-search",
+      events: connectionTools.events as ResolvedDynamicToolResolver["events"],
+      logicalPath: "tools/connection_tools.ts",
+      slug: "connection_tools",
+      sourceId: "eve:connection-tools",
       sourceKind: "module",
     },
   ];
@@ -233,8 +239,7 @@ function setup(
   vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
   const doStream = vi
     .fn()
-    .mockImplementationOnce(() => modelResponse("connection_search"))
-    .mockImplementationOnce(() => modelResponse("notes__saveNote"))
+    .mockImplementationOnce(() => modelResponse("save"))
     .mockImplementation(() => modelResponse());
   vi.mocked(resolveRuntimeModelReference).mockResolvedValue(new MockLanguageModelV4({ doStream }));
   const fetch = vi.fn(
@@ -313,6 +318,45 @@ afterEach(() => {
 });
 
 describe("turn connection approval restoration", () => {
+  it("keeps the provider tools and system prompt identical while connections change", async () => {
+    const fixture = setup("turn.started", false, "unapproved-name");
+    await fixture.step({
+      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's first note." }] },
+    });
+    await fixture.step();
+    fixture.doStream.mockImplementationOnce(() => modelResponse("save-2", "second-notes"));
+    await fixture.step({
+      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's second note." }] },
+    });
+    await fixture.step();
+    expect(fixture.fetch).toHaveBeenCalledTimes(2);
+
+    const requests = fixture.doStream.mock.calls.map(
+      ([options]) =>
+        options as {
+          prompt: { role: string; content: unknown }[];
+          tools: { name: string }[];
+        },
+    );
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    const [first, ...later] = requests;
+    expect(first!.tools.map((tool) => tool.name).sort()).toEqual([
+      "connection_execute",
+      "connection_search",
+    ]);
+    const system = (request: (typeof requests)[number]) =>
+      request.prompt.filter((message) => message.role === "system");
+    for (const request of later) {
+      expect(request.tools).toEqual(first!.tools);
+      expect(system(request)).toEqual(system(first!));
+    }
+    // Connection names reach the model only through appended context messages.
+    const last = JSON.stringify(requests.at(-1)!.prompt);
+    expect(JSON.stringify(system(first!))).not.toContain("- notes:");
+    expect(last).toContain("- notes: Save notes");
+    expect(last).toContain("- second-notes: Save notes");
+  });
+
   it("authorizes requests from two originating turns independently in one cold delivery", async () => {
     const fixture = setup();
     await fixture.step({
@@ -320,9 +364,7 @@ describe("turn connection approval restoration", () => {
     });
     const first = await fixture.step();
     const firstBatch = getPendingInputBatches(readDurableSession(first.sessionState).state)[0]!;
-    fixture.doStream
-      .mockImplementationOnce(() => modelResponse("connection_search", "search-2"))
-      .mockImplementationOnce(() => modelResponse("notes__saveNote", "save-2"));
+    fixture.doStream.mockImplementationOnce(() => modelResponse("save-2"));
     await fixture.step({
       delivery: {
         kind: "deliver",
@@ -361,7 +403,7 @@ describe("turn connection approval restoration", () => {
     expect(fixture.events.filter((event) => event.type === "session.failed")).toEqual([]);
   });
   it.each([false, true])(
-    "fails before execution when the resumed connection changes (cold: %s)",
+    "fails an approved call whose connection changed before it ran (cold: %s)",
     async (cold) => {
       const fixture = setup("turn.started", false, "destination");
       await fixture.step({
@@ -379,37 +421,41 @@ describe("turn connection approval restoration", () => {
         },
       });
       if (cold) clearDurableDynamicCallbacks(sessionId);
-      await expect(fixture.step()).rejects.toThrow(
-        "connection for this tool call changed or is unavailable",
-      );
+      await fixture.step();
       expect(fixture.response).toHaveBeenCalledOnce();
       expect(fixture.fetch).not.toHaveBeenCalled();
+      expect(
+        JSON.stringify(
+          fixture.events.filter(
+            (event) =>
+              event.type === "action.result" &&
+              JSON.stringify(event.data).includes(request.action.callId),
+          ),
+        ),
+      ).toContain("connection for this tool call changed or is unavailable");
     },
   );
 
   it.each([false, true])(
-    "refuses an older tool missing from persisted metadata while approving an available tool (cold: %s)",
+    "fails an approved call whose connection is gone while running an available one (cold: %s)",
     async (cold) => {
       const fixture = setup("turn.started", false, "name");
       await fixture.step({
         delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's first note." }] },
       });
       await fixture.step();
-      fixture.doStream
-        .mockImplementationOnce(() =>
-          modelResponse("connection_search", "search-2", "second-notes"),
-        )
-        .mockImplementationOnce(() => modelResponse("second-notes__saveNote", "save-2"));
+      fixture.doStream.mockImplementationOnce(() => modelResponse("save-2", "second-notes"));
       await fixture.step({
         delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's second note." }] },
       });
       const second = await fixture.step();
       const batches = getPendingInputBatches(readDurableSession(second.sessionState).state);
       expect(batches).toHaveLength(2);
-      expect(batches.map((batch) => batch.requests[0]!.action.toolName)).toEqual([
-        "notes__saveNote",
-        "second-notes__saveNote",
-      ]);
+      expect(
+        batches.map(
+          (batch) => (batch.requests[0]!.action.input as { connection: string }).connection,
+        ),
+      ).toEqual(["notes", "second-notes"]);
       if (cold) clearDurableDynamicCallbacks(sessionId);
       await fixture.step({
         delivery: {
@@ -428,32 +474,27 @@ describe("turn connection approval restoration", () => {
         },
       });
       if (cold) clearDurableDynamicCallbacks(sessionId);
-      const resumed = await fixture.step();
-      const state = readDurableSession(resumed.sessionState).state;
+      await fixture.step();
       const older = batches[0]!.requests[0]!;
-      const newer = batches[1]!.requests[0]!;
-      expect(fixture.policyTurns).toEqual([batches[1]!.event!.turnId]);
-      expect(getApprovalAuditState(state).candidateHistory).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            requestId: older.requestId,
+      // Each approval is authorized against its originating turn's connections;
+      // the older call then fails because "notes" is gone when it runs.
+      expect(fixture.policyTurns).toEqual(batches.map((batch) => batch.event!.turnId));
+      expect(fixture.events).toContainEqual(
+        expect.objectContaining({
+          type: "action.result",
+          data: expect.objectContaining({
             status: "failed",
-            reason: "Approval authorization is temporarily unavailable. Please try again.",
+            result: expect.objectContaining({
+              callId: older.action.callId,
+              output: expect.stringContaining('Connection "notes" is not available'),
+            }),
           }),
-        ]),
+        }),
       );
-      expect(getApprovalAuditState(state).settlements).toEqual([
-        expect.objectContaining({ requestId: newer.requestId, outcome: "allowed" }),
-      ]);
-      expect(getPendingInputBatches(state).flatMap((batch) => batch.requests)).toEqual([older]);
-      expect(getPendingInputBatches(state)[0]!.toolReplayIdentities).toEqual(
-        batches[0]!.toolReplayIdentities,
-      );
-      expect(fixture.fetch).toHaveBeenCalledOnce();
     },
   );
 
-  it("rejects a missing connection before replay even without a response policy", async () => {
+  it("fails an approved call whose connection is gone without a response policy", async () => {
     const fixture = setup("turn.started", false, "request-only");
     await fixture.step({
       delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
@@ -462,16 +503,27 @@ describe("turn connection approval restoration", () => {
     const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
       .requests[0]!;
     fixture.removeConnection();
-    await expect(
-      fixture.step({
-        delivery: {
-          kind: "deliver",
-          auth: bob,
-          payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
-        },
-      }),
-    ).rejects.toThrow("connection for this tool call changed or is unavailable");
+    await fixture.step({
+      delivery: {
+        kind: "deliver",
+        auth: bob,
+        payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
+      },
+    });
+    await fixture.step();
     expect(fixture.fetch).not.toHaveBeenCalled();
+    expect(fixture.events).toContainEqual(
+      expect.objectContaining({
+        type: "action.result",
+        data: expect.objectContaining({
+          status: "failed",
+          result: expect.objectContaining({
+            callId: request.action.callId,
+            output: expect.stringContaining('Connection "notes" is not available'),
+          }),
+        }),
+      }),
+    );
   });
 
   it("leaves the request pending when its connection can no longer be reconstructed", async () => {
@@ -498,8 +550,8 @@ describe("turn connection approval restoration", () => {
     expect(getPendingInputBatches(state)[0]!.requests[0]!.requestId).toBe(request.requestId);
     expect(getApprovalAuditState(state).candidateHistory).toEqual([
       expect.objectContaining({
-        status: "failed",
-        reason: "Approval authorization is temporarily unavailable. Please try again.",
+        status: "rejected",
+        reason: expect.stringContaining("cannot replay its approvalResponse callback"),
       }),
     ]);
   });
@@ -569,7 +621,7 @@ describe("turn connection approval restoration", () => {
   });
 
   it.each([false, true])(
-    "approves and executes a discovered tool with a cold callback cache: %s",
+    "approves and executes a connection tool with a cold callback cache: %s",
     async (cold) => {
       const fixture = setup();
       await fixture.step({
@@ -578,13 +630,7 @@ describe("turn connection approval restoration", () => {
       const parked = await fixture.step();
       const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
         .requests[0]!;
-      expect(request.action.toolName).toBe("notes__saveNote");
-      expect(
-        getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-          .toolReplayIdentities,
-      ).toEqual({
-        [request.requestId]: expect.stringMatching(/^connection:/),
-      });
+      expect(request.action.toolName).toBe("connection_execute");
       expect(fixture.fetch).not.toHaveBeenCalled();
       if (cold) clearDurableDynamicCallbacks(sessionId);
       const candidate = await fixture.step({
@@ -607,12 +653,37 @@ describe("turn connection approval restoration", () => {
       expect(getPendingInputBatches(readDurableSession(resumed.sessionState).state)).toEqual([]);
       expect(resumed.serializedContext).not.toHaveProperty("eve.pendingConnectionCalls");
       expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(2);
+      // The connection call is reported as a nested action of the approved call.
+      const nestedCallId = `${request.action.callId}:1`;
       expect(fixture.events).toContainEqual(
         expect.objectContaining({
-          type: "action.result",
+          type: "actions.requested",
+          data: expect.objectContaining({
+            actions: [
+              expect.objectContaining({
+                callId: nestedCallId,
+                parentCallId: request.action.callId,
+                toolName: "notes__saveNote",
+              }),
+            ],
+          }),
+        }),
+      );
+      const results = fixture.events.filter((event) => event.type === "action.result");
+      const resultCallIds = results.map(
+        (event) => (event.data.result as { callId: string }).callId,
+      );
+      expect(resultCallIds.indexOf(nestedCallId)).toBeLessThan(
+        resultCallIds.indexOf(request.action.callId),
+      );
+      expect(results[resultCallIds.indexOf(nestedCallId)]).toEqual(
+        expect.objectContaining({
           data: expect.objectContaining({
             status: "completed",
-            result: expect.objectContaining({ toolName: "notes__saveNote" }),
+            result: expect.objectContaining({
+              output: { body: { saved: true }, status: 200, statusText: "" },
+              toolName: "notes__saveNote",
+            }),
           }),
         }),
       );
