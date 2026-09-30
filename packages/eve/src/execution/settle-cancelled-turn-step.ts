@@ -2,24 +2,16 @@ import {
   commitCancelledCoordinationBatch,
   getPendingCoordinationBatch,
 } from "#harness/coordination.js";
-import {
-  readDurableSession,
-  replaceDurableSessionSnapshot,
-  type DurableSessionState,
-} from "#execution/durable-session-store.js";
-import {
-  publishFromSessionStep,
-  relaySessionEvents,
-  restoreSessionStep,
-} from "#execution/publish-session-events.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { publishFromSessionStep, restoreSessionStep } from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
+import { relayWithdrawnRequests } from "#execution/tools/workflow/withdraw-step.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
-import { withdrawProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -61,18 +53,7 @@ export async function settleCancelledTurn(
   input: CancelledTurnSettleInput,
 ): Promise<CancelledTurnSettleResult> {
   // The cancel stopped every descendant and task, so nobody can answer a request the session relays.
-  const withdrawn = withdrawProxyInputRequests(readDurableSession(input.sessionState), () => true);
-  const relayed = await relaySessionEvents(
-    {
-      serializedContext: input.serializedContext,
-      sessionState: replaceDurableSessionSnapshot({
-        session: withdrawn.session,
-        state: input.sessionState,
-      }),
-      sessionWritable: input.sessionWritable,
-    },
-    withdrawn.events,
-  );
+  const relayed = await relayWithdrawnRequests(input, () => true);
   const step = await restoreSessionStep({ ...relayed, sessionWritable: input.sessionWritable });
   const durableState = step.durableSession.state;
   const { published, result: usage } = await publishFromSessionStep(step, {

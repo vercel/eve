@@ -71,7 +71,11 @@ export async function withdrawFinishedRunQuestionsStep(
   );
 }
 
-async function relayWithdrawnRequests(
+/**
+ * Retires the relayed requests `select` picks and relays the `input.resolved`
+ * that reports each one `cancelled`, for a step that owns the session.
+ */
+export async function relayWithdrawnRequests(
   input: SessionStepState,
   select: (requestId: string, route: ProxyInputRequest) => boolean,
 ): Promise<PublishedSessionEvents> {
