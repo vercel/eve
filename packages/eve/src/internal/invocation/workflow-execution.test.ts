@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
 import {
   buildInvocationAttributes,
   INVOCATION_OWNER_ATTRIBUTE,
@@ -30,8 +29,8 @@ const auth: SessionAuthContext = {
 };
 
 const createSession = vi.fn<RouteSessionCreator>();
-const deliver = vi.fn();
-const from = vi.fn(() => ({ [INTERNAL_CHANNEL_DELIVER]: deliver }) as never);
+const respond = vi.fn();
+const from = vi.fn(() => ({ respond }) as never);
 
 describe("WorkflowAgentInvocationExecution", () => {
   afterEach(() => {
@@ -194,7 +193,7 @@ describe("WorkflowAgentInvocationExecution", () => {
       } as HandleMessageStreamEvent,
     ];
     getReadable.mockImplementation(() => eventStream(events));
-    deliver.mockResolvedValue({ sessionId: "wrun_invocation" });
+    respond.mockResolvedValue({ sessionId: "wrun_invocation" });
 
     await expect(
       execution().update({
@@ -207,10 +206,7 @@ describe("WorkflowAgentInvocationExecution", () => {
       type: "success",
     });
     expect(from).toHaveBeenCalledWith("invocation:token");
-    expect(deliver).toHaveBeenCalledWith(
-      { inputResponses: [{ optionId: "yes", requestId: "question" }] },
-      { auth },
-    );
+    expect(respond).toHaveBeenCalledWith([{ optionId: "yes", requestId: "question" }], { auth });
     expect(getReadable).toHaveBeenCalledWith({ startIndex: -64 });
   });
 
@@ -220,7 +216,7 @@ describe("WorkflowAgentInvocationExecution", () => {
     getReadable.mockImplementation(() =>
       eventStream([inputRequestedEvent("event_split", ["one", "two"])]),
     );
-    deliver.mockResolvedValue({ sessionId: "wrun_invocation" });
+    respond.mockResolvedValue({ sessionId: "wrun_invocation" });
 
     const one = invocationInputRequestId("event_split", "one");
     const two = invocationInputRequestId("event_split", "two");
@@ -244,13 +240,11 @@ describe("WorkflowAgentInvocationExecution", () => {
         ],
       }),
     ).resolves.toMatchObject({ type: "success" });
-    expect(deliver).toHaveBeenCalledExactlyOnceWith(
-      {
-        inputResponses: [
-          { optionId: "yes", requestId: "one" },
-          { optionId: "yes", requestId: "two" },
-        ],
-      },
+    expect(respond).toHaveBeenCalledExactlyOnceWith(
+      [
+        { optionId: "yes", requestId: "one" },
+        { optionId: "yes", requestId: "two" },
+      ],
       expect.objectContaining({ auth }),
     );
   });
@@ -260,7 +254,7 @@ describe("WorkflowAgentInvocationExecution", () => {
     runsGet.mockResolvedValue(pendingRun);
     let events: HandleMessageStreamEvent[] = [inputRequestedEvent("event_first", ["question"])];
     getReadable.mockImplementation(() => eventStream(events));
-    deliver.mockResolvedValue({ sessionId: "wrun_invocation" });
+    respond.mockResolvedValue({ sessionId: "wrun_invocation" });
 
     const firstRequestId = invocationInputRequestId("event_first", "question");
     await execution().update({
@@ -296,7 +290,7 @@ describe("WorkflowAgentInvocationExecution", () => {
       }),
     ).resolves.toMatchObject({ type: "success" });
 
-    expect(deliver).toHaveBeenCalledTimes(2);
+    expect(respond).toHaveBeenCalledTimes(2);
   });
 
   it("stops reporting input_required once the answer is resolved", async () => {
@@ -330,7 +324,7 @@ describe("WorkflowAgentInvocationExecution", () => {
         responses: [{ optionId: "yes", requestId }],
       }),
     ).resolves.toMatchObject({ invocation: { status: "working" }, type: "success" });
-    expect(deliver).not.toHaveBeenCalled();
+    expect(respond).not.toHaveBeenCalled();
 
     await expect(
       execution().update({
@@ -346,7 +340,7 @@ describe("WorkflowAgentInvocationExecution", () => {
         responses: [{ requestId, text: "yes" }],
       }),
     ).resolves.toMatchObject({ type: "conflict" });
-    expect(deliver).not.toHaveBeenCalled();
+    expect(respond).not.toHaveBeenCalled();
   });
 
   it("acknowledges a repeated answer after the turn completes", async () => {
@@ -371,7 +365,7 @@ describe("WorkflowAgentInvocationExecution", () => {
       invocation: { result: "done", status: "completed" },
       type: "success",
     });
-    expect(deliver).not.toHaveBeenCalled();
+    expect(respond).not.toHaveBeenCalled();
   });
 
   it("projects and clears pending connection authorization", async () => {

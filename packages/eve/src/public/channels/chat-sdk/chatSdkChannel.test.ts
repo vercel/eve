@@ -142,6 +142,14 @@ async function firePost(
   return { cancel, response, send, waitUntil };
 }
 
+function bridgeSendTypeChecks(bridge: ReturnType<typeof chatSdkChannel>, thread: Thread): void {
+  // @ts-expect-error bridge.send takes a message; answer input with bridge.respond.
+  void bridge.send({ inputResponses: [{ optionId: "approve", requestId: "r1" }] }, { thread });
+  void bridge.send("hello", { context: ["extra"], outputSchema: { type: "object" }, thread });
+}
+
+void bridgeSendTypeChecks;
+
 describe("chatSdkChannel", () => {
   it.each([
     [{ isDM: true, channelVisibility: "unknown" }, "private"],
@@ -300,7 +308,7 @@ describe("chatSdkChannel", () => {
     });
   });
 
-  it("does not cancel for a steering response without a message", async () => {
+  it("answers pending input through bridge.respond without cancelling", async () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
@@ -310,10 +318,7 @@ describe("chatSdkChannel", () => {
     });
 
     bridge.bot.onNewMention(async (thread: Thread) => {
-      await bridge.send(
-        { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
-        { thread, turnPolicy: "steer" },
-      );
+      await bridge.respond([{ optionId: "approve", requestId: "request-1" }], { thread });
     });
 
     const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
@@ -785,12 +790,6 @@ describe("chatSdkChannel", () => {
     expect(send).toHaveBeenCalledWith(THREAD_ID, {
       auth: null,
       inputResponses: [{ optionId: "approve", requestId: "request-1" }],
-      state: {
-        thread: expect.objectContaining({
-          adapterName: "test",
-          id: THREAD_ID,
-        }),
-      },
     });
   });
 });

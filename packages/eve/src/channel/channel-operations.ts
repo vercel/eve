@@ -2,11 +2,7 @@ import type { UserContent } from "ai";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { ChannelDeliverySource } from "#channel/delivery-metadata.js";
-import {
-  createChannelAddressFn,
-  type ChannelAddressDeliveryOptions,
-} from "#channel/channel-address.js";
-import type { SendPayload } from "#channel/routes.js";
+import { createChannelAddressFn } from "#channel/channel-address.js";
 import type { Session } from "#channel/session.js";
 import type {
   CancelTurnResult,
@@ -23,12 +19,15 @@ import {
   parseInputResponses,
   type StrictInputResponses,
 } from "#shared/input.js";
+import type { JsonObject } from "#shared/json.js";
 
 interface BaseChannelSendOptions {
   readonly auth: SessionAuthContext | null;
   readonly callback?: SessionCallback;
   readonly context?: readonly string[];
   readonly initiatorAuth?: SessionAuthContext | null;
+  /** JSON Schema for a structured final answer, as on `Session.send()`. */
+  readonly outputSchema?: JsonObject;
   readonly title?: string;
   readonly turnPolicy?: TurnPolicy;
 }
@@ -78,16 +77,6 @@ export interface ChannelReceiveContext<TState = undefined> {
   readonly resolveSession: ChannelResolveSession;
 }
 
-export const INTERNAL_CHANNEL_DELIVER = Symbol("eve.internal.channel-deliver");
-
-/** @internal Permissive transport delivery retained below public authoring surfaces. */
-export interface InternalChannelSource<TState = undefined> extends ChannelSource<TState> {
-  [INTERNAL_CHANNEL_DELIVER](
-    payload: SendPayload,
-    options: ChannelAddressDeliveryOptions<TState>,
-  ): Promise<Session>;
-}
-
 /** Creates request-scoped channel operations backed by continuation dispatch. */
 export function createChannelOperations<TState = undefined>(input: {
   readonly adapter: ChannelAdapter<any>;
@@ -101,7 +90,7 @@ export function createChannelOperations<TState = undefined>(input: {
   return {
     from(address) {
       const bound = channelAddress(address);
-      const source: InternalChannelSource<TState> = {
+      const source: ChannelSource<TState> = {
         async send(message, options) {
           // Deliver hooks read per-delivery state (such as the message author)
           // from the payload, as they do for `respond()`.
@@ -109,6 +98,7 @@ export function createChannelOperations<TState = undefined>(input: {
             {
               context: options.context,
               message,
+              outputSchema: options.outputSchema,
               state: (options as { readonly state?: TState }).state,
             },
             options,
@@ -139,9 +129,6 @@ export function createChannelOperations<TState = undefined>(input: {
         },
         async reset(options) {
           return await bound.reset(options);
-        },
-        async [INTERNAL_CHANNEL_DELIVER](payload, options) {
-          return await bound.deliver(payload, options);
         },
       };
       return source;

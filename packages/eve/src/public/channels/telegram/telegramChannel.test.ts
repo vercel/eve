@@ -346,7 +346,7 @@ describe("telegramChannel() inbound route", () => {
     );
   });
 
-  it("keeps direct approval replies as fallback text for option prompts", async () => {
+  it("sends a reply to a bot prompt as a message carrying the replied-to id", async () => {
     const channel = telegramChannel({
       api: { fetch: fakeTelegramFetch() },
       credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
@@ -368,9 +368,10 @@ describe("telegramChannel() inbound route", () => {
 
     const [, input] = send.mock.calls[0]!;
     expect(input).toMatchObject({
-      inputResponses: [{ requestId: "telegram_reply:55", text: "approve" }],
       message: expect.stringContaining("approve"),
+      state: { replyToBotMessageId: "55" },
     });
+    expect(input).not.toHaveProperty("inputResponses");
   });
 
   it("rejects requests with invalid webhook verification", async () => {
@@ -421,19 +422,17 @@ describe("telegramChannel() deliver hook", () => {
 
     expect(
       await adapter.deliver!(
-        {
-          inputResponses: [
-            { optionId: "selected", requestId: "telegram_callback:eve:0" },
-            { requestId: "telegram_reply:55", text: "because" },
-          ],
-        },
+        { inputResponses: [{ optionId: "selected", requestId: "telegram_callback:eve:0" }] },
         ctx,
       ),
     ).toEqual({
-      inputResponses: [
-        { optionId: "approve", requestId: "call_1" },
-        { requestId: "call_2", text: "because" },
-      ],
+      inputResponses: [{ optionId: "approve", requestId: "call_1" }],
+      context: undefined,
+    });
+    expect(
+      await adapter.deliver!({ message: "because", state: { replyToBotMessageId: "55" } }, ctx),
+    ).toEqual({
+      inputResponses: [{ requestId: "call_2", text: "because" }],
       context: undefined,
     });
   });
@@ -443,13 +442,7 @@ describe("telegramChannel() deliver hook", () => {
     const ctx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as any);
 
     expect(
-      await adapter.deliver!(
-        {
-          inputResponses: [{ requestId: "telegram_reply:55", text: "hello" }],
-          message: "hello",
-        },
-        ctx,
-      ),
+      await adapter.deliver!({ message: "hello", state: { replyToBotMessageId: "55" } }, ctx),
     ).toEqual({ message: "hello", context: undefined });
   });
 });

@@ -59,21 +59,19 @@ describe("linqChannel", () => {
     await handler(thread, message);
 
     expect(markRead).toHaveBeenCalledWith(thread.id, message.id);
-    expect(send).toHaveBeenCalledWith(
-      { context: [], message: "Hello Linq" },
-      {
-        auth: {
-          attributes: { user_name: "user" },
-          authenticator: "linq-message",
-          issuer: "linq",
-          principalId: "linq:user",
-          principalType: "user",
-          subject: "user",
-        },
-        thread,
-        title: undefined,
+    expect(send).toHaveBeenCalledWith("Hello Linq", {
+      auth: {
+        attributes: { user_name: "user" },
+        authenticator: "linq-message",
+        issuer: "linq",
+        principalId: "linq:user",
+        principalType: "user",
+        subject: "user",
       },
-    );
+      context: [],
+      thread,
+      title: undefined,
+    });
   });
 
   it("uses lazy credentials and the managed credential verifier", async () => {

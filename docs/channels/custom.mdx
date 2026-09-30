@@ -138,7 +138,7 @@ A sent delivery can interrupt generation before your `deliver` hook runs. If the
 
 Every `send()` and `respond()` delivery passes its `state` option to your channel's `deliver(payload, channel)` hook as `payload.state`, including deliveries to an existing session. Use it for values that belong to one delivery, such as the author of a message. The hook decides what to merge into `channel.state`; eve seeds `channel.state` from `state` only when `send()` creates the session.
 
-The built-in Slack channel hands every inbound message to `from(address).send(message, options)`. A route wrapper that replaces `send` on the source returned by `from(address)` therefore sees each inbound message, and a rejected delivery reaches the wrapper as an error.
+The built-in Slack, Teams, and Telegram channels, and the Chat SDK bridge's `send`, hand every inbound message to `from(address).send(message, options)`. A route wrapper that replaces `send` on the source returned by `from(address)` therefore sees each inbound message, and a rejected delivery reaches the wrapper as an error.
 
 Configure `turnPolicy: "queue"` on `defineChannel(...)` when messages should wait for the active turn to finish, or override one send:
 

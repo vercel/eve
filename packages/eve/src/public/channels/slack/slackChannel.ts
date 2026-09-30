@@ -873,10 +873,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     // The runtime hands `deliver` the full adapter context; `session.auth.current`
     // is the caller of this delivery.
     deliver(payload, channel: SlackChannelContext & { readonly session: SessionHandle }) {
-      const cards = payload.pendingApprovalCards;
-      if (typeof cards === "object" && cards !== null) {
-        channel.state.pendingApprovalCards = { ...channel.state.pendingApprovalCards, ...cards };
-      }
       recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
       return defaultDeliverResult(payload);
     },
