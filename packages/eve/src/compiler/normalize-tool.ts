@@ -127,6 +127,7 @@ export async function compileToolEntry(
       hasModelOutputProjection: entry.definition.hasModelOutputProjection,
       inputSchema: entry.definition.inputSchema ?? null,
       logicalPath: source.logicalPath,
+      modelInputSchema: entry.definition.modelInputSchema,
       name: toolName,
       outputSchema: entry.definition.outputSchema,
       requiresApproval: entry.definition.hasApproval,

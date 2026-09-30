@@ -17,6 +17,7 @@ export {
 } from "#tools/definition.js";
 export { defineDynamic } from "#dynamic/definition.js";
 export { defineDurableSchema } from "#tools/durable-schema.js";
+export { serializeModelInputSchema } from "#tools/schema.js";
 export { defineDurableCallback } from "#tools/durable-callbacks.js";
 export { toolOutput, toolOutputPart } from "#tools/model-output.js";
 export type { DynamicEvents, DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";

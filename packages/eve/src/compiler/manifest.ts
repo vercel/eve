@@ -237,6 +237,8 @@ export type CompiledToolDefinition = InternalToolDefinition &
     readonly behavior?: CompiledToolBehavior;
     readonly hasExecute: boolean;
     readonly hasModelOutputProjection: boolean;
+    /** The input schema as eve sends it to a model; absent for provider-managed tools. */
+    readonly modelInputSchema?: JsonObject;
     readonly requiresApproval: boolean;
     readonly workflowProgram?: {
       readonly maxSubagents: number;
@@ -862,6 +864,7 @@ const compiledToolDefinitionSchema = z
     hasModelOutputProjection: z.boolean(),
     inputSchema: jsonObjectSchema.nullable(),
     logicalPath: z.string(),
+    modelInputSchema: jsonObjectSchema.optional(),
     name: z.string(),
     outputSchema: jsonObjectSchema.optional(),
     requiresApproval: z.boolean(),

@@ -8,13 +8,21 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { JsonObject } from "#shared/json.js";
 import { firstSentence } from "#shared/presentation-text.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
-import { isToolSchema, withOptionalStringProperty } from "#tools/schema.js";
+import { isToolSchema, type ToolSchema, withOptionalStringProperty } from "#tools/schema.js";
 
 // A `serve` tool's model input is the tool's own input plus an optional
 // `taskId`, which sends the call to the running task it names.
 
 /** The model input property eve adds to every `serve` tool. */
 export const TASK_ID_INPUT = "taskId";
+
+/** A `serve` tool's input schema as the model sees it, with the optional `taskId`. */
+export function withTaskIdSchema(schema: ToolSchema): ToolSchema {
+  return withOptionalStringProperty(schema, {
+    description: TASK_ID_INPUT_DESCRIPTION,
+    name: TASK_ID_INPUT,
+  });
+}
 
 /**
  * The tool as the model sees it: its input gains `taskId`, and its description
@@ -33,10 +41,7 @@ export function withTaskIdInput(definition: HarnessToolDefinition): HarnessToolD
       definition.description,
       agent ? AGENT_SERVE_TOOL_DESCRIPTION : SERVE_TOOL_DESCRIPTION,
     ),
-    inputSchema: withOptionalStringProperty(schema, {
-      description: TASK_ID_INPUT_DESCRIPTION,
-      name: TASK_ID_INPUT,
-    }),
+    inputSchema: withTaskIdSchema(schema),
   };
   if (!agent || definition.label?.start !== undefined) return described;
   return {

@@ -77,6 +77,24 @@ export function serializeInputSchema<T extends ToolSchemaSource | null | undefin
 }
 
 /**
+ * Serializes an input schema into the JSON Schema eve sends a model for it.
+ * A schema from a validation library such as Zod, Valibot, or ArkType gets
+ * `additionalProperties: false` on every object that allows no other keys, as
+ * the AI SDK applies to library schemas. Plain JSON Schema is sent exactly as
+ * written. `null` and `undefined` pass through untouched.
+ *
+ * Providers can transform the schema further before the model reads it.
+ */
+export function serializeModelInputSchema<T extends ToolSchemaSource | null | undefined>(
+  source: T,
+): SchemaResult<T, JsonObject> {
+  const schema = toSchema(source, "input");
+  return (
+    schema === null || schema === undefined ? schema : toModelJsonSchema(schema, "input")
+  ) as SchemaResult<T, JsonObject>;
+}
+
+/**
  * Returns whether a value implements the full {@link ToolSchema} contract:
  * Standard Schema validation plus JSON Schema emission.
  */
@@ -225,21 +243,19 @@ export function toModelSchema(
     return schema;
   }
   const source = schema as StandardSchemaV1;
-  const verbatim = plainJsonSchemas.has(source);
-  return jsonSchema(
-    () => {
-      const json = serializeSchema(source, direction);
-      return (verbatim ? json : closeObjectSchemas(json)) as JSONSchema7;
+  return jsonSchema(() => toModelJsonSchema(source, direction) as JSONSchema7, {
+    validate: async (value) => {
+      const result = await source["~standard"].validate(value);
+      return result.issues === undefined
+        ? { success: true, value: result.value }
+        : { success: false, error: new TypeValidationError({ value, cause: result.issues }) };
     },
-    {
-      validate: async (value) => {
-        const result = await source["~standard"].validate(value);
-        return result.issues === undefined
-          ? { success: true, value: result.value }
-          : { success: false, error: new TypeValidationError({ value, cause: result.issues }) };
-      },
-    },
-  ) satisfies Schema;
+  }) satisfies Schema;
+}
+
+function toModelJsonSchema(source: StandardSchemaV1, direction: SchemaDirection): JsonObject {
+  const json = serializeSchema(source, direction) as JsonObject;
+  return plainJsonSchemas.has(source) ? json : (closeObjectSchemas(json) as JsonObject);
 }
 
 /**
