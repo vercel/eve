@@ -202,10 +202,15 @@ function trackTurnEvent(
       const { turnId } = event.data;
       const current = turns[turnId] ?? { calls: [], ended: false };
       const known = new Set(current.calls.map((call) => call.callId));
+      // Nested actions (such as a connection tool run by connection_execute)
+      // already appear as their parent call's row.
       const requested = event.data.actions.filter(
         (action) =>
           !known.has(action.callId) &&
-          !(action.kind === "tool-call" && isTaskControlTool(action.toolName)),
+          !(
+            action.kind === "tool-call" &&
+            (isTaskControlTool(action.toolName) || action.parentCallId !== undefined)
+          ),
       );
       if (requested.length === 0) return undefined;
       const calls = requested.map((action) =>
