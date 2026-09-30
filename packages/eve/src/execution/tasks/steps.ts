@@ -40,9 +40,12 @@ import type {
 } from "#execution/tools/workflow/messages.js";
 import { workflowToolRunFailureOutput } from "#execution/tools/workflow/owner-inbox.js";
 import { withdrawWorkflowAsks } from "#execution/tools/workflow/withdraw-step.js";
-import { clearProxyInputRequestsWhere } from "#harness/proxy-input-requests.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import { createTaskSettledEvent, type TaskSettledStreamEvent } from "#protocol/message.js";
+import {
+  createTaskSettledEvent,
+  type TaskSettledStreamEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 
 /** The messages a task's run sends that change its record. */
 export type TaskRunMessage = Extract<
@@ -71,6 +74,7 @@ async function applyTaskRunMessage(
   }
   let table = readTaskTable(session.state);
   const events: TaskSettledStreamEvent[] = [];
+  let withdrawn: readonly UnstampedMessageStreamEvent[] = [];
   switch (message.kind) {
     case "started": {
       const started = markTaskRunStarted(table, taskId, message.from.runId);
@@ -97,14 +101,19 @@ async function applyTaskRunMessage(
       const settled = settleRemainingTaskCalls(table, taskId, outcome);
       events.push(...taskSettledEvents(record, settled.settled, outcome));
       table = finishTaskRun(settled.table, taskId, message.from.runId);
-      session = forgetRunQuestions(session, message.from.runId);
+      // A finished run takes no answer, so channels must stop offering its questions.
+      ({ events: withdrawn, session } = withdrawWorkflowAsks(
+        session,
+        (_requestId, runId) => runId === message.from.runId,
+      ));
       break;
     }
   }
-  return await publishSessionEvents(
+  const relayed = await relaySessionEvents(
     { ...input, sessionState: saveTable(input.sessionState, session, table) },
-    events,
+    withdrawn,
   );
+  return await publishSessionEvents({ ...input, ...relayed }, events);
 }
 
 /**
@@ -239,11 +248,6 @@ function countTaskRunUsage(
     session: countRunUsage(session, message.usage, run.usage),
     table: recordTaskRunUsage(table, taskId, message.usage),
   };
-}
-
-/** A finished run can no longer take answers, so its unanswered questions are dropped. */
-function forgetRunQuestions(session: DurableSession, runId: string): DurableSession {
-  return clearProxyInputRequestsWhere(session, (route) => route.workflowAsk?.runId === runId);
 }
 
 function saveTable(
