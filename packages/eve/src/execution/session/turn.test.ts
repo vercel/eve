@@ -29,6 +29,14 @@ import {
 import { getSessionTokenUsage } from "#harness/turn-tag-state.js";
 import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
+import {
+  emitAgentStartedStep,
+  emitWorkflowToolRunReportStep,
+} from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import type {
+  WorkflowToolRunMessage,
+  WorkflowToolRunRef,
+} from "#execution/tools/workflow/messages.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 vi.mock("#compiled/@workflow/core/index.js", async (importOriginal) => ({
@@ -51,6 +59,10 @@ vi.mock("#execution/tools/workflow/interrupt.js", () => ({
 }));
 vi.mock("#execution/session/turn-waiting-step.js", () => ({
   publishTurnWaitingStep: vi.fn(async () => ({ stateDelta: {} })),
+}));
+vi.mock("#execution/tools/workflow/emit-workflow-tool-run-report-step.js", () => ({
+  emitAgentStartedStep: vi.fn(),
+  emitWorkflowToolRunReportStep: vi.fn(),
 }));
 
 beforeEach(() => {
@@ -1199,6 +1211,67 @@ describe("SessionExecution checkpoints", () => {
     ).resolves.toMatchObject({ kind: "done" });
 
     expect(continuation).toEqual({ delivery: steering, steered: false });
+  });
+
+  it("publishes a boundary's consecutive agent-started messages in one step, in admission order, when the step ends the turn", async () => {
+    const sessionState = state("");
+    const from = (callId: string, taskId?: string): WorkflowToolRunRef => ({
+      callId,
+      input: {},
+      runId: `run-${callId}`,
+      sequence: 0,
+      stepIndex: 0,
+      ...(taskId !== undefined && { taskId }),
+      toolName: "execute",
+      turnId: "turn_0",
+    });
+    const opened = (callId: string, name: string): WorkflowToolRunMessage => ({
+      from: from(callId),
+      kind: "agent-started",
+      session: { kind: "local", name, nodeId: name, sessionId: `${name}-session` },
+    });
+    // While Alice's final model step runs, her runs open a planner and a
+    // reviewer, her research task reports progress, and a writer opens.
+    const planner = opened("call-1", "planner");
+    const reviewer = opened("call-2", "reviewer");
+    const progress = {
+      from: from("call-3", "research"),
+      kind: "report",
+      update: "Halfway through the sources.",
+    } as const satisfies WorkflowToolRunMessage;
+    const writer = opened("call-4", "writer");
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: vi.fn().mockReturnValueOnce([planner, reviewer, progress, writer]).mockReturnValue([]),
+      hasPending: () => false,
+      whenPending: () => new Promise<void>(() => {}),
+      next: vi.fn(),
+      restore: vi.fn(),
+      onDelivery: () => () => {},
+      onInterrupt: () => () => {},
+    };
+    const published: unknown[] = [];
+    vi.mocked(emitAgentStartedStep).mockImplementation(async (input) => {
+      published.push(input.messages);
+      return { stateDelta: {} };
+    });
+    vi.mocked(emitWorkflowToolRunReportStep).mockImplementation(async (input) => {
+      published.push(input.update);
+      return { stateDelta: {} };
+    });
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async () => ({ action: "done", serializedContext: {}, sessionState })),
+      );
+
+    await expect(
+      createExecution({ inbox, sessionState }).runTurn(undefined),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(published).toEqual([[planner, reviewer], progress.update, [writer]]);
   });
 });
 

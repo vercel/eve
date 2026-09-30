@@ -54,7 +54,9 @@ export async function handleWorkflowToolRunMessage(
       );
       return undefined;
     case "agent-started":
-      await input.cursor.advance((state) => emitAgentStartedStep({ ...state, message }));
+      await input.cursor.advance((state) =>
+        emitAgentStartedStep({ ...state, messages: [message] }),
+      );
       return undefined;
   }
 }
