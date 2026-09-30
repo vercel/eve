@@ -2,8 +2,8 @@
  * The tasks a turn has working: agents and tools that keep running while the
  * turn goes on. The transcript only ever grows at its end, so a task writes
  * one line when it starts and one when it ends; what it is doing in between
- * lives here and renders in the fixed task panel above the prompt, the one
- * region that redraws in place.
+ * lives here in the activity drawer above the prompt, keeping live updates
+ * out of immutable terminal scrollback.
  */
 
 import type { Block } from "./blocks.js";
