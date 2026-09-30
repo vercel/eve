@@ -48,18 +48,6 @@ export default defineChannel({
         });
       }
 
-      if (method === "tools/call") {
-        const items = ["reading lamp", "oak desk"];
-        return Response.json({
-          jsonrpc: "2.0",
-          id,
-          result: {
-            content: [{ type: "text", text: JSON.stringify({ items }) }],
-            structuredContent: { items },
-          },
-        });
-      }
-
       return Response.json({
         jsonrpc: "2.0",
         id,

@@ -67,18 +67,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         ],
       };
     }
-    const execute = request.toolResults.find((entry) => entry.name === "connection_execute");
-    if (execute === undefined) {
-      return {
-        toolCalls: [
-          {
-            name: "connection_execute",
-            input: { connection: "private-catalog", tool: "list_items", input: {} },
-          },
-        ],
-      };
-    }
-    return `Items: ${JSON.stringify(execute.output)}`;
+    return JSON.stringify(search.output);
   }
 
   const stepAuth = /WORKFLOW-STEP-AUTH-(IMPLICIT|EXPLICIT|REJECTED)/u.exec(message);

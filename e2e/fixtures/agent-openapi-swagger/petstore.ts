@@ -53,5 +53,19 @@ export function petstoreBaseUrl(): string {
   const host = deploymentHost
     ? `https://${deploymentHost}`
     : (process.env.WORKFLOW_LOCAL_BASE_URL ?? "http://127.0.0.1:3000");
-  return `${host}/fixture-petstore`;
+  return `${host}${process.env.EVE_PUBLIC_ROUTE_PREFIX ?? ""}/fixture-petstore`;
+}
+
+/** The spec URL, carrying the preview protection bypass because spec fetches send no connection headers. */
+export function petstoreSpecUrl(): string {
+  const url = new URL(`${petstoreBaseUrl()}/swagger`);
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (bypass) url.searchParams.set("x-vercel-protection-bypass", bypass);
+  return url.href;
+}
+
+/** Lets operation calls reach a protected preview deployment of this fixture. */
+export function petstoreHeaders(): Record<string, string> {
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  return bypass ? { "x-vercel-protection-bypass": bypass } : {};
 }
