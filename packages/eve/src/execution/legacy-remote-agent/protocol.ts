@@ -27,7 +27,11 @@ const TASK_INPUT_TOKEN_RE = /^eve:task-input:([a-f0-9]{32})$/;
 
 /** A session created by a protocol-1 caller. */
 export interface LegacyRemoteAgentCaller {
-  /** The caller's background task; its questions and sign-ins are forwarded only with one. */
+  /**
+   * The caller's background task; its questions and sign-ins are forwarded
+   * only with one. Captured at create: a 0.66–0.68 caller's model-called
+   * agents start in a task, and those callers never check it against later turns.
+   */
   readonly taskId?: string;
 }
 

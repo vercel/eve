@@ -477,7 +477,8 @@ const LEGACY_REMOTE_AGENT_INGRESS_FILES = new Set([
   "packages/eve/src/eve-channel/request.ts",
   "packages/eve/src/execution/forward-session-input.ts",
 ]);
-const LEGACY_REMOTE_AGENT_IMPORT_RE = /(?:from|import\()\s*["'][^"']*legacy-remote-agent\//;
+// `from "…"` covers imports and re-exports; `import "…"` and `import("…")` cover side effects and dynamic imports.
+const LEGACY_REMOTE_AGENT_IMPORT_RE = /\b(?:from|import)\s*\(?\s*["'][^"']*legacy-remote-agent\//;
 
 /** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
 function checkRule48(posix, lines, violations) {

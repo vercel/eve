@@ -185,8 +185,9 @@ before the deployments that call it. A remote agent on this release still serves
 through 0.68, which speak protocol 1. It runs their turns, sends each result to their callback, and
 accepts their follow-up and reset requests. It also sends the remote agent's tool approvals and
 sign-in requests to the caller, and accepts the caller's answers, the same way a 0.66–0.68 remote
-agent does. Every agent call from eve 0.66–0.68 is a background task, which is what these requests
-travel through.
+agent does. As in 0.66–0.68, this covers agents the caller's model calls, which run as background
+tasks. When the caller's own workflow tool code calls an agent, its approvals and sign-in requests
+stay on the remote agent's channel.
 
 Two things differ from a remote agent on the caller's own release:
 
