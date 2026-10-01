@@ -16,7 +16,11 @@ import { relayWithdrawnRequests } from "#execution/tools/workflow/withdraw-step.
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import { clearPendingAuthorization, getPendingAuthorization } from "#harness/authorization.js";
-import { createAuthorizationCompletedEvent } from "#protocol/message.js";
+import {
+  cancelApprovalInputBatches,
+  getPendingApprovalRequests,
+} from "#harness/hitl/approval-input-requests.js";
+import { createAuthorizationCompletedEvent, createInputResolvedEvent } from "#protocol/message.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
@@ -66,11 +70,10 @@ export async function settleCancelledTurn(
     history: input.history,
   };
   const durableState = step.durableSession.state;
-  // Sign-ins the turn held on end with it; responder sign-ins belong to an
-  // approval that outlives the turn.
-  const heldSignIns = (getPendingAuthorization(durableState)?.challenges ?? []).filter(
-    (challenge) => challenge.candidateId === undefined,
-  );
+  // Every request the turn held ends with it: its sign-ins, including a
+  // responder's for an approval, and its approvals.
+  const heldSignIns = getPendingAuthorization(durableState)?.challenges ?? [];
+  const cancelledApprovals = getPendingApprovalRequests(durableState);
   const { published, result: usage } = await publishFromSessionStep(step, {
     origin: "own",
     async publish(emit) {
@@ -81,6 +84,20 @@ export async function settleCancelledTurn(
             ...authorizationEventFields(challenge),
             outcome: "declined",
             reason: "Cancelled.",
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+        );
+      }
+      if (cancelledApprovals.length > 0) {
+        await emit(
+          createInputResolvedEvent({
+            resolutions: cancelledApprovals.map((request) => ({
+              kind: request.kind,
+              outcome: "cancelled",
+              requestId: request.requestId,
+            })),
             sequence: emissionState.sequence,
             stepIndex: emissionState.stepIndex,
             turnId: emissionState.turnId,
@@ -111,8 +128,13 @@ export async function settleCancelledTurn(
         input.sessionState.emissionState.turnId;
       const cancelledSession = setHarnessEmissionState(
         clearPendingSessionLimitPrompt(
-          commitCancelledCoordinationBatch(
-            removeBlockingWorkflowToolRuns({ ...session, outputSchema: undefined }, owningTurnId),
+          // After the coordination batch, which owns an assistant response it
+          // shares with approvals raised beside its calls.
+          cancelApprovalInputBatches(
+            commitCancelledCoordinationBatch(
+              removeBlockingWorkflowToolRuns({ ...session, outputSchema: undefined }, owningTurnId),
+            ),
+            Date.now(),
           ),
         ),
         emissionState,

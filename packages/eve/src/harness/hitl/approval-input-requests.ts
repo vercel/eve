@@ -27,6 +27,8 @@ import type {
   ToolResponsePart,
 } from "#harness/hitl/pending-input-resolution.js";
 import type { HarnessSession } from "#harness/types.js";
+import { finishApprovalCandidate, getApprovalAuditState } from "#harness/approval-candidates.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
 
 const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
 const TOOL_EXECUTION_DENIED_CODE = "TOOL_EXECUTION_DENIED";
@@ -125,6 +127,68 @@ export function ignoreApprovalInputBatch(
     resolvedStepInput: input.resolvedStepInput,
     session: removePendingInputBatches(approval.session, [batch]),
   });
+}
+
+const CANCELLED_APPROVAL_REASON = "Cancelled before anyone answered.";
+
+/**
+ * Withdraws every pending tool approval when its turn is cancelled. Each held
+ * call goes into history with a not-run result, so no call is left without
+ * one, and responder candidates still checking it end as stale.
+ */
+export function cancelApprovalInputBatches(
+  session: HarnessSession,
+  cancelledAt: number,
+): HarnessSession {
+  const batches = pendingApprovalBatches(session.state);
+  if (batches.length === 0) return session;
+  const messages: ModelMessage[] = [...session.history];
+  for (const batch of batches) {
+    appendResolvedBatchTranscript(messages, batch, batch.requests.flatMap(cancelledApprovalParts));
+  }
+  const requestIds = new Set(
+    batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
+  );
+  let state = removePendingInputBatches(session, batches).state;
+  for (const candidate of getApprovalAuditState(state).activeCandidates) {
+    if (!requestIds.has(candidate.requestId)) continue;
+    state = finishApprovalCandidate({
+      candidateId: candidate.candidateId,
+      completedAt: cancelledAt,
+      reason: CANCELLED_APPROVAL_REASON,
+      state,
+      status: "stale",
+    });
+  }
+  return { ...session, history: validateHarnessModelMessages(messages), state };
+}
+
+/** Tool approvals still waiting for an answer, which cancelling their turn withdraws. */
+export function getPendingApprovalRequests(
+  state: HarnessSession["state"],
+): readonly InputRequest[] {
+  return pendingApprovalBatches(state).flatMap((batch) => batch.requests);
+}
+
+function pendingApprovalBatches(state: HarnessSession["state"]): readonly PendingInputBatch[] {
+  return getPendingInputBatches(state).filter((batch) => batch.requests.every(isApprovalRequest));
+}
+
+function cancelledApprovalParts(request: InputRequest): ToolResponsePart[] {
+  return [
+    {
+      approvalId: request.requestId,
+      approved: false,
+      reason: CANCELLED_APPROVAL_REASON,
+      type: "tool-approval-response",
+    },
+    {
+      output: { type: "execution-denied", reason: CANCELLED_APPROVAL_REASON },
+      toolCallId: request.action.callId,
+      toolName: request.action.toolName,
+      type: "tool-result",
+    },
+  ];
 }
 
 /** Returns recorded approval keys that have no matching request still pending. */

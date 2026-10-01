@@ -116,8 +116,8 @@ it("continues the second step past an older approval batch", async () => {
   expect(approval?.event?.turnId).toBe("turn_0");
   expect(approval?.requests[0]?.kind).toBe("tool-approval");
 
-  // The approval holds its turn; this covers it left open between turns, as
-  // cancelling the held turn leaves it.
+  // The approval holds its turn; this covers the cross-turn approval path that
+  // remains until it is removed.
   const first = await run(endHeldTurn(parked.session), { message: "What is the draft status?" });
   expect(typeof first.next).toBe("function");
   expect(read).toHaveBeenCalledTimes(1);

@@ -2,9 +2,10 @@ import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emiss
 import type { HarnessSession } from "#harness/types.js";
 
 /**
- * Ends a turn held on a sign-in or tool approval the way cancelling it does,
- * leaving the request open between turns. Harness tests use it to reach that
- * state without driving the session's cancel path.
+ * Moves a session out of the turn held on a sign-in or tool approval without
+ * settling the request, leaving it open between turns. Held turns and
+ * cancellation no longer reach that state; harness tests use it to keep the
+ * cross-turn approval paths covered until they are removed.
  */
 export function endHeldTurn(session: HarnessSession): HarnessSession {
   const held = getHarnessEmissionState(session.state);

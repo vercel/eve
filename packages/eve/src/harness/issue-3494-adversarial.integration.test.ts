@@ -243,8 +243,8 @@ function fixture(
       this.endHeldTurn();
     },
     /**
-     * An approval holds its turn. These scenarios cover approvals left open
-     * between turns, as cancelling the held turn leaves them.
+     * An approval holds its turn, and cancelling withdraws it. These scenarios
+     * cover the cross-turn approval paths that remain until they are removed.
      */
     endHeldTurn() {
       session = endHeldTurn(session);

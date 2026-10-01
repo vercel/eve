@@ -729,6 +729,72 @@ describe("workflowEntry integration", () => {
     });
   }, 60_000);
 
+  it("withdraws a held tool approval when its turn is cancelled", async () => {
+    const executions: string[] = [];
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-cancel-held-approval" },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineTool({
+              approval: always(),
+              description: "Apply a change after the user approves it.",
+              execute: () => {
+                executions.push("approve_change");
+                return { applied: true };
+              },
+              inputSchema: {},
+            }),
+          }),
+          logicalPath: "tools/approve_change.ts",
+        },
+      ],
+    });
+    const continuationToken = "http:workflow-entry-cancel-held-approval";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Use the approve_change tool exactly once." },
+          serializedContext: {
+            ...buildSerializedContext({ channelKind: "http", continuationToken }),
+            "eve.capabilities": { requestInput: true },
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const asked = await withTimeout(stream.nextTurn(), "approval turn");
+        const request = filterEventsByType(asked, "input.requested")[0]?.data.requests[0];
+        expect(asked.at(-1)?.type).toBe("turn.waiting");
+
+        await resumeHook(sessionInboxHookToken(continuationToken), { kind: "cancel" });
+        const cancelled = await withTimeout(stream.nextTurn(), "cancelled turn");
+        expect(filterEventsByType(cancelled, "input.resolved")).toMatchObject([
+          { data: { resolutions: [{ outcome: "cancelled", requestId: request!.requestId }] } },
+        ]);
+        expect(filterEventsByType(cancelled, "turn.cancelled")).toHaveLength(1);
+
+        // A late answer approves nothing: the call can only run after a new approval.
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request!.requestId }] },
+        });
+        const late = await withTimeout(stream.nextTurn(), "late answer turn");
+        expect(filterEventsByType(late, "session.failed")).toHaveLength(0);
+        const reasked = filterEventsByType(late, "input.requested")[0]?.data.requests[0];
+        expect(reasked?.requestId).not.toBe(request!.requestId);
+        expect(executions).toEqual([]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   it("exits a competing continuation owner before its first turn", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
     const continuationToken = "http:workflow-entry-hook-owner";

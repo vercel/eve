@@ -44,7 +44,7 @@ While the turn is held:
 | Approval answer the response policy refuses                | Keeps the turn held and emits `turn.waiting` again, so the responder's request ends; another responder can still answer.                                                                                                         |
 | Message from the turn's own person                         | Steers the turn and cancels the held request. A sign-in reports `authorization.completed` with `outcome: "declined"`; an approval resolves as `ignored`. The model reads the message with a note that the request was cancelled. |
 | Message from anyone else                                   | Queues until the held turn ends, as it does behind a task.                                                                                                                                                                       |
-| `session.cancel()` (for example a Slack **Cancel** button) | Cancels the turn and its held sign-ins (`authorization.completed`, `declined`).                                                                                                                                                  |
+| `session.cancel()` (for example a Slack **Cancel** button) | Cancels the turn and withdraws every request it held: sign-ins report `authorization.completed` `declined`, approvals `input.resolved` `cancelled`, and each held call gets a not-run result.                                    |
 
 There is no timeout: an answer, a steering message, or a cancel ends the
 hold, as with tasks.
@@ -72,6 +72,5 @@ than a turn the responder could cancel.
 
 ## Out of scope
 
-- Approvals pending when a turn is cancelled stay answerable, as before.
 - Sign-ins and questions inside tasks and workflow tools already hold the
   turn and are unchanged.

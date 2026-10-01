@@ -375,8 +375,8 @@ describe("turn connection approval restoration", () => {
     });
     const first = await fixture.step();
     const firstBatch = getPendingInputBatches(readDurableSession(first.sessionState).state)[0]!;
-    // The approval holds its turn; leave it open between turns, as cancelling
-    // the held turn does, so a second turn can raise its own.
+    // Leave the approval open between turns, a state the cross-turn approval
+    // paths still handle, so a second turn can raise its own.
     fixture.updateSession(endHeldTurn);
     fixture.doStream.mockImplementationOnce(() => modelResponse("save-2"));
     await fixture.step({
@@ -426,7 +426,7 @@ describe("turn connection approval restoration", () => {
       const parked = await fixture.step();
       const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
         .requests[0]!;
-      // Answered in a later turn, as after the held turn is cancelled, so the
+      // Answered in a later turn, through the cross-turn approval path, so the
       // turn-scoped connection resolves again.
       fixture.updateSession(endHeldTurn);
       if (cold) clearDurableDynamicCallbacks(sessionId);
