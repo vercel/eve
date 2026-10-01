@@ -15,7 +15,11 @@ describe("agentTraceIdentityAttributes", () => {
     context.set(TraceRootKey, { kind: "own" });
     contextStorage.run(context, () => {
       expect(
-        agentTraceIdentityAttributes({ rootSessionId: "caller-root", sessionId: "remote-session" }),
+        agentTraceIdentityAttributes({
+          rootSessionId: "caller-root",
+          sessionId: "remote-session",
+          traceSessionId: "remote-session",
+        }),
       ).toMatchObject({
         "gen_ai.conversation.id": "caller-root",
         "vercel.session_id": "remote-session",
@@ -23,7 +27,25 @@ describe("agentTraceIdentityAttributes", () => {
       });
     });
   });
-  const input = { rootSessionId: "root-session", sessionId: "session-1" };
+  const input = {
+    rootSessionId: "root-session",
+    sessionId: "session-1",
+    traceSessionId: "root-session",
+  };
+  it("uses the explicit trace session when active context belongs to another session", () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const context = new ContextContainer();
+    context.set(TraceRootKey, { kind: "inherited", sessionId: "unrelated-session" });
+    contextStorage.run(context, () => {
+      expect(
+        agentTraceIdentityAttributes({
+          rootSessionId: "caller-root",
+          sessionId: "remote",
+          traceSessionId: "remote",
+        })["vercel.session_id"],
+      ).toBe("remote");
+    });
+  });
 
   it("uses the GenAI conversation identifier outside Vercel", () => {
     vi.stubEnv("VERCEL_ENV", undefined);

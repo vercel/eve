@@ -23,6 +23,7 @@ import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 
 interface AgentApprovalSpanState {
+  readonly traceSessionId?: string;
   readonly actionCallId: string;
   readonly actionName: string;
   readonly attemptIndex: number;
@@ -74,6 +75,8 @@ export function createAgentApprovalInstrumentation(input: {
       },
       requestId: event.requestId,
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+      traceSessionId:
+        event.scope.traceSessionId ?? event.scope.rootSessionId ?? event.scope.sessionId,
       sessionId: event.scope.sessionId,
       startTimeMs: Date.now(),
       stepIndex: event.scope.stepIndex,
@@ -110,6 +113,7 @@ export function createAgentApprovalInstrumentation(input: {
               ...agentSpanNamingAttributes("agent.approval"),
               ...agentTraceIdentityAttributes({
                 rootSessionId: state.rootSessionId,
+                traceSessionId: state.traceSessionId ?? state.rootSessionId,
                 sessionId: state.sessionId,
               }),
             },
@@ -179,6 +183,8 @@ function readState(value: unknown): AgentApprovalSpanState | undefined {
     requestAttribute,
     requestId: state["requestId"],
     rootSessionId: state["rootSessionId"],
+    traceSessionId:
+      typeof state["traceSessionId"] === "string" ? state["traceSessionId"] : undefined,
     sessionId: state["sessionId"],
     startTimeMs: state["startTimeMs"],
     stepIndex: state["stepIndex"],

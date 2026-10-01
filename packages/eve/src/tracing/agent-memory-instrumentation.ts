@@ -164,6 +164,7 @@ function memorySpanAttributes(
     ...agentSpanNamingAttributes(event.operationName, event.operationName),
     ...agentTraceIdentityAttributes({
       rootSessionId: event.rootSessionId,
+      traceSessionId: event.traceSessionId ?? event.rootSessionId,
       sessionId: event.sessionId,
     }),
   };

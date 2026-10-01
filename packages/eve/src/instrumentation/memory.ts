@@ -32,6 +32,7 @@ export interface InstrumentationMemoryOperation {
 
 /** Bound session identity added when eve publishes a memory operation. */
 export interface InstrumentationMemoryOperationEvent extends InstrumentationMemoryOperation {
+  readonly traceSessionId?: string;
   readonly rootSessionId: string;
   readonly sessionId: string;
 }
@@ -84,14 +85,15 @@ export function createMemoryInstrumentation(input: {
   readonly resolveContext: () => {
     readonly hooks: InstrumentationHooks;
     readonly rootSessionId: string;
+    readonly traceSessionId?: string;
   };
   readonly runInContext: InstrumentationContextRunner;
   readonly sessionId: string;
 }): MemoryInstrumentation {
   return {
     async execute(operation, execute) {
-      const { hooks, rootSessionId } = input.resolveContext();
-      const event = { ...operation, rootSessionId, sessionId: input.sessionId };
+      const { hooks, rootSessionId, traceSessionId } = input.resolveContext();
+      const event = { ...operation, rootSessionId, traceSessionId, sessionId: input.sessionId };
       await hooks.publish({ ...event, type: "memory.operation.started" });
       try {
         const result = await input.runInContext(

@@ -116,6 +116,7 @@ export interface HistoryState {
 }
 export const HistoryStateKey = new ContextKey<HistoryState>("eve.historyState");
 export interface ActiveChannelDelivery {
+  readonly traceSessionId?: string;
   readonly agentName?: string;
   readonly channelType?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;

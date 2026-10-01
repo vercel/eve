@@ -62,6 +62,7 @@ import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js"
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { readConversationId } from "#shared/conversation-identity.js";
+import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import {
   getInstrumentationRuntime,
   registerInstrumentationRuntime,
@@ -203,6 +204,7 @@ export function bindInstrumentationRuntime(
     return {
       ...sessionContext,
       rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
+      traceSessionId: resolveTraceRootSessionId(sessionContext.context, boundSession.sessionId),
     };
   };
   const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
@@ -241,6 +243,7 @@ export function bindInstrumentationRuntime(
         parentLineage: sessionContext.parentLineage,
         parentTraceContext: sessionContext.parentTraceContext,
         rootSessionId: sessionContext.rootSessionId,
+        traceSessionId: sessionContext.traceSessionId,
         scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
         title: sessionContext.title,
@@ -256,6 +259,7 @@ export function bindInstrumentationRuntime(
             return {
               hooks: bindHooks(sessionContext),
               rootSessionId: sessionContext.rootSessionId,
+              traceSessionId: sessionContext.traceSessionId,
             };
           },
           runInContext: runtime.runInContext,
@@ -402,6 +406,7 @@ export function bindInstrumentationRuntime(
                 parentLineage: sessionContext.parentLineage,
                 parentTraceContext: sessionContext.parentTraceContext,
                 rootSessionId: sessionContext.rootSessionId,
+                traceSessionId: sessionContext.traceSessionId,
                 scheduleId: sessionContext.scheduleId,
                 sessionId: boundSession.sessionId,
                 title: sessionContext.title,
@@ -413,6 +418,7 @@ export function bindInstrumentationRuntime(
                 channelAudience: audience,
                 functionId: settings?.functionId ?? boundSession.agentName,
                 rootSessionId: sessionContext.rootSessionId,
+                traceSessionId: sessionContext.traceSessionId,
                 sessionId: boundSession.sessionId,
                 stepIndex: attemptInput.stepIndex,
                 turnId: attemptInput.turnId,
@@ -490,6 +496,10 @@ export function bindInstrumentationRuntime(
         channelKind: sessionContext.conversation.channel.kind,
         handleEvent: input.handleEvent,
         hooks: bindHooks(sessionContext),
+        rootSessionId: sessionContext.rootSessionId,
+        traceSessionId: sessionContext.traceSessionId,
+        parentLineage: sessionContext.parentLineage,
+        parentTraceContext: sessionContext.parentTraceContext,
         scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
         title: sessionContext.title,
@@ -497,12 +507,17 @@ export function bindInstrumentationRuntime(
       });
     },
     flush: runtime.forceFlush,
-    instrumentChannelDelivery: (input) =>
-      instrumentChannelDelivery({
+    instrumentChannelDelivery: (input) => {
+      const sessionContext = readSessionContext();
+      const deliveryInput = {
         ...input,
         hooks: baseHooks,
         policyAgentName: boundSession.agentName,
-      }),
+      };
+      if ("delivery" in deliveryInput)
+        Object.assign(deliveryInput, { traceSessionId: sessionContext.traceSessionId });
+      return instrumentChannelDelivery(deliveryInput);
+    },
     memory,
     prepareExecution,
     preparePreamble: (input) => preparePreamble(input, readSessionContext()),

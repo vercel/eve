@@ -654,13 +654,14 @@ describe("bindInstrumentationRuntime", () => {
   });
 
   it.each([
-    { name: "local subagent", traceRoot: undefined },
-    { name: "remote agent", traceRoot: { kind: "own" } as const },
+    { name: "local subagent", traceRoot: undefined, expected: "conversation-root" },
+    { name: "remote agent", traceRoot: { kind: "own" } as const, expected: "session-1" },
     {
       name: "remote agent's local subagent",
       traceRoot: { kind: "inherited", sessionId: "remote-root" } as const,
+      expected: "remote-root",
     },
-  ])("preserves the lifecycle lineage root for a $name", async ({ traceRoot }) => {
+  ])("preserves the lifecycle lineage root for a $name", async ({ traceRoot, expected }) => {
     const publish = vi.fn();
     const ctx = createContext();
     ctx.set(ParentSessionKey, {
@@ -700,12 +701,14 @@ describe("bindInstrumentationRuntime", () => {
     expect(publish.mock.calls.map(([event]) => event)).toEqual([
       expect.objectContaining({
         rootSessionId: "conversation-root",
+        traceSessionId: expected,
         sessionId: "session-1",
         type: "memory.operation.started",
       }),
       expect.objectContaining({
         recordCount: 1,
         rootSessionId: "conversation-root",
+        traceSessionId: expected,
         sessionId: "session-1",
         type: "memory.operation.completed",
       }),

@@ -375,6 +375,8 @@ export function createAgentOtelInstrumentation(
           ...agentSpanNamingAttributes(modelSpanName(event.model.modelId), "chat"),
           ...agentTraceIdentityAttributes({
             rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+            traceSessionId:
+              event.scope.traceSessionId ?? event.scope.rootSessionId ?? event.scope.sessionId,
             sessionId: event.scope.sessionId,
           }),
           ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),

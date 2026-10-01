@@ -36,6 +36,7 @@ import {
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
 export interface CreateInstrumentationHandleEventInput {
+  readonly traceSessionId?: string;
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly channelAudience?: ChannelAudience;
@@ -318,6 +319,7 @@ function toLifecycleEvent(
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,
+        traceSessionId: input.traceSessionId,
         scheduleId: input.scheduleId,
         sessionId: input.sessionId,
         title: input.title,
@@ -345,6 +347,7 @@ function toLifecycleEvent(
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId ?? input.sessionId,
+        traceSessionId: input.traceSessionId,
         sequence: event.data.sequence,
         sessionId: input.sessionId,
         turnId: event.data.turnId,

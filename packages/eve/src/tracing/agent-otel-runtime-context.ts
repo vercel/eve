@@ -50,6 +50,8 @@ export function agentActivationAttributes(input: {
     ...agentSpanNamingAttributes(agentInvocationSpanName(input.agentName), "invoke_agent"),
     ...agentTraceIdentityAttributes({
       rootSessionId: input.turn.rootSessionId,
+      traceSessionId:
+        input.turn.traceSessionId ?? input.session?.traceSessionId ?? input.turn.rootSessionId,
       sessionId: input.sessionId,
     }),
   };
@@ -106,6 +108,11 @@ export function agentStepAttributes(input: {
     ...agentSpanNamingAttributes("agent.step"),
     ...agentTraceIdentityAttributes({
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+      traceSessionId:
+        event.scope.traceSessionId ??
+        session?.traceSessionId ??
+        event.scope.rootSessionId ??
+        event.scope.sessionId,
       sessionId: event.scope.sessionId,
     }),
     ...runtimeContextAttributes(event.runtimeContext),

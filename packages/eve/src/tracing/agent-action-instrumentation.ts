@@ -79,6 +79,8 @@ export function createAgentActionInstrumentation(input: {
         traceId: traceContext.traceId,
       },
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+      traceSessionId:
+        event.scope.traceSessionId ?? event.scope.rootSessionId ?? event.scope.sessionId,
       sessionId: event.scope.sessionId,
       spanId: input.idGenerator.deriveSpanId(`action:${event.idempotencyKey}`),
       startTimeMs: Date.now(),
@@ -123,6 +125,7 @@ export function createAgentActionInstrumentation(input: {
             ...agentSpanNamingAttributes(AGENT_SPAN_NAMES.action),
             ...agentTraceIdentityAttributes({
               rootSessionId: state.rootSessionId,
+              traceSessionId: state.traceSessionId ?? state.rootSessionId,
               sessionId: state.sessionId,
             }),
             ...(invocation

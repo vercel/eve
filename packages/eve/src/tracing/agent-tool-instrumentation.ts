@@ -251,6 +251,8 @@ function toolAttributes(
     ...agentSpanNamingAttributes(`execute_tool ${event.toolName}`, "execute_tool"),
     ...agentTraceIdentityAttributes({
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+      traceSessionId:
+        event.scope.traceSessionId ?? event.scope.rootSessionId ?? event.scope.sessionId,
       sessionId: event.scope.sessionId,
     }),
   };
