@@ -61,7 +61,6 @@ import { readInstrumentationSessionContext } from "#instrumentation/session-cont
 import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
-import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { readConversationId } from "#shared/conversation-identity.js";
 import {
   getInstrumentationRuntime,
@@ -203,7 +202,7 @@ export function bindInstrumentationRuntime(
     const sessionContext = readInstrumentationSessionContext(contextStorage.getStore() ?? ctx);
     return {
       ...sessionContext,
-      traceRootSessionId: resolveTraceRootSessionId(sessionContext.context, boundSession.sessionId),
+      rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
     };
   };
   const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
@@ -241,7 +240,7 @@ export function bindInstrumentationRuntime(
         channelType: sessionContext.instrumentation?.channelType,
         parentLineage: sessionContext.parentLineage,
         parentTraceContext: sessionContext.parentTraceContext,
-        rootSessionId: sessionContext.traceRootSessionId,
+        rootSessionId: sessionContext.rootSessionId,
         scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
         title: sessionContext.title,
@@ -256,7 +255,7 @@ export function bindInstrumentationRuntime(
             const sessionContext = readSessionContext();
             return {
               hooks: bindHooks(sessionContext),
-              rootSessionId: sessionContext.traceRootSessionId,
+              rootSessionId: sessionContext.rootSessionId,
             };
           },
           runInContext: runtime.runInContext,
@@ -402,7 +401,7 @@ export function bindInstrumentationRuntime(
                 hooks,
                 parentLineage: sessionContext.parentLineage,
                 parentTraceContext: sessionContext.parentTraceContext,
-                rootSessionId: sessionContext.traceRootSessionId,
+                rootSessionId: sessionContext.rootSessionId,
                 scheduleId: sessionContext.scheduleId,
                 sessionId: boundSession.sessionId,
                 title: sessionContext.title,
@@ -413,7 +412,7 @@ export function bindInstrumentationRuntime(
                 attemptIndex: attemptInput.attemptIndex,
                 channelAudience: audience,
                 functionId: settings?.functionId ?? boundSession.agentName,
-                rootSessionId: sessionContext.traceRootSessionId,
+                rootSessionId: sessionContext.rootSessionId,
                 sessionId: boundSession.sessionId,
                 stepIndex: attemptInput.stepIndex,
                 turnId: attemptInput.turnId,

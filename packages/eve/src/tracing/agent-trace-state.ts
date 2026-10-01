@@ -22,6 +22,7 @@ export interface AgentSessionTraceState {
   readonly rootSessionId: string;
   readonly scheduleId?: string;
   readonly title?: string;
+  readonly ownsTraceSession?: boolean;
 }
 
 export interface AgentTurnTraceState {

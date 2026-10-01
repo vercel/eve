@@ -2,7 +2,6 @@ import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import { defaultDeliverResult } from "#channel/adapter.js";
-import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { contextStorage } from "#context/container.js";
 import { runStep } from "#context/run-step.js";
 import {
@@ -206,7 +205,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         agentName: bundle.turnAgent.id,
         ctx,
         delivery: rawDelivery,
-        rootSessionId: resolveTraceRootSessionId(ctx, initialSession.sessionId),
+        rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
         sequence: initialEmissionState.sequence,
         sessionId: initialSession.sessionId,
         turnId: activeTurnId(initialEmissionState),

@@ -86,6 +86,7 @@ function deserializeSession(value: unknown): AgentSessionTraceState | undefined 
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
     scheduleId: typeof value.scheduleId === "string" ? value.scheduleId : undefined,
     title: typeof value.title === "string" ? value.title : undefined,
+    ownsTraceSession: value.ownsTraceSession === true,
   };
 }
 

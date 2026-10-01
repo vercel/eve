@@ -26,6 +26,8 @@ import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
 import { applyPrincipalTraceDecision } from "#instrumentation/principal-summary.js";
 import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
+import { contextStorage } from "#context/container.js";
+import { TraceRootKey } from "#context/keys.js";
 
 interface AgentOtelSessionContextInput {
   readonly environment: ConversationEnvironment;
@@ -72,6 +74,7 @@ export function createAgentOtelSessionContext(
         rootSessionId: event.rootSessionId,
         scheduleId: event.scheduleId,
         title: event.title,
+        ownsTraceSession: contextStorage.getStore()?.get(TraceRootKey)?.kind === "own",
       };
       await input.stateStore.setSession(event.sessionId, state);
     }

@@ -48,7 +48,7 @@ export function buildRunContext(input: {
     ConversationContextKey,
     buildConversationContext(run, resolveInstrumentationEnvironment()),
   );
-  if (run.parent === undefined) {
+  if (run.parent === undefined || run.traceRoot?.kind === "own") {
     const title = deriveSessionTitle(run.title ?? run.input.message);
     if (title !== undefined) ctx.set(SessionTitleKey, title);
   }

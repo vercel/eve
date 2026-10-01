@@ -33,6 +33,23 @@ function session(overrides: Partial<AgentSessionTraceState> = {}): AgentSessionT
 }
 
 describe("agentActivationAttributes", () => {
+  it("gives a remote trace-session owner metadata without changing its lineage", () => {
+    const attributes = agentActivationAttributes({
+      frameworkVersion: "test",
+      session: session({ ownsTraceSession: true, channelKind: "http", title: "Remote task" }),
+      sessionId: "remote-session",
+      turnId: "turn_0",
+      turn: turn({ parentLineage: { sessionId: "caller", callId: "call", turnId: "turn_0" } }),
+    });
+    expect(attributes).toMatchObject({
+      "agent.channel.kind": "http",
+      "agent.session.origin": "channel",
+      "agent.session.title": "Remote task",
+      "agent.run.type": "subagent",
+      "agent.parent_run.id": "caller",
+      "agent.parent_call.id": "call",
+    });
+  });
   it("emits root-session inventory and trace-policy metadata", () => {
     expect(
       agentActivationAttributes({

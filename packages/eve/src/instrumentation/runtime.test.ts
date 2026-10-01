@@ -654,67 +654,63 @@ describe("bindInstrumentationRuntime", () => {
   });
 
   it.each([
-    { name: "local subagent", traceRoot: undefined, expected: "conversation-root" },
-    { name: "remote agent", traceRoot: { kind: "own" } as const, expected: "session-1" },
+    { name: "local subagent", traceRoot: undefined },
+    { name: "remote agent", traceRoot: { kind: "own" } as const },
     {
       name: "remote agent's local subagent",
       traceRoot: { kind: "inherited", sessionId: "remote-root" } as const,
-      expected: "remote-root",
     },
-  ])(
-    "publishes the trace session for a $name, keeping the lineage conversation",
-    async ({ traceRoot, expected }) => {
-      const publish = vi.fn();
-      const ctx = createContext();
-      ctx.set(ParentSessionKey, {
-        callId: "call-1",
+  ])("preserves the lifecycle lineage root for a $name", async ({ traceRoot }) => {
+    const publish = vi.fn();
+    const ctx = createContext();
+    ctx.set(ParentSessionKey, {
+      callId: "call-1",
+      rootSessionId: "conversation-root",
+      sessionId: "parent-session",
+      turn: { id: "parent-turn", sequence: 0 },
+    });
+    if (traceRoot !== undefined) ctx.set(TraceRootKey, traceRoot);
+    const instrumentation = bindInstrumentationRuntime(
+      {
+        ...createRuntime({ capturesContent: true, publish }),
+        memoryOperations: true,
+      },
+      ctx,
+      boundSession,
+    );
+
+    await instrumentMemoryOperation(
+      instrumentation?.memory,
+      {
+        idempotencyKey: "memory:search",
+        operationName: "search_memory",
+        phase: "turn.started",
+        slot: "profile",
+        storeId: "memscope1_scope",
+        turnId: "turn-1",
+      },
+      async () => ({
+        outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
+        recordCount: 1,
+        value: undefined,
+      }),
+    );
+
+    expect(ctx.get(ConversationIdKey)).toBe("conversation-root");
+    expect(publish.mock.calls.map(([event]) => event)).toEqual([
+      expect.objectContaining({
         rootSessionId: "conversation-root",
-        sessionId: "parent-session",
-        turn: { id: "parent-turn", sequence: 0 },
-      });
-      if (traceRoot !== undefined) ctx.set(TraceRootKey, traceRoot);
-      const instrumentation = bindInstrumentationRuntime(
-        {
-          ...createRuntime({ capturesContent: true, publish }),
-          memoryOperations: true,
-        },
-        ctx,
-        boundSession,
-      );
-
-      await instrumentMemoryOperation(
-        instrumentation?.memory,
-        {
-          idempotencyKey: "memory:search",
-          operationName: "search_memory",
-          phase: "turn.started",
-          slot: "profile",
-          storeId: "memscope1_scope",
-          turnId: "turn-1",
-        },
-        async () => ({
-          outputRecords: [{ content: "The user prefers dark mode.", id: "preference" }],
-          recordCount: 1,
-          value: undefined,
-        }),
-      );
-
-      expect(ctx.get(ConversationIdKey)).toBe("conversation-root");
-      expect(publish.mock.calls.map(([event]) => event)).toEqual([
-        expect.objectContaining({
-          rootSessionId: expected,
-          sessionId: "session-1",
-          type: "memory.operation.started",
-        }),
-        expect.objectContaining({
-          recordCount: 1,
-          rootSessionId: expected,
-          sessionId: "session-1",
-          type: "memory.operation.completed",
-        }),
-      ]);
-    },
-  );
+        sessionId: "session-1",
+        type: "memory.operation.started",
+      }),
+      expect.objectContaining({
+        recordCount: 1,
+        rootSessionId: "conversation-root",
+        sessionId: "session-1",
+        type: "memory.operation.completed",
+      }),
+    ]);
+  });
 
   it("isolates concurrent step decisions and audiences", async () => {
     const ctx = createContext("private");

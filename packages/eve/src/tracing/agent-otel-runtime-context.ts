@@ -21,6 +21,7 @@ export function agentActivationAttributes(input: {
   const recordsOutputs = recordsTrace && input.session?.decision?.recordOutputs === true;
   const parentLineage = input.turn.parentLineage ?? input.session?.parentLineage;
   const isSubagent = parentLineage !== undefined;
+  const ownsSessionMetadata = !isSubagent || input.session?.ownsTraceSession === true;
   const channelClassification = agentChannelClassificationAttributes(input.session, input.turn);
   const scheduleId = isSubagent ? undefined : input.session?.scheduleId;
   return {
@@ -38,7 +39,7 @@ export function agentActivationAttributes(input: {
     "agent.parent_run.id": parentLineage?.sessionId,
     "agent.run.type": isSubagent ? "subagent" : "session",
     "agent.schedule.id": scheduleId,
-    "agent.session.title": !isSubagent && recordsInputs ? input.session?.title : undefined,
+    "agent.session.title": ownsSessionMetadata && recordsInputs ? input.session?.title : undefined,
     "agent.subagent.name": input.turn.subagentName,
     "agent.trace.content.input": recordsInputs,
     "agent.trace.content.output": recordsOutputs,
@@ -62,16 +63,17 @@ export function agentChannelClassificationAttributes(
   readonly "agent.session.origin": string | undefined;
 } {
   const isSubagent = (turn.parentLineage ?? session?.parentLineage) !== undefined;
+  const ownsSessionMetadata = !isSubagent || session?.ownsTraceSession === true;
   const channelKind =
     turn.channelDelivery?.channelKind ??
-    (isSubagent
+    (!ownsSessionMetadata
       ? undefined
       : (session?.channelKind ??
         (session?.channelType === undefined
           ? undefined
           : normalizeInstrumentationChannelKind(session.channelType))));
   const origin =
-    isSubagent || channelKind === undefined
+    !ownsSessionMetadata || channelKind === undefined
       ? undefined
       : session?.scheduleId !== undefined
         ? "schedule"
