@@ -28,7 +28,31 @@ interface CardNode {
 
 type Inbound =
   | { readonly kind: "message"; readonly text: string }
-  | { readonly kind: "action"; readonly actionId: string; readonly value?: string };
+  | {
+      readonly kind: "action";
+      readonly actionId: string;
+      /** The posted message holding the pressed button. */
+      readonly messageId: string;
+      readonly value?: string;
+    };
+
+interface PressHandle {
+  readonly button: CardNode;
+  readonly messageId: string;
+}
+
+function messageIdOf(call: PlatformCall): string {
+  return (call.response as { readonly id: string }).id;
+}
+
+function buttonsOf(call: PlatformCall): { handle: PressHandle; label: string }[] {
+  const card = cardOf(call.body as AdapterPostableMessage);
+  if (card === undefined) return [];
+  const messageId = messageIdOf(call);
+  return nodes(card)
+    .filter((node) => node.type === "button" && node.id !== undefined)
+    .map((button) => ({ handle: { button, messageId }, label: button.label ?? "" }));
+}
 
 /**
  * Drives `chatSdkChannel` with a card-capable direct-message adapter: one
@@ -45,13 +69,26 @@ export function chatSdkDriver(): ChannelDriver {
       if (!isPost(call)) return undefined;
       const card = cardOf(call.body as AdapterPostableMessage);
       if (card === undefined || !texts(card).includes(prompt)) return undefined;
-      return nodes(card)
-        .filter((node) => node.type === "button" && node.id !== undefined)
-        .map((button) => ({ handle: button, label: button.label ?? "" }));
+      return buttonsOf(call);
     },
+    shownMessage(call) {
+      if (!isPost(call)) return undefined;
+      const card = cardOf(call.body as AdapterPostableMessage);
+      return {
+        id: messageIdOf(call),
+        options: buttonsOf(call),
+        text: card === undefined ? (driver.postedText(call) ?? "") : texts(card),
+      };
+    },
+    personShownAs: [PERSON.fullName, PERSON.userName],
     press(option) {
-      const button = option.handle as CardNode;
-      return driver.inbound({ actionId: button.id!, kind: "action", value: button.value });
+      const { button, messageId } = option.handle as PressHandle;
+      return driver.inbound({
+        actionId: button.id!,
+        kind: "action",
+        messageId,
+        value: button.value,
+      });
     },
   };
 }
@@ -171,7 +208,7 @@ function fakeAdapter(
           {
             actionId: body.actionId,
             adapter,
-            messageId: id,
+            messageId: body.messageId,
             raw: body,
             threadId,
             user: PERSON,

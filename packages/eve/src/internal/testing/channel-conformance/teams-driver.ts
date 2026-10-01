@@ -20,6 +20,7 @@ interface Choice {
 interface AdaptiveCard {
   readonly body?: readonly {
     readonly choices?: readonly Choice[];
+    readonly text?: string;
     readonly type?: string;
   }[];
   readonly actions?: readonly {
@@ -39,6 +40,8 @@ interface ActivityBody {
 }
 
 interface PressHandle {
+  /** The card's activity, which Teams names as `replyToId` on the press. */
+  readonly activityId: string;
   readonly data: Record<string, unknown>;
   /** The chosen ChoiceSet value; unset when each option is its own Submit action. */
   readonly value?: string;
@@ -75,11 +78,10 @@ export function teamsDriver(): ChannelDriver {
   async function decode(request: Request): Promise<PlatformCall> {
     const bodyText = await request.text();
     const body = bodyText === "" ? {} : JSON.parse(bodyText);
-    return {
-      body,
-      method: new URL(request.url).pathname.split("/").at(-1) ?? "",
-      response: { id: nextActivityId() },
-    };
+    const path = new URL(request.url).pathname;
+    // An update keeps the id of the activity it replaces.
+    const id = request.method === "PUT" ? path.split("/").at(-1)! : nextActivityId();
+    return { body, method: `${request.method} ${path}`, response: { id } };
   }
 
   return {
@@ -93,35 +95,28 @@ export function teamsDriver(): ChannelDriver {
     message: (text) => activity({ text, type: "message" }),
     findOptions(call, prompt) {
       const body = call.body as ActivityBody;
-      if (body.type === "typing" || body.type !== "message" || !body.text?.includes(prompt)) {
-        return undefined;
-      }
-      const card = body.attachments?.find(
-        (attachment) => attachment.contentType === "application/vnd.microsoft.card.adaptive",
-      )?.content;
-      const choiceSet = card?.body?.find((element) => element.type === "Input.ChoiceSet");
-      const submits = (card?.actions ?? []).filter(
-        (action) => action.type === "Action.Submit" && action.data !== undefined,
-      );
-      // A select renders one ChoiceSet and a single Submit; other choices are one Submit each.
-      if (choiceSet?.choices !== undefined) {
-        const data = submits[0]?.data;
-        if (data === undefined) return [];
-        return choiceSet.choices.map((choice) => ({
-          handle: { data, value: choice.value } satisfies PressHandle,
-          label: choice.title,
-        }));
-      }
-      return submits.map((action) => ({
-        handle: { data: action.data! } satisfies PressHandle,
-        label: action.title ?? "",
-      }));
+      if (body.type !== "message" || !body.text?.includes(prompt)) return undefined;
+      return cardOptions(call);
     },
+    shownMessage(call) {
+      const body = call.body as ActivityBody;
+      if (body.type !== "message") return undefined;
+      const texts = (adaptiveCard(body)?.body ?? []).flatMap((element) =>
+        element.type === "TextBlock" && element.text !== undefined ? [element.text] : [],
+      );
+      return {
+        id: activityIdOf(call),
+        options: cardOptions(call),
+        text: [body.text ?? "", ...texts].join("\n"),
+      };
+    },
+    personShownAs: [PERSON.name],
     press: (option: RenderedOption) => {
-      const { data, value } = option.handle as PressHandle;
+      const { activityId: cardActivityId, data, value } = option.handle as PressHandle;
       return activity({
         id: `INVOKE-${activityId + 1}`,
         name: "adaptiveCard/action",
+        replyToId: cardActivityId,
         type: "invoke",
         value: { action: { data: value === undefined ? data : { ...data, eve_option: value } } },
       });
@@ -132,4 +127,36 @@ export function teamsDriver(): ChannelDriver {
       return body.type === "message" ? body.text : undefined;
     },
   };
+}
+
+function activityIdOf(call: PlatformCall): string {
+  return (call.response as { readonly id: string }).id;
+}
+
+function adaptiveCard(body: ActivityBody): AdaptiveCard | undefined {
+  return body.attachments?.find(
+    (attachment) => attachment.contentType === "application/vnd.microsoft.card.adaptive",
+  )?.content;
+}
+
+function cardOptions(call: PlatformCall): RenderedOption[] {
+  const card = adaptiveCard(call.body as ActivityBody);
+  const activityId = activityIdOf(call);
+  const choiceSet = card?.body?.find((element) => element.type === "Input.ChoiceSet");
+  const submits = (card?.actions ?? []).filter(
+    (action) => action.type === "Action.Submit" && action.data !== undefined,
+  );
+  // A select renders one ChoiceSet and a single Submit; other choices are one Submit each.
+  if (choiceSet?.choices !== undefined) {
+    const data = submits[0]?.data;
+    if (data === undefined) return [];
+    return choiceSet.choices.map((choice) => ({
+      handle: { activityId, data, value: choice.value } satisfies PressHandle,
+      label: choice.title,
+    }));
+  }
+  return submits.map((action) => ({
+    handle: { activityId, data: action.data! } satisfies PressHandle,
+    label: action.title ?? "",
+  }));
 }

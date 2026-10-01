@@ -24,6 +24,60 @@ interface BrokenCell {
   readonly symptom: RegExp;
 }
 
+/** Rules that check how an answered prompt's message changes, by prompt kind and how it was answered. */
+const answeredPromptRules = {
+  approvalPress: [
+    "pressing Approve clears the approval's buttons",
+    "pressing Approve names who approved on the approval",
+  ],
+  approvalText: [
+    "approving by text clears the approval's buttons",
+    "approving by text names who approved on the approval",
+  ],
+  questionPress: [
+    "pressing an option clears the question's buttons",
+    "pressing an option names who answered on the question",
+  ],
+  questionText: [
+    "answering a question by text clears its buttons",
+    "answering a question by text names who answered on the question",
+  ],
+} as const satisfies Record<string, readonly HitlRule[]>;
+
+/** Answered prompts in `groups` are never edited, so they keep their buttons and never say who answered. */
+function staleAnsweredPrompts(
+  reason: string,
+  groups: readonly (keyof typeof answeredPromptRules)[],
+): Partial<Record<HitlRule, BrokenCell>> {
+  return Object.fromEntries(
+    groups
+      .flatMap((group) => answeredPromptRules[group])
+      .map((rule) => [
+        rule,
+        {
+          reason,
+          symptom: /the answered prompt (still offers \[".+\]|never names who answered)/,
+        },
+      ]),
+  );
+}
+
+/** #4135 regression: Telegram's approval buttons never resume the held turn. */
+function heldApprovalPressIgnored(
+  rules: readonly HitlRule[],
+): Partial<Record<HitlRule, BrokenCell>> {
+  return Object.fromEntries(
+    rules.map((rule) => [
+      rule,
+      {
+        reason:
+          "#4135: a held approval checks the button's callback id before Telegram maps it to the request",
+        symptom: /Timed out waiting for deploy_release to run or be denied on telegram/,
+      },
+    ]),
+  );
+}
+
 /**
  * Runs the HITL contract against every registered channel driver. Each cell is one of:
  *
@@ -37,7 +91,15 @@ const channels: readonly {
   readonly driver: () => ChannelDriver;
   readonly broken?: Partial<Record<HitlRule, BrokenCell>>;
 }[] = [
-  { driver: chatSdkDriver },
+  {
+    driver: chatSdkDriver,
+    broken: staleAnsweredPrompts("the bridge never edits an answered prompt", [
+      "approvalPress",
+      "approvalText",
+      "questionPress",
+      "questionText",
+    ]),
+  },
   {
     driver: chatSdkTextDriver,
     broken: {
@@ -51,25 +113,48 @@ const channels: readonly {
       },
     },
   },
-  { driver: discordDriver },
+  {
+    driver: discordDriver,
+    broken: staleAnsweredPrompts("a press gets a deferred update and the message is never edited", [
+      "approvalPress",
+      "questionPress",
+    ]),
+  },
   { driver: githubDriver },
   { driver: linearDriver },
   { driver: linqDriver },
-  { driver: slackDriver },
-  { driver: teamsDriver },
+  {
+    driver: slackDriver,
+    broken: {
+      ...staleAnsweredPrompts(
+        "only the button interaction handler edits a question; a typed answer leaves it",
+        ["questionText"],
+      ),
+      "approving by text names who approved on the approval": {
+        reason: "the card loses its buttons after a typed approval but doesn't say who approved",
+        symptom: /the answered prompt never names who answered/,
+      },
+    },
+  },
+  {
+    driver: teamsDriver,
+    broken: staleAnsweredPrompts(
+      "only a pressed approval card is recorded for editing; questions and typed approvals are not",
+      ["approvalText", "questionPress", "questionText"],
+    ),
+  },
   {
     driver: telegramDriver,
     broken: {
-      "pressing Approve runs the gated tool": {
-        reason:
-          "#4135: a held approval checks the button's callback id before Telegram maps it to the request",
-        symptom: /Timed out waiting for deploy_release to run or be denied on telegram/,
-      },
-      "pressing Cancel stops the gated tool without running it": {
-        reason:
-          "#4135: a held approval checks the button's callback id before Telegram maps it to the request",
-        symptom: /Timed out waiting for deploy_release to run or be denied on telegram/,
-      },
+      ...staleAnsweredPrompts(
+        "nothing edits an answered prompt; a press only answers the callback query",
+        ["approvalText", "questionPress", "questionText"],
+      ),
+      ...heldApprovalPressIgnored([
+        "pressing Approve runs the gated tool",
+        "pressing Cancel stops the gated tool without running it",
+        ...answeredPromptRules.approvalPress,
+      ]),
     },
   },
   {

@@ -2,6 +2,7 @@ import { telegramChannel } from "#public/channels/telegram/index.js";
 import {
   type ChannelDriver,
   type PlatformCall,
+  type RenderedOption,
   recordingFetch,
 } from "#internal/testing/channel-conformance/harness.js";
 
@@ -11,6 +12,42 @@ let nextChatId = 1000;
 interface InlineButton {
   readonly callback_data?: string;
   readonly text: string;
+}
+
+interface MessageBody {
+  readonly message_id?: number;
+  readonly reply_markup?: { readonly inline_keyboard?: readonly InlineButton[][] };
+  readonly text?: string;
+}
+
+interface PressHandle {
+  readonly data: string;
+  readonly messageId: number;
+}
+
+const MESSAGE_WRITES = new Set(["sendMessage", "editMessageText", "editMessageReplyMarkup"]);
+
+/** A send's id comes back from Telegram; an edit names the message it rewrites. */
+function messageIdOf(call: PlatformCall): number {
+  return call.method === "sendMessage"
+    ? (call.response as { readonly result: { readonly message_id: number } }).result.message_id
+    : (call.body as MessageBody).message_id!;
+}
+
+function inlineOptions(call: PlatformCall): RenderedOption[] {
+  const messageId = messageIdOf(call);
+  return ((call.body as MessageBody).reply_markup?.inline_keyboard ?? [])
+    .flat()
+    .flatMap((button) =>
+      button.callback_data === undefined
+        ? []
+        : [
+            {
+              handle: { data: button.callback_data, messageId } satisfies PressHandle,
+              label: button.text,
+            },
+          ],
+    );
 }
 
 /** Drives the Telegram channel through its Bot API webhook in a private chat. */
@@ -56,25 +93,31 @@ export function telegramDriver(): ChannelDriver {
     message: (text) =>
       update({ message: { chat: CHAT, date: 0, from: PERSON, message_id: 1000 + updateId, text } }),
     findOptions(call, prompt) {
-      const body = call.body as {
-        readonly reply_markup?: { readonly inline_keyboard?: readonly InlineButton[][] };
-        readonly text?: string;
-      };
+      const body = call.body as MessageBody;
       if (call.method !== "sendMessage" || body.text?.includes(prompt) !== true) return undefined;
-      return body.reply_markup?.inline_keyboard
-        ?.flat()
-        .filter((button) => button.callback_data !== undefined)
-        .map((button) => ({ handle: button.callback_data, label: button.text }));
+      return body.reply_markup === undefined ? undefined : inlineOptions(call);
     },
-    press: (option) =>
-      update({
+    shownMessage(call) {
+      if (!MESSAGE_WRITES.has(call.method)) return undefined;
+      return {
+        id: String(messageIdOf(call)),
+        // Telegram drops a message's inline keyboard when an edit omits `reply_markup`.
+        options: inlineOptions(call),
+        text: (call.body as MessageBody).text ?? "",
+      };
+    },
+    personShownAs: [PERSON.first_name],
+    press: (option) => {
+      const { data, messageId } = option.handle as PressHandle;
+      return update({
         callback_query: {
-          data: option.handle,
+          data,
           from: PERSON,
           id: `callback-${updateId}`,
-          message: { chat: CHAT, date: 0, message_id: 1 },
+          message: { chat: CHAT, date: 0, message_id: messageId },
         },
-      }),
+      });
+    },
     postedText: (call: PlatformCall) =>
       call.method === "sendMessage" || call.method === "editMessageText"
         ? (call.body as { readonly text?: string }).text
