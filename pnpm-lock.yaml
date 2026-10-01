@@ -1696,8 +1696,8 @@ importers:
         specifier: 'catalog:'
         version: 3.3.0
       '@vercel/schedules':
-        specifier: 0.0.0-alpha.10
-        version: 0.0.0-alpha.10
+        specifier: 0.0.0-alpha.11
+        version: 0.0.0-alpha.11
       '@vercel/sdk':
         specifier: 1.28.8
         version: 1.28.8
@@ -7548,8 +7548,8 @@ packages:
   '@vercel/sandbox@3.3.0':
     resolution: {integrity: sha512-TclqRD2joExyECTrrHsioi3Onw20X2YfpOYEzs3JpJUtAjOKYw2bMeXldKrUg+TB/TT7tPdDu8uKNxj9NE7QUg==}
 
-  '@vercel/schedules@0.0.0-alpha.10':
-    resolution: {integrity: sha512-eEMzK5tbofeIERVqO9EDrN+G0GS/Ka78IvgOrVDPjECrIlKWl6l4eXUE3LLHlU4R/Du5GRFsn2oRCIg3Eocnjg==}
+  '@vercel/schedules@0.0.0-alpha.11':
+    resolution: {integrity: sha512-wu2YwHwO+GMW/0ou8l+5749zvV1eNdJNQrD+juTcsaIqcuksAnaXDSlmG/qAJZhLcIy+cSgURhdGqpLpSXrV5g==}
     engines: {node: '>=20.0.0'}
 
   '@vercel/sdk@1.28.8':
@@ -21171,7 +21171,7 @@ snapshots:
       - bare-abort-controller
       - react-native-b4a
 
-  '@vercel/schedules@0.0.0-alpha.10':
+  '@vercel/schedules@0.0.0-alpha.11':
     dependencies:
       '@vercel/oidc': 3.8.0
 

@@ -42,7 +42,7 @@ export function vercelScheduleProvider(
     kind: "vercel",
     async create(context, input) {
       const schedules = await client(context.abortSignal);
-      let schedule = await schedules.create({
+      let schedule: VercelSchedule = await schedules.create({
         expression: toVercelExpression(input.expression),
         jitter: input.expression.type === "cron" ? input.expression.jitter : undefined,
         name: input.name,
