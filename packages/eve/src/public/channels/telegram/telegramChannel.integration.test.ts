@@ -161,7 +161,7 @@ describe("telegram channel", () => {
             event.data.result.kind === "tool-result" &&
             event.data.result.toolName === "ask_question",
         );
-        expect(JSON.parse(String(result?.data.result.output))).toMatchObject({
+        expect(result?.data.result.output).toEqual({
           answer: "Saturday",
           status: "answered",
         });
