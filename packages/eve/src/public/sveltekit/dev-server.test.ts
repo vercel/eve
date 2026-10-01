@@ -1,6 +1,46 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeDevServerRegistry } from "./dev-server.js";
+import { extractEveDevServerOrigin, normalizeDevServerRegistry } from "./dev-server.js";
+
+describe("extractEveDevServerOrigin", () => {
+  it("returns undefined when the chunk has no readiness line", () => {
+    expect(
+      extractEveDevServerOrigin("resolving rolldown... https://rolldown.rs/guide"),
+    ).toBeUndefined();
+  });
+
+  it("returns the origin from the readiness line", () => {
+    expect(extractEveDevServerOrigin("[DEV] server listening at http://127.0.0.1:50036/\n")).toBe(
+      "http://127.0.0.1:50036",
+    );
+  });
+
+  it("does not depend on the CLI tag", () => {
+    expect(extractEveDevServerOrigin("server listening at http://127.0.0.1:50036/\n")).toBe(
+      "http://127.0.0.1:50036",
+    );
+  });
+
+  it("ignores unrelated URLs that appear before the readiness line", () => {
+    expect(
+      extractEveDevServerOrigin(
+        "warn: https://rolldown.rs/guide\n[DEV] server listening at http://127.0.0.1:50036/\n",
+      ),
+    ).toBe("http://127.0.0.1:50036");
+  });
+
+  it("accepts a chunk that ends at the URL without a trailing newline", () => {
+    expect(extractEveDevServerOrigin("[DEV] server listening at http://127.0.0.1:50036")).toBe(
+      "http://127.0.0.1:50036",
+    );
+  });
+
+  it("accepts an IPv6 loopback origin", () => {
+    expect(extractEveDevServerOrigin("[DEV] server listening at http://[::1]:50036/")).toBe(
+      "http://[::1]:50036",
+    );
+  });
+});
 
 describe("normalizeDevServerRegistry", () => {
   it("normalizes a well-formed record and canonicalizes the origin", () => {
