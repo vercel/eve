@@ -1,3 +1,4 @@
+import { TEST_USAGE } from "#internal/testing/events.js";
 import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext, FetchFileResult } from "#channel/adapter.js";
@@ -143,12 +144,12 @@ describe("ChannelAdapter helpers", () => {
 
     const event = await callAdapterEventHandler(
       adapter,
-      createSessionWaitingEvent(undefined),
+      createSessionWaitingEvent(TEST_USAGE),
       context,
     );
 
     expect(event).toEqual({
-      data: { continuationToken: "C1:T1", wait: "next-user-message" },
+      data: { continuationToken: "C1:T1", usage: TEST_USAGE, wait: "next-user-message" },
       type: "session.waiting",
     });
     expect(observedToken).toBe("temporary");
@@ -167,12 +168,12 @@ describe("ChannelAdapter helpers", () => {
 
     const event = await callAdapterEventHandler(
       { kind: "http" },
-      createSessionWaitingEvent(undefined),
+      createSessionWaitingEvent(TEST_USAGE),
       context,
     );
 
     expect(event).toEqual({
-      data: { continuationToken: "session-1", wait: "next-user-message" },
+      data: { continuationToken: "session-1", usage: TEST_USAGE, wait: "next-user-message" },
       type: "session.waiting",
     });
   });

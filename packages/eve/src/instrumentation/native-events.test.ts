@@ -1,3 +1,4 @@
+import { TEST_USAGE } from "#internal/testing/events.js";
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -119,7 +120,7 @@ describe("createInstrumentationHandleEvent", () => {
       }),
     );
     await handleEvent(createTurnCompletedEvent({ sequence: 0, turnId: "turn-1" }));
-    await handleEvent(createSessionWaitingEvent(undefined));
+    await handleEvent(createSessionWaitingEvent(TEST_USAGE));
 
     expect(order).toEqual([
       "durable:session.started",
@@ -177,7 +178,7 @@ describe("createInstrumentationHandleEvent", () => {
       turnId: "turn-1",
     })!;
 
-    await handleEvent(createSessionWaitingEvent(undefined));
+    await handleEvent(createSessionWaitingEvent(TEST_USAGE));
 
     expect(events).toEqual([
       {

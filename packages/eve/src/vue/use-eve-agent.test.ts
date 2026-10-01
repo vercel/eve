@@ -14,7 +14,7 @@ import {
   createSessionWaitingEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import { stampTestEvents } from "#internal/testing/events.js";
+import { TEST_USAGE, stampTestEvents } from "#internal/testing/events.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -119,7 +119,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(undefined),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createBoundedStreamResponse(events))
@@ -157,7 +157,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(undefined),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -198,7 +198,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
       .mockResolvedValueOnce(
         createEagerStreamResponse([
           createMessageReceivedEvent({ message: "After", sequence: 0, turnId: "turn_1" }),
-          createSessionWaitingEvent(undefined),
+          createSessionWaitingEvent(TEST_USAGE),
         ]),
       );
 

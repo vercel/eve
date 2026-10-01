@@ -9,7 +9,7 @@ import {
   createTurnStartedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import { stampTestEvent } from "#internal/testing/events.js";
+import { TEST_USAGE, stampTestEvent } from "#internal/testing/events.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { ContextContainer, contextStorage } from "./container.js";
 import { dispatchStreamEventHooks } from "./hook-lifecycle.js";
@@ -113,7 +113,7 @@ describe("dispatchStreamEventHooks", () => {
     createStepStartedEvent({ sequence: 0, turnId: "turn_0", stepIndex: 0, modelId: "test" }),
     { type: "session.completed" } as const,
     createSessionFailedEvent({
-      usage: undefined,
+      usage: TEST_USAGE,
       code: "TEST_FAILURE",
       message: "Runtime failure",
       sessionId: "session_test",
