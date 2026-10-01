@@ -1913,11 +1913,43 @@ describe("slackChannel() final reply delivery", () => {
     return (record?.fields as { error: { errorId: string } } | undefined)?.error.errorId;
   }
 
-  it("uploads an authored reply Slack refuses as a snippet, without posting it again", async () => {
+  // The fallbacks eve logged, in order. A record carries no reply text.
+  function fallbacks(logs: { records: { message: string; fields?: unknown }[] }) {
+    return logs.records
+      .filter(
+        (entry) => entry.message === "Slack refused the final reply; delivering it with a fallback",
+      )
+      .map((entry) => entry.fields);
+  }
+
+  it("posts a refused short reply once as native Markdown, without a snippet or notice", async () => {
     const logs = captureLogRecords();
     failSlackCalls({ "chat.postMessage": ["msg_blocks_too_long"] });
     const { adapter, ctx } = adapterWith();
-    const message = `# Findings\n\n${"r".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH - 20)}`;
+    const message = `# Findings\n\n${"r".repeat(6_000)}`;
+
+    await callCompletionHandler(adapter, finalReply(message), ctx);
+
+    expect(slackOperations(fetchMock)).toEqual(["chat.postMessage", "chat.postMessage"]);
+    const inline = parseSlackRequestBody(fetchMock.mock.calls[1]![1] as RequestInit);
+    expect(inline).toMatchObject({
+      channel: "C01",
+      markdown_text: message,
+      thread_ts: "1700000000.000001",
+    });
+    expect(inline.blocks).toBeUndefined();
+    expect(fallbacks(logs)).toEqual([
+      { fallback: "inline", slackError: "msg_blocks_too_long", turnId: "t1" },
+    ]);
+    expect(JSON.stringify(logs.records)).not.toContain(message);
+    expect(ctx.state.undeliveredReplyErrorId).toBeUndefined();
+  });
+
+  it("uploads a refused reply over the Markdown limit as a snippet, without an inline post", async () => {
+    const logs = captureLogRecords();
+    failSlackCalls({ "chat.postMessage": ["msg_blocks_too_long"] });
+    const { adapter, ctx } = adapterWith();
+    const message = `# Findings\n\n${"r".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH)}`;
 
     await callCompletionHandler(adapter, finalReply(message), ctx);
 
@@ -1933,13 +1965,61 @@ describe("slackChannel() final reply delivery", () => {
       initial_comment: "Here's a snippet with the full response.",
       thread_ts: "1700000000.000001",
     });
+    expect(fallbacks(logs)).toEqual([
+      { fallback: "snippet", slackError: "msg_blocks_too_long", turnId: "t1" },
+    ]);
+    expect(ctx.state.undeliveredReplyErrorId).toBeUndefined();
+  });
+
+  it("uploads a snippet when Slack refuses the inline retry too", async () => {
+    const logs = captureLogRecords();
+    failSlackCalls({ "chat.postMessage": ["msg_blocks_too_long", "msg_too_long"] });
+    const { adapter, ctx } = adapterWith();
+    const message = `# Findings\n\n${"r".repeat(6_000)}`;
+
+    await callCompletionHandler(adapter, finalReply(message), ctx);
+
+    expect(urls()).toEqual([
+      "https://slack.com/api/chat.postMessage",
+      "https://slack.com/api/chat.postMessage",
+      "https://slack.com/api/files.getUploadURLExternal",
+      "https://files.slack.com/upload/F01",
+      "https://slack.com/api/files.completeUploadExternal",
+    ]);
+    expect(uploadedBodies).toEqual([message]);
+    expect(fallbacks(logs)).toEqual([
+      { fallback: "inline", slackError: "msg_blocks_too_long", turnId: "t1" },
+      { fallback: "snippet", slackError: "msg_too_long", turnId: "t1" },
+    ]);
+    expect(ctx.state.undeliveredReplyErrorId).toBeUndefined();
+  });
+
+  it("posts the notice when the inline retry fails for another reason", async () => {
+    const logs = captureLogRecords();
+    failSlackCalls({ "chat.postMessage": ["msg_blocks_too_long", "not_in_channel"] });
+    const { adapter, ctx } = adapterWith();
+
+    await callCompletionHandler(adapter, finalReply("The full answer."), ctx);
+
+    const errorId = undeliveredErrorId(logs);
+    expect(errorId).toEqual(expect.any(String));
+    expect(slackOperations(fetchMock)).toEqual([
+      "chat.postMessage",
+      "chat.postMessage",
+      "chat.postMessage",
+    ]);
+    expect(
+      parseSlackRequestBody(fetchMock.mock.calls[2]![1] as RequestInit).markdown_text,
+    ).toContain(errorId);
     expect(logs.records).toContainEqual(
       expect.objectContaining({
-        fields: expect.objectContaining({ slackError: "msg_blocks_too_long" }),
-        level: "warn",
+        fields: expect.objectContaining({
+          error: expect.objectContaining({ message: expect.stringContaining("not_in_channel") }),
+        }),
+        message: "final reply was not delivered to Slack",
       }),
     );
-    expect(ctx.state.undeliveredReplyErrorId).toBeUndefined();
+    expect(ctx.state.undeliveredReplyErrorId).toBe(errorId);
   });
 
   it("posts a notice with the error id when the snippet also fails, and tells the model next turn", async () => {
@@ -1949,8 +2029,9 @@ describe("slackChannel() final reply delivery", () => {
       "files.getUploadURLExternal": ["missing_scope"],
     });
     const { adapter, ctx } = adapterWith();
+    const message = "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1);
 
-    await callCompletionHandler(adapter, finalReply("The full answer."), ctx);
+    await callCompletionHandler(adapter, finalReply(message), ctx);
 
     const errorId = undeliveredErrorId(logs);
     expect(errorId).toEqual(expect.any(String));
@@ -1992,9 +2073,9 @@ describe("slackChannel() final reply delivery", () => {
 
   it("logs and returns when the delivery notice fails too", async () => {
     const logs = captureLogRecords();
+    // The authored post is refused, the inline retry fails, then the notice fails.
     failSlackCalls({
-      "chat.postMessage": ["msg_blocks_too_long", "channel_not_found"],
-      "files.getUploadURLExternal": ["missing_scope"],
+      "chat.postMessage": ["msg_blocks_too_long", "not_in_channel", "channel_not_found"],
     });
     const { adapter, ctx } = adapterWith();
 

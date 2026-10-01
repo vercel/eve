@@ -11,11 +11,12 @@ import type {
 const log = createLogger("slack.reply");
 const LONG_RESPONSE_FILENAME = "eve-response.md";
 const LONG_RESPONSE_NOTICE = "Here's a snippet with the full response.";
+const FALLBACK_LOG = "Slack refused the final reply; delivering it with a fallback";
 
 /**
  * Slack error codes for a message payload Slack refused as too large or
- * malformed. Slack posts nothing for a refused call, so uploading the reply
- * as a snippet cannot duplicate it.
+ * malformed. Slack posts nothing for a refused call, so delivering the reply
+ * again, inline or as a snippet, cannot duplicate it.
  */
 const REFUSED_PAYLOAD_ERRORS = new Set([
   "invalid_blocks",
@@ -88,12 +89,20 @@ async function uploadReplySnippet(channel: SlackContext, message: string): Promi
  * Wraps a channel's composed `message.completed` chain, authored renderers
  * included, so a final reply is never lost without a trace.
  *
- * When the chain throws because Slack refused the payload, eve uploads the
- * reply as a snippet. This assumes the refused call was the reply itself: a
- * renderer that posts the reply and then a separate, refused message gets the
- * reply twice. When the reply still isn't delivered, eve logs the error,
- * posts a short notice with its error id, and tells the model on the next
- * delivery. Steps that end in tool calls and empty replies pass through.
+ * When the chain throws because Slack refused the payload, eve delivers the
+ * reply again in this order:
+ *
+ * 1. One native Markdown message, when the reply fits in
+ *    {@link SLACK_MARKDOWN_TEXT_MAX_LENGTH} characters. eve tries this once.
+ * 2. An `eve-response.md` snippet, when the reply is longer or Slack refuses
+ *    the Markdown message too.
+ * 3. A short notice with an error id, when the reply still isn't delivered or
+ *    the chain failed for another reason. eve logs the error and tells the
+ *    model on the next delivery.
+ *
+ * This assumes the refused call was the reply itself: a renderer that posts
+ * the reply and then a separate, refused message gets the reply twice. Steps
+ * that end in tool calls and empty replies pass through.
  */
 export function withFinalReplyDelivery(
   render: MessageCompletedHandler | undefined,
@@ -120,12 +129,8 @@ async function recoverFinalReply(
   let failure = error;
   const refusal = refusedPayloadError(error);
   if (refusal !== undefined) {
-    log.warn("Slack refused the final reply; uploading it as a snippet", {
-      slackError: refusal,
-      turnId,
-    });
     try {
-      await uploadReplySnippet(channel, message);
+      await redeliverRefusedReply(channel, message, turnId, refusal);
       return;
     } catch (fallbackError) {
       failure = fallbackError;
@@ -144,6 +149,32 @@ async function recoverFinalReply(
   } catch (noticeError) {
     logError(log, "undelivered reply notice failed", noticeError, { errorId, turnId });
   }
+}
+
+/**
+ * Posts a refused reply as one native Markdown message when it fits, once,
+ * and otherwise, or when Slack refuses that message too, uploads a snippet.
+ */
+async function redeliverRefusedReply(
+  channel: SlackEventContext,
+  message: string,
+  turnId: string,
+  refusal: string,
+): Promise<void> {
+  let slackError = refusal;
+  if (message.length <= SLACK_MARKDOWN_TEXT_MAX_LENGTH) {
+    log.warn(FALLBACK_LOG, { fallback: "inline", slackError, turnId });
+    try {
+      await channel.thread.post(message);
+      return;
+    } catch (inlineError) {
+      const inlineRefusal = refusedPayloadError(inlineError);
+      if (inlineRefusal === undefined) throw inlineError;
+      slackError = inlineRefusal;
+    }
+  }
+  log.warn(FALLBACK_LOG, { fallback: "snippet", slackError, turnId });
+  await uploadReplySnippet(channel, message);
 }
 
 /** Slack's error code when `error` is a refused-payload error, checking its causes. */
