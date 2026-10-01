@@ -1,6 +1,9 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
+import { buildAdapterContext } from "#channel/adapter-context.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import { AuthKey } from "#context/keys.js";
+import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
   type DurableSessionState,
@@ -12,8 +15,8 @@ import {
   withSessionStateDelta,
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
-import { deserializeContext } from "#context/serialize.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import {
   resolveRemoteAgentStreamHeaders,
   respondToRemoteAgentSession,
@@ -31,7 +34,8 @@ import {
   type InputResolution,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import { retireProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
+import type { InputResponse } from "#shared/input.js";
 
 export type RoutedDeliverResult =
   | {
@@ -75,14 +79,14 @@ export async function routeProxiedDeliverStep(
 async function routeProxiedDeliver(
   input: SessionStepState & { readonly delivery: DeliverHookPayload },
 ): Promise<RoutedDeliverResult> {
+  const { delivery: sourceDelivery, serializedContext } = await deliverChannelInputResponses(input);
   let durableSession = readDurableSession(input.sessionState);
-  const sourceDelivery = input.delivery;
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
   let parentAction: { readonly kind: "cancel-turn" } | undefined;
   // Only a person's own message may answer or skip a pending question.
   const resolveMessage =
-    !hasDelegatedSessionContext(input.serializedContext) && sourceDelivery.caller === undefined;
+    !hasDelegatedSessionContext(serializedContext) && sourceDelivery.caller === undefined;
   // Every payload routes against the same state, so a `ctx.ask()` question
   // resolved by an earlier payload is hidden from later ones; its run takes
   // one answer, and later messages must reach the parent instead.
@@ -157,7 +161,7 @@ async function routeProxiedDeliver(
       };
       const remote = child.remote;
       if (remote !== undefined) {
-        const ctx = await deserializeContext(input.serializedContext);
+        const ctx = await deserializeContext(serializedContext);
         const headers = await resolveRemoteAgentStreamHeaders({
           bundle: ctx.require(BundleKey),
           name: remote.name,
@@ -190,7 +194,7 @@ async function routeProxiedDeliver(
 
   const context = await relaySessionEvents(
     {
-      serializedContext: input.serializedContext,
+      serializedContext,
       sessionState: retired
         ? replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState })
         : input.sessionState,
@@ -214,4 +218,65 @@ async function routeProxiedDeliver(
           payloads: orderedParentPayloads.map(([, payload]) => payload),
         };
   return { ...context, kind: "continue", remainder };
+}
+
+/**
+ * Maps each input response this session cannot route as sent through the
+ * channel's `deliver` hook, and routes what it maps to a proxied request.
+ * Telegram buttons, for example, carry compact callback ids that only its hook
+ * resolves against channel state. Every other response stays as sent for the
+ * turn's own `deliver` call.
+ */
+async function deliverChannelInputResponses(
+  input: SessionStepState & { readonly delivery: DeliverHookPayload },
+): Promise<{
+  readonly delivery: DeliverHookPayload;
+  readonly serializedContext: Record<string, unknown>;
+}> {
+  const requests = getProxyInputRequests(readDurableSession(input.sessionState).state);
+  const routable = (response: InputResponse) => requests.has(response.requestId);
+  const unrouted = input.delivery.payloads.some(
+    (payload) => payload.inputResponses?.some((response) => !routable(response)) === true,
+  );
+  if (!unrouted) return input;
+  const ctx = await deserializeContext(input.serializedContext);
+  const adapter = ctx.require(ChannelKey);
+  if (adapter.deliver === undefined) return input;
+
+  // The hook sees this delivery's caller, as it does in the turn.
+  if (input.delivery.auth !== undefined) ctx.set(AuthKey, input.delivery.auth ?? null);
+  const adapterCtx = buildAdapterContext(adapter, ctx);
+  let mapped = false;
+  const payloads: DeliverPayload[] = [];
+  for (const payload of input.delivery.payloads) {
+    if (payload.inputResponses === undefined) {
+      payloads.push(payload);
+      continue;
+    }
+    const responses: InputResponse[] = [];
+    for (const response of payload.inputResponses) {
+      if (routable(response)) {
+        responses.push(response);
+        continue;
+      }
+      const result = await adapter.deliver(
+        { ...payload, inputResponses: [response], message: undefined },
+        adapterCtx,
+      );
+      const routed = result?.inputResponses?.filter(routable) ?? [];
+      mapped ||= routed.length > 0;
+      responses.push(...(routed.length > 0 ? routed : [response]));
+    }
+    payloads.push({ ...payload, inputResponses: responses });
+  }
+  if (!mapped) return input;
+
+  // Only the channel state the mapping consumed carries over; the turn applies
+  // the rest of this delivery, such as its caller, itself.
+  const session = await deserializeContext(input.serializedContext);
+  setChannelContext(session, { ...adapter, state: { ...adapterCtx.state } });
+  return {
+    delivery: { ...input.delivery, payloads },
+    serializedContext: serializeContext(session),
+  };
 }
