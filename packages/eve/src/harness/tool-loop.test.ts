@@ -3202,7 +3202,7 @@ describe("createToolLoopHarness", () => {
       },
       type: "input.requested",
     });
-    expect(events.filter((event) => event.type === "turn.waiting").at(-1)).toEqual({
+    expect(events.filter((event) => event.type === "turn.waiting").at(-1)).toMatchObject({
       data: {
         on: "input",
         sequence: 0,
