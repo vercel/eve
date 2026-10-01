@@ -109,6 +109,15 @@ export const workflowToolRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`,
 };
 
+import {
+  occurrenceClaimToken,
+  occurrenceAdmittedToken,
+} from "#execution/session/occurrence-admission.js";
+import {
+  OccurrenceAdmissionPendingError,
+  OccurrenceAdmissionFailedError,
+} from "#shared/occurrence-admission-errors.js";
+
 /**
  * Creates a workflow-backed runtime whose current owner executes turns and
  * whose original run retains the public event stream across owner handoffs.
@@ -117,9 +126,18 @@ export function createWorkflowRuntime(config: {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly nodeId?: string;
+  readonly occurrenceAdmission?: boolean;
 }): Runtime {
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
+      if (config.occurrenceAdmission) {
+        if (!input.occurrenceToken || input.continuationConflictCommand !== undefined) {
+          throw new Error("Scheduled admission requires a create-once continuation identity.");
+        }
+        if ((await getWorld()).capabilities?.hookRetention?.active !== true) {
+          throw new Error("Scheduled admission requires a Workflow backend with retained hooks.");
+        }
+      }
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
@@ -148,6 +166,11 @@ export function createWorkflowRuntime(config: {
         ownerDeploymentId: await resolveCurrentWorkflowDeploymentId(),
         serializedContext,
       };
+      if (config.occurrenceAdmission) {
+        if (!input.occurrenceToken)
+          throw new Error("Scheduled runs require an occurrence identity.");
+        workflowInput.occurrenceToken = input.occurrenceToken;
+      }
       if (input.limits !== undefined) workflowInput.limits = input.limits;
       if (input.continuationConflictCommand !== undefined) {
         workflowInput.continuationConflictCommand = input.continuationConflictCommand;
@@ -239,6 +262,28 @@ export function createWorkflowRuntime(config: {
       continuationToken: string,
     ): Promise<{ sessionId: string } | undefined> {
       try {
+        if (config.occurrenceAdmission) {
+          const claim = await getHookByToken(occurrenceClaimToken(continuationToken));
+          try {
+            await getHookByToken(occurrenceAdmittedToken(continuationToken, claim.runId));
+          } catch (error) {
+            if (!HookNotFoundError.is(error)) throw error;
+            const status = await getRun(claim.runId).status;
+            if (status === "completed" || status === "failed" || status === "cancelled") {
+              // Recheck after reading terminal status: startup may have committed
+              // its admission marker between the first lookup and this read.
+              try {
+                await getHookByToken(occurrenceAdmittedToken(continuationToken, claim.runId));
+              } catch (markerError) {
+                if (!HookNotFoundError.is(markerError)) throw markerError;
+                throw new OccurrenceAdmissionFailedError();
+              }
+            } else {
+              throw new OccurrenceAdmissionPendingError();
+            }
+          }
+          return { sessionId: claim.runId };
+        }
         return await resolveSessionInbox(continuationToken);
       } catch (error) {
         if (HookNotFoundError.is(error)) {

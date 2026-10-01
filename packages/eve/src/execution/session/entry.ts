@@ -14,6 +14,10 @@ import { DEFAULT_SESSION_TIMEOUT_MS, sessionTimeoutDeadline } from "#execution/s
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import {
+  claimOccurrence,
+  markOccurrenceAdmitted,
+} from "#execution/session/occurrence-admission.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 import {
   SESSION_INBOX_CONTEXT_KEY,
@@ -89,6 +93,14 @@ async function bootInitialOwner(
     nodeId?: string;
   };
   try {
+    if (input.occurrenceToken !== undefined) {
+      try {
+        await claimOccurrence(input.occurrenceToken);
+      } catch (error) {
+        if (!isHookConflictError(error)) throw error;
+        return undefined;
+      }
+    }
     const [sessionCreation, stableClaim, aliasClaim] = await Promise.allSettled([
       createSessionStep({
         compiledArtifactsSource: serializedBundle.source,
@@ -118,7 +130,7 @@ async function bootInitialOwner(
       await inbox.dispose();
       return undefined;
     }
-    return {
+    const boot: BootOutcome = {
       inbox,
       session: {
         anchor: { kind: "self" },
@@ -141,6 +153,10 @@ async function bootInitialOwner(
         sessionWritable,
       },
     };
+    if (input.occurrenceToken !== undefined) {
+      await markOccurrenceAdmitted(input.occurrenceToken, sessionId);
+    }
+    return boot;
   } catch (error) {
     await inbox.dispose();
     return await failSession({

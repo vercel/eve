@@ -82,6 +82,8 @@ export async function resolveChannelDefinition(
       handler: httpRoute?.handler,
       websocket: websocketRoute?.handler,
       receive: channelDefinition.receive,
+      mintPersonalTarget: channelDefinition.mintPersonalTarget,
+      captureScheduleTarget: channelDefinition.captureScheduleTarget,
       definition: channelDefinition,
       adapter,
       turnPolicy: channelDefinition.turnPolicy,

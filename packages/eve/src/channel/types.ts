@@ -472,6 +472,8 @@ export interface RunInput {
    * discarded.
    */
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
+  /** Claim/dedup identity, distinct from the channel conversation continuation token. */
+  readonly occurrenceToken?: string;
   /**
    * The original (top-level) caller's auth, forwarded down the delegation
    * chain so the child's `session.auth.initiator` always resolves back to

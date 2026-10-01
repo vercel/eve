@@ -12,6 +12,7 @@ import {
   ConversationIdKey,
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
+  OccurrenceIdKey,
   ParentSessionKey,
   ParentTraceContextKey,
   ScheduleIdKey,
@@ -65,6 +66,7 @@ export function buildRunContext(input: {
     ctx.set(ContinuationTokenKey, run.continuationToken);
     ctx.set(ContinuationHookTokensKey, [run.continuationToken]);
   }
+  if (run.occurrenceToken !== undefined) ctx.set(OccurrenceIdKey, run.occurrenceToken);
   ctx.set(AuthKey, auth);
   if (run.initiatorAuth !== undefined || run.input.message !== undefined) {
     ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);

@@ -7,6 +7,7 @@ import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/ty
 import type { StepInput } from "#harness/types.js";
 import type { AudienceContext } from "#shared/conversation-context.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { ScheduleChannelTarget } from "#public/schedules/collection.js";
 
 /**
  * Enriched return shape from a channel's {@link ChannelAdapter.fetchFile}
@@ -118,6 +119,12 @@ export interface GenericChannelDefinition<
    * confident; consumers treat it as non-public.
    */
   readonly audience?: (input: AudienceContext<TState>) => ChannelAudience;
+  mintPersonalTarget?(auth: SessionAuthContext): Promise<ScheduleChannelTarget>;
+  captureScheduleTarget?(input: {
+    readonly mode?: import("#public/schedules/collection.js").ScheduleDeliveryMode;
+    readonly state: Readonly<TState>;
+    readonly continuationToken?: string;
+  }): ScheduleChannelTarget;
 
   /**
    * Identifier of the adapter family this channel belongs to. Set by

@@ -245,6 +245,8 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
    * accepting a different shape.
    */
   readonly receive?: CompiledChannel["receive"];
+  readonly mintPersonalTarget?: CompiledChannel["mintPersonalTarget"];
+  readonly captureScheduleTarget?: CompiledChannel["captureScheduleTarget"];
   /**
    * Reference to the authored {@link CompiledChannel} value the channel
    * module exported. Preserved so callers of `ctx.to(channel, target)`

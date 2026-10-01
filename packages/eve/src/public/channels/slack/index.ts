@@ -74,6 +74,7 @@ export {
 export { type SlackFetch, type SlackTransportOptions } from "#public/channels/slack/transport.js";
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
+export { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 
 export {
   defineSlackRenderer,
