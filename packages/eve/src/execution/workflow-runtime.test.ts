@@ -557,6 +557,53 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   }
 
+  it("requires retained-hook support and forwards occurrence admission to startup", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "owner-run" });
+    const runtime = createWorkflowRuntime({ compiledArtifactsSource, occurrenceAdmission: true });
+    const input = {
+      adapter,
+      auth: null,
+      input: { message: "run" },
+      continuationToken: "occurrence",
+      occurrenceToken: "occurrence",
+    };
+    await expect(runtime.createSession(input)).rejects.toThrow("retained hooks");
+    expect(startMock).not.toHaveBeenCalled();
+    getWorldMock.mockResolvedValue({ ...world, capabilities: { hookRetention: { active: true } } });
+    await runtime.createSession(input);
+    expect(startMock).toHaveBeenCalledWith(
+      workflowEntryReference,
+      [expect.objectContaining({ occurrenceToken: "occurrence" })],
+      expect.anything(),
+    );
+    await expect(runtime.resolveContinuation("occurrence")).resolves.toEqual({
+      sessionId: "owner-run",
+    });
+    expect(getHookByTokenMock).toHaveBeenCalledWith("eve:occurrence:occurrence");
+  });
+
+  it.each(["running", "failed", "cancelled", "completed"])(
+    "does not admit a %s owner without its initialized marker",
+    async (status) => {
+      const runtime = createWorkflowRuntime({
+        compiledArtifactsSource: {} as RuntimeCompiledArtifactsSource,
+        occurrenceAdmission: true,
+      });
+      getHookByTokenMock.mockImplementation(async (token: string) => {
+        if (token.includes(":admitted:")) throw new HookNotFoundError(token);
+        return { runId: "pending-owner" };
+      });
+      getRunMock.mockReturnValue({ status: Promise.resolve(status) });
+      await expect(runtime.resolveContinuation("occurrence")).rejects.toThrow(
+        status === "running" ? "initialization is pending" : "failed before admission",
+      );
+      expect(startMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("starts workflowEntry on the deployment accepting the request", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;

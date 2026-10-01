@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getWorld, getHookByToken, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { createChannelAddress } from "#channel/channel-address.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
@@ -7,6 +7,10 @@ import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/session/entry.js";
+import {
+  occurrenceClaimToken,
+  occurrenceAdmittedToken,
+} from "#execution/session/occurrence-admission.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,
@@ -431,6 +435,112 @@ describe("workflowEntry integration", () => {
       } finally {
         await run.cancel();
       }
+    });
+  });
+
+  it("retains occurrence admission after session termination and rejects a competing run", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "retained-occurrence" } });
+    const token = "eve-scheduled:retained-occurrence";
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      occurrenceAdmission: true,
+    });
+    await runtime.run(async () => {
+      const input = {
+        kind: "initial" as const,
+        ownerDeploymentId: "dpl_inline",
+        input: { message: "hello" },
+        occurrenceToken: token,
+        serializedContext: buildSerializedContext({
+          channelKind: "http",
+          continuationToken: token,
+        }),
+        sessionTimeoutMs: 25,
+      };
+      const run = await start(workflowEntry, [input]);
+      const stream = captureEvents(run);
+      try {
+        await stream.nextUntil("session completion", (event) => event.type === "session.completed");
+        await run.returnValue;
+        const retained = await getHookByToken(occurrenceClaimToken(token));
+        expect(retained.runId).toBe(run.runId);
+        await expect(workflowRuntime.resolveContinuation(token)).resolves.toEqual({
+          sessionId: run.runId,
+        });
+        const competing = await start(workflowEntry, [input]);
+        await expect(competing.returnValue).resolves.toEqual({ output: "" });
+        await expect(workflowRuntime.resolveContinuation(token)).resolves.toEqual({
+          sessionId: run.runId,
+        });
+      } finally {
+        stream.dispose();
+      }
+    });
+  });
+
+  it("admits only one of concurrent occurrence starts", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "concurrent-occurrence" } });
+    const token = "eve-scheduled:concurrent-boot";
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      occurrenceAdmission: true,
+    });
+    await runtime.run(async () => {
+      const input = {
+        kind: "initial" as const,
+        ownerDeploymentId: "dpl_inline",
+        occurrenceToken: token,
+        input: { message: "hello" },
+        sessionTimeoutMs: 25,
+        serializedContext: buildSerializedContext({
+          channelKind: "http",
+          continuationToken: token,
+        }),
+      };
+      const runs = await Promise.all([
+        start(workflowEntry, [input]),
+        start(workflowEntry, [input]),
+      ]);
+      await Promise.all(runs.map((run) => run.returnValue));
+      const owner = await workflowRuntime.resolveContinuation(token);
+      expect(runs.map((run) => run.runId)).toContain(owner?.sessionId);
+      const markers = await Promise.all(
+        runs.map(async (run) => {
+          try {
+            await getHookByToken(occurrenceAdmittedToken(token, run.runId));
+            return true;
+          } catch {
+            return false;
+          }
+        }),
+      );
+      expect(markers.filter(Boolean)).toHaveLength(1);
+    });
+  });
+
+  it("never admits an occurrence whose session initialization fails", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "failed-occurrence" } });
+    const workflowRuntime = createWorkflowRuntime({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      occurrenceAdmission: true,
+    });
+    await runtime.run(async () => {
+      const token = "eve-scheduled:failed-boot";
+      const context = buildSerializedContext({ channelKind: "http", continuationToken: token });
+      const bundle = context["eve.bundle"] as Record<string, unknown>;
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          occurrenceToken: token,
+          input: { message: "must not run" },
+          serializedContext: { ...context, "eve.bundle": { ...bundle, nodeId: "missing-node" } },
+        },
+      ]);
+      await run.returnValue.catch(() => undefined);
+      await expect(workflowRuntime.resolveContinuation(token)).rejects.toThrow(
+        "failed before admission",
+      );
     });
   });
 

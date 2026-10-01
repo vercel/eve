@@ -22,6 +22,8 @@ import { defineMcpClientConnection } from "#public/definitions/connections/mcp.j
 import { defineHook } from "#public/definitions/hook.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
+import { defineScheduleCollection } from "#public/schedules/collection.js";
+import { inMemoryScheduleProvider } from "#public/schedules/providers/in-memory.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
 import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
@@ -395,6 +397,72 @@ describe("compileAgentManifest source graph", () => {
 
     expect(order[0]).toBe("config");
     expect(order).toContain("tool");
+  });
+
+  it("materializes schedule factories once per compile", async () => {
+    const staticFactory = vi.fn(() =>
+      defineSchedule({ cron: "0 9 * * *", markdown: "Run the report." }),
+    );
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({ default: defineAgent({ model: "openai/gpt-5.4" }) }),
+      },
+      {
+        logicalPath: "schedules/daily.ts",
+        loadNamespace: async () => ({ default: staticFactory }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.schedules).toHaveLength(1);
+    expect(staticFactory).toHaveBeenCalledOnce();
+  });
+
+  it("keeps nested collection identity but flattens generated management tool names", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "schedules/billing/requests.ts",
+        loadNamespace: async () => ({
+          default: defineScheduleCollection({
+            provider: inMemoryScheduleProvider(),
+            auth: () => null,
+            deliveries: { log: { description: "Record it.", deliver: async () => {} } },
+          }),
+        }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+    expect(compiled.scheduleCollections).toContainEqual(
+      expect.objectContaining({ name: "billing/requests" }),
+    );
+    const wrapper = compiled.dynamicTools.find(
+      (tool) => tool.logicalPath === "tools/schedule__billing-requests.ts",
+    )!;
+    expect(wrapper).toMatchObject({ slug: "schedule__billing-requests" });
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const namespace = moduleMap.nodes.__root__!.modules[wrapper.sourceId]!;
+    const tools = await (namespace.default as ReturnType<typeof defineDynamic>).events[
+      "turn.started"
+    ]!(undefined, {
+      model: null,
+      session: { id: "session", auth: { current: null, initiator: null } },
+      channel: {},
+      messages: [],
+    });
+    expect(Object.keys(tools as object).sort()).toEqual([
+      "schedule__billing-requests__create",
+      "schedule__billing-requests__delete",
+      "schedule__billing-requests__disable",
+      "schedule__billing-requests__enable",
+      "schedule__billing-requests__get",
+      "schedule__billing-requests__invoke",
+      "schedule__billing-requests__list",
+      "schedule__billing-requests__update",
+    ]);
   });
 
   it("classifies compile and runtime usage from normalized authored semantics", async () => {
