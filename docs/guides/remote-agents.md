@@ -148,10 +148,13 @@ Forwarding identity is explicit on both sides. The receiver names which deployme
 
 ## Trace propagation
 
-Each remote turn starts a new trace. eve links the child trace to the
-dispatching turn and carries `gen_ai.conversation.id` so you can find the
-traces for one conversation. Trace context is observability metadata, not an
-authorization grant. See [OpenTelemetry](../observability/otel#trace-topology)
+Remote child turns join the dispatching invocation's trace beneath its caller
+span. Follow-up messages to that child session keep the owning invocation as
+their trace parent. eve carries `gen_ai.conversation.id` separately so you can
+find all turns and delegated sessions for one conversation, including later
+independent root turns with new trace IDs. A child still has its own session ID,
+message history, and agent state. Trace context is observability metadata, not
+an authorization grant. See [OpenTelemetry](../observability/otel#trace-topology)
 for the trace topology.
 
 eve carries parent session lineage separately. The receiver accepts it only

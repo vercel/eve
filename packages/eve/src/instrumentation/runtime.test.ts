@@ -147,7 +147,7 @@ describe("initializeSessionInstrumentation", () => {
       traceId: "d".repeat(32),
     });
     expect(ctx.get(SessionTraceSeedKey)?.spanId).not.toBe("c".repeat(16));
-    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("d".repeat(32));
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).toBe("d".repeat(32));
     expect(ctx.get(ParentTraceContextKey)).not.toHaveProperty("forwardedTracePolicy");
     expect(ctx.get(SessionTraceSeedKey)?.forwardedTracePolicy).toEqual({
       ceiling: { recordInputs: true, recordOutputs: true },
@@ -367,7 +367,7 @@ describe("initializeSessionInstrumentation", () => {
       decision: { action: "drop" },
       traceFlags: 0,
     });
-    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("d".repeat(32));
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).toBe("d".repeat(32));
   });
 });
 

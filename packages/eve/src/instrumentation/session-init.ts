@@ -126,7 +126,7 @@ function allocateSessionTraceSeed(input: {
         : { forwardedTracePolicy: input.forwardedTracePolicy }),
       spanId: idGenerator.allocateSpanId(),
       traceFlags: decision.action === "drop" ? 0 : input.parentTraceContext.traceFlags,
-      traceId: idGenerator.generateTraceId(),
+      traceId: input.parentTraceContext.traceId,
     };
   }
   if (input.runtime?.prepareSessionTrace === undefined || input.runtime.idGenerator === undefined)

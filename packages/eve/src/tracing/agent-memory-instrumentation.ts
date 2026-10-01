@@ -32,6 +32,8 @@ import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
+import { withConversationId } from "#tracing/conversation-context.js";
+import { resolveConversationId } from "#shared/conversation-identity.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
 
 type SpanState = { readonly context: Context; readonly span: Span };
@@ -143,7 +145,10 @@ export function createAgentMemoryInstrumentation(input: {
         : await context.with(
             markAgentTraceContext(
               withErrorContent(
-                parent,
+                withConversationId(
+                  parent,
+                  resolveConversationId(session?.rootSessionId ?? operation.sessionId),
+                ),
                 recordOutputs && effective?.action === "record" && effective.recordOutputs,
               ),
             ),

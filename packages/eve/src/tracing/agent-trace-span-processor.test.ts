@@ -67,9 +67,25 @@ describe("AgentTraceSpanProcessor", () => {
     };
     const processor = new AgentTraceSpanProcessor([child]);
     const owned = { "gen_ai.conversation.id": "session-1" };
-    const delegated = { "gen_ai.conversation.id": "child-1" };
-    processor.onStart(span("trace-1", owned), {});
-    processor.onStart(span("trace-1", delegated), {});
+    const root = {
+      ...span("trace-1", {
+        ...owned,
+        "agent.run.id": "root-session",
+        "agent.turn.id": "turn_0",
+        "gen_ai.operation.name": "invoke_agent",
+      }),
+      name: "invoke_agent root",
+    };
+    const delegated = {
+      ...root,
+      attributes: { ...root.attributes, "agent.run.id": "child-session" },
+      name: "invoke_agent child",
+      parentSpanContext: { spanId: "caller" },
+    };
+    processor.onStart(root, {});
+    processor.onStart(delegated, {});
+    processor.onEnd(delegated);
+    processor.releaseCompletedTraces();
 
     expect(processor.releaseConversation("child-1")).toBe(false);
     expect([...processor.activeTraceIds()]).toEqual(["trace-1"]);
@@ -79,7 +95,8 @@ describe("AgentTraceSpanProcessor", () => {
     processor.onEnd(later);
     expect(child.onEnd).toHaveBeenCalledWith(later);
 
-    expect(processor.releaseConversation("session-1")).toBe(true);
+    processor.onEnd(root);
+    expect(processor.releaseCompletedTraces()).toBe(true);
     expect([...processor.activeTraceIds()]).toEqual([]);
   });
 

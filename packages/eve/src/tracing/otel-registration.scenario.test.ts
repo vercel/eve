@@ -16,6 +16,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 import { registerOtelPipeline } from "#tracing/otel-registration.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
+import { withConversationId } from "#tracing/conversation-context.js";
 import { createLogger, logError } from "#internal/logging.js";
 
 const require = createRequire(import.meta.url);
@@ -128,7 +129,10 @@ describe("registerOtelPipeline", () => {
     });
     const parent = runtimeTrace.getTracer("eve").startSpan("eve.parent");
     const parentContext = parent.spanContext();
-    const activeContext = runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, parent);
+    const activeContext = withConversationId(
+      runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, parent),
+      "caller-conversation",
+    );
     const child = await runtimeContext.with(activeContext, async () => {
       await Promise.resolve();
       return authoredTracer.startSpan("authored.child");
@@ -144,6 +148,12 @@ describe("registerOtelPipeline", () => {
       .getFinishedSpans()
       .find((span) => span.name === "authored.child");
     expect(exportedChild?.parentSpanContext?.spanId).toBe(parentContext.spanId);
+    expect(exportedChild?.attributes["gen_ai.conversation.id"]).toBe("caller-conversation");
+    expect(
+      exporter.getFinishedSpans().find((span) => span.name === "eve.parent")?.attributes[
+        "gen_ai.conversation.id"
+      ],
+    ).toBeUndefined();
     await runtime.shutdown();
   });
 

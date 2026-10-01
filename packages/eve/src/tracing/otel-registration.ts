@@ -16,6 +16,7 @@ import {
 } from "#compiled/@vercel/otel/index.js";
 
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { conversationIdFromContext } from "#tracing/conversation-context.js";
 import type { OtelPipeline } from "#tracing/otel-declaration.js";
 import {
   agentInvocationSpanName,
@@ -100,6 +101,13 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
 
   onStart(span: unknown, parentContext: unknown): void {
     if (isRegistrationSpan(span)) return;
+    const conversationId = conversationIdFromContext(parentContext);
+    if (conversationId !== undefined) {
+      (span as { setAttribute(key: string, value: string): void }).setAttribute(
+        "gen_ai.conversation.id",
+        conversationId,
+      );
+    }
     const identity = spanIdentity(span);
     if (identity !== undefined) addBounded(this.startedSpans, identity);
     for (const processor of this.processors) processor.onStart(span, parentContext);

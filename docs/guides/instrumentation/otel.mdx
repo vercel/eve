@@ -139,12 +139,22 @@ invoke_agent <agent>
               └── execute_tool <tool>
 ```
 
-Each turn starts a new trace. The first subagent trace links to its caller with
-`eve.link.type=agent.dispatch`; the link is not an authorization grant. For a
-remote agent, `trustedForwarders` lets the receiver accept the sender's session
-lineage and trace-content policy. See [Remote agents](../guides/remote-agents#preserving-trace-content).
-Use `gen_ai.conversation.id` to find the traces for one conversation in your
-destination's span-search surface.
+Each independent conversation turn starts a new trace. Local and remote
+subagent turns join the owning invocation's trace beneath its dispatch span.
+A persistent child session keeps that invocation as its trace parent across
+follow-up messages; it does not reuse the parent's span ID. Without a propagated
+caller, a child turn starts its own trace.
+
+`gen_ai.conversation.id` groups the root session and its delegated sessions
+across traces. eve propagates it to spans created inside model, tool, and memory
+execution contexts, including third-party instrumentation. `agent.run.id`
+identifies the individual agent session, not the whole conversation.
+
+Conversation correlation does not share message history, agent state, credentials,
+or authorization, and does not pin execution to a worker. Remote agents carry
+the conversation ID in W3C Baggage. `trustedForwarders` separately controls whether
+the receiver accepts session lineage and trace-content policy. See
+[Remote agents](../guides/remote-agents#preserving-trace-content).
 
 ## Local traces
 

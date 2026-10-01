@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { isCurrentTurnBoundaryEvent } from "eve/client";
 
 import { readHookAudit, recordsEveryAgentStart } from "./subagent-hook-audit.shared";
 
@@ -25,6 +26,31 @@ export default defineEval({
     });
     turn.messageIncludes("api:replica-0");
     turn.messageIncludes("api:replica-1");
+    const parentTrace = turn.events.find((event) => event.type === "turn.started")?.data.trace;
+    const childTraces = await Promise.all(
+      turn.events
+        .filter((event) => event.type === "agent.started")
+        .map(async (started) => {
+          for await (const event of turn.session.agent(started).stream()) {
+            if (event.type === "turn.started") return event.data.trace;
+            if (isCurrentTurnBoundaryEvent(event)) break;
+          }
+          return undefined;
+        }),
+    );
+    turn.eventsSatisfy(
+      "parallel local children share the caller trace but not span identity",
+      () =>
+        parentTrace !== undefined &&
+        childTraces.length === 2 &&
+        childTraces.every(
+          (child) =>
+            child !== undefined &&
+            child.traceId === parentTrace.traceId &&
+            child.spanId !== parentTrace.spanId,
+        ) &&
+        new Set(childTraces.map((child) => child?.spanId)).size === 2,
+    );
     turn.eventsSatisfy("both children start before the waiting tool resolves", (events) => {
       const called = events.flatMap((event, index) =>
         event.type === "agent.started" && event.data.name === "workflow-marker" ? [index] : [],
