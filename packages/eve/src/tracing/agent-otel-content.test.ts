@@ -151,6 +151,21 @@ describe("GenAI message attributes", () => {
       '[{"finish_reason":"tool_call","parts":[{"content":"Working.","type":"text"},{"arguments":{"message":"echo"},"id":"call-1","name":"delegate","type":"tool_call"}],"role":"assistant"}]',
     );
   });
+
+  it.each([
+    ["near the limit", "line of instructions\n".repeat(1500)],
+    ["over the limit", "x".repeat(CONTENT_ATTRIBUTE_LIMIT * 2)],
+    ["escape-heavy", "\\\n".repeat(9000)],
+  ])("keeps %s system instructions as valid capped JSON", (_, instructions) => {
+    const attribute = genAiSystemInstructionsAttribute(instructions);
+
+    expect(attribute).toBeDefined();
+    expect(attribute!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+    const parsed = JSON.parse(attribute!) as Array<Record<string, unknown>>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({ type: "text" });
+    expect(parsed[0]?.content).toEqual(expect.stringContaining("… [truncated]"));
+  });
 });
 
 describe("toolResultsContentAttribute", () => {

@@ -48,8 +48,19 @@ export function genAiInputMessagesAttribute(messages: unknown): string | undefin
 
 /** Serializes the system prompt using the OpenTelemetry GenAI instruction schema. */
 export function genAiSystemInstructionsAttribute(instructions: unknown): string | undefined {
-  const text = systemPromptAttribute(instructions);
-  return text === undefined ? undefined : semanticJsonAttribute([{ content: text, type: "text" }]);
+  const text = systemPromptText(instructions);
+  if (text === undefined) return undefined;
+  if (text.length <= CONTENT_ATTRIBUTE_LIMIT) {
+    const full = semanticJsonAttribute([{ content: text, type: "text" }]);
+    if (full !== undefined) return full;
+  }
+  for (let length = Math.min(text.length, CONTENT_ATTRIBUTE_LIMIT); length > 0; length -= 256) {
+    const json = semanticJsonAttribute([
+      { content: `${text.slice(0, length)}… [truncated]`, type: "text" },
+    ]);
+    if (json !== undefined) return json;
+  }
+  return semanticJsonAttribute([{ content: "… [truncated]", type: "text" }]);
 }
 
 /** Serializes one model response using the OpenTelemetry GenAI message schema. */
@@ -103,8 +114,8 @@ function cappedToolResult(entry: Record<string, unknown>, cap: number): Record<s
 }
 
 /** Normalizes the AI SDK's `instructions` prompt to plain text. */
-export function systemPromptAttribute(instructions: unknown): string | undefined {
-  if (typeof instructions === "string") return textContentAttribute(instructions);
+function systemPromptText(instructions: unknown): string | undefined {
+  if (typeof instructions === "string") return instructions.length === 0 ? undefined : instructions;
   if (!isRecord(instructions) && !Array.isArray(instructions)) return undefined;
   const messages = Array.isArray(instructions) ? instructions : [instructions];
   const texts: string[] = [];
@@ -117,7 +128,7 @@ export function systemPromptAttribute(instructions: unknown): string | undefined
           texts.push(part.text);
   }
   const joined = texts.join("\n\n").trim();
-  return joined.length === 0 ? undefined : textContentAttribute(joined);
+  return joined.length === 0 ? undefined : joined;
 }
 
 /** Caps plain text, marking the cut. */

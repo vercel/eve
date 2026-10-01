@@ -70,20 +70,23 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
     if (turnId !== undefined && subagent !== undefined) subagents.set(turnId, subagent);
   }
   const entries: { readonly item: ConversationItem; readonly order: bigint }[] = [];
-  const firstSystemSpan = [...trace.spans]
-    .sort(compareLocalTraceSpans)
-    .find((span) => isModelSpan(span) && systemInstructionsText(span.attributes) !== undefined);
-  const systemText =
-    firstSystemSpan === undefined ? undefined : systemInstructionsText(firstSystemSpan.attributes);
-  if (firstSystemSpan !== undefined && typeof systemText === "string" && systemText.length > 0) {
+  let system: { readonly span: LocalTraceSpan; readonly text: string } | undefined;
+  for (const span of [...trace.spans].sort(compareLocalTraceSpans)) {
+    const text = isModelSpan(span) ? systemInstructionsText(span.attributes) : undefined;
+    if (text !== undefined) {
+      system = { span, text };
+      break;
+    }
+  }
+  if (system !== undefined) {
     entries.push({
       item: {
         kind: "system",
         durationMs: 0,
         error: false,
-        span: firstSystemSpan,
-        subagent: subagentFor(firstSystemSpan, subagents, byId),
-        text: systemText,
+        span: system.span,
+        subagent: subagentFor(system.span, subagents, byId),
+        text: system.text,
       },
       order: 0n,
     });
