@@ -466,12 +466,13 @@ describe("executeTask", () => {
     expect(server.posts[0]?.body).toEqual({ message: "case prompt" });
   });
 
-  it("captures independent sessions created by send", async () => {
+  it("captures independent sessions created by send, each with its own models", async () => {
     const server = createScriptedServer([
       {
         sessionId: "primary",
         events: [
           turnStarted("turn_1"),
+          stepStarted("anthropic/claude-sonnet-4.6", "turn_1"),
           messageCompleted("primary done", "turn_1"),
           turnCompleted("turn_1"),
           sessionCompleted(),
@@ -482,6 +483,8 @@ describe("executeTask", () => {
         events: [
           turnStarted("turn_2"),
           messageReceived("secondary", "turn_2"),
+          stepStarted("openai/gpt-5.1", "turn_2"),
+          stepStarted("anthropic/claude-sonnet-4.6", "turn_2", 1),
           messageCompleted("secondary done", "turn_2"),
           actionsRequested("turn_2", "get_weather"),
           turnCompleted("turn_2"),
@@ -504,9 +507,19 @@ describe("executeTask", () => {
 
     expect(result.sessionId).toBe("primary");
     expect(result.sessions?.map((session) => session.sessionId)).toEqual(["primary", "secondary"]);
-    expect(result.events).toHaveLength(10);
+    expect(result.events).toHaveLength(13);
     expect(secondaryTranscript).toBe("User:\nsecondary\n\nAssistant:\nsecondary done");
     expect(result.derived.toolCalls.map((call) => call.sessionId)).toEqual(["secondary"]);
+    expect({
+      sessions: result.sessions?.map((session) => session.derived.models),
+      combined: result.derived.models,
+    }).toEqual({
+      sessions: [
+        ["anthropic/claude-sonnet-4.6"],
+        ["openai/gpt-5.1", "anthropic/claude-sonnet-4.6"],
+      ],
+      combined: ["anthropic/claude-sonnet-4.6", "openai/gpt-5.1"],
+    });
   });
 
   it("records assertions against individual turns without leaking other turns", async () => {
@@ -1063,6 +1076,10 @@ function sessionWaiting(): UnstampedMessageStreamEvent {
 
 function sessionCompleted(): UnstampedMessageStreamEvent {
   return { type: "session.completed" };
+}
+
+function stepStarted(modelId: string, turnId: string, stepIndex = 0): UnstampedMessageStreamEvent {
+  return { data: { modelId, sequence: 1, stepIndex, turnId }, type: "step.started" };
 }
 
 function messageCompleted(message: string, turnId: string): UnstampedMessageStreamEvent {

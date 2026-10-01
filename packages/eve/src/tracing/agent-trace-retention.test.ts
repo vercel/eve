@@ -15,6 +15,7 @@ const anchor = {
   name: "workflow",
   parent: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
   rootSessionId: "session",
+  traceSessionId: "session",
   sessionId: "session",
   spanId: "3".repeat(16),
   startTimeMs: 1,

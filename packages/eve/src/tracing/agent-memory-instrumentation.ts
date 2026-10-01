@@ -23,7 +23,7 @@ import {
   resolveForwardedTraceSeed,
 } from "#shared/forwarded-trace-policy.js";
 import { genAiMemoryRecordsAttribute } from "#tracing/agent-otel-content.js";
-import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
 import { isAgentTraceContext, markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { recordAgentSpanError } from "#tracing/agent-span-error.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
@@ -32,6 +32,7 @@ import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
+import { withOperationConversation } from "#tracing/conversation-context.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
 
 type SpanState = { readonly context: Context; readonly span: Span };
@@ -143,7 +144,10 @@ export function createAgentMemoryInstrumentation(input: {
         : await context.with(
             markAgentTraceContext(
               withErrorContent(
-                parent,
+                withOperationConversation(parent, {
+                  rootSessionId: session?.rootSessionId,
+                  sessionId: operation.sessionId,
+                }),
                 recordOutputs && effective?.action === "record" && effective.recordOutputs,
               ),
             ),
@@ -164,6 +168,7 @@ function memorySpanAttributes(
     ...agentSpanNamingAttributes(event.operationName, event.operationName),
     ...agentTraceIdentityAttributes({
       rootSessionId: event.rootSessionId,
+      traceSessionId: traceSessionIdOf(event),
       sessionId: event.sessionId,
     }),
   };

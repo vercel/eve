@@ -136,6 +136,7 @@ export function buildSubagentRunInput(input: {
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,
+    traceRoot: input.parent.traceRoot,
   };
   return { childContinuationToken, runInput };
 }

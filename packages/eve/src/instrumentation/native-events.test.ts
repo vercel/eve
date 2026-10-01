@@ -53,6 +53,7 @@ describe("createInstrumentationHandleEvent", () => {
         },
         policyAgentName: "weather",
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
         sequence: 0,
         sessionId: "session-1",
         turnId: "turn_0",

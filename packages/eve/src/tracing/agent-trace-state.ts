@@ -12,6 +12,7 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 
 export interface AgentSessionTraceState {
+  readonly traceSessionId: string;
   readonly channelAudience?: ChannelAudience;
   readonly agentName?: string;
   readonly channelKind?: string;
@@ -25,6 +26,7 @@ export interface AgentSessionTraceState {
 }
 
 export interface AgentTurnTraceState {
+  readonly traceSessionId: string;
   readonly caller?: SpanContext;
   readonly channelDelivery?: AgentTurnChannelDeliveryTraceState;
   readonly context: SpanContext;
@@ -51,6 +53,7 @@ export interface AgentTurnChannelDeliveryTraceState {
 }
 
 export interface AgentActionTraceState {
+  readonly traceSessionId: string;
   readonly attemptIndex: number;
   readonly callId: string;
   readonly channelAudience?: ChannelAudience;

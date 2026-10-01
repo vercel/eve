@@ -76,6 +76,13 @@ export { type SlackFetch, type SlackTransportOptions } from "#public/channels/sl
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
 export {
+  postCompletedSlackReply,
+  type SlackCompletedReply,
+} from "#public/channels/slack/reply-delivery.js";
+
+export { SLACK_MARKDOWN_TEXT_MAX_LENGTH } from "#public/channels/slack/limits.js";
+
+export {
   defineSlackRenderer,
   type SlackRenderer,
   type SlackRendererEvents,

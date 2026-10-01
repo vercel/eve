@@ -49,17 +49,24 @@ const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
   "authored-modules",
 );
 
+export interface ExtensionMountEntry {
+  readonly mountSourcePath: string;
+  readonly packageName: string;
+  readonly sourceRoot: string;
+  readonly specifier: string;
+}
+
 export interface AuthoredModuleLoadOptions {
   readonly externalDependencies?: readonly string[];
   readonly extension?: {
     readonly mountId: string;
     /** Only filesystem mounts need a synthetic entry to bind their configuration. */
-    readonly entry?: {
-      readonly mountSourcePath: string;
-      readonly packageName: string;
-      readonly sourceRoot: string;
-      readonly specifier: string;
-    };
+    readonly entry?: ExtensionMountEntry;
+    /**
+     * Filesystem mounts enclosing `mountId`, outermost first. A mount declared inside another
+     * extension may read that extension's configuration, so those mounts bind first.
+     */
+    readonly ancestors?: readonly (ExtensionMountEntry & { readonly mountId: string })[];
     readonly evaluationId?: string;
   };
 }
@@ -156,11 +163,15 @@ export async function bundleAuthoredModuleCode(
   const packageRoot = resolveAuthoredPackageRoot(modulePath);
   const mount = options.extension?.entry;
   const mountId = options.extension?.mountId;
+  const mountChain =
+    mount === undefined
+      ? []
+      : [...(options.extension?.ancestors ?? []), { ...mount, mountId: mountId! }];
   return await buildAuthoredModuleBundle(modulePath, options, {
     packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
       packageRoot,
-      extensionSpecifier: mount?.specifier,
+      extensionSpecifiers: new Set(mountChain.map((entry) => entry.specifier)),
     }),
     plugins: [
       ...(mount === undefined
@@ -173,16 +184,17 @@ export async function bundleAuthoredModuleCode(
               },
               load(id: string) {
                 if (id !== "\0eve-compile-mount-entry") return undefined;
-                const mountImport = `${mount.mountSourcePath}?eve-mount=${encodeURIComponent(mountId!)}`;
+                const mountImports = mountChain.map(
+                  (entry) =>
+                    `import ${JSON.stringify(`${entry.mountSourcePath}?eve-mount=${encodeURIComponent(entry.mountId)}`)};`,
+                );
                 const contribution = `${modulePath}?eve-mount=${encodeURIComponent(mountId!)}`;
-                return `import ${JSON.stringify(mountImport)}; export * from ${JSON.stringify(contribution)}; import entry from ${JSON.stringify(contribution)}; export default entry;`;
+                return `${mountImports.join(" ")} export * from ${JSON.stringify(contribution)}; import entry from ${JSON.stringify(contribution)}; export default entry;`;
               },
             },
           ]),
       createAuthoredWorkflowDirectivePlugin({ appRoot: packageRoot }),
-      ...(mount === undefined
-        ? []
-        : [createExtensionMountPlugin([{ ...mount, mountId: mountId! }])!]),
+      ...(mount === undefined ? [] : [createExtensionMountPlugin(mountChain)!]),
     ],
     sourcemap: "inline",
   });

@@ -48,6 +48,10 @@ import {
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
 import {
+  withFinalReplyDelivery,
+  withUndeliveredReplyNote,
+} from "#public/channels/slack/reply-delivery.js";
+import {
   composeSlackRenderers,
   type SlackRenderChain,
   type SlackRenderedEvent,
@@ -265,6 +269,11 @@ export interface SlackChannelState {
    * `authorization.required` and approval events.
    */
   slackUsersByPrincipal?: Record<string, string>;
+  /**
+   * Error id of a final reply that never reached Slack. The next delivered
+   * message tells the model the reply was not seen, then clears it.
+   */
+  undeliveredReplyErrorId?: string | null;
 }
 
 /**
@@ -828,6 +837,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   const events = withTaskCards(
     {
       ...rendering.events,
+      "message.completed": withFinalReplyDelivery(rendering.events["message.completed"]),
       async "turn.started"(data, channel, ctx) {
         const triggeringUserId = slackUserIdFromAuthContext(ctx.session.auth.current);
         if (triggeringUserId !== undefined) {
@@ -884,7 +894,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     // is the caller of this delivery.
     deliver(payload, channel: SlackChannelContext & { readonly session: SessionHandle }) {
       recordSlackPrincipal(channel.state, channel.session.auth.current, payload);
-      return defaultDeliverResult(payload);
+      return defaultDeliverResult(withUndeliveredReplyNote(channel.state, payload));
     },
 
     routes: [

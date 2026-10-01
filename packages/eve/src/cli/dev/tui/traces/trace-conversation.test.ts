@@ -149,7 +149,14 @@ describe("buildConversationItems", () => {
   });
 
   it("marks turns dispatched by another turn as subagent items", () => {
-    const parent = weatherTurn();
+    const parent = weatherTurn().map((item) => ({
+      ...item,
+      attributes: {
+        ...item.attributes,
+        "agent.run.id": "parent-session",
+        "gen_ai.conversation.id": "conversation",
+      },
+    }));
     const parentAction = span("e".repeat(16), "agent.action", 5900, 6000, parent[0]!.spanId, {
       "agent.action.call_id": "call-7",
       "agent.action.kind": "subagent-call",
@@ -164,7 +171,9 @@ describe("buildConversationItems", () => {
       parentAction.spanId,
       {
         "agent.channel.delivery.input": JSON.stringify({ message: "delegated task" }),
-        "agent.turn.id": "turn_child",
+        "agent.turn.id": "turn_0",
+        "agent.run.id": "child-session",
+        "gen_ai.conversation.id": "conversation",
         "gen_ai.operation.name": "invoke_agent",
       },
     );

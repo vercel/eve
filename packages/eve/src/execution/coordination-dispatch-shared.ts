@@ -10,6 +10,7 @@ import {
   LocalDevRequestKey,
   type LocalDevRequestProvenance,
   ParentSessionKey,
+  TraceRootKey,
 } from "#context/keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
 import { ContextContainer } from "#context/container.js";
@@ -27,7 +28,9 @@ import {
 } from "#harness/coordination.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
-import type { SessionParent } from "#channel/types.js";
+import type { SessionParent, SessionTraceRoot } from "#channel/types.js";
+import type { ContextReader } from "#context/key.js";
+import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -80,6 +83,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   readonly plan: readonly PlanEntry[];
   readonly session: HarnessSessionBase;
   readonly sessionState: DurableSessionState;
+  /** Trace root that this session's local children inherit, when it isn't the lineage root. */
+  readonly traceRoot?: SessionTraceRoot;
   readonly workflowAgents: Readonly<Record<string, WorkflowAgentMetadata>>;
 }
 
@@ -191,8 +196,19 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
+    traceRoot: childTraceRoot(ctx, session.sessionId),
     workflowAgents: resolveWorkflowAgentMetadata(ctx),
   };
+}
+
+/**
+ * A local child normally shares its caller's lineage root as its trace
+ * session, so nothing is recorded. When the caller's trace session differs,
+ * as for a remote agent and its descendants, the child inherits it.
+ */
+function childTraceRoot(ctx: ContextReader, sessionId: string): SessionTraceRoot | undefined {
+  if (ctx.get(TraceRootKey) === undefined) return undefined;
+  return { kind: "inherited", sessionId: resolveTraceRootSessionId(ctx, sessionId) };
 }
 
 function resolveActiveSandboxSessionId(adapterState: unknown, sessionId: string): string {

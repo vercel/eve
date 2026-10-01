@@ -61,6 +61,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
         parked: false,
         messageCount: 1,
         reasoningBlockCount: 0,
+        models: [],
       },
       sessionId: "session-123",
       traceContexts: [],

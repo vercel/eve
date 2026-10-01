@@ -1065,7 +1065,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(seed!.traceFlags).toBe(0);
   });
 
-  it("inherits parent policy while allocating an independent delegated trace", async () => {
+  it("inherits parent policy and trace while allocating a distinct child span", async () => {
     const tracePolicy = vi.fn(() => false);
     installAgentOtelRuntime(new AgentSpanIdGenerator(), tracePolicy);
     mockBundleAndRun();
@@ -1100,7 +1100,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
       decision: parentTrace.decision,
       traceFlags: parentTrace.traceFlags,
     });
-    expect(seed!.traceId).not.toBe(parentTrace.traceId);
+    expect(seed!.traceId).toBe(parentTrace.traceId);
     expect(seed!.spanId).not.toBe(parentTrace.spanId);
     expect(serialized["eve.parentTraceContext"]).toEqual(parentTrace);
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);

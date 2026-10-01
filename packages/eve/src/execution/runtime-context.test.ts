@@ -243,7 +243,7 @@ describe("buildRunContext", () => {
     expect(ctx.require(ScheduleIdKey)).toBe("automatic-reports");
   });
 
-  it("stores a title only for top-level sessions", () => {
+  it("stores titles for root and remote-owned sessions, not local children", () => {
     const root = buildRunContext({
       bundle: createMinimalBundle(),
       run: {
@@ -269,6 +269,22 @@ describe("buildRunContext", () => {
 
     expect(root.get(SessionTitleKey)).toBe("Investigate the incident");
     expect(child.get(SessionTitleKey)).toBeUndefined();
+    const remote = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "eve" },
+        input: { message: "Remote task" },
+        traceRoot: { kind: "own" },
+        parent: {
+          callId: "call",
+          rootSessionId: "caller-root",
+          sessionId: "caller",
+          turn: { id: "turn_0", sequence: 0 },
+        },
+      },
+    });
+    expect(remote.get(SessionTitleKey)).toBe("Remote task");
   });
 
   it("does not invent a continuation for an ID-only run", () => {

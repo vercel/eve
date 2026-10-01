@@ -3,11 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { JsonObject } from "#shared/json.js";
 import { stampTestEvents } from "#internal/testing/events.js";
-import {
-  createEmptyDerivedFacts,
-  deriveRunFacts,
-  type DeriveRunFactsOptions,
-} from "#evals/runner/derive-run-facts.js";
+import { deriveRunFacts, type DeriveRunFactsOptions } from "#evals/runner/derive-run-facts.js";
 import type { EveEvalDerivedFacts } from "#evals/types.js";
 
 /** Fixtures are authored without envelopes; stamp them the way the wire would. */
@@ -66,6 +62,10 @@ function actionResult(input: {
   };
 }
 
+function stepStarted(modelId: string, stepIndex: number): UnstampedMessageStreamEvent {
+  return { type: "step.started", data: { modelId, sequence: 1, stepIndex, turnId: "t1" } };
+}
+
 function taskStarted(
   callId: string,
   name: string,
@@ -117,7 +117,18 @@ function inputRequested(requestIds: readonly string[]): UnstampedMessageStreamEv
 describe("deriveRunFacts", () => {
   it("returns empty facts for no events", () => {
     const facts = derive([]);
-    expect(facts).toEqual({ ...createEmptyDerivedFacts(), failureCode: undefined });
+    expect(facts).toEqual({
+      toolCalls: [],
+      toolCallCount: 0,
+      subagentCalls: [],
+      subagentCallCount: 0,
+      inputRequests: [],
+      parked: false,
+      messageCount: 0,
+      reasoningBlockCount: 0,
+      models: [],
+      failureCode: undefined,
+    });
   });
 
   it("pairs tool calls with their results by call id", () => {
@@ -421,6 +432,15 @@ describe("deriveRunFacts", () => {
         turnIndex: 0,
       },
     ]);
+  });
+
+  it("lists the models the session's steps started with, once each, in first-use order", () => {
+    const facts = derive([
+      stepStarted("anthropic/claude-sonnet-4.6", 0),
+      stepStarted("openai/gpt-5.1", 1),
+      stepStarted("anthropic/claude-sonnet-4.6", 2),
+    ]);
+    expect(facts.models).toEqual(["anthropic/claude-sonnet-4.6", "openai/gpt-5.1"]);
   });
 
   it("captures failure code from session.failed event", () => {

@@ -148,15 +148,26 @@ Forwarding identity is explicit on both sides. The receiver names which deployme
 
 ## Trace propagation
 
-Each remote turn starts a new trace. eve links the child trace to the
-dispatching turn and carries `gen_ai.conversation.id` so you can find the
-traces for one conversation. Trace context is observability metadata, not an
-authorization grant. See [OpenTelemetry](../observability/otel#trace-topology)
-for the trace topology.
+A remote child starts its own trace with a root `invoke_agent` span. When caller
+trace context is available, the first turn links to the dispatch span with
+`eve.link.type=agent.dispatch`. The receiving deployment applies its sampler.
+Later turns start new traces without the original dispatch link. The first turn
+of a local child can use the remote agent's trace as a nested span.
+
+Use `gen_ai.conversation.id` to find all turns and child sessions for one
+conversation. The child has its own session ID, message history, and agent
+state. Trace context identifies related work. It does not give authorization.
+See [OpenTelemetry](../observability/otel#trace-topology) for the trace structure.
 
 eve carries parent session lineage separately. The receiver accepts it only
 when `trustedForwarders` approves the authenticated caller; otherwise, trace
 correlation continues without it.
+
+On Vercel, a remote agent's spans and its local subagents' spans carry the
+remote session's ID as `vercel.session_id`, so the receiving project groups
+them as their own session. `gen_ai.conversation.id` still names the sender's
+conversation, and the remote agent's `agent.parent_run.id` names the calling
+session.
 
 ## Preserving trace content
 

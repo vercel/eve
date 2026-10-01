@@ -1,11 +1,13 @@
 import type { StepInput } from "#harness/types.js";
-import type { SessionParent, SessionTraceContext } from "#channel/types.js";
+import type { SessionParent, SessionTraceContext, SessionTraceRoot } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { isJsonObjectValue, type JsonObject, type JsonValue } from "#shared/json.js";
 
 export interface SubagentParentContext {
   readonly conversationId?: string;
   readonly lineage: SessionParent;
+  /** The caller's trace root, which a local child inherits. */
+  readonly traceRoot?: SessionTraceRoot;
   readonly continuationToken?: string;
   readonly traceContext?: SessionTraceContext;
   readonly originAudience?: ChannelAudience;

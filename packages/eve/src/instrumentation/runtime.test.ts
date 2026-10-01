@@ -12,6 +12,7 @@ import {
   ScheduleIdKey,
   SessionTitleKey,
   SessionTraceSeedKey,
+  TraceRootKey,
 } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
@@ -146,7 +147,7 @@ describe("initializeSessionInstrumentation", () => {
       traceId: "d".repeat(32),
     });
     expect(ctx.get(SessionTraceSeedKey)?.spanId).not.toBe("c".repeat(16));
-    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("d".repeat(32));
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).toBe("d".repeat(32));
     expect(ctx.get(ParentTraceContextKey)).not.toHaveProperty("forwardedTracePolicy");
     expect(ctx.get(SessionTraceSeedKey)?.forwardedTracePolicy).toEqual({
       ceiling: { recordInputs: true, recordOutputs: true },
@@ -366,11 +367,80 @@ describe("initializeSessionInstrumentation", () => {
       decision: { action: "drop" },
       traceFlags: 0,
     });
-    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("d".repeat(32));
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).toBe("d".repeat(32));
   });
 });
 
 describe("bindInstrumentationRuntime", () => {
+  it("carries the bound trace session through methods called under another session's context", async () => {
+    const publish = vi.fn();
+    const prepareSessionTrace = vi.fn(async (_event: unknown) => ({
+      spanId: "a".repeat(16),
+      traceId: "b".repeat(32),
+      traceFlags: 1,
+    }));
+    const prepareTurnTrace = vi.fn(async (_event: unknown) => ({
+      spanId: "a".repeat(16),
+      traceId: "b".repeat(32),
+      traceFlags: 1,
+    }));
+    const ctx = createContext();
+    ctx.set(TraceRootKey, { kind: "own" });
+    const other = createContext();
+    other.set(TraceRootKey, { kind: "inherited", sessionId: "unrelated" });
+    const bound = bindInstrumentationRuntime(
+      {
+        ...createRuntime({ capturesContent: true, publish }),
+        prepareSessionTrace,
+        prepareTurnTrace,
+        memoryOperations: true,
+      },
+      ctx,
+      boundSession,
+    )!;
+    await contextStorage.run(other, async () => {
+      await bound.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
+      await bound.memory!.execute(
+        {
+          idempotencyKey: "memory",
+          operationName: "search_memory",
+          phase: "turn.started",
+          slot: "notes",
+          storeId: "store",
+        },
+        async () => ({ value: undefined }),
+      );
+      await bound.prepareExecution().runStep(
+        {
+          environment: "test",
+          eveVersion: "test",
+          hasInput: true,
+          session: { sessionId: boundSession.sessionId },
+        },
+        async (step) => {
+          const attempt = step.prepareAttempt({
+            attemptIndex: 0,
+            stepIndex: 0,
+            turnId: "turn_0",
+          });
+          expect(attempt.scope.traceSessionId).toBe(boundSession.sessionId);
+          await attempt.complete();
+        },
+      );
+    });
+    expect(prepareSessionTrace.mock.calls[0]?.[0]).toMatchObject({
+      traceSessionId: boundSession.sessionId,
+    });
+    expect(prepareTurnTrace.mock.calls[0]?.[0]).toMatchObject({
+      traceSessionId: boundSession.sessionId,
+    });
+    expect(
+      publish.mock.calls
+        .map(([event]) => event)
+        .filter((event) => event.type.startsWith("memory."))
+        .every((event) => event.traceSessionId === boundSession.sessionId),
+    ).toBe(true);
+  });
   it("initializes conversation identity without worker controls when no runtime is loaded", () => {
     const ctx = new ContextContainer();
     expect(bindInstrumentationRuntime(undefined, ctx, boundSession)).toBeUndefined();
@@ -652,7 +722,15 @@ describe("bindInstrumentationRuntime", () => {
     expect(publish).not.toHaveBeenCalled();
   });
 
-  it("publishes memory operations with the effective session identity", async () => {
+  it.each([
+    { name: "local subagent", traceRoot: undefined, expected: "conversation-root" },
+    { name: "remote agent", traceRoot: { kind: "own" } as const, expected: "session-1" },
+    {
+      name: "remote agent's local subagent",
+      traceRoot: { kind: "inherited", sessionId: "remote-root" } as const,
+      expected: "remote-root",
+    },
+  ])("preserves the lifecycle lineage root for a $name", async ({ traceRoot, expected }) => {
     const publish = vi.fn();
     const ctx = createContext();
     ctx.set(ParentSessionKey, {
@@ -661,6 +739,7 @@ describe("bindInstrumentationRuntime", () => {
       sessionId: "parent-session",
       turn: { id: "parent-turn", sequence: 0 },
     });
+    if (traceRoot !== undefined) ctx.set(TraceRootKey, traceRoot);
     const instrumentation = bindInstrumentationRuntime(
       {
         ...createRuntime({ capturesContent: true, publish }),
@@ -687,15 +766,18 @@ describe("bindInstrumentationRuntime", () => {
       }),
     );
 
+    expect(ctx.get(ConversationIdKey)).toBe("conversation-root");
     expect(publish.mock.calls.map(([event]) => event)).toEqual([
       expect.objectContaining({
         rootSessionId: "conversation-root",
+        traceSessionId: expected,
         sessionId: "session-1",
         type: "memory.operation.started",
       }),
       expect.objectContaining({
         recordCount: 1,
         rootSessionId: "conversation-root",
+        traceSessionId: expected,
         sessionId: "session-1",
         type: "memory.operation.completed",
       }),
@@ -923,6 +1005,7 @@ describe("bindSessionInstrumentation", () => {
         context: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
         decision: { action: "record", recordInputs: false, recordOutputs: true },
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
       });
     });
 

@@ -18,6 +18,7 @@ import {
   SessionCallbackKey,
   LegacyRemoteAgentCallerKey,
   SessionTitleKey,
+  TraceRootKey,
 } from "#context/keys.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -47,7 +48,7 @@ export function buildRunContext(input: {
     ConversationContextKey,
     buildConversationContext(run, resolveInstrumentationEnvironment()),
   );
-  if (run.parent === undefined) {
+  if (run.parent === undefined || run.traceRoot?.kind === "own") {
     const title = deriveSessionTitle(run.title ?? run.input.message);
     if (title !== undefined) ctx.set(SessionTitleKey, title);
   }
@@ -100,6 +101,9 @@ export function buildRunContext(input: {
 
   if (run.parent !== undefined) {
     ctx.set(ParentSessionKey, run.parent);
+  }
+  if (run.traceRoot !== undefined) {
+    ctx.set(TraceRootKey, run.traceRoot);
   }
 
   if (run.parentTraceContext !== undefined) {

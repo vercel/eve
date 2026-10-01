@@ -12,6 +12,7 @@ import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-poli
  * protocol `step.*` events and the resolver hook fire once per step.
  */
 export interface InstrumentationAttemptScope {
+  readonly traceSessionId?: string;
   readonly channelAudience?: ChannelAudience;
   readonly attemptId: string;
   readonly attemptIndex: number;
@@ -166,6 +167,7 @@ export interface InstrumentationChannelDeliveryInput {
 }
 
 interface InstrumentationChannelDeliveryScope {
+  readonly traceSessionId?: string;
   readonly agentName?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;
   readonly idempotencyKey: string;
@@ -269,6 +271,7 @@ export interface InstrumentationStepAttemptStartedEvent {
 }
 
 export interface InstrumentationSessionStartedEvent {
+  readonly traceSessionId?: string;
   readonly type: "session.started";
   readonly agentName?: string;
   readonly channelKind?: string;
@@ -353,6 +356,7 @@ export type InstrumentationSessionTransitionEvent =
   | InstrumentationSessionFailedEvent;
 
 export interface InstrumentationTurnStartedEvent {
+  readonly traceSessionId?: string;
   readonly type: "turn.started";
   readonly agentName?: string;
   readonly currentPrincipal?: InstrumentationPrincipalSummary;

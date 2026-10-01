@@ -305,6 +305,7 @@ function createParentContext(context: AgentSessionContext, replyTo: string): Sub
     lineage: context.parent,
     originAudience: context.trace.originAudience,
     traceContext: context.trace.parentTraceContext,
+    traceRoot: context.traceRoot,
   };
 }
 

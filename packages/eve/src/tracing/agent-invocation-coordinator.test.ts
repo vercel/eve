@@ -35,6 +35,7 @@ describe("resolveToolCallAgentTrace", () => {
         store.setTurn("session-1", "turn-1", {
           context: action.parent,
           rootSessionId: "session-1",
+          traceSessionId: "session-1",
           sequence: 0,
           startTimeMs: 1,
         });
@@ -72,6 +73,7 @@ function workflowAction() {
       traceId: "1".repeat(32),
     },
     rootSessionId: "session-1",
+    traceSessionId: "session-1",
     sessionId: "session-1",
     spanId: "3".repeat(16),
     startTimeMs: 1,

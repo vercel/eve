@@ -13,6 +13,7 @@ function turn(overrides: Partial<AgentTurnTraceState> = {}): AgentTurnTraceState
   return {
     context,
     rootSessionId: "root-session",
+    traceSessionId: "root-session",
     sequence: 0,
     startTimeMs: 1,
     ...overrides,
@@ -27,12 +28,66 @@ function session(overrides: Partial<AgentSessionTraceState> = {}): AgentSessionT
     context,
     decision: { action: "record", recordInputs: true, recordOutputs: true },
     rootSessionId: "root-session",
+    traceSessionId: "root-session",
     title: "Call the general agent",
     ...overrides,
   };
 }
 
 describe("agentActivationAttributes", () => {
+  it.each([
+    {
+      name: "root",
+      sessionId: "root-session",
+      traceSessionId: "root-session",
+      parent: undefined,
+      ownsMetadata: true,
+    },
+    {
+      name: "remote",
+      sessionId: "remote-session",
+      traceSessionId: "remote-session",
+      parent: "caller",
+      ownsMetadata: true,
+    },
+    {
+      name: "remote local child",
+      sessionId: "child",
+      traceSessionId: "remote-session",
+      parent: "remote-session",
+      ownsMetadata: false,
+    },
+    {
+      name: "local child",
+      sessionId: "child",
+      traceSessionId: "root-session",
+      parent: "root-session",
+      ownsMetadata: false,
+    },
+  ])(
+    "derives $name metadata ownership from explicit session identity",
+    ({ sessionId, traceSessionId, parent, ownsMetadata }) => {
+      const attributes = agentActivationAttributes({
+        frameworkVersion: "test",
+        session: session({ traceSessionId, channelKind: "http", title: "Task" }),
+        sessionId,
+        turnId: "turn_0",
+        turn: turn({
+          traceSessionId,
+          parentLineage:
+            parent === undefined
+              ? undefined
+              : { sessionId: parent, callId: "call", turnId: "turn_0" },
+        }),
+      });
+      expect(attributes["agent.channel.kind"]).toBe(ownsMetadata ? "http" : undefined);
+      expect(attributes["agent.session.origin"]).toBe(ownsMetadata ? "channel" : undefined);
+      expect(attributes["agent.session.title"]).toBe(ownsMetadata ? "Task" : undefined);
+      expect(attributes["agent.run.type"]).toBe(parent === undefined ? "session" : "subagent");
+      expect(attributes["agent.parent_run.id"]).toBe(parent);
+      expect(attributes["agent.parent_call.id"]).toBe(parent === undefined ? undefined : "call");
+    },
+  );
   it("emits root-session inventory and trace-policy metadata", () => {
     expect(
       agentActivationAttributes({
