@@ -31,16 +31,21 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   onStart(span: unknown, parentContext: unknown): void {
     if (!isSpanLike(span)) return;
     const conversationId = span.attributes["gen_ai.conversation.id"];
+    const runId = span.attributes["agent.run.id"];
     if (typeof conversationId === "string") {
       const traceId = span.spanContext().traceId;
       const known = this.#ownedTraceIds.has(traceId) || this.#rememberedTraceIds.has(traceId);
       if (!known) {
         this.#ownedTraceIds.add(traceId);
-        const runId = span.attributes["agent.run.id"];
         this.#traceOwnership.set(traceId, {
           conversationId,
           ownerRunId: typeof runId === "string" ? runId : undefined,
         });
+      } else if (
+        this.#traceOwnership.get(traceId)?.ownerRunId === undefined &&
+        typeof runId === "string"
+      ) {
+        this.#traceOwnership.set(traceId, { conversationId, ownerRunId: runId });
       }
     }
     if (!this.#accepts(span)) return;

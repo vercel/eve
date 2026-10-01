@@ -298,7 +298,7 @@ describe("exported agent telemetry contract", () => {
     }
   });
 
-  it("exports nested remote and local invocations with the remote project's session grouping", async () => {
+  it("exports remote roots and a nested local child with the remote project's session grouping", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     const runtime = createRuntime();
     const caller = {
@@ -383,13 +383,38 @@ describe("exported agent telemetry contract", () => {
         (span) => span.attributes["agent.run.id"] === "remote-session",
       );
       expect(remoteTurns).toHaveLength(2);
-      expect(remoteTurns[0]!.parentSpanId).toBe(caller.spanId);
-      expect(remoteTurns[0]!.traceId).toBe(caller.traceId);
+      expect(remoteTurns[0]!.parentSpanId).toBeUndefined();
+      expect(remoteTurns[0]!.traceId).not.toBe(caller.traceId);
+      expect(remoteSpan.links).toEqual([
+        { context: caller, attributes: { "eve.link.type": "agent.dispatch" } },
+      ]);
       expect(remoteTurns[1]!.parentSpanId).toBeUndefined();
       expect(remoteTurns[1]!.traceId).not.toBe(caller.traceId);
       const local = parsed.find((span) => span.attributes["agent.run.id"] === "local-session")!;
       expect(local.parentSpanId).toBe(remoteSpan.spanContext().spanId);
       expect(local.attributes["agent.parent_run.id"]).toBe("remote-session");
+      // Downstream readers use this export; normalize host metadata and clock values for CI.
+      const fixture = JSON.parse(serialized) as unknown;
+      const normalizeTimes = (value: unknown): void => {
+        if (Array.isArray(value)) {
+          for (const child of value) normalizeTimes(child);
+          return;
+        }
+        if (value === null || typeof value !== "object") return;
+        if (Reflect.get(value, "key") === "service.name") {
+          Reflect.set(value, "value", { stringValue: "eve-trace-contract" });
+        }
+        for (const [key, child] of Object.entries(value)) {
+          if (key === "startTimeUnixNano" || key === "timeUnixNano")
+            Reflect.set(value, key, "1700000000000000000");
+          else if (key === "endTimeUnixNano") Reflect.set(value, key, "1700000000001000000");
+          else normalizeTimes(child);
+        }
+      };
+      normalizeTimes(fixture);
+      await expect(`${JSON.stringify(fixture, null, 2)}\n`).toMatchFileSnapshot(
+        "./test-data/remote-local-agent-trace.otlp.json",
+      );
     } finally {
       await runtime.shutdown();
       vi.unstubAllEnvs();

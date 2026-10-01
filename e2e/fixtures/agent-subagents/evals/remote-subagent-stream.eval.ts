@@ -47,11 +47,11 @@ export default defineEval({
     const parentTrace = turn.events.find((event) => event.type === "turn.started")?.data.trace;
     const childTrace = childEvents.find((event) => event.type === "turn.started")?.data.trace;
     turn.eventsSatisfy(
-      "remote dispatch preserves trace affinity with a distinct child span",
+      "remote dispatch starts a distinct child trace",
       () =>
         parentTrace !== undefined &&
         childTrace !== undefined &&
-        childTrace.traceId === parentTrace.traceId &&
+        childTrace.traceId !== parentTrace.traceId &&
         childTrace.spanId !== parentTrace.spanId,
     );
     t.succeeded();

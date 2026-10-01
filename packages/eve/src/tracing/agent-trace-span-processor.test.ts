@@ -3,6 +3,24 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentTraceSpanProcessor } from "#tracing/agent-trace-span-processor.js";
 
 describe("AgentTraceSpanProcessor", () => {
+  it("adopts the activation owner after a third-party span arrives first", () => {
+    const processor = new AgentTraceSpanProcessor([]);
+    const attributes = { "gen_ai.conversation.id": "conversation" };
+    processor.onStart(span("trace", attributes), {});
+    const activation = {
+      ...span("trace", {
+        ...attributes,
+        "agent.run.id": "run",
+        "agent.turn.id": "turn_0",
+        "gen_ai.operation.name": "invoke_agent",
+      }),
+      name: "invoke_agent root",
+    };
+    processor.onStart(activation, {});
+    processor.onEnd(activation);
+    expect(processor.releaseCompletedTraces()).toBe(true);
+    expect([...processor.activeTraceIds()]).toEqual([]);
+  });
   it("routes an agent trace and releases it at session terminal", () => {
     const child = {
       forceFlush: vi.fn(async () => {}),

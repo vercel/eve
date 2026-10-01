@@ -137,6 +137,12 @@ describe("registerOtelPipeline", () => {
       await Promise.resolve();
       return authoredTracer.startSpan("authored.child");
     });
+    const authoredConversation = await runtimeContext.with(activeContext, () =>
+      authoredTracer.startSpan("authored.conversation", {
+        attributes: { "gen_ai.conversation.id": "authored-id" },
+      }),
+    );
+    authoredConversation.end();
 
     expect(child.isRecording()).toBe(true);
     expect(child.spanContext().traceId).toBe(parentContext.traceId);
@@ -149,6 +155,11 @@ describe("registerOtelPipeline", () => {
       .find((span) => span.name === "authored.child");
     expect(exportedChild?.parentSpanContext?.spanId).toBe(parentContext.spanId);
     expect(exportedChild?.attributes["gen_ai.conversation.id"]).toBe("caller-conversation");
+    expect(
+      exporter.getFinishedSpans().find((span) => span.name === "authored.conversation")?.attributes[
+        "gen_ai.conversation.id"
+      ],
+    ).toBe("authored-id");
     expect(
       exporter.getFinishedSpans().find((span) => span.name === "eve.parent")?.attributes[
         "gen_ai.conversation.id"

@@ -1268,9 +1268,11 @@ describe("createAgentOtelInstrumentation", () => {
     const turn = byName(spans, "invoke_agent weather")[0]!;
     expect(byName(spans, "agent.session")).toHaveLength(0);
     expect(byName(spans, "agent.channel.delivery")).toHaveLength(0);
-    expect(turn.parentSpanContext).toEqual(parentTraceContext);
-    expect(turn.links).toEqual([]);
-    expect(turn.spanContext().traceId).toBe(parentTraceContext.traceId);
+    expect(turn.parentSpanContext).toBeUndefined();
+    expect(turn.links).toEqual([
+      { context: parentTraceContext, attributes: { "eve.link.type": "agent.dispatch" } },
+    ]);
+    expect(turn.spanContext().traceId).not.toBe(parentTraceContext.traceId);
     expect(turn.attributes).toMatchObject({
       "gen_ai.conversation.id": "parent-session",
       "gen_ai.operation.name": "invoke_agent",
@@ -3180,8 +3182,52 @@ describe("createAgentOtelInstrumentation", () => {
     expect(byName(spans, "agent.session")).toHaveLength(0);
   });
 
-  it("nests a remote child beneath the propagated dispatch span", async () => {
-    const runtime = createRuntime();
+  it("exports a local child when its durable dispatch never terminates", async () => {
+    const store = new InMemoryAgentTraceStateStore();
+    const runtime = createRuntime(store);
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: "parent",
+      turnId: "turn_0",
+      turnSequence: 0,
+    });
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "parent:turn_0:0:0",
+      attemptIndex: 0,
+      sessionId: "parent",
+      turnId: "turn_0",
+      stepIndex: 0,
+    };
+    const key = actionIdempotencyKey("parent", "turn_0", "dispatch");
+    await runtime.hooks.publish({
+      type: "action.started",
+      idempotencyKey: key,
+      scope,
+      callId: "dispatch",
+      name: "child",
+      kind: "subagent-call",
+    });
+    const action = (await store.getAction(key))!;
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: "child",
+      rootSessionId: "parent",
+      turnId: "turn_0",
+      turnSequence: 0,
+      parentTraceContext: { ...action.parent, spanId: action.spanId },
+    });
+    await completeTurn(runtime.hooks, "child", "turn_0");
+    await runtime.provider.forceFlush();
+    const spans = runtime.exporter.getFinishedSpans();
+    expect(byName(spans, "agent.action")).toHaveLength(0);
+    const child = byName(spans, "invoke_agent weather")[0]!;
+    expect(child.parentSpanContext?.spanId).toBe(action.spanId);
+    expect(child.spanContext().traceId).toBe(action.parent.traceId);
+  });
+
+  it("starts a remote root with a dispatch link and receiver sampling", async () => {
+    const samplesTrace = vi.fn(() => true);
+    const runtime = createRuntime(undefined, undefined, [], samplesTrace);
     const parentTraceContext: InstrumentationTraceContext & { readonly isRemote: true } = {
       isRemote: true,
       spanId: "2".repeat(16),
@@ -3200,9 +3246,12 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const childTurn = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
-    expect(childTurn.spanContext().traceId).toBe(parentTraceContext.traceId);
-    expect(childTurn.parentSpanContext).toEqual(parentTraceContext);
-    expect(childTurn.links).toEqual([]);
+    expect(childTurn.spanContext().traceId).not.toBe(parentTraceContext.traceId);
+    expect(childTurn.parentSpanContext).toBeUndefined();
+    expect(childTurn.links).toEqual([
+      { context: parentTraceContext, attributes: { "eve.link.type": "agent.dispatch" } },
+    ]);
+    expect(samplesTrace).toHaveBeenCalled();
   });
 
   it("opens its own root when a child session is handed no parent trace", async () => {

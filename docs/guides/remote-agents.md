@@ -148,10 +148,11 @@ Forwarding identity is explicit on both sides. The receiver names which deployme
 
 ## Trace propagation
 
-If eve receives the caller's trace context, the first remote child turn uses the
-caller's trace. Its span is a child of the dispatch span. Later turns in that
-child session start new traces. They do not use the original dispatch span as
-their parent.
+A remote child starts its own trace with a root `invoke_agent` span. When caller
+trace context is available, the first turn links to the dispatch span with
+`eve.link.type=agent.dispatch`. The receiving deployment applies its sampler.
+Later turns start new traces without the original dispatch link. The first turn
+of a local child can use the remote agent's trace as a nested span.
 
 Use `gen_ai.conversation.id` to find all turns and child sessions for one
 conversation. The child has its own session ID, message history, and agent

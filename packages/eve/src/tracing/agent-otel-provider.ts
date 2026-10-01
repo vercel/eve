@@ -308,7 +308,9 @@ export function createAgentOtelInstrumentation(
         if (isSampledTrace(turn.context)) {
           const agentName = session?.agentName ?? turn.subagentName;
           const parentContext = withChannelAudience(
-            turn.caller === undefined ? ROOT_CONTEXT : contextFromSpanContext(turn.caller),
+            turn.caller === undefined || turn.caller.isRemote === true
+              ? ROOT_CONTEXT
+              : contextFromSpanContext(turn.caller),
             session?.channelAudience,
           );
           const startSpan = () =>
@@ -325,7 +327,7 @@ export function createAgentOtelInstrumentation(
                 }),
                 kind: SpanKind.INTERNAL,
                 links: agentActivationLinks(turn),
-                root: turn.caller === undefined,
+                root: turn.caller === undefined || turn.caller.isRemote === true,
                 startTime: turn.startTimeMs,
               },
               parentContext,
@@ -631,6 +633,9 @@ export function createAgentOtelInstrumentation(
 
 function agentActivationLinks(turn: AgentTurnTraceState): Link[] | undefined {
   const links: Link[] = [];
+  if (turn.caller?.isRemote === true) {
+    links.push({ context: turn.caller, attributes: { "eve.link.type": "agent.dispatch" } });
+  }
   if (turn.channelDelivery?.requestTraceContext !== undefined) {
     links.push({
       context: turn.channelDelivery.requestTraceContext,

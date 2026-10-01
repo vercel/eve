@@ -102,7 +102,11 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
   onStart(span: unknown, parentContext: unknown): void {
     if (isRegistrationSpan(span)) return;
     const conversationId = conversationIdFromContext(parentContext);
-    if (conversationId !== undefined) {
+    if (
+      conversationId !== undefined &&
+      (span as { attributes?: Record<string, unknown> }).attributes?.["gen_ai.conversation.id"] ===
+        undefined
+    ) {
       (span as { setAttribute(key: string, value: string): void }).setAttribute(
         "gen_ai.conversation.id",
         conversationId,
