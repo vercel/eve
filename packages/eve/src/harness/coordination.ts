@@ -157,12 +157,12 @@ function approvedSiblingCalls(
 /**
  * Stores one pending coordination batch on the session.
  */
-export function setPendingCoordinationBatch(input: {
+export function setPendingCoordinationBatch<T extends { readonly state?: SessionStateMap }>(input: {
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly event: PendingCoordinationEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
-  readonly session: HarnessSession;
-}): HarnessSession {
+  readonly session: T;
+}): T {
   assertUniqueCoordinationCallIds(input.tasks);
   const state = { ...input.session.state };
   state[PENDING_COORDINATION_BATCH_KEY] = {

@@ -70,16 +70,14 @@ export type SessionAgent = SessionAgentBase &
   );
 
 /**
- * Serializable session state passed between harness and runtime.
- *
- * Only contains plain data -- no resolved model instances or tool execute
- * functions. The harness resolves those at step time via injected config.
+ * A {@link HarnessSession} without its conversation history. Session steps
+ * that only publish events or change `state` rebuild this, so the history
+ * never becomes part of their Workflow step input.
  */
-export interface HarnessSession {
+export interface HarnessSessionBase {
   readonly agent: SessionAgent;
   readonly compaction: CompactionConfig;
   readonly continuationToken: string;
-  readonly history: HarnessModelMessage[];
   readonly limits?: SessionLimits;
   readonly outputSchema?: JsonObject;
   /**
@@ -94,6 +92,16 @@ export interface HarnessSession {
   readonly sessionId: string;
   readonly sandboxState?: SandboxState;
   readonly state?: SessionStateMap;
+}
+
+/**
+ * Serializable session state passed between harness and runtime.
+ *
+ * Only contains plain data -- no resolved model instances or tool execute
+ * functions. The harness resolves those at step time via injected config.
+ */
+export interface HarnessSession extends HarnessSessionBase {
+  readonly history: HarnessModelMessage[];
 }
 
 export function requireSessionModelReference(session: HarnessSession): RuntimeModelReference {

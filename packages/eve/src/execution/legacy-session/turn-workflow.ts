@@ -49,6 +49,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
         notify: (result) =>
           completeLegacyDriverStep({
             completionToken: prepared.input.completionToken,
+            history: prepared.history,
             result,
             serializedContext: prepared.serializedContext,
             sessionState: prepared.sessionState,
@@ -58,6 +59,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
       caller: undefined,
       capabilities: prepared.input.capabilities,
       deploymentId: prepared.deploymentId,
+      history: interrupted.history,
       initialInput:
         prepared.input.delivery === undefined
           ? undefined

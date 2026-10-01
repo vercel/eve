@@ -1,5 +1,5 @@
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSessionBase } from "#harness/types.js";
 import type { SandboxAccess, SandboxState } from "#sandbox/state.js";
 import type { ContextContainer } from "#context/container.js";
 import { SandboxKey, SessionIdKey } from "#context/keys.js";
@@ -10,7 +10,7 @@ import type { FrameworkContextProvider } from "#context/provider.js";
 export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
   key: SandboxKey,
 
-  async create(ctx: ContextContainer, session: HarnessSession) {
+  async create(ctx: ContextContainer, session: HarnessSessionBase) {
     const bundle = ctx.get(BundleKey);
     if (bundle === undefined) return undefined;
     const node = getActiveRuntimeNode(ctx);

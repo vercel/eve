@@ -85,7 +85,13 @@ function stepWork<I extends Partial<SessionStateValues>, R extends Partial<Sessi
 ): (input: I) => Promise<WithSessionStateDelta<R>> {
   return (input) => withSessionStateDelta(input, work);
 }
-const turnStepWork = stepWork<TurnStepInput, DurableStepResult>;
+/** These turns leave the history alone, so their work omits it, which the delta reads as unchanged. */
+type TurnStepWorkResult = DurableStepResult extends infer R
+  ? R extends unknown
+    ? Omit<R, "history">
+    : never
+  : never;
+const turnStepWork = stepWork<TurnStepInput, TurnStepWorkResult>;
 const dispatchWork = stepWork<
   Parameters<typeof dispatchCoordinationStep>[0],
   CoordinationDispatchResult
@@ -1020,6 +1026,7 @@ describe("SessionExecution checkpoints", () => {
         dispatchWork(async () => ({ results: [], serializedContext: {}, sessionState })),
       );
     const cursor = new SessionStateCursor({
+      history: [],
       inbox,
       serializedContext: {},
       sessionState,
@@ -1388,6 +1395,7 @@ function createCursor(input: {
   readonly sessionState: DurableSessionState;
 }): SessionStateCursor {
   return new SessionStateCursor({
+    history: [],
     inbox: input.inbox,
     sessionWritable: new WritableStream<Uint8Array>(),
     serializedContext: input.serializedContext ?? {},
@@ -1419,6 +1427,5 @@ function state(continuationToken: string): DurableSessionState {
     emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
     hasProxyInputRequests: false,
     sessionId: "session-1",
-    version: 1,
   });
 }

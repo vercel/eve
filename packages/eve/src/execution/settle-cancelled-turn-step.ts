@@ -3,13 +3,18 @@ import {
   getPendingCoordinationBatch,
 } from "#harness/coordination.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { publishFromSessionStep, restoreSessionStep } from "#execution/publish-session-events.js";
+import {
+  publishFromSessionStep,
+  restoreSessionStep,
+  type SessionHistoryStepState,
+} from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
 import { relayWithdrawnRequests } from "#execution/tools/workflow/withdraw-step.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
@@ -19,19 +24,18 @@ import type { TokenUsage } from "#shared/token-usage.js";
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly history: HarnessModelMessage[];
   /** What the session spent since its caller's last report, when asked to report it. */
   readonly usage?: TokenUsage;
 }
 
-interface CancelledTurnSettleInput {
+/** Takes the history because the turn's pending calls move into it, each answered as cancelled. */
+interface CancelledTurnSettleInput extends SessionHistoryStepState {
   /**
    * Whether a caller receives the turn's usage. Only then is it marked
    * reported; otherwise the next settled turn reports it.
    */
   readonly reportUsage: boolean;
-  readonly sessionWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
 }
 
 /**
@@ -54,7 +58,10 @@ export async function settleCancelledTurn(
 ): Promise<CancelledTurnSettleResult> {
   // The cancel stopped every descendant and task, so nobody can answer a request the session relays.
   const relayed = await relayWithdrawnRequests(input, () => true);
-  const step = await restoreSessionStep({ ...relayed, sessionWritable: input.sessionWritable });
+  const step = {
+    ...(await restoreSessionStep({ ...relayed, sessionWritable: input.sessionWritable })),
+    history: input.history,
+  };
   const durableState = step.durableSession.state;
   const { published, result: usage } = await publishFromSessionStep(step, {
     origin: "own",

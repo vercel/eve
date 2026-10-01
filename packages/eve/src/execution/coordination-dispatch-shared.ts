@@ -19,7 +19,7 @@ import {
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext } from "#context/serialize.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSessionBase } from "#harness/types.js";
 import {
   assertUniqueCoordinationCallIds,
   getPendingCoordinationBatch,
@@ -78,7 +78,7 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly PlanEntry[];
-  readonly session: HarnessSession;
+  readonly session: HarnessSessionBase;
   readonly sessionState: DurableSessionState;
   readonly workflowAgents: Readonly<Record<string, WorkflowAgentMetadata>>;
 }
@@ -146,7 +146,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     readonly bundle: CompiledBundle;
     readonly ctx: ContextContainer;
     readonly requests: DispatchBatch["requests"];
-    readonly session: HarnessSession;
+    readonly session: HarnessSessionBase;
   }) => readonly PlanEntry[];
   readonly serializedContext: Record<string, unknown>;
 }): Promise<Omit<PreparedCoordinationDispatch<PlanEntry>, "sessionState">> {

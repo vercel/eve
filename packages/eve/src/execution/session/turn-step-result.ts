@@ -1,4 +1,4 @@
-import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { createDurableSessionValues } from "#execution/durable-session-store.js";
 import { derivePendingState } from "#execution/session/pending-turn-state.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
@@ -8,13 +8,11 @@ export function resolveSessionStepResult(
   stepResult: StepResult,
   nextSerializedContext: Record<string, unknown>,
 ): DurableStepResult {
-  const nextState = createDurableSessionState({ session: stepResult.session });
-  if (stepResult.steered)
-    return {
-      action: "steered",
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
-    };
+  const values = {
+    serializedContext: nextSerializedContext,
+    ...createDurableSessionValues(stepResult.session),
+  };
+  if (stepResult.steered) return { action: "steered", ...values };
 
   if (
     stepResult.next !== null &&
@@ -26,20 +24,14 @@ export function resolveSessionStepResult(
       action: "done",
       output: stepResult.next.output,
       isError: stepResult.next.isError,
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
+      ...values,
       usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
       usageDelta: takeSessionUsageDelta(stepResult.session).delta,
     };
   }
 
   if (stepResult.held !== undefined) {
-    return {
-      action: "held",
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
-      taskIds: stepResult.held.taskIds,
-    };
+    return { action: "held", ...values, taskIds: stepResult.held.taskIds };
   }
 
   if (stepResult.next === null) {
@@ -52,7 +44,7 @@ export function resolveSessionStepResult(
         action: "park",
         ...pending,
         serializedContext: nextSerializedContext,
-        sessionState: createDurableSessionState({ session: reportedSession }),
+        ...createDurableSessionValues(reportedSession),
         settled: {
           output: stepResult.settledTurn.output,
           isError: stepResult.settledTurn.isError,
@@ -61,17 +53,8 @@ export function resolveSessionStepResult(
       };
     }
 
-    return {
-      action: "park",
-      ...pending,
-      serializedContext: nextSerializedContext,
-      sessionState: nextState,
-    };
+    return { action: "park", ...pending, ...values };
   }
 
-  return {
-    action: "continue",
-    serializedContext: nextSerializedContext,
-    sessionState: nextState,
-  };
+  return { action: "continue", ...values };
 }

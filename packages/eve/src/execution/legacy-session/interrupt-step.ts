@@ -14,15 +14,8 @@ import type { PreparedLegacySession } from "./prepare-step.js";
 /** Only the elected importer may stop work or append cancellation events. */
 export async function interruptLegacySessionStep(prepared: PreparedLegacySession) {
   "use step";
-  const originalState = {
-    ...prepared.sessionState,
-    snapshot: {
-      session: {
-        ...prepared.originalSession,
-        history: prepared.sessionState.snapshot.session.history,
-      },
-    },
-  };
+  const { history: _history, ...originalSession } = prepared.originalSession;
+  const originalState = { ...prepared.sessionState, snapshot: { session: originalSession } };
   try {
     await terminateChildSessionsStep({ sessionState: originalState });
   } catch (error) {
@@ -78,10 +71,12 @@ export async function interruptLegacySessionStep(prepared: PreparedLegacySession
   }
   if (prepared.input.inputCommitted || prepared.sessionState.emissionState.turnId === "")
     return {
+      history: prepared.history,
       sessionState: prepared.sessionState,
       serializedContext: prepared.serializedContext,
     };
   return await settleCancelledTurn({
+    history: prepared.history,
     reportUsage: false,
     sessionWritable: prepared.input.sessionWritable,
     serializedContext: prepared.serializedContext,

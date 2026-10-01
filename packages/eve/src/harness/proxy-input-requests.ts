@@ -1,6 +1,6 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
-import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import type { HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import { inputOptionSchema, type InputOption, type InputRequestKind } from "#shared/input.js";
 import {
   isSessionInboxAddress,
@@ -94,12 +94,12 @@ export function hasProxyInputRequests(state: SessionStateMap | undefined): boole
  * parent never keeps stale request metadata. Other sources' routes stay
  * independently answerable.
  */
-export function upsertProxyInputRequests(input: {
+export function upsertProxyInputRequests<S extends HarnessSessionBase>(input: {
   readonly inputSource?: string;
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
   readonly forChildContinuationToken: string;
-  readonly session: HarnessSession;
-}): HarnessSession {
+  readonly session: S;
+}): S {
   return {
     ...input.session,
     state: upsertProxyInputRequestState({

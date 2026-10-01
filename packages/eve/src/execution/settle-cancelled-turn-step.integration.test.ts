@@ -82,6 +82,7 @@ describe("settleCancelledTurnStep", () => {
       const cancelling = spend(settled, 50, "turn_2");
 
       const result = await settleCancelledTurn({
+        history: [],
         reportUsage,
         serializedContext,
         sessionState: { ...base, snapshot: { session: cancelling } },
@@ -113,6 +114,7 @@ describe("settleCancelledTurnStep", () => {
     );
 
     const result = await settleCancelledTurn({
+      history: [],
       reportUsage: false,
       serializedContext,
       sessionState: { ...base, snapshot: { session: { ...base.snapshot.session, state } } },

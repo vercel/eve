@@ -2,6 +2,7 @@ import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
 import type { TaskToolCall } from "#execution/tasks/calls.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SettledTurn } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -33,11 +34,13 @@ export interface TurnStepInput {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly history: HarnessModelMessage[];
 }
 
 interface DurableStepResultFields {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly history: HarnessModelMessage[];
 }
 
 /** What one turn step's work produces, with the session state it leaves. */

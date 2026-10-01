@@ -52,6 +52,7 @@ describe("handleWorkflowToolRunMessage", () => {
     const events: MessageStreamEvent[] = [];
     const decoder = new TextDecoder();
     const cursor = new SessionStateCursor({
+      history: [],
       inbox: { claimSessionHooks: async () => {} },
       serializedContext,
       sessionState: {

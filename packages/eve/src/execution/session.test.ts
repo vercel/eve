@@ -153,16 +153,6 @@ describe("createSession", () => {
     expect(refreshed.history).toEqual([
       { content: "Pinned tenant policy.", kind: "user", role: "user" },
     ]);
-
-    const hydrated = hydrateDurableSession({
-      durable: projectToDurableSession(refreshed),
-      turnAgent: createTestTurnAgent({
-        initialMessages: [{ content: "Another deployment policy.", kind: "user", role: "user" }],
-      }),
-    });
-    expect(hydrated.history).toEqual([
-      { content: "Pinned tenant policy.", kind: "user", role: "user" },
-    ]);
   });
 
   it("defaults description and inputSchema when null", () => {
@@ -296,7 +286,6 @@ describe("createSession", () => {
       durable: {
         agent: { system: "You are a helpful assistant." },
         continuationToken: "root-token",
-        history: [],
         sessionId: "sess-root",
       },
       turnAgent: createTestTurnAgent(),
@@ -310,7 +299,6 @@ describe("createSession", () => {
       durable: {
         agent: { system: "You are a helpful assistant." },
         continuationToken: "subagent-token",
-        history: [],
         limits: {},
         rootSessionId: "sess-root",
         sessionId: "sess-child",

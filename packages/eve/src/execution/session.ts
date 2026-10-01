@@ -1,8 +1,8 @@
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { formatAvailableSkillsSection } from "#execution/skills/instructions.js";
-import { validateHarnessModelMessages } from "#harness/messages.js";
 import type {
   HarnessSession,
+  HarnessSessionBase,
   SessionAgent,
   SessionLimits,
   SessionToolDefinition,
@@ -171,13 +171,13 @@ export function mintSubagentContinuationToken(suffix?: string): string {
 }
 
 /**
- * Projects a {@link HarnessSession} to {@link DurableSession}.
+ * Projects a {@link HarnessSessionBase} to {@link DurableSession}.
  *
  * Drops fields rebuilt every turn from `bundle.turnAgent`; keeps
  * `agent.system` and `compaction.lastKnown*` so compaction stays
  * informed after rehydration.
  */
-export function projectToDurableSession(session: HarnessSession): DurableSession {
+export function projectToDurableSession(session: HarnessSessionBase): DurableSession {
   const durable: {
     agent: { system: string };
     compaction?: {
@@ -185,7 +185,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
       lastKnownPromptMessageCount?: number;
     };
     continuationToken: string;
-    history: HarnessSession["history"];
     limits?: HarnessSession["limits"];
     outputSchema?: HarnessSession["outputSchema"];
     rootSessionId?: string;
@@ -195,7 +194,6 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   } = {
     agent: { system: session.agent.system },
     continuationToken: session.continuationToken,
-    history: session.history,
     sessionId: session.sessionId,
   };
 
@@ -227,7 +225,7 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
 }
 
 /**
- * Rehydrates a {@link HarnessSession} from a {@link DurableSession}
+ * Rehydrates a {@link HarnessSessionBase} from a {@link DurableSession}
  * plus the current `turnAgent`, rebuilding the runtime-only agent and
  * compaction fields the durable shape omits.
  */
@@ -237,12 +235,12 @@ export function hydrateDurableSession(input: {
   readonly compactionOverrides?: {
     readonly thresholdPercent?: number;
   };
-}): HarnessSession {
+}): HarnessSessionBase {
   const { durable, turnAgent } = input;
   const tools = createSessionToolDefinitions(turnAgent);
 
   const session: {
-    -readonly [K in keyof HarnessSession]: HarnessSession[K];
+    -readonly [K in keyof HarnessSessionBase]: HarnessSessionBase[K];
   } = {
     agent: createSessionAgent(turnAgent, durable.agent.system, tools),
     compaction: createCompactionConfig({
@@ -252,7 +250,6 @@ export function hydrateDurableSession(input: {
       thresholdPercent: input.compactionOverrides?.thresholdPercent,
     }),
     continuationToken: durable.continuationToken,
-    history: validateHarnessModelMessages(durable.history),
     sessionId: durable.sessionId,
   };
 

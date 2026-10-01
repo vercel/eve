@@ -151,7 +151,7 @@ export class SessionExecution {
 
     while (true) {
       const { cursor } = this.input;
-      const result = await cursor.advance((state) =>
+      const result = await cursor.advanceWithHistory((state) =>
         turnStep({
           ...state,
           abortSignal: turn.signal,

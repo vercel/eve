@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
-import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  createDurableSessionValues,
+  readDurableSession,
+} from "#execution/durable-session-store.js";
 import { turnStep } from "#execution/session/turn-step.js";
 import { runSessionStateStep } from "#internal/testing/session-state-step.js";
 import type { DurableStepResult, TurnStepPayload } from "#execution/session/turn-step-types.js";
@@ -266,7 +269,7 @@ function setup(
   };
   let snapshot = {
     serializedContext: serializeContext(ctx),
-    sessionState: createDurableSessionState({ session }),
+    ...createDurableSessionValues(session),
   };
   const events: Array<{ type: string; data: Record<string, unknown> }> = [];
   async function step(input?: TurnStepPayload): Promise<DurableStepResult> {
@@ -283,7 +286,11 @@ function setup(
       }),
     };
     const result = await runSessionStateStep(stepInput, turnStep);
-    snapshot = { serializedContext: result.serializedContext, sessionState: result.sessionState };
+    snapshot = {
+      history: result.history,
+      serializedContext: result.serializedContext,
+      sessionState: result.sessionState,
+    };
     return result;
   }
   return {
@@ -300,14 +307,15 @@ function setup(
     updateSession(update: (session: HarnessSession) => HarnessSession) {
       snapshot = {
         ...snapshot,
-        sessionState: createDurableSessionState({
-          session: update({
+        ...createDurableSessionValues(
+          update({
             ...session,
             ...readDurableSession(snapshot.sessionState),
             agent: session.agent,
             compaction: session.compaction,
+            history: snapshot.history,
           }),
-        }),
+        ),
       };
     },
   };

@@ -74,7 +74,10 @@ import {
 } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { countRunUsage } from "#execution/agent-sessions/usage.js";
-import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  createDurableSessionValues,
+  readDurableSession,
+} from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
@@ -162,13 +165,16 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     ctx.set(AuthKey, delivery.auth ?? null);
     if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
   }
-  const initialSession = hydrateDurableSession({
-    compactionOverrides: {
-      thresholdPercent: effectiveAgent.thresholdPercent,
-    },
-    durable: durableSession,
-    turnAgent: effectiveAgent.turnAgent,
-  });
+  const initialSession: HarnessSession = {
+    ...hydrateDurableSession({
+      compactionOverrides: {
+        thresholdPercent: effectiveAgent.thresholdPercent,
+      },
+      durable: durableSession,
+      turnAgent: effectiveAgent.turnAgent,
+    }),
+    history: validateHarnessModelMessages(input.history),
+  };
   const history = createExecutionHistoryView(initialSession);
   const instrumentation = bindSessionInstrumentation({
     agentName: effectiveAgent.turnAgent.id,
@@ -326,16 +332,16 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       await instrumentation?.flush();
       const aliased = reconcileSessionContinuationToken(ctx, initialSession);
       const nextSerializedContext = serializeContext(ctx);
-      const nextState =
+      const nextValues =
         aliased === initialSession
-          ? input.sessionState
-          : createDurableSessionState({ session: aliased });
+          ? { history: input.history, sessionState: input.sessionState }
+          : createDurableSessionValues(aliased);
 
       return {
         action: "park",
         ...derivePendingState(aliased),
         serializedContext: nextSerializedContext,
-        sessionState: nextState,
+        ...nextValues,
       };
     }
 

@@ -49,6 +49,7 @@ import type { HookContext } from "#public/definitions/hook.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   createDurableSessionState,
+  createDurableSessionValues,
   type DurableSessionState,
   readDurableSession,
 } from "#execution/durable-session-store.js";
@@ -70,8 +71,16 @@ type LegacyStepPayload =
   | { readonly kind: "clear" | "compact" }
   | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] };
 
-/** Adapts the older single-kind payload shape these fixtures were written against. */
-function turnStep(input: Omit<TurnStepInput, "input"> & { readonly input?: LegacyStepPayload }) {
+/**
+ * Adapts the older single-kind payload shape these fixtures were written
+ * against. A fixture that names no history starts the step with none.
+ */
+function turnStep(
+  input: Omit<TurnStepInput, "history" | "input"> & {
+    readonly history?: TurnStepInput["history"];
+    readonly input?: LegacyStepPayload;
+  },
+) {
   let payload: TurnStepPayload | undefined;
   if (input.input !== undefined) {
     payload =
@@ -81,7 +90,7 @@ function turnStep(input: Omit<TurnStepInput, "input"> & { readonly input?: Legac
           ? { runtimeResults: { results: input.input.results } }
           : { control: input.input.kind };
   }
-  return runSessionStateStep({ ...input, input: payload }, runTurnStep);
+  return runSessionStateStep({ history: [], ...input, input: payload }, runTurnStep);
 }
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
@@ -129,6 +138,7 @@ vi.mock("../durable-session-store.js", async (importOriginal) => {
   return {
     ...actual,
     createDurableSessionState: vi.fn(actual.createDurableSessionState),
+    createDurableSessionValues: vi.fn(actual.createDurableSessionValues),
     readDurableSession: vi.fn(),
   };
 });
@@ -167,7 +177,6 @@ function createStubSessionState(overrides: Partial<DurableSessionState> = {}): D
     emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
     hasProxyInputRequests: false,
     sessionId: "sess-test",
-    version: 1,
     ...overrides,
   });
 }
@@ -755,6 +764,7 @@ describe("turnStep", () => {
     ctx.set(SessionIdKey, "sess-test");
 
     const result = await turnStep({
+      history: session.history,
       input: {
         auth: correctionAuth,
         kind: "deliver",
@@ -819,7 +829,7 @@ describe("turnStep", () => {
       undefined,
       undefined,
     ]);
-    expect(result.sessionState.snapshot.session.history).toEqual([
+    expect(result.history).toEqual([
       { content: "model call 1", role: "assistant" },
       { content: "model call 2", role: "assistant" },
       { content: "model call 3", role: "assistant" },
@@ -876,8 +886,8 @@ describe("turnStep", () => {
     expect(result.action).toBe("cancelled");
     expect(callCount).toBe(51);
     expect(result.serializedContext).toMatchObject({ [ThreadKey.name]: "completed call 50" });
-    expect(result.sessionState.snapshot.session.history).toHaveLength(50);
-    expect(result.sessionState.snapshot.session.history.at(-1)).toEqual({
+    expect(result.history).toHaveLength(50);
+    expect(result.history.at(-1)).toEqual({
       content: "model call 50",
       role: "assistant",
     });
@@ -1203,6 +1213,7 @@ describe("turnStep", () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_new");
 
     await turnStep({
+      history: session.history,
       input: { kind: "deliver", payloads: [{ message: "follow up" }] },
       sessionWritable: createTestWritable(),
       serializedContext: serializeContext(ctx),
@@ -1258,9 +1269,10 @@ describe("turnStep", () => {
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
-    installSessionStoreMocks([
-      createStubSession({ history: [{ content: "raw", kind: "user", role: "user" }] }),
-    ]);
+    const session = createStubSession({
+      history: [{ content: "raw", kind: "user", role: "user" }],
+    });
+    installSessionStoreMocks([session]);
     mockIdentityHistoryViewProjector.mockImplementation(() => {
       throw new Error("projection failed");
     });
@@ -1275,6 +1287,7 @@ describe("turnStep", () => {
 
     await expect(
       turnStep({
+        history: session.history,
         input: { kind: "deliver", payloads: [{ message: "hello" }] },
         sessionWritable: createTestWritable(),
         serializedContext: serializeContext(ctx),
@@ -1427,6 +1440,7 @@ describe("turnStep", () => {
     });
 
     const result = await turnStep({
+      history: session.history,
       input: {
         kind: "deliver",
         payloads: [{ message: "cancel this turn" }],
@@ -1460,7 +1474,7 @@ describe("turnStep", () => {
       },
     });
     expect(result.serializedContext).not.toHaveProperty(ThreadKey.name);
-    expect(result.sessionState.snapshot.session.history).toEqual([
+    expect(result.history).toEqual([
       { role: "user", content: announcement, kind: "user" },
       { content: "thread=unset; user=cancel this turn", kind: "user", role: "user" },
     ]);
@@ -1505,7 +1519,7 @@ describe("turnStep", () => {
     });
 
     expect(result).toMatchObject({ action: "cancelled" });
-    expect(result.sessionState.snapshot.session.history).toEqual([
+    expect(result.history).toEqual([
       {
         content: [
           { text: "thread=unset; user=look at this", type: "text" },
@@ -2140,9 +2154,9 @@ describe("turnStep", () => {
     });
 
     expect(readDurableSession).toHaveBeenCalledWith(sessionState);
-    expect(createDurableSessionState).toHaveBeenLastCalledWith({
-      session: expect.objectContaining({ sessionId: "turn-step-session" }),
-    });
+    expect(createDurableSessionValues).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sessionId: "turn-step-session" }),
+    );
   });
 
   it("persists onDeliver context into the next durable step", async () => {
@@ -2352,13 +2366,13 @@ describe("turnStep", () => {
     });
 
     expect(observedSystemPrompt).toBe("Updated instructions.\n\nUpdated runtime context.");
-    expect(createDurableSessionState).toHaveBeenLastCalledWith({
-      session: expect.objectContaining({
+    expect(createDurableSessionValues).toHaveBeenLastCalledWith(
+      expect.objectContaining({
         agent: expect.objectContaining({
           system: "Updated instructions.\n\nUpdated runtime context.",
         }),
       }),
-    });
+    );
   });
 
   it("refreshes session-scoped dynamic tools from the current deployment", async () => {
@@ -2616,6 +2630,7 @@ describe("turnStep", () => {
     });
 
     const result = await turnStep({
+      history: session.history,
       input: {
         kind: "deliver",
         payloads: [
@@ -2645,7 +2660,7 @@ describe("turnStep", () => {
     if (result.action === "park") {
       expect(result.authorizationAttemptIds).toBeUndefined();
     }
-    const persistedSession = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
+    const persistedSession = vi.mocked(createDurableSessionValues).mock.calls.at(-1)?.[0];
     expect(persistedSession?.state?.retained).toBe("yes");
     expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
     expect(instructionHandler).toHaveBeenCalledTimes(2);

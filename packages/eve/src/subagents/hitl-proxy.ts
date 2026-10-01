@@ -12,7 +12,7 @@ import {
   toProxyInputRequestEntries,
 } from "#harness/proxy-input-requests.js";
 import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
-import type { HarnessEmitFn, HarnessSession, SessionStateMap } from "#harness/types.js";
+import type { HarnessEmitFn, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import {
   createInputRequestedEvent,
   createTurnWaitingEvent,
@@ -35,7 +35,7 @@ import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuatio
 export async function emitProxiedInputRequest(input: {
   readonly emit: HarnessEmitFn;
   readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly session: HarnessSession;
+  readonly session: HarnessSessionBase;
 }): Promise<readonly (readonly [requestId: string, route: ProxyInputRequest])[]> {
   await input.emit(
     createInputRequestedEvent({
@@ -59,7 +59,7 @@ export async function emitProxiedInputRequest(input: {
 export async function emitProxiedAuthorizationEvent(input: {
   readonly emit: HarnessEmitFn;
   readonly hookPayload: SubagentAuthorizationEventHookPayload;
-  readonly session: HarnessSession;
+  readonly session: HarnessSessionBase;
 }): Promise<void> {
   await input.emit(input.hookPayload.event);
   if (input.hookPayload.event.type === "authorization.required") {
@@ -67,7 +67,7 @@ export async function emitProxiedAuthorizationEvent(input: {
   }
 }
 
-async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSession): Promise<void> {
+async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSessionBase): Promise<void> {
   const turn = getHarnessEmissionState(session.state);
   await emit(createTurnWaitingEvent({ sequence: turn.sequence, turnId: turn.turnId }));
 }

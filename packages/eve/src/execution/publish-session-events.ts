@@ -18,7 +18,8 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { hydrateDurableSession } from "#execution/session.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
-import type { HandleEventFn, HarnessSession } from "#harness/types.js";
+import { validateHarnessModelMessages, type HarnessModelMessage } from "#harness/messages.js";
+import type { HandleEventFn, HarnessSession, HarnessSessionBase } from "#harness/types.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import {
@@ -50,6 +51,11 @@ export interface SessionStepState {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionWritable: WritableStream<Uint8Array>;
+}
+
+/** A {@link SessionStepState} with the conversation history, for a step that reads or changes it. */
+export interface SessionHistoryStepState extends SessionStepState {
+  readonly history: HarnessModelMessage[];
 }
 
 /** The context and session state a publication leaves behind. */
@@ -102,6 +108,11 @@ export interface RestoredSessionStep {
   readonly sessionWritable: WritableStream<Uint8Array>;
 }
 
+/** A {@link RestoredSessionStep} with the history, so its publication sees a whole session. */
+export interface RestoredSessionHistoryStep extends RestoredSessionStep {
+  readonly history: HarnessModelMessage[];
+}
+
 export async function restoreSessionStep(step: SessionStepState): Promise<RestoredSessionStep> {
   return {
     ctx: await deserializeContext(step.serializedContext),
@@ -110,45 +121,64 @@ export async function restoreSessionStep(step: SessionStepState): Promise<Restor
   };
 }
 
-/** What a session step publishes, and how it changes the session the publication leaves. */
-export interface SessionStepPublication<T, R> {
+/**
+ * What a session step publishes, and how it changes the session the
+ * publication leaves. `S` is a {@link HarnessSession} only for a step
+ * restored with its history.
+ */
+export interface SessionStepPublication<T, R, S extends HarnessSessionBase = HarnessSessionBase> {
   readonly origin: SessionEventOrigin;
   /** Where a relayed input batch came from; the channel adapter and its forwarding see it. */
   readonly inputSource?: string;
   /** Emits the step's events in the session's context scope. */
-  publish(emit: HandleEventFn, session: HarnessSession): Promise<T>;
+  publish(emit: HandleEventFn, session: S): Promise<T>;
   /**
    * Changes the step makes to the session once the scope has committed it,
    * before its continuation token is reconciled.
    */
-  updateSession?(session: HarnessSession, published: T): SessionUpdate<R>;
+  updateSession?(session: S, published: T): SessionUpdate<R, S>;
 }
 
 /** The session a step keeps, and anything it derived while changing it. */
-export interface SessionUpdate<R> {
-  readonly session: HarnessSession;
+export interface SessionUpdate<R, S extends HarnessSessionBase = HarnessSessionBase> {
+  readonly session: S;
   readonly result?: R;
 }
 
 /**
  * Publishes from a step that owns the session. Returns the context and session
  * state to adopt, and the result of `updateSession`. `step.ctx` is updated in place.
+ * The history is published and returned only when the step was restored with it.
  */
+export async function publishFromSessionStep<T, R = undefined>(
+  step: RestoredSessionHistoryStep,
+  publication: SessionStepPublication<T, R, HarnessSession>,
+): Promise<{
+  readonly published: PublishedSessionEvents & { readonly history: HarnessModelMessage[] };
+  readonly result: R | undefined;
+}>;
 export async function publishFromSessionStep<T, R = undefined>(
   step: RestoredSessionStep,
   publication: SessionStepPublication<T, R>,
-): Promise<{ readonly published: PublishedSessionEvents; readonly result: R | undefined }> {
+): Promise<{ readonly published: PublishedSessionEvents; readonly result: R | undefined }>;
+export async function publishFromSessionStep<T, R>(
+  step: RestoredSessionStep & { readonly history?: HarnessModelMessage[] },
+  publication: SessionStepPublication<T, R>,
+): Promise<{
+  readonly published: PublishedSessionEvents & { readonly history?: HarnessModelMessage[] };
+  readonly result: R | undefined;
+}> {
   const { ctx } = step;
   const scoped = await publishInSessionScope(step, publication);
   const update: SessionUpdate<R> = publication.updateSession?.(scoped.session, scoped.result) ?? {
     session: scoped.session,
   };
+  const session = reconcileSessionContinuationToken(ctx, update.session);
   return {
     published: {
       serializedContext: serializeContext(ctx),
-      sessionState: createDurableSessionState({
-        session: reconcileSessionContinuationToken(ctx, update.session),
-      }),
+      sessionState: createDurableSessionState({ session }),
+      ...("history" in session && { history: session.history as HarnessModelMessage[] }),
     },
     result: update.result,
   };
@@ -160,16 +190,20 @@ export async function publishFromSessionStep<T, R = undefined>(
  * commits.
  */
 async function publishInSessionScope<T>(
-  step: RestoredSessionStep,
+  step: RestoredSessionStep & { readonly history?: HarnessModelMessage[] },
   publication: SessionStepPublication<T, unknown>,
-): Promise<{ readonly result: T; readonly session: HarnessSession }> {
+): Promise<{ readonly result: T; readonly session: HarnessSessionBase }> {
   const { ctx } = step;
   const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
-  const session = hydrateDurableSession({
+  const hydrated = hydrateDurableSession({
     compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
     durable: step.durableSession,
     turnAgent: effectiveAgent.turnAgent,
   });
+  const session =
+    step.history === undefined
+      ? hydrated
+      : { ...hydrated, history: validateHarnessModelMessages(step.history) };
   const instrumentation =
     publication.origin === "own"
       ? bindSessionInstrumentation({

@@ -3,7 +3,7 @@ import { TurnDeliveryIdsKey } from "#context/keys.js";
 import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { serializeContext } from "#context/serialize.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
-import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { createDurableSessionValues } from "#execution/durable-session-store.js";
 import type { DurableStepResult } from "#execution/session/turn-step-types.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
@@ -44,6 +44,6 @@ export async function createCancelledModelCallBatchResult(input: {
       ),
       interruptedContext,
     ),
-    sessionState: createDurableSessionState({ session: cancelledSession }),
+    ...createDurableSessionValues(cancelledSession),
   };
 }

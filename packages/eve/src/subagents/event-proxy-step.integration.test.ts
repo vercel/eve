@@ -75,7 +75,6 @@ function fixture() {
   const durableSession: DurableSession = {
     agent: { system: "" },
     continuationToken: "http:parent",
-    history: [],
     sessionId: "parent-session",
     state: {
       "eve.harness.emission": {

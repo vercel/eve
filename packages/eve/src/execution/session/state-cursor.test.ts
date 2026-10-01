@@ -16,6 +16,7 @@ describe("SessionStateCursor", () => {
     };
     const initialState = state("channel:initial");
     const cursor = new SessionStateCursor({
+      history: [],
       inbox,
       sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {
@@ -43,6 +44,7 @@ describe("SessionStateCursor", () => {
   it("claims the current continuation when no address history was recorded", async () => {
     const claimSessionHooks = vi.fn(async () => {});
     const cursor = new SessionStateCursor({
+      history: [],
       inbox: {
         claimSessionHooks,
       },
@@ -58,39 +60,28 @@ describe("SessionStateCursor", () => {
     expect(claimSessionHooks).toHaveBeenCalledWith([stableToken, "channel:current"]);
   });
 
-  it("adopts exactly the state a step returned, including edits it made to its input in place", async () => {
-    const initial = state("channel:initial");
+  it("adopts exactly the values a step returned, including edits it made to its input in place", async () => {
     const cursor = new SessionStateCursor({
+      history: [{ content: "Alice asks for the status.", kind: "user", role: "user" }],
       inbox: { claimSessionHooks: vi.fn(async () => {}) },
       sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: { "eve.channel": { kind: "slack", state: { threadTs: "1.0" } } },
-      sessionState: initial,
+      sessionState: state("channel:initial"),
     });
     let returned: unknown;
 
-    await cursor.advance(async ({ serializedContext, sessionState }) => {
+    await cursor.advanceWithHistory(async ({ history, serializedContext, sessionState }) => {
       // The workflow hands the step a deserialized copy and the body a deserialized result.
-      const input = structuredClone({ serializedContext, sessionState });
+      const input = structuredClone({ history, serializedContext, sessionState });
       const result = await withSessionStateDelta(input, async (values) => {
         const channel = values.serializedContext["eve.channel"] as {
           state: Record<string, unknown>;
         };
         channel.state.threadTs = "2.0";
-        const session = values.sessionState.snapshot.session;
         const next = {
+          history: [...values.history, { content: "Bob's reply", role: "assistant" as const }],
           serializedContext: values.serializedContext,
-          sessionState: {
-            ...values.sessionState,
-            snapshot: {
-              session: {
-                ...session,
-                history: [
-                  ...session.history,
-                  { content: "Bob's reply", role: "assistant" as const },
-                ],
-              },
-            },
-          },
+          sessionState: { ...values.sessionState, continuationToken: "channel:next" },
         };
         returned = structuredClone(next);
         return next;
@@ -99,13 +90,33 @@ describe("SessionStateCursor", () => {
     });
 
     expect({
+      history: cursor.history,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     }).toStrictEqual(returned);
   });
 
+  it("rejects a history change from a step that was not given the history", async () => {
+    const history = [
+      { content: "Alice asks for the status.", kind: "user" as const, role: "user" as const },
+    ];
+    const cursor = new SessionStateCursor({
+      history,
+      inbox: { claimSessionHooks: vi.fn(async () => {}) },
+      sessionWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state("channel:initial"),
+    });
+
+    await expect(
+      cursor.advance((input) => withSessionStateDelta(input, async () => ({ history: [] }))),
+    ).rejects.toThrow("not given the history cannot change it");
+    expect(cursor.history).toBe(history);
+  });
+
   it("rejects a step's delta when another step changed the state while it ran", async () => {
     const cursor = new SessionStateCursor({
+      history: [],
       inbox: { claimSessionHooks: vi.fn(async () => {}) },
       sessionWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -135,6 +146,5 @@ function state(continuationToken: string): DurableSessionState {
     emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
     hasProxyInputRequests: false,
     sessionId: "session-1",
-    version: 1,
   });
 }

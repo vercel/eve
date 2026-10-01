@@ -19,7 +19,7 @@ import {
 } from "#execution/agent-sessions/context.js";
 import type { TaskStartedStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSessionBase } from "#harness/types.js";
 
 type CoordinationDispatchStepInput = CoordinationDispatchInput & {
   readonly action: "park";
@@ -89,7 +89,7 @@ async function dispatchCoordination(
  */
 async function dispatchWorkflowCall(start: StartWorkflowTaskInput): Promise<{
   readonly result?: RuntimeActionResult;
-  readonly session: HarnessSession;
+  readonly session: HarnessSessionBase;
   readonly started?: TaskStartedStreamEvent;
 }> {
   const { entry } = start.task;

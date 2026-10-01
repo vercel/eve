@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { start } from "#internal/workflow/runtime.js";
+import { hydrateStepArguments } from "#compiled/@workflow/core/serialization.js";
+import { getWorld, start } from "#internal/workflow/runtime.js";
 import {
   captureTurnEvents,
   containsEventSequence,
@@ -411,4 +412,68 @@ describe("workflow tools", () => {
       }
     });
   }, 30_000);
+
+  it("keeps the conversation out of the step input of a session step that only publishes", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-step-input",
+      execute: reportingDeployWorkflow,
+      toolName: "deploy_service",
+    });
+    // Not the first message, which also becomes the session title in the context.
+    const earlyNote = "Alice notes that the api rollout window opens at noon.";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Alice starts planning the api rollout." },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "http:workflow-tool-step-input",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      const send = async (message: string) => {
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          kind: "send",
+          payload: { message },
+        });
+        return await stream.nextTurn();
+      };
+      try {
+        await stream.nextTurn();
+        await send(earlyNote);
+        const settled = await send('Run deploy_service with service "api"');
+        expect(filterEventsByType(settled, "action.partial")).toHaveLength(1);
+
+        const inputs = await readStepInputs(run.runId);
+        const reportInputs = inputs.get("emitWorkflowToolRunReportStep") ?? [];
+        expect(reportInputs).toHaveLength(1);
+        expect(reportInputs[0]).not.toContain(earlyNote);
+        expect(inputs.get("turnStep")?.at(-1)).toContain(earlyNote);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 30_000);
 });
+
+/** Each step's persisted `step_created` input, serialized, grouped by step name in creation order. */
+async function readStepInputs(runId: string): Promise<Map<string, string[]>> {
+  const world = await getWorld();
+  const events = await world.events.list({
+    pagination: { limit: 1000 },
+    resolveData: "all",
+    runId,
+  });
+  const inputs = new Map<string, string[]>();
+  for (const event of events.data) {
+    if (event.eventType !== "step_created") continue;
+    const name = event.eventData.stepName.split("//").at(-1) ?? "";
+    const input = await hydrateStepArguments(event.eventData.input, runId, undefined);
+    inputs.set(name, [...(inputs.get(name) ?? []), JSON.stringify(input)]);
+  }
+  return inputs;
+}

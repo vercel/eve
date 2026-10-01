@@ -23,7 +23,7 @@ describe("conversation import", () => {
         },
       },
     };
-    const result = importConversation(session);
+    const { history, sessionState: result } = importConversation(session);
     expect(result.snapshot.session).toMatchObject({
       sessionId: "old",
       limits: session.limits,
@@ -38,7 +38,8 @@ describe("conversation import", () => {
     );
     expect(result.snapshot.session.state).not.toHaveProperty("eve.agent.handles");
     expect(result.emissionState.sequence).toBe(9);
-    expect(result.snapshot.session.history[0]).toMatchObject({
+    expect(result.snapshot.session).not.toHaveProperty("history");
+    expect(history[0]).toMatchObject({
       kind: "user",
       content: "Alice chose blue.",
     });

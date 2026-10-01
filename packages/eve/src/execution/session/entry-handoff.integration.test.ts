@@ -140,9 +140,7 @@ describe("workflowEntry integration", () => {
             },
             { timeout: 5000 },
           );
-          const histories = (await readTurnStepStates(anchor.runId)).map(
-            (state) => state.sessionState.snapshot.session.history,
-          );
+          const histories = (await readTurnStepStates(anchor.runId)).map((state) => state.history);
           const deliveries = histories.map((history) =>
             history.filter(
               (message) =>
@@ -305,7 +303,7 @@ describe("workflowEntry integration", () => {
               // Recorded steps are not returned in turn order; the settled
               // history is the one that accumulated every turn.
               const settled = (await readTurnStepStates(anchor.runId))
-                .map((state) => state.sessionState.snapshot.session.history)
+                .map((state) => state.history)
                 .reduce<readonly unknown[]>(
                   (longest, history) => (history.length > longest.length ? history : longest),
                   [],
@@ -422,7 +420,7 @@ describe("workflowEntry integration", () => {
           await vi.waitFor(
             async () => {
               for (const state of await readTurnStepStates(owner.runId)) {
-                const history = JSON.stringify(state.sessionState.snapshot.session.history);
+                const history = JSON.stringify(state.history);
                 if (history.includes("Bob sends a later sentinel.")) saved = history;
               }
               expect(saved).toBeDefined();

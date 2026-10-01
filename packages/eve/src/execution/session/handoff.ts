@@ -3,6 +3,7 @@ import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/
 import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import { readAcceptedDeploymentId } from "#execution/session/accepted-deployment.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
@@ -20,12 +21,13 @@ import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.
  * Mount-owned state requires a new version so older readers reject it rather
  * than dropping unrecognized state keys during reverse handoff.
  */
-export const SESSION_CHECKPOINT_VERSION = 10;
+export const SESSION_CHECKPOINT_VERSION = 11;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {
   readonly version: typeof SESSION_CHECKPOINT_VERSION;
   readonly capabilities?: SessionCapabilities;
+  readonly history: HarnessModelMessage[];
   readonly retention?: AgentWorkflowRetentionDefinition;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -65,7 +67,10 @@ type SessionTransferOutcome =
     };
 
 interface SessionHandoffInput {
-  readonly checkpoint: Omit<SessionCheckpoint, "serializedContext" | "sessionState" | "version">;
+  readonly checkpoint: Omit<
+    SessionCheckpoint,
+    "history" | "serializedContext" | "sessionState" | "version"
+  >;
   readonly deploymentId: string;
   readonly inbox: SessionInboxHandle;
   readonly isInitialOwner: boolean;
@@ -104,7 +109,7 @@ export class SessionHandoff {
    */
   async tryTransfer(
     selection: TurnSelection,
-    state: Pick<SessionCheckpoint, "serializedContext" | "sessionState">,
+    state: Pick<SessionCheckpoint, "history" | "serializedContext" | "sessionState">,
   ): Promise<SessionTransferOutcome> {
     const { deploymentId, inbox } = this.input;
     const targetDeploymentId = readAcceptedDeploymentId(selection.delivery);
@@ -113,7 +118,7 @@ export class SessionHandoff {
     if (this.incompatibleTargetDeploymentIds.has(targetDeploymentId))
       return { kind: "retained", reason: "known-incompatible" };
     if (!selection.handoffEligible) return { kind: "retained", reason: "busy" };
-    if (!(await isSessionIdleForHandoffStep(state)))
+    if (!(await isSessionIdleForHandoffStep({ sessionState: state.sessionState })))
       return { kind: "retained", reason: "not-idle" };
 
     const checkpoint: SessionCheckpoint = {

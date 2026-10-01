@@ -7,6 +7,7 @@ import {
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/session/next-input.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
@@ -48,6 +49,7 @@ export interface SessionBoot {
   readonly caller: TurnCaller | undefined;
   readonly capabilities?: SessionCapabilities;
   readonly deploymentId: string;
+  readonly history: HarnessModelMessage[];
   readonly initialInput: DeliverHookPayload | undefined;
   /** Parks on the inbox before any session-scoped lifecycle work. */
   readonly awaitFirstMessage: boolean;
@@ -83,6 +85,7 @@ export async function runPreparedSession(
   inbox: SessionInboxHandle,
 ): Promise<WorkflowEntryResult> {
   const cursor = new SessionStateCursor({
+    history: boot.history,
     inbox,
     sessionWritable: boot.sessionWritable,
     serializedContext: boot.serializedContext,
@@ -248,6 +251,7 @@ async function runSessionLoop(
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
   ): Promise<SessionActionResult> => {
     const transfer = await handoff.tryTransfer(next, {
+      history: cursor.history,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     });
@@ -256,7 +260,7 @@ async function runSessionLoop(
     return { action: await runTurn({ delivery: next.delivery }), kind: "action" };
   };
   const settleCancelledTurn = async (reportUsage: boolean) => {
-    const settled = await cursor.advance((state) =>
+    const settled = await cursor.advanceWithHistory((state) =>
       settleCancelledTurnStep({ ...state, reportUsage }),
     );
     progress.caller = undefined;

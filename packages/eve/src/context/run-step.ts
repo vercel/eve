@@ -1,4 +1,4 @@
-import type { HarnessSession, StepResult } from "#harness/types.js";
+import type { HarnessSession, HarnessSessionBase, StepResult } from "#harness/types.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { connectionProvider } from "#context/providers/connection.js";
@@ -17,9 +17,9 @@ const frameworkProviders: readonly FrameworkContextProvider<any>[] = [
   sandboxProvider,
 ];
 
-interface ContextScopeResult<T> {
+interface ContextScopeResult<T, S extends HarnessSessionBase> {
   readonly result: T;
-  readonly session: HarnessSession;
+  readonly session: S;
 }
 
 /**
@@ -30,12 +30,11 @@ interface ContextScopeResult<T> {
  * result and the (possibly mutated) session so provider commit hooks can
  * persist provider-owned state (e.g. sandbox snapshots).
  */
-export async function withContextScope<T>(
+export async function withContextScope<T, S extends HarnessSessionBase>(
   ctx: ContextContainer,
-  harnessSession: HarnessSession,
-  callback: (session: HarnessSession) => Promise<ContextScopeResult<T>>,
-): Promise<ContextScopeResult<T>> {
-  let session = harnessSession;
+  session: S,
+  callback: (session: S) => Promise<ContextScopeResult<T, S>>,
+): Promise<ContextScopeResult<T, S>> {
   const createdProviders: FrameworkContextProvider<any>[] = [];
 
   ctx.clearVirtualContext();
@@ -46,9 +45,6 @@ export async function withContextScope<T>(
       if (result !== undefined) {
         ctx.setVirtualContext(provider.key, result.value);
         createdProviders.push(provider);
-        if (result.session !== undefined) {
-          session = result.session;
-        }
       }
     }
 

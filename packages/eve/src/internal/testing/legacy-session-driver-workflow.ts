@@ -2,6 +2,7 @@ import { createHook, getWorkflowMetadata, getWritable } from "#compiled/@workflo
 import { start } from "#internal/workflow/runtime.js";
 import { turnWorkflow } from "#execution/legacy-session/turn-workflow.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 
 /** Frozen driver-side protocol: it cannot see the current session inbox. */
 export async function legacySessionDriverWorkflow(input: {
@@ -29,7 +30,7 @@ export async function legacySessionDriverWorkflow(input: {
   const parentWritable = getWritable<Uint8Array>();
   try {
     const delivery = await command;
-    const session: DurableSession = {
+    const session: DurableSession & { readonly history: HarnessModelMessage[] } = {
       sessionId,
       continuationToken: input.alias,
       agent: { system: "previous deployment" },

@@ -34,16 +34,20 @@ describe("SessionHandoff", () => {
     installActivation({ kind: "active" });
     startSessionOwnerStepMock.mockResolvedValue(undefined);
     const trigger = selection("deployment-b");
+    const history = [
+      { content: "Alice asks for the status.", kind: "user" as const, role: "user" as const },
+    ];
 
-    await expect(handoff.tryTransfer(trigger, state())).resolves.toEqual({
+    await expect(handoff.tryTransfer(trigger, { ...state(), history })).resolves.toEqual({
       kind: "transferred",
     });
     expect(startSessionOwnerStepMock).toHaveBeenCalledWith({
       activationToken: "owner-1:handoff",
       anchorRunId: "session-1",
       checkpoint: expect.objectContaining({
+        history,
         sessionTimeoutMs: 60_000,
-        version: 10,
+        version: 11,
       }),
       delivery: trigger.delivery,
       targetDeploymentId: "deployment-b",
@@ -261,6 +265,7 @@ function state(
   } = {},
 ) {
   return {
+    history: [],
     serializedContext: input.serializedContext ?? {},
     sessionState: {
       continuationToken: input.continuationToken ?? "",

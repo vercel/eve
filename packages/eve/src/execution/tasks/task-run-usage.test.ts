@@ -84,6 +84,7 @@ function sessionWithTask(input: {
     onInterrupt: () => () => {},
   } as Partial<SessionInbox> as SessionInbox;
   const cursor = new SessionStateCursor({
+    history: [],
     inbox,
     serializedContext: {},
     sessionState: { ...base, snapshot: { session: snapshot } },

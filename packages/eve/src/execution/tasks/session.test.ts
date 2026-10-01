@@ -166,6 +166,7 @@ describe("applyTaskRunMessageStep", () => {
 
 function cursorFor(session: DurableSession): SessionStateCursor {
   return new SessionStateCursor({
+    history: [],
     inbox: { claimSessionHooks: vi.fn() } as Partial<SessionInbox> as SessionInbox,
     serializedContext: {},
     sessionState: {
