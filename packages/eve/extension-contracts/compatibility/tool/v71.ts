@@ -1,0 +1,11 @@
+import { z } from "zod";
+import { defineTool } from "#public/tools/index.js";
+
+// Epoch 71 sessions had no `task.activity` event; epoch 72 adds it. Tools that
+// start tasks keep working.
+export default defineTool({
+  description: "Summarize the open incidents for a service.",
+  inputSchema: z.object({ service: z.string() }),
+  outputSchema: z.object({ service: z.string(), summary: z.string() }),
+  execute: ({ service }) => ({ service, summary: `No open incidents for ${service}.` }),
+});

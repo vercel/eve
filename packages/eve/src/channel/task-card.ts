@@ -1,5 +1,9 @@
 import { isTaskControlTool } from "#protocol/task-tools.js";
-import type { TaskCancelReason, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type {
+  TaskActivityCall,
+  TaskCancelReason,
+  UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -12,6 +16,13 @@ const MAX_ACTION_INPUT_LENGTH = 4_096;
 /** Calls kept per turn; the oldest settled ones drop first. */
 const MAX_CALLS_PER_TURN = 100;
 const MAX_BLOCKER_LABEL_LENGTH = 200;
+/** An agent's newest tool calls kept for each task call. */
+const MAX_ACTIVITY_CALLS = 10;
+const MAX_ACTIVITY_TITLE_LENGTH = 200;
+/** An agent's tool calls its task's run remembers, so a late result still finds its call. */
+const MAX_FOLDED_AGENT_CALLS = 100;
+
+export type { TaskActivityCall };
 
 /** How one of the turn's calls stands. */
 export type TaskCardStatus = "working" | "completed" | "failed" | "cancelled";
@@ -52,8 +63,19 @@ export interface TaskCardTask {
    * needed it. Absent when the task's run stopped on its own.
    */
   readonly cancelReason?: TaskCancelReason;
+  /** The tool calls the task's agent made for this call, once it made one. */
+  readonly activity?: TaskActivity;
   readonly startedAt: string;
   readonly settledAt?: string;
+}
+
+/**
+ * What a task's agent did for one call, as the agent last reported it. A call
+ * still `working` when the task settled stays so.
+ */
+export interface TaskActivity {
+  /** The agent's newest tool calls, at most 10, oldest first. */
+  readonly calls: readonly TaskActivityCall[];
 }
 
 /**
@@ -102,6 +124,8 @@ interface TrackedCall {
     readonly cancelReason?: TaskCancelReason;
     /** Open requests and sign-ins the task waits on, oldest first. */
     readonly blockers?: readonly (TaskCardBlocker & { readonly id: string })[];
+    /** The agent's newest tool calls for this call, oldest first. */
+    readonly activity?: readonly TaskActivityCall[];
   };
 }
 
@@ -213,15 +237,8 @@ function trackTurnEvent(
       const { turnId } = event.data;
       const current = turns[turnId] ?? { calls: [], ended: false };
       const known = new Set(current.calls.map((call) => call.callId));
-      // Nested actions (such as a connection tool run by connection_execute)
-      // already appear as their parent call's row.
       const requested = event.data.actions.filter(
-        (action) =>
-          !known.has(action.callId) &&
-          !(
-            action.kind === "tool-call" &&
-            (isTaskControlTool(action.toolName) || action.parentCallId !== undefined)
-          ),
+        (action) => !known.has(action.callId) && isTrackedAction(action),
       );
       if (requested.length === 0) return undefined;
       const calls = requested.map((action) =>
@@ -277,7 +294,16 @@ function trackTurnEvent(
       if (summary !== undefined) task.summary = summary;
       const cancelReason = event.data.cancel?.reason;
       if (cancelReason !== undefined) task.cancelReason = cancelReason;
+      if (call.task.activity !== undefined) task.activity = call.task.activity;
       return { turn: replaceCall(current, { ...call, settledAt: at, status, task }), turnId };
+    }
+    case "task.activity": {
+      const { callId, calls, turnId } = event.data;
+      const current = turns[turnId];
+      const call = current?.calls.find((candidate) => candidate.callId === callId);
+      if (current === undefined || call?.task === undefined) return undefined;
+      const activity = mergeActivity(call.task.activity ?? [], calls);
+      return { turn: replaceCall(current, { ...call, task: { ...call.task, activity } }), turnId };
     }
     case "turn.completed":
     case "turn.failed":
@@ -394,8 +420,128 @@ function toTask(
   const shown = call.status !== "failed" || shareable;
   if (task.summary !== undefined && shown) row.summary = task.summary;
   if (task.cancelReason !== undefined) row.cancelReason = task.cancelReason;
+  if (task.activity !== undefined && task.activity.length > 0) {
+    row.activity = { calls: task.activity };
+  }
   if (call.settledAt !== undefined) row.settledAt = call.settledAt;
   return row;
+}
+
+/** Nested actions, such as a connection tool run by `connection_execute`, already appear as their parent call. */
+function isTrackedAction(action: RuntimeActionRequest): boolean {
+  return !(
+    action.kind === "tool-call" &&
+    (isTaskControlTool(action.toolName) || action.parentCallId !== undefined)
+  );
+}
+
+/** Folds an agent's changed calls into a task call's activity by id, keeping the newest. */
+function mergeActivity(
+  activity: readonly TaskActivityCall[],
+  changed: readonly TaskActivityCall[],
+): readonly TaskActivityCall[] {
+  const merged = [...activity];
+  for (const call of changed) {
+    const index = merged.findIndex((candidate) => candidate.id === call.id);
+    if (index === -1) merged.push(call);
+    else merged[index] = call;
+  }
+  return merged.slice(-MAX_ACTIVITY_CALLS);
+}
+
+/**
+ * What one of an agent's own events changes about its tool calls: calls it
+ * requested, a call that runs as a task, or a call that settled. Settling
+ * comes from the call's `action.result`, or from `task.settled` for a task,
+ * whose `action.result` is only its receipt.
+ */
+export type AgentActivityEvent =
+  | {
+      readonly kind: "requested";
+      readonly calls: readonly Pick<TaskActivityCall, "id" | "name" | "title">[];
+    }
+  | { readonly kind: "task"; readonly id: string }
+  | {
+      readonly kind: "settled";
+      readonly id: string;
+      readonly status: TaskCardStatus;
+      readonly task: boolean;
+    };
+
+/** Projects an agent session's event onto its tool calls, or `undefined` when it changes none. */
+export function agentActivityEvent(
+  event: UnstampedMessageStreamEvent,
+): AgentActivityEvent | undefined {
+  switch (event.type) {
+    case "actions.requested": {
+      const calls = event.data.actions.filter(isTrackedAction).map((action) => {
+        const name = actionRequestName(action);
+        const label = presentationText(event.data.presentation?.[action.callId]?.label);
+        return {
+          id: action.callId,
+          name,
+          title: (label ?? displayTitle(name)).slice(0, MAX_ACTIVITY_TITLE_LENGTH),
+        };
+      });
+      return calls.length === 0 ? undefined : { calls, kind: "requested" };
+    }
+    case "action.result":
+      return {
+        id: event.data.result.callId,
+        kind: "settled",
+        status: actionStatus(event.data.status),
+        task: false,
+      };
+    case "task.started":
+      return { id: event.data.callId, kind: "task" };
+    case "task.settled":
+      return { id: event.data.callId, kind: "settled", status: event.data.status, task: true };
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * An agent's tool calls as its task's run folds the agent's activity events.
+ * Each event returns the calls it changed, as they stand now, for the run to
+ * report; a task's receipt never settles its call.
+ */
+export class AgentActivityFold {
+  readonly #calls = new Map<string, TaskActivityCall & { readonly task: boolean }>();
+
+  apply(event: AgentActivityEvent): readonly TaskActivityCall[] {
+    const changed: TaskActivityCall[] = [];
+    const set = (call: TaskActivityCall & { readonly task: boolean }): void => {
+      const previous = this.#calls.get(call.id);
+      this.#calls.delete(call.id);
+      this.#calls.set(call.id, call);
+      if (previous?.status === call.status) return;
+      const { task: _task, ...reported } = call;
+      changed.push(reported);
+    };
+    switch (event.kind) {
+      case "requested":
+        for (const call of event.calls) {
+          if (!this.#calls.has(call.id)) set({ ...call, status: "working", task: false });
+        }
+        break;
+      case "task": {
+        const call = this.#calls.get(event.id);
+        if (call !== undefined && !call.task) set({ ...call, status: "working", task: true });
+        break;
+      }
+      case "settled": {
+        const call = this.#calls.get(event.id);
+        if (call !== undefined && call.task === event.task) set({ ...call, status: event.status });
+        break;
+      }
+    }
+    for (const oldest of this.#calls.keys()) {
+      if (this.#calls.size <= MAX_FOLDED_AGENT_CALLS) break;
+      this.#calls.delete(oldest);
+    }
+    return changed;
+  }
 }
 
 function replaceCall(turn: TaskCardTurn, call: TrackedCall): TaskCardTurn {

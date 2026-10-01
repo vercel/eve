@@ -268,6 +268,7 @@ same `taskId` continues where it left off. A `serve` body that doesn't return to
 | `task.started`  | A call starts a task, or reaches a resumable task by its `taskId`        | `taskId`, `callId`, `turnId`, the tool `name`, and `kind`                                  |
 | `task.settled`  | A reply, return, failure, or cancel settles one call                     | `taskId`, `callId`, `turnId`, `name`, `kind`, `status`, and `output`, `error`, or `cancel` |
 | `agent.started` | A workflow run, including an agent tool's, opens a session with an agent | `callId`, `turnId`, `taskId`, `name`, `sessionId`, `streamPath`                            |
+| `task.activity` | An agent a task's run opened starts or settles one of its tool calls     | `taskId`, `callId`, `turnId`, and `calls` with each call's `id`, `name`, `title`, `status` |
 | `turn.waiting`  | An open turn parks on its tasks, a `task_wait`, a question, or a sign-in | `turnId` and `sequence`                                                                    |
 
 `task.started` and `task.settled` come once each per call, and `(taskId, callId)` identifies the
@@ -281,7 +282,9 @@ the turn, or the working tasks between turns, or `"turn_ended"` when the turn en
 failing, while the task still worked. `cancel` is absent when the task's run stopped on its own, and on events recorded by
 earlier eve versions.
 `agent.started` names the call and turn whose run opened the session, and its `taskId` is absent
-when an `execute` call opened it. Results reach the model as a message in its history, not as a
+when an `execute` call opened it. `task.activity` lists the agent's tool calls that changed, with
+their current `status`; fold them by `id` to show what a task's agent is doing without following
+its session. Results reach the model as a message in its history, not as a
 stream event, so read outcomes from `task.settled`. An `input.requested`,
 `authorization.required`, or `authorization.completed` event from a task's run carries its
 `taskId`. Hooks subscribe to the same events. The stream also carries the model's `task_wait` and

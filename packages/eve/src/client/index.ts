@@ -131,6 +131,8 @@ export type {
   StepCompletedStreamEvent,
   StepFailedStreamEvent,
   StepStartedStreamEvent,
+  TaskActivityCall,
+  TaskActivityStreamEvent,
   TaskSettledStreamEvent,
   TaskStartedStreamEvent,
   TurnCancelledStreamEvent,

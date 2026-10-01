@@ -10,6 +10,7 @@ import {
   createActionsRequestedEvent,
   createInputRequestedEvent,
   createInputResolvedEvent,
+  createTaskActivityEvent,
   createTaskSettledEvent,
   createTaskStartedEvent,
   createTurnCompletedEvent,
@@ -226,6 +227,34 @@ describe("Slack task card", () => {
     const written = cardCalls().length;
     await emit(TURN_COMPLETED);
     expect(cardCalls()).toHaveLength(written);
+  });
+
+  it("shows a working agent task's newest tool call, writing only when the card changes", async () => {
+    const { cardCalls, emit } = slackThread();
+    const activity = (status: "working" | "completed") =>
+      createTaskActivityEvent({
+        callId: RESEARCH_CALL,
+        calls: [
+          { id: "lookup-1", name: "lookup", status, title: "Reading the INC-2291 postmortem" },
+        ],
+        taskId: "researcher-7k2m9q",
+        turnId: TURN_ID,
+      });
+    const researchRow = () =>
+      (cardCalls().at(-1)!.body["blocks"] as [{ tasks: Record<string, unknown>[] }])[0].tasks[1]!;
+
+    await emit(...TWO_TASKS_STARTED, activity("working"));
+    expect(researchRow()["details"]).toMatchObject({
+      elements: [{ elements: [{ text: "Reading the INC-2291 postmortem", type: "text" }] }],
+    });
+
+    // The row shows only the newest call's title, so a status change alone writes nothing.
+    const written = cardCalls().length;
+    await emit(activity("completed"));
+    expect(cardCalls()).toHaveLength(written);
+
+    await emit(...BOTH_TASKS_SETTLED);
+    expect(researchRow()["details"]).toBeUndefined();
   });
 
   it("names the agents a turn asks, times their work, and keeps one block id across updates", async () => {

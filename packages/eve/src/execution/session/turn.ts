@@ -31,10 +31,13 @@ import { publishTurnWaitingStep } from "#execution/session/turn-waiting-step.js"
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import {
-  batchAgentStarts,
+  batchBoundaryMessages,
   handleWorkflowToolRunMessage,
 } from "#execution/session-workflow-tool-run.js";
-import { emitAgentStartedStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
+import {
+  emitAgentStartedStep,
+  emitTaskActivityStep,
+} from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import { interruptWorkflowToolRun } from "#execution/tools/workflow/interrupt.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import type {
@@ -124,20 +127,23 @@ export class SessionExecution {
 
   /**
    * Applies what runs reported while the model step ran, so the next step sees
-   * it. Consecutive `agent-started` messages, such as a fan-out's, share one step.
-   * An ending session drops them: its stream is closed, and finalizing the
-   * session terminates the children.
+   * it. Consecutive `agent-started` messages, such as a fan-out's, share one
+   * step, and so do consecutive `activity` messages. An ending session drops
+   * both: its stream is closed, and finalizing the session terminates the
+   * children.
    */
   private async handleBoundaryMessages(
     messages: readonly WorkflowToolRunMessage[],
     ending = false,
   ): Promise<void> {
-    for (const batch of batchAgentStarts(messages)) {
+    for (const batch of batchBoundaryMessages(messages)) {
       if (batch.kind === "message") {
         await this.handleWorkflowMessage(batch.message);
       } else if (!ending) {
         await this.input.cursor.advance((state) =>
-          emitAgentStartedStep({ ...state, messages: batch.messages }),
+          batch.kind === "agent-started"
+            ? emitAgentStartedStep({ ...state, messages: batch.messages })
+            : emitTaskActivityStep({ ...state, messages: batch.messages }),
         );
       }
     }

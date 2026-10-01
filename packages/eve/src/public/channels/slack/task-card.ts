@@ -179,7 +179,8 @@ function toSlackTask(task: TaskCardTask): SlackTaskObject {
     task_id: slackTaskId(task.id),
     title: truncate(task.title, MAX_TITLE_LENGTH),
   };
-  if (task.blockedOn !== undefined) slackTask.details = richText(blockerLine(task.blockedOn));
+  const details = task.blockedOn === undefined ? activityLine(task) : blockerLine(task.blockedOn);
+  if (details !== undefined) slackTask.details = richText(details);
   const output = outputLine(task);
   if (output !== undefined) slackTask.output = richText(output);
   return slackTask;
@@ -229,6 +230,11 @@ function stoppedLine(reason: TaskCardTask["cancelReason"]): string {
     case undefined:
       return "Stopped";
   }
+}
+
+/** A working task's newest tool call, so the row shows what its agent is doing. */
+function activityLine(task: TaskCardTask): string | undefined {
+  return task.status === "working" ? task.activity?.calls.at(-1)?.title : undefined;
 }
 
 function blockerLine(blocker: TaskCardBlocker): string {
@@ -287,6 +293,7 @@ const TRACKED_EVENTS = [
   "actions.requested",
   "action.result",
   "task.started",
+  "task.activity",
   "task.settled",
   "input.requested",
   "input.resolved",

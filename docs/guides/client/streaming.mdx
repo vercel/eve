@@ -143,6 +143,7 @@ The most common UI events are:
 | `action.partial`        | Update a generator tool's provisional output snapshot.                         |
 | `action.result`         | Show tool call results.                                                        |
 | `task.started`          | Show a task call; `action.result` is a receipt. `kind: "agent"` marks agents.  |
+| `task.activity`         | Show the tool calls a task's agent starts and settles, folded by `id`.         |
 | `task.settled`          | Show the task's result, error, or cancellation for the call's `callId`.        |
 | `input.requested`       | Pause the UI for approval or a question answer.                                |
 | `input.resolved`        | Record the server-accepted outcome and response for each human-input request.  |
@@ -262,7 +263,7 @@ stream index after the captured prefix.
 
 ## Follow a subagent
 
-A delegated subagent reports its progress on its own child session. The parent stream announces each child session with `agent.started`, whether the model called a subagent tool or a [workflow tool](/docs/tools/workflows#delegate-work-ctxagent) opened the session with `ctx.agent`. Pass the event to `agent()` on the parent's session handle to get the child's handle, then follow it with `stream()`:
+A delegated subagent reports its progress on its own child session. To show only which tools a task's agent calls, read `task.activity` on the parent stream instead; it lists each tool call the agent starts or settles, with its `title` and `status`. The parent stream announces each child session with `agent.started`, whether the model called a subagent tool or a [workflow tool](/docs/tools/workflows#delegate-work-ctxagent) opened the session with `ctx.agent`. Pass the event to `agent()` on the parent's session handle to get the child's handle, then follow it with `stream()`:
 
 ```ts
 import { isCurrentTurnBoundaryEvent } from "eve/client";

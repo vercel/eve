@@ -47,6 +47,7 @@ const HOOK_CANCELLABLE_EVENTS = {
   "step.completed": true,
   "step.failed": false,
   "step.started": true,
+  "task.activity": false,
   "task.settled": false,
   "task.started": false,
   "turn.cancelled": false,

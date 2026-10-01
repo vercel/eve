@@ -28,6 +28,19 @@ export async function correctKeeperWhileItWorks(t: EveEvalContext, tool: string)
     );
     return calls.length === 2 && new Set(calls.map((call) => call.taskId)).size === 1;
   });
+  t.eventsSatisfy(
+    "the parent reports the keeper's measurement as it starts and finishes",
+    (events) => {
+      const statuses = events.flatMap((event) =>
+        event.type === "task.activity"
+          ? event.data.calls
+              .filter((call) => call.name === "notebook-measure")
+              .map((call) => call.status)
+          : [],
+      );
+      return statuses.includes("working") && statuses.includes("completed");
+    },
+  );
 
   const started = corrected.events.find(
     (event) => event.type === "agent.started" && event.data.name === tool,

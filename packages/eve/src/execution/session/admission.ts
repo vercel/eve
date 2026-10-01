@@ -36,8 +36,12 @@ export async function admitSessionInboxPayload(
     input.queue.enqueueAuthorization(value.payloads);
     return { kind: "consumed" };
   }
-  // A child's questions reach the session only through the run that opened it.
-  if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
+  // A child's questions and activity reach the session only through the run that opened it.
+  if (
+    value.kind === "subagent-input-request" ||
+    value.kind === "subagent-authorization-event" ||
+    value.kind === "subagent-activity"
+  ) {
     return { kind: "consumed" };
   }
 

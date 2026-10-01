@@ -42,6 +42,7 @@ export interface HookEventMap {
   readonly "step.completed": ProtocolEvent<"step.completed">;
   readonly "step.failed": ProtocolEvent<"step.failed">;
   readonly "step.started": ProtocolEvent<"step.started">;
+  readonly "task.activity": ProtocolEvent<"task.activity">;
   readonly "task.settled": ProtocolEvent<"task.settled">;
   readonly "task.started": ProtocolEvent<"task.started">;
   readonly "turn.cancelled": ProtocolEvent<"turn.cancelled">;

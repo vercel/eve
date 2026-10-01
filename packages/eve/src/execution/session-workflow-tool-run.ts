@@ -1,10 +1,12 @@
 import { deliverWorkflowAuthorization } from "#execution/tools/workflow/owner.js";
 import {
   emitAgentStartedStep,
+  emitTaskActivityStep,
   emitWorkflowToolRunReportStep,
 } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import type {
   WorkflowToolAskRequest,
+  WorkflowToolRunActivityMessage,
   WorkflowToolRunAgentStartedMessage,
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
@@ -61,22 +63,39 @@ export async function handleWorkflowToolRunMessage(
         emitAgentStartedStep({ ...state, messages: [message] }),
       );
       return undefined;
+    case "activity":
+      await input.cursor.advance((state) =>
+        emitTaskActivityStep({ ...state, messages: [message] }),
+      );
+      return undefined;
   }
 }
 
-/** Boundary messages in admission order, with consecutive `agent-started` messages grouped. */
+/**
+ * Boundary messages in admission order, with consecutive `agent-started`
+ * messages grouped, and consecutive `activity` messages grouped.
+ */
 type BoundaryBatch =
+  | { readonly kind: "activity"; readonly messages: WorkflowToolRunActivityMessage[] }
   | { readonly kind: "agent-started"; readonly messages: WorkflowToolRunAgentStartedMessage[] }
   | { readonly kind: "message"; readonly message: WorkflowToolRunMessage };
 
-/** Groups consecutive `agent-started` messages so one `emitAgentStartedStep` publishes each group. */
-export function batchAgentStarts(messages: readonly WorkflowToolRunMessage[]): BoundaryBatch[] {
+/** Groups consecutive messages one step publishes together, so each group costs one step. */
+export function batchBoundaryMessages(
+  messages: readonly WorkflowToolRunMessage[],
+): BoundaryBatch[] {
   const batches: BoundaryBatch[] = [];
   for (const message of messages) {
     const last = batches.at(-1);
-    if (message.kind !== "agent-started") batches.push({ kind: "message", message });
-    else if (last?.kind === "agent-started") last.messages.push(message);
-    else batches.push({ kind: "agent-started", messages: [message] });
+    if (message.kind === "agent-started") {
+      if (last?.kind === "agent-started") last.messages.push(message);
+      else batches.push({ kind: "agent-started", messages: [message] });
+    } else if (message.kind === "activity") {
+      if (last?.kind === "activity") last.messages.push(message);
+      else batches.push({ kind: "activity", messages: [message] });
+    } else {
+      batches.push({ kind: "message", message });
+    }
   }
   return batches;
 }

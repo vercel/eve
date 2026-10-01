@@ -172,6 +172,46 @@ describe("session callback route", () => {
     expect(resumeHookMock).toHaveBeenCalledWith("tok123", payload);
   });
 
+  it("relays a remote child's tool calls to the run awaiting its turn", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const payload = {
+      callId: "call-2",
+      event: {
+        calls: [{ id: "lookup-1", name: "lookup", title: "Reading the INC-2291 postmortem" }],
+        kind: "requested",
+      },
+      kind: "subagent-activity",
+    };
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/tok123", {
+        body: JSON.stringify(payload),
+        method: "POST",
+      }),
+      createRouteContext({ token: "tok123" }),
+    );
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith("tok123", payload);
+  });
+
+  it("rejects remote activity past its bounds without resuming the parent", async () => {
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/tok123", {
+        body: JSON.stringify({
+          callId: "call-2",
+          event: {
+            calls: [{ id: "lookup-1", name: "lookup", title: "x".repeat(201) }],
+            kind: "requested",
+          },
+          kind: "subagent-activity",
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "tok123" }),
+    );
+    expect(response.status).toBe(400);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
   it("rejects malformed remote input without resuming the parent", async () => {
     const response = await handleSessionCallbackRequest(
       new Request("https://app.example.com/eve/v1/callback/tok123", {

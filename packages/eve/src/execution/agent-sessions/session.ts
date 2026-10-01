@@ -1,6 +1,10 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { RuntimeActionResultHookPayload } from "#channel/types.js";
+import { AgentActivityFold, type AgentActivityEvent } from "#channel/task-card.js";
+import type {
+  RuntimeActionResultHookPayload,
+  SubagentActivityHookPayload,
+} from "#channel/types.js";
 import {
   forwardAgentSessionRequest,
   type AgentSessionRequest,
@@ -27,7 +31,10 @@ import type {
   AgentSession,
 } from "#tools/workflow-definition.js";
 
-type AgentTurnReply = AgentSessionRequest | RuntimeActionResultHookPayload;
+type AgentTurnReply =
+  | AgentSessionRequest
+  | RuntimeActionResultHookPayload
+  | SubagentActivityHookPayload;
 
 type AgentTurnEnd =
   | { readonly kind: "ended"; readonly result: AgentMessageResult<unknown> }
@@ -84,6 +91,8 @@ class RunAgentSession implements AgentSession {
   #opened: Promise<OpenedAgentSession> | undefined;
   /** Oldest first. */
   readonly #awaited: AwaitedReply[] = [];
+  /** The agent's tool calls, from the activity its turns report. */
+  readonly #activity = new AgentActivityFold();
 
   constructor(input: {
     readonly key: string;
@@ -149,6 +158,10 @@ class RunAgentSession implements AgentSession {
   async #readTurn(hook: Hook<AgentTurnReply>, expectsData: boolean): Promise<AgentTurnEnd> {
     try {
       for await (const reply of hook) {
+        if (reply.kind === "subagent-activity") {
+          await this.#reportActivity(reply.event);
+          continue;
+        }
         if (reply.kind !== "runtime-action-result") {
           await forwardAgentSessionRequest({
             from: this.#run.from,
@@ -186,6 +199,21 @@ class RunAgentSession implements AgentSession {
       };
     } catch (error) {
       return { error, kind: "failed" };
+    }
+  }
+
+  /**
+   * Reports the agent's changed calls for the call the run serves now. Only a
+   * task's calls have activity: an `execute` call's turn waits on its run.
+   */
+  async #reportActivity(event: AgentActivityEvent): Promise<void> {
+    const calls = this.#activity.apply(event);
+    const { from, owner } = this.#run;
+    if (calls.length === 0 || from.taskId === undefined) return;
+    try {
+      await owner.send({ calls, from, kind: "activity" });
+    } catch {
+      // Activity is best effort; the agent's turn goes on without it.
     }
   }
 

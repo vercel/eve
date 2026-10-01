@@ -32,6 +32,7 @@ const SLACK_RENDERED_EVENTS = [
   "session.failed",
   "session.waiting",
   "step.started",
+  "task.activity",
   "task.settled",
   "task.started",
   "turn.cancelled",

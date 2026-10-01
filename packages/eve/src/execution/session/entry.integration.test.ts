@@ -668,6 +668,71 @@ describe("workflowEntry integration", () => {
     });
   }, 60_000);
 
+  it("reports each tool call a delegated turn starts and settles to its caller", async () => {
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-delegated-activity" },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineTool({
+              description: "Look up an incident by its id.",
+              execute: () => ({ found: true }),
+              inputSchema: {},
+            }),
+          }),
+          logicalPath: "tools/lookup_incident.ts",
+        },
+      ],
+    });
+    const callerToken = "subagent:parent-session:call-1";
+
+    await runtime.run(async () => {
+      const child = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Use the lookup_incident tool exactly once." },
+          serializedContext: buildSerializedContext({
+            channelKind: "subagent",
+            channelState: {
+              callId: "call-1",
+              parentContinuationToken: sessionInboxHookToken(callerToken),
+              parentSessionId: "parent-session",
+              subagentName: "researcher",
+            },
+            continuationToken: callerToken,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(child);
+
+      try {
+        const turn = await withTimeout(stream.nextTurn(), "delegated activity turn");
+        const [requested] = filterEventsByType(turn, "actions.requested");
+        const callId = requested?.data.actions[0]?.callId;
+        expect(callId).toEqual(expect.any(String));
+        await expect(waitForSubagentActivity(child.runId, 2)).resolves.toEqual([
+          {
+            callId: "call-1",
+            event: {
+              calls: [{ id: callId, name: "lookup_incident", title: expect.any(String) }],
+              kind: "requested",
+            },
+            kind: "subagent-activity",
+          },
+          {
+            callId: "call-1",
+            event: { id: callId, kind: "settled", status: "completed", task: false },
+            kind: "subagent-activity",
+          },
+        ]);
+      } finally {
+        stream.dispose();
+        await child.cancel();
+      }
+    });
+  }, 60_000);
+
   it("exits a competing continuation owner before its first turn", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
     const continuationToken = "http:workflow-entry-hook-owner";
@@ -965,6 +1030,38 @@ async function waitForSubagentInputRequest(runId: string, callId: string): Promi
   }
 
   throw new Error(`Timed out waiting for a subagent input request from caller "${callId}".`);
+}
+
+/** The first `count` activity payloads the run's hooks received, in order. */
+async function waitForSubagentActivity(runId: string, count: number): Promise<unknown[]> {
+  const world = await getWorld();
+  const deadline = Date.now() + 10_000;
+  let activity: unknown[] = [];
+
+  while (Date.now() < deadline) {
+    const events = await world.events.list({
+      pagination: { limit: 1000 },
+      resolveData: "all",
+      runId,
+    });
+    activity = [];
+    for (const event of events.data) {
+      if (event.eventType !== "hook_received") continue;
+      const payload = await hydrateWorkflowArguments(event.eventData.payload, runId, undefined);
+      if (
+        typeof payload === "object" &&
+        payload !== null &&
+        "kind" in payload &&
+        payload.kind === "subagent-activity"
+      ) {
+        activity.push(payload);
+      }
+    }
+    if (activity.length >= count) return activity.slice(0, count);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Timed out waiting for subagent activity. Received: ${JSON.stringify(activity)}`);
 }
 
 function hasSubagentResult(value: unknown, callId: string): boolean {

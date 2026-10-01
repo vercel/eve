@@ -6,6 +6,7 @@ import { ParentSessionKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { forwardSessionActivity } from "#execution/forward-session-activity.js";
 import { forwardSessionInput } from "#execution/forward-session-input.js";
 import {
   createDurableSessionState,
@@ -265,7 +266,8 @@ export interface SessionEventDispatcher {
 interface EventDispatcher extends SessionEventDispatcher {
   /**
    * Channel delivery: `forwardSessionInput` or the channel adapter's handler,
-   * then the channel context. Returns the event as the handler left it.
+   * then the channel context, then a delegated session's activity report.
+   * Returns the event as the handler left it.
    */
   deliver(event: UnstampedMessageStreamEvent): Promise<UnstampedMessageStreamEvent>;
 }
@@ -331,6 +333,7 @@ function createSessionEventDispatcher(input: {
             inputSource === undefined ? adapterCtx : { ...adapterCtx, inputSource },
           );
       setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
+      await forwardSessionActivity(ctx, routed);
       return routed;
     },
     async runHooks(event, cancelTurn) {

@@ -106,6 +106,44 @@ const sessionAuthorizationCallbackSchema = z.object({
   ]),
 });
 
+const activityIdSchema = z.string().min(1).max(256);
+
+/** A remote child's tool calls; bounded, since the caller folds them into its own state. */
+const sessionActivityCallbackSchema = z
+  .object({
+    callId: z.string().min(1),
+    kind: z.literal("subagent-activity"),
+    event: z.discriminatedUnion("kind", [
+      z
+        .object({
+          kind: z.literal("requested"),
+          calls: z
+            .array(
+              z
+                .object({
+                  id: activityIdSchema,
+                  name: z.string().min(1).max(256),
+                  title: z.string().min(1).max(200),
+                })
+                .strict(),
+            )
+            .min(1)
+            .max(100),
+        })
+        .strict(),
+      z.object({ id: activityIdSchema, kind: z.literal("task") }).strict(),
+      z
+        .object({
+          id: activityIdSchema,
+          kind: z.literal("settled"),
+          status: z.enum(["working", "completed", "failed", "cancelled"]),
+          task: z.boolean(),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+
 /** A settled remote turn must state its outcome; callers do not infer its lifecycle. */
 const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -146,7 +184,9 @@ export async function handleSessionCallbackRequest(
       ? sessionInputCallbackSchema.safeParse(body)
       : kind === "subagent-authorization-event"
         ? sessionAuthorizationCallbackSchema.safeParse(body)
-        : undefined;
+        : kind === "subagent-activity"
+          ? sessionActivityCallbackSchema.safeParse(body)
+          : undefined;
   if (forwarded !== undefined && !forwarded.success) {
     return Response.json({ error: "Invalid session input callback.", ok: false }, { status: 400 });
   }

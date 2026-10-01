@@ -451,6 +451,33 @@ export interface TaskSettledStreamEvent {
   type: "task.settled";
 }
 
+/** One of the tool calls an agent made while doing a task's work for one call. */
+export interface TaskActivityCall {
+  /** The agent's own call id. */
+  id: string;
+  /** The tool name. */
+  name: string;
+  /** The tool's start label, or the name's display title. */
+  title: string;
+  status: "working" | "completed" | "failed" | "cancelled";
+}
+
+/**
+ * Stream event emitted when an agent a task's run opened starts or settles
+ * one of its own tool calls. `calls` lists the calls that changed, as they
+ * stand now, so a client folds them into the call's activity by `id`. It
+ * comes between the call's `task.started` and `task.settled`.
+ */
+export interface TaskActivityStreamEvent {
+  data: {
+    callId: string;
+    calls: TaskActivityCall[];
+    taskId: string;
+    turnId: string;
+  };
+  type: "task.activity";
+}
+
 /**
  * Why the session cancelled a task call: the model called `task_cancel`,
  * someone cancelled the turn (or, between turns, the tasks still working), or
@@ -824,6 +851,7 @@ export type UnstampedMessageStreamEvent =
   | SessionStartedStreamEvent
   | SessionWaitingStreamEvent
   | ResultCompletedStreamEvent
+  | TaskActivityStreamEvent
   | TaskSettledStreamEvent
   | TaskStartedStreamEvent
   | ActionsRequestedStreamEvent
@@ -1442,6 +1470,21 @@ export function createTaskSettledEvent(
   if (input.error !== undefined) data.error = input.error;
   if (input.cancel !== undefined) data.cancel = input.cancel;
   return { data, type: "task.settled" };
+}
+
+/** Creates the `task.activity` event for an agent's calls that changed while it did a task's work. */
+export function createTaskActivityEvent(
+  input: TaskActivityStreamEvent["data"],
+): TaskActivityStreamEvent {
+  return {
+    data: {
+      callId: input.callId,
+      calls: input.calls.map(({ id, name, status, title }) => ({ id, name, status, title })),
+      taskId: input.taskId,
+      turnId: input.turnId,
+    },
+    type: "task.activity",
+  };
 }
 
 /**

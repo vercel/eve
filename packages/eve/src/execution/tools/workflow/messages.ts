@@ -4,6 +4,7 @@ import type { RemoteAgentBinding } from "#eve-channel/support.js";
 import type { SessionAuth } from "#context/session-context.js";
 import type { AgentSessionContext } from "#execution/agent-sessions/context.js";
 import type { AgentSessionAddress } from "#execution/agent-sessions/steps.js";
+import type { TaskActivityCall } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
@@ -145,7 +146,18 @@ export interface WorkflowToolRunStartedMessage {
   readonly from: WorkflowToolRunRef;
 }
 
+/**
+ * Tool calls a task's `ctx.agent` session started or settled while serving
+ * the call `from` names, as they stand now. The session publishes them as
+ * `task.activity`.
+ */
+export interface WorkflowToolRunActivityMessage {
+  readonly calls: readonly TaskActivityCall[];
+  readonly from: WorkflowToolRunRef;
+}
+
 export type WorkflowToolRunMessage =
+  | ({ readonly kind: "activity" } & WorkflowToolRunActivityMessage)
   | ({ readonly kind: "agent-started" } & WorkflowToolRunAgentStartedMessage)
   | ({ readonly kind: "started" } & WorkflowToolRunStartedMessage)
   | ({ readonly kind: "report" } & WorkflowToolRunReport)

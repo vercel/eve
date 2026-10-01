@@ -4,11 +4,16 @@ import {
   type SessionStateTransition,
 } from "#execution/session/state-delta.js";
 import type {
+  WorkflowToolRunActivityMessage,
   WorkflowToolRunAgentStartedMessage,
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
-import { createActionPartialEvent, createAgentStartedEvent } from "#protocol/message.js";
+import {
+  createActionPartialEvent,
+  createAgentStartedEvent,
+  createTaskActivityEvent,
+} from "#protocol/message.js";
 import type { JsonValue } from "#shared/json.js";
 
 /** Publishes a workflow tool run's `ctx.report()` update as `action.partial`. */
@@ -31,6 +36,29 @@ export async function emitWorkflowToolRunReportStep(
     turnId: input.from.turnId,
   });
   return await withSessionStateDelta(input, (target) => publishSessionEvents(target, [event]));
+}
+
+/** Publishes `task.activity`, in order, for what tasks' agents reported. */
+export async function emitTaskActivityStep(
+  input: SessionStepState & {
+    readonly messages: readonly WorkflowToolRunActivityMessage[];
+  },
+): Promise<SessionStateTransition> {
+  "use step";
+
+  const events = input.messages.flatMap(({ calls, from }) =>
+    from.taskId === undefined
+      ? []
+      : [
+          createTaskActivityEvent({
+            callId: from.callId,
+            calls: [...calls],
+            taskId: from.taskId,
+            turnId: from.turnId,
+          }),
+        ],
+  );
+  return await withSessionStateDelta(input, (target) => publishSessionEvents(target, events));
 }
 
 /** Publishes `agent.started`, in order, for sessions workflow tool runs opened. */

@@ -212,6 +212,7 @@ export interface ChannelEvents<TCtx = void> {
   readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
   readonly "input.resolved"?: ChannelEventHandler<"input.resolved", TCtx>;
   readonly "task.started"?: ChannelEventHandler<"task.started", TCtx>;
+  readonly "task.activity"?: ChannelEventHandler<"task.activity", TCtx>;
   readonly "task.settled"?: ChannelEventHandler<"task.settled", TCtx>;
   readonly "turn.waiting"?: ChannelEventHandler<"turn.waiting", TCtx>;
   readonly "turn.failed"?: ChannelEventHandler<"turn.failed", TCtx>;
@@ -328,6 +329,7 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "input.requested": null,
   "input.resolved": null,
   "task.started": null,
+  "task.activity": null,
   "task.settled": null,
   "turn.waiting": null,
   "turn.failed": null,

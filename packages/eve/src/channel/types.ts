@@ -346,6 +346,17 @@ export interface SubagentAuthorizationEventHookPayload {
 }
 
 /**
+ * Payload a delegated child sends its caller when one of its tool calls
+ * starts or settles, so the run awaiting the child's turn can report the
+ * task's activity. Runtime-internal, like the other subagent payloads.
+ */
+export interface SubagentActivityHookPayload {
+  readonly callId: string;
+  readonly event: import("#channel/task-card.js").AgentActivityEvent;
+  readonly kind: "subagent-activity";
+}
+
+/**
  * Serializable payload sent through the workflow `resumeHook`.
  */
 export type HookPayload =
@@ -354,6 +365,7 @@ export type HookPayload =
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
   | SessionTimeoutHookPayload
+  | SubagentActivityHookPayload
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
