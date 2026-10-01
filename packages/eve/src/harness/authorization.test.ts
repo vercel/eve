@@ -231,18 +231,6 @@ describe("pending authorization attempts", () => {
     ]);
   });
 
-  it("keeps a re-requested open attempt once without superseding it", () => {
-    const notion = challenge("notion", "notion-1");
-    const state = setPendingAuthorization(undefined, {
-      challenges: [challenge("linear", "linear-1"), notion],
-    });
-
-    expect(getSupersededAuthorizationChallenges(state, [notion])).toEqual([]);
-    expect(
-      getPendingAuthorization(setPendingAuthorization(state, { challenges: [notion] }))?.challenges,
-    ).toEqual([challenge("linear", "linear-1"), notion]);
-  });
-
   it("clears by exact attempt identity", () => {
     const state = setPendingAuthorization(undefined, {
       challenges: [challenge("linear", "linear-2"), challenge("github", "github-1")],

@@ -89,13 +89,21 @@ export class SessionInputQueue {
     }
   }
 
-  /** Removes and returns the queued callbacks for `attemptIds`, or `undefined` when none arrived. */
+  /**
+   * Removes and returns the queued callbacks for `attemptIds` once every one
+   * has arrived, so a turn holding several sign-ins resumes when all are done.
+   */
   takeAuthorizations(attemptIds: ReadonlySet<string>): DeliverPayload[] | undefined {
     const taken = this.entries.filter(
       (entry): entry is QueuedAuthorization =>
         entry.kind === "authorization" && attemptIds.has(entry.attemptId),
     );
-    if (taken.length === 0) return undefined;
+    if (
+      taken.length === 0 ||
+      new Set(taken.map((entry) => entry.attemptId)).size < attemptIds.size
+    ) {
+      return undefined;
+    }
     this.retain((entry) => !taken.includes(entry as QueuedAuthorization));
     return taken.map((entry) => entry.payload);
   }

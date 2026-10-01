@@ -1,4 +1,5 @@
 import { isApprovalRequest } from "#harness/input-request-class.js";
+import { declinedSignInEvents, withdrawHeldSignIns } from "#harness/held-requests.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
@@ -672,7 +673,38 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         stepInput: stepInput.input,
       }),
     });
-    const effectiveStepInput = staleConversion.stepInput;
+    let effectiveStepInput = staleConversion.stepInput;
+    // A new message reaching an open turn steers it: the turn moves past the
+    // sign-ins it waits on, and its unanswered approvals resolve below.
+    if (
+      !isHarnessBetweenTurns(session) &&
+      (input?.message !== undefined || staleConversion.kind === "converted")
+    ) {
+      const withdrawal = withdrawHeldSignIns(session.state, {
+        completedAt: Date.now(),
+        reason: STEERED_SIGN_IN_REASON,
+      });
+      session = { ...session, state: withdrawal.state };
+      if (withdrawal.withdrawn.length > 0) {
+        if (emit) {
+          for (const event of declinedSignInEvents(
+            withdrawal.withdrawn,
+            STEERED_SIGN_IN_REASON,
+            emissionState,
+          )) {
+            await emit(event);
+          }
+        }
+        const names = [...new Set(withdrawal.withdrawn.map((challenge) => challenge.name))];
+        effectiveStepInput = {
+          ...effectiveStepInput,
+          context: [
+            ...(effectiveStepInput?.context ?? []),
+            `Sign-in to ${names.join(", ")} was cancelled because the user sent a new message instead. Ask to sign in again only if the new message still needs it.`,
+          ],
+        };
+      }
+    }
     const preambleStepInput =
       staleConversion.kind === "converted"
         ? { ...effectiveStepInput, message: staleConversion.displayMessage }
@@ -2800,15 +2832,7 @@ async function handleStepResult(input: {
           }),
         );
       }
-      // A reused attempt already has its prompt; announcing it again would
-      // post a second card for one sign-in.
-      const announced = new Set(
-        (getPendingAuthorization(baseSession.state)?.challenges ?? []).flatMap(
-          (challenge) => challenge.attemptId ?? [],
-        ),
-      );
       for (const ch of challenges) {
-        if (ch.attemptId !== undefined && announced.has(ch.attemptId)) continue;
         await emit(
           createAuthorizationRequiredEvent({
             ...authorizationEventFields(ch),
@@ -2929,6 +2953,8 @@ async function holdTurnForRequest(
   await emit(createTurnWaitingEvent({ on: "input", sequence: next.sequence, turnId: next.turnId }));
   return next;
 }
+
+const STEERED_SIGN_IN_REASON = "Cancelled because a new message arrived.";
 
 /** Appended to the model-facing description of every tool with `endsTurn: true`. */
 const ENDS_TURN_TOOL_NOTE =

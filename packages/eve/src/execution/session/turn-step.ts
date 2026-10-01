@@ -67,11 +67,9 @@ import {
 } from "#protocol/message.js";
 import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import {
-  type AuthorizationChallenge,
   CallbackBaseUrlKey,
   clearPendingAuthorization,
   getPendingAuthorization,
-  OpenAuthorizationChallengesKey,
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -158,33 +156,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       if (remainingPayloads.length === 0) delivery = undefined;
     }
   }
-
-  // A message that steers a turn held on its own sign-in cancels the sign-in,
-  // so the turn moves on with the message. Responder sign-ins (`candidateId`)
-  // belong to an approval and stay open.
-  let cancelledAuths: readonly AuthorizationChallenge[] = [];
-  const heldAuth = getPendingAuthorization(durableSession.state);
-  if (
-    heldAuth !== undefined &&
-    getHarnessEmissionState(durableSession.state).turnId !== "" &&
-    delivery?.payloads.some((payload) => payload.message !== undefined) === true
-  ) {
-    cancelledAuths = heldAuth.challenges.filter((challenge) => challenge.candidateId === undefined);
-    if (cancelledAuths.length > 0) {
-      durableSession = {
-        ...durableSession,
-        state: clearPendingAuthorization(
-          durableSession.state,
-          cancelledAuths.map((challenge) => challenge.attemptId ?? challenge.name),
-        ),
-      };
-    }
-  }
-
-  ctx.set(
-    OpenAuthorizationChallengesKey,
-    getPendingAuthorization(durableSession.state)?.challenges ?? [],
-  );
 
   const previousAuth = ctx.get(AuthKey);
 
@@ -321,16 +292,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         throw error;
       }
       resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
-      if (resolved !== undefined && cancelledAuths.length > 0) {
-        const names = [...new Set(cancelledAuths.map((challenge) => challenge.name))].join(", ");
-        resolved = {
-          ...resolved,
-          context: [
-            ...(resolved.context ?? []),
-            `Sign-in to ${names} was cancelled because the user sent a new message instead. Ask to sign in again only if the new message still needs it.`,
-          ],
-        };
-      }
     }
     const ignoredActiveDelivery =
       delivery !== undefined && resolved === undefined && !isHarnessBetweenTurns(initialSession);
@@ -565,21 +526,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                   createAuthorizationCompletedEvent({
                     ...authorizationEventFields(challenge),
                     outcome: "authorized",
-                    sequence: emissionState.sequence,
-                    stepIndex: emissionState.stepIndex,
-                    turnId: emissionState.turnId,
-                  }),
-                );
-              }
-            }
-            if (firstCall) {
-              const emissionState = getHarnessEmissionState(schemaSession.state);
-              for (const challenge of cancelledAuths) {
-                await handleEvent(
-                  createAuthorizationCompletedEvent({
-                    ...authorizationEventFields(challenge),
-                    outcome: "declined",
-                    reason: "Cancelled because a new message arrived.",
                     sequence: emissionState.sequence,
                     stepIndex: emissionState.stepIndex,
                     turnId: emissionState.turnId,

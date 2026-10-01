@@ -27,7 +27,6 @@ import type {
   ToolResponsePart,
 } from "#harness/hitl/pending-input-resolution.js";
 import type { HarnessSession } from "#harness/types.js";
-import { finishApprovalCandidate, getApprovalAuditState } from "#harness/approval-candidates.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 
 const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
@@ -141,34 +140,23 @@ const CANCELLED_APPROVAL_REASON = "Cancelled before anyone answered.";
 
 /**
  * Withdraws every pending tool approval when its turn is cancelled. Each held
- * call goes into history with a not-run result, so no call is left without
- * one, and responder candidates still checking it end as stale.
+ * call goes into history with a not-run result, so no call is left without one.
  */
-export function cancelApprovalInputBatches(
-  session: HarnessSession,
-  cancelledAt: number,
-): HarnessSession {
+export function cancelApprovalInputBatches(session: HarnessSession): HarnessSession {
   const batches = pendingApprovalBatches(session.state);
   if (batches.length === 0) return session;
   const messages: ModelMessage[] = [...session.history];
   for (const batch of batches) {
-    appendResolvedBatchTranscript(messages, batch, batch.requests.flatMap(cancelledApprovalParts));
+    appendResolvedBatchTranscript(
+      messages,
+      batch,
+      buildApprovalBatchToolResponseParts(batch, [], CANCELLED_APPROVAL_REASON),
+    );
   }
-  const requestIds = new Set(
-    batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
-  );
-  let state = removePendingInputBatches(session, batches).state;
-  for (const candidate of getApprovalAuditState(state).activeCandidates) {
-    if (!requestIds.has(candidate.requestId)) continue;
-    state = finishApprovalCandidate({
-      candidateId: candidate.candidateId,
-      completedAt: cancelledAt,
-      reason: CANCELLED_APPROVAL_REASON,
-      state,
-      status: "stale",
-    });
-  }
-  return { ...session, history: validateHarnessModelMessages(messages), state };
+  return {
+    ...removePendingInputBatches(session, batches),
+    history: validateHarnessModelMessages(messages),
+  };
 }
 
 /** Tool approvals still waiting for an answer, which cancelling their turn withdraws. */
@@ -180,23 +168,6 @@ export function getPendingApprovalRequests(
 
 function pendingApprovalBatches(state: HarnessSession["state"]): readonly PendingInputBatch[] {
   return getPendingInputBatches(state).filter((batch) => batch.requests.every(isApprovalRequest));
-}
-
-function cancelledApprovalParts(request: InputRequest): ToolResponsePart[] {
-  return [
-    {
-      approvalId: request.requestId,
-      approved: false,
-      reason: CANCELLED_APPROVAL_REASON,
-      type: "tool-approval-response",
-    },
-    {
-      output: { type: "execution-denied", reason: CANCELLED_APPROVAL_REASON },
-      toolCallId: request.action.callId,
-      toolName: request.action.toolName,
-      type: "tool-result",
-    },
-  ];
 }
 
 /** Returns recorded approval keys that have no matching request still pending. */
@@ -305,6 +276,8 @@ function buildRejectedActionBatch(
 function buildApprovalBatchToolResponseParts(
   batch: PendingInputBatch,
   responses: readonly InputResponse[],
+  /** Why an unanswered request did not run, when not because the user moved on. */
+  unansweredReason?: string,
 ): ToolResponsePart[] {
   const responseMap = new Map(responses.map((response) => [response.requestId, response]));
   const parts: ToolResponsePart[] = [];
@@ -313,7 +286,11 @@ function buildApprovalBatchToolResponseParts(
     switch (request.kind) {
       case "tool-approval":
         parts.push(
-          ...buildApprovalToolResponseParts(request as ToolApprovalInputRequest, response),
+          ...buildApprovalToolResponseParts(
+            request as ToolApprovalInputRequest,
+            response,
+            unansweredReason,
+          ),
         );
         break;
       case "question":
@@ -333,8 +310,11 @@ function buildApprovalBatchToolResponseParts(
 function buildApprovalToolResponseParts(
   request: ToolApprovalInputRequest,
   response: InputResponse | undefined,
+  unansweredReason: string | undefined,
 ): ToolResponsePart[] {
-  const { approved, reason } = resolveApprovalOutcome(response);
+  const outcome = resolveApprovalOutcome(response);
+  const approved = outcome.approved;
+  const reason = response === undefined ? (unansweredReason ?? outcome.reason) : outcome.reason;
   const parts: ToolResponsePart[] = [
     { approvalId: request.requestId, approved, reason, type: "tool-approval-response" },
   ];

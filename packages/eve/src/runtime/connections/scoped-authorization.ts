@@ -24,7 +24,6 @@ import {
   consumeAuthorizationResult,
   createAuthorizationAttempt,
   requestAuthorization,
-  findOpenAuthorizationChallenge,
 } from "#harness/authorization.js";
 import type { JsonValue } from "#shared/json.js";
 import {
@@ -325,21 +324,11 @@ async function startScopedAuthorization(
   const { scope, authorization, connection } = input;
   if (!supportsInteractiveAuthorization(authorization)) return undefined;
 
-  const principal = resolveScopedPrincipal(input);
-  const grant = authorization.vercelConnect?.connector;
-  // A call that needs a sign-in the person already has a prompt for reuses
-  // that attempt, so the prompt keeps working instead of being superseded.
-  // Responder sign-ins stay per approval.
-  const open =
-    input.boundResponder === undefined
-      ? findOpenAuthorizationChallenge({ grant, name: scope, principal })
-      : undefined;
-  if (open !== undefined) return requestAuthorization([open]);
-
   const attempt = createAuthorizationAttempt(scope);
   if (attempt === undefined) return undefined;
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
+  const principal = resolveScopedPrincipal(input);
   const requester = input.boundResponder ?? contextStorage.getStore()?.get(AuthKey) ?? undefined;
   const callbackUrl = resolveAuthorizationCallbackUrl({
     authorization,
@@ -354,7 +343,7 @@ async function startScopedAuthorization(
     {
       attemptId: attempt.attemptId,
       challenge: stampChallengeDisplayName(challenge, authorization),
-      grant,
+      grant: authorization.vercelConnect?.connector,
       hookUrl: callbackUrl,
       instanceId: input.instanceId,
       name: scope,
