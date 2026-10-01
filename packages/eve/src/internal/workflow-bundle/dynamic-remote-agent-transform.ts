@@ -52,7 +52,11 @@ function findCredentialsFactories(
 ): CredentialsFactoryInfo[] {
   const factories: CredentialsFactoryInfo[] = [];
   const moduleId = stableModuleId(filename);
-  const definers = findEveImportAliases(ast, ["defineRemoteAgent"]);
+  // The bare name also covers re-exports through authored modules.
+  const definers = new Set([
+    "defineRemoteAgent",
+    ...findEveImportAliases(ast, ["defineRemoteAgent"]),
+  ]);
 
   const visit = (node: AstNode, enclosingBindings: ReadonlySet<string>): void => {
     if (isFunction(node)) {
