@@ -52,9 +52,6 @@ async function expectAnswerable(
   await t.require(part.approval?.id, equals(requestId));
   await t.require(part.toolMetadata?.eve?.inputRequest?.requestId, equals(requestId));
   await t.require(part.toolMetadata?.eve?.inputResponse, equals(undefined));
-  const cancel = await settles("Idle store cancellation", store.cancel());
-  await t.require(cancel.status, equals("no_active_turn"));
-  await t.require(store.snapshot.status, equals("ready"));
 }
 
 async function refuse(t: EveEvalContext, store: Store, callId: string, requestId: string) {
@@ -76,13 +73,14 @@ async function refuse(t: EveEvalContext, store: Store, callId: string, requestId
     equals(["pending", "rejected"]),
   );
   await t.require(candidates.at(-1)?.data.reason, equals("Wrong responder."));
+  // The approval holds the turn, so a refused answer leaves it held.
   await t.require(
     events
-      .filter((event) => event.type === "approval.candidate" || event.type === "session.waiting")
+      .filter((event) => event.type === "approval.candidate" || event.type === "turn.waiting")
       .map((event) => event.type),
-    equals(["approval.candidate", "approval.candidate", "session.waiting"]),
+    equals(["approval.candidate", "approval.candidate", "turn.waiting"]),
   );
-  await t.require(events.at(-1)?.type, equals("session.waiting"));
+  await t.require(events.at(-1)?.type, equals("turn.waiting"));
   await t.require(
     events.filter(
       (event) =>

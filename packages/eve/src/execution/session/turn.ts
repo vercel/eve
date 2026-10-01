@@ -3,13 +3,7 @@ import { sleep } from "#compiled/@workflow/core/index.js";
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
-import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
-import {
-  isSteeringMessage,
-  type SessionInputQueue,
-  type SteeringTurn,
-} from "#execution/session/input-queue.js";
+import type { SessionInputQueue } from "#execution/session/input-queue.js";
 import { taskToolResult, type TaskToolCall } from "#execution/tasks/calls.js";
 import { TASK_WAIT_TOOL_NAME } from "#protocol/task-tools.js";
 import { resolveTurnPrincipal } from "#execution/session/principal.js";
@@ -26,9 +20,8 @@ import {
   sessionCommandHookToken,
   sessionInboxHookToken,
 } from "#execution/session-inbox/address.js";
-import type { SessionInboxPayload, SessionInboxReader } from "#execution/session-inbox/inbox.js";
+import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { publishTurnWaitingStep } from "#execution/session/turn-waiting-step.js";
-import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import {
   batchAgentStarts,
@@ -43,10 +36,7 @@ import type {
   TurnStepPayload,
 } from "#execution/session/turn-step-types.js";
 import { turnStep } from "#execution/session/turn-step.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
-import { coalesceDeliveries } from "#harness/messages.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
+import { ActiveTurn } from "#execution/session/active-turn.js";
 import {
   findBlockingWorkflowToolRun,
   isInboxToolResultFromRecordedWorkflowToolRun,
@@ -181,6 +171,20 @@ export class SessionExecution {
         };
       }
 
+      if (result.action === "held" && result.hold === "request") {
+        if (
+          result.hasPendingInputBatch &&
+          this.input.capabilities?.requestInput !== true &&
+          !hasDelegatedCallerContext(this.input.cursor.serializedContext)
+        ) {
+          throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
+        }
+        const woke = await this.waitForHeldRequest(turn, result);
+        if (woke === "cancelled") return await this.finishCancelledTurn(turn);
+        nextStepInput = { delivery: woke };
+        continue;
+      }
+
       if (result.action === "held") {
         const woke = await this.waitForHeldTurn(turn);
         if (woke === "cancelled") return await this.finishCancelledTurn(turn);
@@ -280,10 +284,39 @@ export class SessionExecution {
         case "workflow":
           await this.handleWorkflowMessage(next.message);
           continue;
+        case "input":
         case "runtime-action-result":
         case "timeout":
           continue;
       }
+    }
+  }
+
+  /**
+   * The turn waits on a sign-in or tool approval it raised. It wakes with the
+   * delivery its next step reads: the sign-in callback, an approval answer
+   * from any responder, or a message from the turn's own person, which steers
+   * the turn and cancels the request. Anyone else's message queues behind it.
+   */
+  private async waitForHeldRequest(
+    turn: ActiveTurn,
+    held: {
+      readonly authorizationAttemptIds: readonly string[];
+      readonly inputRequestIds: readonly string[];
+    },
+  ): Promise<DeliverHookPayload | "cancelled"> {
+    const attemptIds = new Set(held.authorizationAttemptIds);
+    const requestIds = new Set(held.inputRequestIds);
+    while (true) {
+      const callbacks = this.input.queue.takeAuthorizations(attemptIds);
+      if (callbacks !== undefined) return { kind: "deliver", payloads: callbacks };
+      const answer = turn.takeInputResponses(requestIds);
+      if (answer !== undefined) return answer;
+      const steering = await turn.takeSteering();
+      if (steering !== undefined) return steering;
+      const next = await turn.nextRuntimeEvent([]);
+      if (next === "cancelled") return next;
+      if (next.kind === "workflow") await this.handleWorkflowMessage(next.message);
     }
   }
 
@@ -338,6 +371,7 @@ export class SessionExecution {
         }
         continue;
       }
+      if (next.kind === "input") continue;
       if (next.kind === "steering") {
         // Only the first steering message interrupts; later ones wait for the calls anyway.
         if (!interrupted) await this.interruptWaitedWorkflowCalls(input.pendingCallIds, results);
@@ -444,247 +478,4 @@ function startTaskWait(call: Extract<TaskToolCall, { readonly kind: "task_wait" 
   const { callId, timeoutMs } = call;
   const timer = timeoutMs === undefined ? undefined : sleep(timeoutMs).then(() => callId);
   return { callId, startedAtMs: Date.now(), timedOut: false, timer };
-}
-
-type RuntimeEvent =
-  | { readonly kind: "runtime-action-result"; readonly results: readonly RuntimeActionResult[] }
-  | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
-  /** A steering message that answered no pending request arrived during the wait. */
-  | { readonly kind: "steering" }
-  /** A `task_wait` call's timeout passed. */
-  | { readonly kind: "timeout"; readonly callId: string }
-  | "cancelled";
-
-/**
- * Admission policy, cancellation, and steering for one active turn.
- * Deliveries admitted while a model step runs stay in the shared queue until
- * the turn reaches a committed boundary; a runtime-action wait routes them
- * eagerly so a proxied child can receive the answer it is blocked on.
- *
- * The pump signals cancellation and eligible steering immediately. Cancellation
- * aborts the turn; steering only interrupts generation before assistant output
- * or local tool execution. Both retain ordered admission at the next boundary.
- */
-class ActiveTurn {
-  private readonly admitted = new Set<number>();
-  private readonly routedToChildren = new Set<number>();
-  private readonly runtimeResults: RuntimeEvent[] = [];
-  private readonly controller = new AbortController();
-  private readonly expectedTurnId: string;
-  private readonly input: SessionExecutionInput;
-  /** Who alone steers the turn: its principal, or its delegated caller. */
-  private readonly identity: SteeringTurn;
-  private readonly unsubscribe: () => void;
-  private unsubscribeDelivery: () => void;
-  private steeringController = new AbortController();
-  /** The delegated caller of the latest message the turn read. */
-  caller: TurnCaller | undefined;
-
-  constructor(
-    input: SessionExecutionInput,
-    owner: { readonly caller: TurnCaller | undefined; readonly principal: string },
-  ) {
-    this.input = input;
-    this.caller = owner.caller;
-    this.identity = { callerCallId: owner.caller?.callId, principal: owner.principal };
-    this.expectedTurnId = activeTurnId(input.cursor.sessionState.emissionState);
-    this.unsubscribe = input.inbox.onInterrupt((payload) => {
-      if (this.cancelsThisTurn(payload)) this.abort();
-    });
-    this.unsubscribeDelivery = input.inbox.onDelivery(this.signalSteering);
-  }
-
-  private readonly signalSteering = (payload: SessionInboxPayload): void => {
-    let delivery;
-    try {
-      delivery = decodeSessionInboxPayload(payload);
-    } catch {
-      return;
-    }
-    if (
-      delivery.kind === "deliver" &&
-      isSteeringMessage(delivery, this.identity) &&
-      !this.input.cursor.sessionState.hasProxyInputRequests
-    )
-      this.steeringController.abort();
-  };
-
-  get signal(): AbortSignal {
-    return this.controller.signal;
-  }
-
-  dispose(): void {
-    this.unsubscribe();
-    this.unsubscribeDelivery();
-  }
-
-  get steeringSignal(): AbortSignal {
-    return this.steeringController.signal;
-  }
-
-  private resetSteering(): void {
-    if (!this.steeringController.signal.aborted) return;
-    this.unsubscribeDelivery();
-    this.steeringController = new AbortController();
-    // Admission can yield while new deliveries are pumped. Replaying the
-    // unread inbox keeps those arrivals attached to the next generation.
-    this.unsubscribeDelivery = this.input.inbox.onDelivery(this.signalSteering);
-  }
-
-  /** Admits everything the pump accepted while the last step ran. */
-  async admitBoundary(): Promise<void> {
-    const pending = this.input.inbox.drain();
-    for (const payload of pending) await this.admit(payload);
-  }
-
-  /**
-   * Steering admitted during this turn, routed to children first and coalesced.
-   * The next step reads it as input, so its signal must not interrupt that
-   * step; only deliveries still unread re-signal the next generation.
-   */
-  async takeSteering(): Promise<DeliverHookPayload | undefined> {
-    const steering: DeliverHookPayload[] = [];
-    while (true) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity);
-      if (selection === undefined) break;
-      for (const sequence of selection.sequences) this.admitted.delete(sequence);
-      const routed = await routeSelectedDelivery(selection, this.input.cursor);
-      if (routed.kind === "cancel-turn") {
-        this.abort();
-        break;
-      }
-      if (routed.kind === "turn") steering.push(routed.delivery);
-    }
-    this.resetSteering();
-    if (steering.length === 0) return undefined;
-    const delivery = steering.length === 1 ? steering[0]! : coalesceDeliveries(steering);
-    if (delivery.caller !== undefined) this.caller = delivery.caller;
-    return delivery;
-  }
-
-  /**
-   * Removes the admitted run messages the session applies at once instead of
-   * in a runtime wait, or only those of `kind`.
-   */
-  takeBoundaryMessages(kind?: "agent-started"): WorkflowToolRunMessage[] {
-    const taken: WorkflowToolRunMessage[] = [];
-    const kept: RuntimeEvent[] = [];
-    for (const event of this.runtimeResults) {
-      const message = asBoundaryMessage(event);
-      if (message === undefined || (kind !== undefined && message.kind !== kind)) kept.push(event);
-      else taken.push(message);
-    }
-    this.runtimeResults.splice(0, this.runtimeResults.length, ...kept);
-    return taken;
-  }
-
-  /**
-   * Next runtime result, workflow message, steering, or timeout, admitting
-   * inbox traffic while waiting. Deliveries admitted before the wait began are
-   * routed first, so a message that arrived as the calls started still steers.
-   * `timers` are durable sleeps raced against the inbox.
-   */
-  async nextRuntimeEvent(timers: readonly Promise<string>[]): Promise<RuntimeEvent> {
-    while (true) {
-      const steered = await this.routeAdmittedToChildren();
-      if (this.signal.aborted) return "cancelled";
-      if (steered) return { kind: "steering" };
-      const event = this.runtimeResults.shift();
-      if (event !== undefined) return event;
-      const elapsed = await this.waitForInboxOrTimer(timers);
-      if (elapsed !== undefined) return { callId: elapsed, kind: "timeout" };
-      const payload = await this.input.inbox.next();
-      if (payload === undefined)
-        throw new Error("Session inbox closed before runtime actions completed.");
-      await this.admit(payload);
-    }
-  }
-
-  /** Resolves with the id of the call whose timer won, or `undefined` once inbox input is ready. */
-  private async waitForInboxOrTimer(
-    timers: readonly Promise<string>[],
-  ): Promise<string | undefined> {
-    if (timers.length === 0 || this.input.inbox.hasPending()) return undefined;
-    const inboxReady = this.input.inbox.whenPending().then(() => undefined);
-    return await Promise.race([inboxReady, ...timers]);
-  }
-
-  private cancelsThisTurn(payload: SessionInboxPayload): boolean {
-    if (payload.kind === "reset") return true;
-    if (payload.kind !== "cancel") return false;
-    return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
-  }
-
-  private async admit(value: SessionInboxPayload): Promise<void> {
-    const admitted = await admitSessionInboxPayload(value, this.input);
-    switch (admitted.kind) {
-      case "delivery":
-        this.admitted.add(admitted.admission.sequence);
-        return;
-      case "runtime-action-result":
-        this.runtimeResults.push({
-          kind: "runtime-action-result",
-          results: admitted.payload.results,
-        });
-        return;
-      case "workflow":
-        this.runtimeResults.push({ kind: "workflow", message: admitted.message });
-        return;
-      case "cancel":
-        if (this.cancelsThisTurn(value)) this.abort();
-        return;
-      case "consumed":
-        return;
-    }
-  }
-
-  /**
-   * During a runtime wait, descendant-bound answers cannot wait for the
-   * boundary. Returns whether a newly routed delivery still steers: it
-   * answered nothing, so its message is for the model.
-   */
-  private async routeAdmittedToChildren(): Promise<boolean> {
-    let steered = false;
-    for (const sequence of this.admitted) {
-      if (this.routedToChildren.has(sequence)) continue;
-      const delivery = this.input.queue.delivery(sequence);
-      if (delivery === undefined) {
-        this.admitted.delete(sequence);
-        continue;
-      }
-      this.routedToChildren.add(sequence);
-      const routed = await this.input.cursor.advance((state) =>
-        routeDeliverToChildren({ delivery, ...state }),
-      );
-      if (routed.kind === "cancel-turn") {
-        this.input.queue.replaceDelivery(sequence, undefined);
-        this.admitted.delete(sequence);
-        this.abort();
-        return false;
-      }
-      this.input.queue.replaceDelivery(sequence, routed.remainder);
-      if (routed.remainder === undefined) {
-        this.admitted.delete(sequence);
-        continue;
-      }
-      if (isSteeringMessage(routed.remainder, this.identity)) steered = true;
-    }
-    return steered;
-  }
-
-  private abort(): void {
-    if (this.controller.signal.aborted) return;
-    this.controller.abort(new TurnCancelledError());
-  }
-}
-
-function asBoundaryMessage(event: RuntimeEvent): WorkflowToolRunMessage | undefined {
-  if (event === "cancelled" || event.kind !== "workflow") return undefined;
-  // Tasks run beside the turn, so everything their runs send, such as a
-  // question, reaches the session at the next boundary rather than at turn end.
-  if (event.message.from.taskId !== undefined) return event.message;
-  // An `execute` run can open a session after its call returns, when the turn
-  // may have no wait left to take the message, and publishing it needs none.
-  if (event.message.kind === "agent-started") return event.message;
-  return undefined;
 }

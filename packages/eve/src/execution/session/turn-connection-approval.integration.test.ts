@@ -1,3 +1,4 @@
+import { endHeldTurn } from "#internal/testing/held-turn.js";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -374,6 +375,9 @@ describe("turn connection approval restoration", () => {
     });
     const first = await fixture.step();
     const firstBatch = getPendingInputBatches(readDurableSession(first.sessionState).state)[0]!;
+    // The approval holds its turn; leave it open between turns, as cancelling
+    // the held turn does, so a second turn can raise its own.
+    fixture.updateSession(endHeldTurn);
     fixture.doStream.mockImplementationOnce(() => modelResponse("save-2"));
     await fixture.step({
       delivery: {
@@ -422,6 +426,9 @@ describe("turn connection approval restoration", () => {
       const parked = await fixture.step();
       const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
         .requests[0]!;
+      // Answered in a later turn, as after the held turn is cancelled, so the
+      // turn-scoped connection resolves again.
+      fixture.updateSession(endHeldTurn);
       if (cold) clearDurableDynamicCallbacks(sessionId);
       await fixture.step({
         delivery: {
@@ -498,11 +505,15 @@ describe("turn connection approval restoration", () => {
         delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's first note." }] },
       });
       await fixture.step();
+      fixture.updateSession(endHeldTurn);
       fixture.doStream.mockImplementationOnce(() => modelResponse("save-2", "second-notes"));
       await fixture.step({
         delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's second note." }] },
       });
       const second = await fixture.step();
+      // Both approvals stay open between turns, so the answer arrives in a new
+      // turn whose connections no longer include "notes".
+      fixture.updateSession(endHeldTurn);
       const batches = getPendingInputBatches(readDurableSession(second.sessionState).state);
       expect(batches).toHaveLength(2);
       expect(
@@ -741,11 +752,11 @@ describe("turn connection approval restoration", () => {
     expect(fixture.policyTurns).toEqual([batch.event!.turnId]);
     expect(fixture.response).toHaveBeenCalledOnce();
     expect(fixture.fetch).toHaveBeenCalledOnce();
+    // The approval held its turn, so the responder's sign-in resumes it
+    // without starting another.
     const events = fixture.events.slice(start);
-    expect(events.findIndex((event) => event.type === "authorization.completed")).toBeLessThan(
-      events.findIndex((event) => event.type === "turn.started"),
-    );
-    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+    expect(events.some((event) => event.type === "authorization.completed")).toBe(true);
+    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(0);
   });
 
   it.each([false, true])(
@@ -788,7 +799,8 @@ describe("turn connection approval restoration", () => {
       expect(fixture.fetch).toHaveBeenCalledOnce();
       expect(getPendingInputBatches(readDurableSession(resumed.sessionState).state)).toEqual([]);
       expect(resumed.serializedContext).not.toHaveProperty("eve.pendingConnectionCalls");
-      expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(2);
+      // The approval held its turn, so approving it resumes the same turn.
+      expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
       // The connection call is reported as a nested action of the approved call.
       const nestedCallId = `${request.action.callId}:1`;
       expect(fixture.events).toContainEqual(

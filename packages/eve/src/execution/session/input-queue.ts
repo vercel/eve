@@ -89,6 +89,17 @@ export class SessionInputQueue {
     }
   }
 
+  /** Removes and returns the queued callbacks for `attemptIds`, or `undefined` when none arrived. */
+  takeAuthorizations(attemptIds: ReadonlySet<string>): DeliverPayload[] | undefined {
+    const taken = this.entries.filter(
+      (entry): entry is QueuedAuthorization =>
+        entry.kind === "authorization" && attemptIds.has(entry.attemptId),
+    );
+    if (taken.length === 0) return undefined;
+    this.retain((entry) => !taken.includes(entry as QueuedAuthorization));
+    return taken.map((entry) => entry.payload);
+  }
+
   delivery(sequence: number): DeliverHookPayload | undefined {
     const entry = this.entries.find(
       (candidate): candidate is QueuedDelivery =>

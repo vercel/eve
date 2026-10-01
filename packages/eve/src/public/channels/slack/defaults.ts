@@ -402,7 +402,18 @@ export const defaultEvents: SlackChannelInternalEvents = {
     // must only ever be visible to the person who started the sign-in, never posted into
     // the shared thread.
     if (recipientUserId && challengeUrl) {
-      const prompt = { displayName, url: challengeUrl, userCode: event.authorization?.userCode };
+      const { channelId, threadTs } = channel.state;
+      // The turn's own sign-in holds it, so the prompt can cancel that turn.
+      const cancel =
+        event.candidateId === undefined && channelId && threadTs && event.turnId
+          ? { channelId, threadTs, turnId: event.turnId }
+          : undefined;
+      const prompt = {
+        cancel,
+        displayName,
+        url: challengeUrl,
+        userCode: event.authorization?.userCode,
+      };
       try {
         await channel.thread.postEphemeral(recipientUserId, {
           blocks: buildAuthEphemeralBlocks(prompt),

@@ -706,6 +706,8 @@ Use them to test a custom renderer against eve's wire format, or to post eve's c
 
 Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the Slack user behind the event's `principalId`, device code included, and then updates that public status when `authorization.completed` fires. A renderer's `authorization.required` handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access. Its `next()` reaches eve's default, which posts the public status; skip `next` to deliver the challenge yourself, as this handler does by direct message. `state.slackUsersByPrincipal` maps each principal eve has seen in the thread, through a message or an input response, to its Slack user ID. If the principal has no entry, the challenge is not sent privately.
 
+The default private prompt names the service, says the agent is paused, and pairs a **Connect** button with **Cancel**. Cancel ends the held turn and removes the prompt; the public status, "Paused: waiting for @user to connect Linear…", then reads "Linear sign-in cancelled". Approval cards say the agent is paused until someone approves or cancels.
+
 ```ts
 renderers: [
   {

@@ -156,7 +156,7 @@ async function settleApprovalCard(
         userId: answer.userId,
       });
     }
-    const { actions: _actions, ...withoutActions } = candidate;
+    const { actions: _actions, subtext: _subtext, ...withoutActions } = candidate;
     return buildAnsweredBlocks({
       answerLabel: answer.label,
       promptBlocks: [withoutActions],

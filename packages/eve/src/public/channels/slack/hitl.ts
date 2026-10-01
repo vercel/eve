@@ -420,7 +420,7 @@ function renderInputRequestCardBlock(
   request: InputRequest,
   actionId: string,
 ): Record<string, unknown> {
-  return {
+  const card: Record<string, unknown> = {
     type: "card",
     body: {
       type: "mrkdwn",
@@ -429,6 +429,11 @@ function renderInputRequestCardBlock(
     },
     actions: cardButtonOptions(request).map((opt, index) => buildCardButton(opt, actionId, index)),
   };
+  // A tool approval holds the turn until someone acts, so say so on the card.
+  if (isApprovalRequest(request)) {
+    card.subtext = { type: "mrkdwn", text: "I've paused until someone approves or cancels." };
+  }
+  return card;
 }
 
 function cardButtonOptions(request: InputRequest): CardButtonOption[] {

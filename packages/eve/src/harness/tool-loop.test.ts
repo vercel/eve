@@ -1592,7 +1592,8 @@ describe("createToolLoopHarness", () => {
     expect(hasPendingInputBatch(reparked.session.state)).toBe(true);
     const toolMessages = reparked.session.history.filter((message) => message.role === "tool");
     expect(JSON.stringify(toolMessages)).toContain("delegated-done");
-    expect(events.at(-1)?.type).toBe("session.waiting");
+    expect(reparked.held).toEqual({ kind: "request" });
+    expect(events.at(-1)?.type).toBe("turn.waiting");
   });
 
   it("waits on a task_wait parked beside an approval, but not on an invalid task_cancel", async () => {
@@ -3223,13 +3224,15 @@ describe("createToolLoopHarness", () => {
       },
       type: "input.requested",
     });
-    expect(events.filter((event) => event.type === "turn.completed").at(-1)).toEqual({
+    expect(events.filter((event) => event.type === "turn.waiting").at(-1)).toEqual({
       data: {
+        awaitingPerson: true,
         sequence: 0,
         turnId: "turn_0",
       },
-      type: "turn.completed",
+      type: "turn.waiting",
     });
+    expect(events.some((event) => event.type === "turn.completed")).toBe(false);
   });
 
   it.each(["", "Alice's inventory list is"])(
@@ -7843,8 +7846,7 @@ describe("createToolLoopHarness", () => {
       "actions.requested",
       "step.completed",
       "input.requested",
-      "turn.completed",
-      "session.waiting",
+      "turn.waiting",
     ]);
     expect(events.find((event) => event.type === "actions.requested")).toEqual({
       data: {

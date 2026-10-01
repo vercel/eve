@@ -33,7 +33,9 @@ export default defineEval({
     });
     started.event("authorization.required", { count: 1 });
     started.notEvent("authorization.completed");
-    started.event("session.waiting", { count: 1 });
+    // The sign-in holds the turn; the callback resumes it.
+    started.event("turn.waiting", { count: 1 });
+    started.notEvent("session.waiting");
 
     const required = started.events.find((event) => event.type === "authorization.required");
     if (required?.type !== "authorization.required") {
@@ -54,6 +56,7 @@ export default defineEval({
 
     const completed = await resumed.result();
     completed.expectOk();
+    completed.notEvent("turn.started");
     completed.noFailedActions();
     completed.notEvent("authorization.required");
     completed.event("authorization.completed", {

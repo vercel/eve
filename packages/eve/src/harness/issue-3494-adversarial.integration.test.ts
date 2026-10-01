@@ -11,6 +11,7 @@ import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
+import { endHeldTurn } from "#internal/testing/held-turn.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -235,9 +236,18 @@ function fixture(
     pending: () => getPendingInputBatches(session.state).flatMap((b) => b.requests),
     async gate(...names: string[]) {
       script.push(calls(...names));
-      await drive({ message: `Prepare ${names.join(" and ")}.` });
+      const parked = await drive({ message: `Prepare ${names.join(" and ")}.` });
+      expect(parked.held).toEqual({ kind: "request" });
       expect(this.pending().filter((r) => r.kind === "tool-approval")).toHaveLength(names.length);
       expect(executions).toHaveLength(0);
+      this.endHeldTurn();
+    },
+    /**
+     * An approval holds its turn. These scenarios cover approvals left open
+     * between turns, as cancelling the held turn leaves them.
+     */
+    endHeldTurn() {
+      session = endHeldTurn(session);
     },
     respond(tool: string, optionId = "approve"): StepInput {
       const request = this.pending().find((r) => r.action.toolName === tool);
@@ -529,11 +539,68 @@ it("continues after responder-authorized approval with an older approval still o
   expect(result.settledTurn?.output).toBe("FINAL");
 });
 
+it("cancels a held approval when the same person steers the turn", async () => {
+  const f = fixture("steer-cancels-held-approval");
+  f.script.push(calls("gateA"));
+  const parked = await f.drive({ message: "Prepare gateA." });
+  expect(parked.held).toEqual({ kind: "request" });
+  f.script.push("FINAL", "FINAL");
+  const result = await f.drive({ message: "Never mind, skip it." });
+  expect(f.pending()).toHaveLength(0);
+  expect(f.executions).toEqual([]);
+  expect(f.events.filter((event) => event.type === "input.resolved")).toMatchObject([
+    { data: { resolutions: [{ kind: "tool-approval", outcome: "ignored" }] } },
+  ]);
+  expect(f.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+  expect(result.settledTurn?.output).toBe("FINAL");
+});
+
+it("keeps holding the turn after a refused response and resumes it on retry", async () => {
+  let allowed = false;
+  const f = fixture("held-refused-response", () =>
+    allowed
+      ? { status: "allowed" as const }
+      : { status: "rejected" as const, reason: "Alice needs Bob's approval." },
+  );
+  f.script.push(calls("gateA"));
+  const parked = await f.drive({ message: "Prepare gateA." });
+  expect(parked.held).toEqual({ kind: "request" });
+  const input = {
+    attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
+      response,
+      auth: {
+        attributes: {},
+        authenticator: "test",
+        issuer: "test",
+        principalId: "alice",
+        principalType: "user" as const,
+      },
+    })),
+  };
+  const start = f.events.length;
+  const refused = await f.drive(input);
+  const types = f.events.slice(start).map((event) => event.type);
+  expect(refused.held).toEqual({ kind: "request" });
+  // The turn stays held, and `turn.waiting` gives the responder's send a boundary.
+  expect(types).toEqual(["approval.candidate", "approval.candidate", "turn.waiting"]);
+  expect(f.pending()).toHaveLength(1);
+  expect(f.executions).toEqual([]);
+
+  allowed = true;
+  f.script.push("Bob approved the task.");
+  const resumed = await f.drive(input);
+  expect(f.executions).toEqual(["gateA"]);
+  expect(f.pending()).toEqual([]);
+  expect(resumed.settledTurn?.output).toBe("Bob approved the task.");
+  expect(f.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+});
+
 it("continues after responder-authorized approval of the older batch", async () => {
   const f = fixture("authorized-older-sibling", true);
   await f.gate("gateA");
   f.script.push(calls("gateB"));
   await f.drive({ message: "Also prepare B." });
+  f.endHeldTurn();
   expect(f.pending().map((request) => request.action.toolName)).toEqual(["gateA", "gateB"]);
   f.script.push(calls("read"), "FINAL");
   const response = f.respond("gateA").inputResponses![0]!;

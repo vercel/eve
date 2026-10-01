@@ -114,7 +114,7 @@ function resultCallIds(session: HarnessSession) {
 }
 
 describe("workflow approval resume (real AI SDK)", () => {
-  it("opens one resume turn before dispatch and replays accompanying input after completion", async () => {
+  it("resumes the held turn before dispatch and replays accompanying input after completion", async () => {
     const fixture = setup([workflow("deploy", always())]);
     const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
     expect(getPendingCoordinationBatch(initial.session.state)).toBeUndefined();
@@ -128,20 +128,19 @@ describe("workflow approval resume (real AI SDK)", () => {
     expect(
       getPendingCoordinationBatch(approved.session.state)?.tasks.map((task) => task.callId),
     ).toEqual(["call-0"]);
+    // The approval held its turn, so answering it resumes that turn.
     const resumedTurn = getHarnessEmissionState(approved.session.state).turnId;
+    expect(resumedTurn).toBe(getHarnessEmissionState(initial.session.state).turnId);
     expect(resumedTurn).not.toBe("");
     expect(
       fixture.events.slice(start).filter((event) => event.type === "turn.started"),
-    ).toMatchObject([{ data: { turnId: resumedTurn } }]);
+    ).toHaveLength(0);
     const completed = await fixture.step(approved.session, workflowResult());
     expect(resultCallIds(completed.session)).toEqual(["call-0"]);
     expect(fixture.model.doStreamCalls).toHaveLength(2);
     expect(
       fixture.events.slice(start).filter((event) => event.type === "step.started"),
-    ).toMatchObject([
-      { data: { turnId: resumedTurn, stepIndex: 0 } },
-      { data: { turnId: resumedTurn, stepIndex: 1 } },
-    ]);
+    ).toMatchObject([{ data: { turnId: resumedTurn } }, { data: { turnId: resumedTurn } }]);
     expect(JSON.stringify(fixture.model.doStreamCalls[1]!.prompt)).not.toContain("Tell Alice");
     expect(typeof completed.next).toBe("function");
     const followUp = await fixture.step(completed.session);

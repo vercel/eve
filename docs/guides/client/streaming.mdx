@@ -56,11 +56,12 @@ This consumes the stream until the current turn boundary:
 - `session.waiting`
 - `session.completed`
 - `session.failed`
+- `turn.waiting` with `awaitingPerson: true`, which the turn emits while it
+  waits on a sign-in or tool approval
 - `turn.waiting` while an `input.requested` the response read is unanswered
 
-A `turn.waiting` without a pending request is informational: the turn stays
-open, and `result()` keeps reading to its final reply. This includes a sign-in
-a running call needs, such as a subagent's connection. When a call the turn
+Any other `turn.waiting` is informational: the turn stays open, and `result()`
+keeps reading to its final reply. When a call the turn
 runs asks a question, such as a workflow tool's `ctx.ask()`, `result()` returns
 `status: "waiting"` with the question in `inputRequests`. Answer it with
 `respond()`, which keeps reading the same turn. A question stays pending until

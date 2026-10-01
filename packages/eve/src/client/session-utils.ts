@@ -87,16 +87,18 @@ export async function collectTurnEvents(
 
 /**
  * Returns true when one segment of a turn's events ends at `event`: at a
- * current-turn boundary, or at `turn.waiting` while an input request read in
- * the segment is unanswered. The turn stays open there until a person answers;
- * without a pending request, `turn.waiting` is informational and reading goes
- * on to the turn's real end.
+ * current-turn boundary, or at a `turn.waiting` that waits on a person (a
+ * sign-in or approval, or an input request read in the segment that is still
+ * unanswered). Otherwise `turn.waiting` is informational and reading goes on
+ * to the turn's real end.
  */
 export function isTurnSegmentBoundary(
   event: UnstampedMessageStreamEvent,
   pendingInputRequests: ReadonlySet<string>,
 ): boolean {
-  if (event.type === "turn.waiting") return pendingInputRequests.size > 0;
+  if (event.type === "turn.waiting") {
+    return event.data.awaitingPerson === true || pendingInputRequests.size > 0;
+  }
   return isCurrentTurnBoundaryEvent(event);
 }
 

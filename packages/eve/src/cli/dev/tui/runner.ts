@@ -2569,9 +2569,13 @@ async function* eveEventsToTUIStream(
         return;
 
       case "turn.waiting":
-        // The turn stays open; it ends this stream only when a call it runs
-        // asked something the person must answer first.
-        if (turnState.pendingApprovals.length === 0 && turnState.pendingQuestions.length === 0) {
+        // The turn stays open; it ends this stream only when it waits on the
+        // person: a sign-in or approval, or a question a call it runs asked.
+        if (
+          event.data.awaitingPerson !== true &&
+          turnState.pendingApprovals.length === 0 &&
+          turnState.pendingQuestions.length === 0
+        ) {
           break;
         }
         turnState.boundaryEvent = event.type;

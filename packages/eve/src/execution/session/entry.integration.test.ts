@@ -668,6 +668,67 @@ describe("workflowEntry integration", () => {
     });
   }, 60_000);
 
+  it("holds the turn on a tool approval and resumes that turn when it is answered", async () => {
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-held-approval" },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineTool({
+              approval: always(),
+              description: "Apply a change after the user approves it.",
+              execute: () => ({ applied: true }),
+              inputSchema: {},
+            }),
+          }),
+          logicalPath: "tools/approve_change.ts",
+        },
+      ],
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Use the approve_change tool exactly once." },
+          serializedContext: {
+            ...buildSerializedContext({
+              channelKind: "http",
+              continuationToken: "http:workflow-entry-held-approval",
+            }),
+            "eve.capabilities": { requestInput: true },
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const asked = await withTimeout(stream.nextTurn(), "approval turn");
+        const request = filterEventsByType(asked, "input.requested")[0]?.data.requests[0];
+        expect(request?.kind).toBe("tool-approval");
+        expect(asked.at(-1)?.type).toBe("turn.waiting");
+        expect(filterEventsByType(asked, "turn.completed")).toHaveLength(0);
+
+        await resumeHook(sessionInboxHookToken(sessionCommandHookToken(run.runId)), {
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request!.requestId }] },
+        });
+
+        const answered = await withTimeout(stream.nextTurn(), "approved turn");
+        expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
+        expect(
+          filterEventsByType(answered, "action.result").map((event) => event.data.result.output),
+        ).toContainEqual({ applied: true });
+        expect(filterEventsByType(answered, "turn.completed")).toHaveLength(1);
+        expect(answered.at(-1)?.type).toBe("session.waiting");
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   it("exits a competing continuation owner before its first turn", async () => {
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-hook-owner" } });
     const continuationToken = "http:workflow-entry-hook-owner";

@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1084
 status: draft
-last_updated: "2026-09-28"
+last_updated: "2026-10-01"
 ---
 
 # eve tasks
@@ -442,9 +442,9 @@ includes `ask_question`) asks a question or needs a sign-in, right after its `in
 `authorization.required`. `turn.waiting` is informational, never a response
 boundary: the next `step.started` with the same `turnId` means the turn resumed, and only
 `turn.completed`, `turn.failed`, or `turn.cancelled` end it. `session.waiting` keeps one meaning,
-the turn has ended and the session awaits another message, and carries no `turnId`. A tool
-approval the turn requests still ends that turn, as today: `input.requested`, `turn.completed`,
-then `session.waiting`. A root turn's held text step completes normally as
+the turn has ended and the session awaits another message, and carries no `turnId`. A sign-in
+or tool approval the turn raises itself holds it the same way, and that `turn.waiting` carries
+`awaitingPerson: true`; see [held sign-in and approval](./held-sign-in-and-approval.md). A root turn's held text step completes normally as
 `"stop"`, and a person can keep writing. A child turn (its session has a caller) and a schedule's
 turn (`ScheduleIdKey`, `harness/tool-loop.ts`) report their held text step as
 `finishReason: "tool-calls"`, which channels already skip, so the run posts once. History and
@@ -452,7 +452,7 @@ traces keep the model's own finish reason.
 
 **Where a response ends.** `send()`, the helpers that collect a turn's events, and MCP stop at
 `session.waiting`, `session.completed`, or `session.failed`, and at `turn.waiting` only when
-questions are pending in what they read, the way pending sign-ins already gate
+questions are pending in what they read or it carries `awaitingPerson`, the way pending sign-ins already gate
 `session.waiting`. Then `result()` returns `status: "waiting"` with the questions, and
 `respond()` keeps reading the same open turn to its real end. Without pending questions,
 `turn.waiting` is not a boundary, so `send().result()` and an MCP `agent_get` see the final reply;

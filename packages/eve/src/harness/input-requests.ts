@@ -6,6 +6,7 @@ import { hasTailApprovalResponse } from "#harness/current-messages.js";
 import {
   getApprovedTools,
   findAnsweredApprovalBatches,
+  ignoreApprovalInputBatch,
   resolveApprovalInputBatches,
 } from "#harness/hitl/approval-input-requests.js";
 import type { RejectedActionBatch } from "#harness/hitl/approval-input-requests.js";
@@ -179,6 +180,18 @@ export function resolvePendingInput(input: {
     responses,
     session: input.session,
   };
+  // A message that steers a turn held on its own approval cancels that
+  // approval, so the turn moves on instead of waiting behind it.
+  if (
+    input.internalStep === true &&
+    route.kind === "approvals" &&
+    responses.length === 0 &&
+    resolvedStepInput?.message !== undefined &&
+    input.activeTurnId !== undefined &&
+    batches[0]?.event?.turnId === input.activeTurnId
+  ) {
+    return ignoreApprovalInputBatch(resolverInput);
+  }
   switch (route.kind) {
     case "session-limit":
       return resolveSessionLimitInput({ ...resolverInput, pendingBatch: route.batch });

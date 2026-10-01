@@ -16,9 +16,12 @@
  * surface the outcome (`authorized` / `declined` / `failed` /
  * `timed-out`).
  */
-
 import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
 import { truncatePlainText } from "#public/channels/slack/limits.js";
+import {
+  SIGN_IN_CANCEL_ACTION_ID,
+  type SignInCancelTarget,
+} from "#public/channels/slack/sign-in-cancel.js";
 import { displayProperName } from "#shared/display-name.js";
 
 export type { ConnectionAuthorizationOutcome };
@@ -42,7 +45,7 @@ export function buildAuthRequiredPublicText(input: {
   if (input.recipientUserId === null) {
     return `${input.displayName} needs to be connected to continue, but the sign-in link couldn't be sent privately.`;
   }
-  return `Waiting for <@${input.recipientUserId}> to connect ${input.displayName}…`;
+  return `Paused: waiting for <@${input.recipientUserId}> to connect ${input.displayName}…`;
 }
 
 /**
@@ -58,6 +61,9 @@ export function buildAuthCompletedText(input: {
   if (input.outcome === "authorized") {
     return `:white_check_mark: ${input.displayName} connected`;
   }
+  if (input.outcome === "declined") {
+    return `${input.displayName} sign-in cancelled`;
+  }
   const tail = input.reason !== undefined ? ` (${input.reason})` : "";
   return `:x: ${input.displayName} authorization ${input.outcome}${tail}`;
 }
@@ -69,6 +75,8 @@ export function buildAuthCompletedText(input: {
  * provider shows only sometimes, so it is a quiet hint below the button.
  */
 export function buildAuthEphemeralBlocks(input: {
+  /** Lets the person cancel the held turn instead of connecting. */
+  readonly cancel?: SignInCancelTarget;
   readonly displayName: string;
   readonly url: string;
   readonly userCode?: string;
@@ -78,7 +86,10 @@ export function buildAuthEphemeralBlocks(input: {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account. Only you can see this message.`,
+        text:
+          input.cancel === undefined
+            ? `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account. Only you can see this message.`
+            : `*Connect ${input.displayName}*\nI've paused until you connect your ${input.displayName} account or cancel. Only you can see this message.`,
       },
     },
     {
@@ -90,6 +101,16 @@ export function buildAuthEphemeralBlocks(input: {
           url: input.url,
           style: "primary",
         },
+        ...(input.cancel === undefined
+          ? []
+          : [
+              {
+                type: "button",
+                action_id: SIGN_IN_CANCEL_ACTION_ID,
+                text: { type: "plain_text", text: "Cancel" },
+                value: JSON.stringify(input.cancel),
+              },
+            ]),
       ],
     },
   ];

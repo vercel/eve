@@ -617,6 +617,11 @@ export interface TurnCompletedStreamEvent {
  */
 export interface TurnWaitingStreamEvent {
   data: {
+    /**
+     * Present when the turn waits on a person: a sign-in or tool approval it
+     * raised. It resumes when that person acts, sends a message, or cancels.
+     */
+    awaitingPerson?: true;
     sequence: number;
     turnId: string;
   };
@@ -1681,16 +1686,16 @@ export function createTurnCompletedEvent(input: {
  * Creates the `turn.waiting` event for one open turn that parked.
  */
 export function createTurnWaitingEvent(input: {
+  readonly awaitingPerson?: boolean;
   readonly sequence: number;
   readonly turnId: string;
 }): TurnWaitingStreamEvent {
-  return {
-    data: {
-      sequence: input.sequence,
-      turnId: input.turnId,
-    },
-    type: "turn.waiting",
+  const data: TurnWaitingStreamEvent["data"] = {
+    sequence: input.sequence,
+    turnId: input.turnId,
   };
+  if (input.awaitingPerson === true) data.awaitingPerson = true;
+  return { data, type: "turn.waiting" };
 }
 
 /**

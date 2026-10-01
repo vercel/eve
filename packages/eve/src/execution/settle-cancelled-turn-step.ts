@@ -14,6 +14,9 @@ import {
 } from "#execution/session/state-delta.js";
 import { relayWithdrawnRequests } from "#execution/tools/workflow/withdraw-step.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
+import { authorizationEventFields } from "#harness/authorization-event-fields.js";
+import { clearPendingAuthorization, getPendingAuthorization } from "#harness/authorization.js";
+import { createAuthorizationCompletedEvent } from "#protocol/message.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
@@ -63,10 +66,40 @@ export async function settleCancelledTurn(
     history: input.history,
   };
   const durableState = step.durableSession.state;
+  // Sign-ins the turn held on end with it; responder sign-ins belong to an
+  // approval that outlives the turn.
+  const heldSignIns = (getPendingAuthorization(durableState)?.challenges ?? []).filter(
+    (challenge) => challenge.candidateId === undefined,
+  );
   const { published, result: usage } = await publishFromSessionStep(step, {
     origin: "own",
-    publish: (emit) => emitCancelledTurn(emit, getHarnessEmissionState(durableState)),
-    updateSession(session, emissionState) {
+    async publish(emit) {
+      const emissionState = getHarnessEmissionState(durableState);
+      for (const challenge of heldSignIns) {
+        await emit(
+          createAuthorizationCompletedEvent({
+            ...authorizationEventFields(challenge),
+            outcome: "declined",
+            reason: "Cancelled.",
+            sequence: emissionState.sequence,
+            stepIndex: emissionState.stepIndex,
+            turnId: emissionState.turnId,
+          }),
+        );
+      }
+      return await emitCancelledTurn(emit, emissionState);
+    },
+    updateSession(baseSession, emissionState) {
+      const session =
+        heldSignIns.length === 0
+          ? baseSession
+          : {
+              ...baseSession,
+              state: clearPendingAuthorization(
+                baseSession.state,
+                heldSignIns.map((challenge) => challenge.attemptId ?? challenge.name),
+              ),
+            };
       // `clearPendingSessionLimitPrompt`: cancellation settles with the step's
       // input snapshot, which can resurrect an already-answered session-limit
       // prompt (the decline that cancelled this turn consumed the answer in the

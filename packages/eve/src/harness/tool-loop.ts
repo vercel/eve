@@ -820,6 +820,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return { next: runStep, session: continuedSession };
     }
     if (coordinated.challenges.length > 0) {
+      // A responder's sign-in raised inside an open turn holds it; one raised
+      // between turns, for an approval left from an earlier turn, parks as before.
+      const holdsTurn = !isHarnessBetweenTurns(session);
       if (emit) {
         for (const challenge of coordinated.challenges) {
           await emit(
@@ -834,20 +837,23 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }),
           );
         }
+        if (holdsTurn) emissionState = await holdTurnForRequest(emit, emissionState);
       }
       const parkedSession =
         coordinated.stepInput === undefined
           ? session
           : queueDeferredStepInput(session, coordinated.stepInput);
-      return {
-        next: null,
-        session: {
+      const challengeSession = setHarnessEmissionState(
+        {
           ...parkedSession,
           state: setPendingAuthorization(parkedSession.state, {
             challenges: coordinated.challenges,
           }),
         },
-      };
+        emissionState,
+      );
+      if (holdsTurn) return { held: { kind: "request" }, next: null, session: challengeSession };
+      return { next: null, session: challengeSession };
     }
 
     // Approved siblings of a finished workflow run with their approval turn's tools.
@@ -942,19 +948,31 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
 
       if (resolvedCoordination.outcome === "resolved") {
+        // The approval raised beside the deferred calls is still open: hold the
+        // turn on it, as the approval park below does.
         if (emit) {
-          emissionState = await emitTurnEpilogue(emit, emissionState, parkedSession.history);
+          emissionState = await holdTurnForRequest(emit, emissionState);
           parkedSession = setHarnessEmissionState(parkedSession, emissionState);
         }
-        return { next: null, session: parkedSession };
+        return { held: { kind: "request" }, next: null, session: parkedSession };
       }
 
       if (
         coordinated.kind === "responses-completed" &&
-        isHarnessBetweenTurns(pending.session) &&
         getPendingAuthorization(pending.session.state) === undefined
       ) {
-        await emit?.(createSessionWaitingEvent());
+        if (isHarnessBetweenTurns(pending.session)) {
+          await emit?.(createSessionWaitingEvent());
+        } else {
+          // A response attempt that settled without resolving the request (a
+          // refused responder, say) leaves the turn held on it.
+          let heldSession = pending.session;
+          if (emit) {
+            emissionState = await holdTurnForRequest(emit, emissionState);
+            heldSession = setHarnessEmissionState(heldSession, emissionState);
+          }
+          return { held: { kind: "request" }, next: null, session: heldSession };
+        }
       }
       return { next: null, session: pending.session };
     }
@@ -2734,6 +2752,7 @@ async function handleStepResult(input: {
       session: { ...baseSession, history: parkedInputHistory },
     });
 
+    const runsDeferredInput = hasRunnableDeferredStepInput(parkedSession);
     if (emit) {
       await emit(
         createInputRequestedEvent({
@@ -2743,15 +2762,14 @@ async function handleStepResult(input: {
           turnId: emissionState.turnId,
         }),
       );
-
-      emissionState = await emitTurnEpilogue(emit, emissionState, parkedSession.history);
-      parkedSession = setHarnessEmissionState(parkedSession, emissionState);
+      if (!runsDeferredInput) {
+        emissionState = await holdTurnForRequest(emit, emissionState);
+        parkedSession = setHarnessEmissionState(parkedSession, emissionState);
+      }
     }
 
-    return {
-      next: hasRunnableDeferredStepInput(parkedSession) ? runStep : null,
-      session: parkedSession,
-    };
+    if (runsDeferredInput) return { next: runStep, session: parkedSession };
+    return { held: { kind: "request" }, next: null, session: parkedSession };
   }
 
   // --- Park on authorization request ------------------------------------------
@@ -2792,14 +2810,11 @@ async function handleStepResult(input: {
         );
       }
 
-      // An authorization park is a between-turn wait like the input park
-      // above: the session keeps serving ordinary turns while the challenge
-      // is open, so the stream must close its turn boundary — clients wait
-      // on `session.waiting` and would otherwise hang on the parked turn.
-      emissionState = await emitTurnEpilogue(emit, emissionState, authorizationHistory);
+      emissionState = await holdTurnForRequest(emit, emissionState);
     }
 
     return {
+      held: { kind: "request" },
       next: null,
       session: setHarnessEmissionState(
         {
@@ -2865,7 +2880,7 @@ async function handleStepResult(input: {
           }),
         );
       }
-      return { held: { taskIds: workingTasks }, next: null, session: nextSession };
+      return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: nextSession };
     }
     return { next: runStep, session: nextSession };
   }
@@ -2880,6 +2895,22 @@ async function handleStepResult(input: {
     // Text written before an `endsTurn` call was narration, not the reply.
     stepOutput: endsTurn ? null : stepOutput,
   });
+}
+
+/**
+ * A sign-in or tool approval the turn raised holds it open, as a task or
+ * `ctx.ask` does: the turn reports `turn.waiting` and resumes in the same turn
+ * once the person answers, steers, or cancels.
+ */
+async function holdTurnForRequest(
+  emit: NonNullable<ToolLoopHarnessConfig["handleEvent"]>,
+  emissionState: ReturnType<typeof getHarnessEmissionState>,
+): Promise<ReturnType<typeof getHarnessEmissionState>> {
+  const next = advanceStep(emissionState);
+  await emit(
+    createTurnWaitingEvent({ awaitingPerson: true, sequence: next.sequence, turnId: next.turnId }),
+  );
+  return next;
 }
 
 /** Appended to the model-facing description of every tool with `endsTurn: true`. */

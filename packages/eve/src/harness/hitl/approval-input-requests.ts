@@ -100,6 +100,33 @@ export function resolveApprovalInputBatches(
   });
 }
 
+/**
+ * Resolves the first open approval batch with no responses, so each of its
+ * approvals reports `ignored`: the person steered the held turn with a message
+ * instead of answering. Later batches stay open, as with answered batches.
+ */
+export function ignoreApprovalInputBatch(
+  input: InputDomainResolverInput,
+): ResolvePendingInputResult {
+  const batch = input.batches[0]!;
+  const approval = resolveApprovalBatch({
+    batch,
+    messages: [...input.baseHistory],
+    responses: [],
+    session: input.session,
+  });
+  const resolved = buildResolvedInputBatch(batch, []);
+  return finishResolvedInput({
+    deferTurnInput: true,
+    leftoverResponses: [],
+    messages: approval.messages,
+    rejectedActions: approval.rejectedActions,
+    resolvedInputs: resolved === undefined ? [] : [resolved],
+    resolvedStepInput: input.resolvedStepInput,
+    session: removePendingInputBatches(approval.session, [batch]),
+  });
+}
+
 /** Returns recorded approval keys that have no matching request still pending. */
 export function getApprovedTools(
   session: HarnessSession,

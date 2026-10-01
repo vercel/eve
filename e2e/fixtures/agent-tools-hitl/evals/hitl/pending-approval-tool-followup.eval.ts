@@ -53,7 +53,7 @@ export default [
   }),
   defineEval({
     description:
-      "An ungated tool follow-up completes while an older approval remains answerable (#3494).",
+      "An ungated tool follow-up steers a held approval, cancels it, and completes (#3494).",
     tags: ["hitl", "continuation", "regression", "user-message", "tool-result"],
     timeoutMs: 120_000,
     async test(t) {
@@ -67,9 +67,10 @@ export default [
       const approval = requestFrom(parked, "gate");
       t.log(`Original gate approval is pending: ${approval.requestId}`);
 
-      // When the user leaves that approval pending and asks to read the draft status.
+      // When the user moves on and asks to read the draft status instead. The
+      // approval holds the turn, so this message steers it.
       const live = await session.start(
-        `Alice will review the account change later. Leave its approval pending. ${READ_STATUS}`,
+        `Alice will review the account change later. ${READ_STATUS}`,
       );
       // Then the tool result reaches a completed reply without executing the account change.
       const result = await live.waitForEvent("action.result", {
@@ -105,19 +106,20 @@ export default [
         },
         { type: "turn.completed", data: { turnId: received.data.turnId }, count: 1 },
       ]);
-      followup.notEvent("action.result", { data: { result: { toolName: "gate" } } });
-      followup.notEvent("input.requested");
-
-      // When the user later approves the original account change.
-      const approved = await session.respond([
-        { requestId: approval.requestId, optionId: "approve" },
-      ]);
-      // Then that saved approval executes exactly once.
-      approved.expectOk();
-      approved.calledTool("gate", { status: "completed", count: 1 });
-      session.event("action.result", {
-        count: 1,
+      followup.notEvent("action.result", {
         data: { status: "completed", result: { toolName: "gate" } },
+      });
+      followup.notEvent("input.requested");
+      // Then the steer cancelled the account change instead of leaving it open.
+      followup.event("input.resolved", {
+        count: 1,
+        data: {
+          resolutions: (resolutions) =>
+            resolutions.some(
+              (resolution) =>
+                resolution.requestId === approval.requestId && resolution.outcome === "ignored",
+            ),
+        },
       });
       t.check(session.pendingInputRequests.length, equals(0));
     },

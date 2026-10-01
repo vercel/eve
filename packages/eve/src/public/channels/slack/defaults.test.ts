@@ -298,6 +298,7 @@ describe("defaultInputRequestedHandler private input requests", () => {
       blocks?: unknown[];
     };
     expect(JSON.stringify(update.blocks)).not.toContain("eve_input:route:");
+    expect(JSON.stringify(update.blocks)).not.toContain("I've paused");
     expect(request).toHaveBeenCalledWith("chat.delete", { channel: "D123", ts: "dm2" });
     expect(request).toHaveBeenCalledWith("chat.update", {
       channel: "C123",
@@ -574,12 +575,16 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Waiting for <@U777> to connect Notion…");
+    expect(publicText).toBe("Paused: waiting for <@U777> to connect Notion…");
     expect(publicText).not.toContain("https://");
     expect(postEphemeral).toHaveBeenCalledTimes(1);
     expect(postEphemeral.mock.calls[0]?.[0]).toBe("U777");
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
     expect(message.text).toContain("https://connect.example.com/a/sca_1");
+    // The sign-in holds the turn, so the prompt can cancel it.
+    expect(JSON.stringify(message.blocks)).toContain(
+      JSON.stringify(JSON.stringify({ channelId: "C123", threadTs: "111.222", turnId: "turn_0" })),
+    );
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
   });
 
@@ -594,6 +599,8 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).not.toHaveBeenCalled();
     expect(postEphemeral).toHaveBeenCalledTimes(1);
+    // A responder's sign-in belongs to an approval, not a turn it could cancel.
+    expect(JSON.stringify(postEphemeral.mock.calls[0]?.[1])).not.toContain("eve_sign_in:cancel");
   });
 
   it("targets the event principal instead of the current caller or stale channel state", async () => {
@@ -670,7 +677,9 @@ describe("defaultEvents authorization.required", () => {
       sessionCtx,
     );
 
-    expect(post.mock.calls[0]?.[0]).toBe("Waiting for <@U777> to connect Notion Workspace…");
+    expect(post.mock.calls[0]?.[0]).toBe(
+      "Paused: waiting for <@U777> to connect Notion Workspace…",
+    );
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string };
     expect(message.text).toContain("Connect your Notion Workspace account");
   });
@@ -699,7 +708,7 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Waiting for <@U777> to connect Notion…");
+    expect(publicText).toBe("Paused: waiting for <@U777> to connect Notion…");
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
     expect(logs.records).toContainEqual(

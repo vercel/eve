@@ -26,10 +26,13 @@ export default defineEval({
       parked.calledTool("gated_deploy", { count: 1, status: "pending" });
       parked.notEvent("action.partial");
       parked.notEvent("action.result");
+      // The approval holds the turn, so answering it resumes that turn.
+      parked.event("turn.waiting", { count: 1 });
+      parked.notEvent("session.waiting");
 
       const resumed = await session.respondAll(decision);
       resumed.expectOk();
-      resumed.event("turn.started", { count: 1 });
+      resumed.notEvent("turn.started");
       resumed.event("input.resolved", { count: 1 });
       resumed.messageIncludes("WORKFLOW-APPROVAL-RESULT");
       if (decision === "approve") {
@@ -39,7 +42,7 @@ export default defineEval({
         });
         resumed.calledTool("gated_deploy", { status: "completed", output: /api/u });
         resumed.eventOrder([
-          { type: "turn.started" },
+          { type: "input.resolved" },
           { type: "action.partial" },
           { type: "action.result" },
           { type: "turn.completed" },

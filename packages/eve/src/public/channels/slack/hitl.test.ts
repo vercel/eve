@@ -220,6 +220,7 @@ describe("renderInputRequestBlocks", () => {
     expect(card).toMatchObject({
       type: "card",
       body: { type: "mrkdwn", text: "*Approve tool call: mongodb-mutate*" },
+      subtext: { type: "mrkdwn", text: "I've paused until someone approves or cancels." },
     });
     expect(card.actions).toMatchObject([
       {
