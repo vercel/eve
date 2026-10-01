@@ -8,6 +8,7 @@ import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels
 import {
   buildAuthCompletedText,
   buildAuthEphemeralBlocks,
+  buildAuthEphemeralText,
   buildAuthRequiredPublicText,
   formatConnectionDisplayName,
   type ConnectionAuthorizationOutcome,
@@ -380,10 +381,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
     // itself remains private.
     const pending = channel.state.pendingAuthMessageTs ?? {};
     if (event.candidateId === undefined && pending[event.name] === undefined) {
-      const publicText = buildAuthRequiredPublicText({
-        displayName,
-        hasRecipient: recipientUserId !== null,
-      });
+      const publicText = buildAuthRequiredPublicText({ displayName, recipientUserId });
       try {
         const sent = await channel.thread.post(publicText);
         if (sent.id) {
@@ -404,19 +402,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
     // must only ever be visible to the person who started the sign-in, never posted into
     // the shared thread.
     if (recipientUserId && challengeUrl) {
-      const userCode = event.authorization?.userCode;
+      const prompt = { displayName, url: challengeUrl, userCode: event.authorization?.userCode };
       try {
         await channel.thread.postEphemeral(recipientUserId, {
-          blocks: buildAuthEphemeralBlocks({
-            displayName,
-            url: challengeUrl,
-            userCode,
-          }),
-          // Fallback text mirrors the blocks: clients that render only the
-          // notification text still get everything needed to complete the flow.
-          text: userCode
-            ? `Sign in with ${displayName}: ${challengeUrl} (code: ${userCode})`
-            : `Sign in with ${displayName}: ${challengeUrl}`,
+          blocks: buildAuthEphemeralBlocks(prompt),
+          text: buildAuthEphemeralText(prompt),
         });
       } catch (error) {
         log.error("Slack auth ephemeral delivery failed", {

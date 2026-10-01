@@ -12,7 +12,7 @@ import {
 } from "#connections/errors.js";
 import { loadContext } from "#context/container.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { getAuthorizationResults } from "#harness/authorization.js";
+import { getAuthorizationResults, type AuthorizationSignal } from "#harness/authorization.js";
 import { reportNestedToolAction } from "#harness/nested-actions.js";
 import { createLogger } from "#internal/logging.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
@@ -66,6 +66,8 @@ const CONNECTION_SEARCH_DESCRIPTION = [
   "Find tools in your connected services (MCP servers and OpenAPI APIs).",
   "Returns each matching tool's connection, name, description, and TypeScript signature.",
   "Omit `query` to list a connection's tools. Call a found tool with connection_execute.",
+  "Connections the user has not signed in to are listed under `unavailable` with `requiresSignIn`;",
+  "when the request needs one, search it again with `connection` and `signIn: true` to ask the user to sign in.",
   "Prefer connected services over web search or general knowledge when a request relates to them.",
 ].join(" ");
 
@@ -84,6 +86,11 @@ const CONNECTION_SEARCH_INPUT_SCHEMA: JsonObject = {
         "Words describing the capability, such as 'list open issues'. Omit to list every tool.",
     },
     connection: { type: "string", description: "Only search this connection." },
+    signIn: {
+      type: "boolean",
+      description:
+        "Ask the user to sign in to `connection` first, then search it. Requires `connection`. Use only for a connection listed with `requiresSignIn` that the request needs.",
+    },
     limit: {
       type: "integer",
       minimum: 1,
@@ -114,6 +121,7 @@ interface ConnectionSearchInput {
   readonly limit?: number;
   readonly offset?: number;
   readonly query?: string;
+  readonly signIn?: boolean;
 }
 
 interface ConnectionSearchMatch {
@@ -126,6 +134,8 @@ interface ConnectionSearchMatch {
 interface UnavailableConnection {
   readonly connection: string;
   readonly error: string;
+  /** Present when `signIn: true` can make the connection available. */
+  readonly requiresSignIn?: true;
   /** Whether the failure is final rather than waiting on authorization. */
   readonly terminal: boolean;
 }
@@ -182,9 +192,10 @@ function connectionToolLabel(_closure: object, input: unknown): string {
 
 function connectionSearchLabel(_closure: object, input: unknown): string {
   const connection = isObject(input) ? input.connection : undefined;
-  return typeof connection === "string" && connection !== ""
-    ? `Search ${displayProperName(connection)} tools`
-    : "Search connected tools";
+  if (typeof connection !== "string" || connection === "") return "Search connected tools";
+  return isObject(input) && input.signIn === true
+    ? `Connect ${displayProperName(connection)}`
+    : `Search ${displayProperName(connection)} tools`;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,17 +205,29 @@ function connectionSearchLabel(_closure: object, input: unknown): string {
 async function searchConnectionTools(
   _closure: object,
   rawInput: unknown,
-): Promise<ConnectionSearchOutput> {
+): Promise<ConnectionSearchOutput | AuthorizationSignal> {
   const input = (isObject(rawInput) ? rawInput : {}) as ConnectionSearchInput;
   const registry = requireRegistry();
+  const connectionName =
+    input.connection === undefined || input.connection === "" ? undefined : input.connection;
+  if (input.signIn === true && connectionName === undefined) {
+    throw new Error(
+      "connection_search with signIn: true requires `connection`. Ask the user to sign in to one connection at a time.",
+    );
+  }
   const targets =
-    input.connection === undefined || input.connection === ""
+    connectionName === undefined
       ? registry.getConnections()
-      : [requireConnection(registry, input.connection)];
+      : [requireConnection(registry, connectionName)];
 
-  // Search only finishes sign-ins the user already completed; starting one is
-  // left to connection_execute so discovery never prompts the user.
-  await completePendingAuthorizations(registry, targets, createAuthorizationExecution());
+  // Finishing a sign-in the user already completed never prompts. Starting one
+  // is reserved for `signIn: true` on one named connection and connection_execute.
+  const auth = createAuthorizationExecution();
+  await completePendingAuthorizations(registry, targets, auth);
+  if (input.signIn === true) {
+    const signal = await requestConnectionSignIn(registry, targets[0]!, auth);
+    if (signal !== undefined) return signal;
+  }
 
   const unavailable: UnavailableConnection[] = [];
   const candidates: RankCandidate[] = [];
@@ -239,9 +262,32 @@ async function searchConnectionTools(
     total: ranked.length,
   };
   if (unavailable.length > 0) {
-    output.unavailable = unavailable.map(({ connection, error }) => ({ connection, error }));
+    output.unavailable = unavailable.map(({ terminal: _terminal, ...entry }) => entry);
   }
   return output;
+}
+
+/**
+ * Starts sign-in when the user has not authorized `connection`; returns
+ * `undefined` once its tools can be listed, so the search runs as usual.
+ */
+async function requestConnectionSignIn(
+  registry: ConnectionRegistry,
+  connection: ResolvedConnectionDefinition,
+  auth: ReturnType<typeof createAuthorizationExecution>,
+): Promise<AuthorizationSignal | undefined> {
+  const name = connection.connectionName;
+  try {
+    await registry.getClient(name).getToolMetadata();
+    return undefined;
+  } catch (error) {
+    if (!isConnectionAuthorizationRequiredError(error)) return undefined;
+    const scoped = await resolveInteractiveAuthorization(registry, name);
+    if (scoped === undefined) {
+      throw new Error(`"${name}" requires authorization and cannot start interactive sign-in.`);
+    }
+    return await auth.handleError(error, scoped);
+  }
 }
 
 type ListedConnectionTools =
@@ -258,13 +304,22 @@ async function listConnectionTools(
   } catch (error) {
     if (isConnectionAuthorizationRequiredError(error)) {
       const interactive = (await resolveInteractiveAuthorization(registry, name)) !== undefined;
+      if (!interactive) {
+        return {
+          unavailable: {
+            connection: name,
+            error: `"${name}" requires authorization and cannot start interactive sign-in.`,
+            terminal: false,
+          },
+        };
+      }
       return {
         unavailable: {
           connection: name,
-          error: interactive
-            ? `"${name}" requires the user to sign in before its tools can be listed. ` +
-              `Call connection_execute on "${name}" to ask the user to sign in, then search again.`
-            : `"${name}" requires authorization and cannot start interactive sign-in.`,
+          error:
+            `Sign-in required: the user has not signed in to "${name}", so its tools cannot be listed. ` +
+            `If the request needs "${name}", call connection_search with connection "${name}" and signIn: true to ask the user to sign in.`,
+          requiresSignIn: true,
           terminal: false,
         },
       };

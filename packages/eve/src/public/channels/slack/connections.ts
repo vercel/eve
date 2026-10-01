@@ -18,6 +18,7 @@
  */
 
 import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
+import { truncatePlainText } from "#public/channels/slack/limits.js";
 import { displayProperName } from "#shared/display-name.js";
 
 export type { ConnectionAuthorizationOutcome };
@@ -36,12 +37,12 @@ export function formatConnectionDisplayName(connectionName: string): string {
  */
 export function buildAuthRequiredPublicText(input: {
   readonly displayName: string;
-  readonly hasRecipient: boolean;
+  readonly recipientUserId: string | null;
 }): string {
-  if (!input.hasRecipient) {
-    return `Authorization required for ${input.displayName} (couldn't send the sign-in link privately)`;
+  if (input.recipientUserId === null) {
+    return `${input.displayName} needs to be connected to continue, but the sign-in link couldn't be sent privately.`;
   }
-  return `Connect with ${input.displayName} to continue`;
+  return `Waiting for <@${input.recipientUserId}> to connect ${input.displayName}…`;
 }
 
 /**
@@ -62,34 +63,59 @@ export function buildAuthCompletedText(input: {
 }
 
 /**
- * Block Kit blocks for the ephemeral "Sign in" link button.
- * Device-code flows carry a `userCode` the user must enter after
- * following the link, so it is rendered alongside the button. Slack
- * ephemerals accept the same block list shape as regular messages so the
- * helper returns blocks directly.
+ * Block Kit blocks for the private sign-in prompt. It names the service and
+ * why it is asking before the button, because the user may not remember which
+ * request needed it. A device-code flow's `userCode` is a fallback the
+ * provider shows only sometimes, so it is a quiet hint below the button.
  */
 export function buildAuthEphemeralBlocks(input: {
   readonly displayName: string;
   readonly url: string;
   readonly userCode?: string;
 }): unknown[] {
-  const blocks: unknown[] = [];
+  const blocks: unknown[] = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*Connect ${input.displayName}*\nTo continue, I need access to your ${input.displayName} account. Only you can see this message.`,
+      },
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: truncatePlainText(`Connect ${input.displayName}`) },
+          url: input.url,
+          style: "primary",
+        },
+      ],
+    },
+  ];
   if (input.userCode !== undefined && input.userCode.length > 0) {
     blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: `Use code \`${input.userCode}\` when prompted.` },
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `If ${input.displayName} asks for a confirmation code, enter \`${input.userCode}\`.`,
+        },
+      ],
     });
   }
-  blocks.push({
-    type: "actions",
-    elements: [
-      {
-        type: "button",
-        text: { type: "plain_text", text: "Sign in" },
-        url: input.url,
-        style: "primary",
-      },
-    ],
-  });
   return blocks;
+}
+
+/** Notification text for the private sign-in prompt, for clients that show no blocks. */
+export function buildAuthEphemeralText(input: {
+  readonly displayName: string;
+  readonly url: string;
+  readonly userCode?: string;
+}): string {
+  const code =
+    input.userCode !== undefined && input.userCode.length > 0
+      ? ` If asked for a confirmation code, enter ${input.userCode}.`
+      : "";
+  return `Connect your ${input.displayName} account to continue: ${input.url}${code}`;
 }

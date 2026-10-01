@@ -86,11 +86,12 @@ function setup() {
 }
 
 describe("connection tools authorization", () => {
-  it("lists unauthorized connections from search and prompts only from execute", async () => {
+  it("prompts only for one named connection with signIn, never for a plain search", async () => {
     const { call, startAuthorization } = setup();
     const signIn = (connection: string) => ({
       connection,
-      error: `"${connection}" requires the user to sign in before its tools can be listed. Call connection_execute on "${connection}" to ask the user to sign in, then search again.`,
+      error: `Sign-in required: the user has not signed in to "${connection}", so its tools cannot be listed. If the request needs "${connection}", call connection_search with connection "${connection}" and signIn: true to ask the user to sign in.`,
+      requiresSignIn: true,
     });
 
     const unscoped = await call(CONNECTION_SEARCH_TOOL_NAME, { query: "open issues" });
@@ -99,21 +100,36 @@ describe("connection tools authorization", () => {
       tools: [{ connection: "github", tool: "list_issues" }],
       unavailable: [signIn("linear"), signIn("notion")],
     });
-
     const scoped = await call(CONNECTION_SEARCH_TOOL_NAME, { connection: "linear" });
     expect(scoped).toEqual({ tools: [], total: 0, unavailable: [signIn("linear")] });
+    await expect(call(CONNECTION_SEARCH_TOOL_NAME, { signIn: true })).rejects.toThrow(
+      "connection_search with signIn: true requires `connection`.",
+    );
+    const signedIn = await call(CONNECTION_SEARCH_TOOL_NAME, {
+      connection: "github",
+      query: "issues",
+      signIn: true,
+    });
+    expect(signedIn).toMatchObject({ tools: [{ tool: "list_issues" }], total: 1 });
     expect(startAuthorization).not.toHaveBeenCalled();
 
-    const executed = await call(CONNECTION_EXECUTE_TOOL_NAME, {
+    const requested = await call(CONNECTION_SEARCH_TOOL_NAME, {
       connection: "linear",
-      tool: "list_issues",
+      query: "issues",
+      signIn: true,
     });
-    expect(isAuthorizationSignal(executed)).toBe(true);
-    expect(executed).toMatchObject({
+    expect(requested).toMatchObject({
       challenges: [
         { grant: "workspace/agent", name: "linear", requester: { principalId: "alice" } },
       ],
     });
     expect(startAuthorization).toHaveBeenCalledOnce();
+
+    const executed = await call(CONNECTION_EXECUTE_TOOL_NAME, {
+      connection: "notion",
+      tool: "list_issues",
+    });
+    expect(executed).toMatchObject({ challenges: [{ name: "notion" }] });
+    expect(startAuthorization).toHaveBeenCalledTimes(2);
   });
 });

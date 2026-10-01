@@ -3,15 +3,18 @@ import { z } from "zod";
 
 import { fixtureAuthorizationCallback } from "../agent/lib/fake-service.ts";
 
-const searchResult = z.object({
+const unavailableResult = z.object({
   tools: z.array(z.unknown()).length(0),
-  unavailable: z.array(z.object({ connection: z.string(), error: z.string() })),
+  unavailable: z.array(
+    z.object({ connection: z.string(), error: z.string(), requiresSignIn: z.literal(true) }),
+  ),
 });
+const toolsResult = z.object({ tools: z.array(z.object({ tool: z.string() })) });
 const executeResult = z.object({ items: z.array(z.string()) });
 
 export default defineEval({
   description:
-    "Connection search reports a connection that needs sign-in without prompting; executing its tool prompts, then runs over authenticated HTTP.",
+    "A plain connection search reports that private-catalog requires sign-in without prompting; searching it with signIn prompts, then lists and runs its tools over authenticated HTTP.",
   timeoutMs: 90_000,
 
   async test(t) {
@@ -22,16 +25,11 @@ export default defineEval({
     started.expectOk();
     started.calledTool("connection_search", {
       count: 1,
-      output: (value) => {
-        const result = searchResult.safeParse(value);
-        return (
-          result.success &&
-          result.data.unavailable.some(
-            (entry) =>
-              entry.connection === "private-catalog" && entry.error.includes("connection_execute"),
-          )
-        );
-      },
+      input: { connection: "private-catalog" },
+      output: (value) =>
+        unavailableResult
+          .safeParse(value)
+          .data?.unavailable.some((entry) => entry.connection === "private-catalog") === true,
     });
     started.event("authorization.required", { count: 1 });
     started.notEvent("authorization.completed");
@@ -39,11 +37,11 @@ export default defineEval({
 
     const required = started.events.find((event) => event.type === "authorization.required");
     if (required?.type !== "authorization.required") {
-      throw new Error("Connection execute did not produce an authorization challenge.");
+      throw new Error("Connection search with signIn did not produce an authorization challenge.");
     }
     const callback = fixtureAuthorizationCallback(t.target.url, required.data.authorization?.url);
     if (session.sessionId === undefined || session.state === undefined) {
-      throw new Error("Connection execute did not create a session.");
+      throw new Error("Connection search did not create a session.");
     }
 
     const resumed = t.target.watchTurn(session.sessionId, {
@@ -61,6 +59,13 @@ export default defineEval({
     completed.event("authorization.completed", {
       count: 1,
       data: { candidateId: required.data.candidateId, outcome: "authorized" },
+    });
+    completed.calledTool("connection_search", {
+      count: 1,
+      input: { connection: "private-catalog", signIn: true },
+      output: (value) =>
+        toolsResult.safeParse(value).data?.tools.some((entry) => entry.tool === "list_items") ===
+        true,
     });
     completed.calledTool("connection_execute", {
       count: 1,

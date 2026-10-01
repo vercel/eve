@@ -135,9 +135,10 @@ connection_execute({ connection, tool, input })   ← model-visible action
     `minimum`, `maximum`, and `pattern` as comments.
   - An output with no schema renders as `Promise<unknown>`.
   - The raw JSON Schema is not repeated, so each schema is paid for once.
-- **Connection failures.** Search never prompts. A connection that needs
-  sign-in is returned in `unavailable` with an `error` that points the
-  model at `connection_execute`, which starts authorization. A connection
+- **Connection failures.** A plain search never prompts. A connection that needs
+  sign-in is returned in `unavailable` with `requiresSignIn: true`.
+  `connection_search({ connection, signIn: true })` starts authorization for
+  that one connection and returns its tools once the user signs in. A connection
   that fails is returned in `unavailable` with its `error`.
 - **Ranking.** Prefix word matching, weighted by field: tool name, then
   connection name, input property names, tool description, and last

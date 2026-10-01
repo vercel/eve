@@ -574,7 +574,7 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Connect with Notion to continue");
+    expect(publicText).toBe("Waiting for <@U777> to connect Notion…");
     expect(publicText).not.toContain("https://");
     expect(postEphemeral).toHaveBeenCalledTimes(1);
     expect(postEphemeral.mock.calls[0]?.[0]).toBe("U777");
@@ -656,7 +656,9 @@ describe("defaultEvents authorization.required", () => {
 
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
     expect(JSON.stringify(message.blocks)).toContain("OTB-DGO");
-    expect(message.text).toContain("(code: OTB-DGO)");
+    expect(message.text).toBe(
+      "Connect your Notion account to continue: https://connect.example.com/a/sca_1 If asked for a confirmation code, enter OTB-DGO.",
+    );
   });
 
   it("renders the challenge displayName instead of the title-cased connection name", async () => {
@@ -668,9 +670,9 @@ describe("defaultEvents authorization.required", () => {
       sessionCtx,
     );
 
-    expect(post.mock.calls[0]?.[0]).toBe("Connect with Notion Workspace to continue");
+    expect(post.mock.calls[0]?.[0]).toBe("Waiting for <@U777> to connect Notion Workspace…");
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string };
-    expect(message.text).toContain("Sign in with Notion Workspace");
+    expect(message.text).toContain("Connect your Notion Workspace account");
   });
 
   it("posts a link-free public status when the principal has no Slack user", async () => {
@@ -682,7 +684,7 @@ describe("defaultEvents authorization.required", () => {
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
     expect(publicText).toBe(
-      "Authorization required for Notion (couldn't send the sign-in link privately)",
+      "Notion needs to be connected to continue, but the sign-in link couldn't be sent privately.",
     );
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
@@ -697,7 +699,7 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Connect with Notion to continue");
+    expect(publicText).toBe("Waiting for <@U777> to connect Notion…");
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
     expect(logs.records).toContainEqual(

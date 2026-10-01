@@ -69,7 +69,9 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
   const scenario = respondToTaskScenario(request, directiveOf(message));
   if (scenario !== undefined) return scenario;
   if (message.includes("private-catalog")) {
-    const search = request.toolResults.find((entry) => entry.name === "connection_search");
+    const search = [...request.toolResults]
+      .reverse()
+      .find((entry) => entry.name === "connection_search");
     if (search === undefined) {
       return {
         toolCalls: [
@@ -80,7 +82,17 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
         ],
       };
     }
-    // Search reports the connection as needing sign-in; executing its tool asks the user.
+    // A plain search reports the connection as requiring sign-in; `signIn` asks the user.
+    if (JSON.stringify(search.output).includes('"requiresSignIn":true')) {
+      return {
+        toolCalls: [
+          {
+            name: "connection_search",
+            input: { connection: "private-catalog", query: "items", signIn: true },
+          },
+        ],
+      };
+    }
     const execute = request.toolResults.find((entry) => entry.name === "connection_execute");
     if (execute === undefined) {
       return {

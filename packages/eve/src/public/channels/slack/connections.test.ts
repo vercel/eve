@@ -22,15 +22,15 @@ describe("formatConnectionDisplayName", () => {
 });
 
 describe("buildAuthRequiredPublicText", () => {
-  it("invites the recipient to connect when the link was sent privately", () => {
-    expect(buildAuthRequiredPublicText({ displayName: "Linear", hasRecipient: true })).toBe(
-      "Connect with Linear to continue",
+  it("names who the thread is waiting on when the link was sent privately", () => {
+    expect(buildAuthRequiredPublicText({ displayName: "Linear", recipientUserId: "U777" })).toBe(
+      "Waiting for <@U777> to connect Linear…",
     );
   });
 
   it("notes when the link could not be sent privately", () => {
-    expect(buildAuthRequiredPublicText({ displayName: "Linear", hasRecipient: false })).toBe(
-      "Authorization required for Linear (couldn't send the sign-in link privately)",
+    expect(buildAuthRequiredPublicText({ displayName: "Linear", recipientUserId: null })).toBe(
+      "Linear needs to be connected to continue, but the sign-in link couldn't be sent privately.",
     );
   });
 });
@@ -60,48 +60,59 @@ describe("buildAuthCompletedText", () => {
 });
 
 describe("buildAuthEphemeralBlocks", () => {
-  it("produces an actions block with a link button to the challenge URL", () => {
-    const blocks = buildAuthEphemeralBlocks({
-      displayName: "Linear",
-      url: "https://connect.example.com/authorize/sca_abc",
-    });
-    expect(blocks).toHaveLength(1);
-    const actions = blocks[0] as { type: string; elements: Array<Record<string, unknown>> };
-    expect(actions.type).toBe("actions");
-    expect(actions.elements).toHaveLength(1);
-    const button = actions.elements[0] as {
-      type: string;
-      text: { text: string };
-      url: string;
-      style: string;
-    };
-    expect(button.type).toBe("button");
-    expect(button.text.text).toBe("Sign in");
-    expect(button.url).toBe("https://connect.example.com/authorize/sca_abc");
-    expect(button.style).toBe("primary");
+  it("names the service and why before a Connect button to the challenge URL", () => {
+    expect(
+      buildAuthEphemeralBlocks({
+        displayName: "Linear",
+        url: "https://connect.example.com/authorize/sca_abc",
+      }),
+    ).toEqual([
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: "*Connect Linear*\nTo continue, I need access to your Linear account. Only you can see this message.",
+        },
+      },
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            text: { type: "plain_text", text: "Connect Linear" },
+            url: "https://connect.example.com/authorize/sca_abc",
+            style: "primary",
+          },
+        ],
+      },
+    ]);
   });
 
   it("keeps the button label within Slack's limit for long display names", () => {
     const blocks = buildAuthEphemeralBlocks({
-      displayName: "x".repeat(63),
+      displayName: "x".repeat(90),
       url: "https://connect.example.com/authorize/sca_abc",
     });
-    const actions = blocks[0] as { elements: Array<{ text: { text: string } }> };
-    const button = actions.elements[0] as { text: { text: string } };
-    expect(button.text.text).toBe("Sign in");
-    expect(button.text.text.length).toBeLessThanOrEqual(75);
+    const actions = blocks[1] as { elements: Array<{ text: { text: string } }> };
+    expect(actions.elements[0]!.text.text.length).toBeLessThanOrEqual(75);
   });
 
-  it("prepends a section with the device user code when one is provided", () => {
+  it("adds the device code as a quiet hint after the button", () => {
     const blocks = buildAuthEphemeralBlocks({
       displayName: "Notion",
       url: "https://connect.example.com/authorize/sca_abc",
       userCode: "OTB-DGO",
     });
-    expect(blocks).toHaveLength(2);
-    const section = blocks[0] as { type: string; text: { text: string } };
-    expect(section.type).toBe("section");
-    expect(section.text.text).toBe("Use code `OTB-DGO` when prompted.");
-    expect((blocks[1] as { type: string }).type).toBe("actions");
+    expect(blocks.map((block) => (block as { type: string }).type)).toEqual([
+      "section",
+      "actions",
+      "context",
+    ]);
+    expect(blocks[2]).toEqual({
+      type: "context",
+      elements: [
+        { type: "mrkdwn", text: "If Notion asks for a confirmation code, enter `OTB-DGO`." },
+      ],
+    });
   });
 });
