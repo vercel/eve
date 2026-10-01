@@ -276,9 +276,9 @@ than the one that started the task, and the task's tool `name` and `kind`. `kind
 an agent tool's call and `"tool"` otherwise. Events recorded by earlier eve versions omit `name`
 and `kind` on `task.settled`; match those to their `task.started` by `callId`. `status` is `"completed"`, `"failed"`, or `"cancelled"`. A completed call carries
 `output`, a failed call carries `error`, and a cancelled call carries `cancel.reason`:
-`"task_cancel"` when the model called `task_cancel`, `"session_cancel"` when someone cancelled
-the session, or `"turn_ended"` when the turn ended, such as by failing, while the task still
-worked. `cancel` is absent when the task's run stopped on its own, and on events recorded by
+`"task_cancel"` when the model called `task_cancel`, `"turn_cancelled"` when someone cancelled
+the turn, or the working tasks between turns, or `"turn_ended"` when the turn ended, such as by
+failing, while the task still worked. `cancel` is absent when the task's run stopped on its own, and on events recorded by
 earlier eve versions.
 `agent.started` names the call and turn whose run opened the session, and its `taskId` is absent
 when an `execute` call opened it. Results reach the model as a message in its history, not as a

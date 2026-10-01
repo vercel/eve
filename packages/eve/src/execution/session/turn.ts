@@ -256,7 +256,7 @@ export class SessionExecution {
     await cancelDescendantTurnsStep({
       sessionState: cursor.sessionState,
     });
-    await cancelWorkingTasks(cursor, "session_cancel");
+    await cancelWorkingTasks(cursor, "turn_cancelled");
     return { cancelled: true, kind: "park" };
   }
 

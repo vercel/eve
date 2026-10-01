@@ -163,7 +163,7 @@ function stoppedLine(reason: TaskCardTask["cancelReason"]): string {
   switch (reason) {
     case "task_cancel":
       return "Stopped early since it was no longer needed";
-    case "session_cancel":
+    case "turn_cancelled":
       return "Stopped by request";
     case "turn_ended":
       return "Stopped when the turn ended";

@@ -453,9 +453,10 @@ export interface TaskSettledStreamEvent {
 
 /**
  * Why the session cancelled a task call: the model called `task_cancel`,
- * someone cancelled the session, or the turn ended while the task still worked.
+ * someone cancelled the turn (or, between turns, the tasks still working), or
+ * the turn ended while the task still worked.
  */
-export type TaskCancelReason = "task_cancel" | "session_cancel" | "turn_ended";
+export type TaskCancelReason = "task_cancel" | "turn_cancelled" | "turn_ended";
 
 /**
  * Stream event emitted when one assistant text delta is appended to the
