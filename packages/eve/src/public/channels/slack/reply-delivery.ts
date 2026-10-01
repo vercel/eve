@@ -1,6 +1,9 @@
 import type { DeliverPayload } from "#channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
-import { SLACK_MARKDOWN_TEXT_MAX_LENGTH } from "#public/channels/slack/limits.js";
+import {
+  SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+  truncateMessageText,
+} from "#public/channels/slack/limits.js";
 import type {
   SlackChannelInternalEvents,
   SlackChannelState,
@@ -15,8 +18,8 @@ const FALLBACK_LOG = "Slack refused the final reply; delivering it with a fallba
 
 /**
  * Slack error codes for a message payload Slack refused as too large or
- * malformed. Slack posts nothing for a refused call, so delivering the reply
- * again, inline or as a snippet, cannot duplicate it.
+ * malformed. Slack posts nothing for a refused call, so a fallback post
+ * cannot duplicate it.
  */
 const REFUSED_PAYLOAD_ERRORS = new Set([
   "invalid_blocks",
@@ -29,39 +32,94 @@ const REFUSED_PAYLOAD_ERRORS = new Set([
 type MessageCompletedHandler = NonNullable<SlackChannelInternalEvents["message.completed"]>;
 
 /**
- * Posts a completed reply to the bound Slack thread the way eve's default
- * renderer does, so an authored renderer can hand a reply back to eve instead
- * of copying its size handling.
+ * A completed reply for {@link postCompletedSlackReply}: Markdown alone, or
+ * Markdown with the Block Kit blocks to try first. `markdown` is the full
+ * reply eve falls back to; `text` is the notification text for the blocks,
+ * defaulting to `markdown`.
+ */
+export type SlackCompletedReply =
+  | string
+  | {
+      readonly markdown: string;
+      readonly blocks?: readonly unknown[];
+      readonly text?: string;
+    };
+
+/**
+ * Posts a completed reply to the bound Slack thread with eve's delivery
+ * fallbacks, using only the content you pass. eve's default renderer posts
+ * its replies through it; an authored renderer opts in by calling it instead
+ * of `channel.thread.post`.
  *
- * A reply of up to {@link SLACK_MARKDOWN_TEXT_MAX_LENGTH} characters posts as
- * one native Markdown message. A longer reply uploads unchanged as an
- * `eve-response.md` Markdown snippet with a short note, instead of being
- * truncated or split; this requires the `files:write` bot scope. In a session
- * that has no thread yet, the note posts first and anchors the thread.
+ * eve tries, in order:
  *
- * Throws when Slack rejects the post or the upload. When the throw ends a
- * `message.completed` renderer, the Slack channel still recovers the reply.
+ * 1. Your `blocks`, when given, with `text` as the notification text.
+ * 2. `markdown` as one native Markdown message, when it fits in
+ *    {@link SLACK_MARKDOWN_TEXT_MAX_LENGTH} characters. eve moves on from
+ *    the blocks only when Slack refuses them as too large or malformed
+ *    (`msg_too_long`, `msg_blocks_too_long`, `msg_blocks_too_many`,
+ *    `invalid_blocks`, or `invalid_blocks_format`).
+ * 3. `markdown` uploaded unchanged as an `eve-response.md` snippet with a
+ *    short note, when it is longer or Slack refuses the Markdown message.
+ *    This requires the `files:write` bot scope. In a session without a
+ *    thread yet, the note posts first and anchors the thread.
+ *
+ * Any other error, and a failed upload, is thrown so your renderer sees it.
+ * eve logs each fallback it takes with Slack's error code, never the reply.
  *
  * @example
  * ```ts
- * import { postCompletedSlackReply, SLACK_MARKDOWN_TEXT_MAX_LENGTH } from "eve/channels/slack";
+ * import { postCompletedSlackReply } from "eve/channels/slack";
  *
- * if (event.message.length > SLACK_MARKDOWN_TEXT_MAX_LENGTH) {
- *   await postCompletedSlackReply(channel, event.message);
- * } else {
- *   await channel.thread.post({ blocks: answerBlocks(event.message), text: event.message });
- * }
+ * await postCompletedSlackReply(channel, {
+ *   blocks: [{ type: "markdown", text: reply }, sourcesBlock],
+ *   markdown: reply,
+ * });
  * ```
  */
 export async function postCompletedSlackReply(
   channel: SlackContext,
-  message: string,
+  reply: SlackCompletedReply,
 ): Promise<void> {
-  if (message.length <= SLACK_MARKDOWN_TEXT_MAX_LENGTH) {
-    await channel.thread.post(message);
-    return;
+  await deliverCompletedSlackReply(channel, reply, {});
+}
+
+/**
+ * {@link postCompletedSlackReply} with fields for its fallback log, such as
+ * the turn id eve's default renderer knows.
+ */
+export async function deliverCompletedSlackReply(
+  channel: SlackContext,
+  reply: SlackCompletedReply,
+  logFields: { readonly turnId?: string },
+): Promise<void> {
+  const { blocks, markdown, text } = typeof reply === "string" ? { markdown: reply } : reply;
+  let slackError: string | undefined;
+  if (blocks !== undefined) {
+    try {
+      await channel.thread.post({ blocks, text: text ?? truncateMessageText(markdown) });
+      return;
+    } catch (error) {
+      slackError = refusedPayloadError(error);
+      if (slackError === undefined) throw error;
+    }
   }
-  await uploadReplySnippet(channel, message);
+  if (markdown.length <= SLACK_MARKDOWN_TEXT_MAX_LENGTH) {
+    if (slackError !== undefined) {
+      log.warn(FALLBACK_LOG, { fallback: "inline", slackError, ...logFields });
+    }
+    try {
+      await channel.thread.post(markdown);
+      return;
+    } catch (error) {
+      slackError = refusedPayloadError(error);
+      if (slackError === undefined) throw error;
+    }
+  }
+  if (slackError !== undefined) {
+    log.warn(FALLBACK_LOG, { fallback: "snippet", slackError, ...logFields });
+  }
+  await uploadReplySnippet(channel, markdown);
 }
 
 async function uploadReplySnippet(channel: SlackContext, message: string): Promise<void> {
@@ -85,98 +143,6 @@ async function uploadReplySnippet(channel: SlackContext, message: string): Promi
   });
 }
 
-/**
- * Wraps a channel's composed `message.completed` chain, authored renderers
- * included, so a final reply is never lost without a trace.
- *
- * When the chain throws because Slack refused the payload, eve delivers the
- * reply again in this order:
- *
- * 1. One native Markdown message, when the reply fits in
- *    {@link SLACK_MARKDOWN_TEXT_MAX_LENGTH} characters. eve tries this once.
- * 2. An `eve-response.md` snippet, when the reply is longer or Slack refuses
- *    the Markdown message too.
- * 3. A short notice with an error id, when the reply still isn't delivered or
- *    the chain failed for another reason. eve logs the error and tells the
- *    model on the next delivery.
- *
- * This assumes the refused call was the reply itself: a renderer that posts
- * the reply and then a separate, refused message gets the reply twice. Steps
- * that end in tool calls and empty replies pass through.
- */
-export function withFinalReplyDelivery(
-  render: MessageCompletedHandler | undefined,
-): MessageCompletedHandler {
-  return async (event, channel, ctx) => {
-    if (event.finishReason === "tool-calls" || !event.message) {
-      await render?.(event, channel, ctx);
-      return;
-    }
-    try {
-      await render?.(event, channel, ctx);
-    } catch (error) {
-      await recoverFinalReply(channel, event.message, event.turnId, error);
-    }
-  };
-}
-
-async function recoverFinalReply(
-  channel: SlackEventContext,
-  message: string,
-  turnId: string,
-  error: unknown,
-): Promise<void> {
-  let failure = error;
-  const refusal = refusedPayloadError(error);
-  if (refusal !== undefined) {
-    try {
-      await redeliverRefusedReply(channel, message, turnId, refusal);
-      return;
-    } catch (fallbackError) {
-      failure = fallbackError;
-    }
-  }
-
-  const errorId = logError(log, "final reply was not delivered to Slack", failure, {
-    slackError: refusal,
-    turnId,
-  });
-  channel.state.undeliveredReplyErrorId = errorId;
-  try {
-    await channel.thread.post(
-      `I finished, but couldn't deliver my answer in Slack (error id \`${errorId}\`). Please ask me to resend it.`,
-    );
-  } catch (noticeError) {
-    logError(log, "undelivered reply notice failed", noticeError, { errorId, turnId });
-  }
-}
-
-/**
- * Posts a refused reply as one native Markdown message when it fits, once,
- * and otherwise, or when Slack refuses that message too, uploads a snippet.
- */
-async function redeliverRefusedReply(
-  channel: SlackEventContext,
-  message: string,
-  turnId: string,
-  refusal: string,
-): Promise<void> {
-  let slackError = refusal;
-  if (message.length <= SLACK_MARKDOWN_TEXT_MAX_LENGTH) {
-    log.warn(FALLBACK_LOG, { fallback: "inline", slackError, turnId });
-    try {
-      await channel.thread.post(message);
-      return;
-    } catch (inlineError) {
-      const inlineRefusal = refusedPayloadError(inlineError);
-      if (inlineRefusal === undefined) throw inlineError;
-      slackError = inlineRefusal;
-    }
-  }
-  log.warn(FALLBACK_LOG, { fallback: "snippet", slackError, turnId });
-  await uploadReplySnippet(channel, message);
-}
-
 /** Slack's error code when `error` is a refused-payload error, checking its causes. */
 function refusedPayloadError(error: unknown): string | undefined {
   let current = error;
@@ -192,6 +158,49 @@ function refusedPayloadError(error: unknown): string | undefined {
     current = candidate.cause;
   }
   return undefined;
+}
+
+/**
+ * Wraps a channel's composed `message.completed` chain, authored renderers
+ * included, so a final reply that fails is never lost without a trace.
+ *
+ * When the chain throws on a final reply, eve logs the error at error level,
+ * posts a content-free notice with its error id, and tells the model on the
+ * next delivery that its reply was not seen. eve never sends the reply from
+ * here: the chain owns the content, including any change a renderer made
+ * before `next`, and {@link postCompletedSlackReply} owns the fallbacks.
+ * Steps that end in tool calls and empty replies pass through.
+ */
+export function withFinalReplyDelivery(
+  render: MessageCompletedHandler | undefined,
+): MessageCompletedHandler {
+  return async (event, channel, ctx) => {
+    if (event.finishReason === "tool-calls" || !event.message) {
+      await render?.(event, channel, ctx);
+      return;
+    }
+    try {
+      await render?.(event, channel, ctx);
+    } catch (error) {
+      await reportUndeliveredReply(channel, event.turnId, error);
+    }
+  };
+}
+
+async function reportUndeliveredReply(
+  channel: SlackEventContext,
+  turnId: string,
+  error: unknown,
+): Promise<void> {
+  const errorId = logError(log, "final reply was not delivered to Slack", error, { turnId });
+  channel.state.undeliveredReplyErrorId = errorId;
+  try {
+    await channel.thread.post(
+      `I finished, but couldn't deliver my answer in Slack (error id \`${errorId}\`). Please ask me to resend it.`,
+    );
+  } catch (noticeError) {
+    logError(log, "undelivered reply notice failed", noticeError, { errorId, turnId });
+  }
 }
 
 /**

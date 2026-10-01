@@ -24,7 +24,7 @@ import {
 } from "#public/channels/slack/hitl.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import { deliverPrivateInputRequest } from "#public/channels/slack/private-approval-delivery.js";
-import { postCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
+import { deliverCompletedSlackReply } from "#public/channels/slack/reply-delivery.js";
 import {
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   truncateMessageText,
@@ -480,7 +480,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
       await channel.thread.startTyping();
       return;
     }
-    await postCompletedSlackReply(channel, event.message);
+    await deliverCompletedSlackReply(channel, event.message, { turnId: event.turnId });
   },
 
   async "turn.failed"(event, channel, _ctx) {
