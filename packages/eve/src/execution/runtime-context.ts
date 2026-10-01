@@ -18,6 +18,7 @@ import {
   SessionCallbackKey,
   LegacyRemoteAgentCallerKey,
   SessionTitleKey,
+  ToolStubSetKey,
   TraceRootKey,
 } from "#context/keys.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
@@ -108,6 +109,10 @@ export function buildRunContext(input: {
 
   if (run.parentTraceContext !== undefined) {
     ctx.set(ParentTraceContextKey, run.parentTraceContext);
+  }
+
+  if (run.toolStubSet !== undefined) {
+    ctx.set(ToolStubSetKey, run.toolStubSet);
   }
 
   // `run.limits` deliberately never enters the context: inherited limits ride

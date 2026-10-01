@@ -65,6 +65,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
     collector,
     onSessionStart: options.onSessionStart,
     signal,
+    targetKind: target.kind,
   });
   const targetForRun = scopeEvalTargetHandle(target, {
     sessions: manager,

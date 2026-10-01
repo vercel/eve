@@ -2,6 +2,7 @@ import { type GrepInput, executeGrepOnSandbox } from "#execution/sandbox/grep-to
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 export interface GrepToolInput {
   context?: number;
@@ -104,5 +105,6 @@ export const grep: ToolDefinition<GrepToolInput, GrepToolOutput> = defineTool({
   inputSchema: GREP_INPUT_SCHEMA,
   outputSchema: GREP_OUTPUT_SCHEMA,
 });
+markProvidedTool(grep);
 
 export default grep;

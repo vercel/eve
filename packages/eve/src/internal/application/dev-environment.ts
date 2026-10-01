@@ -30,6 +30,16 @@ function isEveEvaluationEnvironment(): boolean {
   return process.env[EVE_EVALUATION_ENV_FLAG] === "1";
 }
 
+/** Directory of the eval tool stub sets the local eval server may load. */
+export const EVE_EVALUATION_TOOL_STUBS_DIR_ENV = "EVE_EVALUATION_TOOL_STUBS_DIR";
+
+/** Returns the stub set directory, or `undefined` when this server was not started by `eve eval`. */
+export function resolveEveEvaluationToolStubsDirectory(): string | undefined {
+  if (!isEveEvaluationEnvironment()) return undefined;
+  const directory = process.env[EVE_EVALUATION_TOOL_STUBS_DIR_ENV];
+  return directory === undefined || directory.length === 0 ? undefined : directory;
+}
+
 export function resolveEveEvaluationRunId(): string | undefined {
   if (!isEveEvaluationEnvironment()) return undefined;
   const runId = process.env[EVE_EVALUATION_RUN_ID_ENV];

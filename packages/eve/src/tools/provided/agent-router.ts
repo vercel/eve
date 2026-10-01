@@ -6,6 +6,7 @@ import {
   type AgentRouterInput,
 } from "#execution/tools/agent-router.js";
 import { defineWorkflowTool, type WorkflowTaskToolDefinition } from "#tools/workflow-definition.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 export type { AgentRouterInput };
 
@@ -16,10 +17,12 @@ export type AgentRouterTool = WorkflowTaskToolDefinition<AgentRouterInput, JsonV
  * agent targets. Each call runs as a task.
  */
 export function agentRouter(): AgentRouterTool {
-  return defineWorkflowTool({
+  const tool = defineWorkflowTool({
     availableInSubagents: false,
     description: AGENT_ROUTER_TOOL_DESCRIPTION,
     inputSchema: AGENT_ROUTER_INPUT_SCHEMA,
     task: runAgentRouterTask,
   });
+  markProvidedTool(tool);
+  return tool;
 }

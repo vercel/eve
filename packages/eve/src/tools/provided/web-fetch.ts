@@ -2,6 +2,7 @@ import { type WebFetchInput, executeWebFetchTool } from "#execution/web-fetch/ex
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 export interface WebFetchToolInput {
   format?: "markdown" | "text" | "html";
@@ -69,5 +70,6 @@ export const webFetch: ToolDefinition<WebFetchToolInput, WebFetchToolOutput> = d
   inputSchema: WEB_FETCH_INPUT_SCHEMA,
   outputSchema: WEB_FETCH_OUTPUT_SCHEMA,
 });
+markProvidedTool(webFetch);
 
 export default webFetch;

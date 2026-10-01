@@ -24,7 +24,11 @@ import { resolveDurableCompiledArtifactsSource } from "#runtime/durable-compiled
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
-import type { JsonObject } from "#shared/json.js";
+import { parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
+import { toErrorMessage } from "#shared/errors.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import { resumeHook } from "#internal/workflow/runtime.js";
+import { runAgentStub, type StubRun } from "#execution/tool-stubs.js";
 import type { SubagentParentContext } from "#subagents/invocation.js";
 import {
   cancelRemoteAgentTurn,
@@ -57,6 +61,8 @@ export type AgentSessionAddress =
       /** Keys the authored credential functions, as on `agent.started`. */
       readonly resolverId?: string;
       readonly sessionId: string;
+      /** An eval tool stub answers this session's messages; no remote session exists. */
+      readonly stubbed?: true;
       readonly url: string;
     };
 
@@ -110,7 +116,14 @@ export async function openAgentSessionStep(
   });
   const start = { auth: input.auth, bundle, context, key: input.key, replyTo: input.replyTo };
   if (target.kind === "remote") {
-    return await startRemoteSession({ ...start, target });
+    return context.toolStubSet === undefined
+      ? await startRemoteSession({ ...start, target })
+      : await startStubbedRemoteSession({
+          ...start,
+          message: { message: input.message, outputSchema: input.outputSchema },
+          set: context.toolStubSet,
+          target,
+        });
   }
   return await startLocalSession({ ...start, target });
 }
@@ -125,6 +138,17 @@ export async function sendAgentSessionMessageStep(
   "use step";
 
   const { address, context } = input;
+  if (address.kind === "remote" && address.stubbed === true && context.toolStubSet !== undefined) {
+    await replyWithAgentStub({
+      context,
+      message: input.message,
+      name: address.name,
+      outputSchema: input.outputSchema,
+      replyTo: input.replyTo,
+      set: context.toolStubSet,
+    });
+    return;
+  }
   if (address.kind === "remote") {
     const remote = await resolveSessionRemote(context, address);
     await continueRemoteAgentSession({
@@ -168,6 +192,8 @@ export async function cancelAgentSessionTurnStep(input: OpenedAgentSession): Pro
   "use step";
 
   const { address } = input;
+  // A stub answers each message before its step ends, so no turn is left to cancel.
+  if (address.kind === "remote" && address.stubbed === true) return;
   try {
     if (address.kind === "remote") {
       const remote = await resolveSessionRemote(input.context, address);
@@ -193,6 +219,7 @@ export async function endAgentSessionsStep(input: {
 }
 
 async function endAgentSession({ address, context }: OpenedAgentSession): Promise<void> {
+  if (address.kind === "remote" && address.stubbed === true) return;
   try {
     if (address.kind === "remote") {
       const remote = await resolveSessionRemote(context, address);
@@ -248,6 +275,7 @@ async function startLocalSession(
       sessionId: context.parent.sessionId,
     },
     source: target.source,
+    toolStubSet: context.toolStubSet,
   });
   const childRuntime = createWorkflowRuntime({
     compiledArtifactsSource: bundle.compiledArtifactsSource,
@@ -296,6 +324,114 @@ async function startRemoteSession(
     url: remote.url,
   };
 }
+
+/**
+ * In a session with a tool stub set, a remote agent's stub answers in place of
+ * the remote session, keyed by the agent's name. No request leaves the server.
+ */
+async function startStubbedRemoteSession(
+  input: SessionStart<Extract<SubagentStartTarget, { readonly kind: "remote" }>> & {
+    readonly message: Pick<AgentSessionMessage, "message" | "outputSchema">;
+    readonly set: string;
+  },
+): Promise<AgentSessionAddress> {
+  const { action } = input.target;
+  const remote = resolveRemoteAgentForAction({
+    dynamicRemoteAgent: input.target.dynamicRemoteAgent,
+    nodeId: action.nodeId,
+    registry: input.bundle.subagentRegistry.subagentsByNodeId,
+    remoteAgentName: action.remoteAgentName,
+  });
+  await replyWithAgentStub({
+    context: input.context,
+    message: input.message.message,
+    name: action.remoteAgentName,
+    outputSchema: input.message.outputSchema,
+    replyTo: input.replyTo,
+    set: input.set,
+  });
+  return {
+    callbackBaseUrl: "",
+    kind: "remote",
+    name: action.remoteAgentName,
+    nodeId: action.nodeId,
+    sessionId: `stub:${input.key}`,
+    stubbed: true,
+    url: remote.url,
+  };
+}
+
+/** Delivers the stub's answer to the message's reply hook in the payload a remote agent's callback carries. */
+async function replyWithAgentStub(input: {
+  readonly context: AgentSessionContext;
+  readonly message: string;
+  readonly name: string;
+  readonly outputSchema?: JsonObject;
+  readonly replyTo: string;
+  readonly set: string;
+}): Promise<void> {
+  const { parent } = input.context;
+  const run = await runAgentStub({
+    callId: parent.callId,
+    message: input.message,
+    name: input.name,
+    outputSchema: input.outputSchema,
+    session: { id: parent.sessionId, rootId: parent.rootSessionId },
+    set: input.set,
+  });
+  const result = toStubbedAgentResult({ callId: parent.callId, name: input.name, run });
+  await resumeHook(input.replyTo, { kind: "runtime-action-result", results: [result] });
+}
+
+function toStubbedAgentResult(input: {
+  readonly callId: string;
+  readonly name: string;
+  readonly run: StubRun;
+}): RuntimeSubagentChildResult {
+  const settled = settleAgentStubOutput(input.run);
+  const base = { callId: input.callId, kind: "subagent-result", origin: "child" } as const;
+  if (!settled.ok) {
+    return {
+      ...base,
+      isError: true,
+      outcome: {
+        kind: "parked",
+        result: { error: settled.error, kind: "failed" },
+        usageDelta: NO_USAGE,
+      },
+      output: settled.error,
+      subagentName: input.name,
+    };
+  }
+  return {
+    ...base,
+    outcome: {
+      kind: "parked",
+      result: { kind: "succeeded", output: settled.value },
+      usageDelta: NO_USAGE,
+    },
+    output: settled.value,
+    subagentName: input.name,
+  };
+}
+
+function settleAgentStubOutput(
+  run: StubRun,
+):
+  | { readonly ok: true; readonly value: JsonValue }
+  | { readonly ok: false; readonly error: string } {
+  if (run.kind === "error") return { error: run.message, ok: false };
+  try {
+    return { ok: true, value: parseJsonValue(run.output) };
+  } catch (error) {
+    return {
+      error: `The agent stub returned a value that is not JSON: ${toErrorMessage(error)}`,
+      ok: false,
+    };
+  }
+}
+
+const NO_USAGE = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
 
 function createParentContext(context: AgentSessionContext, replyTo: string): SubagentParentContext {
   return {

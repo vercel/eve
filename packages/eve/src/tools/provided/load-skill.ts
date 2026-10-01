@@ -6,6 +6,7 @@ import {
 import { displayTitle } from "#shared/display-name.js";
 import { defineTool } from "#tools/definition.js";
 import { attachToolBehavior } from "#tools/behavior.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 export const loadSkill = attachToolBehavior(
   defineTool({
@@ -30,5 +31,7 @@ export const loadSkill = attachToolBehavior(
   }),
   { availability: [], presentation: "load-skill" },
 );
+
+markProvidedTool(loadSkill);
 
 export default loadSkill;

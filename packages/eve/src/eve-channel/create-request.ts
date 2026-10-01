@@ -14,6 +14,8 @@ export interface ParsedCreateBody {
   /** Remote agent protocol of a delegating caller; set only with {@link callback}. */
   protocolVersion?: number;
   legacyRemoteAgentCaller?: LegacyRemoteAgentCaller;
+  /** Eval tool stub set from `evals/stubs/`; accepted only by the `eve eval` server. */
+  stubs?: string;
 }
 
 /** Enforces the fields that only make sense when creation also starts a turn. */

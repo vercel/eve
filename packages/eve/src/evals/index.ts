@@ -6,6 +6,7 @@ export { defineEval } from "#evals/define-eval.js";
 export { defineEvalConfig } from "#evals/define-eval-config.js";
 export { EveEvalTurnFailedError } from "#evals/session.js";
 export { mockModel } from "#evals/mock-model.js";
+export { defineToolStubs } from "#evals/tool-stubs.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,6 +67,8 @@ export type {
   JudgeContext,
   JudgeOpts,
 } from "#evals/types.js";
+
+export type { ToolStub, ToolStubContext, ToolStubs, ToolStubsInput } from "#evals/tool-stubs.js";
 
 export type {
   MockModelMessage,

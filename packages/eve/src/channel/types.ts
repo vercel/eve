@@ -503,6 +503,8 @@ export interface RunInput {
   };
   /** Observability correlation only; never grants delegated-session privileges. */
   readonly conversationId?: string;
+  /** Eval tool stub set the session runs with; see `#execution/tool-stubs.js`. */
+  readonly toolStubSet?: string;
   readonly parent?: SessionParent;
   /** Trace session for this run when it differs from `parent.rootSessionId`. */
   readonly traceRoot?: SessionTraceRoot;

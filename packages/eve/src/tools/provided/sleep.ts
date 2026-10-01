@@ -6,6 +6,7 @@ import {
 } from "#tools/provided/interrupted.js";
 import { executeSleepTool } from "#tools/provided/sleep-workflow.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 const MAX_SLEEP_SECONDS = Math.floor(Number.MAX_SAFE_INTEGER / 1_000);
 
@@ -59,11 +60,13 @@ const SLEEP_OUTPUT_SCHEMA = defineJsonSchema<SleepToolOutput>({
  * application runtime open. A new message ends the wait early.
  */
 export function sleep(): WorkflowExecuteToolDefinition<SleepToolInput, SleepToolOutput> {
-  return defineWorkflowTool({
+  const tool = defineWorkflowTool({
     description: SLEEP_TOOL_DESCRIPTION,
     execute: executeSleepTool,
     inputSchema: SLEEP_INPUT_SCHEMA,
     outputSchema: SLEEP_OUTPUT_SCHEMA,
     toModelOutput: toInterruptibleModelOutput,
   });
+  markProvidedTool(tool);
+  return tool;
 }

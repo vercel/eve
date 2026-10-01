@@ -191,6 +191,8 @@ export type ResolvedToolDefinition = Readonly<
      * handlers and the stream. See {@link ToolModelOutput}.
      */
     readonly toModelOutput?: (output: unknown) => ToolModelOutput | Promise<ToolModelOutput>;
+    /** eve provides this tool, so eval tool stubs leave it running as usual. */
+    readonly provided?: true;
   };
 
 /**

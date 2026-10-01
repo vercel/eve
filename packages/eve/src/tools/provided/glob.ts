@@ -2,6 +2,7 @@ import { type GlobInput, executeGlobOnSandbox } from "#execution/sandbox/glob-to
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 export interface GlobToolInput {
   limit?: number;
@@ -77,5 +78,6 @@ export const glob: ToolDefinition<GlobToolInput, GlobToolOutput> = defineTool({
   inputSchema: GLOB_INPUT_SCHEMA,
   outputSchema: GLOB_OUTPUT_SCHEMA,
 });
+markProvidedTool(glob);
 
 export default glob;

@@ -31,6 +31,33 @@ describe("Client.sessions", () => {
     expect(session.state).toEqual({ sessionId: "wrun_prewarmer", streamIndex: 0 });
   });
 
+  it("sends a tool stub set only with the session-create request", async () => {
+    const bodies: Array<string | undefined> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if (init?.method !== "POST") return new Response(null, { status: 404 });
+      bodies.push(init.body as string | undefined);
+      return Response.json(
+        { deliveryId: "delivery-1", ok: true, sessionId: "wrun_stubbed" },
+        { status: 202 },
+      );
+    });
+    const client = new Client({ host: "https://eve.test" });
+
+    const { session: idle } = await client.sessions.create({ stubs: "two-workflows" });
+    const { session } = await client.sessions.create({
+      message: "What workflows do I have?",
+      stubs: "two-workflows",
+    });
+    await session.send("And now?");
+
+    expect(idle.state.sessionId).toBe("wrun_stubbed");
+    expect(bodies.map((body) => (body === undefined ? undefined : JSON.parse(body)))).toEqual([
+      { stubs: "two-workflows" },
+      expect.objectContaining({ message: "What workflows do I have?", stubs: "two-workflows" }),
+      expect.not.objectContaining({ stubs: expect.anything() }),
+    ]);
+  });
+
   it("returns structured output when fetch instrumentation clones the live stream", async () => {
     const events = [
       { type: "result.completed", data: { result: { answer: "child-result" } } },

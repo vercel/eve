@@ -471,8 +471,14 @@ export interface EveEvalContext<TContext = unknown> extends EveEvalAssertions {
    * acceptance with a definite session id and cursor. Every call creates a session.
    */
   session(options?: CreateSessionOptions): Promise<EveEvalSession>;
-  /** Create a new session with its first message and wait for the turn to settle. */
-  send(message: SendTurnInput["message"], options?: SendTurnOptions): Promise<EveEvalTurn>;
+  /**
+   * Create a new session with its first message and wait for the turn to settle.
+   * `stubs` selects a tool stub set from `evals/stubs/` for the whole session.
+   */
+  send(
+    message: SendTurnInput["message"],
+    options?: Omit<SendTurnInput, "message">,
+  ): Promise<EveEvalTurn>;
 
   /** Apply a value-level assertion (from `eve/evals/expect`) to a value. */
   check(value: unknown, assertion: Assertion): AssertionHandle;

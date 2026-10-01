@@ -7,7 +7,7 @@ import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import { loadContext } from "#context/container.js";
+import { contextStorage, loadContext } from "#context/container.js";
 import {
   authorizationPendingModelText,
   isAuthorizationPendingModelOutput,
@@ -15,6 +15,7 @@ import {
   modelFacingAuthorizationOutput,
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
+import { isTurnFailingToolError, stashTurnFailure } from "#harness/tool-turn-failure.js";
 import { isApprovedToolCall, markApprovalRecheck } from "#harness/approval-recheck.js";
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
@@ -164,17 +165,24 @@ export function wrapToolExecute(
     try {
       output = execute(input, options);
     } catch (error) {
-      return Promise.reject(error);
+      return Promise.reject(stashIfTurnFailing(error));
     }
 
     if (isAsyncIterable(output)) {
       return normalizeToolExecuteIterable(output, definition.name, options);
     }
 
-    return Promise.resolve(output).then((value) =>
-      normalizeToolExecuteOutput(value, definition.name, options),
+    return Promise.resolve(output).then(
+      (value) => normalizeToolExecuteOutput(value, definition.name, options),
+      (error: unknown) => Promise.reject(stashIfTurnFailing(error)),
     );
   };
+}
+
+function stashIfTurnFailing(error: unknown): unknown {
+  const ctx = contextStorage.getStore();
+  if (ctx !== undefined && isTurnFailingToolError(error)) stashTurnFailure(ctx, error);
+  return error;
 }
 
 async function* normalizeToolExecuteIterable(

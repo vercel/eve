@@ -12,6 +12,7 @@ import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-he
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import { createWorkflowProgramExecuteInput } from "#tools/workflow-program-input.js";
+import { isProvidedTool } from "#tools/provided/provided-tool.js";
 
 /**
  * Resolves one compiled authored tool into a runtime-owned definition
@@ -86,7 +87,7 @@ export async function resolveToolDefinition(
         ? undefined
         : (input: unknown) => createWorkflowProgramExecuteInput(workflowProgram, input);
 
-    return {
+    const resolved: ResolvedToolDefinition = {
       availableInSubagents: definition.availableInSubagents,
       behavior: definition.behavior,
       description: definition.description,
@@ -102,6 +103,7 @@ export async function resolveToolDefinition(
       sourceKind: "module",
       ...extractOptionalHooks(resolvedRecord, definition),
     };
+    return isProvidedTool(resolvedRecord) ? { ...resolved, provided: true } : resolved;
   } catch (error) {
     if (error instanceof ResolveAgentError) {
       throw error;

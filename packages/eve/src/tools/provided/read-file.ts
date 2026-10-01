@@ -2,6 +2,7 @@ import { type ReadFileInput, executeReadFileOnSandbox } from "#execution/sandbox
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 export interface ReadFileToolInput {
   filePath: string;
@@ -82,5 +83,6 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = d
   inputSchema: READ_FILE_INPUT_SCHEMA,
   outputSchema: READ_FILE_OUTPUT_SCHEMA,
 });
+markProvidedTool(readFile);
 
 export default readFile;

@@ -2,6 +2,7 @@ import { type WriteFileInput, executeWriteFileOnSandbox } from "#execution/sandb
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 export interface WriteFileToolInput {
   content: string;
@@ -63,5 +64,6 @@ export const writeFile: ToolDefinition<WriteFileToolInput, WriteFileToolOutput> 
   inputSchema: WRITE_FILE_INPUT_SCHEMA,
   outputSchema: WRITE_FILE_OUTPUT_SCHEMA,
 });
+markProvidedTool(writeFile);
 
 export default writeFile;

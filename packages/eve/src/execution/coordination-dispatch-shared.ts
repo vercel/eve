@@ -10,6 +10,7 @@ import {
   LocalDevRequestKey,
   type LocalDevRequestProvenance,
   ParentSessionKey,
+  ToolStubSetKey,
   TraceRootKey,
 } from "#context/keys.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
@@ -81,6 +82,8 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly PlanEntry[];
+  /** Eval tool stub set that local children inherit. */
+  readonly toolStubSet?: string;
   readonly session: HarnessSessionBase;
   readonly sessionState: DurableSessionState;
   /** Trace root that this session's local children inherit, when it isn't the lineage root. */
@@ -196,6 +199,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
+    toolStubSet: ctx.get(ToolStubSetKey),
     traceRoot: childTraceRoot(ctx, session.sessionId),
     workflowAgents: resolveWorkflowAgentMetadata(ctx),
   };

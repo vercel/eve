@@ -101,6 +101,8 @@ export interface LocalDevRequestProvenance {
 export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
   "eve.internal.localDevRequest",
 );
+/** Name of the eval tool stub set from `evals/stubs/` that this session runs with. */
+export const ToolStubSetKey = new ContextKey<string>("eve.toolStubSet");
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
 /** Display title derived from the session's initial input. */

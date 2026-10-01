@@ -46,6 +46,13 @@ until the eval passes under `EVE_E2E_MODEL=mock`, then remove the tag. Prefer
 untagging over new `real-model` tags — deterministic evals make every world
 suite stronger.
 
+### The `local-server` tag
+
+An eval tagged `local-server` needs the local server that `eve eval` starts,
+such as an eval that selects [tool stubs](../docs/evals/tool-stubs.mdx). The
+world suites run against deployed `--url` targets, so they exclude it; the
+model suite runs it.
+
 ## Local
 
 Run evals from the fixture directory:

@@ -82,6 +82,8 @@ export function buildSubagentRunInput(input: {
   readonly parent: SubagentParentContext;
   readonly session: Pick<HarnessSession, "continuationToken" | "sandboxState" | "sessionId">;
   readonly source: SubagentInputSource;
+  /** Parent's eval tool stub set, inherited unchanged. */
+  readonly toolStubSet?: string;
 }): SubagentRunInputBuild {
   const {
     action,
@@ -136,6 +138,7 @@ export function buildSubagentRunInput(input: {
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,
+    toolStubSet: input.toolStubSet,
     traceRoot: input.parent.traceRoot,
   };
   return { childContinuationToken, runInput };

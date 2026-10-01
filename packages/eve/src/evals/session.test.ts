@@ -138,3 +138,21 @@ async function* events() {
     },
   ]);
 }
+
+describe("eval tool stubs", () => {
+  it("refuses a stub set against a remote target before sending a request", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+    const manager = new EvalSessionManager({
+      client: new Client({ host: "https://eve.test" }),
+      targetKind: "remote",
+    });
+
+    await expect(manager.send("Hi", { stubs: "two-workflows" })).rejects.toThrow(
+      'Tool stub set "two-workflows" needs the local server that `eve eval` starts.',
+    );
+    await expect(manager.session({ stubs: "two-workflows" })).rejects.toThrow(
+      "This eval runs against an `eve eval --url` target",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

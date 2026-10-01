@@ -2,6 +2,7 @@ import { executeBashOnSandbox, type BashInput } from "#execution/sandbox/bash.js
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 export interface BashToolInput {
   command: string;
@@ -58,5 +59,6 @@ export const bash: ToolDefinition<BashToolInput, BashToolOutput> = defineTool({
   inputSchema: BASH_INPUT_SCHEMA,
   outputSchema: BASH_OUTPUT_SCHEMA,
 });
+markProvidedTool(bash);
 
 export default bash;

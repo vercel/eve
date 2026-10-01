@@ -6,6 +6,7 @@ import {
   type InterruptedOutput,
 } from "#tools/provided/interrupted.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 export const ASK_QUESTION_TOOL_DESCRIPTION = [
   "Ask the user a question and wait for the answer. Use this only when you cannot make good progress without the user's input: to choose between materially different approaches, fill in a missing requirement, or confirm something risky or irreversible. Do not ask for information you can find with your other tools, and do not ask the user to confirm routine steps.",
@@ -117,11 +118,13 @@ const ASK_QUESTION_OUTPUT_SCHEMA = defineJsonSchema<AskQuestionOutput>({
  * message that does not answer the question withdraws it.
  */
 export function askQuestion(): WorkflowExecuteToolDefinition<AskQuestionInput, AskQuestionOutput> {
-  return defineWorkflowTool({
+  const tool = defineWorkflowTool({
     description: ASK_QUESTION_TOOL_DESCRIPTION,
     execute: executeAskQuestionTool,
     inputSchema: ASK_QUESTION_INPUT_SCHEMA,
     outputSchema: ASK_QUESTION_OUTPUT_SCHEMA,
     toModelOutput: toInterruptibleModelOutput,
   });
+  markProvidedTool(tool);
+  return tool;
 }

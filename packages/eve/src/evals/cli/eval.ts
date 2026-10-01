@@ -7,6 +7,7 @@ import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.
 import {
   EVE_EVALUATION_ENV_FLAG,
   EVE_EVALUATION_RUN_ID_ENV,
+  EVE_EVALUATION_TOOL_STUBS_DIR_ENV,
 } from "#internal/application/dev-environment.js";
 import { noDevelopmentExtensions } from "#compiler/development-extensions.js";
 import { createDevelopmentServer, type DevelopmentServer } from "#internal/nitro/host.js";
@@ -152,6 +153,7 @@ export async function runEvalCommand(
       // once at startup and never again.
       process.env[EVE_EVALUATION_ENV_FLAG] = "1";
       process.env[EVE_EVALUATION_RUN_ID_ENV] = randomUUID();
+      process.env[EVE_EVALUATION_TOOL_STUBS_DIR_ENV] = join(appRoot, "evals", "stubs");
       devServer = createDevelopmentServer(appRoot, {
         developmentExtensions: noDevelopmentExtensions(),
         host: "127.0.0.1",

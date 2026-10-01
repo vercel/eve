@@ -186,7 +186,7 @@ jobs:
             exit 1
           fi
 
-          if ! pnpm exec eve eval --strict --verbose --exclude-tag real-model \
+          if ! pnpm exec eve eval --strict --verbose --exclude-tag real-model local-server \
             --url http://127.0.0.1:3000 \
             --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"; then
             cat "$server_log"

@@ -1,0 +1,116 @@
+---
+title: "Tool Stubs"
+description: "Replace what an agent's tools return in an eval with stubs, while the model, approvals, and result handling stay real."
+---
+
+A tool stub set replaces what your agent's tools return in an eval session. The model still sees each real tool's name, description, input schema, and approval policy, and decides on its own whether to call it. Only the tool's `execute` changes: the stub runs in its place, and its return value takes the same path a real result takes, through `toModelOutput` and into session history.
+
+Use stubs when a tool needs credentials, network access, or live data, or when its side effects must not happen in an eval. Stubs work only with the local server that `eve eval` starts, on your machine or in CI.
+
+## Write a stub set
+
+A stub set is one file in `evals/stubs/` that default-exports `defineToolStubs(...)` from `eve/evals`. The file path names the set: `evals/stubs/two-workflows.ts` is the set `"two-workflows"`, and `evals/stubs/billing/refunds.ts` is `"billing/refunds"`. Every `.ts` file under `evals/stubs/` is a set, so keep shared helpers outside that directory.
+
+```ts title="evals/stubs/two-workflows.ts"
+import { defineToolStubs } from "eve/evals";
+
+export default defineToolStubs({
+  state: () => ({
+    schedules: [{ id: "sched_1", name: "Weekly commit activity", cron: "0 17 * * 4" }],
+  }),
+  tools: {
+    schedules_read: (input, { state }) => ({ schedules: state.schedules }),
+    schedules_create: (input, { state }) => {
+      const schedule = { id: `sched_${state.schedules.length + 1}`, ...input };
+      state.schedules.push(schedule);
+      return { schedule };
+    },
+  },
+});
+```
+
+- `tools` maps the tool name the model sees to a stub. A stub receives the tool input and a context with `state`, `toolName`, and `callId`, and returns the same shape as the real tool. A stub can be `async`, and it can branch on its input.
+- `state` returns the starting state. Mutate `state` in place; later stub calls see the change.
+- A stub that throws produces an ordinary tool error, which the model sees, so a stub can simulate a failing service.
+
+## Select a set in an eval
+
+Pass `stubs` when the eval creates the session, with `t.send(...)` or `t.session(...)`. Later messages and approval responses in that session use the same set; they do not accept `stubs`.
+
+```ts title="evals/schedules.eval.ts"
+import { defineEval } from "eve/evals";
+
+export default defineEval({
+  async test(t) {
+    // The model reads the stub's starting state.
+    const first = await t.send("What workflows do I have?", { stubs: "two-workflows" });
+    t.calledTool("schedules_read");
+    first.messageIncludes("Weekly commit activity");
+
+    // The create tool asks for approval; the stub runs only after the eval approves.
+    const created = await first.session.send("Remind me to check the canary tomorrow at 9am.");
+    const approved = await created.session.respondAll("approve");
+    approved.expectOk();
+
+    // The stubbed create changed the state, so the next read includes it.
+    const listed = await approved.session.send("What workflows do I have now?");
+    listed.messageIncludes("canary");
+  },
+});
+```
+
+Only the set's name travels with the request. The [TypeScript client](../guides/client/overview) accepts the same `stubs` option on `client.sessions.create(...)`.
+
+## Approvals stay real
+
+A stub replaces only `execute`, so a tool with an approval policy still pauses the turn. The eval approves or denies the call with `session.respond(...)` or `session.respondAll(...)`, as a person does in a channel. The stub runs only after approval. A denied call never reaches the stub. Resuming a parked turn does not run a stub again for a call that already has a result.
+
+## State
+
+eve creates one state per root eval session, on the first stub call, and every subagent the session starts shares it. A subagent's stub writes are visible to the parent and to other subagents.
+
+The state lives in the memory of the local eval server:
+
+- It survives approval pauses and later turns in the session.
+- A retried step can apply a stub's write twice.
+- A server restart loses it.
+- eve keeps every root session's state until the server stops.
+
+## Which tools a set replaces
+
+In a session with a stub set:
+
+- **Authored tools** in `agent/tools/`, tools from [extensions](../extensions), and [dynamic tools](../guides/dynamic-capabilities) run their stub.
+- **Connection tools** reach the model through `connection_search` and `connection_execute`. Stub them by those names; the stub receives the same input the model sent, such as `{ connection, tool, input }` for `connection_execute`.
+- **Tools eve provides** run as usual, including when your app mounts them from `agent/tools/`: `bash`, `read_file`, `write_file`, `glob`, `grep`, `web_fetch`, `load_skill`, and `no_reply`.
+- **Workflow tools** you define with `defineWorkflowTool` run their stub in place of the workflow, and the call settles with the stub's result. A workflow tool that runs as a task (`task` or `serve`) cannot be stubbed, so calling it fails the turn with code `TOOL_STUB_UNSUPPORTED`. eve's own workflow tools, such as `ask_question` and `sleep`, run as usual.
+- **[Remote agents](../subagents)** run their stub, keyed by the agent's name, in place of the remote session, so no request leaves the server. The stub receives `{ message }`, plus `outputSchema` when the caller asked for structured output, and returns the agent's reply. It runs once for each message the agent receives. The `agent.started` event still names the agent, but its session has no stream to follow.
+- **Local subagents** run with the session's set and share its state.
+- Provider-executed tools such as `web_search` run as usual.
+
+When the model calls a tool that the set must replace but has no stub for, the turn fails before the real `execute` runs. The turn ends with `turn.failed` and code `TOOL_STUB_MISSING`, and the message names the set and the tool:
+
+```text
+Tool stub set "two-workflows" has no stub for "schedules_delete", so the turn failed without running the real tool. Add "schedules_delete" to `tools` in evals/stubs/two-workflows.ts.
+```
+
+A missing stub inside a subagent fails the subagent's turn and the root session's turn: the root fails with `TOOL_STUB_MISSING` before its model reads the failed agent result.
+
+The step's other tool calls still ran, including their stubs' state writes, but the step's messages do not enter session history. The session stays open, so the eval can continue it or assert on the failure with `turn.event("turn.failed", { data: { code: "TOOL_STUB_MISSING" } })`.
+
+## Errors at session create
+
+| Error message starts with                           | Cause                                                                            | Next action                                                      |
+| --------------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `Unknown tool stub set "x". Sets in evals/stubs/:`  | No file in `evals/stubs/` derives the name `x`.                                  | Fix the name, or add `evals/stubs/x.ts`.                         |
+| `Tool stub set "x" failed to load:`                 | The file does not default-export `defineToolStubs(...)`, or importing it failed. | Fix the stub file.                                               |
+| `Tool stub set "x" needs the local server that`     | The eval runs with `eve eval --url`. The runner refuses before sending.          | Run `eve eval` without `--url`, or remove `stubs` from the eval. |
+| `'stubs' is accepted only by the local server that` | The request reached a server that `eve eval` did not start.                      | Send stub requests only to the server `eve eval` starts.         |
+
+Deployed agents never contain stub code: `eve build` does not compile `evals/`, and every server other than the one `eve eval` starts rejects `stubs`. To run the rest of a suite against a deployment, tag stubbed evals and pass `--exclude-tag` (see [Running evals](./running)).
+
+## What to read next
+
+- [Cases](./cases): multi-turn evals and approval responses
+- [Assertions](./assertions): `calledTool` and event matchers for stubbed calls
+- [Targets](./targets): local and remote targets

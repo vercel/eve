@@ -89,6 +89,19 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.capabilities).toEqual({ requestInput: true });
   });
 
+  it("hands the parent's eval tool stub set to the child", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      initiatorAuth: null,
+      session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
+      toolStubSet: "two-workflows",
+    });
+
+    expect(runInput.toolStubSet).toBe("two-workflows");
+  });
+
   it("leaves capabilities undefined when the parent has none", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),

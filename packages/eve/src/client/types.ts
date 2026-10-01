@@ -106,6 +106,13 @@ export interface ClientOptions {
  */
 export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutput> {
   readonly message: string | UserContent;
+  /**
+   * Eval tool stub set from `evals/stubs/` for the new session. Only the local
+   * server `eve eval` starts accepts it. Other servers on an eve release with
+   * tool stubs reject the request; servers on older releases ignore the field.
+   * Later messages and responses in the session use the same set.
+   */
+  readonly stubs?: string;
 }
 
 /** Request options for creating a conversation session before its first turn. */
@@ -114,6 +121,13 @@ export interface CreateSessionOptions {
   readonly signal?: AbortSignal;
   /** Additional headers for this request only. */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * Eval tool stub set from `evals/stubs/` for the new session. Only the local
+   * server `eve eval` starts accepts it. Other servers on an eve release with
+   * tool stubs reject the request; servers on older releases ignore the field.
+   * Later messages and responses in the session use the same set.
+   */
+  readonly stubs?: string;
 }
 
 /** Options shared by message sends and HITL responses on a client session. */

@@ -19,6 +19,7 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
+import type { TurnFailingToolError } from "#harness/tool-turn-failure.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -308,6 +309,11 @@ export interface ToolLoopHarnessConfig {
     readonly sequence: number;
     readonly turnId: string;
   }) => Promise<void>;
+  /**
+   * Returns a turn failure raised outside this session's model step, such as
+   * by a delegated child. The step fails the turn before it calls the model.
+   */
+  readonly takePendingTurnFailure?: () => TurnFailingToolError | undefined;
   /** Resolves persisted step-scoped tools before an approval policy reads them. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

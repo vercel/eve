@@ -50,6 +50,8 @@ export interface AgentSessionContext {
   /** Present when the caller's trace root differs from `parent.rootSessionId`. */
   readonly traceRoot?: SessionTraceRoot;
   readonly sandbox: AgentSessionSandbox;
+  /** Eval tool stub set each session inherits. */
+  readonly toolStubSet?: string;
   readonly trace: AgentChildTraceDispatch;
 }
 
@@ -77,6 +79,7 @@ type CallerDispatch = Pick<
   | "sandboxSessionId"
   | "serializedContext"
   | "session"
+  | "toolStubSet"
   | "traceRoot"
   | "workflowAgents"
 >;
@@ -125,6 +128,7 @@ export function captureAgentSessionContext(
       turn: { id: batch.event.turnId, sequence: batch.event.sequence },
     },
     sandbox: { sessionId: caller.sandboxSessionId, state: session.sandboxState },
+    toolStubSet: caller.toolStubSet,
     traceRoot: caller.traceRoot,
     trace: resolveToolCallAgentTrace({
       callId,

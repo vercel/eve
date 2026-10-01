@@ -199,6 +199,11 @@ import {
 } from "#harness/model-call-error.js";
 import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semantic-errors/index.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import {
+  isTurnFailingToolError,
+  readTurnFailure,
+  stashTurnFailure,
+} from "#harness/tool-turn-failure.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
@@ -280,8 +285,13 @@ function logToolExecutionError(event: {
   readonly toolOutput: { readonly type: string; readonly error?: unknown };
 }): void {
   // A tool unwinding because its turn was cancelled is the expected outcome
-  // of a user action, not a failure worth an error log.
-  if (event.toolOutput.type !== "tool-error" || isTurnCancellation(event.toolOutput.error)) {
+  // of a user action, not a failure worth an error log. A turn-failing tool
+  // error is logged once, where the tool loop fails the turn.
+  if (
+    event.toolOutput.type !== "tool-error" ||
+    isTurnCancellation(event.toolOutput.error) ||
+    isTurnFailingToolError(event.toolOutput.error)
+  ) {
     return;
   }
   logError(log, "tool execution failed", event.toolOutput.error, {
@@ -1739,6 +1749,38 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return limitResult;
     }
 
+    // A turn-failing tool error ends the turn before a later model call can
+    // read the tool error and work around it. An approved call runs before the
+    // model call, so its failure also wins over a failed model call.
+    const failTurnFromTool = async (): Promise<StepResult | undefined> => {
+      const turnFailure = ctx === undefined ? undefined : readTurnFailure(ctx);
+      if (turnFailure === undefined) return undefined;
+      if (!emit) throw turnFailure;
+      log.warn("a tool failed the turn", {
+        code: turnFailure.code,
+        sessionId: session.sessionId,
+        turnId: emissionState.turnId,
+      });
+      emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
+        code: turnFailure.code,
+        continuationToken: session.continuationToken,
+        message: turnFailure.message,
+        usage: getSessionUsage(session),
+      });
+      return {
+        next: null,
+        session: setHarnessEmissionState({ ...session, outputSchema: undefined }, emissionState),
+        settledTurn: { isError: true, output: turnFailure.message },
+      };
+    };
+
+    const pendingTurnFailure = config.takePendingTurnFailure?.();
+    if (pendingTurnFailure !== undefined && ctx !== undefined) {
+      stashTurnFailure(ctx, pendingTurnFailure);
+      const pendingFailure = await failTurnFromTool();
+      if (pendingFailure !== undefined) return pendingFailure;
+    }
+
     let result: HarnessStepResult;
     try {
       result = await runOneModelCall({
@@ -1751,6 +1793,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (generation.interrupted) {
         return finishSteeredStep();
       }
+
+      const toolTurnFailureBeforeError = await failTurnFromTool();
+      if (toolTurnFailureBeforeError !== undefined) return toolTurnFailureBeforeError;
 
       // Stage order: drop a gateway-rejected provider tool first, then
       // reissue an empty response; see runModelCallRecoveryPipeline for
@@ -1954,6 +1999,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       "$eve.cost_usd": nextTurnUsage.sawCost ? nextTurnUsage.costUsd : undefined,
       "$eve.tool_count": config.tools.size,
     });
+
+    const toolTurnFailure = await failTurnFromTool();
+    if (toolTurnFailure !== undefined) return toolTurnFailure;
 
     // --- Handle result ------------------------------------------------------
 

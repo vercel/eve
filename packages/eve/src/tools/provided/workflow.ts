@@ -7,6 +7,7 @@ import type { JsonValue } from "#shared/json.js";
 import { defineWorkflowTool, type WorkflowTaskToolDefinition } from "#tools/workflow-definition.js";
 import { attachWorkflowProgramOptions } from "#tools/workflow-program-input.js";
 import { defineJsonSchema } from "#tools/schema.js";
+import { markProvidedTool } from "#tools/provided/provided-tool.js";
 
 export interface WorkflowToolOptions {
   /** Maximum child-agent calls per program, from 1 to 128. Defaults to 100. */
@@ -43,7 +44,7 @@ export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
     'Supply the body directly, for example: return await ctx.agent("researcher", { message: "Describe the task" });',
     `The program may invoke at most ${String(normalized.maxSubagents)} agents.`,
   ].join(" ");
-  return attachWorkflowProgramOptions(
+  const tool = attachWorkflowProgramOptions(
     defineWorkflowTool({
       description,
       inputSchema: workflowInputSchema,
@@ -51,6 +52,8 @@ export function workflow(options: WorkflowToolOptions = {}): WorkflowTool {
     }),
     normalized,
   );
+  markProvidedTool(tool);
+  return tool;
 }
 
 function normalizeWorkflowToolOptions(options: WorkflowToolOptions): {

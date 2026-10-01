@@ -7,6 +7,8 @@ An eval target is always an HTTP URL. `eve eval` starts a local dev server, whil
 
 The runner polls `/eve/v1/health`, verifies `/eve/v1/info`, and exposes the live target as `t.target` inside the `test` function.
 
+[Tool stubs](./tool-stubs) work only with the local server that `eve eval` starts. An eval that passes `stubs` fails against an `eve eval --url` target before it sends a request.
+
 ## Target helpers
 
 ```ts title="evals/heartbeat.eval.ts"

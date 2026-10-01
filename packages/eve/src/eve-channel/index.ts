@@ -1,3 +1,4 @@
+import { selectToolStubSet } from "#execution/tool-stubs.js";
 import { handleExpiredLegacyAuthorization } from "#execution/legacy-session/authorization.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import type { SessionAuthContext, SessionParent, SessionTraceContext } from "#channel/types.js";
@@ -174,6 +175,11 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
+        const toolStubs =
+          body.stubs === undefined ? undefined : await selectToolStubSet(body.stubs);
+        if (toolStubs?.ok === false) {
+          return Response.json({ error: toolStubs.error, ok: false }, { status: 400 });
+        }
         if (body.callback !== undefined && body.legacyRemoteAgentCaller !== undefined) {
           log.info("serving a remote agent protocol 1 caller", {
             callerOrigin: new URL(body.callback.url).origin,
@@ -349,6 +355,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             // deployment; its lineage still names the caller's root.
             traceRoot: parent === undefined ? undefined : { kind: "own" },
             title: messageResult.title,
+            toolStubSet: toolStubs?.set,
           });
         } catch (error) {
           const errorId = logError(log, "session-create request failed", error);
