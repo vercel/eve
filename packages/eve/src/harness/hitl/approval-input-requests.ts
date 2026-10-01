@@ -124,7 +124,10 @@ export function ignoreApprovalInputBatch(
   });
   const resolved = buildResolvedInputBatch(batch, answers);
   return finishResolvedInput({
-    deferTurnInput: true,
+    // Calls that will not run already have their results, so the message joins
+    // this step. An approved call runs through AI SDK, which needs its approval
+    // response last, so the message replays after it.
+    deferTurnInput: answers.some((answer) => resolveApprovalOutcome(answer).approved),
     leftoverResponses: responsesForBatches(input.responses, input.batches.slice(1)),
     messages: approval.messages,
     rejectedActions: approval.rejectedActions,

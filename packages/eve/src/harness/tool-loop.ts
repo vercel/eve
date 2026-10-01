@@ -1074,7 +1074,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         const traceContext = await preparePreambleTrace();
         emissionState = await emitTurnPreamble(
           emit,
-          preambleStepInput ?? {},
+          // A deferred message replays on a later step, which announces it then.
+          pending.deferredMessage === true
+            ? { ...preambleStepInput, message: undefined }
+            : (preambleStepInput ?? {}),
           emissionState,
           projectHistory(
             [...pending.messages, ...ephemeralContextMessages, ...preparedTurnInput],

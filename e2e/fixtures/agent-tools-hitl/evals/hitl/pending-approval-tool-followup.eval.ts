@@ -85,7 +85,12 @@ export default [
       followup.messageIncludes(MARKER);
       followup.messageIncludes("ready");
       followup.eventOrder([
-        { type: "message.received", data: { turnId: received.data.turnId }, count: 1 },
+        // The follow-up joins the held turn, which also received the original request.
+        {
+          type: "message.received",
+          data: { turnId: received.data.turnId, sequence: received.data.sequence },
+          count: 1,
+        },
         {
           type: "action.result",
           data: {

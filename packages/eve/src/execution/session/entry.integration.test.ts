@@ -1066,6 +1066,87 @@ describe("workflowEntry integration", () => {
     });
   }, 60_000);
 
+  it("runs a steering message after the budget prompt that followed its cancelled approval", async () => {
+    const runtime = await createTestRuntime({
+      agent: {
+        limits: { maxInputTokensPerSession: 1 },
+        name: "workflow-entry-steer-held-limit",
+      },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineTool({
+              approval: always(),
+              description: "Apply a change after the user approves it.",
+              execute: () => ({ applied: true }),
+              inputSchema: {},
+            }),
+          }),
+          logicalPath: "tools/approve_change.ts",
+        },
+      ],
+    });
+    const continuationToken = "http:workflow-entry-steer-held-limit";
+    const alice = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "alice",
+      principalType: "user" as const,
+    };
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Use the approve_change tool exactly once." },
+          serializedContext: {
+            ...buildSerializedContext({ auth: alice, channelKind: "http", continuationToken }),
+            "eve.capabilities": { requestInput: true },
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const held = await withTimeout(stream.nextTurn(), "approval hold");
+        expect(held.at(-1)?.type).toBe("turn.waiting");
+
+        await resumeHook(sessionInboxHookToken(continuationToken), {
+          auth: alice,
+          kind: "send",
+          payload: { message: "Never mind, just say hello." },
+          turnPolicy: "queue",
+        });
+        const limited = await withTimeout(stream.nextTurn(), "budget prompt");
+        const budget = filterEventsByType(limited, "input.requested")
+          .flatMap((event) => event.data.requests)
+          .find((request) => request.kind === "session-limit");
+        expect(budget).toBeDefined();
+
+        await resumeHook(sessionInboxHookToken(continuationToken), {
+          auth: alice,
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "continue", requestId: budget!.requestId }] },
+          turnPolicy: "queue",
+        });
+        const resumed = await withTimeout(stream.nextTurn(), "granted turn");
+        // The message joined the step that cancelled the approval; the grant
+        // resumes with one model call that answers it.
+        expect(filterEventsByType(limited, "message.received").map((e) => e.data.message)).toEqual([
+          "Never mind, just say hello.",
+        ]);
+        expect(filterEventsByType(resumed, "message.received")).toHaveLength(0);
+        expect(filterEventsByType(resumed, "step.started")).toHaveLength(1);
+        expect(filterEventsByType(resumed, "message.completed")).toHaveLength(1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   it("releases a session reset while its turn is held on an approval", async () => {
     const runtime = await createTestRuntime({
       agent: { name: "workflow-entry-reset-held" },

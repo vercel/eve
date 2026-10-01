@@ -413,6 +413,28 @@ it("reaches the next budget prompt after a grant while an earlier approval remai
   expect(f.pending().map((r) => r.kind)).toEqual(["tool-approval", "session-limit"]);
 });
 
+it("runs the steering message after a budget grant that followed the cancelled approval", async () => {
+  const f = fixture("steer-then-session-limit", false, 1);
+  f.script.push(calls("gateA"));
+  expect((await f.drive({ message: "Prepare gateA." })).held).toEqual({ kind: "request" });
+  await f.drive({ message: "Read the status instead." });
+  expect(f.pending().map((r) => r.kind)).toEqual(["session-limit"]);
+  f.script.push(calls("read"), "FINAL");
+  await f.drive(f.respond("session_limit_continuation", "continue"));
+  // The message joined the step that cancelled the approval, so it reaches the
+  // model once, without an extra model call spent before it.
+  const userTexts = f.session.history
+    .filter((message) => message.role === "user")
+    .map((message) => JSON.stringify(message.content));
+  expect(userTexts.filter((text) => text.includes("Read the status instead."))).toHaveLength(1);
+  expect(
+    f.events
+      .filter((event) => event.type === "message.received")
+      .map((event) => event.data.message),
+  ).toEqual(["Prepare gateA.", "Read the status instead."]);
+  expect(f.executions).toEqual(["read"]);
+});
+
 for (const variant of ["fail", "invalid"]) {
   it(`recovers from ${variant} without pending input [control]`, async () => {
     const logs = captureLogRecords();
@@ -552,6 +574,12 @@ it("cancels a held approval when the same person steers the turn", async () => {
     { data: { resolutions: [{ kind: "tool-approval", outcome: "ignored" }] } },
   ]);
   expect(f.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+  // The steering message replays after the cancelled call's result, and is announced once.
+  expect(
+    f.events
+      .filter((event) => event.type === "message.received")
+      .map((event) => event.data.message),
+  ).toEqual(["Prepare gateA.", "Never mind, skip it."]);
   expect(result.settledTurn?.output).toBe("FINAL");
 });
 

@@ -1,7 +1,7 @@
 import { defineEval } from "eve/evals";
 import {
+  expectApprovalCancelled,
   scriptedSession,
-  approveSavedChange,
   expectChangeStillUnexecuted,
   expectReply,
   requestFrom,
@@ -21,7 +21,7 @@ export default defineEval({
     // When the user asks to read from a failing tool.
     const live = await session.start("Try the unavailable draft store and explain the error.");
 
-    // Then the reply explains the actual error and completes; A stays unexecuted and answerable.
+    // Then the reply explains the actual error and completes; the message cancelled A, which never runs.
     await expectToolResult(t, live, "unavailable-draft");
     const turn = await expectReply(
       t,
@@ -30,6 +30,6 @@ export default defineEval({
     );
     turn.calledTool("unavailable-draft", { status: "failed", count: 1 });
     expectChangeStillUnexecuted(session);
-    await approveSavedChange(t, session, approval);
+    expectApprovalCancelled(session, approval);
   },
 });
