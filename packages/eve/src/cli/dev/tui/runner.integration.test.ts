@@ -1,0 +1,513 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Client } from "#client/client.js";
+import {
+  createActionsRequestedEvent,
+  createAgentStartedEvent,
+  createInputRequestedEvent,
+  createMessageAppendedEvent,
+  createMessageCompletedEvent,
+  createSessionFailedEvent,
+  createMessageReceivedEvent,
+  createSessionWaitingEvent,
+  createTaskSettledEvent,
+  createTaskStartedEvent,
+  createTurnCancelledEvent,
+  createTurnCompletedEvent,
+  createTurnStartedEvent,
+  createTurnWaitingEvent,
+} from "#protocol/message.js";
+import type { AgentTUIConversationView } from "./conversation-view.js";
+import { interruptedError } from "./errors.js";
+import {
+  EveTUIRunner,
+  type AgentTUIInput,
+  type AgentTUIRenderer,
+  type AgentTUIToolApprovalRequest,
+} from "./runner.js";
+import { FakeEveServer, reply, silent } from "./test/fake-eve-server.js";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+/** A renderer whose composer the test drives, recording every conversation view. */
+function scriptedRenderer(overrides: Partial<AgentTUIRenderer> = {}) {
+  const views: AgentTUIConversationView[] = [];
+  const reads: Array<{ resolve: (input: AgentTUIInput | undefined) => void; done: boolean }> = [];
+  const renderer: AgentTUIRenderer = {
+    renderConversation: (view) => views.push(view),
+    readInput: vi.fn(
+      (options) =>
+        new Promise<AgentTUIInput | undefined>((resolve, reject) => {
+          const read = {
+            done: false,
+            resolve: (input: AgentTUIInput | undefined) => {
+              read.done = true;
+              if (input === undefined) reject(interruptedError());
+              else resolve(input);
+            },
+          };
+          reads.push(read);
+          options?.signal?.addEventListener("abort", () => {
+            read.done = true;
+            resolve(undefined);
+          });
+        }),
+    ),
+    ...overrides,
+  };
+  const pending = () => reads.findLast((read) => !read.done);
+  return {
+    renderer,
+    views,
+    latest: () => views.at(-1)!,
+    /** Waits for the composer to open, then answers it. `undefined` leaves the session. */
+    async input(input: AgentTUIInput | undefined) {
+      await vi.waitFor(() => expect(pending()).toBeDefined());
+      pending()!.resolve(input);
+    },
+  };
+}
+
+function assistantText(view: AgentTUIConversationView): string[] {
+  return view.conversation.messages.flatMap((message) =>
+    message.role === "assistant"
+      ? message.parts.flatMap((part) => (part.type === "text" ? [part.text] : []))
+      : [],
+  );
+}
+
+function startRunner(
+  server: FakeEveServer,
+  renderer: AgentTUIRenderer,
+  fetch: typeof globalThis.fetch = server.fetch,
+) {
+  vi.stubGlobal("fetch", fetch);
+  const run = new EveTUIRunner({
+    client: new Client({ host: "http://localhost:3000" }),
+    renderer,
+    name: "Review Agent",
+  }).run();
+  return run;
+}
+
+describe("eve dev conversation", () => {
+  it("renders server-initiated turns between sends from the one session stream", async () => {
+    const server = new FakeEveServer(reply("Bob received the update."));
+    const tui = scriptedRenderer();
+    const run = startRunner(server, tui.renderer);
+
+    await tui.input({ type: "submit", text: "Tell Bob about the release." });
+    await vi.waitFor(() =>
+      expect(assistantText(tui.latest())).toContain("Bob received the update."),
+    );
+    await vi.waitFor(() => expect(tui.latest().working).toBe(false));
+
+    // Alice's scheduled review wakes the agent while the composer is open.
+    server.emit([
+      createTurnStartedEvent({ sequence: 0, turnId: "wake" }),
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Alice finished the review.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "wake",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    await vi.waitFor(() =>
+      expect(assistantText(tui.latest())).toEqual([
+        "Bob received the update.",
+        "Alice finished the review.",
+      ]),
+    );
+
+    await tui.input({ type: "submit", text: "Thanks." });
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/session_1")).toHaveLength(1));
+    await tui.input(undefined);
+    await run;
+    expect(server.requestsTo("GET", "/stream")).toHaveLength(1);
+    expect(server.requestsTo("POST", "/session_1")[0]?.body).toMatchObject({
+      turnPolicy: "queue",
+    });
+  });
+
+  it("steers the running turn with a message sent while it works", async () => {
+    const server = new FakeEveServer(silent());
+    const tui = scriptedRenderer();
+    const run = startRunner(server, tui.renderer);
+
+    await tui.input({ type: "submit", text: "Start the review." });
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
+    server.emit(
+      [
+        createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+        createMessageAppendedEvent({
+          messageDelta: "Reviewing",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      ],
+      "delivery_1",
+    );
+    await vi.waitFor(() => expect(tui.latest().working).toBe(true));
+
+    await tui.input({ type: "submit", text: "Include Bob's note." });
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/session_1")).toHaveLength(1));
+    expect(server.requestsTo("POST", "/session_1")[0]?.body).toMatchObject({
+      message: "Include Bob's note.",
+      turnPolicy: "steer",
+    });
+    await tui.input(undefined);
+    await run;
+  });
+
+  it("answers an approval that arrives while the composer is open", async () => {
+    const server = new FakeEveServer(reply("Ready."));
+    const readToolApproval = vi.fn(async () => ({ approved: true }));
+    const tui = scriptedRenderer({ readToolApproval });
+    const run = startRunner(server, tui.renderer);
+
+    await tui.input({ type: "submit", text: "Hello." });
+    await vi.waitFor(() => expect(tui.latest().working).toBe(false));
+    server.emit([
+      createTurnStartedEvent({ sequence: 0, turnId: "wake" }),
+      createInputRequestedEvent({
+        requests: [
+          {
+            action: {
+              callId: "call_1",
+              input: { path: "notes.md" },
+              kind: "tool-call",
+              toolName: "write_file",
+            },
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Approve" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve write_file?",
+            requestId: "approval_1",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "wake",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+
+    await vi.waitFor(() => expect(readToolApproval).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/session_1")).toHaveLength(1));
+    expect(server.requestsTo("POST", "/session_1")[0]?.body).toMatchObject({
+      inputResponses: [{ requestId: "approval_1", optionId: "approve" }],
+    });
+    await tui.input(undefined);
+    await run;
+  });
+
+  it("answers an agent's approval while its held turn waits and follows the agent's reply", async () => {
+    const server = new FakeEveServer(silent());
+    const readToolApproval = vi.fn(async () => ({ approved: true }));
+    const tui = scriptedRenderer({ readToolApproval });
+    const run = startRunner(server, tui.renderer);
+
+    await tui.input({ type: "submit", text: "Ask the researcher for Alice's region." });
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
+    const task = {
+      callId: "call_1",
+      kind: "agent" as const,
+      name: "researcher",
+      taskId: "task_1",
+      turnId: "turn_1",
+    };
+    server.emit(
+      [
+        createMessageReceivedEvent({
+          message: "Ask the researcher for Alice's region.",
+          sequence: 0,
+          turnId: "turn_1",
+        }),
+        createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+        createTaskStartedEvent(task),
+        createAgentStartedEvent({ ...task, parentSessionId: "session_1", sessionId: "child_1" }),
+        createInputRequestedEvent({
+          requests: [
+            {
+              action: { callId: "lookup_1", input: {}, kind: "tool-call", toolName: "lookup" },
+              kind: "tool-approval",
+              prompt: "Approve lookup?",
+              requestId: "approval_1",
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          taskId: "task_1",
+          turnId: "turn_1",
+        }),
+        createTurnWaitingEvent({ on: "input", sequence: 1, turnId: "turn_1" }),
+      ],
+      "delivery_1",
+    );
+
+    await vi.waitFor(() => expect(readToolApproval).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/session_1")).toHaveLength(1));
+    expect(server.requestsTo("POST", "/session_1")[0]?.body).toMatchObject({
+      inputResponses: [{ requestId: "approval_1", optionId: "approve" }],
+    });
+    expect(tui.latest().working).toBe(true);
+    await vi.waitFor(() => expect(server.requestsTo("GET", "/child_1/stream")).toHaveLength(1));
+
+    server.emit(
+      [
+        createTurnStartedEvent({ sequence: 0, turnId: "child_turn" }),
+        createMessageReceivedEvent({
+          message: "Find Alice's region.",
+          sequence: 0,
+          turnId: "child_turn",
+        }),
+        createMessageCompletedEvent({
+          finishReason: "stop",
+          message: "Alice works in the west region.",
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "child_turn",
+        }),
+        createTurnCompletedEvent({ sequence: 2, turnId: "child_turn" }),
+      ],
+      undefined,
+      "child_1",
+    );
+    server.emit([
+      createTaskSettledEvent({
+        ...task,
+        output: "Alice works in the west region.",
+        status: "completed",
+      }),
+      createTurnCompletedEvent({ sequence: 2, turnId: "turn_1" }),
+      createSessionWaitingEvent(),
+    ]);
+    await vi.waitFor(() => expect(tui.latest().working).toBe(false));
+    await vi.waitFor(() =>
+      expect(tui.latest().conversation.agents.child_1?.observation.status).toBe("idle"),
+    );
+    await tui.input(undefined);
+    await run;
+  });
+
+  it("sends each approval as it is answered and counts the ones that arrive meanwhile", async () => {
+    const server = new FakeEveServer(silent());
+    const firstAnswer = Promise.withResolvers<{ approved: boolean }>();
+    const readToolApproval = vi.fn((request: AgentTUIToolApprovalRequest) =>
+      request.approvalId === "approval_task_1"
+        ? firstAnswer.promise
+        : Promise.resolve({ approved: true }),
+    );
+    const tui = scriptedRenderer({ readToolApproval });
+    const run = startRunner(server, tui.renderer);
+
+    await tui.input({ type: "submit", text: "Pick two numbers." });
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
+    const calls = ["task_1", "task_2"].map((taskId) => ({
+      callId: `pick_${taskId}`,
+      kind: "agent" as const,
+      name: "number_picker",
+      taskId,
+      turnId: "turn_1",
+    }));
+    const approval = (taskId: string) =>
+      createInputRequestedEvent({
+        requests: [
+          {
+            action: {
+              callId: `random_${taskId}`,
+              input: {},
+              kind: "tool-call",
+              toolName: "random_number",
+            },
+            kind: "tool-approval",
+            prompt: "Approve random_number?",
+            requestId: `approval_${taskId}`,
+          },
+        ],
+        sequence: 2,
+        stepIndex: 0,
+        taskId,
+        turnId: "turn_1",
+      });
+    server.emit(
+      [
+        createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+        createActionsRequestedEvent({
+          actions: calls.map(({ callId }) => ({
+            callId,
+            input: { message: "Pick a number." },
+            kind: "tool-call" as const,
+            toolName: "number_picker",
+          })),
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+        ...calls.flatMap((call, index) => [
+          createTaskStartedEvent(call),
+          createAgentStartedEvent({
+            ...call,
+            parentSessionId: "session_1",
+            sessionId: `child_${String(index + 1)}`,
+          }),
+        ]),
+        approval("task_1"),
+        createTurnWaitingEvent({ on: "input", sequence: 2, turnId: "turn_1" }),
+      ],
+      "delivery_1",
+    );
+    await vi.waitFor(() => expect(readToolApproval).toHaveBeenCalledOnce());
+    // Bob's approval arrives while Alice is still deciding on the first one.
+    server.emit(
+      [approval("task_2"), createTurnWaitingEvent({ on: "input", sequence: 2, turnId: "turn_1" })],
+      "delivery_1",
+    );
+    await vi.waitFor(() => expect(tui.latest().conversation.inputs.approval_task_2).toBeDefined());
+    firstAnswer.resolve({ approved: true });
+
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/session_1")).toHaveLength(2));
+    expect(readToolApproval.mock.calls.map(([request]) => request.context)).toEqual([
+      { taskId: "task_1" },
+      { position: { index: 2, total: 2 }, taskId: "task_2" },
+    ]);
+    expect(
+      server.requestsTo("POST", "/session_1").map((request) => request.body?.inputResponses),
+    ).toEqual([
+      [{ optionId: "approve", requestId: "approval_task_1" }],
+      [{ optionId: "approve", requestId: "approval_task_2" }],
+    ]);
+    await tui.input(undefined);
+    await run;
+  });
+
+  it.each([
+    ["Esc", { type: "cancel" }],
+    ["/cancel", { type: "submit", text: "/cancel" }],
+  ] as const)("cancels with %s only the turn the user watched start", async (_label, cancel) => {
+    const server = new FakeEveServer(silent());
+    const created = Promise.withResolvers<void>();
+    const tui = scriptedRenderer();
+    const run = startRunner(server, tui.renderer, async (input, init) => {
+      // Hold session creation open so the cancel lands before any session exists.
+      if (init?.method === "POST" && new URL(String(input)).pathname === "/eve/v1/session") {
+        await created.promise;
+      }
+      return await server.fetch(input, init);
+    });
+
+    await tui.input({ type: "submit", text: "Write a long report." });
+    await vi.waitFor(() => expect(tui.latest().working).toBe(true));
+    await tui.input(cancel);
+    created.resolve();
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
+    await Promise.resolve();
+    // No turn ID yet: cancellation waits instead of guessing.
+    expect(server.requestsTo("POST", "/cancel")).toHaveLength(0);
+
+    server.emit([createTurnStartedEvent({ sequence: 0, turnId: "turn_1" })], "delivery_1");
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/cancel")).toHaveLength(1));
+    expect(server.requestsTo("POST", "/cancel")[0]?.body).toMatchObject({ turnId: "turn_1" });
+    server.emit(
+      [createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }), createSessionWaitingEvent()],
+      "delivery_1",
+    );
+    await vi.waitFor(() => expect(tui.latest().working).toBe(false));
+    await tui.input(undefined);
+    await run;
+  });
+
+  it("puts a message back when another client cancels its turn, but not when this prompt does", async () => {
+    const server = new FakeEveServer(silent());
+    const restored: string[] = [];
+    const tui = scriptedRenderer({ restoreDraft: (text) => restored.push(text) });
+    const run = startRunner(server, tui.renderer);
+    const cancelled = (turnId: string, message: string, delivery: string) => {
+      server.emit(
+        [
+          createTurnStartedEvent({ sequence: 0, turnId }),
+          createMessageReceivedEvent({ message, sequence: 1, turnId }),
+        ],
+        delivery,
+      );
+      return () =>
+        server.emit(
+          [createTurnCancelledEvent({ sequence: 2, turnId }), createSessionWaitingEvent()],
+          delivery,
+        );
+    };
+
+    // Bob cancels Alice's turn from another client.
+    await tui.input({ type: "submit", text: "Draft the release notes." });
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
+    cancelled("turn_1", "Draft the release notes.", "delivery_1")();
+    await vi.waitFor(() => expect(restored).toEqual(["Draft the release notes."]));
+    await vi.waitFor(() => expect(tui.latest().working).toBe(false));
+
+    // Alice cancels her own next turn.
+    await tui.input({ type: "submit", text: "Summarize Bob's feedback." });
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/session_1")).toHaveLength(1));
+    const settle = cancelled("turn_2", "Summarize Bob's feedback.", "delivery_2");
+    await vi.waitFor(() => expect(tui.latest().working).toBe(true));
+    await tui.input({ type: "cancel" });
+    await vi.waitFor(() => expect(server.requestsTo("POST", "/cancel")).toHaveLength(1));
+    settle();
+    await vi.waitFor(() => expect(tui.latest().working).toBe(false));
+    expect(restored).toEqual(["Draft the release notes."]);
+    await tui.input(undefined);
+    await run;
+  });
+
+  it("starts a fresh session after the current one fails", async () => {
+    const server = new FakeEveServer(silent());
+    const renderSessionBoundary = vi.fn();
+    const tui = scriptedRenderer({ renderSessionBoundary });
+    const run = startRunner(server, tui.renderer);
+
+    await tui.input({ type: "submit", text: "Hello." });
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_1"));
+    server.emit(
+      [
+        createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
+        createSessionFailedEvent({
+          code: "SANDBOX_LOST",
+          message: "The sandbox stopped.",
+          sessionId: "session_1",
+        }),
+      ],
+      "delivery_1",
+    );
+    await vi.waitFor(() => expect(renderSessionBoundary).toHaveBeenCalledOnce());
+    expect(tui.latest().conversation.messages).toEqual([]);
+
+    await tui.input({ type: "submit", text: "Try again." });
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_2"));
+    expect(server.requestsTo("POST", "/eve/v1/session")).toHaveLength(2);
+    await tui.input(undefined);
+    await run;
+  });
+
+  it("retires the session on /reset before the next message", async () => {
+    const server = new FakeEveServer(reply("Done."));
+    const reset = vi.fn();
+    const tui = scriptedRenderer({ reset });
+    const run = startRunner(server, tui.renderer);
+
+    await tui.input({ type: "submit", text: "Hello." });
+    await vi.waitFor(() => expect(tui.latest().working).toBe(false));
+    await tui.input({ type: "submit", text: "/reset" });
+    await vi.waitFor(() => expect(reset).toHaveBeenCalledOnce());
+    expect(server.requestsTo("POST", "/session_1/reset")).toHaveLength(1);
+
+    await tui.input({ type: "submit", text: "Start over." });
+    await vi.waitFor(() => expect(server.sessionId).toBe("session_2"));
+    await tui.input(undefined);
+    await run;
+  });
+});

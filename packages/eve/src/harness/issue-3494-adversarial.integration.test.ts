@@ -788,6 +788,47 @@ it("does not announce waiting while a candidate needs sign-in, then completes on
   expect(f.pending()).toHaveLength(1);
 });
 
+it("announces a candidate's sign-in with the attempt its completion will name", async () => {
+  const f = fixture("candidate-sign-in-attempt", () => ({ status: "allowed" as const }));
+  await f.gate("gateA");
+  await f.step({
+    attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
+      response,
+      auth: {
+        attributes: {},
+        authenticator: "test",
+        issuer: "test",
+        principalId: "alice",
+        principalType: "user" as const,
+      },
+    })),
+  });
+  const candidate = getApprovalAuditState(f.session.state).activeCandidates[0]!;
+  f.updateSession((session) => ({
+    ...session,
+    state: markApprovalCandidateAuthorizationRequired({
+      state: session.state,
+      candidateId: candidate.candidateId,
+      authorizationChallenges: [
+        {
+          attemptId: "attempt_alice",
+          candidateId: candidate.candidateId,
+          name: "notes",
+          hookUrl: "https://example.com/callback",
+          challenge: { url: "https://example.com/sign-in" },
+        },
+      ],
+    }),
+  }));
+  const start = f.events.length;
+  await f.drive();
+  expect(
+    f.events.slice(start).find((event) => event.type === "authorization.required"),
+  ).toMatchObject({
+    data: { attemptId: "attempt_alice", candidateId: candidate.candidateId, name: "notes" },
+  });
+});
+
 it("uses the normal turn boundary for a mixed accepted and refused delivery", async () => {
   const f = fixture("mixed-response", ({ request }) =>
     request.toolName === "gateA"

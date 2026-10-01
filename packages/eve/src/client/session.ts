@@ -1,8 +1,4 @@
-import {
-  isTurnSegmentBoundary,
-  updatePendingAuthorizations,
-  updatePendingInputRequests,
-} from "#client/session-utils.js";
+import { TurnSegment } from "#client/session-utils.js";
 import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
@@ -253,8 +249,7 @@ export class ClientSession {
     let eventCount = 0;
     let started = deliveryId === undefined;
     let reachedBoundary = false;
-    const pendingAuthorizations = new Set<string>();
-    const pendingInputRequests = new Set<string>();
+    const segment = new TurnSegment({ followCallbacks: true });
     try {
       for await (const event of source ??
         this.#readStream({
@@ -277,11 +272,7 @@ export class ClientSession {
           if (!terminal && event.meta?.deliveryIds !== undefined && !matches) continue;
           started = true;
         }
-        updatePendingAuthorizations(pendingAuthorizations, event);
-        updatePendingInputRequests(pendingInputRequests, event);
-        reachedBoundary =
-          isTurnSegmentBoundary(event, pendingInputRequests) &&
-          (event.type !== "session.waiting" || pendingAuthorizations.size === 0);
+        reachedBoundary = segment.observe(event);
         yield event;
         if (reachedBoundary) {
           break;

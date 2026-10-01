@@ -8,13 +8,14 @@
  * hosts lifecycle and keys; this module only paints rows.
  */
 
-import type { AgentTUIInputOption } from "./runner.js";
+import type { AgentTUIInputContext, AgentTUIInputOption } from "./runner.js";
 import { visibleLine, type LineState } from "./line-editor.js";
 import type { Theme } from "./theme.js";
 import {
   clipVisible,
   renderInputText,
   renderInputWithBlockCursor,
+  stripTerminalControls,
   wrapVisibleLine,
 } from "#cli/ui/terminal-text.js";
 import { renderOptionRow } from "#setup/cli/option-row.js";
@@ -59,6 +60,19 @@ export function renderQuestionPanel(
   }
 
   return rows.map((row) => clipVisible(row, width));
+}
+
+/** Who asked for a prompt and where it sits among the open requests, for the drawer's corner. */
+export function inputContextLabel(
+  context: AgentTUIInputContext | undefined,
+  theme: Theme,
+): string | undefined {
+  const parts: string[] = [];
+  if (context?.requester !== undefined) parts.push(stripTerminalControls(context.requester));
+  if (context?.position !== undefined) {
+    parts.push(`${context.position.index} of ${context.position.total}`);
+  }
+  return parts.length === 0 ? undefined : parts.join(` ${theme.glyph.dot} `);
 }
 
 export function renderQuestionChoices(

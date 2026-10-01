@@ -38,10 +38,7 @@ const WORKSPACE_TARGET = {
 
 function context(renderer: Partial<AgentTUIRenderer> = {}): PromptCommandHandlerContext {
   return {
-    renderer: {
-      renderStream: vi.fn(async () => {}),
-      ...renderer,
-    },
+    renderer: { ...renderer },
     title: "Weather Agent",
   };
 }

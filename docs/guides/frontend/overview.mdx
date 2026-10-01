@@ -53,7 +53,7 @@ export function Chat() {
         <article key={message.id}>
           <header>{message.role}</header>
           {message.parts.map((part, index) =>
-            part.type === "text" ? <p key={index}>{part.text}</p> : null,
+            part.type === "text" ? <p key={part.id ?? index}>{part.text}</p> : null,
           )}
         </article>
       ))}
@@ -70,21 +70,22 @@ export function Chat() {
 
 `useEveAgent()` returns the current UI state plus commands:
 
-| Field     | What it is                                                                                |
-| --------- | ----------------------------------------------------------------------------------------- |
-| `data`    | Projected UI state from the reducer. Defaults to `{ messages }`.                          |
-| `status`  | `"ready"`, `"resuming"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer. |
-| `error`   | The latest session creation, stream, resume, or turn failure.                             |
-| `events`  | Raw eve stream events for this session.                                                   |
-| `session` | Serializable fixed session cursor (`sessionId`, `streamIndex`).                           |
-| `prewarm` | Create the durable session without starting a turn.                                       |
-| `send`    | Send text or a multi-part message, with per-turn options.                                 |
-| `respond` | Answer pending HITL input requests, with per-turn options.                                |
-| `resume`  | Replay an attached session and follow its in-flight turn.                                 |
-| `cancel`  | Request durable cancellation of the active turn.                                          |
-| `reset`   | Clear local events, data, errors, and the local session cursor.                           |
+| Field          | What it is                                                                                |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| `data`         | The selected projection: `ConversationState` by default, or your custom reducer's state.  |
+| `conversation` | Canonical conversation state, including messages, root turns and inputs, and child state. |
+| `status`       | `"ready"`, `"resuming"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer. |
+| `error`        | The latest session creation, stream, resume, or turn failure.                             |
+| `events`       | Raw eve stream events for this session.                                                   |
+| `session`      | Serializable fixed session cursor (`sessionId`, `streamIndex`).                           |
+| `prewarm`      | Create the durable session without starting a turn.                                       |
+| `send`         | Send text or a multi-part message, with per-turn options.                                 |
+| `respond`      | Answer pending HITL input requests, with per-turn options.                                |
+| `resume`       | Replay an attached session and follow its in-flight turn.                                 |
+| `cancel`       | Request durable cancellation of the active turn.                                          |
+| `reset`        | Clear local events, data, errors, and the local session cursor.                           |
 
-Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
+Most chat UIs only need `data.messages` and `status` with the default reducer. Use `conversation` for session state when a custom reducer shapes `data`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
 
 Pass `prewarm: true` to start a workflow when the chat mounts and after each reset:
 
@@ -157,9 +158,10 @@ change the option from `false` to `true` again, reset, or send a message to reco
 
 The hook keeps consuming one session stream across turns and idle periods. Replies,
 authorization updates, and turns started elsewhere all update the same projection. Separately
-delivered participant messages remain separate bubbles even when they steer the same active turn;
-a single event that coalesces multiple deliveries remains one bubble. A turn settling does not
-close the connection. The transport reconnects from its cursor after a disconnect or the
+delivered participant messages remain separate bubbles before that turn's assistant response, even
+when they arrive after the response begins. A single event that coalesces multiple deliveries
+remains one bubble. A turn settling does not close the connection. The transport reconnects from
+its cursor after a disconnect or the
 server's renewable 60-second lease; lease renewal does not start a turn or clear UI state.
 Unmounting or resetting closes the local stream without cancelling the old durable session.
 
@@ -168,9 +170,15 @@ the reset, it prepares the next owned session; otherwise, the next send creates 
 supplied `session` remains externally owned and is never replaced by prewarming or reset. Use
 `initialSession` with `resume: true` to restore a saved chat.
 
-`data.messages` are eve-owned `EveMessage[]`. Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
+`data.messages` are eve-owned `EveMessage[]`. Assistant text and reasoning parts have a stable `id` from the event that created the part. Appends and completion retain that ID. Use `part.id` to key streamed assistant content, including successive text parts within one step. Older events without an ID get a best-effort fallback. User text parts may not have an ID.
 
-When the root agent delegates, its stream emits `agent.started` with the child's `sessionId`, and the subagent tool call's `task.settled` carries the child's reply. The child session can remain available for reuse. Detailed child progress lives on the child session's stream instead of being flattened into the root `data.messages`. When your UI needs live subagent activity, attach a [client session](../client/overview#sessions) to the parent and pass the `agent.started` event from `events` to [`session.agent()`](../client/streaming#follow-a-subagent) and follow the child with `stream()`. It follows local and remote children through the parent, so the browser never calls a remote deployment directly. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
+Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
+
+When the root agent delegates, its stream emits `task.started` for the call, `agent.started` with the child's `sessionId`, and `task.settled` with the call's result, failure, or cancellation. The default reducer settles the subagent's tool part from `task.settled`, so the part shows the call's outcome rather than its start receipt. `data.tasks[taskId].calls[callId]` records each call's `status`, `output`, and `error`, and `data.agents[sessionId]` records each session a call opened, with its `taskId` and opening `callId`. These records come from the root stream alone.
+
+Detailed child progress lives on the child session's stream, not in the root `data.messages`. Pass `followSubagents: true` to follow the session each subagent call reaches while the component is mounted; following is off by default. Narrow `data.agents[sessionId].observation.status` before reading its `conversation`: `"not-followed"` has no child detail, `"following"` has live detail, and `"idle"` has everything the calls so far produced and resumes when another call reaches the task. `"unavailable"` means the stream failed, not that the child failed. Calls that continue a task with its `taskId` reach the same session, so one session's `conversation.messages`, `inputs`, and `turns` span all of them. Sessions that a custom task opens with `ctx.agent` are recorded but not followed.
+
+If you manage your own session rather than using the hook, pass an `agent.started` event from `events` to [`session.agent()`](../client/streaming#follow-a-subagent) and follow the child with `stream()`. It follows local and remote children through the parent, so the browser never calls a remote deployment directly. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
 
 ## Sending and streaming
 
@@ -192,13 +200,15 @@ await agent.send([
 
 Assistant text, reasoning, tool calls, and tool results stream into `data` as they arrive, and a new turn moves `status` from `ready` to `submitted` to `streaming` and back. Resuming an attached session uses `resuming` while eve performs bounded catch-up. Disable message and HITL submission in that state. A settled tail moves directly to `ready`; an in-flight tail moves to `streaming` before eve follows it.
 
+A turn stays open while tasks it started are working. `status` stays `streaming` until the turn ends, and `data.turns[turnId].waiting` is `true` while the turn is parked, until its next step starts. When a call the turn runs asks a question, `send()` resolves at that point, as `session.send().result()` does; answer with `respond()` while the turn stays open.
+
 To steer an active turn with a follow-up, send the message with `turnPolicy: "steer"`. Before answer output or local tool execution begins, eve interrupts pending model generation and continues the same turn with the correction. Executing tools finish and checkpoint their results first; after answer output starts, steering waits for the next committed workflow boundary. Reasoning and search progress do not count as answer output. The hook stays attached through completion:
 
 ```tsx
 await agent.send(message, { turnPolicy: "steer" });
 ```
 
-Other message sends and HITL responses reject while the hook is processing a turn. Call `cancel()` to stop the durable server-side turn without replacing it, and `reset()` to clear local state so the next send starts a fresh durable session.
+Other message sends reject while the hook is processing a turn. Answers to open input requests are accepted at any time; see [Human-in-the-loop prompts](#human-in-the-loop-prompts). The default `data.inputs` ledger keeps each request's originating `turnId` and `stepIndex`, response and settlement status, including requests left open after their originating turn ends; `data.activeTurnId` tracks the current root turn when known. A request from a task's run also carries that task's `taskId`. Each followed session keeps its own ledger in `data.agents[sessionId].observation.conversation`. Call `cancel()` to stop the durable server-side turn without replacing it, and `reset()` to clear local state so the next send starts a fresh durable session.
 
 `cancel()` can be called as soon as `status` is `"submitted"`; the hook waits for the active response to identify its turn when necessary, sends one guarded cancellation request, and keeps the event stream attached. The promise resolves when eve accepts the request or reports that no turn is active, and rejects if the cancellation request fails. The turn then settles on the same stream as `turn.cancelled` followed by `session.waiting`, so the session is safe to continue.
 
@@ -216,18 +226,14 @@ received attachment as a `file` part on the user message. The part includes `med
 
 ## Human-in-the-loop prompts
 
-Tools opt into approval with `approval`, and workflow tools such as the opt-in `ask_question` tool ask the user a question with `ctx.ask()` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event, and the pending request rides on a `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest`. Scan every message because the pending request can sit on an earlier message than the latest one, then answer through the same session with `respond()`:
+Tools opt into approval with `approval`, and workflow tools such as the opt-in `ask_question` tool ask the user a question with `ctx.ask()` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event. The default projection keeps open requests in `data.inputs`, including a request that sits on an earlier message than the latest one. Render from that ledger and answer through the same session with `respond()`. The request also appears on its originating `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest` for inline display:
 
 ```tsx
-const pendingRequests = agent.data.messages
-  .flatMap((message) => message.parts)
-  .flatMap((part) => {
-    if (part.type !== "dynamic-tool" || part.state !== "approval-requested") return [];
-    const request = part.toolMetadata?.eve?.inputRequest;
-    return request ? [request] : [];
-  });
+import { openConversationInputs } from "eve/react";
 
-const inputDisabled = ["submitted", "streaming", "resuming"].includes(agent.status);
+const pendingRequests = openConversationInputs(agent.data).map((input) => input.request);
+
+const inputDisabled = agent.status === "resuming";
 
 return pendingRequests.map((request) => (
   <fieldset disabled={inputDisabled} key={request.requestId}>
@@ -252,11 +258,11 @@ return pendingRequests.map((request) => (
 ));
 ```
 
-For a question with `allowFreeform`, render a text input and send `{ requestId, text }`. The default reducer keeps each request pending until the server confirms its resolution through `input.resolved` or `approval.settled`. Disable input controls while the response is being processed; a refused approval attempt leaves the request answerable. Approved tools update again when eve streams their result.
+For a question with `allowFreeform`, render a text input and send `{ requestId, text }`. You can answer while other work runs. For example, when one model step asks to approve two tools, the first approval settles on its own and the second stays answerable while the batch waits for it. `respond()` marks each answered request `responded` in `data.inputs` until the server settles it through `approval.settled` or `input.resolved`, so `openConversationInputs()` no longer returns it. Answering a request that is no longer open rejects without contacting the server. A refused approval attempt, or a response that never reaches the server, reopens the request. Approved tools update again when eve streams their result.
 
 ## Authorization prompts
 
-Connections and tools that need OAuth or another grant emit `authorization.required`. The default reducer projects that into an `authorization` message part with the display name, instructions, device code, and user-facing sign-in URL. Render that part as a normal chat message, then keep the session cursor; eve resumes the parked turn when the callback completes and updates the part after `authorization.completed`:
+Connections and tools that need OAuth or another grant emit `authorization.required`. The default reducer projects that into an `authorization` message part with the display name, instructions, device code, and user-facing sign-in URL. When multiple people authorize the same connection in one session, the client matches completion to the corresponding `attemptId`, not merely the connection name. The part stays `required` until eve reports the outcome, then becomes `completed`. `awaitsCallback` is `true` when the sign-in's callback settles the attempt and resumes the parked turn. Render the part as a normal chat message and keep the session cursor so eve can resume the parked turn:
 
 ```tsx
 import type { EveMessagePart } from "eve/react";
@@ -284,7 +290,7 @@ function AuthorizationPrompt({ part }: { part: EveMessagePart }) {
 }
 ```
 
-For fully custom state machines, `authorization.required` and `authorization.completed` are still available on `events` and `onEvent`.
+With a custom reducer, authorization attempts remain available in `conversation.messages`; `authorization.required` and `authorization.completed` are also available on `events` and `onEvent`.
 
 ## Attach page context per turn
 
@@ -324,11 +330,11 @@ const agent = useEveAgent({
 });
 ```
 
-The `optimistic` option (default `true`) projects submitted user messages into `data` before eve confirms them with a `message.received` event. These are reducer-facing projection events only. `events` stays the authoritative eve stream. For an existing session, the hook reconciles each placeholder with the server's delivery ID, so an unrelated or identical message cannot consume it.
+The `optimistic` option (default `true`) projects submitted user messages into `data` before eve confirms them with a `message.received` event. Steered follow-ups appear before the active turn's assistant response once the turn is known; if the send fails, the failed placeholder stays in place. These are reducer-facing projection events only. `events` stays the authoritative eve stream. For an existing session, the hook reconciles each placeholder with the server's delivery ID, so an unrelated or identical message cannot consume it.
 
 ## Custom reducer
 
-The default reducer projects events into `{ messages }` (`EveMessageData`). When you want `data` shaped differently, pass a `reducer` implementing `EveAgentReducer<TData>`:
+The default hook uses `conversationReducer`, which includes the `EveMessageData` message fields plus turn and input state (`ConversationState`). When you want `data` shaped differently, pass a `reducer` implementing `EveAgentReducer<TData>`:
 
 ```tsx
 import { useEveAgent } from "eve/react";
@@ -345,10 +351,10 @@ const toolCounter: EveAgentReducer<ToolLog> = {
 };
 
 const agent = useEveAgent({ reducer: toolCounter });
-// agent.data is ToolLog
+// agent.data is ToolLog; agent.conversation remains ConversationState.
 ```
 
-`reduce(data, event)` receives both authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). `client.input.responded` notifies custom reducers that an answer was submitted, not that it was accepted. The default reducer waits for server settlement; the durable `input.resolved` event records the server-accepted outcome and lets replayed history rebuild the same HITL state. Return `data` unchanged for events your reducer does not handle.
+`reduce(data, event)` receives authoritative eve stream events and client projection events (`client.message.submitted`, `client.message.failed`, `client.input.responded`). The custom reducer only shapes `data`: the client maintains `conversation` separately for authorization, input requests, turns, and child following. Agent-session observations update `conversation.agents`, not the custom reducer. The built-in reducer makes `data` and `conversation` the same state. `client.input.responded` tells a custom reducer an answer was submitted, not that the server accepted it; the durable `input.resolved` event confirms settlement. Return `data` unchanged for events your reducer does not handle.
 
 ## Resumable sessions
 

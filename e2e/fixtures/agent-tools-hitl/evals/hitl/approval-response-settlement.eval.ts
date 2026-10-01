@@ -45,7 +45,8 @@ async function expectAnswerable(
   callId: string,
   requestId: string,
 ) {
-  await t.require(store.snapshot.status, equals("ready"));
+  // The approval holds its turn open, and the store keeps following it live.
+  await t.require(store.snapshot.status, equals("streaming"));
   await t.require(store.snapshot.error, equals(undefined));
   const part = toolPart(store, callId);
   await t.require(part.state, equals("approval-requested"));

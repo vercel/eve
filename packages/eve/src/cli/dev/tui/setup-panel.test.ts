@@ -8,7 +8,7 @@ import {
   renderSelectQuestion,
   renderTextQuestion,
 } from "./setup-panel.js";
-import { renderFlowDrawer } from "./flow-drawer.js";
+import { renderFlowDrawer, renderTransientDrawer } from "./flow-drawer.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTheme } from "./theme.js";
 
@@ -225,6 +225,18 @@ describe("renderFlowDrawer", () => {
     expect(rows.rows.at(-2)).toBe("");
     expect(rows.rows.at(-1)).toBe("─".repeat(60));
     expect(rows.rows.join("\n").split("add to your agent")).toHaveLength(2);
+  });
+
+  it("clips a corner label so the top rule keeps the terminal width", () => {
+    const { rows } = renderTransientDrawer(
+      ["  Approve random_number?"],
+      [],
+      theme,
+      30,
+      "subagent(number_picker:13) · 2 of 10",
+    );
+
+    expect(rows[0]).toBe("── subagent(number_picker:… ──");
   });
 
   it("places question controls below the drawer boundary", () => {

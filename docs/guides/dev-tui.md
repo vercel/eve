@@ -94,25 +94,25 @@ Required authorization or deployment setup still runs for the selected item. Pre
 
 ## Work with the agent
 
-Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
+Type a message and press `Enter` to send it. When the agent asks a question or requests tool approval, respond in the prompt shown by the UI. Each answer is sent as soon as you give it. When several requests are open, the prompt shows its place among them, such as `2 of 5`, and names the task that asked as its transcript lines do. Connection authorization can open a browser; keep local `eve dev` running until the browser returns to it.
 
 The activity line shows **Thinking** while the model reasons or waits to respond, **Generating** while it writes a response or tool input, **Running** while tools execute, and **Waiting for** followed by task names while the turn waits on [tasks](../tools/tasks). A blinking dot and elapsed time indicate progress, with token counts shown when available. The activity line disappears when the turn finishes or needs your input.
 
 A task, such as a call to a subagent, writes one line to the transcript when it starts and one when it finishes, fails, or is stopped. The finished line names how long the task took and, for a subagent, what it did, such as `Read 3 files, Ran 2 commands`. While tasks work, a panel above the prompt shows each task's current activity and elapsed time. The UI does not show the model's own `task_wait` and `task_cancel` calls; their effect appears as the waiting activity line and a stopped task's line.
 
-While a turn is running, `Enter` sends your message immediately as steering. Before assistant output begins, the runtime interrupts pending model generation and continues the same turn with your correction. Executing tools finish safely. After output begins, steering applies at the next workflow boundary and preserves streamed text.
+The prompt stays open while the agent works, including turns started elsewhere, such as a scheduled run. While a turn is running, `Enter` sends your message immediately as steering. Before assistant output begins, the runtime interrupts pending model generation and continues the same turn with your correction. Executing tools finish safely. After output begins, steering applies at the next workflow boundary and preserves streamed text.
 
-Slash commands wait until the turn ends, except `/cancel`, which cancels directly. If the session does not support steering, messages queue for the next turn. Press `Esc` or `Ctrl+C` to cancel a turn with no queued messages. With queued messages, these keys select the oldest message for steering, or for the next turn if steering is unavailable. If a direct cancellation requested with `/cancel` or `Ctrl+C` does not settle, press `Ctrl+C` to stop waiting. The UI then returns to the prompt and asks you to press `Ctrl+C` again to exit. At an idle prompt, press `Ctrl+C` twice to exit.
+Slash commands run immediately, even during a turn. Press `Esc` or `Ctrl+C`, or run `/cancel`, to cancel a running turn. If you cancel before the turn has started, eve waits for that turn's ID before sending cancellation, so the request cannot cancel a later turn. If a cancellation does not settle, press `Ctrl+C` again to stop waiting: eve starts a new session, and the next `Ctrl+C` exits. At an idle prompt, press `Ctrl+C` twice to exit.
 
-| Key           | Action                                                                                                                  |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `Enter`       | Send the current message or answer.                                                                                     |
-| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                                                       |
-| `Esc`         | Cancel a running turn, or steer with the oldest queued message.                                                         |
-| `Ctrl+C`      | Cancel or steer during a turn; stop a pending cancellation, then exit on the next press; press twice to exit when idle. |
-| `↑` / `↓`     | Move through input lines or sent-message history.                                                                       |
-| `Ctrl+L`      | Cycle log display modes.                                                                                                |
-| `Ctrl+R`      | Redraw the screen.                                                                                                      |
+| Key           | Action                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------- |
+| `Enter`       | Send the current message or answer.                                                                        |
+| `Shift+Enter` | Insert a newline. Requires a terminal that reports modified keys.                                          |
+| `Esc`         | Cancel a running turn.                                                                                     |
+| `Ctrl+C`      | Cancel a running turn; press again to stop waiting and start a new session; press twice to exit when idle. |
+| `↑` / `↓`     | Move through input lines or sent-message history.                                                          |
+| `Ctrl+L`      | Cycle log display modes.                                                                                   |
+| `Ctrl+R`      | Redraw the screen.                                                                                         |
 
 ## Logs and traces
 

@@ -75,6 +75,9 @@ export function AgentChat({
   const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
   const showConversationLayout = isResuming || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
+  // Answers are accepted while work runs; the server's settlement closes each request.
+  const canRespond = (requestId: string) =>
+    !isResuming && agent.data.inputs[requestId]?.status === "open";
 
   const requestCancellation = () => {
     setCancellationError(undefined);
@@ -152,7 +155,7 @@ export function AgentChat({
               isPendingAssistantShell &&
               message.id === lastMessage.id ? null : (
                 <AgentMessage
-                  canRespond={!isBusy && !isResuming}
+                  canRespond={canRespond}
                   isStreaming={
                     agent.status === "streaming" && index === agent.data.messages.length - 1
                   }
