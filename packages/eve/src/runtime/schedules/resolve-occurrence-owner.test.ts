@@ -13,7 +13,7 @@ it("waits for the admitted owner and refuses to report an unsettled claim", asyn
       .fn()
       .mockRejectedValueOnce(new OccurrenceAdmissionPendingError())
       .mockResolvedValueOnce({ sessionId: "winner" }),
-  } as unknown as Runtime;
+  } as Runtime;
   vi.useFakeTimers();
   try {
     const owner = resolveCreateOnceOwner(runtime, "occurrence", { timeoutMs: 50 });
