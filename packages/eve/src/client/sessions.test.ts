@@ -21,13 +21,13 @@ describe("Client.sessions", () => {
     });
     const client = new Client({ host: "https://eve.test" });
 
-    const created = await client.sessions.create();
+    const created = await client.sessions.create({ sessionContext: { surface: "docs" } });
     expectTypeOf(created).toEqualTypeOf<CreatedIdleClientSession>();
     const { session } = created;
 
     expect(requests).toHaveLength(1);
     expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session");
-    expect(requests[0]!.body).toBeUndefined();
+    expect(JSON.parse(requests[0]!.body!)).toEqual({ sessionContext: { surface: "docs" } });
     expect(session.state).toEqual({ sessionId: "wrun_prewarmer", streamIndex: 0 });
   });
 
@@ -105,14 +105,20 @@ describe("Client.sessions", () => {
       });
     const client = new Client({ host: "https://eve.test" });
 
-    const input: SendTurnInput<{ answer: string }> = { message: "hello" };
+    const input: SendTurnInput<{ answer: string }> = {
+      message: "hello",
+      sessionContext: { surface: "docs" },
+    };
     const created = await client.sessions.create(input);
     expectTypeOf(created).toEqualTypeOf<CreatedClientSession<{ answer: string }>>();
     const { response, session } = created;
     await response.result();
 
     expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session");
-    expect(JSON.parse(requests[0]!.body!)).toEqual({ message: "hello" });
+    expect(JSON.parse(requests[0]!.body!)).toEqual({
+      message: "hello",
+      sessionContext: { surface: "docs" },
+    });
     expect(new URL(requests[1]!.url).pathname).toBe("/eve/v1/session/wrun_A/stream");
     expect(session.state).toEqual({ sessionId: "wrun_A", streamIndex: 1 });
   });

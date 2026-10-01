@@ -17,6 +17,7 @@ import { defaultMessageReducer, type EveMessageData } from "#client/message-redu
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
   CancelSessionResult,
+  CreateSessionOptions,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -93,6 +94,8 @@ export interface UseEveAgentReturn<TData> {
  * every render.
  */
 export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
+  /** Context for new sessions, captured when the hook is created; ignored when attaching. */
+  readonly sessionContext?: CreateSessionOptions["sessionContext"];
   /**
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
@@ -183,6 +186,7 @@ export function useEveAgent<TData>(
     prewarm: options.prewarm,
     reducer,
     session: options.session,
+    sessionContext: options.sessionContext,
   });
 
   store.setCallbacks({

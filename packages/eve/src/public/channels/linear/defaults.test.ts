@@ -10,7 +10,9 @@ import type {
 function sessionContext(): SessionContext {
   return {
     getSandbox: vi.fn(),
+    turn: {},
     session: {
+      context: {},
       auth: {
         current: {
           attributes: {},

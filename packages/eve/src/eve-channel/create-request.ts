@@ -2,15 +2,18 @@ import type { UserContent } from "ai";
 
 import type { SessionCallback, SessionCapabilities } from "#channel/types.js";
 import type { LegacyRemoteAgentCaller } from "#execution/legacy-remote-agent/protocol.js";
-import type { JsonObject } from "#shared/json.js";
+import type { ClientContextValue } from "#internal/client-context.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 export interface ParsedCreateBody {
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
   message?: string | UserContent;
   context?: readonly string[];
+  clientContextValue?: ClientContextValue;
   operationId?: string;
   outputSchema?: JsonObject;
+  sessionContext?: JsonObject;
   /** Remote agent protocol of a delegating caller; set only with {@link callback}. */
   protocolVersion?: number;
   legacyRemoteAgentCaller?: LegacyRemoteAgentCaller;
@@ -42,4 +45,16 @@ export function validateMessageFreeCreate(input: {
     );
   }
   return undefined;
+}
+
+export function parseSessionContextField(value: unknown): JsonObject | Response | undefined {
+  if (value === undefined) return undefined;
+  try {
+    return parseJsonObject(value);
+  } catch {
+    return Response.json(
+      { error: "Expected 'sessionContext' to be a JSON object.", ok: false },
+      { status: 400 },
+    );
+  }
 }

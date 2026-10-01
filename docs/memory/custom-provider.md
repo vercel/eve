@@ -102,7 +102,7 @@ Every handler receives a `MemoryOperationContext`:
 Phase-specific fields:
 
 - `turn.started` and `turn.completed` add `turn` with the turn `id`, `input`
-  messages, and `sequence`.
+  messages, `sequence`, and `context`, the turn's `clientContext` as sent.
 - `compaction.requested` adds `compaction.modelId` and
   `compaction.usageInputTokens`; `turn` is `null` for standalone compaction.
 - `compaction.completed` adds `compaction.modelId`; `turn` may be `null`.

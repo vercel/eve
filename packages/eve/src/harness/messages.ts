@@ -8,7 +8,11 @@ import type {
 } from "#channel/types.js";
 import type { InputResponse } from "#shared/input.js";
 import type { StepInput } from "#harness/types.js";
-import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import {
+  attachClientContext,
+  readClientContext,
+  readClientContextValue,
+} from "#internal/client-context.js";
 
 /** Reason a framework-authored user-role message was added to model history. */
 export type FrameworkMessageKind =
@@ -157,6 +161,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     a: readClientContext(a),
     b: readClientContext(b),
   });
+  const clientContextValue = readClientContextValue(b) ?? readClientContextValue(a);
   const outputSchema = b.outputSchema ?? a.outputSchema;
 
   const result: {
@@ -187,6 +192,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
       ? result
       : markFrameworkStepInput(result, frameworkMessageKind),
     ephemeralContext,
+    clientContextValue,
   );
 }
 

@@ -126,6 +126,7 @@ async function invokeAuthorizedStep(input: {
     callId: ctx.callId,
     toolName: ctx.toolName,
     session: ctx.session,
+    turn: ctx.turn,
     abortSignal: ctx.abortSignal,
     baseUrl: getWorkflowMetadata().url,
     token: callbackToken,

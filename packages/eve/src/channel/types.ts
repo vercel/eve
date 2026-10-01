@@ -410,6 +410,8 @@ export interface SessionCapabilities {
  * subagent tool wrapper).
  */
 export interface RunInput {
+  /** Application context captured at creation and available to authored callbacks. */
+  readonly sessionContext?: JsonObject;
   readonly adapter: ChannelAdapter<any>;
   /**
    * Registered channel name for root sessions started from an authored

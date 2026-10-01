@@ -1,3 +1,5 @@
+import { readClientContextValue } from "#internal/client-context.js";
+import { restoreTurnContext, TurnContextKey } from "#context/turn-context.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
@@ -176,6 +178,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
     sessionId: initialSession.sessionId,
   });
+  restoreTurnContext(ctx, initialSession);
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
   if (
     !initialEmissionState.sessionStarted &&
@@ -464,9 +467,12 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
                 ({ challenge }) => challenge.candidateId === undefined,
               );
               if (startsTurn && isHarnessBetweenTurns(schemaSession)) {
-                const turnInput = createTurnInputMessages(
-                  consumeDeferredStepInput({ session: schemaSession, input: stepInput }).input,
-                );
+                const deferredInput = consumeDeferredStepInput({
+                  session: schemaSession,
+                  input: stepInput,
+                }).input;
+                ctx.setVirtualContext(TurnContextKey, readClientContextValue(deferredInput));
+                const turnInput = createTurnInputMessages(deferredInput);
                 prepareDynamicInstructionPreamble(ctx, history.messages(schemaSession));
                 prepareMemoryPreamble(ctx, {
                   history: schemaSession.history,

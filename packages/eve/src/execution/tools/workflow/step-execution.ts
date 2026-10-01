@@ -1,6 +1,13 @@
 import { getStepMetadata } from "#compiled/@workflow/core/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import { TurnContextKey } from "#context/turn-context.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  SessionIdKey,
+  SessionKey,
+  SessionContextKey,
+} from "#context/keys.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import {
   isAuthorizationSignal,
@@ -29,7 +36,9 @@ export function withWorkflowStepAuthorization(execute: (...args: never[]) => unk
     context.set(AuthKey, input.session.auth.current);
     context.set(InitiatorAuthKey, input.session.auth.initiator);
     context.set(SessionIdKey, input.session.id);
+    context.set(SessionContextKey, input.session.context ?? {});
     context.setVirtualContext(SessionKey, { ...input.session, sessionId: input.session.id });
+    context.setVirtualContext(TurnContextKey, input.turn.context);
     context.set(CallbackBaseUrlKey, resolveWorkflowCallbackBaseUrl(input.baseUrl));
     context.setVirtualContext(AuthorizationHookKey, input.token);
     context.setVirtualContext(PendingAuthorizationResultKey, input.authorizationResults);

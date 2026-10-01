@@ -1,3 +1,4 @@
+import { TurnContextKey } from "#context/turn-context.js";
 import type { ModelMessage } from "ai";
 
 import type { DynamicResolveContext } from "#dynamic/definition.js";
@@ -6,6 +7,7 @@ import { getEffectiveModelSelection } from "#context/effective-model.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
+  SessionContextKey,
   SessionIdKey,
   InitiatorAuthKey,
   ContinuationTokenKey,
@@ -38,11 +40,13 @@ export function buildResolveContext(
     model: effectiveModel === null ? null : { id: effectiveModel.reference.id },
     session: {
       id: sessionId,
+      context: ctx.get(SessionContextKey) ?? {},
       auth: {
         current: currentAuth,
         initiator: initiatorAuth,
       },
     },
+    turn: { context: ctx.get(TurnContextKey) },
     channel: {
       kind: channelAdapter !== undefined ? getAdapterKind(channelAdapter) : undefined,
       continuationToken,

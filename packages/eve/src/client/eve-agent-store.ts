@@ -59,6 +59,7 @@ const attachStore = Symbol("attachEveAgentStore");
 export class EveAgentStore<TData> {
   readonly #client: Client | undefined;
   readonly #autoPrewarm: boolean;
+  readonly #sessionContext: EveAgentStoreInit<TData>["sessionContext"];
   #attached = false;
   #stream: SessionEventStream | undefined;
   readonly #pendingAuthorizations = new Set<string>();
@@ -86,6 +87,7 @@ export class EveAgentStore<TData> {
 
   constructor(init: EveAgentStoreInit<TData>) {
     this.#autoPrewarm = init.prewarm ?? false;
+    this.#sessionContext = init.sessionContext;
     this.#externalSession = init.session !== undefined;
     this.#client = this.#externalSession
       ? undefined
@@ -152,7 +154,8 @@ export class EveAgentStore<TData> {
     this.#prewarmController = controller;
     const promise = (async () => {
       try {
-        const created = await client.sessions.create({ signal: controller.signal });
+        const sessionContext = this.#sessionContext;
+        const created = await client.sessions.create({ signal: controller.signal, sessionContext });
         if (generation !== this.#prewarmGeneration) return;
         this.#session = created.session;
         this.#error = undefined;
@@ -505,7 +508,11 @@ export class EveAgentStore<TData> {
       if (input.message === undefined) {
         throw new Error("Cannot answer an input request before the session starts.");
       }
-      const created = await this.#client.sessions.create({ ...input, message: input.message });
+      const created = await this.#client.sessions.create({
+        ...input,
+        message: input.message,
+        sessionContext: this.#sessionContext,
+      });
       input.signal?.throwIfAborted();
       this.#session = created.session;
       this.#callbacks.onSessionChange?.(created.session.state);

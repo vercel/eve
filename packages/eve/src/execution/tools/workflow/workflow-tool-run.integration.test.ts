@@ -1,3 +1,4 @@
+import { attachClientContext } from "#internal/client-context.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { start } from "#internal/workflow/runtime.js";
 import {
@@ -89,10 +90,17 @@ describe("workflow tools", () => {
         {
           kind: "initial",
           ownerDeploymentId: "dpl_inline",
-          input: { message: 'Run deploy_service with service "api"' },
-          serializedContext: buildWorkflowToolSerializedContext({
-            continuationToken: "schedule:workflow-tool-wait",
-          }),
+          input: attachClientContext(
+            { message: 'Run deploy_service with service "api"' },
+            ['Client context:\n{"page":"/billing"}'],
+            { page: "/billing" },
+          ),
+          serializedContext: {
+            ...buildWorkflowToolSerializedContext({
+              continuationToken: "schedule:workflow-tool-wait",
+            }),
+            "eve.sessionContext": { surface: "docs" },
+          },
         },
       ]);
       return String(await readFirstTurnReply(run));
@@ -100,6 +108,9 @@ describe("workflow tools", () => {
 
     expect(output).toContain('"plan":"plan:api"');
     expect(output).toContain('"callId":"call_deploy_service');
+    expect(output).toContain('"context":{"surface":"docs"}');
+    expect(output).toContain('"turnContext":{"page":"/billing"}');
+    expect(output).toContain('"stepTurnContext":{"page":"/billing"}');
   });
 
   it("fails workflow-context misuse in a step with actionable guidance", async () => {

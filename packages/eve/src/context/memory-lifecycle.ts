@@ -116,7 +116,7 @@ export async function dispatchMemoryTurnStarted(input: {
                 memory: { scope: lock.scope, slot: memory.slot },
                 messages: preRecallMessages,
                 operationId,
-                turn,
+                turn: { ...turn, ...callbackContext.turn },
               });
               const messages = validateMemoryRecallResult(result, memory.slot);
               return {
@@ -223,7 +223,7 @@ export async function dispatchMemoryCompactionRequested(input: {
               memory: { scope: lock.scope, slot: memory.slot },
               messages: input.messages,
               operationId,
-              turn,
+              turn: turn && { ...turn, ...callbackContext.turn },
             });
             return { value: undefined };
           },
@@ -283,7 +283,7 @@ export async function dispatchMemoryCompactionCompleted(input: {
                 memory: { scope: lock.scope, slot: memory.slot },
                 messages: projected,
                 operationId,
-                turn,
+                turn: turn && { ...turn, ...callbackContext.turn },
               });
               const messages = validateMemoryRecallResult(result, memory.slot);
               return {
@@ -362,7 +362,7 @@ export async function dispatchMemoryTurnCompleted(input: {
               memory: { scope: lock.scope, slot: memory.slot },
               messages: projected,
               operationId,
-              turn: lock.turn,
+              turn: { ...lock.turn, ...callbackContext.turn },
             });
             return { value: undefined };
           },

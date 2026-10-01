@@ -428,6 +428,7 @@ function toolsContext(): MemoryToolsContext {
     memory: operationContext().memory,
     messages: [],
     session: {
+      context: {},
       auth: { current: null, initiator: null },
       id: "session-1",
     },
@@ -448,6 +449,7 @@ function operationContext() {
     messages: [],
     operationId: "memop-1",
     session: {
+      context: {},
       auth: { current: null, initiator: null },
       id: "session-1",
       turn: { id: "turn-1", sequence: 1 },

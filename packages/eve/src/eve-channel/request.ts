@@ -9,6 +9,7 @@ import type {
 import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
+import type { ClientContextValue } from "#internal/client-context.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
   EVE_MESSAGE_STREAM_FORMAT,
@@ -38,7 +39,11 @@ import {
 import { isInputResponse, type ValidatedInputResponse } from "#shared/input.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { parseTurnPolicyField } from "#eve-channel/turn-policy-request.js";
-import { type ParsedCreateBody, validateMessageFreeCreate } from "#eve-channel/create-request.js";
+import {
+  type ParsedCreateBody,
+  parseSessionContextField,
+  validateMessageFreeCreate,
+} from "#eve-channel/create-request.js";
 
 const SESSION_STREAM_HEARTBEAT_MS = 10_000;
 const SESSION_STREAM_LEASE_MS = 60_000;
@@ -77,6 +82,8 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
 
   const context = parseClientContextField(payload.clientContext);
   if (context instanceof Response) return context;
+  const sessionContext = parseSessionContextField(payload.sessionContext);
+  if (sessionContext instanceof Response) return sessionContext;
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
@@ -110,7 +117,9 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
   const result: ParsedCreateBody = {
     callback,
     capabilities,
-    context,
+    context: context?.messages,
+    clientContextValue: context?.value,
+    sessionContext,
     outputSchema,
   };
   if (message !== undefined) result.message = message;
@@ -127,6 +136,7 @@ interface ParsedSessionMessageBody {
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
   context?: readonly string[];
+  clientContextValue?: ClientContextValue;
   outputSchema?: JsonObject;
   turnPolicy?: TurnPolicy;
 }
@@ -135,6 +145,12 @@ export function parseSessionMessageBody(
   input: Record<string, unknown>,
 ): ParsedSessionMessageBody | Response {
   const { payload } = splitLegacyTaskFields(input);
+  if (payload.sessionContext !== undefined) {
+    return Response.json(
+      { error: "'sessionContext' is only accepted when creating a session.", ok: false },
+      { status: 400 },
+    );
+  }
   const tokenRejection = rejectSessionContinuationToken(payload);
   if (tokenRejection !== null) return tokenRejection;
 
@@ -172,7 +188,8 @@ export function parseSessionMessageBody(
     callback,
     message,
     inputResponses,
-    context,
+    context: context?.messages,
+    clientContextValue: context?.value,
     outputSchema,
     turnPolicy,
   };
@@ -527,11 +544,13 @@ function parseInputResponses(
 
 const CLIENT_CONTEXT_PREFIX = "Client context:\n";
 
-function parseClientContextField(value: unknown): string[] | Response | undefined {
+function parseClientContextField(
+  value: unknown,
+): { messages: string[]; value: ClientContextValue } | Response | undefined {
   if (value === undefined) return undefined;
 
   if (typeof value === "string") {
-    return value.length > 0 ? [toClientContextMessage(value)] : undefined;
+    return value.length > 0 ? { messages: [toClientContextMessage(value)], value } : undefined;
   }
 
   if (Array.isArray(value)) {
@@ -544,7 +563,7 @@ function parseClientContextField(value: unknown): string[] | Response | undefine
       );
     }
 
-    return value.map((entry) => toClientContextMessage(entry));
+    return { messages: value.map((entry) => toClientContextMessage(entry)), value };
   }
 
   if (value === null || typeof value !== "object") {
@@ -559,7 +578,7 @@ function parseClientContextField(value: unknown): string[] | Response | undefine
 
   try {
     const json = parseJsonObject(value);
-    return [toClientContextMessage(JSON.stringify(json))];
+    return { messages: [toClientContextMessage(JSON.stringify(json))], value: json };
   } catch {
     return Response.json(
       { error: "Expected 'clientContext' to be a JSON-serializable object.", ok: false },

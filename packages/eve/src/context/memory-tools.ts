@@ -21,7 +21,7 @@ export function createMemoryToolDynamicDefinition(definition: MemoryDefinition, 
           const context: MemoryToolsContext = {
             ...resolveContext,
             memory: { scope: lock.scope, slot },
-            turn: lock.turn,
+            turn: { ...lock.turn, ...resolveContext.turn },
           };
           const result = await definition.provider.tools(context);
           if (result === null) return null;

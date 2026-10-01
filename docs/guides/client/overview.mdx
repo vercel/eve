@@ -140,6 +140,8 @@ await session.compact();
 await session.clear();
 ```
 
+Pass `sessionContext: { surface: "docs" }` to either creation form to make a JSON object available as `ctx.session.context` throughout the session. See [Application context](../session-context#application-context) for validation and lifecycle behavior. It is a creation option, so subsequent `session.send()` calls cannot replace it.
+
 If you already know the durable ID, attach a fixed handle without performing I/O:
 
 ```ts

@@ -36,6 +36,7 @@ describe("buildCallbackContext – session", () => {
     );
 
     expect(session).toEqual({
+      context: {},
       auth: {
         current: null,
         initiator: null,

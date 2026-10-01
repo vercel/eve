@@ -79,7 +79,7 @@ export interface AgentSession {
 /** Members the context of every workflow tool entry point shares. */
 export type WorkflowSharedContext = Pick<
   ToolContext,
-  "session" | "toolName" | "getToken" | "requireAuth"
+  "session" | "turn" | "toolName" | "getToken" | "requireAuth"
 > & {
   /**
    * Returns a new session with the agent of this invocation name. Nothing

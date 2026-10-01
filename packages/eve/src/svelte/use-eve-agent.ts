@@ -17,6 +17,7 @@ import type { EveAgentReducer } from "#client/reducer.js";
 import type { ClientSession } from "#client/session.js";
 import type {
   CancelSessionResult,
+  CreateSessionOptions,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -92,6 +93,8 @@ export interface UseEveAgentReturn<TData> {
  * the client resolves before each HTTP request.
  */
 export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData> {
+  /** Context for new sessions, captured when the hook is created; ignored when attaching. */
+  readonly sessionContext?: CreateSessionOptions["sessionContext"];
   /**
    * Named agent mounted by a framework integration such as `withEve({ agents })`.
    *
@@ -258,6 +261,7 @@ export function useEveAgent<TData>(
     prewarm: options.prewarm,
     reducer,
     session: options.session,
+    sessionContext: options.sessionContext,
   });
 
   store.setCallbacks({

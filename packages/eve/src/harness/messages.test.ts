@@ -16,7 +16,11 @@ import {
   validateHarnessModelMessages,
 } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
-import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import {
+  attachClientContext,
+  readClientContext,
+  readClientContextValue,
+} from "#internal/client-context.js";
 
 function textFilePart(overrides: {
   readonly filename: string;
@@ -141,11 +145,12 @@ describe("coalesceTurnInputs", () => {
 
   it("coalesces ephemeral context without making it durable context", () => {
     const result = coalesceTurnInputs(
-      attachClientContext({}, ["first"]),
-      attachClientContext({}, ["second"]),
+      attachClientContext({}, ["first"], { page: "/docs" }),
+      attachClientContext({}, ["second"], "second"),
     );
 
     expect(readClientContext(result)).toEqual(["first", "second"]);
+    expect(readClientContextValue(result)).toBe("second");
     expect(result.context).toBeUndefined();
   });
 

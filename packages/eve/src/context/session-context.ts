@@ -1,3 +1,5 @@
+import type { ClientContextValue } from "#internal/client-context.js";
+import type { JsonObject } from "#shared/json.js";
 import type { SandboxEnvironment } from "#shared/sandbox-environment.js";
 import type {
   RuntimeSandboxSession,
@@ -23,8 +25,16 @@ export interface SessionContext {
   readonly session: {
     readonly id: string;
     readonly auth: SessionAuth;
+    /** Application context supplied at session creation. Defaults to `{}`. */
+    readonly context: JsonObject;
     readonly turn: SessionTurn;
     readonly parent?: SessionParent;
+  };
+
+  /** The active turn's application context. */
+  readonly turn: {
+    /** The `clientContext` sent with this turn's message or input response, as sent. */
+    readonly context?: ClientContextValue;
   };
 
   /**

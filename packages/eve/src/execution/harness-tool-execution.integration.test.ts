@@ -91,6 +91,7 @@ describe("authored tool execution", () => {
         initiator: null,
       },
       id: "session_async_session",
+      context: {},
       turn: {
         id: "turn_async_session_001",
         sequence: 1,
@@ -133,6 +134,7 @@ describe("authored tool execution", () => {
         turn: { id: "turn_parent_001", sequence: 4 },
       },
       id: "session_child",
+      context: {},
       turn: { id: "turn_child_001", sequence: 1 },
     });
   });

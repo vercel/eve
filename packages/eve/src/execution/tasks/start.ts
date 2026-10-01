@@ -115,6 +115,7 @@ export async function sendToTask(input: TaskDispatchInput): Promise<TaskDispatch
     input: task.input,
     sequence: input.batchEvent.sequence,
     stepIndex: input.batchEvent.stepIndex,
+    turnContext: input.turnContext,
     turnId: input.batchEvent.turnId,
   });
   if (recorded.send !== undefined) await sendTaskRunCommands(recorded.send);

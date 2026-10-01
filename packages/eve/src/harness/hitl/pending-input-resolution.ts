@@ -6,7 +6,11 @@ import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending-input-batches.js";
 import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
-import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import {
+  attachClientContext,
+  readClientContext,
+  readClientContextValue,
+} from "#internal/client-context.js";
 
 export type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 
@@ -95,7 +99,11 @@ export function finishResolvedInput(input: {
       deferredInput.message = input.resolvedStepInput.message;
     }
   }
-  attachClientContext(deferredInput, clientContext);
+  attachClientContext(
+    deferredInput,
+    clientContext,
+    input.deferTurnInput ? readClientContextValue(input.resolvedStepInput) : undefined,
+  );
 
   if (Object.keys(deferredInput).length > 0) {
     return {
@@ -144,5 +152,5 @@ export function compactStepInput(input: ResolvedStepInput | undefined): Resolved
   if (input.messageConsumed === true) result.messageConsumed = true;
   if (input.outputSchema !== undefined) result.outputSchema = input.outputSchema;
 
-  return attachClientContext(result, readClientContext(input));
+  return attachClientContext(result, readClientContext(input), readClientContextValue(input));
 }

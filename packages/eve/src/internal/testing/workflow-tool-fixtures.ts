@@ -23,14 +23,23 @@ export interface DeployInput {
   readonly service: string;
 }
 
-export async function deployServiceWorkflow(
-  input: DeployInput,
-  ctx: WorkflowToolContext,
-): Promise<{ readonly callId: string; readonly plan: string; readonly sessionId: string }> {
+export async function deployServiceWorkflow(input: DeployInput, ctx: WorkflowToolContext) {
   "use workflow";
 
   const plan = await planDeployStep(input.service);
-  return { callId: ctx.callId, plan, sessionId: ctx.session.id };
+  return {
+    callId: ctx.callId,
+    plan,
+    sessionId: ctx.session.id,
+    context: ctx.session.context,
+    turnContext: ctx.turn.context,
+    stepTurnContext: await readTurnContextStep(ctx),
+  };
+}
+
+async function readTurnContextStep(ctx: WorkflowToolContext) {
+  "use step";
+  return ctx.turn.context;
 }
 
 export async function authorizedDeployWorkflow(input: DeployInput, ctx: WorkflowToolContext) {

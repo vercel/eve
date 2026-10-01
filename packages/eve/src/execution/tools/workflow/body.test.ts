@@ -27,7 +27,9 @@ it("binds workflow-only methods to the run context", async () => {
     entry: { entryPoint: "execute" },
     hookToken: "control",
     input: {},
+    turn: {},
     session: {
+      context: {},
       auth: { current: null, initiator: null },
       id: "session",
       turn: { id: "turn", sequence: 1 },

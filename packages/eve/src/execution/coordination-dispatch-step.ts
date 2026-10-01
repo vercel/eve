@@ -60,6 +60,8 @@ async function dispatchCoordination(
       batchEvent: batch.event,
       owner: input.workflowToolRunOwner,
       parentSession: prepared.parentSession,
+      sessionContext: prepared.sessionContext,
+      turnContext: prepared.turnContext,
       session: nextSession,
       task,
     };

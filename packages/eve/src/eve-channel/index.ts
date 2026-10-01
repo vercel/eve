@@ -324,6 +324,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
           handle = await createSession({
+            sessionContext: body.sessionContext,
             audienceAuth: authResult,
             auth: messageResult.auth,
             capabilities: body.capabilities ?? { requestInput: true },
@@ -338,6 +339,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                 outputSchema: body.outputSchema,
               },
               body.context,
+              body.clientContextValue,
             ),
             conversationId:
               body.callback === undefined
@@ -414,6 +416,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               title,
             },
             body.context,
+            body.clientContextValue,
           );
           result =
             body.inputResponses === undefined

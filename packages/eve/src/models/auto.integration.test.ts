@@ -43,7 +43,8 @@ function context(
   return {
     model: null,
     channel: {},
-    session: { id: "test", auth: { current: null, initiator: null } },
+    session: { context: {}, id: "test", auth: { current: null, initiator: null } },
+    turn: {},
     messages: [{ role: "user", content: text }],
     abortSignal,
   };

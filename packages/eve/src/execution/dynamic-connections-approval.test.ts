@@ -54,7 +54,12 @@ describe("approval-only connection restoration", () => {
         data: expect.objectContaining({ sequence: 2, turnId: "turn_2" }),
       }),
       expect.objectContaining({
-        session: { id: "test", auth: { current: bob, initiator: alice } },
+        session: {
+          context: {},
+          id: "test",
+          auth: { current: bob, initiator: alice },
+        },
+        turn: { context: undefined },
       }),
     );
     expect(fixture.registry.getConnectionNames()).toEqual(["notes"]);

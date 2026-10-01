@@ -18,6 +18,7 @@ import {
   SessionCallbackKey,
   LegacyRemoteAgentCallerKey,
   SessionTitleKey,
+  SessionContextKey,
 } from "#context/keys.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -66,6 +67,8 @@ export function buildRunContext(input: {
     ctx.set(ContinuationHookTokensKey, [run.continuationToken]);
   }
   ctx.set(AuthKey, auth);
+  if (run.sessionContext !== undefined) ctx.set(SessionContextKey, run.sessionContext);
+
   if (run.initiatorAuth !== undefined || run.input.message !== undefined) {
     ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
   }

@@ -1,3 +1,4 @@
+import { restoreTurnContext, TurnContextKey } from "#context/turn-context.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
@@ -17,7 +18,7 @@ import {
 } from "ai";
 import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { readClientContext } from "#internal/client-context.js";
+import { readClientContext, readClientContextValue } from "#internal/client-context.js";
 import { resolveProviderHeaders } from "#internal/gateway.js";
 import { createErrorId, createLogger, formatError, logError } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
@@ -511,6 +512,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         session.agent.dynamicModel === true ? null : (session.agent.modelReference ?? null),
       );
     }
+    if (store !== undefined) restoreTurnContext(store, session);
     const parent = store?.get(ParentSessionKey);
     const callback = store?.get(SessionCallbackKey);
     const hasDelegatedCaller = parent !== undefined || callback !== undefined;
@@ -677,6 +679,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? { ...effectiveStepInput, message: staleConversion.displayMessage }
         : effectiveStepInput;
 
+    if (store !== undefined && readClientContextValue(effectiveStepInput) !== undefined) {
+      store.setVirtualContext(TurnContextKey, readClientContextValue(effectiveStepInput));
+    }
     const approvalContext = contextStorage.getStore();
     const prepareApprovalTools = async (
       batch: { readonly event?: PendingInputBatchEvent } | undefined,
@@ -879,6 +884,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (emit && pending.deferredMessage === true && hasStepInput(input)) {
         const deferredInput = createTurnInputMessages(effectiveStepInput);
         if (store !== undefined) {
+          store.setVirtualContext(TurnContextKey, readClientContextValue(effectiveStepInput));
           prepareDynamicInstructionPreamble(
             store,
             projectHistory(parkedSession.history, parkedSession.state),
@@ -1012,6 +1018,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const storedClientContext = getTurnClientContextState(pending.session.state, turnId);
     const clientContext =
       pending.deferredContext === true ? undefined : readClientContext(effectiveStepInput);
+    const clientContextValue =
+      readClientContextValue(effectiveStepInput) ?? storedClientContext?.value;
+    if (store !== undefined) store.setVirtualContext(TurnContextKey, clientContextValue);
     const activeClientContext = clientContext ?? storedClientContext?.messages;
     const ephemeralContextMessages: UserModelMessage[] =
       activeClientContext?.map((content) =>
@@ -1135,10 +1144,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // Keep ephemeral client context at the same position across durable steps.
     let turnClientContext = storedClientContext;
-    if (clientContext !== undefined) {
+    const storedMessageIndex =
+      (storedClientContext?.messages.length ?? 0) > 0
+        ? storedClientContext?.insertionIndex
+        : undefined;
+    if (clientContext !== undefined || clientContextValue !== storedClientContext?.value) {
       turnClientContext = {
-        insertionIndex: storedClientContext?.insertionIndex ?? messages.length,
-        messages: clientContext,
+        // Deferred messages take their position from the step that replays them.
+        insertionIndex: storedMessageIndex ?? messages.length,
+        messages: clientContext ?? storedClientContext?.messages ?? [],
+        value: clientContextValue,
         turnId,
       };
     }

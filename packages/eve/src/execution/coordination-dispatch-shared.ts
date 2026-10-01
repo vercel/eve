@@ -7,6 +7,7 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  SessionContextKey,
   LocalDevRequestKey,
   type LocalDevRequestProvenance,
   ParentSessionKey,
@@ -27,6 +28,9 @@ import {
 } from "#harness/coordination.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import type { RuntimeActionResult, RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
+import type { JsonObject } from "#shared/json.js";
+import type { ClientContextValue } from "#internal/client-context.js";
+import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { SessionParent } from "#channel/types.js";
 import {
   createDurableSessionState,
@@ -75,6 +79,9 @@ export interface PreparedCoordinationDispatch<PlanEntry = RuntimeWorkflowTaskReq
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** Lineage of the session running this dispatch, when it is itself a delegated child. */
   readonly parentSession: SessionParent | undefined;
+  readonly sessionContext: JsonObject;
+  /** The dispatching turn's `clientContext`, which workflow runs expose as `ctx.turn.context`. */
+  readonly turnContext: ClientContextValue | undefined;
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly PlanEntry[];
@@ -187,6 +194,8 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     localDevRequest: ctx.get(LocalDevRequestKey),
     parentSession: ctx.get(ParentSessionKey),
+    sessionContext: ctx.get(SessionContextKey) ?? {},
+    turnContext: getTurnClientContextState(session.state, batch.event.turnId)?.value,
     plan,
     sandboxSessionId,
     serializedContext: input.serializedContext,

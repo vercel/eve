@@ -10,6 +10,7 @@ export interface WorkflowStepContext {
   readonly callId: string;
   readonly toolName: string;
   readonly session: SessionContext["session"];
+  readonly turn: SessionContext["turn"];
   readonly abortSignal: AbortSignal;
   readonly baseUrl: string;
   readonly token: string;

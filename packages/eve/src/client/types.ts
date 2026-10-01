@@ -104,12 +104,18 @@ export interface ClientOptions {
 /**
  * Input object for creating a client session. The first message is required.
  */
-export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutput> {
+export interface SendTurnInput<TOutput = unknown>
+  extends SendTurnOptions<TOutput>, CreateSessionOptions {
   readonly message: string | UserContent;
 }
 
-/** Request options for creating a conversation session before its first turn. */
+/** Request options for creating a session, with or without a first message. */
 export interface CreateSessionOptions {
+  /**
+   * Application context captured when this session is created, including prewarming.
+   * Available as `ctx.session.context` across turns.
+   */
+  readonly sessionContext?: JsonObject;
   /** Abort signal for cancelling the creation request. */
   readonly signal?: AbortSignal;
   /** Additional headers for this request only. */
@@ -125,8 +131,9 @@ export interface SendTurnOptions<TOutput = unknown> {
    * Ephemeral client/page context for the current turn.
    *
    * Strings are rendered as user-role model context messages. Objects are
-   * JSON-serialized into one user-role model context message. Client context
-   * rides along with a message or HITL response; it does not dispatch a turn by
+   * JSON-serialized into one user-role model context message. The value as sent
+   * is also available to authored code as `ctx.turn.context`. Client
+   * context rides along with a message or HITL response; it does not dispatch a turn by
    * itself, remains available to every model call in the turn, and is never
    * persisted to durable session history or exposed to later turns.
    */

@@ -1,5 +1,6 @@
 import type { ModelMessage } from "ai";
 
+import type { SessionContext } from "#context/session-context.js";
 import type { SessionAuth } from "#context/keys.js";
 import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -53,6 +54,16 @@ export interface DynamicResolveContext {
   readonly session: {
     readonly id: string;
     readonly auth: SessionAuth;
+    /** Application context supplied at session creation. Defaults to `{}`. */
+    readonly context: SessionContext["session"]["context"];
+  };
+  readonly turn: {
+    /**
+     * The `clientContext` sent with the active turn's message or input
+     * response, as sent. `undefined` outside a turn, such as `session.started`
+     * while prewarming.
+     */
+    readonly context?: SessionContext["turn"]["context"];
   };
   /** Channel metadata for the request that triggered this resolve. */
   readonly channel: {

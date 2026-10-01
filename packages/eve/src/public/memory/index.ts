@@ -65,13 +65,13 @@ export type MemoryRecallResult =
   | null
   | undefined;
 
-export interface MemoryTurnContext {
+export type MemoryTurnContext = SessionContext["turn"] & {
   readonly id: string;
   readonly input: readonly ModelMessage[];
   readonly sequence: number;
-}
+};
 
-export interface MemoryOperationContext extends SessionContext {
+export interface MemoryOperationContext extends Omit<SessionContext, "turn"> {
   readonly abortSignal: AbortSignal;
   readonly messages: readonly ModelMessage[];
   readonly operationId: string;

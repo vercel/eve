@@ -34,7 +34,11 @@ import {
 } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
-import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import {
+  attachClientContext,
+  readClientContext,
+  readClientContextValue,
+} from "#internal/client-context.js";
 
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
@@ -110,7 +114,11 @@ export function createSession(
         context?: readonly string[];
         message: string | UserContent | undefined;
         outputSchema?: JsonObject;
-      }>({ message: serializeUrlFilePartsInMessage(message) }, readClientContext(options));
+      }>(
+        { message: serializeUrlFilePartsInMessage(message) },
+        readClientContext(options),
+        readClientContextValue(options),
+      );
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
@@ -138,7 +146,11 @@ export function createSession(
         context?: readonly string[];
         inputResponses: readonly InputResponse[];
         outputSchema?: JsonObject;
-      }>({ inputResponses: validatedInputResponses }, readClientContext(options));
+      }>(
+        { inputResponses: validatedInputResponses },
+        readClientContext(options),
+        readClientContextValue(options),
+      );
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {

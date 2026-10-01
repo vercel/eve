@@ -1,3 +1,4 @@
+import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   type FilePart,
@@ -26,6 +27,7 @@ import {
   SessionTraceSeedKey,
   SessionKey,
   SessionIdKey,
+  SessionContextKey,
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicToolMetadataKey,
@@ -8526,6 +8528,54 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("exposes deferred turn context in the approval-response step and after it", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Approved.", role: "assistant" }] },
+      text: "Approved.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const ctx = new ContextContainer();
+    const turnContexts: unknown[] = [];
+    const harness = createToolLoopHarness(
+      createTestConfig(
+        async (event) => {
+          if (event.type === "step.started") {
+            turnContexts.push(buildResolveContext(ctx, []).turn.context);
+          }
+        },
+        {
+          tools: new Map([
+            [
+              "bash",
+              {
+                description: "Run shell commands",
+                execute: vi.fn().mockResolvedValue("ok"),
+                inputSchema: jsonSchema({ type: "object" }),
+                name: "bash",
+              },
+            ],
+          ]),
+        },
+      ),
+    );
+
+    const first = await contextStorage.run(ctx, () =>
+      harness(
+        createPendingBashApprovalSession(),
+        attachClientContext(
+          { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
+          ["Client context:\ncurrent page"],
+          ["current page"],
+        ),
+      ),
+    );
+    await contextStorage.run(ctx, () => harness(first.session));
+
+    expect(turnContexts).toEqual([["current page"], ["current page"]]);
+  });
+
   it("defers durable and ephemeral context past the approval-response model call", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -11553,19 +11603,39 @@ describe("createToolLoopHarness", () => {
           },
         ],
       });
-      const runStep = createToolLoopHarness(createTestConfig());
+      const sessionContext = { surface: "docs" };
+      const turnContext = { route: "/billing" };
+      let ctx = new ContextContainer();
+      ctx.set(SessionContextKey, sessionContext);
+      const visibleContexts: unknown[] = [];
+      const runStep = createToolLoopHarness(
+        createTestConfig(async (event) => {
+          if (event.type === "turn.started" || event.type === "step.started") {
+            visibleContexts.push({
+              event: event.type,
+              session: buildResolveContext(ctx, []).session.context,
+              turn: buildResolveContext(ctx, []).turn.context,
+            });
+          }
+        }),
+      );
       const clientContext = "Client context:\nroute=/billing";
 
-      const firstStep = await runStep(
-        createTestSession(),
-        attachClientContext({ message: "Add 20 and 22." }, [clientContext]),
+      const firstStep = await contextStorage.run(ctx, () =>
+        runStep(
+          createTestSession(),
+          attachClientContext({ message: "Add 20 and 22." }, [clientContext], turnContext),
+        ),
       );
       expect(firstStep.next).toBe(runStep);
       const firstPrompt = structuredClone(getLastAgentSettings().messages);
 
       setupMockAgent(defaultModelResult());
       const serializedSession = JSON.parse(JSON.stringify(firstStep.session)) as HarnessSession;
-      const secondStep = await runStep(serializedSession);
+      const serializedContext = JSON.parse(JSON.stringify(serializeContext(ctx)));
+      expect(serializedContext["eve.sessionContext"]).toEqual(sessionContext);
+      ctx = await deserializeContext(serializedContext);
+      const secondStep = await contextStorage.run(ctx, () => runStep(serializedSession));
       expect(secondStep.next).toBeNull();
       const secondPrompt = getLastAgentSettings().messages;
 
@@ -11584,7 +11654,16 @@ describe("createToolLoopHarness", () => {
       expect(JSON.stringify(secondStep.session.state)).not.toContain(clientContext);
 
       setupMockAgent(defaultModelResult());
-      await runStep(secondStep.session, { message: "Start another turn." });
+      await contextStorage.run(ctx, () =>
+        runStep(secondStep.session, { message: "Start another turn." }),
+      );
+      expect(visibleContexts).toEqual([
+        { event: "turn.started", session: sessionContext, turn: turnContext },
+        { event: "step.started", session: sessionContext, turn: turnContext },
+        { event: "step.started", session: sessionContext, turn: turnContext },
+        { event: "turn.started", session: sessionContext, turn: undefined },
+        { event: "step.started", session: sessionContext, turn: undefined },
+      ]);
       expect(getLastAgentSettings().messages).not.toContainEqual({
         content: clientContext,
         kind: "user" as const,

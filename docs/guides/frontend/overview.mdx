@@ -16,6 +16,10 @@ The framework pages walk through the wiring step by step: [Next.js](./nextjs), [
 
 For scripts, server-to-server calls, evals, tests, or custom clients that do not need framework UI state, use the [Client SDK](../client/overview) directly.
 
+## Application context
+
+Pass `sessionContext: { surface: "docs" }` to `useEveAgent()` to capture application data when the session is created, including with `prewarm: true`. The backend reads the object through `ctx.session.context`. The option is captured when the hook is created; existing sessions keep their original context. See [Application context](../session-context#application-context) for an example that selects dynamic instructions without configuring a schema on the agent.
+
 ## Authenticate browser requests
 
 A same-origin framework integration sends your application cookies with every eve request. For bearer tokens or another non-cookie scheme, pass `auth` or `headers` to `useEveAgent`.

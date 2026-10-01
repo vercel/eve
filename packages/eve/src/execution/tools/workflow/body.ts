@@ -37,6 +37,7 @@ export interface WorkflowBodyDefinition {
   readonly input: JsonObject;
 
   readonly session: SessionContext["session"];
+  readonly turn: SessionContext["turn"];
   readonly stepIndex: number;
   readonly toolName: string;
   readonly workflowId: string;
@@ -237,9 +238,9 @@ export function resolveWorkflowEntryPoint<TEntryPoint>(input: WorkflowBodyInput)
 /**
  * The members every entry point's context shares, bound to the run. `ask`
  * is the entry point's own, since what it may ask for depends on its calls.
- * The members that describe a call, `abortSignal`, `agents`, `callId`, and
- * `session` (whose turn is the call's), come from the entry point, which
- * knows its calls.
+ * The members that describe a call, `abortSignal`, `agents`, `callId`,
+ * `session` (whose turn is the call's), and `turn`, come from the entry point,
+ * which knows its calls.
  */
 export function createSharedContext(
   input: WorkflowBodyInput,
@@ -247,7 +248,7 @@ export function createSharedContext(
   askPerson: WorkflowSharedContext["ask"],
 ): Omit<
   ToolContext & WorkflowSharedContext,
-  "abortSignal" | "agents" | "callId" | "messages" | "session"
+  "abortSignal" | "agents" | "callId" | "messages" | "session" | "turn"
 > {
   const unavailable = (member: string, hint: string): never => {
     throw new Error(
@@ -296,6 +297,7 @@ function createCallContext(
     agents: createAgentsView(input.agentContext),
     callId: input.callId,
     session: input.session,
+    turn: input.turn,
   };
   return ctx;
 }

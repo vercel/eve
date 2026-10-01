@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
-import { readClientContext } from "#internal/client-context.js";
+import { readClientContext, readClientContextValue } from "#internal/client-context.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
@@ -1260,6 +1260,7 @@ describe("eveChannel — create session (text)", () => {
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload).toMatchObject({ message: "What word is selected?" });
     expect(readClientContext(payload)).toEqual(['Client context:\n{"selectedWord":"jazz"}']);
+    expect(readClientContextValue(payload)).toEqual({ selectedWord: "jazz" });
   });
 
   it("forwards outputSchema with a create-session message", async () => {
@@ -1317,6 +1318,7 @@ describe("eveChannel — create session (text)", () => {
       "Client context:\nroute: /editor",
       "Client context:\nselection: jazz",
     ]);
+    expect(readClientContextValue(payload)).toEqual(["route: /editor", "selection: jazz"]);
   });
 
   it("rejects invalid create-session clientContext", async () => {
@@ -1785,6 +1787,7 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     expect(readClientContext(handler.send.mock.calls[0]?.[1])).toEqual([
       "Client context:\napproval modal open",
     ]);
+    expect(readClientContextValue(handler.send.mock.calls[0]?.[1])).toBe("approval modal open");
   });
 
   it("forwards outputSchema with a continue-session message", async () => {
