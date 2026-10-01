@@ -90,7 +90,7 @@ describe("live task panel", () => {
     expect(rows).toHaveLength(5);
     expect(rows[0]).toMatch(/^── Waiting · 1 task · 16s ─+$/);
     expect(rows[1]).toBe("");
-    expect(rows[2]).toBe("  subagent(self-modification) 12s");
+    expect(rows[2]).toBe("  agent editor 12s");
     expect(rows.slice(-2)).toEqual(["", "─".repeat(80)]);
     expect(rows.join("\n")).not.toContain("Waiting for");
   });

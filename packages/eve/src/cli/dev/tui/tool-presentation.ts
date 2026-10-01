@@ -234,7 +234,9 @@ export function presentTool(
     // Named subagent dispatch: the tool name is the delegation target; the
     // message rides as the quiet subtitle. The row is transient — the
     // task's start line replaces it once the call becomes a task.
-    const name = agentTaskLabel(agentDisplayName(toolName));
+    const name = isSelfModificationAgent(toolName)
+      ? agentDisplayName(toolName)
+      : agentTaskLabel(agentDisplayName(toolName));
     return {
       title: `${DELEGATE_VERB} ${name}`,
       doneTitle: `Delegated ${name}`,
@@ -312,8 +314,12 @@ export function isSelfModificationAgent(toolName: string): boolean {
 
 /** The name an agent task goes by in the delegate row, task line, and task panel. */
 export function agentTaskLabel(name: string): string {
-  const readable = name.replace(/__agent(?=:\d+$|$)/u, "");
-  return readable === "subagent" ? readable : `subagent(${readable})`;
+  const readable = name
+    .replace(/^self-modification__agent(?=:\d+$|$)/u, "agent editor")
+    .replace(/__agent(?=:\d+$|$)/u, "");
+  return readable === "subagent" || readable.startsWith("agent editor")
+    ? readable
+    : `subagent(${readable})`;
 }
 export function agentDisplayName(toolName: string): string {
   const baseName = toolBaseName(toolName);

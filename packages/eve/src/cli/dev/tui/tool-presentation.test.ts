@@ -223,8 +223,8 @@ describe("presentTool", () => {
       { message: "Edit Alice's agent" },
       { isSubagent: true },
     );
-    expect(selfModification.title).toBe("Delegate subagent(self-modification)");
-    expect(selfModification.doneTitle).toBe("Delegated subagent(self-modification)");
+    expect(selfModification.title).toBe("Delegate agent editor");
+    expect(selfModification.doneTitle).toBe("Delegated agent editor");
     // Without roster knowledge the generic formatter keeps its shape.
     expect(presentTool("stock-price", { message: "x" }).title).toBe("stock-price");
   });
