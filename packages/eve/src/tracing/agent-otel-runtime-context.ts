@@ -4,6 +4,8 @@ import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { agentInvocationSpanName } from "#tracing/agent-span-contract.js";
 import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
 import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
+import { runtimeContextAttributes as traceRuntimeContextAttributes } from "#tracing/core/attributes.js";
+import { frameworkAttributes } from "#tracing/core/attributes.js";
 
 type SpanAttributePrimitive = string | number | boolean;
 type SpanAttributeValue = SpanAttributePrimitive | SpanAttributePrimitive[];
@@ -29,8 +31,7 @@ export function agentActivationAttributes(input: {
   );
   const scheduleId = isSubagent ? undefined : input.session?.scheduleId;
   return {
-    "agent.framework.name": "eve",
-    "agent.framework.version": input.frameworkVersion,
+    ...frameworkAttributes({ name: "eve", version: input.frameworkVersion }),
     "agent.name": input.agentName,
     "agent.channel.audience": input.session?.channelAudience,
     ...agentPrincipalAttributes(input.turn),
@@ -103,8 +104,7 @@ export function agentStepAttributes(input: {
     event.scope.sessionId,
   );
   return {
-    "agent.framework.name": "eve",
-    "agent.framework.version": input.frameworkVersion,
+    ...frameworkAttributes({ name: "eve", version: input.frameworkVersion }),
     "agent.step.attempt": event.scope.attemptIndex,
     "agent.step.index": event.scope.stepIndex,
     "agent.turn.id": event.scope.turnId,
@@ -137,38 +137,10 @@ export function runtimeContextAttributes(
   runtimeContext: Readonly<Record<string, unknown>> | undefined,
 ): Record<string, SpanAttributeValue> {
   const attributes: Record<string, SpanAttributeValue> = {};
-  if (runtimeContext === undefined) return attributes;
-  for (const [key, value] of Object.entries(runtimeContext)) {
-    flattenContextAttribute(attributes, `ai.settings.context.${key}`, value);
+  for (const [key, value] of Object.entries(traceRuntimeContextAttributes(runtimeContext))) {
+    if (value !== undefined) attributes[key] = value as SpanAttributeValue;
   }
   return attributes;
-}
-
-function flattenContextAttribute(
-  attributes: Record<string, SpanAttributeValue>,
-  key: string,
-  value: unknown,
-): void {
-  if (value == null) return;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    attributes[key] = value;
-    return;
-  }
-  if (Array.isArray(value)) {
-    const primitives = value.filter(
-      (entry): entry is SpanAttributePrimitive =>
-        typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean",
-    );
-    if (primitives.length !== value.length) return;
-    if (new Set(primitives.map((entry) => typeof entry)).size !== 1) return;
-    attributes[key] = primitives;
-    return;
-  }
-  if (typeof value === "object") {
-    for (const [nestedKey, nestedValue] of Object.entries(value)) {
-      flattenContextAttribute(attributes, `${key}.${nestedKey}`, nestedValue);
-    }
-  }
 }
 
 function setOptionalAttribute(

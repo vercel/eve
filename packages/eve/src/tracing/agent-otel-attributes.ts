@@ -1,5 +1,6 @@
 import { resolveConversationId } from "#shared/conversation-identity.js";
-import { AGENT_TRACE_SCHEMA_VERSION } from "#tracing/agent-span-contract.js";
+import { identityAttributes } from "#tracing/core/attributes.js";
+import { eveOutputMapping } from "#tracing/adapters/eve/compatibility.js";
 
 export function traceSessionIdOf(scope: {
   readonly traceSessionId?: string;
@@ -15,13 +16,17 @@ export function agentTraceIdentityAttributes(input: {
   readonly traceSessionId: string;
 }): Record<string, string | number> {
   const conversationId = resolveConversationId(input.rootSessionId);
-  const attributes: Record<string, string | number> = {
-    "agent.run.id": input.sessionId,
-    "agent.trace.schema.version": AGENT_TRACE_SCHEMA_VERSION,
-    "gen_ai.conversation.id": conversationId,
-  };
-  if (process.env.VERCEL_ENV !== undefined) {
-    attributes["vercel.session_id"] = input.traceSessionId;
-  }
-  return attributes;
+  return eveOutputMapping({
+    resolve: () => ({
+      platform: process.env.VERCEL_ENV === undefined ? "other" : "vercel",
+      traceSessionId: input.traceSessionId,
+    }),
+  }).attributes(
+    { type: "activation", operationId: input.sessionId },
+    identityAttributes({
+      conversationId,
+      runId: input.sessionId,
+      turnId: "",
+    }),
+  ) as Record<string, string | number>;
 }

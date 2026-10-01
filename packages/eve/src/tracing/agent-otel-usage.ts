@@ -2,43 +2,19 @@ import type { Span } from "#compiled/@opentelemetry/api/index.js";
 
 import type { InstrumentationUsage } from "#instrumentation/lifecycle.js";
 import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
-import { AGENT_USAGE_ATTRIBUTES } from "#tracing/agent-span-contract.js";
+import { usageAttributes } from "#tracing/core/attributes.js";
 
 /** Applies eve's structural token usage attributes to an agent span. */
 export function setAgentUsage(span: Span, usage: InstrumentationUsage): void {
-  if (usage.costUsd !== undefined) {
-    span.setAttribute(AGENT_USAGE_ATTRIBUTES.costUsd, usage.costUsd);
-  }
-  if (usage.inputTokens !== undefined) {
-    span.setAttribute(AGENT_USAGE_ATTRIBUTES.inputTokens, usage.inputTokens);
-  }
-  if (usage.outputTokens !== undefined) {
-    span.setAttribute(AGENT_USAGE_ATTRIBUTES.outputTokens, usage.outputTokens);
-  }
-  const details = usage.inputTokenDetails;
-  if (details?.cacheReadTokens !== undefined) {
-    span.setAttribute(AGENT_USAGE_ATTRIBUTES.cacheReadTokens, details.cacheReadTokens);
-  }
-  if (details?.cacheWriteTokens !== undefined) {
-    span.setAttribute(AGENT_USAGE_ATTRIBUTES.cacheWriteTokens, details.cacheWriteTokens);
+  for (const [key, value] of Object.entries(usageAttributes(usage))) {
+    if (value !== undefined) span.setAttribute(key, value);
   }
 }
 
 /** Applies standard GenAI token usage while retaining eve's compatibility attributes. */
 export function setGenAiUsage(span: Span, usage: InstrumentationUsage): void {
-  setAgentUsage(span, usage);
-  if (usage.inputTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.input_tokens", usage.inputTokens);
-  }
-  if (usage.outputTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.output_tokens", usage.outputTokens);
-  }
-  const details = usage.inputTokenDetails;
-  if (details?.cacheReadTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.cache_read.input_tokens", details.cacheReadTokens);
-  }
-  if (details?.cacheWriteTokens !== undefined) {
-    span.setAttribute("gen_ai.usage.cache_write.input_tokens", details.cacheWriteTokens);
+  for (const [key, value] of Object.entries(usageAttributes(usage, true))) {
+    if (value !== undefined) span.setAttribute(key, value);
   }
 }
 

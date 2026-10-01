@@ -33,6 +33,7 @@ import { withErrorContent } from "#tracing/error-content-context.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
+import { startEveSpan } from "#tracing/adapters/eve/span.js";
 
 type SpanState = { readonly context: Context; readonly span: Span };
 
@@ -79,14 +80,17 @@ export function createAgentMemoryInstrumentation(input: {
     const parent = await parentContext(event);
     const parentSpan = parent === undefined ? undefined : trace.getSpan(parent)?.spanContext();
     if (parent === undefined || parentSpan === undefined || !isSampledTrace(parentSpan)) return;
-    const span = input.tracer.startSpan(
-      event.operationName,
-      {
+    const span = startEveSpan({
+      tracer: input.tracer,
+      type: "memory",
+      operationId: event.idempotencyKey,
+      name: event.operationName,
+      options: {
         attributes: memorySpanAttributes(event),
         kind: SpanKind.CLIENT,
       },
       parent,
-    );
+    });
     spans.set(event.idempotencyKey, {
       context: trace.setSpan(parent, span),
       span,

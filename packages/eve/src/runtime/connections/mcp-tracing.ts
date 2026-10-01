@@ -22,6 +22,7 @@ import {
 import { truncateTelemetryText } from "#tracing/telemetry-budget.js";
 import { replaceBaggageMember } from "#protocol/baggage.js";
 import { isObject } from "#shared/guards.js";
+import { startEveSpan } from "#tracing/adapters/eve/span.js";
 
 const MAX_MCP_TRACE_REQUEST_BYTES = 1024 * 1024;
 const MAX_MCP_TRACE_CONTEXT_BYTES = 8192;
@@ -122,14 +123,17 @@ export async function withMcpToolsListSpan<T>(input: {
     method: "tools/list",
     protocolVersion: input.protocolVersion,
   });
-  const span = trace.getTracer("eve.mcp").startSpan(
-    "tools/list",
-    {
+  const span = startEveSpan({
+    tracer: trace.getTracer("eve.mcp"),
+    type: "mcp",
+    operationId: `${input.connectionName}:tools/list`,
+    name: "tools/list",
+    options: {
       attributes,
       kind: SpanKind.CLIENT,
     },
     parent,
-  );
+  });
   const spanContext = withMcpMethodName(
     withAgentToolSpanContext(trace.setSpan(parent, span), {
       ...agentToolContentPolicy(parent),
@@ -171,14 +175,17 @@ export async function withMcpToolCallSpan<T>(input: {
     return await runMcpToolCall(input, parent, undefined, policy);
   }
 
-  const span = trace.getTracer("eve.mcp").startSpan(
-    `tools/call ${truncateTelemetryText(input.toolName, 128)}`,
-    {
+  const span = startEveSpan({
+    tracer: trace.getTracer("eve.mcp"),
+    type: "mcp",
+    operationId: `${input.connectionName}:tools/call:${input.toolName}`,
+    name: `tools/call ${truncateTelemetryText(input.toolName, 128)}`,
+    options: {
       attributes: mcpToolCallAttributes(input),
       kind: SpanKind.CLIENT,
     },
     parent,
-  );
+  });
   const spanContext = withMcpMethodName(
     withAgentToolSpanContext(trace.setSpan(parent, span), {
       ...policy,

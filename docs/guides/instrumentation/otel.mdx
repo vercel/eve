@@ -126,6 +126,9 @@ The resolver receives the channel, session, final model input, step, and turn.
 Keys beginning with `eve.` are reserved. Content excluded by
 `otel({ tracePolicy })` is not available to the resolver.
 
+Runtime context is bounded to 256 attributes, eight levels of nesting, and
+256 entries per array. Values beyond these limits are omitted.
+
 ## Trace topology
 
 OpenTelemetry destinations receive the following trace topology for an ordinary
