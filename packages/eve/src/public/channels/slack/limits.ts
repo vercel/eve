@@ -45,9 +45,11 @@ export const SLACK_CARD_SUBTEXT_MAX_LENGTH = 200;
 export const SLACK_MESSAGE_TEXT_MAX_LENGTH = 40000;
 
 /**
- * Slack's native `markdown_text` field on `chat.postMessage` is capped at
- * 12000 characters. Default agent replies use this field so headings, tables,
- * and other Markdown render natively.
+ * Slack caps a message's Markdown at 12,000 characters: the `markdown_text`
+ * field of `chat.postMessage`, and the combined text of every `markdown`
+ * block in one message. eve's default replies use `markdown_text` so
+ * headings, tables, and other Markdown render natively, and upload longer
+ * replies as a snippet.
  */
 export const SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12000;
 

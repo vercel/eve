@@ -134,6 +134,7 @@ Check the delivery path in order so you can identify where a Slack event stops:
 | Mentions never reach the deployment                                   | Confirm that the connector trigger destination uses the intended project and branch, enables triggers, and points to `/eve/v1/slack`.                                                  | Edit or remove stale destinations in the Connect dashboard, then register the intended destination with `vercel connect attach`.                                     |
 | Mentions work but DMs or thread replies do not                        | Check the Slack app's Event Subscriptions and OAuth scopes. DMs require `message.im` and `im:history`; channel replies require the matching message event and history scope.           | Add the missing events or scopes, then reinstall the Slack app if Slack requires it.                                                                                 |
 | A long response cannot be uploaded as a snippet                       | Check whether the installed Slack app has the `files:write` bot scope.                                                                                                                 | Add `files:write`, then reinstall the Slack app so the new scope takes effect.                                                                                       |
+| The thread says the agent couldn't deliver its answer                 | Search the Vercel runtime logs for the error id in the notice. The `final reply was not delivered to Slack` line carries Slack's error.                                                | Fix the cause, such as a missing `files:write` scope or a renderer that posts invalid blocks, then ask the agent to resend the answer.                               |
 | A preview request receives an authentication page or protection error | Check whether the branch domain is exempt or the direct Slack request URL includes `x-vercel-protection-bypass`. Slack cannot complete an interactive Vercel Authentication challenge. | Add a Deployment Protection Exception for the branch domain, or add the automation bypass query parameter to a Slack app that uses environment-variable credentials. |
 | The webhook reaches the deployment but the agent does not reply       | Open the project's Vercel runtime logs, then inspect the session in [**Agent Runs**](/docs/observability/agent-runs) when your team has access.                                        | Use the first missing or failed stage to narrow the issue to channel dispatch, the agent run, or outbound Slack delivery.                                            |
 
@@ -469,7 +470,15 @@ Slack clears a thread status after two minutes without a message, so during a lo
 
 Action labels follow the same rule as the task card titles described below, plus `+N more` when the model requests several actions at once. They leave out the model's own `task_wait` and `task_cancel` calls. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use a five-second refresh interval to avoid one Slack request per token.
 
-Replies up to 12,000 characters render inline. Longer replies are uploaded unchanged as a Markdown snippet named `eve-response.md` with a short in-thread note, which requires the `files:write` bot scope. Upload failures are logged by the channel dispatcher; they do not trigger a model retry.
+Replies up to 12,000 characters render inline. Longer replies are uploaded unchanged as a Markdown snippet named `eve-response.md` with a short in-thread note, which requires the `files:write` bot scope.
+
+A final reply is never dropped without a trace, whether eve's default or one of your [renderers](#customize-rendering) posts it:
+
+- When Slack refuses the reply as too large or malformed (`msg_too_long`, `msg_blocks_too_long`, `msg_blocks_too_many`, `invalid_blocks`, or `invalid_blocks_format`), eve uploads the full reply as the same `eve-response.md` snippet.
+- When the reply still doesn't reach Slack, for example because the upload fails or Slack returns another error, eve logs the error and posts a short notice in the thread: `I finished, but couldn't deliver my answer in Slack (error id ...). Please ask me to resend it.` The error id matches the `final reply was not delivered to Slack` line in the Vercel runtime logs.
+- The next message in the session tells the model that its previous reply was not delivered, so it doesn't assume the user read it.
+
+This applies to the turn's final reply only. A failed status update, tool-call narration, or other event is logged and skipped. Delivery failures don't trigger a model retry.
 
 When the model replies while its tasks keep working, that reply posts like any other, and the reply after the results posts as another message. A schedule's session posts only the final reply.
 
@@ -546,6 +555,40 @@ export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
   renderers: [feedback],
 });
+```
+
+A `message.completed` handler that posts the final reply itself, instead of calling `next()`, gets the same [delivery guarantees](#delivery): if your post throws because Slack refused it, eve uploads the reply as a snippet, and any other failure produces the thread notice. eve assumes the post that threw was the reply itself. If you post the reply and then a separate follow-up message, as the feedback example above does, catch the follow-up's errors in your handler. Otherwise eve may upload the reply a second time or post the notice even though the reply arrived.
+
+Slack caps the combined text of all `markdown` blocks in one message at 12,000 characters, the same limit as `markdown_text`. To keep long replies intact without copying eve's size handling, check the length against `SLACK_MARKDOWN_TEXT_MAX_LENGTH` and hand longer replies to `postCompletedSlackReply`. It posts the way eve's default does: one native Markdown message up to the limit, otherwise the `eve-response.md` snippet with a short note. It throws when Slack rejects the post or the upload.
+
+```ts title="agent/channels/slack.ts"
+import {
+  defineSlackRenderer,
+  postCompletedSlackReply,
+  slackChannel,
+  SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+} from "eve/channels/slack";
+
+const sourcedReplies = defineSlackRenderer({
+  events: {
+    async "message.completed"(event, channel, _ctx, next) {
+      if (event.finishReason === "tool-calls" || !event.message) return next();
+      if (event.message.length > SLACK_MARKDOWN_TEXT_MAX_LENGTH) {
+        await postCompletedSlackReply(channel, event.message);
+        return;
+      }
+      await channel.thread.post({
+        blocks: [
+          { type: "markdown", text: event.message },
+          { type: "context", elements: [{ type: "mrkdwn", text: "Sources: internal docs" }] },
+        ],
+        text: event.message,
+      });
+    },
+  },
+});
+
+export default slackChannel({ renderers: [sourcedReplies] });
 ```
 
 `taskCard` runs for every turn that calls a tool, and receives the same view eve's default renders from:

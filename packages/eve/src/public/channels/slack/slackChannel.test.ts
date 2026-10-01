@@ -35,7 +35,7 @@ import {
   SLACK_MESSAGE_TEXT_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
 } from "#public/channels/slack/limits.js";
-import { defaultSlackAuth } from "#public/channels/slack/index.js";
+import { defaultSlackAuth, postCompletedSlackReply } from "#public/channels/slack/index.js";
 import {
   composeSlackRenderers,
   type SlackRenderChain,
@@ -666,7 +666,8 @@ describe("slackChannel() default event handlers", () => {
   it.each([
     ["files.getUploadURLExternal", "missing_scope"],
     ["files.completeUploadExternal", "channel_not_found"],
-  ])("message.completed propagates %s failure", async (method, error) => {
+  ])("message.completed posts a notice when the snippet's %s call fails", async (method, error) => {
+    const logs = captureLogRecords();
     useSuccessfulSlackFileUpload(fetchMock);
     const successfulFetch = fetchMock.getMockImplementation() as typeof fetch;
     fetchMock.mockImplementation(async (input: string | URL | Request) => {
@@ -690,21 +691,32 @@ describe("slackChannel() default event handlers", () => {
     const ctx = buildAdapterContext(adapter, stubAccessor());
     const message = "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1);
 
-    await expect(
-      callCompletionHandler(
-        adapter,
-        makeEvent("message.completed", {
-          finishReason: "stop",
-          message,
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "t1",
-        }),
-        ctx,
-      ),
-    ).rejects.toThrow(error);
+    await callCompletionHandler(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
 
-    expect(fetchMock).toHaveBeenCalledTimes(method === "files.getUploadURLExternal" ? 1 : 3);
+    const failure = logs.records.find(
+      (record) => record.message === "final reply was not delivered to Slack",
+    );
+    expect(failure).toMatchObject({
+      fields: { error: { message: expect.stringContaining(error) } },
+      level: "error",
+    });
+    const { errorId } = failure!.fields!.error as { errorId: string };
+    expect(String(fetchMock.mock.calls.at(-1)![0])).toBe("https://slack.com/api/chat.postMessage");
+    const notice = parseSlackRequestBody(fetchMock.mock.calls.at(-1)![1] as RequestInit);
+    expect(notice).toMatchObject({ channel: "C01", thread_ts: "1700000000.000001" });
+    expect(notice.markdown_text).toContain("couldn't deliver my answer");
+    expect(notice.markdown_text).toContain(errorId);
+    expect(slackCalls(fetchMock, "chat.postMessage")).toHaveLength(1);
   });
 
   it("names one working task in the status while a turn waits, and counts several", async () => {
@@ -1832,6 +1844,214 @@ describe("slackChannel() default event handlers", () => {
   });
 });
 
+describe("slackChannel() final reply delivery", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let uploadedBodies: string[];
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    uploadedBodies = useSuccessfulSlackFileUpload(fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  // Fails the next calls to each named Slack method with the queued error
+  // codes, in order; every other call succeeds.
+  function failSlackCalls(errors: Record<string, string[]>): void {
+    const succeed = fetchMock.getMockImplementation() as typeof fetch;
+    fetchMock.mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+      const method = /^https:\/\/slack\.com\/api\/([\w.]+)$/.exec(String(input))?.[1];
+      const error = method === undefined ? undefined : errors[method]?.shift();
+      if (error !== undefined) {
+        return new Response(JSON.stringify({ error, ok: false }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return succeed(input, init);
+    });
+  }
+
+  // Posts every reply as Block Kit: the answer plus a sources row.
+  const blockReplies: SlackRenderer = {
+    events: {
+      async "message.completed"(event, channel) {
+        await channel.thread.post({
+          blocks: [
+            { type: "markdown", text: event.message },
+            { type: "context", elements: [{ type: "mrkdwn", text: "Sources: 12 documents" }] },
+          ],
+          text: event.message.slice(0, 100),
+        });
+      },
+    },
+  };
+
+  function adapterWith(renderers: readonly SlackRenderer[] = [blockReplies]) {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" }, renderers })),
+      THREAD_STATE,
+    );
+    return { adapter, ctx: buildAdapterContext(adapter, stubAccessor()) };
+  }
+
+  function finalReply(message: string, finishReason = "stop") {
+    return makeEvent("message.completed", {
+      finishReason,
+      message,
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "t1",
+    });
+  }
+
+  function urls(): string[] {
+    return fetchMock.mock.calls.map(([input]) => String(input));
+  }
+
+  function undeliveredErrorId(logs: { records: { message: string; fields?: unknown }[] }) {
+    const record = logs.records.find(
+      (entry) => entry.message === "final reply was not delivered to Slack",
+    );
+    return (record?.fields as { error: { errorId: string } } | undefined)?.error.errorId;
+  }
+
+  it("uploads an authored reply Slack refuses as a snippet, without posting it again", async () => {
+    const logs = captureLogRecords();
+    failSlackCalls({ "chat.postMessage": ["msg_blocks_too_long"] });
+    const { adapter, ctx } = adapterWith();
+    const message = `# Findings\n\n${"r".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH - 20)}`;
+
+    await callCompletionHandler(adapter, finalReply(message), ctx);
+
+    expect(urls()).toEqual([
+      "https://slack.com/api/chat.postMessage",
+      "https://slack.com/api/files.getUploadURLExternal",
+      "https://files.slack.com/upload/F01",
+      "https://slack.com/api/files.completeUploadExternal",
+    ]);
+    expect(uploadedBodies).toEqual([message]);
+    expect(parseSlackRequestBody(fetchMock.mock.calls[3]![1] as RequestInit)).toMatchObject({
+      channel_id: "C01",
+      initial_comment: "Here's a snippet with the full response.",
+      thread_ts: "1700000000.000001",
+    });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        fields: expect.objectContaining({ slackError: "msg_blocks_too_long" }),
+        level: "warn",
+      }),
+    );
+    expect(ctx.state.undeliveredReplyErrorId).toBeUndefined();
+  });
+
+  it("posts a notice with the error id when the snippet also fails, and tells the model next turn", async () => {
+    const logs = captureLogRecords();
+    failSlackCalls({
+      "chat.postMessage": ["msg_blocks_too_long"],
+      "files.getUploadURLExternal": ["missing_scope"],
+    });
+    const { adapter, ctx } = adapterWith();
+
+    await callCompletionHandler(adapter, finalReply("The full answer."), ctx);
+
+    const errorId = undeliveredErrorId(logs);
+    expect(errorId).toEqual(expect.any(String));
+    expect(urls()).toEqual([
+      "https://slack.com/api/chat.postMessage",
+      "https://slack.com/api/files.getUploadURLExternal",
+      "https://slack.com/api/chat.postMessage",
+    ]);
+    const notice = parseSlackRequestBody(fetchMock.mock.calls[2]![1] as RequestInit);
+    expect(notice).toMatchObject({ channel: "C01", thread_ts: "1700000000.000001" });
+    expect(notice.markdown_text).toBe(
+      `I finished, but couldn't deliver my answer in Slack (error id \`${errorId}\`). Please ask me to resend it.`,
+    );
+
+    const next = await adapter.deliver!({ context: ["thread context"], message: "Hello?" }, ctx);
+    expect(next?.context).toEqual([
+      expect.stringContaining(
+        `Your previous reply was not delivered to Slack (error id ${errorId})`,
+      ),
+      "thread context",
+    ]);
+    expect(next?.message).toBe("Hello?");
+    const after = await adapter.deliver!({ message: "And now?" }, ctx);
+    expect(after?.context).toBeUndefined();
+  });
+
+  it("posts the notice without a snippet when an authored reply fails for another reason", async () => {
+    const logs = captureLogRecords();
+    failSlackCalls({ "chat.postMessage": ["not_in_channel"] });
+    const { adapter, ctx } = adapterWith();
+
+    await callCompletionHandler(adapter, finalReply("The full answer."), ctx);
+
+    expect(slackOperations(fetchMock)).toEqual(["chat.postMessage", "chat.postMessage"]);
+    expect(
+      parseSlackRequestBody(fetchMock.mock.calls[1]![1] as RequestInit).markdown_text,
+    ).toContain(undeliveredErrorId(logs));
+  });
+
+  it("logs and returns when the delivery notice fails too", async () => {
+    const logs = captureLogRecords();
+    failSlackCalls({
+      "chat.postMessage": ["msg_blocks_too_long", "channel_not_found"],
+      "files.getUploadURLExternal": ["missing_scope"],
+    });
+    const { adapter, ctx } = adapterWith();
+
+    await callCompletionHandler(adapter, finalReply("The full answer."), ctx);
+
+    const errorId = undeliveredErrorId(logs);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        fields: expect.objectContaining({ errorId }),
+        level: "error",
+        message: "undelivered reply notice failed",
+      }),
+    );
+    expect(ctx.state.undeliveredReplyErrorId).toBe(errorId);
+  });
+
+  it.each([
+    ["a step that ends in tool calls", "Checking the docs.", "tool-calls"],
+    ["an empty reply", "", "stop"],
+  ])("leaves a failure on %s to the adapter", async (_name, message, finishReason) => {
+    failSlackCalls({ "chat.postMessage": ["msg_blocks_too_long"] });
+    const { adapter, ctx } = adapterWith();
+
+    await expect(
+      callCompletionHandler(adapter, finalReply(message, finishReason), ctx),
+    ).rejects.toThrow("msg_blocks_too_long");
+
+    expect(slackOperations(fetchMock)).toEqual(["chat.postMessage"]);
+  });
+
+  it("lets an authored renderer hand a long reply to postCompletedSlackReply", async () => {
+    const { adapter, ctx } = adapterWith([
+      {
+        events: {
+          async "message.completed"(event, channel, ctx, next) {
+            if (event.message.length <= SLACK_MARKDOWN_TEXT_MAX_LENGTH) {
+              await blockReplies.events!["message.completed"]!(event, channel, ctx, next);
+              return;
+            }
+            await postCompletedSlackReply(channel, event.message);
+          },
+        },
+      },
+    ]);
+    const message = "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1);
+
+    await callCompletionHandler(adapter, finalReply(message), ctx);
+
+    expect(urls()).toEqual([
+      "https://slack.com/api/files.getUploadURLExternal",
+      "https://files.slack.com/upload/F01",
+      "https://slack.com/api/files.completeUploadExternal",
+    ]);
+    expect(uploadedBodies).toEqual([message]);
+  });
+});
+
 describe("rebuildSlackContext", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn());
@@ -2038,22 +2258,32 @@ describe("rebuildSlackContext", () => {
       },
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
+    const logs = captureLogRecords();
 
-    await expect(
-      callCompletionHandler(
-        adapter,
-        makeEvent("message.completed", {
-          finishReason: "stop",
-          message: "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1),
-          sequence: 0,
-          stepIndex: 0,
-          turnId: "t1",
+    await callCompletionHandler(
+      adapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: "x".repeat(SLACK_MARKDOWN_TEXT_MAX_LENGTH + 1),
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    // The anchor note, then the delivery notice; no upload without a thread.
+    expect(slackOperations(fetchMock)).toEqual(["chat.postMessage", "chat.postMessage"]);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        fields: expect.objectContaining({
+          error: expect.objectContaining({
+            message: expect.stringContaining("Slack did not return a thread timestamp"),
+          }),
         }),
-        ctx,
-      ),
-    ).rejects.toThrow("Slack did not return a thread timestamp");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+        level: "error",
+      }),
+    );
   });
 });
 
