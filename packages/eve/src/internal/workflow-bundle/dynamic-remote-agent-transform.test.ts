@@ -142,27 +142,40 @@ export default eve.defineDynamic({ events: { "session.started": () => eve.define
     }
   });
 
-  it("fails the build when credentials reference a function-local binding", async () => {
-    // The hoisted copy would silently read the module-level "env" instead.
+  // Each module also declares "env", which the hoisted copy would silently read.
+  it.each([
+    {
+      name: "handler-local const",
+      handler: `const env = "PRODUCTION";
+      return defineRemoteAgent({ description: "Research", url: "https://example.com", headers: () => ({ "x-env": env }) });`,
+    },
+    {
+      name: "handler-local function declaration",
+      handler: `function env() { return "PRODUCTION"; }
+      return defineRemoteAgent({ description: "Research", url: "https://example.com", headers: () => ({ "x-env": env() }) });`,
+    },
+    {
+      name: "catch parameter",
+      handler: `try { throw "PRODUCTION"; } catch (env) {
+        return defineRemoteAgent({ description: "Research", url: "https://example.com", headers: () => ({ "x-env": env }) });
+      }`,
+    },
+    {
+      name: "const next to a same-named nested parameter",
+      handler: `const env = "PRODUCTION";
+      return defineRemoteAgent({ description: "Research", url: "https://example.com", headers: () => ({ "x-env": env, all: ["a"].map((env) => env) }) });`,
+    },
+  ])("fails the build when credentials capture a $name", async ({ handler }) => {
     const source = `
 import { defineDynamic, defineRemoteAgent } from "eve";
 
 const env = "STAGING";
-export default defineDynamic({
-  events: {
-    "session.started": () => {
-      const env = "PRODUCTION";
-      return defineRemoteAgent({
-        description: "Remote research.",
-        headers: () => ({ "x-env": env }),
-        url: "https://research.example.com",
-      });
-    },
-  },
-});
+export default defineDynamic({ events: { "session.started": () => {
+      ${handler}
+} } });
 `;
     await expect(transformSource(source)).rejects.toThrow(
-      /Dynamic remote agent "headers" in subagents\/research\.ts references "env", declared inside a function/,
+      /Dynamic remote agent "headers" in subagents\/research\.ts references "env", declared outside module scope/,
     );
   });
 
@@ -173,15 +186,19 @@ import { defineDynamic, defineRemoteAgent } from "eve";
 const ENV = "PRODUCTION";
 export default defineDynamic({
   events: {
-    "session.started": (_event, ctx) =>
-      defineRemoteAgent({
+    "session.started": (_event, ctx) => {
+      if (ctx) {
+        const ENV = "BLOCK";
+      }
+      return defineRemoteAgent({
         async auth(request) {
           const ctx = { token: ENV };
           return { headers: { authorization: ctx.token, url: request?.url } };
         },
         description: "Remote research.",
         url: "https://research.example.com",
-      }),
+      });
+    },
   },
 });
 `;

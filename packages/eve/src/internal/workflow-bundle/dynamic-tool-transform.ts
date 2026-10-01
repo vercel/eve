@@ -7,8 +7,8 @@
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import {
+  collectPatternNames,
   collectReferencedIdentifierNames,
-  collectScopeVarDeclarations,
   extractParamNames,
   findEveImportAliases,
   findProperty,
@@ -16,6 +16,7 @@ import {
   isFunction,
   readDefinerName,
   type DynamicToolAstNode as AstNode,
+  walkNode,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
 type CallbackPhase =
@@ -405,6 +406,17 @@ function dedupeShadowed(names: readonly string[]): string[] {
     deduped.unshift(name);
   }
   return deduped;
+}
+
+function collectScopeVarDeclarations(bodyNode: AstNode): string[] {
+  const names: string[] = [];
+  walkNode(bodyNode, (node) => {
+    if (node !== bodyNode && isFunction(node)) return false;
+    if (node.type === "VariableDeclarator") collectPatternNames(node.id as AstNode | null, names);
+    if (node.type === "FunctionDeclaration" && node.id?.name) names.push(node.id.name);
+    return true;
+  });
+  return names;
 }
 
 function extractFnParams(source: string, fn: AstNode): string {
