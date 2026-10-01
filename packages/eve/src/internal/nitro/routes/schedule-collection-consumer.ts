@@ -1,7 +1,7 @@
 import { handleCallback } from "@vercel/queue";
-import { SchedulesApiError, SchedulesClient } from "@vercel/schedules";
+import { SchedulesApiError, SchedulesClient } from "#compiled/@vercel/schedules/index.js";
 
-import { CreateOnceClaimPendingError } from "#channel/channel-address.js";
+import { CreateOnceClaimPendingError } from "#runtime/schedules/resolve-occurrence-owner.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import { EVE_SCHEDULE_CONSUMER_MAX_DELIVERIES } from "#internal/schedules/consumer-route.js";

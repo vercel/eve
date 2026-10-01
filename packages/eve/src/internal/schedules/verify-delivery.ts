@@ -1,4 +1,4 @@
-import type { Schedule as VercelSchedule } from "@vercel/schedules";
+import type { Schedule as VercelSchedule } from "#compiled/@vercel/schedules/index.js";
 
 import { deriveEveScheduleQueueTopic } from "#runtime/schedules/queue-namespace.js";
 

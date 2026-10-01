@@ -1,4 +1,7 @@
-import type { Schedule as VercelSchedule, SchedulesClient } from "@vercel/schedules";
+import type {
+  Schedule as VercelSchedule,
+  SchedulesClient,
+} from "#compiled/@vercel/schedules/index.js";
 
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type {
@@ -126,7 +129,7 @@ async function createClient(
   signal: AbortSignal,
 ): Promise<SchedulesClient> {
   assertSupportedVercelEnvironment();
-  const { SchedulesClient } = await import("@vercel/schedules");
+  const { SchedulesClient } = await import("#compiled/@vercel/schedules/index.js");
   signal.throwIfAborted();
   const fetchImpl = options.fetch ?? fetch;
   return new SchedulesClient({
