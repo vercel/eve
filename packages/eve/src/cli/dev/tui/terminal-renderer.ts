@@ -149,11 +149,7 @@ import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
 import { inputContextLabel, renderQuestionChoices, renderQuestionPanel } from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
-import {
-  formatStoredDiagnostic,
-  presentDiagnostic,
-  splitWorkflowLogs,
-} from "./diagnostic-presentation.js";
+import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
 import {
   isProgressPulseVisible,
@@ -477,7 +473,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #restoreLogCapture?: () => void;
   #stdoutLogBuffer = "";
   #stderrLogBuffer = "";
-  #stderrInWorkflowLog = false;
   #delayedDevBuildError?: string;
   /**
    * The in-place dev rebuild status line. While the dev server's rebuild log
@@ -3904,7 +3899,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     this.#stdoutLogBuffer = "";
     this.#stderrLogBuffer = "";
-    this.#stderrInWorkflowLog = false;
 
     const capture = (target: NodeJS.WriteStream, source: "stdout" | "stderr"): (() => void) => {
       const original = target.write.bind(target);
