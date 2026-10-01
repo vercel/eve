@@ -95,7 +95,7 @@ export function createGenerationPackageBoundaryPlugin(input: {
 export function createRuntimeLoaderPackageBoundaryPlugin(input: {
   readonly externalDependencies: readonly string[];
   readonly packageRoot: string;
-  readonly extensionSpecifier?: string;
+  readonly extensionSpecifiers?: ReadonlySet<string>;
 }): Record<string, unknown> {
   const canonicalPackageRoot = toCanonicalPath(input.packageRoot);
 
@@ -111,7 +111,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
         return undefined;
       }
 
-      if (source === input.extensionSpecifier) return undefined;
+      if (input.extensionSpecifiers?.has(source) === true) return undefined;
       if (isFrameworkRuntimeImport(source, importer)) {
         return {
           external: true,
