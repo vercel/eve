@@ -378,7 +378,7 @@ describe("turn connection approval restoration", () => {
     expect(batches).toHaveLength(2);
     expect(batches[1]!.event!.turnId).not.toBe(firstBatch.event!.turnId);
     clearDurableDynamicCallbacks(sessionId);
-    await fixture.step({
+    let resumed = await fixture.step({
       delivery: {
         kind: "deliver",
         auth: bob,
@@ -394,14 +394,18 @@ describe("turn connection approval restoration", () => {
         ],
       },
     });
-    clearDurableDynamicCallbacks(sessionId);
-    const resumed = await fixture.step();
+    // Step the way the session workflow does: a park ends the turn until the next delivery.
+    while (resumed.action === "continue") {
+      clearDurableDynamicCallbacks(sessionId);
+      resumed = await fixture.step();
+    }
+    expect(resumed).toMatchObject({ action: "park", hasPendingInputBatch: false });
     expect(fixture.policyTurns).toEqual(batches.map((batch) => batch.event!.turnId));
     expect(fixture.response).toHaveBeenCalledTimes(2);
     expect(
       getApprovalAuditState(readDurableSession(resumed.sessionState).state).settlements,
     ).toHaveLength(2);
-    expect(fixture.fetch).toHaveBeenCalled();
+    expect(fixture.fetch).toHaveBeenCalledTimes(2);
     expect(fixture.events.filter((event) => event.type === "session.failed")).toEqual([]);
   });
   it.each([false, true])(
