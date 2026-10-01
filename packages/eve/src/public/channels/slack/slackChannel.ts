@@ -1139,7 +1139,7 @@ async function handleEventPost(input: {
   }
 
   // Specialized handlers retain their bot/subtype filters. onMessage receives
-  // structurally valid messages except this app's own; onEvent is the raw fallback.
+  // newly posted messages except this app's own; onEvent is the raw fallback.
   const onEvent = config.onEvent;
   if (dispatch === null && onEvent !== undefined) {
     dispatch = () =>

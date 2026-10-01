@@ -240,12 +240,30 @@ export function slackEventInstallationTeamId(envelope: SlackEventCallback): stri
   return authorizations.find((entry) => typeof entry.team_id === "string")?.team_id;
 }
 
-/** Parses a Slack message event without applying bot or subtype policy. */
+/**
+ * Parses a Slack message event that posts a new message. Bot-authored messages
+ * remain; edits, deletions, joins, and other system events return `null`.
+ */
 export function parseMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
   if (envelope.type !== "event_callback") return null;
   const event = envelope.event;
   if (!event || event.type !== "message") return null;
-  return buildSlackMessage(event as SlackMessageEvent, envelope.team_id);
+  const message = event as SlackMessageEvent;
+  if (!isPostedMessageSubtype(message.subtype)) return null;
+  return buildSlackMessage(message, envelope.team_id);
+}
+
+// Change events such as `message_changed` carry the edit's own `ts` and nest
+// the author under `message`, so they cannot be routed as new messages.
+const POSTED_MESSAGE_SUBTYPES: ReadonlySet<string> = new Set([
+  "bot_message",
+  "file_share",
+  "me_message",
+  "thread_broadcast",
+]);
+
+function isPostedMessageSubtype(subtype: string | undefined): boolean {
+  return subtype === undefined || subtype === "" || POSTED_MESSAGE_SUBTYPES.has(subtype);
 }
 
 export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMessage | null {

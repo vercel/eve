@@ -3410,6 +3410,72 @@ describe("slackChannel() onMessage", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  // Slack reports chat.update and chat.delete on the app's own HITL card as
+  // message events whose author is nested under `message`/`previous_message`.
+  it.each([
+    [
+      "message_changed",
+      {
+        channel: "D01",
+        channel_type: "im",
+        hidden: true,
+        message: {
+          app_id: "A01",
+          bot_id: "B01",
+          text: "Approved",
+          ts: "1700000000.000200",
+          type: "message",
+          user: "U_BOT",
+        },
+        subtype: "message_changed",
+        ts: "1700000000.000300",
+        type: "message",
+      },
+    ],
+    [
+      "message_deleted",
+      {
+        channel: "D01",
+        channel_type: "im",
+        deleted_ts: "1700000000.000200",
+        hidden: true,
+        previous_message: {
+          app_id: "A01",
+          bot_id: "B01",
+          text: "Approve?",
+          ts: "1700000000.000200",
+          type: "message",
+          user: "U_BOT",
+        },
+        subtype: "message_deleted",
+        ts: "1700000000.000400",
+        type: "message",
+      },
+    ],
+  ])("routes %s to onEvent instead of the documented DM policy", async (_label, event) => {
+    const onEvent = vi.fn(() => {});
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      async onMessage(ctx, message) {
+        if (message.author?.isBot) return null;
+        return (await ctx.isDMOrPrivateChannel()) ||
+          ctx.isBotMentioned() ||
+          (await ctx.isSubscribed())
+          ? { auth: null }
+          : null;
+      },
+      onEvent,
+    });
+    const body = buildEventBody(event, {
+      authorizations: [{ is_bot: true, user_id: "U_BOT" }],
+    });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).not.toHaveBeenCalled();
+    expect(onEvent).toHaveBeenCalledTimes(1);
+  });
+
   it("gives specialized message hooks precedence", async () => {
     const onAppMention = vi.fn(() => null);
     const onMessage = vi.fn(() => ({ auth: null }));
