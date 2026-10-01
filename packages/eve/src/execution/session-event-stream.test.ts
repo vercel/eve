@@ -45,7 +45,9 @@ function mockSessionStream(
 }
 
 const storedEvents = (count: number) =>
-  Array.from({ length: count }, (_, index) => stampTestEvent(createSessionWaitingEvent(), index));
+  Array.from({ length: count }, (_, index) =>
+    stampTestEvent(createSessionWaitingEvent(undefined), index),
+  );
 
 async function collect(iterable: AsyncIterable<MessageStreamEvent>) {
   const events: MessageStreamEvent[] = [];

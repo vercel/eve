@@ -6,6 +6,7 @@ import type {
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import type { EveEvalDerivedFacts, EveEvalSubagentCall, EveEvalToolCall } from "#evals/types.js";
 
 interface MutableToolCall {
@@ -68,6 +69,7 @@ export function deriveRunFacts(
   let messageCount = 0;
   let reasoningBlockCount = 0;
   const models = new Set<string>();
+  let usage: TokenUsage | undefined;
   let failureCode: string | undefined;
 
   const ensureToolCall = (callId: string, name: string, input: JsonObject): MutableToolCall => {
@@ -157,7 +159,18 @@ export function deriveRunFacts(
         break;
       }
 
+      case "session.waiting": {
+        usage = event.data.usage;
+        break;
+      }
+
+      case "session.completed": {
+        usage = event.data?.usage;
+        break;
+      }
+
       case "session.failed": {
+        usage = event.data.usage;
         failureCode = event.data.code;
         break;
       }
@@ -180,6 +193,7 @@ export function deriveRunFacts(
     messageCount,
     reasoningBlockCount,
     models: [...models],
+    usage,
     failureCode,
   };
 }

@@ -136,7 +136,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       firstStream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      firstStream.pushEvent(createSessionWaitingEvent());
+      firstStream.pushEvent(createSessionWaitingEvent(undefined));
     }, 0);
 
     const first = await firstPromise;
@@ -169,7 +169,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       secondStream.pushEvent(createTurnCompletedEvent({ sequence: 2, turnId: "turn_002" }));
-      secondStream.pushEvent(createSessionWaitingEvent());
+      secondStream.pushEvent(createSessionWaitingEvent(undefined));
     }, 0);
 
     const second = await secondPromise;
@@ -281,7 +281,7 @@ describe("sendDevelopmentMessage", () => {
         turnId: "turn_002",
       }),
       createTurnCompletedEvent({ sequence: 2, turnId: "turn_002" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ]);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -322,7 +322,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       firstStream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      firstStream.pushEvent(createSessionWaitingEvent());
+      firstStream.pushEvent(createSessionWaitingEvent(undefined));
     }, 0);
 
     const first = await firstPromise;
@@ -474,7 +474,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       stream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      stream.pushEvent(createSessionWaitingEvent());
+      stream.pushEvent(createSessionWaitingEvent(undefined));
     }, 0);
 
     const result = await messagePromise;
@@ -533,7 +533,7 @@ describe("sendDevelopmentMessage", () => {
         }),
       );
       stream.pushEvent(createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }));
-      stream.pushEvent(createSessionWaitingEvent());
+      stream.pushEvent(createSessionWaitingEvent(undefined));
     }, 0);
 
     await messagePromise;

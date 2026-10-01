@@ -75,6 +75,7 @@ import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
+import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import { createTask, writeTaskTable } from "#execution/tasks/table.js";
 import { SessionLimitDeclinedError, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
@@ -418,6 +419,28 @@ function setDelegatedParent(ctx: ContextContainer): void {
     sessionId: "session-parent",
     turn: { id: "turn-parent", sequence: 0 },
   });
+}
+
+const DELEGATED_SPEND = {
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  costUsd: 0.25,
+  inputTokens: 100,
+  outputTokens: 20,
+};
+
+/** A session whose delegated agents already spent {@link DELEGATED_SPEND}. */
+function withDelegatedSpend(overrides?: Parameters<typeof createTestSession>[0]): HarnessSession {
+  return countRunUsage(createTestSession(overrides), DELEGATED_SPEND);
+}
+
+function lastSessionEvent<T extends "session.waiting" | "session.failed">(
+  events: readonly UnstampedMessageStreamEvent[],
+  type: T,
+): Extract<UnstampedMessageStreamEvent, { type: T }> | undefined {
+  return events.findLast(
+    (event): event is Extract<UnstampedMessageStreamEvent, { type: T }> => event.type === type,
+  );
 }
 
 function createEventCollector(): {
@@ -1710,6 +1733,81 @@ describe("createToolLoopHarness", () => {
       outputTokens: 3,
       sawCost: true,
     });
+  });
+
+  it("reports the session's running usage, delegated spend included, when the turn ends", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      providerMetadata: { gateway: { cost: "0.125" } },
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: {
+        inputTokenDetails: { cacheReadTokens: 2, cacheWriteTokens: 1 },
+        inputTokens: 7,
+        outputTokens: 3,
+      },
+    });
+    const { emit, events } = createEventCollector();
+
+    await createToolLoopHarness(createTestConfig(emit))(withDelegatedSpend(), { message: "Hi" });
+
+    expect(lastSessionEvent(events, "session.waiting")?.data.usage).toEqual({
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      costUsd: 0.375,
+      inputTokens: 107,
+      outputTokens: 23,
+    });
+  });
+
+  it("reports no session cost on session.waiting when no model call reported one", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
+    const { emit, events } = createEventCollector();
+
+    await createToolLoopHarness(createTestConfig(emit))(createTestSession(), { message: "Hi" });
+
+    expect(lastSessionEvent(events, "session.waiting")?.data.usage).toEqual({
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: undefined,
+      inputTokens: 7,
+      outputTokens: 3,
+    });
+  });
+
+  it("reports the session's usage on session.waiting when a failed model call parks the turn", async () => {
+    setupMockAgentError(new Error("Model blew up"));
+    const { emit, events } = createEventCollector();
+
+    await createToolLoopHarness(createTestConfig(emit))(withDelegatedSpend(), { message: "Hi" });
+
+    expect(lastSessionEvent(events, "session.waiting")?.data.usage).toEqual(DELEGATED_SPEND);
+  });
+
+  it("reports the session's usage on session.failed when model selection fails", async () => {
+    const emit: HarnessEmitFn = async (event) => {
+      events.push(event);
+      if (event.type === "turn.started") {
+        throw new DynamicModelSelectionError(new Error("flag service unavailable"));
+      }
+    };
+    const events: UnstampedMessageStreamEvent[] = [];
+
+    await createToolLoopHarness(createTestConfig(emit))(
+      withDelegatedSpend({ outputSchema: { type: "object" } }),
+      { message: "Hi" },
+    );
+
+    expect(lastSessionEvent(events, "session.failed")?.data.usage).toEqual(DELEGATED_SPEND);
   });
 
   it.each([

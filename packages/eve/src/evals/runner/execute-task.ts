@@ -2,6 +2,7 @@ import { runUntilAborted } from "#evals/abort.js";
 import type { Client } from "#client/client.js";
 import type { MessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { addTokenUsage, type TokenUsage } from "#shared/token-usage.js";
 import type {
   AssertionResult,
   EveEval,
@@ -172,8 +173,30 @@ function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEval
     messageCount: sum(sessions, (session) => session.derived.messageCount),
     reasoningBlockCount: sum(sessions, (session) => session.derived.reasoningBlockCount),
     models: [...new Set(sessions.flatMap((session) => session.derived.models))],
+    usage: evalUsage(sessions),
     failureCode,
   };
+}
+
+/**
+ * The eval's usage: each captured session's latest usage, counted once however often the eval
+ * captured it, less the sessions another captured session opened, whose spend that session already
+ * counts. No usage when a counted session reported none.
+ */
+function evalUsage(sessions: readonly EveEvalSessionResult[]): TokenUsage | undefined {
+  const opened = new Set(
+    sessions.flatMap((session) =>
+      session.events.flatMap((event) =>
+        event.type === "agent.started" ? [event.data.sessionId] : [],
+      ),
+    ),
+  );
+  const latestById = new Map(sessions.map((session) => [session.sessionId, session.derived.usage]));
+  const counted = [...latestById].flatMap(([id, usage]) =>
+    id !== undefined && opened.has(id) ? [] : [usage],
+  );
+  if (!counted.every((usage): usage is TokenUsage => usage !== undefined)) return undefined;
+  return counted.reduce(addTokenUsage);
 }
 
 function selectPrimarySessionId(sessions: readonly EveEvalSessionResult[]): string | undefined {

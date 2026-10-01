@@ -141,7 +141,11 @@ describe("ChannelAdapter helpers", () => {
       },
     };
 
-    const event = await callAdapterEventHandler(adapter, createSessionWaitingEvent(), context);
+    const event = await callAdapterEventHandler(
+      adapter,
+      createSessionWaitingEvent(undefined),
+      context,
+    );
 
     expect(event).toEqual({
       data: { continuationToken: "C1:T1", wait: "next-user-message" },
@@ -163,7 +167,7 @@ describe("ChannelAdapter helpers", () => {
 
     const event = await callAdapterEventHandler(
       { kind: "http" },
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
       context,
     );
 

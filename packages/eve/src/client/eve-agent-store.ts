@@ -606,7 +606,9 @@ export class EveAgentStore<TData> {
     this.#applyTerminalStreamFailure(event);
     const settled = this.#isSettledAt(event);
     if (this.#status !== "resuming" && this.#error === undefined) {
-      if ("data" in event && "turnId" in event.data) this.#status = "streaming";
+      if ("data" in event && event.data !== undefined && "turnId" in event.data) {
+        this.#status = "streaming";
+      }
       if (this.#activeTurn === undefined && settled) this.#status = "ready";
     }
     this.#callbacks.onSessionChange?.(this.#session?.state);

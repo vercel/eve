@@ -211,7 +211,8 @@ export class EveAcpAdapter {
         let unsupportedEvent: RequestError | undefined;
 
         for await (const event of response) {
-          const turnId = "data" in event && "turnId" in event.data ? event.data.turnId : undefined;
+          const data = "data" in event ? event.data : undefined;
+          const turnId = data !== undefined && "turnId" in data ? data.turnId : undefined;
           if (typeof turnId === "string") active.turnId = turnId;
 
           if (event.type === "input.requested") inputRequests.push(...event.data.requests);

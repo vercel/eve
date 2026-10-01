@@ -2810,6 +2810,7 @@ describe("emitTerminalSessionFailureStep", () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await emitTerminalSessionFailureStep({
+      usage: undefined,
       error,
       sessionWritable: createTestWritable(),
       serializedContext: serialized,
@@ -2859,6 +2860,7 @@ describe("emitTerminalSessionFailureStep", () => {
     });
 
     await emitTerminalSessionFailureStep({
+      usage: undefined,
       error,
       sessionWritable: createTestWritable(),
       serializedContext: serialized,
@@ -2907,6 +2909,7 @@ describe("emitTerminalSessionFailureStep", () => {
     // a secondary failure during notification.
     await expect(
       emitTerminalSessionFailureStep({
+        usage: undefined,
         error: new Error("inner"),
         sessionWritable: createTestWritable(),
         serializedContext: serialized,

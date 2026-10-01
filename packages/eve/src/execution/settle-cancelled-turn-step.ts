@@ -18,7 +18,11 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import {
+  getSessionUsage,
+  getTurnUsageState,
+  takeSessionUsageDelta,
+} from "#harness/turn-tag-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 export interface CancelledTurnSettleResult {
@@ -65,7 +69,12 @@ export async function settleCancelledTurn(
   const durableState = step.durableSession.state;
   const { published, result: usage } = await publishFromSessionStep(step, {
     origin: "own",
-    publish: (emit) => emitCancelledTurn(emit, getHarnessEmissionState(durableState)),
+    publish: (emit) =>
+      emitCancelledTurn(
+        emit,
+        getHarnessEmissionState(durableState),
+        getSessionUsage(step.durableSession),
+      ),
     updateSession(session, emissionState) {
       // `clearPendingSessionLimitPrompt`: cancellation settles with the step's
       // input snapshot, which can resurrect an already-answered session-limit

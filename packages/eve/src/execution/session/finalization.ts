@@ -7,7 +7,7 @@ import type { TurnOutcome } from "#execution/session/turn-step-types.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import { getSessionTokenUsage, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
+import { getSessionUsage, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
 /** The three ways a session ends. `done` already emitted its terminal event inside the turn. */
@@ -37,10 +37,13 @@ export async function finalizeSession(
   if (sessionState !== undefined) {
     await terminateChildSessionsStep({ sessionState });
   }
+  const session = sessionState?.snapshot.session;
+  const usage = session === undefined ? undefined : getSessionUsage(session);
   if (outcome.kind === "expired") {
     await emitTerminalSessionCompletionStep({
       sessionWritable: context.sessionWritable,
       serializedContext,
+      usage,
     });
   } else if (outcome.kind === "failed") {
     await emitTerminalSessionFailureStep({
@@ -48,6 +51,7 @@ export async function finalizeSession(
       sessionWritable: context.sessionWritable,
       serializedContext,
       turnId: outcome.turnId,
+      usage,
     });
   }
 
@@ -94,7 +98,7 @@ function settledResult(
     session === undefined || context.caller === undefined
       ? {}
       : {
-          sessionUsage: toUsage(getSessionTokenUsage(session)),
+          sessionUsage: getSessionUsage(session),
           turnUsage: takeSessionUsageDelta(session).delta,
         };
   switch (outcome.kind) {

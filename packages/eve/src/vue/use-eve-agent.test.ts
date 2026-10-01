@@ -119,7 +119,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ];
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createBoundedStreamResponse(events))
@@ -157,7 +157,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -198,7 +198,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
       .mockResolvedValueOnce(
         createEagerStreamResponse([
           createMessageReceivedEvent({ message: "After", sequence: 0, turnId: "turn_1" }),
-          createSessionWaitingEvent(),
+          createSessionWaitingEvent(undefined),
         ]),
       );
 

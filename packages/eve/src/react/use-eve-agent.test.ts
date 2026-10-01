@@ -185,7 +185,7 @@ describe("useEveAgent", () => {
       const cancel = vi.fn();
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
-          const [waiting] = stampTestEvents([createSessionWaitingEvent()]);
+          const [waiting] = stampTestEvents([createSessionWaitingEvent(undefined)]);
           controller.enqueue(new TextEncoder().encode(`${JSON.stringify(waiting)}\n`));
         },
         cancel,
@@ -232,7 +232,7 @@ describe("useEveAgent", () => {
     let creates = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       if (init?.method === "POST") return createStartedMessageResponse(`session_${++creates}`, "");
-      return createEagerStreamResponse([createSessionWaitingEvent()]);
+      return createEagerStreamResponse([createSessionWaitingEvent(undefined)]);
     });
     let agent: UseEveAgentHelpers<EveMessageData> | undefined;
     function Chat({
@@ -283,7 +283,7 @@ describe("useEveAgent", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockReturnValueOnce(accepted.promise)
-      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent()]));
+      .mockResolvedValueOnce(createEagerStreamResponse([createSessionWaitingEvent(undefined)]));
     let agent: UseEveAgentHelpers<EveMessageData> | undefined;
     function Chat({ prewarm }: { readonly prewarm: boolean }) {
       agent = useEveAgent({ prewarm });
@@ -346,7 +346,7 @@ describe("useEveAgent", () => {
     let creates = 0;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       if (init?.method === "POST") return createStartedMessageResponse(`session_${++creates}`, "");
-      return createEagerStreamResponse([createSessionWaitingEvent()]);
+      return createEagerStreamResponse([createSessionWaitingEvent(undefined)]);
     });
     let agent: UseEveAgentHelpers<EveMessageData> | undefined;
     let setPrewarm: ((value: boolean) => void) | undefined;
@@ -463,7 +463,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -586,7 +586,7 @@ describe("useEveAgent", () => {
       .mockImplementation(async (_request, init) =>
         init?.method === "POST"
           ? await startResponse.promise
-          : createEagerStreamResponse([createSessionWaitingEvent()]),
+          : createEagerStreamResponse([createSessionWaitingEvent(undefined)]),
       );
 
     let randomWord = "jazz";
@@ -643,7 +643,7 @@ describe("useEveAgent", () => {
       .mockImplementation(async (_request, init) =>
         init?.method === "POST"
           ? await startResponse.promise
-          : createEagerStreamResponse([createSessionWaitingEvent()]),
+          : createEagerStreamResponse([createSessionWaitingEvent(undefined)]),
       );
 
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
@@ -722,7 +722,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_2",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ];
 
     vi.spyOn(globalThis, "fetch")
@@ -802,6 +802,7 @@ describe("useEveAgent", () => {
         turnId: "turn_1",
       }),
       createSessionFailedEvent({
+        usage: undefined,
         code: "MODEL_CALL_FAILED",
         message: "Bad Request",
         sessionId: "session_1",
@@ -874,7 +875,7 @@ describe("useEveAgent", () => {
         sequence: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -938,7 +939,7 @@ describe("useEveAgent", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ]);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -984,7 +985,7 @@ describe("useEveAgent", () => {
       init?.method === "POST"
         ? await startResponse.promise
         : await startResponse.promise.then(() =>
-            createEagerStreamResponse([createSessionWaitingEvent()]),
+            createEagerStreamResponse([createSessionWaitingEvent(undefined)]),
           ),
     );
 

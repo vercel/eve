@@ -22,7 +22,7 @@ describe("SteeringStream", () => {
     const events = stampTestEvents([
       createMessageReceivedEvent({ message: "first", sequence: 0, turnId: "turn_0" }),
       createMessageReceivedEvent({ message: "steer", sequence: 0, turnId: "turn_0" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ]);
     const session = { send: vi.fn(async () => iterate(events.slice(1))) };
     const stream = new SteeringStream(iterate(events), session);
@@ -37,9 +37,9 @@ describe("SteeringStream", () => {
   it("follows a message accepted after the original turn settled", async () => {
     const events = stampTestEvents([
       createMessageReceivedEvent({ message: "first", sequence: 0, turnId: "turn_0" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
       createMessageReceivedEvent({ message: "later", sequence: 1, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ]);
     const stream = new SteeringStream(iterate(events.slice(0, 2)), {
       send: async () => iterate(events.slice(2)),
@@ -51,9 +51,9 @@ describe("SteeringStream", () => {
   it("skips an overlapping settled boundary before following the accepted turn", async () => {
     const events = stampTestEvents([
       createMessageReceivedEvent({ message: "first", sequence: 0, turnId: "turn_0" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
       createMessageReceivedEvent({ message: "later", sequence: 1, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ]);
     const stream = new SteeringStream(iterate(events.slice(0, 2)), {
       send: async () => iterate(events.slice(1)),
@@ -78,7 +78,7 @@ describe("SteeringStream", () => {
   });
 
   it("reports failed admission without losing the original stream boundary", async () => {
-    const events = stampTestEvents([createSessionWaitingEvent()]);
+    const events = stampTestEvents([createSessionWaitingEvent(undefined)]);
     const stream = new SteeringStream(iterate(events), {
       send: async () => {
         throw new Error("send failed");

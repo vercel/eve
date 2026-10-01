@@ -113,6 +113,7 @@ describe("dispatchStreamEventHooks", () => {
     createStepStartedEvent({ sequence: 0, turnId: "turn_0", stepIndex: 0, modelId: "test" }),
     { type: "session.completed" } as const,
     createSessionFailedEvent({
+      usage: undefined,
       code: "TEST_FAILURE",
       message: "Runtime failure",
       sessionId: "session_test",

@@ -36,7 +36,7 @@ function turnEvents(): MessageStreamEvent[] {
       stepIndex: 0,
       turnId: "turn_1",
     }),
-    createSessionWaitingEvent(),
+    createSessionWaitingEvent(undefined),
   ] as UnstampedMessageStreamEvent[]);
 }
 
@@ -63,7 +63,7 @@ function streamingTurnEvents(): MessageStreamEvent[] {
       stepIndex: 0,
       turnId: "turn_1",
     }),
-    createSessionWaitingEvent(),
+    createSessionWaitingEvent(undefined),
   ] as UnstampedMessageStreamEvent[]);
 }
 
@@ -327,7 +327,7 @@ describe("EveAgentStore lifecycle", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) =>
       init?.method === "POST"
         ? await start.promise
-        : streamResponse(stampTestEvents([createSessionWaitingEvent()])),
+        : streamResponse(stampTestEvents([createSessionWaitingEvent(undefined)])),
     );
     const store = createStore<readonly string[]>({
       initialSession: { sessionId: "session_1", streamIndex: 0 },
@@ -415,7 +415,9 @@ describe("EveAgentStore prewarming", () => {
       .spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(error)
       .mockResolvedValueOnce(startedResponse())
-      .mockResolvedValueOnce(streamResponse(stampTestEvents([createSessionWaitingEvent()])));
+      .mockResolvedValueOnce(
+        streamResponse(stampTestEvents([createSessionWaitingEvent(undefined)])),
+      );
     const onError = vi.fn();
     const store = createStore({ reducer: defaultMessageReducer() });
     store.setCallbacks({ onError });
@@ -522,7 +524,9 @@ describe("EveAgentStore prewarming", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockReturnValueOnce(accepted.promise)
-      .mockResolvedValueOnce(streamResponse(stampTestEvents([createSessionWaitingEvent()])));
+      .mockResolvedValueOnce(
+        streamResponse(stampTestEvents([createSessionWaitingEvent(undefined)])),
+      );
     const onFinish = vi.fn();
     const onSessionChange = vi.fn();
     const prepareSend = vi.fn();
@@ -616,7 +620,7 @@ describe("EveAgentStore prewarming", () => {
         stepIndex: 0,
         turnId: "turn-note",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ]);
     const store = createStore({
       initialSession: { sessionId: "session_1", streamIndex: initialEvents.length },
@@ -639,7 +643,7 @@ describe("EveAgentStore prewarming", () => {
         stepIndex: 0,
         turnId: "turn-note",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ]).map((event) => ({
       ...event,
       meta: { ...event.meta, id: `refusal-${event.meta.id}`, deliveryIds: ["approval-delivery"] },
@@ -662,7 +666,7 @@ describe("EveAgentStore prewarming", () => {
         stepIndex: 0,
         turnId: "turn-report",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ]).map((event) => ({
       ...event,
       meta: { ...event.meta, id: `unsolicited-${event.meta.id}`, deliveryIds: ["report-delivery"] },
@@ -707,7 +711,7 @@ describe("EveAgentStore prewarming", () => {
         stepIndex: 0,
         turnId: "turn_scheduled",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ]).map((event) => ({
       ...event,
       meta: { ...event.meta, deliveryIds: ["scheduled-delivery"] },
@@ -965,7 +969,7 @@ describe("EveAgentStore stream overlap", () => {
 
   it("applies a pre-v20 event whose envelope has no id", async () => {
     const legacy = preV20MessageCompletedEvent();
-    const boundary = stampTestEvents([createSessionWaitingEvent()])[0]!;
+    const boundary = stampTestEvents([createSessionWaitingEvent(undefined)])[0]!;
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(startedResponse())
       .mockResolvedValueOnce(streamResponse([legacy, boundary]));
@@ -1107,7 +1111,7 @@ describe("EveAgentStore session resume", () => {
           stepIndex: 0,
           turnId: "turn_0",
         }),
-        createSessionWaitingEvent(),
+        createSessionWaitingEvent(undefined),
       ]).map((event, index) =>
         index < 2 ? event : { ...event, meta: { ...event.meta, deliveryIds: ["delivery_1"] } },
       );
@@ -1157,7 +1161,7 @@ describe("EveAgentStore session resume", () => {
           stepIndex: 0,
           turnId: `turn_${index}`,
         }),
-        createSessionWaitingEvent(),
+        createSessionWaitingEvent(undefined),
       ]).flat() as UnstampedMessageStreamEvent[],
     );
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(boundedStreamResponse(events));
@@ -1326,7 +1330,7 @@ describe("EveAgentStore session resume", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ] as UnstampedMessageStreamEvent[]);
     const initialEvents = [received!, started!];
     const live = controlledStreamResponse();
@@ -1361,6 +1365,7 @@ describe("EveAgentStore session resume", () => {
   it("publishes a hydrated terminal failure with error status", async () => {
     const failed = stampTestEvents([
       createSessionFailedEvent({
+        usage: undefined,
         code: "SESSION_FAILED",
         message: "Session failed.",
         sessionId: "session_1",
@@ -1427,7 +1432,7 @@ describe("EveAgentStore session resume", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
       createMessageReceivedEvent({ message: "Again", sequence: 0, turnId: "turn_2" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_2" }),
       createMessageCompletedEvent({
@@ -1437,7 +1442,7 @@ describe("EveAgentStore session resume", () => {
         stepIndex: 0,
         turnId: "turn_2",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ] as UnstampedMessageStreamEvent[]);
     const settled = events.slice(0, 3);
     const live = controlledStreamResponse();
@@ -1482,7 +1487,7 @@ describe("EveAgentStore session resume", () => {
         stepIndex: 0,
         turnId: "turn_3",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ]);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -1510,7 +1515,7 @@ describe("EveAgentStore session resume", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
       createAuthorizationRequiredEvent({
         authorization: { url: "https://idp.example.com/authorize" },
         description: "Linear",
@@ -1520,7 +1525,7 @@ describe("EveAgentStore session resume", () => {
         turnId: "turn_2",
         webhookUrl: "https://agent.example.com/eve/v1/connections/linear/callback/hook",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
       createAuthorizationCompletedEvent({
         name: "linear",
         outcome: "authorized",
@@ -1528,7 +1533,7 @@ describe("EveAgentStore session resume", () => {
         stepIndex: 0,
         turnId: "turn_2",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ] as UnstampedMessageStreamEvent[]);
     const settled = events.slice(0, 3);
     const fetchMock = vi
@@ -1558,7 +1563,7 @@ describe("EveAgentStore session resume", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ] as UnstampedMessageStreamEvent[]);
     const live = controlledStreamResponse();
     const requests: string[] = [];
@@ -1677,7 +1682,7 @@ describe("EveAgentStore steering", () => {
           stepIndex: 1,
           turnId: "turn_1",
         }),
-        createSessionWaitingEvent(),
+        createSessionWaitingEvent(undefined),
       ] as UnstampedMessageStreamEvent[]).map((event) => ({
         ...event,
         meta: { ...event.meta, deliveryIds: ["delivery_1"] },
@@ -1717,7 +1722,7 @@ describe("EveAgentStore steering", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
       ...event,
       meta: {
@@ -1773,7 +1778,7 @@ describe("EveAgentStore steering", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
       createMessageReceivedEvent({ message: "Instead", sequence: 0, turnId: "turn_2" }),
       createTurnStartedEvent({ sequence: 1, turnId: "turn_2" }),
       createMessageCompletedEvent({
@@ -1783,7 +1788,7 @@ describe("EveAgentStore steering", () => {
         stepIndex: 0,
         turnId: "turn_2",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ] as UnstampedMessageStreamEvent[]).map((event, index) => ({
       ...event,
       meta: { ...event.meta, deliveryIds: [index < 4 ? "first-delivery" : "delivery_1"] },
@@ -1846,6 +1851,7 @@ describe("EveAgentStore terminal failure", () => {
   it("publishes a live terminal failure with error status", async () => {
     const failed = stampTestEvents([
       createSessionFailedEvent({
+        usage: undefined,
         code: "SESSION_FAILED",
         message: "Session failed.",
         sessionId: "session_1",
@@ -1878,7 +1884,7 @@ describe("EveAgentStore cancellation", () => {
     const [turnStarted, turnCancelled, boundary] = stampTestEvents([
       createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
       createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ] as UnstampedMessageStreamEvent[]);
     const fetchMock = vi
       .spyOn(globalThis, "fetch")

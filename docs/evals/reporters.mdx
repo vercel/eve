@@ -99,6 +99,8 @@ An eval can create several sessions, and a long session can produce several trac
 
 `result.result.derived` holds the facts the runner derived from the eval's sessions, such as tool calls and `models`: the distinct ids of the models the steps started with, in session order. Each entry in `result.result.sessions` holds the same facts for one session, in first-use order, so a reporter can tell the primary session's models from those of the other sessions the eval created or attached. A delegated subagent runs in its own session, so its models appear only when the eval attaches that session with `t.target.attachSession`. Compaction and `auto` routing calls are not included.
 
+`derived.usage` is the token usage and cost from each session's latest `session.waiting`, `session.failed`, or `session.completed`, including what its delegated agents spent; on a turn, it is the session's total so far. The eval's `usage` counts each captured session once, by its latest usage, and leaves out sessions another captured session opened, because that session already counts their spend. It is absent when a counted session reported no usage. It leaves out compaction calls, the turns an eval sends directly to a child session it attached, and delegated spend counted after a session's last such event.
+
 Reporter callbacks for an eval stay ordered—eval start, traced session starts, then completion—even when several evals run concurrently. Reach for a custom reporter only when a destination isn't covered. The per-run artifacts under `.eve/evals/` retain the trace contexts alongside the result for ad-hoc inspection.
 
 ## What to read next

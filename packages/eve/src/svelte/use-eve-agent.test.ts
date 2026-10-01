@@ -109,7 +109,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     vi.stubGlobal("window", {});
     const events = [
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ];
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -133,7 +133,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     vi.stubGlobal("window", {});
     const events = [
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ];
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))

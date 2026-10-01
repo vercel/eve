@@ -88,7 +88,7 @@ function createEagerStreamResponse(
 ): Response {
   let turnId = "turn_001";
   for (const event of events) {
-    if ("data" in event && "turnId" in event.data) {
+    if ("data" in event && event.data !== undefined && "turnId" in event.data) {
       turnId = event.data.turnId;
       break;
     }
@@ -134,7 +134,7 @@ function singleTurnEvents(input: {
       turnId: input.turnId,
     }),
     createTurnCompletedEvent({ sequence: input.sequence, turnId: input.turnId }),
-    createSessionWaitingEvent(),
+    createSessionWaitingEvent(undefined),
   ];
 }
 
@@ -312,6 +312,7 @@ describe("Session.send (result)", () => {
     const events: UnstampedMessageStreamEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createSessionFailedEvent({
+        usage: undefined,
         code: "internal_error",
         message: "Something went wrong",
         sessionId: "session_001",
@@ -340,7 +341,7 @@ describe("Session.send (result)", () => {
         turnId: "turn_001",
       }),
       createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }),
-      createSessionCompletedEvent(),
+      createSessionCompletedEvent(undefined),
     ];
 
     vi.spyOn(globalThis, "fetch")
@@ -380,7 +381,7 @@ describe("Session.send (result)", () => {
         turnId: "turn_001",
       }),
       createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ];
 
     const fetchMock = vi
@@ -409,7 +410,7 @@ describe("Session.send (result)", () => {
         stepIndex: 0,
         turnId: "turn_001",
       }),
-      createSessionCompletedEvent(),
+      createSessionCompletedEvent(undefined),
     ];
     const secondEvents = singleTurnEvents({
       message: "New conversation",
@@ -476,7 +477,7 @@ describe("Session.send (stream)", () => {
           turnId: "turn_001",
         }),
       );
-      stream.pushEvent(createSessionWaitingEvent());
+      stream.pushEvent(createSessionWaitingEvent(undefined));
     }, 0);
 
     await iterationPromise;
@@ -500,7 +501,7 @@ describe("Session.send (stream)", () => {
     expect(res.sessionId).toBe("session_001");
 
     setTimeout(() => {
-      stream.pushEvent(createSessionWaitingEvent());
+      stream.pushEvent(createSessionWaitingEvent(undefined));
     }, 0);
 
     for await (const _ of res) {
@@ -544,7 +545,7 @@ describe("Session.send (reconnection)", () => {
         turnId: "turn_001",
       }),
       createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ];
 
     const fetchMock = vi
@@ -714,7 +715,7 @@ describe("Session.stream", () => {
         stepIndex: 0,
         turnId: "turn_002",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ];
 
     const fetchMock = vi

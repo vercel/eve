@@ -1,3 +1,4 @@
+import type { TokenUsage } from "#shared/token-usage.js";
 import type { Experimental_EvaluationModel as EvaluationModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
@@ -94,6 +95,13 @@ export interface EveEvalDerivedFacts {
    * attaches that session. Compaction and `auto` routing calls are not included.
    */
   readonly models: readonly string[];
+  /**
+   * Token usage from the latest `session.waiting`, `session.failed`, or `session.completed`: the
+   * session's own model calls plus what the agents it delegated to spent, so on a turn it is the
+   * session's total so far. For an eval, each captured session counts once, by its latest usage,
+   * except sessions another captured session opened. Absent when a counted session reported none.
+   */
+  readonly usage?: TokenUsage;
   readonly failureCode?: string;
 }
 

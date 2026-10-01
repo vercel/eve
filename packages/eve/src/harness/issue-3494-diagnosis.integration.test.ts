@@ -142,7 +142,11 @@ it("continues the second step past an older approval batch", async () => {
     emittedBySecondStep: events.slice(before).map((event) => event.type),
     firstTurnEvents: events
       .filter(
-        (event) => "data" in event && "turnId" in event.data && event.data.turnId === "turn_1",
+        (event) =>
+          "data" in event &&
+          event.data !== undefined &&
+          "turnId" in event.data &&
+          event.data.turnId === "turn_1",
       )
       .map((event) => event.type),
   };

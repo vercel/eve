@@ -29,7 +29,7 @@ describe("MessageResponse cancellation", () => {
     const settle = createDeferred<void>();
     const [turnStarted, boundary] = stampTestEvents([
       createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ] as UnstampedMessageStreamEvent[]);
     const cancelTurn = vi.fn(async () => acceptedCancellation());
     const response = new MessageResponse({
@@ -62,7 +62,7 @@ describe("MessageResponse cancellation", () => {
     const settle = createDeferred<void>();
     const [turnStarted, boundary] = stampTestEvents([
       createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ] as UnstampedMessageStreamEvent[]);
     const cancelTurn = vi
       .fn<(turnId: string) => Promise<ReturnType<typeof acceptedCancellation>>>()
@@ -91,7 +91,7 @@ describe("MessageResponse cancellation", () => {
 
   it("drops a queued cancellation when the response settles without starting a turn", async () => {
     const [boundary] = stampTestEvents([
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(undefined),
     ] as UnstampedMessageStreamEvent[]);
     const cancelTurn = vi.fn(async () => acceptedCancellation());
     const response = new MessageResponse({
