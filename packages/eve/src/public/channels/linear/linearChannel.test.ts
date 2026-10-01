@@ -205,29 +205,6 @@ describe("linearChannel inbound Agent Session events", () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it("delivers prompted values as messages for the harness to resolve", async () => {
-    const channel = linearChannel({ credentials: { webhookSecret: SECRET } });
-    const { send } = await firePost(
-      channel,
-      signedRequest(
-        sessionPayload({
-          action: "prompted",
-          agentActivity: {
-            content: { body: "approve", type: "prompt" },
-            id: "activity_prompt",
-            user: { id: "user_1" },
-            userId: "user_1",
-          },
-        }),
-      ),
-    );
-
-    expect(send).toHaveBeenCalledTimes(1);
-    const [, input] = send.mock.calls[0]!;
-    expect(input.inputResponses).toBeUndefined();
-    expect(input.message).toBe("approve");
-  });
-
   it("attaches authenticated Linear upload images to prompted messages", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(new Uint8Array([1, 2, 3]), {

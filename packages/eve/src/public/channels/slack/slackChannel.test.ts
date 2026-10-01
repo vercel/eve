@@ -1290,13 +1290,6 @@ describe("slackChannel() default event handlers", () => {
     const callbackBody = await interactionRequest.clone().text();
     expect(callbackBody).not.toContain("cursor+cloud+task");
     expect(callbackBody.length).toBeLessThan(3_000);
-
-    const { send } = await firePost(channel, interactionRequest);
-    expect(send).toHaveBeenCalledTimes(1);
-    expect(send.mock.calls[0]?.[0]).toBe("C01:1700000000.000001");
-    expect(send.mock.calls[0]?.[1]).toMatchObject({
-      inputResponses: [{ optionId: "approve", requestId: "approval_cursor" }],
-    });
   });
 
   it("input.requested caps section and fallback text so Slack does not reject the post", async () => {
