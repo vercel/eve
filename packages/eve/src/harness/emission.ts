@@ -35,6 +35,7 @@ import {
   createTurnStartedEvent,
 } from "#protocol/message.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromToolError,
@@ -183,7 +184,7 @@ async function emitStepAndTurnFailed(
 export async function emitFailedStep(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
-  input: FailedStepPayload & { readonly sessionId: string },
+  input: FailedStepPayload & { readonly sessionId: string; readonly usage: TokenUsage },
 ): Promise<void> {
   await emitStepAndTurnFailed(emitFn, state, input);
   await emitFn(createSessionFailedEvent(input));
@@ -196,10 +197,10 @@ export async function emitFailedStep(
 export async function emitRecoverableFailedTurn(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
-  input: FailedStepPayload & { readonly continuationToken: string },
+  input: FailedStepPayload & { readonly continuationToken: string; readonly usage: TokenUsage },
 ): Promise<HarnessEmissionState> {
   await emitStepAndTurnFailed(emitFn, state, input);
-  await emitFn(createSessionWaitingEvent());
+  await emitFn(createSessionWaitingEvent(input.usage));
 
   return {
     sessionStarted: state.sessionStarted,
@@ -220,13 +221,14 @@ export function advanceStep(state: HarnessEmissionState): HarnessEmissionState {
 }
 
 /**
- * Emits `turn.completed` and `session.waiting`.
+ * Emits `turn.completed` and `session.waiting` with the session's `usage`.
  * Returns updated emission state with an incremented sequence.
  */
 export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   messages: readonly ModelMessage[],
+  usage: TokenUsage,
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
@@ -235,7 +237,7 @@ export async function emitTurnEpilogue(
     }),
     messages,
   );
-  await emitFn(createSessionWaitingEvent());
+  await emitFn(createSessionWaitingEvent(usage));
 
   return {
     sessionStarted: state.sessionStarted,

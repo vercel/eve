@@ -26,6 +26,7 @@ import {
   bumpSessionRuntimeUsageLimits,
   getSessionUsageLimitViolation,
   getSessionTokenUsage,
+  getSessionUsage,
   type SessionUsageLimitViolation,
 } from "#harness/turn-tag-state.js";
 import type { HarnessSession, StepResult, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -143,7 +144,12 @@ async function parkOnSessionUsageLimit(input: {
     }),
   );
 
-  emissionState = await emitTurnEpilogue(input.emit, emissionState, parkedSession.history);
+  emissionState = await emitTurnEpilogue(
+    input.emit,
+    emissionState,
+    parkedSession.history,
+    getSessionUsage(parkedSession),
+  );
 
   return {
     next: null,
@@ -195,6 +201,7 @@ async function failSessionUsageLimit(input: {
       details,
       message,
       sessionId: input.session.sessionId,
+      usage: getSessionUsage(input.session),
     });
   }
 

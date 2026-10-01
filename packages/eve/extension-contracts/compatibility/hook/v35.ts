@@ -1,11 +1,14 @@
 import { defineHook } from "#public/hooks/index.js";
 
-// Epoch 35 `turn.waiting` events had no `on`; epoch 36 adds it.
-// Hooks that read only `turnId` keep working.
+// Epoch 35 `session.waiting`, `session.failed`, `session.completed`, and `turn.waiting` events had no `usage`; epoch 36 adds it as optional.
+// Hooks that read only the continuation token see no change.
 export default defineHook({
   events: {
-    "turn.waiting"(event, ctx) {
-      console.info("turn waiting", { sessionId: ctx.session.id, turnId: event.data.turnId });
+    "session.waiting"(event, ctx) {
+      console.info("session waiting", {
+        continuationToken: event.data.continuationToken,
+        sessionId: ctx.session.id,
+      });
     },
   },
 });

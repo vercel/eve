@@ -1,3 +1,4 @@
+import { TEST_USAGE } from "#internal/testing/events.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { ModelMessage } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -2754,6 +2755,7 @@ describe("emitTerminalSessionFailureStep", () => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await emitTerminalSessionFailureStep({
+      usage: TEST_USAGE,
       error,
       sessionWritable: createTestWritable(),
       serializedContext: serialized,
@@ -2803,6 +2805,7 @@ describe("emitTerminalSessionFailureStep", () => {
     });
 
     await emitTerminalSessionFailureStep({
+      usage: TEST_USAGE,
       error,
       sessionWritable: createTestWritable(),
       serializedContext: serialized,
@@ -2851,6 +2854,7 @@ describe("emitTerminalSessionFailureStep", () => {
     // a secondary failure during notification.
     await expect(
       emitTerminalSessionFailureStep({
+        usage: TEST_USAGE,
         error: new Error("inner"),
         sessionWritable: createTestWritable(),
         serializedContext: serialized,

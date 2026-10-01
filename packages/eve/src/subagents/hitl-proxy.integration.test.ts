@@ -267,7 +267,15 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     // `turn.waiting`; the call that asked is still running, so the turn
     // neither completes nor resets.
     expect(events.slice(1)).toEqual([
-      { data: { on: "input", sequence: 3, turnId: "turn_3" }, type: "turn.waiting" },
+      {
+        data: {
+          on: "input",
+          sequence: 3,
+          turnId: "turn_3",
+          usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
+        },
+        type: "turn.waiting",
+      },
     ]);
     expect(events[0]?.type).toBe("input.requested");
 

@@ -24,7 +24,11 @@ import type { HarnessModelMessage } from "#harness/messages.js";
 import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
-import { getTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
+import {
+  getSessionUsage,
+  getTurnUsageState,
+  takeSessionUsageDelta,
+} from "#harness/turn-tag-state.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 const CANCELLED_REASON = "Cancelled.";
@@ -100,7 +104,7 @@ export async function settleCancelledTurn(
           }),
         );
       }
-      return await emitCancelledTurn(emit, emissionState);
+      return await emitCancelledTurn(emit, emissionState, getSessionUsage(step.durableSession));
     },
     updateSession(baseSession, emissionState) {
       const session = {

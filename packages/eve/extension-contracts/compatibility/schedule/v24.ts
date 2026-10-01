@@ -1,12 +1,12 @@
 import { defineChannel } from "#public/channels/index.js";
 import { defineSchedule } from "#public/schedules/index.js";
 
-// Epoch 24 `turn.waiting` events had no `on`; epoch 25 adds it.
+// Epoch 24 `session.waiting`, `session.failed`, `session.completed`, and `turn.waiting` events had no `usage`; epoch 25 adds it as optional.
 const reports = defineChannel({
   routes: [],
   events: {
-    "turn.waiting"(event) {
-      console.info("report turn waiting", { turnId: event.turnId });
+    "session.waiting"(event) {
+      console.info("report waiting", { continuationToken: event.continuationToken });
     },
   },
   receive(input, { from }) {

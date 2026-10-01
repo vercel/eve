@@ -1,3 +1,4 @@
+import { TEST_USAGE } from "#internal/testing/events.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "#client/client.js";
 import {
@@ -113,7 +114,7 @@ describe("eve dev conversation", () => {
         stepIndex: 0,
         turnId: "wake",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ]);
     await vi.waitFor(() =>
       expect(assistantText(tui.latest())).toEqual([
@@ -195,7 +196,7 @@ describe("eve dev conversation", () => {
         stepIndex: 0,
         turnId: "wake",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ]);
 
     await vi.waitFor(() => expect(readToolApproval).toHaveBeenCalledOnce());
@@ -246,7 +247,7 @@ describe("eve dev conversation", () => {
           taskId: "task_1",
           turnId: "turn_1",
         }),
-        createTurnWaitingEvent({ on: "input", sequence: 1, turnId: "turn_1" }),
+        createTurnWaitingEvent({ on: "input", usage: TEST_USAGE, sequence: 1, turnId: "turn_1" }),
       ],
       "delivery_1",
     );
@@ -286,7 +287,7 @@ describe("eve dev conversation", () => {
         status: "completed",
       }),
       createTurnCompletedEvent({ sequence: 2, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ]);
     await vi.waitFor(() => expect(tui.latest().working).toBe(false));
     await vi.waitFor(() =>
@@ -359,14 +360,17 @@ describe("eve dev conversation", () => {
           }),
         ]),
         approval("task_1"),
-        createTurnWaitingEvent({ on: "input", sequence: 2, turnId: "turn_1" }),
+        createTurnWaitingEvent({ on: "input", usage: TEST_USAGE, sequence: 2, turnId: "turn_1" }),
       ],
       "delivery_1",
     );
     await vi.waitFor(() => expect(readToolApproval).toHaveBeenCalledOnce());
     // Bob's approval arrives while Alice is still deciding on the first one.
     server.emit(
-      [approval("task_2"), createTurnWaitingEvent({ on: "input", sequence: 2, turnId: "turn_1" })],
+      [
+        approval("task_2"),
+        createTurnWaitingEvent({ on: "input", usage: TEST_USAGE, sequence: 2, turnId: "turn_1" }),
+      ],
       "delivery_1",
     );
     await vi.waitFor(() => expect(tui.latest().conversation.inputs.approval_task_2).toBeDefined());
@@ -415,7 +419,10 @@ describe("eve dev conversation", () => {
     await vi.waitFor(() => expect(server.requestsTo("POST", "/cancel")).toHaveLength(1));
     expect(server.requestsTo("POST", "/cancel")[0]?.body).toMatchObject({ turnId: "turn_1" });
     server.emit(
-      [createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }), createSessionWaitingEvent()],
+      [
+        createTurnCancelledEvent({ sequence: 1, turnId: "turn_1" }),
+        createSessionWaitingEvent(TEST_USAGE),
+      ],
       "delivery_1",
     );
     await vi.waitFor(() => expect(tui.latest().working).toBe(false));
@@ -438,7 +445,10 @@ describe("eve dev conversation", () => {
       );
       return () =>
         server.emit(
-          [createTurnCancelledEvent({ sequence: 2, turnId }), createSessionWaitingEvent()],
+          [
+            createTurnCancelledEvent({ sequence: 2, turnId }),
+            createSessionWaitingEvent(TEST_USAGE),
+          ],
           delivery,
         );
     };
@@ -476,6 +486,7 @@ describe("eve dev conversation", () => {
       [
         createTurnStartedEvent({ sequence: 0, turnId: "turn_1" }),
         createSessionFailedEvent({
+          usage: TEST_USAGE,
           code: "SANDBOX_LOST",
           message: "The sandbox stopped.",
           sessionId: "session_1",

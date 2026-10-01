@@ -1,6 +1,8 @@
 ---
 name: gh-pr-description
 description: Drafts and reviews GitHub pull request descriptions for the eve repository. Use when opening, updating, or reviewing a PR, or when summarizing a branch for reviewers.
+metadata:
+  internal: true
 ---
 
 # GitHub PR description

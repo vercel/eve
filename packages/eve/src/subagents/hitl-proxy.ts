@@ -1,4 +1,5 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
+import { getSessionUsage } from "#harness/turn-tag-state.js";
 import type {
   DeliverPayload,
   SubagentAuthorizationEventHookPayload,
@@ -69,7 +70,14 @@ export async function emitProxiedAuthorizationEvent(input: {
 
 async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSessionBase): Promise<void> {
   const turn = getHarnessEmissionState(session.state);
-  await emit(createTurnWaitingEvent({ on: "input", sequence: turn.sequence, turnId: turn.turnId }));
+  await emit(
+    createTurnWaitingEvent({
+      on: "input",
+      sequence: turn.sequence,
+      turnId: turn.turnId,
+      usage: getSessionUsage(session),
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------

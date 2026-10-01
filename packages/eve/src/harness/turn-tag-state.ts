@@ -78,6 +78,11 @@ export function getSessionTokenUsage(session: Pick<HarnessSession, "state">): To
   return getTurnUsageState(session.state)?.session ?? ZERO_TOKEN_USAGE;
 }
 
+/** The session's usage so far, delegated spend included. */
+export function getSessionUsage(session: Pick<HarnessSession, "state">): TokenUsage {
+  return toUsage(getSessionTokenUsage(session));
+}
+
 /** Projects a {@link TokenUsageTotals} down to the cross-cutting {@link TokenUsage} shape. */
 export function toUsage(totals: TokenUsageTotals): TokenUsage {
   return {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { stampTestEvent } from "#internal/testing/events.js";
+import { TEST_USAGE, stampTestEvent } from "#internal/testing/events.js";
 import { createSessionWaitingEvent, type MessageStreamEvent } from "#protocol/message.js";
 import { sessions } from "#public/server/index.js";
 
@@ -45,7 +45,9 @@ function mockSessionStream(
 }
 
 const storedEvents = (count: number) =>
-  Array.from({ length: count }, (_, index) => stampTestEvent(createSessionWaitingEvent(), index));
+  Array.from({ length: count }, (_, index) =>
+    stampTestEvent(createSessionWaitingEvent(TEST_USAGE), index),
+  );
 
 async function collect(iterable: AsyncIterable<MessageStreamEvent>) {
   const events: MessageStreamEvent[] = [];

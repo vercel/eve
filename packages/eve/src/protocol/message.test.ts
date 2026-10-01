@@ -15,7 +15,6 @@ import {
   createMessageReceivedEvent,
   createReasoningAppendedEvent,
   createResultCompletedEvent,
-  createSessionWaitingEvent,
   createStepStartedEvent,
   createAgentStartedEvent,
   createTurnCancelledEvent,
@@ -298,16 +297,6 @@ describe("message stream protocol", () => {
     ).toMatchObject({
       streamPath: "/eve/v1/session/parent%2F1/subagents/call%2F1/child%2F1/stream",
       remote: { resolverId: "remote/research", url: "https://remote.example" },
-    });
-  });
-
-  it("publishes the channel-local continuation token on session.waiting", () => {
-    expect(createSessionWaitingEvent("slack:C1:T1")).toEqual({
-      data: {
-        continuationToken: "C1:T1",
-        wait: "next-user-message",
-      },
-      type: "session.waiting",
     });
   });
 

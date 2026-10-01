@@ -10,6 +10,14 @@ import {
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 
+/** What the fake server reports a session spent, like a real one does on `session.waiting`. */
+const FAKE_USAGE = {
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  inputTokens: 1200,
+  outputTokens: 150,
+};
+
 export interface FakeEveRequest {
   readonly method: string;
   readonly path: string;
@@ -186,7 +194,7 @@ export function reply(text: string): FakeEveTurn {
       turnId,
     }),
     createTurnCompletedEvent({ sequence: 3, turnId }),
-    createSessionWaitingEvent(),
+    createSessionWaitingEvent(FAKE_USAGE),
   ];
 }
 

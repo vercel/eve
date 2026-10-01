@@ -12,7 +12,7 @@ import {
   createSessionWaitingEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import { stampTestEvents } from "#internal/testing/events.js";
+import { TEST_USAGE, stampTestEvents } from "#internal/testing/events.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -109,7 +109,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     vi.stubGlobal("window", {});
     const events = [
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -133,7 +133,7 @@ describe("useEveAgent (Svelte rune binding)", () => {
     vi.stubGlobal("window", {});
     const events = [
       createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))

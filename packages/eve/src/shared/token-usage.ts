@@ -14,3 +14,17 @@ const tokenUsageSchema = z.object({
 export const tokenUsageWithCostSchema = tokenUsageSchema.extend({
   costUsd: z.number().finite().nonnegative().optional(),
 });
+
+/** Adds two usages; the cost is absent only when neither reported one. */
+export function addTokenUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
+  return {
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    costUsd:
+      a.costUsd === undefined && b.costUsd === undefined
+        ? undefined
+        : (a.costUsd ?? 0) + (b.costUsd ?? 0),
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+  };
+}

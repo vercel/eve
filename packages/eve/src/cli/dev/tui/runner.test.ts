@@ -1,3 +1,4 @@
+import { TEST_USAGE } from "#internal/testing/events.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Client, ClientError, type AgentInfoResult } from "#client/index.js";
@@ -832,7 +833,7 @@ describe("EveTUIRunner gateway-auth failure rendering", () => {
   async function failuresFor(appRoot?: string): Promise<readonly AgentTUIFailure[]> {
     const server = new FakeEveServer(({ turnId }) => [
       { type: "step.failed", data: { ...gatewayFailure, sequence: 0, stepIndex: 0, turnId } },
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ]);
     vi.stubGlobal("fetch", server.fetch);
     const views: AgentTUIConversationView[] = [];
@@ -1280,7 +1281,7 @@ describe("EveTUIRunner registry handoffs", () => {
       createTurnStartedEvent({ sequence: 0, turnId }),
       ...registryResult("slack-add", "channel/slack"),
       ...registryResult("linear-add", "connection/linear"),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ]);
     const handle = vi.fn(async (_command: { name: string; argument: string }) => ({
       message: "done",
@@ -1302,7 +1303,7 @@ describe("EveTUIRunner registry handoffs", () => {
     const order: string[] = [];
     const server = serve(({ body, turnId }) =>
       body?.inputResponses !== undefined
-        ? (order.push("respond"), [createSessionWaitingEvent()])
+        ? (order.push("respond"), [createSessionWaitingEvent(TEST_USAGE)])
         : [
             createTurnStartedEvent({ sequence: 0, turnId }),
             ...registryResult("registry-add", "channel/slack"),
@@ -1324,7 +1325,7 @@ describe("EveTUIRunner registry handoffs", () => {
               stepIndex: 0,
               turnId,
             }),
-            createSessionWaitingEvent(),
+            createSessionWaitingEvent(TEST_USAGE),
           ],
     );
     await new EveTUIRunner({
@@ -1378,7 +1379,7 @@ describe("EveTUIRunner registry handoffs", () => {
       [
         createTurnStartedEvent({ sequence: 0, turnId: "child_turn" }),
         ...registryResult("registry-add", "channel/slack", "registry_add"),
-        createSessionWaitingEvent(),
+        createSessionWaitingEvent(TEST_USAGE),
       ],
       undefined,
       "child_1",
@@ -1392,7 +1393,7 @@ describe("EveTUIRunner registry handoffs", () => {
           taskId: "task_1",
           turnId: "turn_1",
         }),
-        createSessionWaitingEvent(),
+        createSessionWaitingEvent(TEST_USAGE),
       ],
       "delivery_1",
       "session_1",
@@ -1526,7 +1527,7 @@ describe("EveTUIRunner requests", () => {
   it("submits the chosen session-limit continuation", async () => {
     const server = serve(({ body, turnId }) =>
       body?.inputResponses !== undefined
-        ? [createSessionWaitingEvent()]
+        ? [createSessionWaitingEvent(TEST_USAGE)]
         : [
             createTurnStartedEvent({ sequence: 0, turnId }),
             createInputRequestedEvent({
@@ -1551,7 +1552,7 @@ describe("EveTUIRunner requests", () => {
               stepIndex: 0,
               turnId,
             }),
-            createSessionWaitingEvent(),
+            createSessionWaitingEvent(TEST_USAGE),
           ],
     );
     const readInputQuestion = vi.fn(async () => ({ optionId: "continue" }));
@@ -1585,7 +1586,7 @@ describe("EveTUIRunner requests", () => {
         stepIndex: 0,
         turnId,
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ]);
     const readInputQuestion = vi.fn(async () => undefined);
     const readInput = vi.fn().mockResolvedValueOnce({ type: "submit", text: "Summarize." });
@@ -1718,6 +1719,7 @@ describe("EveTUIRunner remote session failures", () => {
     serve(({ turnId }) => [
       createTurnStartedEvent({ sequence: 0, turnId }),
       createSessionFailedEvent({
+        usage: TEST_USAGE,
         code: "HookConflictError",
         message: "HookConflictError: token in use",
         sessionId: "session_1",

@@ -18,8 +18,8 @@ import type {
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
-import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 export const EVE_SESSION_ID_HEADER = "x-eve-session-id";
 export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
@@ -628,6 +628,12 @@ export interface TurnWaitingStreamEvent {
     on: TurnWaitingOn;
     sequence: number;
     turnId: string;
+    /**
+     * The session's token usage so far: its own model calls plus what the
+     * agents it delegated to spent. `costUsd` is absent when no model call
+     * reported a cost. Absent on events from eve versions before it was added.
+     */
+    usage?: TokenUsage;
   };
   type: "turn.waiting";
 }
@@ -783,6 +789,12 @@ export interface SessionWaitingStreamEvent {
   data: {
     /** Channel-local continuation token, or the immutable session ID for an ID-only session. */
     continuationToken: string;
+    /**
+     * The session's token usage so far: its own model calls plus what the
+     * agents it delegated to spent. `costUsd` is absent when no model call
+     * reported a cost. Absent on events from eve versions before it was added.
+     */
+    usage?: TokenUsage;
     wait: "next-user-message";
   };
   type: "session.waiting";
@@ -797,6 +809,12 @@ export interface SessionFailedStreamEvent {
     details?: JsonObject;
     message: string;
     sessionId: string;
+    /**
+     * The session's token usage so far: its own model calls plus what the
+     * agents it delegated to spent. `costUsd` is absent when no model call
+     * reported a cost. Absent on events from eve versions before it was added.
+     */
+    usage?: TokenUsage;
   };
   type: "session.failed";
 }
@@ -805,6 +823,14 @@ export interface SessionFailedStreamEvent {
  * Stream event emitted when the session completes successfully.
  */
 export interface SessionCompletedStreamEvent {
+  /** Absent when the session's usage was unknown, and on events from eve versions before it was added. */
+  data?: {
+    /**
+     * The session's token usage: its own model calls plus what the agents it
+     * delegated to spent. `costUsd` is absent when no model call reported a cost.
+     */
+    usage: TokenUsage;
+  };
   type: "session.completed";
 }
 
@@ -1693,9 +1719,15 @@ export function createTurnWaitingEvent(input: {
   readonly on: TurnWaitingOn;
   readonly sequence: number;
   readonly turnId: string;
+  readonly usage: TokenUsage | undefined;
 }): TurnWaitingStreamEvent {
   return {
-    data: { on: input.on, sequence: input.sequence, turnId: input.turnId },
+    data: {
+      on: input.on,
+      sequence: input.sequence,
+      turnId: input.turnId,
+      ...(input.usage !== undefined && { usage: input.usage }),
+    },
     type: "turn.waiting",
   };
 }
@@ -1803,11 +1835,12 @@ export function createCompactionCompletedEvent(input: {
  * wait.
  */
 export function createSessionWaitingEvent(
-  namespacedContinuationToken: string = "",
+  usage: TokenUsage | undefined,
 ): SessionWaitingStreamEvent {
   return {
     data: {
-      continuationToken: toChannelLocalContinuationToken(namespacedContinuationToken),
+      continuationToken: "",
+      ...(usage !== undefined && { usage }),
       wait: "next-user-message",
     },
     type: "session.waiting",
@@ -1822,6 +1855,7 @@ export function createSessionFailedEvent(input: {
   readonly details?: JsonObject;
   readonly message: string;
   readonly sessionId: string;
+  readonly usage: TokenUsage | undefined;
 }): SessionFailedStreamEvent {
   return {
     data: {
@@ -1829,6 +1863,7 @@ export function createSessionFailedEvent(input: {
       details: input.details,
       message: input.message,
       sessionId: input.sessionId,
+      ...(input.usage !== undefined && { usage: input.usage }),
     },
     type: "session.failed",
   };
@@ -1837,8 +1872,12 @@ export function createSessionFailedEvent(input: {
 /**
  * Creates the `session.completed` event for one terminal session completion.
  */
-export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
-  return { type: "session.completed" };
+export function createSessionCompletedEvent(
+  usage: TokenUsage | undefined,
+): SessionCompletedStreamEvent {
+  return usage === undefined
+    ? { type: "session.completed" }
+    : { data: { usage }, type: "session.completed" };
 }
 
 /**

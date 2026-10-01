@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import { deriveRunFacts, type DeriveRunFactsOptions } from "#evals/runner/derive-run-facts.js";
 import type { EveEvalDerivedFacts } from "#evals/types.js";
@@ -64,6 +65,22 @@ function actionResult(input: {
 
 function stepStarted(modelId: string, stepIndex: number): UnstampedMessageStreamEvent {
   return { type: "step.started", data: { modelId, sequence: 1, stepIndex, turnId: "t1" } };
+}
+
+const USAGE = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 40, outputTokens: 8 };
+
+function sessionFailed(usage: TokenUsage): UnstampedMessageStreamEvent {
+  return {
+    type: "session.failed",
+    data: { code: "MODEL_CALL_FAILED", message: "failed", sessionId: "s1", usage },
+  };
+}
+
+function sessionWaiting(usage: TokenUsage | undefined): UnstampedMessageStreamEvent {
+  return {
+    type: "session.waiting",
+    data: { continuationToken: "", wait: "next-user-message", ...(usage && { usage }) },
+  };
 }
 
 function taskStarted(
@@ -441,6 +458,50 @@ describe("deriveRunFacts", () => {
       stepStarted("anthropic/claude-sonnet-4.6", 2),
     ]);
     expect(facts.models).toEqual(["anthropic/claude-sonnet-4.6", "openai/gpt-5.1"]);
+  });
+
+  it("reports the usage of the session's latest session.waiting", () => {
+    const facts = derive([
+      sessionWaiting({ cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 10, outputTokens: 2 }),
+      sessionWaiting({
+        cacheReadTokens: 1,
+        cacheWriteTokens: 0,
+        costUsd: 0.5,
+        inputTokens: 40,
+        outputTokens: 8,
+      }),
+    ]);
+    expect(facts.usage).toEqual({
+      cacheReadTokens: 1,
+      cacheWriteTokens: 0,
+      costUsd: 0.5,
+      inputTokens: 40,
+      outputTokens: 8,
+    });
+  });
+
+  it("reports the usage of a session.failed or session.completed that came after it", () => {
+    const failed = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 90, outputTokens: 9 };
+    const completed = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 70, outputTokens: 7 };
+    expect([
+      derive([sessionWaiting(USAGE), sessionFailed(failed)]).usage,
+      derive([sessionWaiting(USAGE), { type: "session.completed", data: { usage: completed } }])
+        .usage,
+    ]).toEqual([failed, completed]);
+  });
+
+  it("reports the usage of a turn.waiting that parked the turn after it", () => {
+    const parked = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 55, outputTokens: 5 };
+    expect(
+      derive([
+        sessionWaiting(USAGE),
+        { type: "turn.waiting", data: { on: "input", sequence: 2, turnId: "t2", usage: parked } },
+      ]).usage,
+    ).toEqual(parked);
+  });
+
+  it("reports no usage when the latest session event carried none", () => {
+    expect(derive([sessionWaiting(USAGE), sessionWaiting(undefined)]).usage).toBeUndefined();
   });
 
   it("captures failure code from session.failed event", () => {

@@ -9,7 +9,8 @@ import { SURVEY_WORKER_INPUT_TOKENS } from "../constants";
  * worker's one model call reports more input tokens than the parent's default
  * session budget, so the parent's next model call stops at its own
  * session-limit prompt, whose used figure includes the worker's tokens.
- * Approving the prompt lets the parent report the survey. Returns the session
+ * Approving the prompt lets the parent report the survey, and the parent's
+ * `session.waiting` usage then includes the worker's tokens. Returns the session
  * for checks on how the parent delegated.
  */
 export async function expectSurveyCountedAgainstParent(t: EveEvalContext, message: string) {
@@ -33,5 +34,12 @@ export async function expectSurveyCountedAgainstParent(t: EveEvalContext, messag
   const resumed = await session.respond([{ optionId: "continue", requestId: request.requestId }]);
   resumed.expectOk();
   resumed.messageIncludes("SURVEY-REPLY Alice's tide survey has 12 stations.");
+  t.eventsSatisfy("the parent's session.waiting usage counts the worker's tokens", (events) => {
+    const waiting = events.filter((event) => event.type === "session.waiting").at(-1);
+    return (
+      waiting?.type === "session.waiting" &&
+      (waiting.data.usage?.inputTokens ?? 0) >= SURVEY_WORKER_INPUT_TOKENS
+    );
+  });
   return session;
 }

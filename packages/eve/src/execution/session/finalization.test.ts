@@ -3,6 +3,8 @@ import { finalizeSession } from "#execution/session/finalization.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
+import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
+import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { notifyTurnCallerStep } from "#subagents/parent-notification.js";
 
 vi.mock("#execution/terminate-child-sessions-step.js", () => ({
@@ -79,6 +81,29 @@ describe("session finalization with an unsettled caller", () => {
       });
     },
   );
+
+  it.each([
+    { kind: "expired" as const, step: emitTerminalSessionCompletionStep },
+    {
+      kind: "failed" as const,
+      error: new Error("Owner failed"),
+      step: emitTerminalSessionFailureStep,
+    },
+  ])("ends a $kind session with its usage on the terminal event", async ({ step, ...outcome }) => {
+    await finalizeSession(outcome, {
+      caller: undefined,
+      cursor: { serializedContext: {}, sessionState: sessionWithUnreportedUsage() },
+      sessionWritable: new WritableStream(),
+    });
+
+    expect(vi.mocked(step).mock.calls[0]?.[0].usage).toEqual({
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: undefined,
+      inputTokens: 250,
+      outputTokens: 0,
+    });
+  });
 
   it("does not notify again when an already settled conversation expires", async () => {
     const result = await finalizeSession(

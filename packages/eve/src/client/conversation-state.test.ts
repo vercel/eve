@@ -9,7 +9,7 @@ import {
   isAgentSessionCaughtUp,
   type ConversationState,
 } from "#client/conversation-state.js";
-import { stampTestEvent } from "#internal/testing/events.js";
+import { TEST_USAGE, stampTestEvent } from "#internal/testing/events.js";
 import {
   createAgentStartedEvent,
   createAuthorizationCompletedEvent,
@@ -170,7 +170,7 @@ describe("agent tool sessions", () => {
         description: "Connect Alice's notes",
         webhookUrl: "https://example.com/callback",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ]);
     expect(caughtUp()).toBe(false);
     state = observe(state, [

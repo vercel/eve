@@ -216,3 +216,12 @@ export function stampTestEvents(
 ): MessageStreamEvent[] {
   return events.map((event, index) => stampTestEvent(event, index));
 }
+
+/** Token usage a session reports in tests that build session events without caring about its value. */
+export const TEST_USAGE = {
+  cacheReadTokens: 800,
+  cacheWriteTokens: 0,
+  costUsd: 0.0042,
+  inputTokens: 1200,
+  outputTokens: 150,
+};

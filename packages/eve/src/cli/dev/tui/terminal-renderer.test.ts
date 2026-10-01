@@ -13,7 +13,7 @@ import {
 
 import { initialConversationState, reduceConversation } from "#client/conversation-reducer.js";
 import type { EveAgentReducerEvent } from "#client/reducer.js";
-import { stampTestEvent } from "#internal/testing/events.js";
+import { TEST_USAGE, stampTestEvent } from "#internal/testing/events.js";
 import {
   createActionsRequestedEvent,
   createMessageAppendedEvent,
@@ -3836,7 +3836,9 @@ describe("TerminalRenderer conversation", () => {
           turnId: "turn_1",
         }),
       ),
-      stamped(createTurnWaitingEvent({ on: "tasks", sequence: 3, turnId: "turn_1" })),
+      stamped(
+        createTurnWaitingEvent({ on: "tasks", usage: TEST_USAGE, sequence: 3, turnId: "turn_1" }),
+      ),
     ];
     renderer.renderConversation(conversationOf(working, { working: true }));
     const during = screen.snapshot();

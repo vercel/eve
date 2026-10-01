@@ -5,7 +5,7 @@ import {
   type ConversationEvent,
 } from "#client/conversation-reducer.js";
 import type { ConversationState } from "#client/conversation-state.js";
-import { stampTestEvent } from "#internal/testing/events.js";
+import { TEST_USAGE, stampTestEvent } from "#internal/testing/events.js";
 import {
   createActionInputAppendedEvent,
   createActionResultEvent,
@@ -305,7 +305,9 @@ describe("ConversationTranscript", () => {
       taskStarted("call_1", "summarize"),
       toolResult("call_1", "summarize"),
       toolCall("wait_1", "task_wait"),
-      event(createTurnWaitingEvent({ on: "tasks", sequence: 3, turnId: "turn_1" })),
+      event(
+        createTurnWaitingEvent({ on: "tasks", usage: TEST_USAGE, sequence: 3, turnId: "turn_1" }),
+      ),
     ]);
     const transcript = new ConversationTranscript();
     const working = view(state, true);

@@ -88,10 +88,12 @@ import { collectDeferredCalls, dispatchApprovedWorkflowCalls } from "#harness/wo
 import { estimateTokens } from "#harness/token-estimate.js";
 import {
   accumulateTurnUsage,
+  getSessionUsage,
   getTurnUsageState,
   setTurnUsageState,
   type TokenUsageDelta,
 } from "#harness/turn-tag-state.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import {
   applySessionLimitContinuation,
   enforceSessionUsageLimit,
@@ -553,6 +555,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         details: { errorId },
         message,
         sessionId: session.sessionId,
+        usage: getSessionUsage(session),
       });
 
       return {
@@ -593,7 +596,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           turnId: activeTurnId(emissionState),
         }),
       );
-      await emit?.(createSessionWaitingEvent());
+      await emit?.(createSessionWaitingEvent(getSessionUsage(session)));
       return { next: null, session };
     }
 
@@ -631,7 +634,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         }
       }
 
-      await emit?.(createSessionWaitingEvent());
+      await emit?.(createSessionWaitingEvent(getSessionUsage(session)));
       return { next: null, session };
     }
 
@@ -862,7 +865,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }),
           );
         }
-        emissionState = await holdTurnForRequest(emit, emissionState);
+        emissionState = await holdTurnForRequest(emit, emissionState, session);
       }
       const parkedSession =
         coordinated.stepInput === undefined
@@ -907,7 +910,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // The turn's request is still open (a partial answer, a refused responder,
       // or a message waiting behind a budget prompt), so the turn stays held.
       if (emit) {
-        emissionState = await holdTurnForRequest(emit, emissionState);
+        emissionState = await holdTurnForRequest(emit, emissionState, parkedSession);
         parkedSession = setHarnessEmissionState(parkedSession, emissionState);
       }
       return { held: { kind: "request" }, next: null, session: parkedSession };
@@ -1815,6 +1818,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
             code: "WORKFLOW_STREAM_WRITE_FAILED",
             continuationToken: session.continuationToken,
+            usage: getSessionUsage(session),
             details: { ...streamWriteDetails, errorId },
             message: toErrorMessage(finalError),
           });
@@ -1875,6 +1879,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             details,
             message: errorMessage,
             sessionId: session.sessionId,
+            usage: getSessionUsage(session),
           });
           // Delegated runs need a failed terminal result so their caller sees a
           // failed `subagent-result`; top-level conversation failures already
@@ -1894,6 +1899,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
           code: "MODEL_CALL_FAILED",
           continuationToken: session.continuationToken,
+          usage: getSessionUsage(session),
           details,
           message: errorMessage,
         });
@@ -2702,7 +2708,7 @@ async function handleStepResult(input: {
         }),
       );
       if (!runsDeferredInput) {
-        emissionState = await holdTurnForRequest(emit, emissionState);
+        emissionState = await holdTurnForRequest(emit, emissionState, parkedSession);
         parkedSession = setHarnessEmissionState(parkedSession, emissionState);
       }
     }
@@ -2749,7 +2755,7 @@ async function handleStepResult(input: {
         );
       }
 
-      emissionState = await holdTurnForRequest(emit, emissionState);
+      emissionState = await holdTurnForRequest(emit, emissionState, baseSession);
     }
 
     return {
@@ -2817,6 +2823,7 @@ async function handleStepResult(input: {
             on: "tasks",
             sequence: emissionState.sequence,
             turnId: emissionState.turnId,
+            usage: getSessionUsage(nextSession),
           }),
         );
       }
@@ -2845,9 +2852,17 @@ async function handleStepResult(input: {
 async function holdTurnForRequest(
   emit: NonNullable<ToolLoopHarnessConfig["handleEvent"]>,
   emissionState: ReturnType<typeof getHarnessEmissionState>,
+  session: HarnessSession,
 ): Promise<ReturnType<typeof getHarnessEmissionState>> {
   const next = advanceStep(emissionState);
-  await emit(createTurnWaitingEvent({ on: "input", sequence: next.sequence, turnId: next.turnId }));
+  await emit(
+    createTurnWaitingEvent({
+      on: "input",
+      sequence: next.sequence,
+      turnId: next.turnId,
+      usage: getSessionUsage(session),
+    }),
+  );
   return next;
 }
 
@@ -2977,6 +2992,7 @@ async function emitStructuredResult(
   emissionState: ReturnType<typeof getHarnessEmissionState>,
   structured: JsonValue,
   history: readonly HarnessModelMessage[],
+  usage: TokenUsage,
 ): Promise<ReturnType<typeof getHarnessEmissionState>> {
   await emit(
     createResultCompletedEvent({
@@ -2986,7 +3002,7 @@ async function emitStructuredResult(
       turnId: emissionState.turnId,
     }),
   );
-  return emitTurnEpilogue(emit, emissionState, history);
+  return emitTurnEpilogue(emit, emissionState, history, usage);
 }
 
 /**
@@ -3009,7 +3025,12 @@ async function finishTurn(input: {
 
   if (schema === undefined) {
     if (emit) {
-      emissionState = await emitTurnEpilogue(emit, emissionState, session.history);
+      emissionState = await emitTurnEpilogue(
+        emit,
+        emissionState,
+        session.history,
+        getSessionUsage(session),
+      );
       session = setHarnessEmissionState(session, emissionState);
     }
     const settledTurn = { output: stepOutput ?? "" } satisfies SettledTurn;
@@ -3025,6 +3046,7 @@ async function finishTurn(input: {
       emissionState = await emitRecoverableFailedTurn(emit, emissionState, {
         ...OUTPUT_SCHEMA_NOT_FULFILLED,
         continuationToken: session.continuationToken,
+        usage: getSessionUsage(session),
       });
       session = setHarnessEmissionState(session, emissionState);
     }
@@ -3037,7 +3059,13 @@ async function finishTurn(input: {
 
   session = persistStructuredAssistantTurn(session, history, structured);
   if (emit) {
-    emissionState = await emitStructuredResult(emit, emissionState, structured, session.history);
+    emissionState = await emitStructuredResult(
+      emit,
+      emissionState,
+      structured,
+      session.history,
+      getSessionUsage(session),
+    );
     session = setHarnessEmissionState(session, emissionState);
   }
   const settledTurn = { output: structured } satisfies SettledTurn;

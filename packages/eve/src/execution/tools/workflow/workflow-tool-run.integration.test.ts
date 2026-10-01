@@ -234,7 +234,9 @@ describe("workflow tools", () => {
         // The answer resumes the same turn, which completes once.
         const turnIds = new Set(
           answered.flatMap((event) =>
-            "data" in event && "turnId" in event.data ? [event.data.turnId] : [],
+            "data" in event && event.data !== undefined && "turnId" in event.data
+              ? [event.data.turnId]
+              : [],
           ),
         );
         expect([...turnIds]).toEqual([parked!.data.turnId]);

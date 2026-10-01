@@ -2,6 +2,7 @@ import { publishTerminalSessionEvent } from "#execution/publish-session-events.j
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import { createSessionFailedEvent } from "#protocol/message.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 const log = createLogger("execution.workflow-entry");
 
@@ -11,6 +12,7 @@ export async function emitTerminalSessionFailureStep(input: {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly turnId?: string;
+  readonly usage: TokenUsage | undefined;
 }): Promise<void> {
   "use step";
 
@@ -41,7 +43,7 @@ export async function emitTerminalSessionFailureStep(input: {
 
   await publishTerminalSessionEvent({
     errorId: typeof details.errorId === "string" ? details.errorId : undefined,
-    event: createSessionFailedEvent({ code, details, message, sessionId }),
+    event: createSessionFailedEvent({ code, details, message, sessionId, usage: input.usage }),
     sessionWritable: input.sessionWritable,
     serializedContext: input.serializedContext,
     turnId: input.turnId,

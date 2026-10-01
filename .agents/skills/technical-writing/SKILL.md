@@ -1,6 +1,8 @@
 ---
 name: technical-writing
 description: Write, edit, review, or audit user-facing documentation for the eve repository. Use for changes under docs/, documentation tied to eve APIs or CLI behavior, docs work based on Slack or support feedback, and requests to make eve docs clearer, more natural, or less AI-patterned while verifying claims against current source, tests, CLI help, public releases, and repository conventions.
+metadata:
+  internal: true
 ---
 
 # Technical writing

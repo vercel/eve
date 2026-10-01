@@ -54,7 +54,12 @@ describe("emitTurnEpilogue", () => {
     const emit = createEmitStub();
     const history = [{ content: "settled reply", role: "assistant" as const }];
 
-    await emitTurnEpilogue(emit, EMISSION_STATE, history);
+    await emitTurnEpilogue(emit, EMISSION_STATE, history, {
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
 
     expect(emit).toHaveBeenNthCalledWith(
       1,

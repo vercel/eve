@@ -23,7 +23,7 @@ import {
   createSessionFailedEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
-import { stampTestEvents } from "#internal/testing/events.js";
+import { TEST_USAGE, stampTestEvents } from "#internal/testing/events.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -175,7 +175,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -257,6 +257,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
         turnId: "turn_1",
       }),
       createSessionFailedEvent({
+        usage: TEST_USAGE,
         code: "MODEL_CALL_FAILED",
         message: "Bad Request",
         sessionId: "session_1",
@@ -328,7 +329,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) =>
       init?.method === "POST"
         ? await startResponse.promise
-        : createEagerStreamResponse([createSessionWaitingEvent()]),
+        : createEagerStreamResponse([createSessionWaitingEvent(TEST_USAGE)]),
     );
 
     const store = createStore<readonly string[]>({
@@ -373,7 +374,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createBoundedStreamResponse(events))
@@ -411,7 +412,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
         stepIndex: 0,
         turnId: "turn_1",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
 
     const startResponse = createDeferred<Response>();
@@ -452,7 +453,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
       .mockResolvedValueOnce(
         createEagerStreamResponse([
           createMessageReceivedEvent({ message: "After", sequence: 0, turnId: "turn_1" }),
-          createSessionWaitingEvent(),
+          createSessionWaitingEvent(TEST_USAGE),
         ]),
       );
 

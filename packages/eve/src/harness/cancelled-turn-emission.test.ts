@@ -3,14 +3,23 @@ import { describe, expect, it } from "vitest";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
+const USAGE = {
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  costUsd: 0.5,
+  inputTokens: 120,
+  outputTokens: 30,
+};
+
 describe("emitCancelledTurn", () => {
-  it("emits turn.cancelled → session.waiting and no failure events", async () => {
+  it("emits turn.cancelled → session.waiting with the session's usage and no failure events", async () => {
     const events: UnstampedMessageStreamEvent[] = [];
     const next = await emitCancelledTurn(
       async (event) => {
         events.push(event);
       },
       { sessionStarted: true, sequence: 3, stepIndex: 2, turnId: "turn_3" },
+      USAGE,
     );
 
     expect(events.map((event) => event.type)).toEqual(["turn.cancelled", "session.waiting"]);
@@ -19,7 +28,7 @@ describe("emitCancelledTurn", () => {
       type: "turn.cancelled",
     });
     expect(events[1]).toEqual({
-      data: { continuationToken: "", wait: "next-user-message" },
+      data: { continuationToken: "", usage: USAGE, wait: "next-user-message" },
       type: "session.waiting",
     });
     expect(next).toEqual({ sessionStarted: true, sequence: 4, stepIndex: 0, turnId: "" });
@@ -36,6 +45,7 @@ describe("emitCancelledTurn", () => {
         events.push(event);
       },
       { sessionStarted: false, sequence: 0, stepIndex: 0, turnId: "" },
+      USAGE,
     );
 
     expect(events[0]).toMatchObject({
