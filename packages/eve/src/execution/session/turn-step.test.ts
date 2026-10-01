@@ -1401,6 +1401,68 @@ describe("turnStep", () => {
     expect(observed).toEqual(expected);
   });
 
+  it("resumes a sign-in callback as the user who started it, not the last speaker", async () => {
+    const alice: SessionAuthContext = {
+      attributes: {},
+      authenticator: "slack-webhook",
+      issuer: "slack",
+      principalId: "slack:alice",
+      principalType: "user",
+    };
+    const bob: SessionAuthContext = { ...alice, principalId: "slack:bob" };
+    installSessionStoreMocks([
+      createStubSession({
+        state: setPendingAuthorization(undefined, {
+          challenges: [
+            {
+              attemptId: "attempt-linear",
+              challenge: { url: "https://idp.example/authorize" },
+              hookUrl: "https://agent.example/callback",
+              name: "linear",
+              principal: { id: "slack:alice", issuer: "slack", type: "user" },
+              principalId: "slack:alice",
+              requester: alice,
+            },
+          ],
+        }),
+      }),
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, bob);
+    ctx.set(BundleKey, createStubBundle());
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "http:shared-thread");
+    ctx.set(SessionIdKey, "session-1");
+
+    let observed: SessionAuthContext | null | undefined;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session): Promise<StepResult> => {
+        observed = loadContext().get(AuthKey);
+        return { next: null, session };
+      };
+    });
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [
+          {
+            authorizationCallback: {
+              attemptId: "attempt-linear",
+              callback: { method: "GET", params: { code: "oauth-code" } },
+              connectionName: "linear",
+            },
+          },
+        ],
+      },
+      sessionWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(observed).toEqual(alice);
+  });
+
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
     const announcement = "Available skills\n- policy: Tenant policy";
     const session = createStubSession({

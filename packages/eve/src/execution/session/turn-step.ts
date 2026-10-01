@@ -165,6 +165,15 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     ctx.set(AuthKey, delivery.auth ?? null);
     if (!ctx.has(InitiatorAuthKey)) ctx.set(InitiatorAuthKey, delivery.auth ?? null);
   }
+  // A sign-in callback carries no identity. Resume as the user who started the
+  // sign-in, not whoever spoke in the session while it was pending. Approval
+  // sign-ins (`candidateId`) bind their responder separately.
+  const requester =
+    delivery === undefined
+      ? completedAuths?.find(({ challenge }) => challenge.candidateId === undefined)?.challenge
+          .requester
+      : undefined;
+  if (requester !== undefined) ctx.set(AuthKey, requester);
   const initialSession: HarnessSession = {
     ...hydrateDurableSession({
       compactionOverrides: {

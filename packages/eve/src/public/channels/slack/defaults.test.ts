@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { defaultEvents, defaultInputRequestedHandler } from "#public/channels/slack/defaults.js";
+import { defaultInputRequestedHandler } from "#public/channels/slack/approval-cards.js";
+import { defaultEvents } from "#public/channels/slack/defaults.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
@@ -241,6 +242,7 @@ describe("defaultInputRequestedHandler private input requests", () => {
 
   it("previews the triggering message and updates the routed DM card after settlement", async () => {
     const { channel, post, postDirectMessage, request } = buildChannelStub({
+      slackUsersByPrincipal: { "slack:T1:U_REVIEWER": "U_REVIEWER" },
       triggeringMessageTs: "111.333",
       triggeringUserId: "U_REVIEWER",
     });
@@ -296,11 +298,62 @@ describe("defaultInputRequestedHandler private input requests", () => {
       blocks?: unknown[];
     };
     expect(JSON.stringify(update.blocks)).not.toContain("eve_input:route:");
+    expect(request).toHaveBeenCalledWith("chat.delete", { channel: "D123", ts: "dm2" });
+    expect(request).toHaveBeenCalledWith("chat.update", {
+      channel: "C123",
+      text: "Approved by <@U_REVIEWER>.",
+      ts: "ts1",
+    });
+    expect(channel.state.pendingApprovalCards).toEqual({});
+  });
+
+  it("retires a thread approval that resolves without a click, even when Slack fails", async () => {
+    const logs = captureLogRecords();
+    const { channel, post, request } = buildChannelStub();
+    post
+      .mockResolvedValueOnce({ id: "details-ts", raw: { ok: true } })
+      .mockResolvedValueOnce({ id: "card-ts", raw: { ok: true } });
+
+    await defaultInputRequestedHandler()(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+    expect(channel.state.pendingApprovalCards?.["approval-1"]).toMatchObject({
+      detailsMessageTs: "details-ts",
+      messageTs: "card-ts",
+    });
+
+    request.mockRejectedValueOnce(new Error("Slack unavailable"));
+    await defaultEvents["input.resolved"]!(
+      {
+        resolutions: [{ kind: "tool-approval", outcome: "ignored", requestId: "approval-1" }],
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-2",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(request).toHaveBeenCalledWith(
+      "chat.update",
+      expect.objectContaining({
+        channel: "C123",
+        text: "Answered: No longer needed",
+        ts: "card-ts",
+      }),
+    );
+    expect(request).toHaveBeenCalledWith("chat.delete", { channel: "C123", ts: "details-ts" });
+    expect(channel.state.pendingApprovalCards).toEqual({});
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to retire approval message" }),
+    );
   });
 });
 
 describe("defaultEvents approval lifecycle", () => {
-  it("sends candidate progress privately", async () => {
+  it("posts no notice that would outlive a pending candidate", async () => {
     const { channel, postEphemeral } = buildChannelStub({
       slackUsersByPrincipal: { "slack:T1:U777": "U777" },
     });
@@ -325,13 +378,10 @@ describe("defaultEvents approval lifecycle", () => {
       ctx,
     );
 
-    expect(postEphemeral).toHaveBeenCalledWith(
-      "U777",
-      "Checking whether you can respond to this approval…",
-    );
+    expect(postEphemeral).not.toHaveBeenCalled();
   });
 
-  it("routes candidate progress from event identity instead of ambient auth", async () => {
+  it("routes candidate feedback from event identity instead of ambient auth", async () => {
     const { channel, postEphemeral } = buildChannelStub({
       slackUsersByPrincipal: { "slack:T1:U777": "U777" },
       teamId: "T1",
@@ -346,7 +396,8 @@ describe("defaultEvents approval lifecycle", () => {
     await defaultEvents["approval.candidate"]!(
       {
         candidateId: "candidate-1",
-        outcome: "pending",
+        outcome: "rejected",
+        reason: "GitHub write access is required.",
         requestId: "approval-1",
         responderPrincipalId: "slack:T1:U777",
         sequence: 1,
@@ -357,10 +408,7 @@ describe("defaultEvents approval lifecycle", () => {
       wrongAmbientUser,
     );
 
-    expect(postEphemeral).toHaveBeenCalledWith(
-      "U777",
-      "Checking whether you can respond to this approval…",
-    );
+    expect(postEphemeral).toHaveBeenCalledWith("U777", "GitHub write access is required.");
   });
 
   it("delivers an immediate rejection through the responder mapping", async () => {

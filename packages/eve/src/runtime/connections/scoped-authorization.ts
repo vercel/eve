@@ -325,8 +325,7 @@ async function startScopedAuthorization(
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const principal = resolveScopedPrincipal(input);
-  const principalId = (input.boundResponder ?? contextStorage.getStore()?.get(AuthKey))
-    ?.principalId;
+  const requester = input.boundResponder ?? contextStorage.getStore()?.get(AuthKey) ?? undefined;
   const callbackUrl = resolveAuthorizationCallbackUrl({
     authorization,
     callbackUrl: attempt.hookUrl,
@@ -340,11 +339,13 @@ async function startScopedAuthorization(
     {
       attemptId: attempt.attemptId,
       challenge: stampChallengeDisplayName(challenge, authorization),
+      grant: authorization.vercelConnect?.connector,
       hookUrl: callbackUrl,
       instanceId: input.instanceId,
       name: scope,
       principal,
-      principalId,
+      principalId: requester?.principalId,
+      requester,
       resume,
     },
   ]);

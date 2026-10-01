@@ -22,9 +22,8 @@ export type NextTurnInstruction =
 
 /**
  * Waits for the next input the parked owner must act on. While an
- * authorization challenge is open, its callbacks collect in the queue and
- * resume the challenge once every expected attempt has reported; ordinary
- * deliveries keep starting turns in the meantime. Fully routed descendant
+ * authorization challenge is open, any expected callback resumes it ahead of
+ * other input; ordinary deliveries keep starting turns in the meantime. Fully routed descendant
  * deliveries leave nothing for the parent, so the wait continues.
  */
 export async function nextTurnDelivery(input: {

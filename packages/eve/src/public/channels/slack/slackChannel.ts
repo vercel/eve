@@ -41,9 +41,9 @@ import {
   collectInboundFileParts,
   createSlackFetchFile,
 } from "#public/channels/slack/attachments.js";
+import { defaultInputRequestedHandler } from "#public/channels/slack/approval-cards.js";
 import {
   defaultEvents,
-  defaultInputRequestedHandler,
   defaultOnMessage,
   defaultReceived,
 } from "#public/channels/slack/defaults.js";
@@ -195,6 +195,10 @@ type SlackSessionFailedHandler = (
  * `JSON.stringify` / `JSON.parse`.
  */
 export interface SlackPendingApprovalCard {
+  /** Thread post announcing a direct-message approval; updated with the outcome. */
+  readonly announcementTs?: string;
+  /** Separate tool-input details post; deleted once none of its approvals are pending. */
+  readonly detailsMessageTs?: string;
   /** Channel containing the approval card; differs from the session channel for DM delivery. */
   readonly messageChannelId?: string;
   readonly messageBlocks: readonly unknown[];
@@ -1107,7 +1111,7 @@ async function handleEventPost(input: {
 
   if (payload.kind === "app_mention" || payload.kind === "direct_message") {
     const kind = payload.kind;
-    const message = slackMessageFromWebhookPayload(payload);
+    const message = slackMessageFromWebhookPayload(payload, installationTeamId);
     if (message !== null && !isSelfAuthoredSlackMessage({ appId, botUserId }, message)) {
       const specialized = kind === "app_mention" ? config.onAppMention : config.onDirectMessage;
       const handler = specialized ?? config.onMessage;
@@ -1222,6 +1226,7 @@ async function dispatchSlackMessage(input: {
         : buildSlackAuthContext({
             channelId: input.message.channelId,
             fullName: author.fullName,
+            installationTeamId: input.installationTeamId,
             isBot: author.isBot,
             teamId: input.message.teamId,
             threadTs: input.message.threadTs,

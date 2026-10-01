@@ -234,6 +234,8 @@ Override every enabled inbound handler; leaving `onDirectMessage` out would reta
 
 Keep authorization checks inside sensitive tools too. The inbound allowlist controls who can start a turn; tool-level checks control what that authenticated Slack principal may read or change.
 
+`defaultSlackAuth` and `ctx.defaultAuth` identify a person as `slack:<team>:<user>`, where `<team>` is the app installation workspace when Slack reports one, otherwise the event's team. Messages and button clicks resolve the same team, so a Slack Connect user keeps one principal, and one connection sign-in, whether they post in the thread or click an approval.
+
 `onInputResponse` runs after eve decodes a built-in HITL answer but before the parked session resumes. Return `{ auth }` to accept the answer. Returning `null` or throwing rejects it, leaves the request pending, and keeps the Slack controls active. `ctx.defaultAuth` identifies the Slack user who submitted the signed interaction; it does not authorize that user by itself.
 
 If you omit `onInputResponse`, Slack accepts HITL answers with the submitting user's auth, regardless of which message or event handlers you define. Define `onInputResponse` when those handlers enforce an invocation policy that must also apply to HITL answers. Put sensitive prompts in conversations limited to the intended approvers, and re-check `ctx.session.auth.current` inside a sensitive tool before performing its side effect.
@@ -645,6 +647,8 @@ export default slackChannel({
 
 The callback receives the `InputRequest` and current `SessionContext`, so it can switch on `kind`, `action`, or presentation properties. Omit it to keep every request in the thread, or return `"direct-message"` unconditionally to make every request private. If eve cannot resolve the triggering Slack user for a direct message, it logs the undelivered request and posts no fallback, so private delivery fails closed. The existing `onInputResponse` or tool approval response policy still decides whether the person who clicks may respond.
 
+When a tool approval resolves, eve retires the messages it posted for it. The card loses its buttons and shows the answer and who gave it, the separate tool-input post is deleted, and a direct-message request's `Waiting on approval` note in the thread changes to the outcome. This also happens when the approval ends without a click, for example when the person replies in the thread instead, in which case the card reads `No longer needed`.
+
 A renderer's `input.requested` handler can extend delivery and then hand the requests on to eve with `next()`. For example, an application can add non-sensitive context to the Slack thread before eve renders the actionable controls. The configured `approvalChannel` still sends sensitive reviews to a DM and keeps ordinary requests in the thread:
 
 ```ts title="agent/channels/slack.ts"
@@ -698,7 +702,7 @@ deriveHitlResponse({ actionId: button.action_id, value: button.value });
 // { response: { optionId: "approve", requestId: request.requestId } }
 ```
 
-Use them to test a custom renderer against eve's wire format, or to post eve's controls from your own renderer. A click on these controls in the session's Slack thread resumes the session through `onInputResponse`, the same as eve's own controls. To pass `response` to `respond()` yourself, validate it first with `parseInputResponses` from `eve/client`.
+Use them to test a custom renderer against eve's wire format, or to post eve's controls from your own renderer. A click on these controls in the session's Slack thread resumes the session through `onInputResponse`, the same as eve's own controls. eve does not track controls you post yourself, so update or remove those messages from your renderer's `approval.settled` and `input.resolved` handlers. To pass `response` to `respond()` yourself, validate it first with `parseInputResponses` from `eve/client`.
 
 Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the Slack user behind the event's `principalId`, device code included, and then updates that public status when `authorization.completed` fires. A renderer's `authorization.required` handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access. Its `next()` reaches eve's default, which posts the public status; skip `next` to deliver the challenge yourself, as this handler does by direct message. `state.slackUsersByPrincipal` maps each principal eve has seen in the thread, through a message or an input response, to its Slack user ID. If the principal has no entry, the challenge is not sent privately.
 

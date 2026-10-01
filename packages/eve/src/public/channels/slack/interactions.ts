@@ -344,6 +344,7 @@ export async function handleInteractionPost(
           address: slackContinuationToken(interaction.channelId, interaction.threadTs),
           defaultAuth: buildSlackAuthContext({
             channelId: interaction.channelId,
+            installationTeamId: interaction.installationTeamId,
             teamId: interaction.teamId,
             threadTs: interaction.threadTs,
             userId: actionUser.id,

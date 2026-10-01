@@ -39,16 +39,16 @@ export async function deliverPrivateInputRequest(input: {
         }),
       );
     }
+    let detailsMessageTs: string | undefined;
     if (parts.details !== undefined) {
-      postedMessageIds.push(
-        await postMessage(input.slack, {
-          blocks: parts.details.blocks,
-          channel: messageChannelId,
-          text: parts.details.text,
-          unfurl_links: false,
-          unfurl_media: false,
-        }),
-      );
+      detailsMessageTs = await postMessage(input.slack, {
+        blocks: parts.details.blocks,
+        channel: messageChannelId,
+        text: parts.details.text,
+        unfurl_links: false,
+        unfurl_media: false,
+      });
+      postedMessageIds.push(detailsMessageTs);
     }
     const messageTs = await postMessage(input.slack, {
       blocks: parts.controls.blocks,
@@ -58,7 +58,12 @@ export async function deliverPrivateInputRequest(input: {
       unfurl_media: false,
     });
     postedMessageIds.push(messageTs);
-    return { messageBlocks: parts.controls.blocks, messageChannelId, messageTs };
+    return {
+      detailsMessageTs,
+      messageBlocks: parts.controls.blocks,
+      messageChannelId,
+      messageTs,
+    };
   } catch (error) {
     await Promise.allSettled(
       postedMessageIds.map(async (ts) => {

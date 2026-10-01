@@ -73,6 +73,11 @@ export interface SlackMessage {
   readonly channelId: string;
   /** Slack team id, when the envelope carried one. */
   readonly teamId: string | undefined;
+  /**
+   * Workspace whose app installation received the message, when Slack reported
+   * one. eve pairs it with the author's user id to identify the author.
+   */
+  readonly installationTeamId?: string;
   /** Author of the message. May be `undefined` for system events. */
   readonly author: SlackAuthor | undefined;
   /** File / image attachments on the inbound message. */
@@ -181,7 +186,7 @@ export function parseAppMentionEvent(envelope: SlackEventCallback): SlackMessage
   if (envelope.type !== "event_callback") return null;
   const event = envelope.event;
   if (!event || event.type !== "app_mention") return null;
-  return buildSlackMessage(event as SlackAppMentionEvent, envelope.team_id);
+  return buildSlackMessage(event as SlackAppMentionEvent, envelope);
 }
 
 /**
@@ -245,7 +250,7 @@ export function parseMessageEvent(envelope: SlackEventCallback): SlackMessage | 
   if (envelope.type !== "event_callback") return null;
   const event = envelope.event;
   if (!event || event.type !== "message") return null;
-  return buildSlackMessage(event as SlackMessageEvent, envelope.team_id);
+  return buildSlackMessage(event as SlackMessageEvent, envelope);
 }
 
 export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMessage | null {
@@ -257,7 +262,7 @@ export function parseDirectMessageEvent(envelope: SlackEventCallback): SlackMess
   if (message.channel_type !== "im") return null;
   if (!isHumanMessage(message)) return null;
 
-  return buildSlackMessage(message, envelope.team_id);
+  return buildSlackMessage(message, envelope);
 }
 
 function isHumanMessage(message: SlackMessageEvent): boolean {
@@ -273,6 +278,7 @@ function isHumanMessage(message: SlackMessageEvent): boolean {
 
 export function slackMessageFromWebhookPayload(
   payload: SlackAppMentionPayload | SlackDirectMessagePayload,
+  installationTeamId?: string,
 ): SlackMessage | null {
   if (payload.kind === "direct_message") {
     if (
@@ -294,6 +300,7 @@ export function slackMessageFromWebhookPayload(
     threadTs: payload.threadTs,
     channelId: payload.channelId,
     teamId: payload.teamId,
+    installationTeamId,
     author: parsePayloadAuthor(payload),
     attachments: parsePayloadAttachments(payload.files),
     raw: payload.raw,
@@ -302,7 +309,7 @@ export function slackMessageFromWebhookPayload(
 
 function buildSlackMessage(
   event: SlackAppMentionEvent | SlackMessageEvent,
-  envelopeTeamId: string | undefined,
+  envelope: SlackEventCallback,
 ): SlackMessage | null {
   const channelId = typeof event.channel === "string" ? event.channel : "";
   const ts = typeof event.ts === "string" ? event.ts : "";
@@ -311,7 +318,8 @@ function buildSlackMessage(
   const topLevelText = typeof event.text === "string" ? event.text : "";
   const text = resolveSlackInboundMrkdwn(topLevelText, event as Record<string, unknown>);
   const threadTs = typeof event.thread_ts === "string" ? event.thread_ts : ts;
-  const teamId = typeof envelopeTeamId === "string" ? envelopeTeamId : undefined;
+  const teamId = typeof envelope.team_id === "string" ? envelope.team_id : undefined;
+  const installationTeamId = slackEventInstallationTeamId(envelope);
 
   return {
     text,
@@ -320,6 +328,7 @@ function buildSlackMessage(
     threadTs,
     channelId,
     teamId,
+    installationTeamId,
     author: parseAuthor(event),
     attachments: parseAttachments(event.files),
     raw: event as Record<string, unknown>,

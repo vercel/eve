@@ -37,7 +37,7 @@ import {
 
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { SessionIdKey } from "#context/keys.js";
+import { SessionIdKey, type SessionAuthContext } from "#context/keys.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connection-types.js";
@@ -56,6 +56,12 @@ export interface AuthorizationChallenge {
   /** Opaque identity of this exact authorization attempt. */
   readonly attemptId?: string;
   readonly candidateId?: string;
+  /**
+   * Credential this sign-in grants, shared by every scope that uses it (the
+   * Vercel Connect connector). Attempts for the same grant and principal are
+   * one sign-in, so only one is shown.
+   */
+  readonly grant?: string;
   /** Opaque resolved connection identity; omitted for tool-hosted authorization. */
   readonly instanceId?: string;
   readonly name: string;
@@ -65,6 +71,12 @@ export interface AuthorizationChallenge {
   readonly principal?: ConnectionPrincipal;
   /** Session principal that started this attempt; projected onto authorization events. */
   readonly principalId?: string;
+  /**
+   * Session identity that started this attempt. The callback carries no
+   * identity, so the resumed turn runs as this caller. Never projected onto
+   * events or model-facing output.
+   */
+  readonly requester?: SessionAuthContext;
   /**
    * Opaque resume value from the strategy's `startAuthorization`,
    * journaled across the park. Absent for provider-owned flows.
@@ -311,35 +323,38 @@ export function setPendingAuthorization(
   };
 }
 
-/** Keeps the last challenge for each authorization name and principal scope. */
+/** Keeps the last challenge for each sign-in and principal. */
 export function resolveActiveAuthorizationChallenges(
   challenges: readonly AuthorizationChallenge[],
 ): readonly AuthorizationChallenge[] {
   return challenges.filter(
     (candidate, index) =>
-      !challenges
-        .slice(index + 1)
-        .some(
-          (replacement) =>
-            candidate.name === replacement.name &&
-            samePrincipal(candidate.principal, replacement.principal),
-        ),
+      !challenges.slice(index + 1).some((replacement) => sameSignIn(candidate, replacement)),
   );
 }
 
-/** Existing same-scope attempts replaced by newer attempts for the same principal. */
+/** Existing attempts replaced by newer attempts for the same sign-in and principal. */
 export function getSupersededAuthorizationChallenges(
   sessionState: Record<string, unknown> | undefined,
   replacements: readonly AuthorizationChallenge[],
 ): readonly AuthorizationChallenge[] {
   const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
   return previous.filter((candidate) =>
-    replacements.some(
-      (replacement) =>
-        candidate.name === replacement.name &&
-        samePrincipal(candidate.principal, replacement.principal),
-    ),
+    replacements.some((replacement) => sameSignIn(candidate, replacement)),
   );
+}
+
+/**
+ * Same scope, or the same grant from another scope, such as two tools and a
+ * connection that all use one Vercel Connect connector. Approval sign-ins
+ * stay per candidate because each one settles its own approval.
+ */
+function sameSignIn(left: AuthorizationChallenge, right: AuthorizationChallenge): boolean {
+  const sameGrant =
+    left.grant !== undefined &&
+    left.grant === right.grant &&
+    left.candidateId === right.candidateId;
+  return (left.name === right.name || sameGrant) && samePrincipal(left.principal, right.principal);
 }
 
 function samePrincipal(

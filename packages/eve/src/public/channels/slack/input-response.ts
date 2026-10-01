@@ -25,6 +25,7 @@ export async function authorizeInputResponse(input: {
 }): Promise<SlackInputResponseResult> {
   const defaultAuth = buildSlackAuthContext({
     channelId: input.channelId,
+    installationTeamId: input.installationTeamId,
     teamId: input.teamId,
     threadTs: input.threadTs,
     userId: input.submission.user.id,

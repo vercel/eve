@@ -1,14 +1,10 @@
 import { workingTaskNames } from "#channel/task-card.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
-import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
+import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import { describeActionRequests, waitingOnTasks } from "#public/channels/slack/action-status.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
-import {
-  buildSlackAuthContext,
-  slackUserIdForPrincipal,
-  slackUserIdFromAuthContext,
-} from "#public/channels/slack/auth.js";
+import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
   buildAuthEphemeralBlocks,
@@ -16,29 +12,18 @@ import {
   formatConnectionDisplayName,
   type ConnectionAuthorizationOutcome,
 } from "#public/channels/slack/connections.js";
-import {
-  buildAnsweredBlocks,
-  decodeHitlActionId,
-  renderInputRequestPostParts,
-  type SlackInputRequestPostPart,
-} from "#public/channels/slack/hitl.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
-import { deliverPrivateInputRequest } from "#public/channels/slack/private-approval-delivery.js";
+import { approvalEvents } from "#public/channels/slack/approval-cards.js";
 import {
   SLACK_MARKDOWN_TEXT_MAX_LENGTH,
-  SLACK_MAX_BLOCKS_PER_MESSAGE,
-  truncateMessageText,
   truncateTypingStatus,
 } from "#public/channels/slack/limits.js";
 import type {
-  SlackApprovalChannelResolver,
   SlackChannelInternalEvents,
   SlackChannelState,
   SlackContext,
-  SlackEventContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
-import type { InputRequest } from "#shared/input.js";
 
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
@@ -126,22 +111,6 @@ function formatSemanticErrorReply(input: {
   ].join("\n");
 }
 
-function blockContainsRequestAction(block: unknown, requestId: string): boolean {
-  if (typeof block !== "object" || block === null) return false;
-  const candidate = block as { actions?: unknown; elements?: unknown };
-  return [candidate.actions, candidate.elements].some(
-    (entries) =>
-      Array.isArray(entries) &&
-      entries.some((entry) => {
-        if (typeof entry !== "object" || entry === null) return false;
-        const actionId = (entry as { action_id?: unknown }).action_id;
-        return (
-          typeof actionId === "string" && decodeHitlActionId(actionId)?.requestId === requestId
-        );
-      }),
-  );
-}
-
 /**
  * Workspace-scoped projection of the Slack actor that produced
  * `message`, derived into a {@link SessionAuthContext}. Used by both
@@ -159,6 +128,7 @@ export function defaultSlackAuth(
   return buildSlackAuthContext({
     channelId: ctx.slack.channelId,
     fullName: author.fullName,
+    installationTeamId: message.installationTeamId,
     isBot: author.isBot,
     teamId: message.teamId,
     threadTs: ctx.slack.threadTs,
@@ -192,123 +162,6 @@ function firstNonEmptyLine(text: string): string | undefined {
     if (trimmed.length > 0) return trimmed;
   }
   return undefined;
-}
-
-/**
- * Default `input.requested` handler — renders each pending HITL
- * request as Slack `block_actions`. Buttons by default; radio for
- * ≤6-option select requests; static_select for >6-option select
- * requests. Batches split into multiple posts when they would exceed
- * Slack's 50-block message cap.
- */
-export function defaultInputRequestedHandler(
-  approvalChannel?: SlackApprovalChannelResolver,
-): NonNullable<SlackChannelInternalEvents["input.requested"]> {
-  return async (data, channel, ctx) => {
-    const directMessageRequests: InputRequest[] = [];
-    const threadRequests: InputRequest[] = [];
-    for (const request of data.requests) {
-      const destination =
-        approvalChannel === undefined ? "thread" : await approvalChannel(request, ctx);
-      (destination === "direct-message" ? directMessageRequests : threadRequests).push(request);
-    }
-
-    await postPublicInputRequests(threadRequests, channel);
-    for (const request of directMessageRequests) {
-      const reviewer =
-        slackUserIdFromAuthContext(ctx.session.auth.current) ?? channel.state.triggeringUserId;
-      if (!reviewer) {
-        log.warn("direct-message input request not delivered because no reviewer was resolved", {
-          requestId: request.requestId,
-          sessionId: ctx.session.id,
-        });
-        continue;
-      }
-      const card = await deliverPrivateInputRequest({
-        previewMessageTs: channel.state.triggeringMessageTs ?? channel.slack.threadTs,
-        request,
-        reviewer,
-        slack: channel.slack,
-      });
-      recordApprovalCards(channel.state, [request], card);
-      try {
-        await channel.thread.post(
-          `Waiting on ${request.kind === "tool-approval" ? "approval" : "a response"} from <@${reviewer}>…`,
-        );
-      } catch (error) {
-        logError(log, "failed to announce private input request", error, {
-          requestId: request.requestId,
-          sessionId: ctx.session.id,
-        });
-      }
-    }
-  };
-}
-
-async function postPublicInputRequests(
-  requests: readonly InputRequest[],
-  channel: SlackEventContext,
-): Promise<void> {
-  for (const post of buildInputRequestPosts(requests)) {
-    const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
-    recordApprovalCards(channel.state, post.requests, {
-      messageBlocks: post.blocks,
-      messageTs: message.id,
-    });
-  }
-}
-
-function recordApprovalCards(
-  state: SlackChannelState,
-  requests: readonly InputRequest[],
-  card: NonNullable<SlackChannelState["pendingApprovalCards"]>[string],
-): void {
-  if (!card.messageTs) return;
-  const cards = { ...state.pendingApprovalCards };
-  for (const request of requests) {
-    if (request.kind === "tool-approval") cards[request.requestId] = card;
-  }
-  state.pendingApprovalCards = cards;
-}
-
-/**
- * Groups HITL requests into `chat.postMessage` payloads that stay under
- * Slack's block-count cap. Tool input details are posted before interactive
- * approval controls so Slack's callback body cannot grow with the input.
- */
-function buildInputRequestPosts(
-  requests: readonly InputRequest[],
-): Array<{ blocks: unknown[]; requests: InputRequest[]; text: string }> {
-  const details: Array<SlackInputRequestPostPart & { readonly request: InputRequest }> = [];
-  const controls: Array<SlackInputRequestPostPart & { readonly request: InputRequest }> = [];
-  for (const request of requests) {
-    const parts = renderInputRequestPostParts(request);
-    if (parts.details) details.push({ ...parts.details, request });
-    controls.push({ ...parts.controls, request });
-  }
-
-  return [...groupInputRequestPostParts(details), ...groupInputRequestPostParts(controls)];
-}
-
-function groupInputRequestPostParts(
-  parts: readonly (SlackInputRequestPostPart & { readonly request: InputRequest })[],
-): Array<{ blocks: unknown[]; requests: InputRequest[]; text: string }> {
-  const groups: Array<{ blocks: unknown[]; fallbacks: string[]; requests: InputRequest[] }> = [];
-  for (const part of parts) {
-    const current = groups.at(-1);
-    if (current && current.blocks.length + part.blocks.length <= SLACK_MAX_BLOCKS_PER_MESSAGE) {
-      current.blocks.push(...part.blocks);
-      current.fallbacks.push(part.text);
-      current.requests.push(part.request);
-    } else {
-      groups.push({ blocks: [...part.blocks], fallbacks: [part.text], requests: [part.request] });
-    }
-  }
-  return groups.map((group) => ({
-    blocks: group.blocks,
-    requests: group.requests,
-    text: truncateMessageText(group.fallbacks.join("\n")),
-  }));
 }
 
 /**
@@ -353,62 +206,7 @@ export async function postCompletedSlackReply(
  * authored renderers cannot express.
  */
 export const defaultEvents: SlackChannelInternalEvents = {
-  async "approval.candidate"(event, channel, _ctx) {
-    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
-    if (event.outcome === "pending" && userId !== undefined) {
-      await channel.thread.postEphemeral(
-        userId,
-        "Checking whether you can respond to this approval…",
-      );
-      return;
-    }
-    if (userId === undefined) return;
-    if (event.outcome === "rejected" || event.outcome === "failed") {
-      await channel.thread.postEphemeral(
-        userId,
-        event.reason ?? "We couldn’t verify your response. Please try again.",
-      );
-    }
-  },
-
-  async "approval.settled"(event, channel, _ctx) {
-    const cards = channel.state.pendingApprovalCards ?? {};
-    const card = cards[event.requestId];
-    if (card === undefined) return;
-    const messageChannelId = card.messageChannelId ?? channel.state.channelId;
-    if (messageChannelId === null) return;
-    const answerLabel = event.outcome === "approved" ? "Approve" : "Cancel";
-    const userId = slackUserIdForPrincipal(channel.state, event.responderPrincipalId);
-    const blocks = card.messageBlocks.flatMap((block) => {
-      if (!blockContainsRequestAction(block, event.requestId)) return [block];
-      if (typeof block !== "object" || block === null) return [];
-      const candidate = block as Record<string, unknown>;
-      if (candidate.type !== "card") {
-        return buildAnsweredBlocks({ answerLabel, promptBlocks: [], userId });
-      }
-      const { actions: _actions, ...withoutActions } = candidate;
-      return buildAnsweredBlocks({
-        answerLabel,
-        promptBlocks: [withoutActions],
-        userId,
-      });
-    });
-    await channel.slack.request("chat.update", {
-      blocks,
-      channel: messageChannelId,
-      text: `Answered: ${answerLabel}`,
-      ts: card.messageTs,
-    });
-    const next = { ...cards };
-    delete next[event.requestId];
-    for (const [requestId, pendingCard] of Object.entries(next)) {
-      if (pendingCard.messageTs === card.messageTs) {
-        next[requestId] = { ...pendingCard, messageBlocks: blocks };
-      }
-    }
-    channel.state.pendingApprovalCards = next;
-  },
-
+  ...approvalEvents,
   async "turn.waiting"(event, channel, _ctx) {
     const working = workingTaskNames(channel.state.taskCards?.[event.turnId]?.turn);
     if (working.length > 0) await channel.thread.startTyping(waitingOnTasks(working));

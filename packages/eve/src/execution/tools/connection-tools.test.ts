@@ -26,13 +26,16 @@ function setup() {
   const startAuthorization = vi.fn(async ({ callbackUrl }: { callbackUrl: string }) => ({
     challenge: { url: `https://idp.example.com/authorize?redirect=${callbackUrl}` },
   }));
-  const authorization = defineInteractiveAuthorization({
-    getToken: async () => {
-      throw new ConnectionAuthorizationRequiredError("unused");
-    },
-    startAuthorization,
-    completeAuthorization: async () => ({ token: "token" }),
-  });
+  const authorization = {
+    ...defineInteractiveAuthorization({
+      getToken: async () => {
+        throw new ConnectionAuthorizationRequiredError("unused");
+      },
+      startAuthorization,
+      completeAuthorization: async () => ({ token: "token" }),
+    }),
+    vercelConnect: { connector: "workspace/agent" },
+  };
   const connections = ["github", "linear", "notion"].map(
     (connectionName) =>
       ({
@@ -106,7 +109,11 @@ describe("connection tools authorization", () => {
       tool: "list_issues",
     });
     expect(isAuthorizationSignal(executed)).toBe(true);
-    expect(executed).toMatchObject({ challenges: [{ name: "linear" }] });
+    expect(executed).toMatchObject({
+      challenges: [
+        { grant: "workspace/agent", name: "linear", requester: { principalId: "alice" } },
+      ],
+    });
     expect(startAuthorization).toHaveBeenCalledOnce();
   });
 });
