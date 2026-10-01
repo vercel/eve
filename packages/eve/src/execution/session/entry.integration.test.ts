@@ -995,6 +995,77 @@ describe("workflowEntry integration", () => {
     });
   }, 60_000);
 
+  it("lets the turn's own person steer a held approval even with a queue turn policy", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "alice",
+      principalType: "user" as const,
+    };
+    const executions: string[] = [];
+    const runtime = await createTestRuntime({
+      agent: { name: "workflow-entry-steer-held-auth" },
+      modules: [
+        {
+          loadNamespace: async () => ({
+            default: defineTool({
+              approval: always(),
+              description: "Apply a change after the user approves it.",
+              execute: () => {
+                executions.push("approve_change");
+                return { applied: true };
+              },
+              inputSchema: {},
+            }),
+          }),
+          logicalPath: "tools/approve_change.ts",
+        },
+      ],
+    });
+    const continuationToken = "http:workflow-entry-steer-held-auth";
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: "Use the approve_change tool exactly once." },
+          serializedContext: {
+            ...buildSerializedContext({ auth: alice, channelKind: "http", continuationToken }),
+            "eve.capabilities": { requestInput: true },
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const held = await withTimeout(stream.nextTurn(), "approval hold");
+        const request = filterEventsByType(held, "input.requested")[0]?.data.requests[0];
+        expect(held.at(-1)?.type).toBe("turn.waiting");
+
+        await resumeHook(sessionInboxHookToken(continuationToken), {
+          auth: alice,
+          kind: "send",
+          payload: { message: "Never mind, just say hello." },
+          // Clients such as the TUI and eval sessions queue by default. Queued
+          // behind a turn that waits on Alice, it would never run.
+          turnPolicy: "queue",
+        });
+        const steered = await withTimeout(stream.nextTurn(), "steered turn");
+        expect(filterEventsByType(steered, "input.resolved")).toMatchObject([
+          { data: { resolutions: [{ outcome: "ignored", requestId: request!.requestId }] } },
+        ]);
+        expect(filterEventsByType(steered, "turn.started")).toHaveLength(0);
+        expect(steered.at(-1)?.type).toBe("session.waiting");
+        expect(executions).toEqual([]);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
   it("releases a session reset while its turn is held on an approval", async () => {
     const runtime = await createTestRuntime({
       agent: { name: "workflow-entry-reset-held" },

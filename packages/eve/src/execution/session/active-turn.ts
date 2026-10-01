@@ -1,7 +1,11 @@
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
-import { isSteeringMessage, type SteeringTurn } from "#execution/session/input-queue.js";
+import {
+  isSteeringMessage,
+  type SteeringOptions,
+  type SteeringTurn,
+} from "#execution/session/input-queue.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type { SessionExecutionInput } from "#execution/session/turn.js";
 import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
@@ -110,10 +114,10 @@ export class ActiveTurn {
    * The next step reads it as input, so its signal must not interrupt that
    * step; only deliveries still unread re-signal the next generation.
    */
-  async takeSteering(): Promise<DeliverHookPayload | undefined> {
+  async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity);
+      const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
       const routed = await routeSelectedDelivery(selection, this.input.cursor);
