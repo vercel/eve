@@ -27,11 +27,16 @@ const nextConfig: NextConfig = {};
 
 export default nextConfig;
 `;
+const PEER_SERVICE_WEB_BUILD_COMMAND = "node ../../node_modules/next/dist/bin/next build";
 const PEER_SERVICE_VERCEL_CONFIG = `import { withEve } from "eve/vercel";
 
 export default await withEve({
   services: {
-    web: { framework: "nextjs", root: "apps/web" },
+    web: {
+      framework: "nextjs",
+      root: "apps/web",
+      buildCommand: "${PEER_SERVICE_WEB_BUILD_COMMAND}",
+    },
   },
   routes: [
     { src: "^(.*)$", destination: { type: "service", service: "web" } },
@@ -178,7 +183,13 @@ export default withEve(nextConfig);
   if (plan.hosting === "vercel") {
     const vercelTsPath = join(project.environmentRoot, "vercel.ts");
     const vercelJsonPath = join(project.environmentRoot, "vercel.json");
-    await assertInstallerOwned(vercelTsPath, [PEER_SERVICE_VERCEL_CONFIG]);
+    await assertInstallerOwned(vercelTsPath, [
+      PEER_SERVICE_VERCEL_CONFIG,
+      PEER_SERVICE_VERCEL_CONFIG.replace(
+        /    web: \{[^}]+\},/,
+        '    web: { framework: "nextjs", root: "apps/web" },',
+      ),
+    ]);
     if (await deps.pathExists(vercelJsonPath)) {
       throw new Error(
         `Could not configure Vercel services because ${vercelJsonPath} already exists. Preserve it and compose eve/vercel manually.`,
