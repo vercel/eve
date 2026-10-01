@@ -379,7 +379,13 @@ async function postCreateSession(
   options: CreateSessionOptions,
 ): Promise<Response> {
   const headers = await context.resolveHeaders(options.headers);
+  let body: string | undefined;
+  if (options.stubs !== undefined) {
+    headers.set("content-type", "application/json");
+    body = JSON.stringify({ stubs: options.stubs });
+  }
   const response = await fetch(createClientUrl(context.host, EVE_SESSION_ROUTE_PATH), {
+    body,
     headers,
     method: "POST",
     redirect: context.redirect,
@@ -399,7 +405,7 @@ function isSessionNotReady(error: unknown): error is ClientError {
 async function postTurn(
   context: ClientSessionContext,
   path: string,
-  input: SendTurnPayload,
+  input: SendTurnPayload & Pick<SendTurnInput, "stubs">,
   requireMessage: boolean,
 ): Promise<Response> {
   const body = createMessageBody(input, requireMessage);
@@ -450,7 +456,7 @@ async function readAcceptedMessage(
 }
 
 function createMessageBody(
-  input: SendTurnPayload,
+  input: SendTurnPayload & Pick<SendTurnInput, "stubs">,
   requireMessage: boolean,
 ): Record<string, unknown> | null {
   const body: Record<string, unknown> = {};
@@ -462,6 +468,7 @@ function createMessageBody(
     body.turnPolicy = input.turnPolicy;
   }
   if (input.clientContext !== undefined) body.clientContext = input.clientContext;
+  if (input.stubs !== undefined) body.stubs = input.stubs;
   const outputSchema = serializeOutputSchema(input.outputSchema);
   if (outputSchema !== undefined) body.outputSchema = outputSchema;
 

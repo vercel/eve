@@ -1,5 +1,5 @@
 import type { ClientSession } from "#client/session.js";
-import type { CreateSessionOptions, SendTurnInput, SendTurnOptions } from "#client/types.js";
+import type { CreateSessionOptions, SendTurnInput } from "#client/types.js";
 import type { Client } from "#client/client.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalSessionDriver, type EvalSessionStartedEvent } from "#evals/session.js";
@@ -34,7 +34,7 @@ export class EvalSessionManager {
     return this.#register(session);
   }
 
-  async send(message: SendTurnInput["message"], options: SendTurnOptions = {}) {
+  async send(message: SendTurnInput["message"], options: Omit<SendTurnInput, "message"> = {}) {
     const { session, response } = await this.#client.sessions.create({
       turnPolicy: "queue",
       ...options,

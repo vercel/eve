@@ -18,6 +18,7 @@ import {
   SessionCallbackKey,
   LegacyRemoteAgentCallerKey,
   SessionTitleKey,
+  ToolStubsKey,
   TraceRootKey,
 } from "#context/keys.js";
 import { deriveSessionTitle } from "#execution/eve-workflow-attributes.js";
@@ -77,6 +78,10 @@ export function buildRunContext(input: {
 
   if (run.capabilities !== undefined) {
     ctx.set(CapabilitiesKey, run.capabilities);
+  }
+
+  if (run.toolStubs !== undefined) {
+    ctx.set(ToolStubsKey, run.toolStubs);
   }
 
   if (run.requestId !== undefined) {

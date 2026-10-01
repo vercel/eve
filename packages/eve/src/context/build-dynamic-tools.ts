@@ -14,6 +14,7 @@ import {
   type PersistedDynamicToolMetadata,
 } from "#context/dynamic-tool-metadata.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { withToolStubs } from "#evals/tool-stubs.js";
 import { createLogger } from "#internal/logging.js";
 import type {
   ApprovalContext,
@@ -145,12 +146,12 @@ export function replayDynamicTools(
       endsTurn: entry.endsTurn,
       execute: createToolExecuteWithAuth({
         scope: entry.name,
-        execute: (input, context) => {
+        execute: withToolStubs((input, context) => {
           if (execute === undefined) {
             throw missingCallbackError(entry, "execute");
           }
           return callDurableDynamicCallback(execute, executeReference.closure, input, context);
-        },
+        }, "fail"),
       }),
       inputSchema: replayDynamicToolSchema(entry, owner, "inputSchema")!,
       name: entry.name,

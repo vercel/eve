@@ -25,6 +25,11 @@ import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import {
+  recordSubagentToolStubFailure,
+  withDispatchToolStubs,
+  withToolStubs,
+} from "#evals/tool-stubs.js";
+import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
 } from "#execution/tools/workflow/harness-definition.js";
@@ -117,12 +122,12 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     runtimeIdentity: buildRuntimeIdentity(input.node),
     tools,
   });
-  if (instrumentation === undefined) return step;
   return async (session, stepInput) => {
+    recordSubagentToolStubFailure();
     try {
       return await step(session, stepInput);
     } finally {
-      await instrumentation.flush();
+      await instrumentation?.flush();
     }
   };
 }
@@ -215,17 +220,19 @@ function resolveHarnessToolDefinition(input: {
 
   if (workflowId !== undefined) {
     if (registeredTool === null) {
-      return createPreparedWorkflowToolHarnessDefinition(input.tool);
+      return withDispatchToolStubs(createPreparedWorkflowToolHarnessDefinition(input.tool));
     }
-    return createWorkflowToolHarnessDefinition({
-      executeInput: registeredTool.definition.executeInput,
-      definition: createRegisteredHarnessToolDefinition({
-        behavior: input.tool.behavior,
-        definition: registeredTool.definition,
-        rootOnly: input.tool.rootOnly,
+    return withDispatchToolStubs(
+      createWorkflowToolHarnessDefinition({
+        executeInput: registeredTool.definition.executeInput,
+        definition: createRegisteredHarnessToolDefinition({
+          behavior: input.tool.behavior,
+          definition: registeredTool.definition,
+          rootOnly: input.tool.rootOnly,
+        }),
+        workflowId,
       }),
-      workflowId,
-    });
+    );
   }
 
   if (registeredTool === null) {
@@ -267,6 +274,7 @@ function createRegisteredHarnessToolDefinition(input: {
     execute: resolveAuthoredExecute({
       rawExecute,
       scope: def.name,
+      withoutStub: def.owner.kind === "framework" ? "run" : "fail",
     }),
     frameworkAction:
       def.owner.kind === "framework" && def.name === LOAD_SKILL_TOOL_NAME
@@ -293,11 +301,12 @@ function createRegisteredHarnessToolDefinition(input: {
 function resolveAuthoredExecute(input: {
   readonly rawExecute: ResolvedToolDefinition["execute"];
   readonly scope: string;
+  readonly withoutStub: "fail" | "run";
 }): HarnessToolDefinition["execute"] {
-  const { rawExecute, scope } = input;
+  const { rawExecute, scope, withoutStub } = input;
   if (rawExecute === undefined) {
     return undefined;
   }
   const authored = rawExecute as (toolInput: unknown, ctx: unknown) => unknown;
-  return createToolExecuteWithAuth({ execute: authored, scope });
+  return createToolExecuteWithAuth({ execute: withToolStubs(authored, withoutStub), scope });
 }

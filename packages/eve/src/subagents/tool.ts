@@ -7,6 +7,7 @@ import type {
   SessionAuthContext,
   SessionCapabilities,
   RunInput,
+  ToolStubsSelection,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
@@ -82,6 +83,8 @@ export function buildSubagentRunInput(input: {
   readonly parent: SubagentParentContext;
   readonly session: Pick<HarnessSession, "continuationToken" | "sandboxState" | "sessionId">;
   readonly source: SubagentInputSource;
+  /** Parent's eval stub set, so the child shares the parent's stub state. */
+  readonly toolStubs?: ToolStubsSelection;
 }): SubagentRunInputBuild {
   const {
     action,
@@ -136,6 +139,7 @@ export function buildSubagentRunInput(input: {
     conversationId: input.parent.conversationId,
     parent: input.parent.lineage,
     parentTraceContext: input.parent.traceContext,
+    toolStubs: input.toolStubs,
     traceRoot: input.parent.traceRoot,
   };
   return { childContinuationToken, runInput };

@@ -137,7 +137,7 @@ model: mockModel({
 });
 ```
 
-`mockModel()` uses `"Mock response"` when no response is supplied. It handles both generated and streamed responses, derives deterministic response metadata, and estimates token usage. Because the model is part of the agent definition, use it for a dedicated fixture agent; it remains mocked whether that fixture runs locally or as a deployed eval target.
+`mockModel()` uses `"Mock response"` when no response is supplied. It handles both generated and streamed responses, derives deterministic response metadata, and estimates token usage. Because the model is part of the agent definition, use it for a dedicated fixture agent; it remains mocked whether that fixture runs locally or as a deployed eval target. To keep the real model and replace what its tools return, use [tool stubs](./tool-stubs).
 
 ## The `t` context
 
@@ -195,6 +195,7 @@ The rest of this section covers each piece:
 - [Cases](./cases): single-turn evals, scripted multi-turn evals, and dataset fan-out
 - [Assertions](./assertions): run-level methods and `t.check` value assertions, with matchers and severity
 - [Judge](./judge): LLM-as-judge grading and the judge model
+- [Tool stubs](./tool-stubs): replace what tools return, while the model still sees and calls the real tools
 - [Targets](./targets): local vs remote targets for the same eval files
 - [Reporters](./reporters): Braintrust experiments and JUnit XML
 - [Running evals](./running): the `eve eval` CLI, exit codes, and artifacts

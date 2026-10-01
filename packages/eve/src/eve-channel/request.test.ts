@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseCreateBody } from "#eve-channel/request.js";
+import { parseCreateBody, parseSessionMessageBody } from "#eve-channel/request.js";
 import { REMOTE_AGENT_PROTOCOL_VERSION } from "#protocol/remote-agent-protocol.js";
 
 describe("parseCreateBody", () => {
@@ -46,6 +46,35 @@ describe("parseCreateBody", () => {
     expect(response).toBeInstanceOf(Response);
     await expect((response as Response).json()).resolves.toMatchObject({
       error: expect.stringContaining("does not accept"),
+    });
+  });
+
+  it("accepts a stub set name on a session without a message", () => {
+    expect(parseCreateBody({ stubs: "two-workflows" })).toEqual({
+      callback: undefined,
+      capabilities: undefined,
+      context: undefined,
+      outputSchema: undefined,
+      stubs: "two-workflows",
+    });
+  });
+
+  it("rejects a stub set name that is not a non-empty string", async () => {
+    const response = parseCreateBody({ message: "hi", stubs: ["two-workflows"] });
+    expect(response).toBeInstanceOf(Response);
+    await expect((response as Response).json()).resolves.toMatchObject({
+      error: "Expected 'stubs' to be the non-empty name of a stub set in evals/stubs/.",
+    });
+  });
+});
+
+describe("parseSessionMessageBody", () => {
+  it("rejects a stub set on a message to an existing session", async () => {
+    const response = parseSessionMessageBody({ message: "hi", stubs: "two-workflows" });
+    expect(response).toBeInstanceOf(Response);
+    await expect((response as Response).json()).resolves.toMatchObject({
+      error:
+        "'stubs' is accepted only when creating a session; later turns use the session's stub set.",
     });
   });
 });

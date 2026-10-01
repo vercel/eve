@@ -48,6 +48,7 @@ import {
 import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
+import { readTurnFailingToolError } from "#harness/turn-failing-tool-error.js";
 import { emitNestedToolActions } from "#harness/nested-actions.js";
 import { AuthKey } from "#context/keys.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
@@ -177,6 +178,10 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
   // -------------------------------------------------------------------------
 
   const prepareStep: PrepareStepFunction<ToolSet> = async ({ messages, model }) => {
+    // An approved call that runs before this model call can fail the turn.
+    const turnFailure = readTurnFailingToolError();
+    if (turnFailure !== undefined) throw turnFailure;
+
     let processed = messages;
 
     if (input.cachePath.kind === "anthropic-direct" && input.marker) {

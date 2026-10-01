@@ -1,4 +1,5 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
+import { latestTaskResult, playScript } from "@eve-e2e/config/mock-script";
 import { defineAgent, defineDynamic } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
@@ -11,6 +12,9 @@ const REPLY_DIRECTIVE = /reply with exactly ([A-Z0-9-]+)/iu;
 const APPROVAL_FOLLOWUP_DIRECTIVE =
   /call the (gate|read-status) tool exactly once with marker "([^"]+)"/iu;
 const ASK_QUESTION_DIRECTIVE = /call the ask_question tool exactly once with question "([^"]+)"/iu;
+const SCHEDULES_DIRECTIVE =
+  /call the (schedules_read|schedules_create) tool exactly once(?: with name "([^"]+)")?/iu;
+const SCHEDULER_SUBAGENT_DIRECTIVE = /use the scheduler subagent with message "([^"]+)"/iu;
 
 /**
  * Scripted mock for the world suites: untagged evals in this fixture phrase
@@ -32,6 +36,38 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     const output = [...request.toolResults]
       .reverse()
       .find((result) => result.name === approvalFollowup[1])?.output;
+    return JSON.stringify(output ?? "Missing tool result");
+  }
+
+  // A subagent answers in a later user message, so match the latest directive, not the result.
+  const schedulerMessage = [...request.userMessages]
+    .reverse()
+    .find((entry) => !entry.includes("<task_result"));
+  const scheduler = SCHEDULER_SUBAGENT_DIRECTIVE.exec(schedulerMessage ?? "");
+  if (scheduler?.[1] !== undefined) {
+    const turn = request.userMessages.filter((entry) =>
+      SCHEDULER_SUBAGENT_DIRECTIVE.test(entry),
+    ).length;
+    return playScript(
+      request,
+      [
+        { id: `scheduler-${turn}`, input: () => ({ message: scheduler[1] }), name: "scheduler" },
+        { id: `scheduler-${turn}-wait`, name: "task_wait" },
+      ],
+      (current) => latestTaskResult(current, "scheduler") ?? "Missing scheduler result",
+    );
+  }
+
+  const schedules = SCHEDULES_DIRECTIVE.exec(message);
+  if (schedules?.[1] !== undefined) {
+    const roles = request.messages.map((entry) => entry.role);
+    if (roles.lastIndexOf("tool") < roles.lastIndexOf("user")) {
+      const input = schedules[2] === undefined ? {} : { name: schedules[2] };
+      return { toolCalls: [{ name: schedules[1], input }] };
+    }
+    const output = [...request.toolResults]
+      .reverse()
+      .find((result) => result.name === schedules[1])?.output;
     return JSON.stringify(output ?? "Missing tool result");
   }
 

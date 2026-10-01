@@ -35,3 +35,13 @@ export function resolveEveEvaluationRunId(): string | undefined {
   const runId = process.env[EVE_EVALUATION_RUN_ID_ENV];
   return runId === undefined || runId.length === 0 ? undefined : runId;
 }
+
+/** Directory of the stub sets an `eve eval` run can select, `<app>/evals/stubs`. */
+export const EVE_EVALUATION_TOOL_STUBS_DIR_ENV = "EVE_EVALUATION_TOOL_STUBS_DIR";
+
+/** Returns the stub set directory when this process serves a local eval run. */
+export function resolveEveEvaluationToolStubsDirectory(): string | undefined {
+  if (!isEveEvaluationEnvironment()) return undefined;
+  const directory = process.env[EVE_EVALUATION_TOOL_STUBS_DIR_ENV];
+  return directory === undefined || directory.length === 0 ? undefined : directory;
+}

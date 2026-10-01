@@ -106,6 +106,11 @@ export interface ClientOptions {
  */
 export interface SendTurnInput<TOutput = unknown> extends SendTurnOptions<TOutput> {
   readonly message: string | UserContent;
+  /**
+   * Stub set the new session runs against, by its path under `evals/stubs/`
+   * (`"two-workflows"`). Accepted only by the agent server `eve eval` starts.
+   */
+  readonly stubs?: string;
 }
 
 /** Request options for creating a conversation session before its first turn. */
@@ -114,6 +119,11 @@ export interface CreateSessionOptions {
   readonly signal?: AbortSignal;
   /** Additional headers for this request only. */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * Stub set the new session runs against, by its path under `evals/stubs/`
+   * (`"two-workflows"`). Accepted only by the agent server `eve eval` starts.
+   */
+  readonly stubs?: string;
 }
 
 /** Options shared by message sends and HITL responses on a client session. */

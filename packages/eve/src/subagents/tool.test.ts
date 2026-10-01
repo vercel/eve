@@ -89,6 +89,19 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.capabilities).toEqual({ requestInput: true });
   });
 
+  it("forwards the parent's stub set so the child shares its stub state", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      initiatorAuth: null,
+      session: makeSession(),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
+      toolStubs: { set: "two-workflows", worldId: "world-1" },
+    });
+
+    expect(runInput.toolStubs).toEqual({ set: "two-workflows", worldId: "world-1" });
+  });
+
   it("leaves capabilities undefined when the parent has none", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),

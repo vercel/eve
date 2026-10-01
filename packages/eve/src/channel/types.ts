@@ -391,6 +391,14 @@ export interface SessionCallback {
 // Capabilities
 // ---------------------------------------------------------------------------
 
+/** The stub set an eval session runs against and the stub state it shares. */
+export interface ToolStubsSelection {
+  /** Stub set name, derived from its path under `evals/stubs/`. */
+  readonly set: string;
+  /** Identifies the stub state shared by the root session and its subagents. */
+  readonly worldId: string;
+}
+
 /**
  * Runtime capabilities granted to one eve session.
  *
@@ -454,6 +462,11 @@ export interface RunInput {
    * leave this undefined.
    */
   readonly capabilities?: SessionCapabilities;
+  /**
+   * Stub set an `eve eval` session selected at create. Subagent dispatch
+   * forwards it unchanged, so the whole session tree shares one stub state.
+   */
+  readonly toolStubs?: ToolStubsSelection;
   /** Inbound channel request id used to correlate workflow attributes. */
   readonly requestId?: string;
   /**

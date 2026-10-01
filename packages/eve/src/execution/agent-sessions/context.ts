@@ -4,6 +4,7 @@ import type {
   SessionCapabilities,
   SessionParent,
   SessionTraceRoot,
+  ToolStubsSelection,
 } from "#channel/types.js";
 import type { LocalDevRequestProvenance } from "#context/keys.js";
 import type { DynamicSubagentSelections } from "#execution/agent-sessions/target.js";
@@ -50,6 +51,8 @@ export interface AgentSessionContext {
   /** Present when the caller's trace root differs from `parent.rootSessionId`. */
   readonly traceRoot?: SessionTraceRoot;
   readonly sandbox: AgentSessionSandbox;
+  /** Forwarded unchanged, so sessions share their caller's eval stub set and stub state. */
+  readonly toolStubs?: ToolStubsSelection;
   readonly trace: AgentChildTraceDispatch;
 }
 
@@ -77,6 +80,7 @@ type CallerDispatch = Pick<
   | "sandboxSessionId"
   | "serializedContext"
   | "session"
+  | "toolStubs"
   | "traceRoot"
   | "workflowAgents"
 >;
@@ -125,6 +129,7 @@ export function captureAgentSessionContext(
       turn: { id: batch.event.turnId, sequence: batch.event.sequence },
     },
     sandbox: { sessionId: caller.sandboxSessionId, state: session.sandboxState },
+    toolStubs: caller.toolStubs,
     traceRoot: caller.traceRoot,
     trace: resolveToolCallAgentTrace({
       callId,

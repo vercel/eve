@@ -90,6 +90,17 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
 
+  const stubs = payload.stubs;
+  if (stubs !== undefined && (typeof stubs !== "string" || stubs.length === 0)) {
+    return Response.json(
+      {
+        error: "Expected 'stubs' to be the non-empty name of a stub set in evals/stubs/.",
+        ok: false,
+      },
+      { status: 400 },
+    );
+  }
+
   const messageFreeRejection = validateMessageFreeCreate({
     callback,
     hasClientContext: payload.clientContext !== undefined,
@@ -114,6 +125,7 @@ export function parseCreateBody(input: Record<string, unknown>): ParsedCreateBod
     outputSchema,
   };
   if (message !== undefined) result.message = message;
+  if (stubs !== undefined) result.stubs = stubs;
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
   if (protocolVersion !== undefined) result.protocolVersion = protocolVersion;
   if (protocolVersion === LEGACY_REMOTE_AGENT_PROTOCOL_VERSION) {
@@ -150,6 +162,16 @@ export function parseSessionMessageBody(
   if (outputSchema instanceof Response) return outputSchema;
   const turnPolicy = parseTurnPolicyField(payload.turnPolicy);
   if (turnPolicy instanceof Response) return turnPolicy;
+  if (payload.stubs !== undefined) {
+    return Response.json(
+      {
+        error:
+          "'stubs' is accepted only when creating a session; later turns use the session's stub set.",
+        ok: false,
+      },
+      { status: 400 },
+    );
+  }
 
   if (message === undefined && inputResponses === undefined) {
     return Response.json(

@@ -15,6 +15,7 @@ import {
   modelFacingAuthorizationOutput,
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
+import { recordTurnFailingToolError } from "#harness/turn-failing-tool-error.js";
 import { isApprovedToolCall, markApprovalRecheck } from "#harness/approval-recheck.js";
 import { toModelSchema } from "#tools/schema.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
@@ -164,6 +165,7 @@ export function wrapToolExecute(
     try {
       output = execute(input, options);
     } catch (error) {
+      recordTurnFailingToolError(error);
       return Promise.reject(error);
     }
 
@@ -171,8 +173,12 @@ export function wrapToolExecute(
       return normalizeToolExecuteIterable(output, definition.name, options);
     }
 
-    return Promise.resolve(output).then((value) =>
-      normalizeToolExecuteOutput(value, definition.name, options),
+    return Promise.resolve(output).then(
+      (value) => normalizeToolExecuteOutput(value, definition.name, options),
+      (error: unknown) => {
+        recordTurnFailingToolError(error);
+        throw error;
+      },
     );
   };
 }

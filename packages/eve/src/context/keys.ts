@@ -16,6 +16,7 @@ import type {
   SessionTraceContext,
   SessionTraceRoot,
   SessionTurn,
+  ToolStubsSelection,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
 import {
@@ -148,6 +149,9 @@ export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled
  * dispatch so HITL readiness flows through a conversation chain.
  */
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
+
+/** Stub set selected when an `eve eval` session was created; absent everywhere else. */
+export const ToolStubsKey = new ContextKey<ToolStubsSelection>("eve.toolStubs");
 
 /**
  * Optional framework-owned caller callback captured when the session is created.

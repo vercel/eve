@@ -5,7 +5,7 @@ description: "Point evals at a local dev server or a deployment with the same ev
 
 An eval target is always an HTTP URL. `eve eval` starts a local dev server, while `eve eval --url <url>` runs against an existing server or deployment. The same eval files work for both, which is what makes evals usable as end-to-end tests in CI.
 
-The runner polls `/eve/v1/health`, verifies `/eve/v1/info`, and exposes the live target as `t.target` inside the `test` function.
+The runner polls `/eve/v1/health`, verifies `/eve/v1/info`, and exposes the live target as `t.target` inside the `test` function. [Tool stubs](./tool-stubs) work only on the local server `eve eval` starts; a `--url` target rejects them.
 
 ## Target helpers
 
