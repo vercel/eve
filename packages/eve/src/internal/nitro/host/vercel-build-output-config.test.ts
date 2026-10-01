@@ -52,7 +52,7 @@ describe("createEveVercelOptions", () => {
         enabled: true,
         publicRoutePrefix,
       });
-      expect(options?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH].environment).not.toHaveProperty(
+      expect(options?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH]!.environment).not.toHaveProperty(
         "EVE_PUBLIC_ROUTE_PREFIX",
       );
     }
@@ -65,7 +65,7 @@ describe("createEveVercelOptions", () => {
       publicRoutePrefix: "eve/support/",
     });
 
-    expect(options?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH].environment).toEqual({
+    expect(options?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH]!.environment).toEqual({
       WORKFLOW_PRECONDITION_GUARD: "1",
       EVE_PUBLIC_ROUTE_PREFIX: "/eve/support",
     });
@@ -84,11 +84,13 @@ describe("createEveVercelOptions", () => {
       workspaceMember: true,
     });
 
-    expect(standalone?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH].environment).not.toHaveProperty(
+    expect(standalone?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH]!.environment).not.toHaveProperty(
       "EVE_INTERNAL_AGENT_WORKSPACE_MEMBER",
     );
-    expect(workspaceMember?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH].environment).toMatchObject({
-      EVE_INTERNAL_AGENT_WORKSPACE_MEMBER: "1",
-    });
+    expect(workspaceMember?.functionRules[EVE_WORKFLOW_FLOW_ROUTE_PATH]!.environment).toMatchObject(
+      {
+        EVE_INTERNAL_AGENT_WORKSPACE_MEMBER: "1",
+      },
+    );
   });
 });
