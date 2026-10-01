@@ -1,8 +1,9 @@
 import { expect } from "vitest";
 
-import type {
-  ChannelCapability,
-  ChannelConversation,
+import {
+  type ChannelCapability,
+  type ChannelConversation,
+  GATED_TOOL,
 } from "#internal/testing/channel-conformance/harness.js";
 
 /**
@@ -25,6 +26,31 @@ const PROMPT = "Which day works for the review?";
 async function askWhichDay(conversation: ChannelConversation) {
   await conversation.say(ASK);
   return await conversation.waitForQuestion(PROMPT);
+}
+
+const DEPLOY = `Use ${GATED_TOOL} to ship the release.`;
+const APPROVAL_PROMPT = "Approve Deploy release?";
+
+async function askToDeploy(conversation: ChannelConversation) {
+  await conversation.say(DEPLOY);
+  return await conversation.waitForQuestion(APPROVAL_PROMPT);
+}
+
+async function expectDeployed(conversation: ChannelConversation) {
+  const outcome = await conversation.waitForToolOutcome(GATED_TOOL);
+  expect(outcome, `${GATED_TOOL} settled as ${JSON.stringify(outcome)}`).toEqual({
+    kind: "ran",
+    output: { deployed: true },
+  });
+  expect(conversation.gatedToolRuns).toBe(1);
+}
+
+async function expectNotDeployed(conversation: ChannelConversation) {
+  const outcome = await conversation.waitForToolOutcome(GATED_TOOL);
+  expect(outcome, `${GATED_TOOL} settled as ${JSON.stringify(outcome)}`).toEqual({
+    kind: "denied",
+  });
+  expect(conversation.gatedToolRuns).toBe(0);
 }
 
 function expectAnsweredSaturday(output: unknown) {
@@ -68,6 +94,63 @@ export const hitlContract = [
       await askWhichDay(conversation);
       await conversation.say("Saturday");
       expectAnsweredSaturday(await conversation.waitForToolResult("ask_question"));
+    },
+  },
+  {
+    rule: "a tool approval shows Approve and Cancel",
+    source: "docs/tools/human-in-the-loop.md#approvals",
+    requires: [],
+    async run(conversation) {
+      const options = await askToDeploy(conversation);
+      const labels = options.map((option) => option.label).sort();
+      expect(labels, `the approval showed ${JSON.stringify(labels)}`).toEqual([
+        "Approve",
+        "Cancel",
+      ]);
+    },
+  },
+  {
+    rule: "pressing Approve runs the gated tool",
+    source: "docs/tools/human-in-the-loop.md#approvals",
+    requires: ["buttons"],
+    async run(conversation) {
+      const options = await askToDeploy(conversation);
+      const approve = options.find((option) => option.label === "Approve");
+      expect(approve, "an Approve option to press").toBeDefined();
+      await conversation.press(approve!);
+      await expectDeployed(conversation);
+    },
+  },
+  {
+    rule: "pressing Cancel stops the gated tool without running it",
+    source: "docs/tools/human-in-the-loop.md#approvals",
+    requires: ["buttons"],
+    async run(conversation) {
+      const options = await askToDeploy(conversation);
+      const cancel = options.find((option) => option.label === "Cancel");
+      expect(cancel, "a Cancel option to press").toBeDefined();
+      await conversation.press(cancel!);
+      await expectNotDeployed(conversation);
+    },
+  },
+  {
+    rule: "a text reply of approve runs the gated tool",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["text-replies"],
+    async run(conversation) {
+      await askToDeploy(conversation);
+      await conversation.say("approve");
+      await expectDeployed(conversation);
+    },
+  },
+  {
+    rule: "a text reply of cancel stops the gated tool without running it",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["text-replies"],
+    async run(conversation) {
+      await askToDeploy(conversation);
+      await conversation.say("cancel");
+      await expectNotDeployed(conversation);
     },
   },
 ] as const satisfies readonly ContractRule[];

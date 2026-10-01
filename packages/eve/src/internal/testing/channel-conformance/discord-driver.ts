@@ -61,12 +61,12 @@ export function discordDriver(): ChannelDriver {
     const body = text === "" ? {} : JSON.parse(text);
     const path = new URL(request.url).pathname;
     if (path.endsWith("/typing")) {
-      return { body, method: "POST", response: {} };
+      return { body, method: `POST ${path}`, response: {} };
     }
     messageId += 1;
     return {
       body,
-      method: request.method,
+      method: `${request.method} ${path}`,
       response: { channel_id: channelId, id: `M_CONFORMANCE_${messageId}` },
     };
   }
@@ -101,7 +101,7 @@ export function discordDriver(): ChannelDriver {
       );
     },
     findOptions(call, prompt) {
-      if (call.method !== "PATCH") return undefined;
+      if (!isMessageWrite(call)) return undefined;
       const body = call.body as {
         readonly components?: readonly { readonly components?: readonly DiscordComponent[] }[];
         readonly content?: string;
@@ -133,7 +133,7 @@ export function discordDriver(): ChannelDriver {
       );
     },
     postedText(call) {
-      if (call.method !== "POST" && call.method !== "PATCH") return undefined;
+      if (!isMessageWrite(call)) return undefined;
       return (call.body as { readonly content?: string }).content;
     },
   };
@@ -152,4 +152,13 @@ function visibleChoices(component: DiscordComponent, messageId: string): Rendere
     }));
   }
   return [];
+}
+
+/**
+ * Any call that writes a message a person sees. eve edits the interaction's
+ * original response first, then sends follow-ups, and falls back to a plain
+ * channel message when the interaction token fails.
+ */
+function isMessageWrite(call: PlatformCall): boolean {
+  return /^(PATCH|POST) /u.test(call.method) && !call.method.endsWith("/typing");
 }

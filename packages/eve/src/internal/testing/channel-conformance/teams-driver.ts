@@ -24,6 +24,7 @@ interface AdaptiveCard {
   }[];
   readonly actions?: readonly {
     readonly data?: Record<string, unknown>;
+    readonly title?: string;
     readonly type?: string;
   }[];
 }
@@ -39,7 +40,8 @@ interface ActivityBody {
 
 interface PressHandle {
   readonly data: Record<string, unknown>;
-  readonly value: string;
+  /** The chosen ChoiceSet value; unset when each option is its own Submit action. */
+  readonly value?: string;
 }
 
 /** Drives Teams' Bot Framework webhook and Connector API in a personal chat. */
@@ -98,12 +100,21 @@ export function teamsDriver(): ChannelDriver {
         (attachment) => attachment.contentType === "application/vnd.microsoft.card.adaptive",
       )?.content;
       const choiceSet = card?.body?.find((element) => element.type === "Input.ChoiceSet");
-      const submit = card?.actions?.find((action) => action.type === "Action.Submit");
-      const data = submit?.data;
-      if (choiceSet?.choices === undefined || data === undefined) return [];
-      return choiceSet.choices.map((choice) => ({
-        handle: { data, value: choice.value } satisfies PressHandle,
-        label: choice.title,
+      const submits = (card?.actions ?? []).filter(
+        (action) => action.type === "Action.Submit" && action.data !== undefined,
+      );
+      // A select renders one ChoiceSet and a single Submit; other choices are one Submit each.
+      if (choiceSet?.choices !== undefined) {
+        const data = submits[0]?.data;
+        if (data === undefined) return [];
+        return choiceSet.choices.map((choice) => ({
+          handle: { data, value: choice.value } satisfies PressHandle,
+          label: choice.title,
+        }));
+      }
+      return submits.map((action) => ({
+        handle: { data: action.data! } satisfies PressHandle,
+        label: action.title ?? "",
       }));
     },
     press: (option: RenderedOption) => {
@@ -112,7 +123,7 @@ export function teamsDriver(): ChannelDriver {
         id: `INVOKE-${activityId + 1}`,
         name: "adaptiveCard/action",
         type: "invoke",
-        value: { action: { data: { ...data, eve_option: value } } },
+        value: { action: { data: value === undefined ? data : { ...data, eve_option: value } } },
       });
     },
     postedText(call) {

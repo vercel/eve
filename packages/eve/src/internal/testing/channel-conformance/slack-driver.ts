@@ -126,7 +126,12 @@ export function slackDriver(): ChannelDriver {
         return undefined;
       const messageTs = (call.response as { readonly ts: string }).ts;
       const options = body.blocks.flatMap((block) =>
-        ((block as { readonly elements?: readonly SlackElement[] }).elements ?? [])
+        // Questions use `actions` blocks (`elements`); approval cards keep buttons in `actions`.
+        (
+          (block as { readonly elements?: readonly SlackElement[] }).elements ??
+          (block as { readonly actions?: readonly SlackElement[] }).actions ??
+          []
+        )
           .filter((element) => element.action_id.startsWith(HITL_ACTION_PREFIX))
           .flatMap((element) => renderedOptions(element, messageTs)),
       );

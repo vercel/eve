@@ -45,6 +45,10 @@ const channels: readonly {
         reason: "#3712: the card's fallback text is only the prompt",
         symptom: /the question showed \[\]/,
       },
+      "a tool approval shows Approve and Cancel": {
+        reason: "#3712: the card's fallback text is only the prompt",
+        symptom: /the approval showed \[\]/,
+      },
     },
   },
   { driver: discordDriver },
@@ -65,26 +69,48 @@ const channels: readonly {
         reason: "the channel never sends the question (no input.requested handler)",
         symptom: /Timed out waiting for the question "Which day works for the review\?" on twilio/,
       },
+      "a tool approval shows Approve and Cancel": {
+        reason: "the channel never sends the approval (no input.requested handler)",
+        symptom: /Timed out waiting for the question "Approve Deploy release\?" on twilio/,
+      },
+      "a text reply of approve runs the gated tool": {
+        reason: "the channel never sends the approval (no input.requested handler)",
+        symptom: /Timed out waiting for the question "Approve Deploy release\?" on twilio/,
+      },
+      "a text reply of cancel stops the gated tool without running it": {
+        reason: "the channel never sends the approval (no input.requested handler)",
+        symptom: /Timed out waiting for the question "Approve Deploy release\?" on twilio/,
+      },
     },
   },
 ];
 
+/**
+ * A broken cell fails with its symptom, often a wait that never ends, so it gets
+ * a short wait. Real platform calls arrive in well under a second once warm.
+ */
+const BROKEN_WAIT_TIMEOUT_MS = 3_000;
+
 describe.each(channels.map((entry) => ({ ...entry, name: entry.driver().name })))(
   "$name HITL contract",
   ({ driver, broken }) => {
+    const { capabilities } = driver();
     for (const rule of hitlContract) {
-      const { capabilities } = driver();
       const supported = rule.requires.every((capability) => capabilities.includes(capability));
       const known = broken?.[rule.rule];
-      const run = () => withChannelConversation(driver(), (c) => rule.run(c));
       if (!supported) {
-        it.skip(`${rule.rule} (not supported)`, run);
+        it.skip(`${rule.rule} (not supported)`, () => {});
       } else if (known === undefined) {
-        it(rule.rule, run, 60_000);
+        it(rule.rule, () => withChannelConversation(driver(), (c) => rule.run(c)), 60_000);
       } else {
         it(
           `${rule.rule} (broken: ${known.reason})`,
-          () => expect(run()).rejects.toThrow(known.symptom),
+          () =>
+            expect(
+              withChannelConversation(driver(), (c) => rule.run(c), {
+                waitTimeoutMs: BROKEN_WAIT_TIMEOUT_MS,
+              }),
+            ).rejects.toThrow(known.symptom),
           60_000,
         );
       }
