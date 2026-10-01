@@ -411,10 +411,23 @@ export const defaultEvents: SlackChannelInternalEvents = {
 
   async "turn.waiting"(event, channel, _ctx) {
     const working = workingTaskNames(channel.state.taskCards?.[event.turnId]?.turn);
-    if (working.length > 0) await channel.thread.startTyping(waitingOnTasks(working));
+    if (working.length === 0) return;
+    channel.state.waitingTurnId = event.turnId;
+    await channel.thread.startTyping(waitingOnTasks(working));
+  },
+
+  // A settled task resumes the parked turn. Without this, the waiting status
+  // lingers while the model reads the results, which can take a while when
+  // the provider streams no reasoning.
+  async "task.settled"(event, channel, _ctx) {
+    if (event.cancel !== undefined || channel.state.waitingTurnId !== event.turnId) return;
+    if (workingTaskNames(channel.state.taskCards?.[event.turnId]?.turn).length > 0) return;
+    channel.state.waitingTurnId = null;
+    await channel.thread.startTyping("Reviewing results...");
   },
 
   async "turn.started"(_event, channel, _ctx) {
+    channel.state.waitingTurnId = null;
     channel.state.pendingToolCallMessage = null;
     channel.state.lastReasoningTypingAtMs = null;
     channel.state.lastReasoningTypingStatus = null;
@@ -473,6 +486,8 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "actions.requested"(event, channel, _ctx) {
+    // The model resumed and moved on; a later settle must not replace its status.
+    channel.state.waitingTurnId = null;
     const buffered = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
     if (buffered) {
