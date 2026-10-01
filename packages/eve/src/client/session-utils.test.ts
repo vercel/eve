@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
-import { collectTurnEvents, summarizeTurnEvents } from "./session-utils.js";
+import { collectTurnEvents, summarizeTurnEvents, TurnSegment } from "./session-utils.js";
 
 const eventData = { sequence: 1, stepIndex: 0, turnId: "turn_1" };
 
@@ -168,6 +168,63 @@ describe("collectTurnEvents", () => {
         type: "session.waiting",
         data: { continuationToken: "session-id", wait: "next-user-message" },
       },
+    ]);
+  });
+});
+
+describe("TurnSegment", () => {
+  const signIn: UnstampedMessageStreamEvent = {
+    type: "authorization.required",
+    data: { ...eventData, description: "Sign in", name: "linear", webhookUrl: "https://auth" },
+  };
+  const held: UnstampedMessageStreamEvent = {
+    type: "turn.waiting",
+    data: { on: "input", sequence: 1, turnId: "turn_1" },
+  };
+
+  it("reads past a held sign-in only while following its callback", () => {
+    const resumed: UnstampedMessageStreamEvent[] = [
+      {
+        type: "authorization.completed",
+        data: { ...eventData, name: "linear", outcome: "authorized" },
+      },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
+    ];
+    const following = new TurnSegment({ followCallbacks: true });
+    expect([signIn, held, ...resumed].map((event) => following.observe(event))).toEqual([
+      false,
+      false,
+      false,
+      true,
+    ]);
+
+    const plain = new TurnSegment();
+    expect([signIn, held].map((event) => plain.observe(event))).toEqual([false, true]);
+  });
+
+  it("stops at a held sign-in when an approval also waits on the person", () => {
+    const segment = new TurnSegment({ followCallbacks: true });
+    const approval: UnstampedMessageStreamEvent = {
+      type: "input.requested",
+      data: {
+        ...eventData,
+        requests: [
+          {
+            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
+            kind: "tool-approval",
+            prompt: "Approve deploy?",
+            requestId: "req_1",
+          },
+        ],
+      },
+    };
+    expect([approval, signIn, held].map((event) => segment.observe(event))).toEqual([
+      false,
+      false,
+      true,
     ]);
   });
 });

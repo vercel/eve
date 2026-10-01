@@ -79,14 +79,16 @@ export async function collectTurnEvents(
  * at a `turn.waiting` on `"input"` (or while a request read in the segment is unanswered). The
  * turn stays open there until a person acts; a `turn.waiting` on `"tasks"` is informational and
  * reading goes on to the turn's real end.
- * A reader that follows sign-in callbacks also reads past `session.waiting` while one is
- * outstanding, because the callback resumes the same turn.
+ * A reader that follows sign-in callbacks reads past a sign-in's `turn.waiting` or
+ * `session.waiting` while its callback is outstanding, because the callback resumes the same turn.
  */
 export function endsTurnSegment(
   event: UnstampedMessageStreamEvent,
   open: { readonly callbacks: boolean; readonly requests: boolean },
 ): boolean {
-  if (event.type === "turn.waiting") return event.data.on === "input" || open.requests;
+  if (event.type === "turn.waiting") {
+    return open.requests || (event.data.on === "input" && !open.callbacks);
+  }
   return isCurrentTurnBoundaryEvent(event) && (event.type !== "session.waiting" || !open.callbacks);
 }
 

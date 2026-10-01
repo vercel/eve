@@ -32,9 +32,11 @@ export default defineEval({
       const followup = await session.send(question);
 
       followup.expectOk();
-      followup.usedNoTools();
+      followup.notEvent("actions.requested");
       followup.notEvent("input.requested");
       if (index === 0) {
+        // The steer cancels the held call, so its not-run result lands in this turn.
+        followup.calledTool(TOOL_NAME, { status: "completed", count: 0 });
         followup.event("input.resolved", {
           count: 1,
           data: {
@@ -45,6 +47,8 @@ export default defineEval({
               ),
           },
         });
+      } else {
+        followup.usedNoTools();
       }
       followup.event("session.waiting", { count: 1 });
     }

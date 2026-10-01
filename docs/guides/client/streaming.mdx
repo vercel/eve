@@ -57,7 +57,8 @@ This consumes the stream until the current turn boundary:
 - `session.completed`
 - `session.failed`
 - `turn.waiting` with `on: "input"`, which the turn emits while a person must
-  act on a sign-in, approval, or question
+  act on an approval or question. A sign-in emits it too, but the response stays
+  attached through it; see [authorization pauses](#authorization-pauses)
 
 A `turn.waiting` with `on: "tasks"` is informational: the turn stays open, and
 `result()` keeps reading to its final reply. When a call the turn
@@ -166,7 +167,7 @@ client-resolvable `http(s)` and `data:` URLs.
 
 `authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked turn can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.
 
-The stream can emit an interim `session.waiting` while the authorization callback is pending. An active `send()` or `respond()` response stays attached across that parking boundary until the authorization resolves and the resumed turn reaches its next boundary. If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load; the callback or a structured decline resumes the same eve session.
+The sign-in holds the turn open, and the stream emits `turn.waiting` with `on: "input"` while the authorization callback is pending. An active `send()` or `respond()` response stays attached across it until the authorization resolves and the resumed turn reaches its next boundary. If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load; the callback or a structured decline resumes the same eve session.
 
 ## Reconnection
 
