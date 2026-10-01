@@ -758,39 +758,67 @@ describe("slackChannel() default event handlers", () => {
     expect(slackStatuses(fetchMock)).toEqual([
       "Waiting on 3 tasks...",
       "Waiting on reviewer...",
-      "Reviewing results...",
       "Waiting on a task...",
     ]);
   });
 
-  it("keeps the model's status when a task settles after the turn resumed", async () => {
+  it("replaces the previous step's status when the model starts another step", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
+    const stepStarted = (stepIndex: number) =>
+      makeEvent("step.started", { modelId: "test", sequence: 1, stepIndex, turnId: "t1" });
     const taskStarted = (callId: string, name: string) =>
       makeEvent("task.started", { callId, kind: "agent", name, taskId: `${name}-1`, turnId: "t1" });
-    const taskSettled = (callId: string, name: string) =>
-      makeEvent("task.settled", { callId, status: "completed", taskId: `${name}-1`, turnId: "t1" });
 
+    await callEvent(adapter, stepStarted(0), ctx);
     await callEvent(adapter, taskStarted("c1", "researcher"), ctx);
     await callEvent(adapter, taskStarted("c2", "reviewer"), ctx);
     await callEvent(adapter, makeEvent("turn.waiting", { sequence: 1, turnId: "t1" }), ctx);
-    await callEvent(adapter, taskSettled("c1", "researcher"), ctx);
     await callEvent(
       adapter,
-      makeEvent("actions.requested", {
-        actions: [{ callId: "call_1", input: {}, kind: "tool-call", toolName: "search" }],
-        sequence: 2,
-        stepIndex: 1,
+      makeEvent("task.settled", {
+        callId: "c1",
+        status: "completed",
+        taskId: "researcher-1",
         turnId: "t1",
       }),
       ctx,
     );
-    await callEvent(adapter, taskSettled("c2", "reviewer"), ctx);
+    await callEvent(adapter, stepStarted(1), ctx);
+    await callEvent(adapter, makeEvent("turn.waiting", { sequence: 1, turnId: "t1" }), ctx);
+    await callEvent(
+      adapter,
+      makeEvent("actions.requested", {
+        actions: [{ callId: "call_1", input: {}, kind: "tool-call", toolName: "search" }],
+        sequence: 1,
+        stepIndex: 2,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    await callEvent(
+      adapter,
+      makeEvent("task.settled", {
+        callId: "c2",
+        cancel: { reason: "task_cancel" },
+        status: "cancelled",
+        taskId: "reviewer-1",
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    await callEvent(adapter, stepStarted(3), ctx);
 
-    expect(slackStatuses(fetchMock)).toEqual(["Waiting on 2 tasks...", "search"]);
+    expect(slackStatuses(fetchMock)).toEqual([
+      "Waiting on 2 tasks...",
+      "Reviewing results...",
+      "Waiting on reviewer...",
+      "search",
+      "Thinking...",
+    ]);
   });
 
   it("forgets a failed turn's tasks even when a renderer replaces its failure reply", async () => {

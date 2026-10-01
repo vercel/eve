@@ -462,7 +462,7 @@ eve shows an agent's progress in two places. Short work, such as thinking or a t
 | The model reasons                  | The first line of its reasoning                                                 |
 | The model calls tools              | Its narration before the calls, or an action label such as `Search useEveAgent` |
 | The turn waits on its tasks        | `Waiting on researcher...`, or `Waiting on 3 tasks...`                          |
-| The turn's last task finishes      | `Reviewing results...`, while the model reads the results                       |
+| The model starts its next step     | `Reviewing results...` after a task finishes, otherwise `Thinking...`           |
 | A reply posts                      | Cleared by Slack                                                                |
 
 Slack clears a thread status after two minutes without a message, so during a long wait the task card is what shows the work is still going.

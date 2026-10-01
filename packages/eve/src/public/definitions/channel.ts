@@ -207,6 +207,7 @@ export interface ChannelEvents<TCtx = void> {
   readonly "message.appended"?: ChannelEventHandler<"message.appended", TCtx>;
   readonly "reasoning.appended"?: ChannelEventHandler<"reasoning.appended", TCtx>;
   readonly "reasoning.completed"?: ChannelEventHandler<"reasoning.completed", TCtx>;
+  readonly "step.started"?: ChannelEventHandler<"step.started", TCtx>;
   readonly "step.completed"?: ChannelEventHandler<"step.completed", TCtx>;
   readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
   readonly "input.resolved"?: ChannelEventHandler<"input.resolved", TCtx>;
@@ -322,6 +323,7 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "message.appended": null,
   "reasoning.appended": null,
   "reasoning.completed": null,
+  "step.started": null,
   "step.completed": null,
   "input.requested": null,
   "input.resolved": null,

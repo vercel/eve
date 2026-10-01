@@ -250,11 +250,11 @@ export interface SlackChannelState {
    */
   taskCards?: Record<string, SlackTaskCardState> | null;
   /**
-   * The parked turn whose status names its working tasks, set by the default
-   * `turn.waiting` handler. The default `task.settled` handler replaces that
-   * status once the turn's last task settles.
+   * The turn with a task that settled since its last model step. The default
+   * `step.started` handler shows `Reviewing results...` for the step that reads
+   * the results.
    */
-  waitingTurnId?: string | null;
+  pendingTaskResultsTurnId?: string | null;
   /**
    * Principal id to Slack user id, recorded as each message or input response
    * is delivered. Default handlers use it to address the principal named on

@@ -411,23 +411,26 @@ export const defaultEvents: SlackChannelInternalEvents = {
 
   async "turn.waiting"(event, channel, _ctx) {
     const working = workingTaskNames(channel.state.taskCards?.[event.turnId]?.turn);
-    if (working.length === 0) return;
-    channel.state.waitingTurnId = event.turnId;
-    await channel.thread.startTyping(waitingOnTasks(working));
+    if (working.length > 0) await channel.thread.startTyping(waitingOnTasks(working));
   },
 
-  // A settled task resumes the parked turn. Without this, the waiting status
-  // lingers while the model reads the results, which can take a while when
-  // the provider streams no reasoning.
+  // The turn's next model step reads the results, so `step.started` can say so.
   async "task.settled"(event, channel, _ctx) {
-    if (event.cancel !== undefined || channel.state.waitingTurnId !== event.turnId) return;
-    if (workingTaskNames(channel.state.taskCards?.[event.turnId]?.turn).length > 0) return;
-    channel.state.waitingTurnId = null;
-    await channel.thread.startTyping("Reviewing results...");
+    if (event.cancel === undefined) channel.state.pendingTaskResultsTurnId = event.turnId;
+  },
+
+  // Each later step replaces the status left by the previous one, such as a
+  // finished tool's label or `Waiting on 3 tasks...`, which would otherwise
+  // linger until the model streams something. `turn.started` covers step 0.
+  async "step.started"(event, channel, _ctx) {
+    if (event.stepIndex === 0) return;
+    const reviewing = channel.state.pendingTaskResultsTurnId === event.turnId;
+    channel.state.pendingTaskResultsTurnId = null;
+    await channel.thread.startTyping(reviewing ? "Reviewing results..." : "Thinking...");
   },
 
   async "turn.started"(_event, channel, _ctx) {
-    channel.state.waitingTurnId = null;
+    channel.state.pendingTaskResultsTurnId = null;
     channel.state.pendingToolCallMessage = null;
     channel.state.lastReasoningTypingAtMs = null;
     channel.state.lastReasoningTypingStatus = null;
@@ -486,8 +489,6 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "actions.requested"(event, channel, _ctx) {
-    // The model resumed and moved on; a later settle must not replace its status.
-    channel.state.waitingTurnId = null;
     const buffered = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
     if (buffered) {
