@@ -104,16 +104,19 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return next;
     }
 
-    case "message.received":
+    case "message.received": {
+      const metadata: { -readonly [K in keyof EveMessageMetadata]: EveMessageMetadata[K] } = {
+        status: "complete",
+        turnId: event.data.turnId,
+      };
+      if (event.data.clientContext !== undefined) metadata.clientContext = event.data.clientContext;
       return upsertMessage(data, {
         id: `${receivedMessageEventId(event)}:user`,
-        metadata: {
-          status: "complete",
-          turnId: event.data.turnId,
-        },
+        metadata,
         parts: projectReceivedParts(event.data.parts, event.data.message),
         role: "user",
       });
+    }
 
     case "step.started":
       return updateAssistantMessage(data, event.data.turnId, (message) =>

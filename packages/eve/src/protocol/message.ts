@@ -198,10 +198,12 @@ export interface TurnStartedStreamEvent {
  *
  * `message` is the existing flattened text summary. `parts` carries the
  * structured projection current emitters provide for clients that render
- * attachments.
+ * attachments. `clientContext` is the `clientContext` sent with the turn's
+ * input, as sent, so clients can rebuild it from the durable stream.
  */
 export interface MessageReceivedStreamEvent {
   data: {
+    clientContext?: string | readonly string[] | JsonObject;
     message: string;
     parts?: readonly MessageReceivedPart[];
     sequence: number;
@@ -952,19 +954,19 @@ export function createTurnStartedEvent(input: {
  * consumers while preserving the authored turn content upstream.
  */
 export function createMessageReceivedEvent(input: {
+  readonly clientContext?: string | readonly string[] | JsonObject;
   readonly message: string | UserContent;
   readonly sequence: number;
   readonly turnId: string;
 }): MessageReceivedStreamEvent {
-  return {
-    data: {
-      message: summarizeUserContent(input.message),
-      parts: projectUserContentParts(input.message),
-      sequence: input.sequence,
-      turnId: input.turnId,
-    },
-    type: "message.received",
+  const data: MessageReceivedStreamEvent["data"] = {
+    message: summarizeUserContent(input.message),
+    parts: projectUserContentParts(input.message),
+    sequence: input.sequence,
+    turnId: input.turnId,
   };
+  if (input.clientContext !== undefined) data.clientContext = input.clientContext;
+  return { data, type: "message.received" };
 }
 
 function summarizeUserContent(message: string | UserContent): string {

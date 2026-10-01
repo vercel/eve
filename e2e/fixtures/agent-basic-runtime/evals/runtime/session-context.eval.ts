@@ -27,6 +27,7 @@ export default defineEval({
       const sessionId = first.sessionId;
       first.expectOk();
       first.event("session.started", { count: 1 });
+      first.event("message.received", { data: { clientContext: firstContext } });
       first.calledTool("read_session_context");
       first.messageIncludes(JSON.stringify({ session: sessionContext, turn: firstContext }));
 

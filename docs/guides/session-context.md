@@ -98,7 +98,7 @@ await (await session.send("Continue our conversation.")).result();
 // ctx.turn.context: undefined
 ```
 
-Turn context is available to dynamic resolvers, hooks, tools, connections, and memory providers throughout the turn, including resumed workflow steps. Workflow tools capture the context of the turn that launches them. Turns without `clientContext` expose `undefined`, as does `session.started` while prewarming. When several messages merge into one turn, the model sees each message's `clientContext`, and `turn.context` holds the latest one. Use `turn.started` dynamic definitions for behavior that should respond to it.
+Turn context is available to dynamic resolvers, hooks, tools, connections, and memory providers throughout the turn, including resumed workflow steps. Workflow tools capture the context of the turn that launches them. Turns without `clientContext` expose `undefined`, as does `session.started` while prewarming. When several messages merge into one turn, the model sees each message's `clientContext`, and `turn.context` holds the latest one. Use `turn.started` dynamic definitions for behavior that should respond to it. The same value is recorded on the turn's [`message.received`](./client/streaming) event, so code that reads the stream later can recover it.
 
 [`clientContext`](./client/messages#send-a-full-turn-payload) also keeps its model-facing behavior: each value becomes a user-role context message for that turn. Session context is not automatically added to model prompts. There is no `defineAgent` schema or automatic application type inference. Use [`defineState`](../concepts/state) for mutable session state.
 

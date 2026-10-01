@@ -162,6 +162,11 @@ flattened compatibility summary, while `message.received.data.parts` carries ren
 file metadata. File parts never include raw bytes or internal sandbox paths; `url` appears only for
 client-resolvable `http(s)` and `data:` URLs.
 
+`message.received.data.clientContext` is the `clientContext` sent with the turn's input, exactly as
+the client sent it: a string, an array of strings, or a JSON object. It is omitted when the turn had
+no client context. When several messages merge into one turn, it holds the latest value. The
+default message reducer copies it to the confirmed user message as `metadata.clientContext`.
+
 ## Authorization pauses
 
 `authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked turn can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.

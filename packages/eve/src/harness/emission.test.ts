@@ -16,6 +16,7 @@ import {
   setTurnClientContextState,
 } from "#harness/turn-client-context.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
+import { attachClientContext } from "#internal/client-context.js";
 
 async function* streamOf(parts: TextStreamPart<ToolSet>[]): AsyncIterable<TextStreamPart<ToolSet>> {
   for (const part of parts) {
@@ -179,6 +180,35 @@ describe("emitTurnPreamble", () => {
     );
 
     expect(events.map((event) => event.type)).toEqual(["turn.started", "message.received"]);
+  });
+
+  it("records the turn's clientContext on message.received as sent", async () => {
+    const emitReceived = async (input: Parameters<typeof emitTurnPreamble>[1]) => {
+      const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+      await emitTurnPreamble(
+        async (event) => {
+          events.push(event);
+        },
+        input,
+        { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "" },
+        [],
+      );
+      return events.find((event) => event.type === "message.received")?.data;
+    };
+    const clientContext = { messageId: "m_123", page: "/docs" };
+
+    expect(
+      await emitReceived(
+        attachClientContext(
+          { message: "Fix this redirect" },
+          [`Client context:\n${JSON.stringify(clientContext)}`],
+          clientContext,
+        ),
+      ),
+    ).toMatchObject({ clientContext, message: "Fix this redirect" });
+    expect(await emitReceived({ message: "Fix this redirect" })).not.toHaveProperty(
+      "clientContext",
+    );
   });
 
   it("attaches one trace context to the session and turn start events", async () => {

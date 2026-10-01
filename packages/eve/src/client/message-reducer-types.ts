@@ -1,5 +1,6 @@
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { AuthorizationOutcome } from "#protocol/message.js";
+import type { JsonObject } from "#shared/json.js";
 
 /**
  * UIMessage-compatible eve message projection for chat and agent UIs.
@@ -26,9 +27,11 @@ export interface EveMessage {
  * use `"streaming"` or `"complete"`. `optimistic` is set only while a
  * client-projected user message awaits server confirmation. `turnId` links the
  * message to its runtime turn; `result` holds the harness structured result
- * once the turn finalizes.
+ * once the turn finalizes. `clientContext` holds the `clientContext` sent with a
+ * confirmed user message, as sent.
  */
 export interface EveMessageMetadata {
+  readonly clientContext?: string | readonly string[] | JsonObject;
   readonly optimistic?: true;
   readonly result?: unknown;
   readonly status?: "complete" | "failed" | "streaming" | "submitted";

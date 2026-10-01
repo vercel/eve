@@ -1428,6 +1428,20 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
+  it("keeps message.received clientContext on the confirmed user message", () => {
+    const reducer = defaultMessageReducer();
+    const clientContext = { messageId: "m_123", page: "/docs" };
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      {
+        data: { clientContext, message: "Fix this redirect", sequence: 1, turnId: "turn_1" },
+        type: "message.received",
+      },
+    ]);
+
+    const userMessage = data.messages.find((message) => message.role === "user");
+    expect(userMessage?.metadata).toEqual({ clientContext, status: "complete", turnId: "turn_1" });
+  });
+
   it("falls back to a single text part when message.received omits parts", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [

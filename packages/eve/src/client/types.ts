@@ -134,8 +134,9 @@ export interface SendTurnOptions<TOutput = unknown> {
    * JSON-serialized into one user-role model context message. The value as sent
    * is also available to authored code as `ctx.turn.context`. Client
    * context rides along with a message or HITL response; it does not dispatch a turn by
-   * itself, remains available to every model call in the turn, and is never
-   * persisted to durable session history or exposed to later turns.
+   * itself, remains available to every model call in the turn, and is not
+   * exposed to later turns. The stream records it as sent on the turn's
+   * `message.received` event as `data.clientContext`.
    */
   readonly clientContext?: string | readonly string[] | JsonObject;
 

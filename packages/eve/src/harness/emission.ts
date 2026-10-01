@@ -10,12 +10,10 @@ import type {
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
 
-import type {
-  AssistantStepFinishReason,
-  RuntimeIdentity,
-  RuntimeTraceContext,
-} from "#protocol/message.js";
 import {
+  type AssistantStepFinishReason,
+  type RuntimeIdentity,
+  type RuntimeTraceContext,
   createActionsRequestedEvent,
   createActionInputAppendedEvent,
   createActionPartialEvent,
@@ -52,6 +50,7 @@ import {
   type RuntimeActionRequestProjection,
 } from "#harness/action-presentation.js";
 import { projectResultPresentation, projectDeltaPresentation } from "#harness/tool-presentation.js";
+import { readClientContextValue } from "#internal/client-context.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
@@ -100,6 +99,7 @@ export async function emitTurnPreamble(
   if (input.message !== undefined) {
     await emitFn(
       createMessageReceivedEvent({
+        clientContext: readClientContextValue(input),
         message: input.message,
         sequence: state.sequence,
         turnId,
