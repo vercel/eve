@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineTool } from "#public/tools/index.js";
 
-// Epoch 71 `session.waiting`, `session.failed`, and `session.completed` events had no `usage`; epoch 72 adds it as optional.
+// Epoch 71 `session.waiting`, `session.failed`, `session.completed`, and `turn.waiting` events had no `usage`; epoch 72 adds it as optional.
 export default defineTool({
   description: "Summarize the open incidents for a service.",
   inputSchema: z.object({ service: z.string() }),

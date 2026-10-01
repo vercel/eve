@@ -490,6 +490,16 @@ describe("deriveRunFacts", () => {
     ]).toEqual([failed, completed]);
   });
 
+  it("reports the usage of a turn.waiting that parked the turn after it", () => {
+    const parked = { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 55, outputTokens: 5 };
+    expect(
+      derive([
+        sessionWaiting(USAGE),
+        { type: "turn.waiting", data: { sequence: 2, turnId: "t2", usage: parked } },
+      ]).usage,
+    ).toEqual(parked);
+  });
+
   it("reports no usage when the latest session event carried none", () => {
     expect(derive([sessionWaiting(USAGE), sessionWaiting(undefined)]).usage).toBeUndefined();
   });

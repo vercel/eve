@@ -96,7 +96,8 @@ export interface EveEvalDerivedFacts {
    */
   readonly models: readonly string[];
   /**
-   * Token usage from the latest `session.waiting`, `session.failed`, or `session.completed`: the
+   * Token usage from the latest `session.waiting`, `turn.waiting`, `session.failed`, or
+   * `session.completed`: the
    * session's own model calls plus what the agents it delegated to spent, so on a turn it is the
    * session's total so far. For an eval, each captured session counts once, by its latest usage,
    * except sessions another captured session opened. Absent when a counted session reported none.

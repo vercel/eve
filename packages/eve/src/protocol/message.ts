@@ -619,6 +619,12 @@ export interface TurnWaitingStreamEvent {
   data: {
     sequence: number;
     turnId: string;
+    /**
+     * The session's token usage so far: its own model calls plus what the
+     * agents it delegated to spent. `costUsd` is absent when no model call
+     * reported a cost. Absent on events from eve versions before it was added.
+     */
+    usage?: TokenUsage;
   };
   type: "turn.waiting";
 }
@@ -1703,11 +1709,13 @@ export function createTurnCompletedEvent(input: {
 export function createTurnWaitingEvent(input: {
   readonly sequence: number;
   readonly turnId: string;
+  readonly usage: TokenUsage | undefined;
 }): TurnWaitingStreamEvent {
   return {
     data: {
       sequence: input.sequence,
       turnId: input.turnId,
+      ...(input.usage !== undefined && { usage: input.usage }),
     },
     type: "turn.waiting",
   };

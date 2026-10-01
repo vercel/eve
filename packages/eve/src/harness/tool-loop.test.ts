@@ -4772,7 +4772,7 @@ describe("createToolLoopHarness", () => {
     );
   });
 
-  it("parks a delegated turn held by its working tasks with turn.waiting", async () => {
+  it("parks a delegated turn held by its working tasks with turn.waiting and the session's usage", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Checking now.", role: "assistant" }] },
@@ -4790,7 +4790,7 @@ describe("createToolLoopHarness", () => {
     );
 
     const result = await contextStorage.run(ctx, () =>
-      runStep(writeTaskTable(createTestSession(), table), { message: "Delegated turn" }),
+      runStep(writeTaskTable(withDelegatedSpend(), table), { message: "Delegated turn" }),
     );
 
     expect(result.held).toBeDefined();
@@ -4801,7 +4801,7 @@ describe("createToolLoopHarness", () => {
       }),
     );
     expect(events.at(-1)).toEqual({
-      data: { sequence: 0, turnId: "turn_0" },
+      data: { sequence: 0, turnId: "turn_0", usage: DELEGATED_SPEND },
       type: "turn.waiting",
     });
     expect(events.map((event) => event.type)).not.toContain("session.waiting");

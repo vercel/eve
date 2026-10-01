@@ -159,7 +159,8 @@ export function deriveRunFacts(
         break;
       }
 
-      case "session.waiting": {
+      case "session.waiting":
+      case "turn.waiting": {
         usage = event.data.usage;
         break;
       }

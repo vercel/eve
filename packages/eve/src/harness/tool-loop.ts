@@ -2888,6 +2888,7 @@ async function handleStepResult(input: {
           createTurnWaitingEvent({
             sequence: emissionState.sequence,
             turnId: emissionState.turnId,
+            usage: getSessionUsage(nextSession),
           }),
         );
       }
