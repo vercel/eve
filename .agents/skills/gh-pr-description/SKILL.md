@@ -13,11 +13,18 @@ changesets. When updating a PR, read its current body first.
 Fill in `.github/pull_request_template.md`. Write for a reviewer, not a
 changelog:
 
+- Follow these ASD-STE100 rules where they apply:
+  - Use approved words from the ASD-STE100 dictionary, with one meaning per
+    word.
+  - Use active voice and keep one topic in each sentence.
+  - Limit descriptive sentences to 25 words and procedural sentences to 20
+    words.
+  - Keep necessary technical terms, proper nouns, and code identifiers.
 - Keep the Summary to one short paragraph: usually 2–4 sentences and about
   100 words or fewer.
 - Lead with the concrete problem, user need, or decision behind the change;
-  follow with the solution and meaningful behavior. Prefer short sentences;
-  split independent points rather than combining them into a long sentence.
+  follow with the solution and meaningful behavior. Split independent points
+  into separate sentences.
 - Do not list files or narrate commits. Include implementation detail only when
   it is necessary to assess behavior or risk.
 - Mention breaking changes, preserved behavior, tradeoffs, scope boundaries,
