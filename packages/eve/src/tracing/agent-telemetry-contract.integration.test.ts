@@ -370,7 +370,9 @@ describe("exported agent telemetry contract", () => {
       await runtime.forceFlush();
       const exported = runtime.exporter.getFinishedSpans();
       const serialized = new TextDecoder().decode(JsonTraceSerializer.serializeRequest(exported)!);
-      const parsed = parseLocalTraceSegment(serialized, caller.traceId);
+      const traceIds = [...new Set(exported.map((span) => span.spanContext().traceId))];
+      expect(traceIds).toHaveLength(2);
+      const parsed = traceIds.flatMap((traceId) => parseLocalTraceSegment(serialized, traceId));
       expect(parsed).toHaveLength(3);
       expect(new Set(parsed.map((span) => span.spanId)).size).toBe(3);
       for (const span of parsed) {
@@ -381,7 +383,10 @@ describe("exported agent telemetry contract", () => {
         (span) => span.attributes["agent.run.id"] === "remote-session",
       );
       expect(remoteTurns).toHaveLength(2);
-      expect(remoteTurns.every((span) => span.parentSpanId === caller.spanId)).toBe(true);
+      expect(remoteTurns[0]!.parentSpanId).toBe(caller.spanId);
+      expect(remoteTurns[0]!.traceId).toBe(caller.traceId);
+      expect(remoteTurns[1]!.parentSpanId).toBeUndefined();
+      expect(remoteTurns[1]!.traceId).not.toBe(caller.traceId);
       const local = parsed.find((span) => span.attributes["agent.run.id"] === "local-session")!;
       expect(local.parentSpanId).toBe(remoteSpan.spanContext().spanId);
       expect(local.attributes["agent.parent_run.id"]).toBe("remote-session");

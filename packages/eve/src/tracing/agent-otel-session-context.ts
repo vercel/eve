@@ -98,7 +98,7 @@ export function createAgentOtelSessionContext(
 
     const session = await ensureSessionContext(event);
     const useInitialContext = event.sequence === 0;
-    const caller = event.parentTraceContext;
+    const caller = useInitialContext ? event.parentTraceContext : undefined;
     let turnContext = useInitialContext
       ? { ...session.context, isRemote: false }
       : freshTurnContext(input, event.idempotencyKey, session.decision);

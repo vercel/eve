@@ -1,4 +1,4 @@
-import { resolveConversationId } from "#shared/conversation-identity.js";
+import { operationConversationId } from "#tracing/conversation-context.js";
 import { AGENT_TRACE_SCHEMA_VERSION } from "#tracing/agent-span-contract.js";
 
 export function traceSessionIdOf(scope: {
@@ -14,7 +14,7 @@ export function agentTraceIdentityAttributes(input: {
   readonly sessionId: string;
   readonly traceSessionId: string;
 }): Record<string, string | number> {
-  const conversationId = resolveConversationId(input.rootSessionId);
+  const conversationId = operationConversationId(input);
   const attributes: Record<string, string | number> = {
     "agent.run.id": input.sessionId,
     "agent.trace.schema.version": AGENT_TRACE_SCHEMA_VERSION,

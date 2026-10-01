@@ -139,11 +139,11 @@ invoke_agent <agent>
               └── execute_tool <tool>
 ```
 
-Each independent conversation turn starts a new trace. Local and remote
-subagent turns join the owning invocation's trace beneath its dispatch span.
-A persistent child session keeps that invocation as its trace parent across
-follow-up messages; it does not reuse the parent's span ID. Without a propagated
-caller, a child turn starts its own trace.
+Each independent conversation turn starts a new trace. The first local or remote
+subagent turn joins the caller's trace beneath its dispatch span, with its own
+span ID. Later turns in a persistent child session start fresh traces instead of
+reusing the original dispatch parent. Without a propagated caller, the first
+child turn also starts its own trace.
 
 `gen_ai.conversation.id` groups the root session and its delegated sessions
 across traces. eve propagates it to spans created inside model, tool, and memory

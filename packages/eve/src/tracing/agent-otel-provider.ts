@@ -75,8 +75,7 @@ import {
 } from "#tracing/agent-span-contract.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
 import { withAgentToolContentPolicy } from "#tracing/agent-tool-span-context.js";
-import { withConversationId } from "#tracing/conversation-context.js";
-import { resolveConversationId } from "#shared/conversation-identity.js";
+import { withOperationConversation } from "#tracing/conversation-context.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
@@ -606,12 +605,7 @@ export function createAgentOtelInstrumentation(
           ? withAgentToolContentPolicy(withErrorPolicy, toolContentPolicy)
           : withErrorPolicy;
       return context.with(
-        markAgentTraceContext(
-          withConversationId(
-            operationContext,
-            resolveConversationId(operation.scope.rootSessionId ?? operation.scope.sessionId),
-          ),
-        ),
+        markAgentTraceContext(withOperationConversation(operationContext, operation.scope)),
         execute,
       );
     },

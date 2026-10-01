@@ -3228,7 +3228,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turn.parentSpanContext).toBeUndefined();
   });
 
-  it("keeps a persistent subagent's turns beneath the owning invocation", async () => {
+  it("nests the first child turn and starts fresh traces for persistent follow-ups", async () => {
     const runtime = createRuntime();
     const caller = spanContext("1", "2");
 
@@ -3252,11 +3252,11 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turns[0]!.spanContext().traceId).toBe(caller.traceId);
     expect(turns[0]!.parentSpanContext).toEqual({ ...caller, isRemote: false });
     expect(turns[0]!.links).toEqual([]);
-    expect(new Set(turns.map((turn) => turn.spanContext().traceId))).toHaveLength(1);
+    expect(new Set(turns.map((turn) => turn.spanContext().traceId))).toHaveLength(201);
     expect(new Set(turns.map((turn) => turn.spanContext().spanId))).toHaveLength(201);
     for (const turn of turns.slice(1)) {
-      expect(turn.spanContext().traceId).toBe(caller.traceId);
-      expect(turn.parentSpanContext).toEqual({ ...caller, isRemote: false });
+      expect(turn.spanContext().traceId).not.toBe(caller.traceId);
+      expect(turn.parentSpanContext).toBeUndefined();
       expect(turn.links).toEqual([]);
     }
     for (const turn of turns) {

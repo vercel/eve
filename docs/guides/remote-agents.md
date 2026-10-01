@@ -148,9 +148,9 @@ Forwarding identity is explicit on both sides. The receiver names which deployme
 
 ## Trace propagation
 
-Remote child turns join the dispatching invocation's trace beneath its caller
-span. Follow-up messages to that child session keep the owning invocation as
-their trace parent. eve carries `gen_ai.conversation.id` separately so you can
+The first remote child turn joins the dispatching invocation's trace beneath its
+caller span. Later turns in that child session start fresh traces; they do not
+reuse the original dispatch parent. eve carries `gen_ai.conversation.id` so you can
 find all turns and delegated sessions for one conversation, including later
 independent root turns with new trace IDs. A child still has its own session ID,
 message history, and agent state. Trace context is observability metadata, not
