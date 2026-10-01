@@ -140,6 +140,15 @@ export function extensionMountId(nodePath: string, namespace: string): string {
   return posix.join(nodePath, "extensions", namespace);
 }
 
+/**
+ * Whether `enclosing` is the mount of an extension whose contributed subagents declare `mountId`.
+ * Extension subagents live at `<mountId>/subagents/<id>`, so nested mount ids extend their
+ * enclosing mount's id.
+ */
+export function isEnclosingExtensionMount(enclosing: string, mountId: string): boolean {
+  return mountId.startsWith(`${enclosing}/`);
+}
+
 export type AgentSourceLayer =
   | "framework-default"
   | "extension-package"

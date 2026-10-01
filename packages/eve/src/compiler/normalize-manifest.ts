@@ -440,11 +440,7 @@ class AgentGraphCompiler {
     externalDependencies: readonly string[],
   ): Promise<PhaseOneNodeSourceState> {
     const graph = this.composeNodeSources(input, externalDependencies);
-    const { mounts, sourceIds } = createExtensionCompileMounts(
-      input.manifest,
-      input.nodePath,
-      input.mountId,
-    );
+    const { mounts, sourceIds } = createExtensionCompileMounts(input.manifest, input.nodePath);
     for (const [mountId, mount] of mounts) this.mounts.set(mountId, mount);
     const evaluation = new NodeModuleEvaluationContext(
       this.registries,

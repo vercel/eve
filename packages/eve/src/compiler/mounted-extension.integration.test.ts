@@ -768,13 +768,15 @@ describe("mounted extension via directory form with override", () => {
 });
 
 describe("nested extension mounts", () => {
-  it("binds an enclosing extension's config before a mount declared inside it", async () => {
+  it("binds enclosing extension config through nested mounts of a twice-mounted extension", async () => {
     const app = await createAppRoot("eve-nested-extension-config-", {
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
         "agent/instructions.md": "Work with the available tools.",
         "agent/extensions/outer.mjs":
           'import outer from "@acme/outer"; export default outer({ label: "from-outer" });',
+        "agent/extensions/second.mjs":
+          'import outer from "@acme/outer"; export default outer({ label: "from-second" });',
         "node_modules/@acme/outer/package.json": JSON.stringify({
           name: "@acme/outer",
           type: "module",
@@ -806,6 +808,7 @@ describe("nested extension mounts", () => {
         }),
         "node_modules/@acme/inner/extension/_manifest.json": compatibilityManifest({
           extension: 1,
+          subagent: 6,
           tool: 1,
           config: 1,
         }),
@@ -819,14 +822,38 @@ describe("nested extension mounts", () => {
           "const label = ext.config.label;",
           "export default { description: label, inputSchema: {}, execute: () => label };",
         ].join("\n"),
+        "node_modules/@acme/inner/extension/subagents/deep/agent.mjs":
+          'export default { model: "openai/gpt-5.4", description: "Go deeper" };',
+        "node_modules/@acme/inner/extension/subagents/deep/extensions/leaf.mjs": [
+          'import leaf from "@acme/leaf";',
+          'import inner from "../../../extension.mjs";',
+          "export default leaf({ label: `${inner.config.label}/leaf` });",
+        ].join("\n"),
+        "node_modules/@acme/leaf/package.json": JSON.stringify({
+          name: "@acme/leaf",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        }),
+        "node_modules/@acme/leaf/extension/_manifest.json": compatibilityManifest({
+          extension: 1,
+          tool: 1,
+          config: 1,
+        }),
+        "node_modules/@acme/leaf/extension/extension.mjs": [
+          'import { defineExtension } from "eve/extension";',
+          "const config = { '~standard': { version: 1, vendor: 'test', validate: value => typeof value?.label === 'string' ? { value } : { issues: [{ message: 'leaf label is required' }] } } };",
+          "export default defineExtension({ config });",
+        ].join("\n"),
+        "node_modules/@acme/leaf/extension/tools/leaf_label.mjs": [
+          'import ext from "@acme/leaf";',
+          "const label = ext.config.label;",
+          "export default { description: label, inputSchema: {}, execute: () => label };",
+        ].join("\n"),
       },
     });
 
     const { manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
-    const helper = manifest.subagents.find((node) => node.name === "outer__helper")!;
-    const tool = helper.agent.tools.find((entry) => entry.name === "inner__label")!;
-    expect(tool.description).toBe("from-outer");
-
     const moduleMapPath = join(app.appRoot, ".eve", "compile", "nested-map.mjs");
     const { code } = await bundleAuthoredModuleMapForGeneration({
       appRoot: app.appRoot,
@@ -837,11 +864,29 @@ describe("nested extension mounts", () => {
     const generated = (await import(`${moduleMapPath}?test=nested-config`)) as {
       default: typeof moduleMap;
     };
-    for (const map of [moduleMap, generated.default]) {
-      const definition = map.nodes[helper.nodeId]!.modules[tool.sourceId]!.default as {
-        execute: () => string;
-      };
-      expect(definition.execute()).toBe("from-outer");
+    // Each nested mount reads the configuration of the mounts that contributed its subagent,
+    // through every level of nesting.
+    for (const [mount, label] of [
+      ["outer", "from-outer"],
+      ["second", "from-second"],
+    ] as const) {
+      const helper = manifest.subagents.find((node) => node.name === `${mount}__helper`)!;
+      const deep = manifest.subagents.find(
+        (node) => node.name === "inner__deep" && node.parentNodeId === helper.nodeId,
+      )!;
+      for (const [node, toolName, expected] of [
+        [helper, "inner__label", label],
+        [deep, "leaf__leaf_label", `${label}/leaf`],
+      ] as const) {
+        const tool = node.agent.tools.find((entry) => entry.name === toolName)!;
+        expect(tool.description).toBe(expected);
+        for (const map of [moduleMap, generated.default]) {
+          const definition = map.nodes[node.nodeId]!.modules[tool.sourceId]!.default as {
+            execute: () => string;
+          };
+          expect(definition.execute()).toBe(expected);
+        }
+      }
     }
   });
 });

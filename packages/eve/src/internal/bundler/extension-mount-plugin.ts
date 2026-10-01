@@ -1,6 +1,8 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
+import { isEnclosingExtensionMount } from "#compiler/source-graph.js";
+
 const MOUNT_QUERY = "?eve-mount=";
 
 interface Mount {
@@ -42,11 +44,13 @@ export function createExtensionMountPlugin(
     return canonicalPath;
   };
   const roots = mounts.map((mount) => ({ ...mount, root: canonical(mount.sourceRoot) }));
-  const declarationPaths = new Map(
-    roots
-      .filter((mount) => mount.mountSourcePath !== undefined)
-      .map((mount) => [canonical(resolve(mount.mountSourcePath!)), mount]),
-  );
+  // A mount file inside an extension subagent declares one mount per enclosing mount.
+  const declarationPaths = new Map<string, (typeof roots)[number][]>();
+  for (const mount of roots) {
+    if (mount.mountSourcePath === undefined) continue;
+    const path = canonical(resolve(mount.mountSourcePath));
+    declarationPaths.set(path, [...(declarationPaths.get(path) ?? []), mount]);
+  }
   const byId = new Map(roots.map((mount) => [mount.mountId, mount]));
   const overrideMounts = new Map(
     [...overridePaths].map(([path, id]) => [canonical(path), byId.get(id)]),
@@ -76,11 +80,31 @@ export function createExtensionMountPlugin(
       const cleanSource = query >= 0 ? source.slice(0, query) : source;
       const cleanImporter = importerQuery >= 0 ? importer!.slice(0, importerQuery) : importer;
       const importerPath = cleanImporter === undefined ? undefined : canonical(cleanImporter);
+      const declarations =
+        importerPath === undefined ? [] : (declarationPaths.get(importerPath) ?? []);
       const declarationMount =
-        importerPath === undefined ? undefined : declarationPaths.get(importerPath);
+        declarations.length === 1
+          ? declarations[0]
+          : declarations.find(
+              (candidate) =>
+                inherited !== undefined && isEnclosingExtensionMount(inherited, candidate.mountId),
+            );
+      // A nested mount file is loaded as its enclosing extension's source, but the extension it
+      // mounts must bind that mount's own instance.
+      const declaredSource =
+        declarationMount !== undefined &&
+        (cleanSource === declarationMount.specifier ||
+          cleanSource === declarationMount.programmaticImport?.specifier)
+          ? declarationMount
+          : undefined;
       const overrideMount =
         importerPath === undefined ? undefined : overrideMounts.get(importerPath);
-      const mountId = tagged ?? inherited ?? declarationMount?.mountId ?? overrideMount?.mountId;
+      const mountId =
+        tagged ??
+        declaredSource?.mountId ??
+        inherited ??
+        declarationMount?.mountId ??
+        overrideMount?.mountId;
       const mount = mountId === undefined ? undefined : byId.get(mountId);
       if (mountId !== undefined && mount === undefined)
         throw new Error(`Unknown extension mount "${mountId}".`);
@@ -126,10 +150,20 @@ export function createExtensionMountPlugin(
       if (mount === undefined && (importer === undefined || importer.startsWith("\0"))) {
         return undefined;
       }
-      // Source owned by another extension keeps that extension's mount identity, so a mount
-      // declared inside an extension reads the configuration its enclosing mount bound.
       const owners = roots.filter((root) => within(path, root.root));
-      if (mount !== undefined && owners.length !== 1) return resolved;
+      if (mount !== undefined) {
+        // Source owned by another extension keeps that extension's mount identity, so a mount
+        // declared inside an extension reads the configuration its enclosing mount bound. When
+        // the extension is mounted more than once, the enclosing mount disambiguates.
+        const owner =
+          owners
+            .filter((candidate) => isEnclosingExtensionMount(candidate.mountId, mount.mountId))
+            .sort((left, right) => right.mountId.length - left.mountId.length)[0] ??
+          (owners.length === 1 ? owners[0] : undefined);
+        return owner === undefined
+          ? resolved
+          : { id: `${resolved.id}${MOUNT_QUERY}${encodeURIComponent(owner.mountId)}` };
+      }
       if (owners.length > 1) {
         throw new Error(
           `Import "${source}" from "${importer}" refers to multiple extension mounts (${owners.map((owner) => owner.mountId).join(", ")}). Import it from an owned mount or contribution instead.`,

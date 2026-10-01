@@ -1,4 +1,5 @@
 import {
+  isEnclosingExtensionMount,
   type AgentModuleBinding,
   type AgentSourceRegistry,
   loadProgrammaticModuleNamespace,
@@ -8,7 +9,6 @@ import {
 import {
   loadAuthoredModuleNamespace,
   type AuthoredModuleLoadOptions,
-  type ExtensionMountEntry,
 } from "#internal/authored-module-loader.js";
 
 export type CompiledBindingNamespaceLoader = (
@@ -18,25 +18,16 @@ export type CompiledBindingNamespaceLoader = (
 export interface ExtensionCompileMount {
   readonly mountId: string;
   readonly entry?: NonNullable<AuthoredModuleLoadOptions["extension"]>["entry"];
-  /** Mount that contributed the node declaring this mount, when that node is extension-owned. */
-  readonly parentMountId?: string;
 }
 
-function ancestorMountEntries(
-  mounts: ReadonlyMap<string, ExtensionCompileMount>,
-  mount: ExtensionCompileMount | undefined,
-) {
-  const ancestors: (ExtensionMountEntry & { readonly mountId: string })[] = [];
-  const seen = new Set<string>();
-  for (
-    let parent = mount?.parentMountId === undefined ? undefined : mounts.get(mount.parentMountId);
-    parent !== undefined && !seen.has(parent.mountId);
-    parent = parent.parentMountId === undefined ? undefined : mounts.get(parent.parentMountId)
-  ) {
-    seen.add(parent.mountId);
-    if (parent.entry !== undefined) ancestors.unshift({ ...parent.entry, mountId: parent.mountId });
-  }
-  return ancestors;
+/** Filesystem mounts enclosing `mountId`, outermost first. */
+function ancestorMountEntries(mounts: ReadonlyMap<string, ExtensionCompileMount>, mountId: string) {
+  return [...mounts.values()]
+    .filter(
+      (mount) => mount.entry !== undefined && isEnclosingExtensionMount(mount.mountId, mountId),
+    )
+    .sort((left, right) => left.mountId.length - right.mountId.length)
+    .map((mount) => ({ ...mount.entry!, mountId: mount.mountId }));
 }
 
 /** Loads one node's selected bindings with dependency ordering and per-phase caching. */
@@ -111,7 +102,7 @@ async function loadCompiledBindingNamespace(input: {
             evaluationId: input.evaluationId,
             entry: mount?.entry,
             ancestors:
-              input.mounts === undefined ? undefined : ancestorMountEntries(input.mounts, mount),
+              input.mounts === undefined ? undefined : ancestorMountEntries(input.mounts, mountId),
           };
     return await loadAuthoredModuleNamespace(input.binding.backing.sourcePath, {
       externalDependencies: input.binding.backing.externalDependencies,
