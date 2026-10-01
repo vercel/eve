@@ -103,6 +103,36 @@ describe("resolveEvalClientOptions", () => {
     expect(fetchMock.mock.calls[1]?.[1]?.redirect).toBe("manual");
   });
 
+  it("looks up a remote eval target in the linked Vercel project from the environment", async () => {
+    vi.stubEnv("VERCEL_ORG_ID", "team_test");
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_example");
+    const resolveVercelDeployment = vi.fn(async () => ({
+      kind: "resolved" as const,
+      target: VERIFIED_TARGET,
+    }));
+
+    await createEvalClient(
+      { kind: "remote", url: "https://example.vercel.app" },
+      {
+        workspaceRoot: "/workspace",
+        deps: {
+          resolveVercelDeployment,
+          resolveDevelopmentOidcToken: async () => ({
+            kind: "resolved" as const,
+            token: "ambient-token",
+          }),
+        },
+      },
+    );
+
+    expect(resolveVercelDeployment).toHaveBeenCalledWith({
+      host: "example.vercel.app",
+      source: { orgId: "team_test", projectId: "prj_example" },
+      signal: undefined,
+      workspaceRoot: "/workspace",
+    });
+  });
+
   it("does not resolve or emit ambient OIDC for an unverified remote origin", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
