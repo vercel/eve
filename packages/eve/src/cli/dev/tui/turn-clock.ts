@@ -1,19 +1,18 @@
+import type { TokenUsage } from "./conversation-view.js";
+
 /**
- * One turn's wall clock and summed token flow. "When did this turn start"
- * is a single fact; this object is its single representation — armed once
- * per turn (a prompt submit, or an `--input` turn arming itself), fed by
- * step usage reports, and consumed exactly once by the end-of-turn coda.
- * Multi-pass turns (question answers, connection authorizations) re-stream
- * without re-arming, so one turn gets one coda.
+ * One turn's wall clock and token flow, measured against the session's summed
+ * step usage when work started. Armed when work starts and consumed once by
+ * the end-of-turn coda, so answering an approval or question mid-turn does
+ * not split the turn.
  */
 export class TurnClock {
   #startedAtMs?: number;
-  #usage = { inputTokens: 0, outputTokens: 0 };
+  #baseline: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
-  /** Starts the turn: resets the summed flow and stamps the clock. */
-  arm(): void {
+  arm(usage: TokenUsage): void {
     this.#startedAtMs = Date.now();
-    this.#usage = { inputTokens: 0, outputTokens: 0 };
+    this.#baseline = usage;
   }
 
   get armed(): boolean {
@@ -24,31 +23,25 @@ export class TurnClock {
     return this.#startedAtMs;
   }
 
-  get usage(): { readonly inputTokens: number; readonly outputTokens: number } {
-    return this.#usage;
+  /** Token flow since the clock was armed. */
+  usage(current: TokenUsage): TokenUsage {
+    return {
+      inputTokens: Math.max(0, current.inputTokens - this.#baseline.inputTokens),
+      outputTokens: Math.max(0, current.outputTokens - this.#baseline.outputTokens),
+    };
   }
 
-  addUsage(usage: { inputTokens?: number; outputTokens?: number }): void {
-    this.#usage.inputTokens += usage.inputTokens ?? 0;
-    this.#usage.outputTokens += usage.outputTokens ?? 0;
-  }
-
-  /**
-   * Consumes the armed clock, returning the turn's elapsed time and summed
-   * flow — or `undefined` when no turn was armed (the coda's "already
-   * settled" signal). The flow survives the settle so a repaint between the
-   * coda and the next arm still reads the last turn's numbers.
-   */
-  settle(): { elapsedMs: number; inputTokens: number; outputTokens: number } | undefined {
+  /** Consumes the armed clock, or returns `undefined` when no turn was armed. */
+  settle(current: TokenUsage): ({ elapsedMs: number } & TokenUsage) | undefined {
     const startedAtMs = this.#startedAtMs;
     if (startedAtMs === undefined) return undefined;
     this.#startedAtMs = undefined;
-    return { elapsedMs: Date.now() - startedAtMs, ...this.#usage };
+    return { elapsedMs: Date.now() - startedAtMs, ...this.usage(current) };
   }
 
   /** Drops the clock without a coda (conversation boundaries). */
   reset(): void {
     this.#startedAtMs = undefined;
-    this.#usage = { inputTokens: 0, outputTokens: 0 };
+    this.#baseline = { inputTokens: 0, outputTokens: 0 };
   }
 }

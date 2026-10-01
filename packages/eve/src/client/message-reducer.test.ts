@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { defaultMessageReducer } from "#client/message-reducer.js";
-import { stampTestEvents } from "#internal/testing/events.js";
+import { stampTestEvent, stampTestEvents } from "#internal/testing/events.js";
 import {
   createActionInputAppendedEvent,
   createActionPartialEvent,
@@ -66,6 +66,65 @@ describe("defaultMessageReducer", () => {
       "assistant",
       { state: "done", text: "Next turn", type: "text" },
     ]);
+  });
+
+  it("places an optimistic steered message before the active reply, then keeps its place when confirmed", () => {
+    const reducer = defaultMessageReducer();
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageReceivedEvent({ message: "First", sequence: 0, turnId: "turn_1" }),
+      createMessageAppendedEvent({
+        messageDelta: "Reply so far",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+    data = reducer.reduce(data, {
+      data: { createdAt: 1, message: "Correction", submissionId: "follow-up", turnId: "turn_1" },
+      type: "client.message.submitted",
+    });
+    expect(data.messages.map((message) => message.role)).toEqual(["user", "user", "assistant"]);
+    data = reducer.reduce(
+      data,
+      stampTestEvent(
+        createMessageReceivedEvent({ message: "Correction", sequence: 2, turnId: "turn_1" }),
+        2,
+      ),
+    );
+    expect(data.messages.map((message) => message.role)).toEqual([
+      "user",
+      "user",
+      "user",
+      "assistant",
+    ]);
+  });
+
+  it("leaves a failed optimistic follow-up ahead of the active reply", () => {
+    const reducer = defaultMessageReducer();
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageCompletedEvent({
+        finishReason: "stop",
+        message: "Reply",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+    data = reducer.reduce(data, {
+      type: "client.message.submitted",
+      data: { createdAt: 1, submissionId: "failed", message: "Correction", turnId: "turn_1" },
+    });
+    data = reducer.reduce(data, {
+      type: "client.message.failed",
+      data: {
+        createdAt: 1,
+        submissionId: "failed",
+        message: "Correction",
+        error: { message: "No connection" },
+      },
+    });
+    expect(data.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+    expect(data.messages[0]?.metadata?.status).toBe("failed");
   });
 
   it("accumulates message and reasoning deltas without a start marker", () => {

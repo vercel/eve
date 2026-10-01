@@ -74,15 +74,19 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
   switch (event.type) {
     case "client.message.submitted":
     case "client.message.failed":
-      return upsertMessage(data, {
-        id: optimisticUserMessageId(event.data.submissionId),
-        metadata: {
-          optimistic: true,
-          status: event.type === "client.message.failed" ? "failed" : "submitted",
+      return upsertMessage(
+        data,
+        {
+          id: optimisticUserMessageId(event.data.submissionId),
+          metadata: {
+            optimistic: true,
+            status: event.type === "client.message.failed" ? "failed" : "submitted",
+          },
+          parts: [{ type: "text", text: event.data.message }],
+          role: "user",
         },
-        parts: [{ type: "text", text: event.data.message }],
-        role: "user",
-      });
+        event.data.turnId,
+      );
 
     case "input.resolved": {
       let next = data;

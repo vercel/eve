@@ -12,33 +12,42 @@ import {
   getMessageResponseDeliveryId,
   type MessageResponse,
 } from "#client/message-response.js";
-import {
+import type {
+  SessionEventReader,
   SessionEventStream,
-  type SessionEventReader,
-  type SessionEventStreamOptions,
+  SessionEventStreamOptions,
 } from "#client/session-event-stream.js";
 import { EveAgentProjection } from "#client/eve-agent-projection.js";
 import { OptimisticMessageSubmissions } from "#client/optimistic-message-submissions.js";
+import { ConversationClient } from "#client/conversation-client.js";
 import type { ClientSession } from "#client/session.js";
-import { createEventDeduper } from "#protocol/event-dedupe.js";
+import { dispatchSessionTurn } from "#client/session-turn-dispatch.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import {
+  activeTurnForOptimisticFollowUp,
+  assertAnswerable,
   assertExclusiveTurnInput,
+  assertInFlightFollowUp,
+  validateFollowUp,
+  countFollowUpDeliveries,
   createAbortSignal,
   createActiveTurn,
   followSteeredTurns,
   isAbortError,
+  isResponseBoundary,
   isSettledSessionTail,
+  settledStatus,
   toTerminalStreamFailureError,
   waitWithSignal,
 } from "#client/eve-agent-store-helpers.js";
-import {
-  isTurnSegmentBoundary,
-  updatePendingAuthorizations,
-  updatePendingInputRequests,
-} from "#client/session-utils.js";
 import { toError } from "#shared/errors.js";
-import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
+import type {
+  CancelSessionResult,
+  ClearResult,
+  CompactResult,
+  ResetResult,
+  SendTurnPayload,
+} from "#client/types.js";
 
 export type {
   EveAgentStoreCallbacks,
@@ -60,22 +69,15 @@ export class EveAgentStore<TData> {
   readonly #client: Client | undefined;
   readonly #autoPrewarm: boolean;
   #attached = false;
-  #stream: SessionEventStream | undefined;
-  readonly #pendingAuthorizations = new Set<string>();
-  readonly #pendingInputRequests = new Set<string>();
+  readonly #conversationClient: ConversationClient<TData>;
+  readonly #followChildStreams: boolean;
   readonly #externalSession: boolean;
-  readonly #optimistic: boolean;
-  readonly #projection: EveAgentProjection<TData>;
   readonly #subscribers = new Set<() => void>();
-
-  /** Ids already folded into the projection: `initialEvents` and a reconnect can overlap. */
-  #seenEvents = createEventDeduper();
-
   #activeTurn: ActiveTurn | undefined;
   #callbacks: EveAgentStoreCallbacks<TData> = {};
   #error: Error | undefined;
   #events: readonly MessageStreamEvent[];
-  readonly #messageSubmissions: OptimisticMessageSubmissions<TData>;
+  readonly #messageSubmissions: OptimisticMessageSubmissions;
   #prewarmGeneration = 0;
   #prewarmPromise: Promise<void> | undefined;
   #prewarmController: AbortController | undefined;
@@ -86,25 +88,28 @@ export class EveAgentStore<TData> {
 
   constructor(init: EveAgentStoreInit<TData>) {
     this.#autoPrewarm = init.prewarm ?? false;
+    this.#followChildStreams = init.followSubagents ?? false;
     this.#externalSession = init.session !== undefined;
     this.#client = this.#externalSession
       ? undefined
-      : new Client({
+      : (init.client ??
+        new Client({
           auth: init.auth,
           headers: init.headers,
           host: init.host ?? "",
-        });
-    // Seed the deduper from the saved log so a live stream that replays the
-    // same prefix does not double-apply it.
-    const initialEvents: MessageStreamEvent[] = [];
-    for (const event of init.initialEvents ?? []) {
-      if (this.#seenEvents.admit(event)) initialEvents.push(event);
-      this.#trackPendingRequests(event);
-    }
-    this.#events = initialEvents;
-    this.#projection = new EveAgentProjection(init.reducer, this.#events);
-    this.#optimistic = init.optimistic ?? true;
-    this.#messageSubmissions = new OptimisticMessageSubmissions(this.#projection, this.#optimistic);
+        }));
+    this.#conversationClient = new ConversationClient(
+      new EveAgentProjection(init.reducer, []),
+      () => this.#publish(),
+      () => this.#publish(),
+    );
+    this.#events = (init.initialEvents ?? []).filter((event) =>
+      this.#conversationClient.hydrate(event),
+    );
+    this.#messageSubmissions = new OptimisticMessageSubmissions(
+      this.#conversationClient.projections,
+      init.optimistic ?? true,
+    );
     this.#session =
       init.session ??
       (init.initialSession === undefined
@@ -126,9 +131,7 @@ export class EveAgentStore<TData> {
 
   subscribe(callback: () => void): () => void {
     this.#subscribers.add(callback);
-    return () => {
-      this.#subscribers.delete(callback);
-    };
+    return () => void this.#subscribers.delete(callback);
   }
 
   /** Creates this store's owned session without starting a turn. */
@@ -154,11 +157,9 @@ export class EveAgentStore<TData> {
       try {
         const created = await client.sessions.create({ signal: controller.signal });
         if (generation !== this.#prewarmGeneration) return;
-        this.#session = created.session;
         this.#error = undefined;
         if (this.#status === "error") this.#status = "ready";
-        this.#callbacks.onSessionChange?.(created.session.state);
-        this.#publish();
+        this.#adoptSession(created.session);
         this.#ensureStream();
       } catch (error) {
         if (
@@ -166,10 +167,7 @@ export class EveAgentStore<TData> {
           this.#activeTurn === undefined &&
           this.#error === undefined
         ) {
-          this.#error = toError(error);
-          this.#status = "error";
-          this.#callbacks.onError?.(this.#error);
-          this.#publish();
+          this.#fail(error);
         }
         throw error;
       }
@@ -193,6 +191,7 @@ export class EveAgentStore<TData> {
     input: SendTurnPayload<TOutput>,
     prepareSend?: PrepareSend,
   ): Promise<void> {
+    assertAnswerable(input, this.#conversationClient.conversation);
     if (this.#activeTurn !== undefined) {
       if (this.#status === "resuming") {
         throw new Error("eve session is resuming.");
@@ -210,10 +209,16 @@ export class EveAgentStore<TData> {
     this.#activeTurn = turn;
     this.#error = undefined;
     this.#status = "submitted";
-    this.#publish();
 
     let reader: SessionEventReader | undefined;
+    let submissionId: string | undefined;
+    let retractResponses: (() => void) | undefined;
     try {
+      assertExclusiveTurnInput(input);
+      // Echo the submission before preparation, which may wait on caller-owned work.
+      submissionId = this.#messageSubmissions.submit(input, this.#events.length);
+      retractResponses = this.#conversationClient.projectResponses(input.inputResponses);
+      this.#publish();
       const preparedInput = await (prepareSend === undefined
         ? input
         : waitWithSignal(
@@ -221,63 +226,52 @@ export class EveAgentStore<TData> {
             createAbortSignal(input.signal, turn.abortController.signal),
           ));
       assertExclusiveTurnInput(preparedInput);
-
-      if (!this.#isActiveTurn(turn)) {
-        return;
+      if (!this.#isActiveTurn(turn)) return;
+      if (preparedInput !== input) {
+        submissionId = this.#messageSubmissions.resubmit(submissionId, preparedInput);
+        retractResponses = this.#conversationClient.replaceResponses(
+          retractResponses,
+          preparedInput,
+        );
+        this.#publish();
       }
-
-      const submissionId = this.#messageSubmissions.submit(preparedInput, this.#events.length);
-      this.#projectInputResponses(preparedInput);
-      this.#publish();
 
       const turnInput = {
         ...preparedInput,
         signal: createAbortSignal(preparedInput.signal, turn.abortController.signal),
       };
       const dispatched = await this.#dispatchTurn(turnInput);
+      retractResponses = undefined;
       const response = dispatched.response;
       reader = dispatched.reader;
 
       if (!this.#isActiveTurn(turn)) return;
       turn.resolveResponse(response);
 
-      if (
-        this.#handleReconciliation(
-          this.#messageSubmissions.correlate(
-            submissionId,
-            getMessageResponseDeliveryId(response),
-            this.#events,
-          ),
-        )
-      ) {
-        this.#publish();
-      }
+      this.#correlate(submissionId, response);
       for await (const event of consumeMessageResponse(response, reader)) {
         if (!this.#isActiveTurn(turn)) return;
         turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
         turn.receivedFollowUpEvents.delete(event);
       }
 
-      if (!this.#isActiveTurn(turn)) {
-        return;
-      }
+      if (!this.#isActiveTurn(turn)) return;
 
       await followSteeredTurns(turn, reader, () => this.#isActiveTurn(turn));
       if (!this.#isActiveTurn(turn)) return;
-      this.#status = this.#error === undefined ? "ready" : "error";
+      this.#status = settledStatus(this.#error, this.#conversationClient.conversation);
     } catch (error) {
-      if (!this.#isActiveTurn(turn)) {
-        return;
-      }
+      if (!this.#isActiveTurn(turn)) return;
+      retractResponses?.();
 
       if (isAbortError(error)) {
         this.#status = "ready";
-        this.#messageSubmissions.fail(toError(error));
+        this.#messageSubmissions.fail(toError(error), submissionId);
       } else {
         const reported = this.#error !== undefined;
         this.#error ??= toError(error);
         this.#status = "error";
-        this.#messageSubmissions.fail(this.#error);
+        this.#messageSubmissions.fail(this.#error, submissionId);
         if (!reported) this.#callbacks.onError?.(this.#error);
       }
     } finally {
@@ -300,11 +294,7 @@ export class EveAgentStore<TData> {
   }
 
   async #resume(): Promise<void> {
-    if (
-      this.#status === "resuming" ||
-      this.#status === "streaming" ||
-      this.#status === "submitted"
-    ) {
+    if (this.#status !== "ready" && this.#status !== "error") {
       throw new Error("eve session is already processing a turn.");
     }
     if (this.#session === undefined) {
@@ -332,18 +322,23 @@ export class EveAgentStore<TData> {
       reader.discard();
       const tail = this.#events.at(-1);
       if (tail !== undefined) this.#applyTerminalStreamFailure(tail);
-      if (tail !== undefined && this.#error === undefined && !isSettledSessionTail(this.#events)) {
+      if (
+        tail &&
+        !this.#error &&
+        !isSettledSessionTail(this.#events, this.#conversationClient.conversation)
+      ) {
         this.#status = "streaming";
         this.#publish();
         for await (const event of reader) {
           if (!this.#isActiveTurn(turn)) return;
           turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
           turn.receivedFollowUpEvents.delete(event);
-          if (this.#isSettledAt(event)) break;
+          if (isResponseBoundary(event, this.#conversationClient.conversation)) break;
         }
       }
       await followSteeredTurns(turn, reader, () => this.#isActiveTurn(turn));
-      if (this.#isActiveTurn(turn)) this.#status = this.#error === undefined ? "ready" : "error";
+      if (this.#isActiveTurn(turn))
+        this.#status = settledStatus(this.#error, this.#conversationClient.conversation);
     } catch (error) {
       if (!this.#isActiveTurn(turn)) return;
       if (isAbortError(error)) {
@@ -375,25 +370,47 @@ export class EveAgentStore<TData> {
     return turn.cancel();
   }
 
+  /** Queues server-side compaction of the current session's context. */
+  async compact(): Promise<CompactResult> {
+    return (await this.#session?.compact()) ?? { status: "no_active_session" };
+  }
+
+  /** Clears the current session's model-message history on the server. */
+  async clear(): Promise<ClearResult> {
+    return (await this.#session?.clear()) ?? { status: "no_active_session" };
+  }
+
+  /**
+   * Terminally retires the store-owned server session, then resets local state so the next
+   * send starts a fresh session. A failed request leaves both intact.
+   */
+  async retire(): Promise<ResetResult> {
+    if (this.#externalSession) {
+      throw new Error(
+        "retire() needs a store-owned session. Call reset() on the session you supplied, then create a new store for the next session.",
+      );
+    }
+    const result = (await this.#session?.reset()) ?? { status: "no_active_session" };
+    this.reset();
+    return result;
+  }
+
   [attachStore](): void {
     this.#attached = true;
+    if (this.#followChildStreams && !this.#conversationClient.following) this.#followSubagents();
     if (this.#autoPrewarm && this.#session === undefined) void this.prewarm().catch(() => {});
   }
 
   [detachStore](): void {
     this.#attached = false;
-    this.#stream?.close();
-    this.#stream = undefined;
+    this.#conversationClient.stop();
     this.#activeTurn?.abortController.abort();
     this.#resetPrewarm();
     this.#resumePromise = undefined;
   }
 
   reset(): void {
-    this.#stream?.close();
-    this.#stream = undefined;
-    this.#pendingAuthorizations.clear();
-    this.#pendingInputRequests.clear();
+    this.#conversationClient.stop();
     const turn = this.#activeTurn;
     this.#activeTurn = undefined;
     turn?.resolveResponse(undefined);
@@ -403,9 +420,9 @@ export class EveAgentStore<TData> {
     this.#resumePromise = undefined;
     if (!this.#externalSession) this.#session = undefined;
     this.#events = [];
-    this.#seenEvents = createEventDeduper();
+    this.#conversationClient.reset();
     this.#messageSubmissions.reset();
-    this.#projection.reset();
+    if (this.#followChildStreams && this.#attached) this.#followSubagents();
     this.#error = undefined;
     this.#status = "ready";
     this.#callbacks.onSessionChange?.(this.#session?.state);
@@ -418,56 +435,64 @@ export class EveAgentStore<TData> {
     input: SendTurnPayload<TOutput>,
     prepareSend?: PrepareSend,
   ): Promise<void> {
-    if (input.message === undefined || input.turnPolicy !== "steer") {
-      throw new Error(
-        'eve session is already processing a turn. Send a message with turnPolicy: "steer" to guide it at the next boundary.',
-      );
-    }
-
+    assertInFlightFollowUp(input);
     const generation = this.#prewarmGeneration;
     const signal = createAbortSignal(input.signal, turn.abortController.signal);
-    const preparedInput =
-      (await waitWithSignal(Promise.resolve(prepareSend?.(input)), signal)) ?? input;
+    // Answers close their requests before preparation so no one answers them twice.
+    let retractResponses = this.#conversationClient.projectResponses(input.inputResponses);
+    const preparedInput = await waitWithSignal(Promise.resolve(prepareSend?.(input)), signal)
+      .then((prepared) => {
+        const next = validateFollowUp(prepared ?? input);
+        if (next === input) return next;
+        retractResponses = this.#conversationClient.replaceResponses(retractResponses, next);
+        return next;
+      })
+      .catch((error: unknown) => {
+        retractResponses?.();
+        throw error;
+      });
     if (generation !== this.#prewarmGeneration) return;
-    assertExclusiveTurnInput(preparedInput);
-    if (preparedInput.message === undefined || preparedInput.turnPolicy !== "steer") {
-      throw new Error('An in-flight follow-up requires a message with turnPolicy: "steer".');
+    if (!this.#isActiveTurn(turn)) {
+      retractResponses?.();
+      return await this.#submit(preparedInput);
     }
-    if (!this.#isActiveTurn(turn)) return await this.#submit(preparedInput);
 
-    const submissionId = this.#messageSubmissions.submit(preparedInput, this.#events.length);
+    const submissionId = this.#messageSubmissions.submit(
+      preparedInput,
+      this.#events.length,
+      activeTurnForOptimisticFollowUp(this.#events),
+    );
     if (submissionId !== undefined) turn.followUpSubmissionIds.add(submissionId);
     this.#publish();
-    this.#ensureStream({
-      headers: preparedInput.headers,
-      streamReconnectPolicy: preparedInput.streamReconnectPolicy,
-    });
 
     let dispatch!: Promise<void>;
     dispatch = (async () => {
       try {
         const signal = createAbortSignal(preparedInput.signal, turn.abortController.signal);
+        // The active turn may still be creating the session this follow-up steers.
         await waitWithSignal(turn.response, signal);
         if (!this.#isActiveTurn(turn) || this.#session === undefined) {
           throw new Error("The active eve turn ended before the follow-up could be sent.");
         }
-        const { message, ...options } = preparedInput;
-        const response = await this.#session.send(message, { ...options, signal });
+        this.#ensureStream({
+          headers: preparedInput.headers,
+          streamReconnectPolicy: preparedInput.streamReconnectPolicy,
+        });
+        const response = (
+          await dispatchSessionTurn({
+            session: this.#session,
+            turn: { ...preparedInput, signal },
+          })
+        ).response;
+        retractResponses = undefined;
+        // Answers settle through the active turn's stream; only steered messages extend it.
+        if (preparedInput.message === undefined) return;
         turn.acceptedFollowUps += 1;
-        if (
-          this.#handleReconciliation(
-            this.#messageSubmissions.correlate(
-              submissionId,
-              getMessageResponseDeliveryId(response),
-              this.#events,
-            ),
-          )
-        ) {
-          this.#publish();
-        }
+        this.#correlate(submissionId, response);
       } catch (error) {
         if (this.#isActiveTurn(turn)) {
           this.#messageSubmissions.fail(toError(error), submissionId);
+          retractResponses?.();
           this.#publish();
         }
         throw error;
@@ -481,9 +506,10 @@ export class EveAgentStore<TData> {
     await turn.completion;
   }
 
-  async #dispatchTurn<TOutput>(
-    input: SendTurnPayload<TOutput>,
-  ): Promise<{ readonly response: MessageResponse<TOutput>; readonly reader: SessionEventReader }> {
+  async #dispatchTurn<TOutput>(input: SendTurnPayload<TOutput>): Promise<{
+    readonly response: MessageResponse<TOutput>;
+    readonly reader: SessionEventReader;
+  }> {
     const streamOptions = {
       headers: input.headers,
       streamReconnectPolicy: input.streamReconnectPolicy,
@@ -498,33 +524,24 @@ export class EveAgentStore<TData> {
       );
       input.signal?.throwIfAborted();
     }
-    if (this.#session === undefined) {
-      if (this.#client === undefined) {
-        throw new Error("An external eve session is required before sending.");
-      }
-      if (input.message === undefined) {
-        throw new Error("Cannot answer an input request before the session starts.");
-      }
-      const created = await this.#client.sessions.create({ ...input, message: input.message });
-      input.signal?.throwIfAborted();
-      this.#session = created.session;
-      this.#callbacks.onSessionChange?.(created.session.state);
-      this.#publish();
-      return {
-        response: created.response,
-        reader: this.#ensureStream(streamOptions).subscribe(input.signal),
-      };
-    }
-    const reader = this.#ensureStream(streamOptions).subscribe(input.signal);
+    const session = this.#session;
+    let reader: SessionEventReader | undefined;
     try {
-      if (input.inputResponses === undefined) {
-        const { message, ...options } = input;
-        return { response: await this.#session.send(message, options), reader };
+      const dispatched = await dispatchSessionTurn({
+        client: this.#client,
+        session,
+        turn: input,
+        beforeSend: () => {
+          reader = this.#ensureStream(streamOptions).subscribe(input.signal);
+        },
+      });
+      if (dispatched.created) {
+        this.#adoptSession(dispatched.session);
+        reader = this.#ensureStream(streamOptions).subscribe(input.signal);
       }
-      const { inputResponses, ...options } = input;
-      return { response: await this.#session.respond(inputResponses, options), reader };
+      return { response: dispatched.response, reader: reader! };
     } catch (error) {
-      reader[Symbol.dispose]();
+      reader?.[Symbol.dispose]();
       throw error;
     }
   }
@@ -532,30 +549,38 @@ export class EveAgentStore<TData> {
   #ensureStream(
     options: Omit<SessionEventStreamOptions, "onEvent" | "onError"> = {},
   ): SessionEventStream {
-    if (this.#stream !== undefined && !this.#stream.ended) {
-      this.#stream.setOptions(options);
-      return this.#stream;
-    }
     if (this.#session === undefined)
       throw new Error("A session is required before opening its stream.");
-    const session = this.#session;
     const generation = this.#prewarmGeneration;
-    this.#stream = new SessionEventStream(session, {
+    if (this.#followChildStreams && !this.#conversationClient.following) this.#followSubagents();
+    return this.#conversationClient.stream(this.#session, {
       ...options,
       onEvent: (event) => {
         if (generation === this.#prewarmGeneration) this.#acceptServerEvent(event);
       },
       onError: (error) => {
-        if (generation !== this.#prewarmGeneration) return;
-        this.#stream = undefined;
-        if (this.#activeTurn !== undefined) return;
-        this.#error = toError(error);
-        this.#status = "error";
-        this.#callbacks.onError?.(this.#error);
-        this.#publish();
+        if (generation !== this.#prewarmGeneration || this.#activeTurn !== undefined) return;
+        this.#fail(error);
       },
     });
-    return this.#stream;
+  }
+
+  #adoptSession(session: ClientSession): void {
+    this.#session = session;
+    if (this.#followChildStreams && this.#attached) this.#followSubagents();
+    this.#callbacks.onSessionChange?.(session.state);
+    this.#publish();
+  }
+
+  #fail(error: unknown): void {
+    this.#error = toError(error);
+    this.#status = "error";
+    this.#callbacks.onError?.(this.#error);
+    this.#publish();
+  }
+
+  #followSubagents(): void {
+    if (this.#session) this.#conversationClient.follow(this.#session, this.#events);
   }
 
   #resetPrewarm(): void {
@@ -582,29 +607,25 @@ export class EveAgentStore<TData> {
     return this.#activeTurn === turn;
   }
 
-  #projectInputResponses(input: SendTurnPayload): void {
-    if (input.inputResponses === undefined || input.inputResponses.length === 0) {
-      return;
-    }
-
-    this.#projection.append({
-      data: {
-        createdAt: Date.now(),
-        responses: input.inputResponses,
-      },
-      type: "client.input.responded",
-    });
-  }
-
-  #acceptServerEvent(event: MessageStreamEvent): void {
-    if (!this.#seenEvents.admit(event)) return;
+  #acceptServerEvent(event: MessageStreamEvent): boolean {
     const wasStreaming = this.#status === "streaming";
-    this.#trackPendingRequests(event);
-    this.#events = [...this.#events, event];
-    this.#handleReconciliation(this.#messageSubmissions.apply(event));
+    if (
+      !this.#conversationClient.observe(event, {
+        onAccepted: () => {
+          this.#events = [...this.#events, event];
+        },
+        project: (accepted) => {
+          this.#handleReconciliation(this.#messageSubmissions.apply(accepted));
+        },
+        notify: false,
+      })
+    )
+      return false;
     this.#callbacks.onEvent?.(event);
     this.#applyTerminalStreamFailure(event);
-    const settled = this.#isSettledAt(event);
+    const { conversation } = this.#conversationClient;
+    const settled =
+      isSettledSessionTail(this.#events, conversation) && conversation.activeTurnId === undefined;
     if (this.#status !== "resuming" && this.#error === undefined) {
       if ("data" in event && "turnId" in event.data) this.#status = "streaming";
       if (this.#activeTurn === undefined && settled) this.#status = "ready";
@@ -616,45 +637,27 @@ export class EveAgentStore<TData> {
     if (this.#activeTurn === undefined && wasStreaming && settled) {
       this.#callbacks.onFinish?.(this.#snapshot);
     }
+    return true;
   }
 
-  #trackPendingRequests(event: MessageStreamEvent): void {
-    updatePendingAuthorizations(this.#pendingAuthorizations, event);
-    updatePendingInputRequests(this.#pendingInputRequests, event);
-  }
-
-  #isSettledAt(event: MessageStreamEvent): boolean {
-    return (
-      isTurnSegmentBoundary(event, this.#pendingInputRequests) &&
-      this.#pendingAuthorizations.size === 0
-    );
+  /** Pairs a submission's echo with the server's copy once its delivery ID is known. */
+  #correlate(submissionId: string | undefined, response: MessageResponse<unknown>): void {
+    const deliveryId = getMessageResponseDeliveryId(response);
+    const reconciled = this.#messageSubmissions.correlate(submissionId, deliveryId, this.#events);
+    if (this.#handleReconciliation(reconciled)) this.#publish();
   }
 
   #handleReconciliation(
-    reconciliation: ReturnType<OptimisticMessageSubmissions<TData>["apply"]>,
+    reconciliation: ReturnType<OptimisticMessageSubmissions["apply"]>,
   ): boolean {
     if (reconciliation === undefined) return false;
-    let followed = 0;
-    for (const id of reconciliation.ids) {
-      if (this.#activeTurn?.followUpSubmissionIds.delete(id)) followed += 1;
-    }
-    if (followed > 0 && this.#activeTurn !== undefined) {
-      if (reconciliation.alreadyProjected) {
-        this.#activeTurn.receivedFollowUps += followed;
-      } else {
-        const previous = this.#activeTurn.receivedFollowUpEvents.get(reconciliation.event) ?? 0;
-        this.#activeTurn.receivedFollowUpEvents.set(reconciliation.event, previous + followed);
-      }
-    }
+    if (this.#activeTurn !== undefined) countFollowUpDeliveries(this.#activeTurn, reconciliation);
     return true;
   }
 
   #applyTerminalStreamFailure(event: MessageStreamEvent): void {
     const error = toTerminalStreamFailureError(event);
-    if (error === undefined) {
-      return;
-    }
-
+    if (error === undefined) return;
     this.#status = "error";
     this.#messageSubmissions.failAll(error);
 
@@ -666,7 +669,8 @@ export class EveAgentStore<TData> {
 
   #createSnapshot(): EveAgentStoreSnapshot<TData> {
     return {
-      data: this.#projection.data,
+      data: this.#conversationClient.data,
+      conversation: this.#conversationClient.conversation,
       error: this.#error,
       events: this.#events,
       session: this.#session?.state,
@@ -676,9 +680,7 @@ export class EveAgentStore<TData> {
 
   #publish(): void {
     this.#snapshot = this.#createSnapshot();
-    for (const subscriber of this.#subscribers) {
-      subscriber();
-    }
+    for (const subscriber of this.#subscribers) subscriber();
   }
 }
 
