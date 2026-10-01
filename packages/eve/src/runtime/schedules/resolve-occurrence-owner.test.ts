@@ -8,12 +8,17 @@ import {
 } from "#runtime/schedules/resolve-occurrence-owner.js";
 
 it("waits for the admitted owner and refuses to report an unsettled claim", async () => {
-  const runtime = {
+  const runtime: Runtime = {
+    createSession: vi.fn(),
+    dispatchContinuation: vi.fn(),
+    dispatchSession: vi.fn(),
+    getEventStream: vi.fn(),
+    getStreamTailIndex: vi.fn(),
     resolveContinuation: vi
-      .fn()
+      .fn<Runtime["resolveContinuation"]>()
       .mockRejectedValueOnce(new OccurrenceAdmissionPendingError())
       .mockResolvedValueOnce({ sessionId: "winner" }),
-  } as Runtime;
+  };
   vi.useFakeTimers();
   try {
     const owner = resolveCreateOnceOwner(runtime, "occurrence", { timeoutMs: 50 });
