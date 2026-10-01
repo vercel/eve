@@ -741,6 +741,111 @@ describe("app runtime dependency tracing", () => {
     }
   }, 30_000);
 
+  it("traces an external dependency reached only through a workspace source package", async () => {
+    const workspaceRoot = await createScratchDirectory("eve-workspace-external-dep-build-");
+    const appRoot = join(workspaceRoot, "apps", "agent");
+    const backendRoot = join(workspaceRoot, "packages", "backend");
+    const externalDependencyRoot = join(
+      backendRoot,
+      "node_modules",
+      "fixture-workspace-external",
+    );
+
+    await Promise.all([
+      mkdir(join(appRoot, "agent", "tools"), { recursive: true }),
+      mkdir(join(appRoot, "node_modules", "@fixture"), { recursive: true }),
+      mkdir(join(backendRoot, "src"), { recursive: true }),
+      mkdir(externalDependencyRoot, { recursive: true }),
+    ]);
+    await writeFile(
+      join(appRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          dependencies: { "@fixture/backend": "workspace:*" },
+          name: "workspace-external-dependency-app",
+          private: true,
+          type: "module",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      join(appRoot, "agent", "agent.ts"),
+      [
+        "export default {",
+        "  build: {",
+        '    externalDependencies: ["fixture-workspace-external"],',
+        "  },",
+        '  model: "openai/gpt-5.4-mini",',
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(join(appRoot, "agent", "instructions.md"), "Workspace external dependency.\n");
+    await writeFile(
+      join(appRoot, "agent", "tools", "use_backend.ts"),
+      [
+        'import { value } from "@fixture/backend";',
+        "",
+        "export default {",
+        '  description: "Use a workspace package.",',
+        "  execute() {",
+        "    return value;",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(backendRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          dependencies: { "fixture-workspace-external": "1.0.0" },
+          exports: "./src/index.ts",
+          name: "@fixture/backend",
+          private: true,
+          type: "module",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(
+      join(backendRoot, "src", "index.ts"),
+      [
+        'import { value } from "fixture-workspace-external";',
+        "",
+        "export { value };",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(externalDependencyRoot, "package.json"),
+      `${JSON.stringify(
+        {
+          exports: "./index.js",
+          name: "fixture-workspace-external",
+          type: "module",
+          version: "1.0.0",
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await writeFile(join(externalDependencyRoot, "index.js"), 'export const value = "workspace external";\n');
+    await symlink(backendRoot, join(appRoot, "node_modules", "@fixture", "backend"), "dir");
+
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+
+    await expect(
+      readFile(
+        join(outputDir, "server", "node_modules", "fixture-workspace-external", "index.js"),
+        "utf8",
+      ),
+    ).resolves.toContain('export const value = "workspace external";');
+  }, 30_000);
+
   it("rewrites framework tool executors into hosted Vercel output", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
@@ -917,19 +1022,15 @@ describe("app runtime dependency tracing", () => {
       ["export default {", '  model: "openai/gpt-5.4-mini",', "};", ""].join("\n"),
     );
     await writeFile(join(appRoot, "agent", "instructions.md"), "Verify hosted instrumentation.\n");
-    await mkdir(join(appRoot, "agent", "instrumentation"), { recursive: true });
     await writeFile(
-      join(appRoot, "agent", "instrumentation", "dependency.ts"),
+      join(appRoot, "agent", "instrumentation.ts"),
       [
         'import fixtureInstrumentationDep from "fixture-instrumentation-dep";',
-        'import { defineInstrumentation } from "eve/instrumentation";',
         "",
-        "export default defineInstrumentation({",
-        "  setup() {",
-        "    (globalThis as Record<string, unknown>).__fixtureInstrumentationDep =",
-        "      fixtureInstrumentationDep;",
-        "  },",
-        "});",
+        "(globalThis as Record<string, unknown>).__fixtureInstrumentationDep =",
+        "  fixtureInstrumentationDep;",
+        "",
+        "export default fixtureInstrumentationDep;",
         "",
       ].join("\n"),
     );
