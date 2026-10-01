@@ -224,15 +224,12 @@ async function searchConnectionTools(
   // is reserved for `signIn: true` on one named connection and connection_execute.
   const auth = createAuthorizationExecution();
   await completePendingAuthorizations(registry, targets, auth);
-  if (input.signIn === true) {
-    const signal = await requestConnectionSignIn(registry, targets[0]!, auth);
-    if (signal !== undefined) return signal;
-  }
 
   const unavailable: UnavailableConnection[] = [];
   const candidates: RankCandidate[] = [];
   for (const connection of targets) {
-    const listed = await listConnectionTools(registry, connection, auth);
+    const listed = await listConnectionTools(registry, connection, auth, input.signIn === true);
+    if ("signIn" in listed) return listed.signIn;
     if ("unavailable" in listed) unavailable.push(listed.unavailable);
     else {
       for (const tool of listed.tools) candidates.push({ connection, tool });
@@ -267,37 +264,17 @@ async function searchConnectionTools(
   return output;
 }
 
-/**
- * Starts sign-in when the user has not authorized `connection`; returns
- * `undefined` once its tools can be listed, so the search runs as usual.
- */
-async function requestConnectionSignIn(
-  registry: ConnectionRegistry,
-  connection: ResolvedConnectionDefinition,
-  auth: ReturnType<typeof createAuthorizationExecution>,
-): Promise<AuthorizationSignal | undefined> {
-  const name = connection.connectionName;
-  try {
-    await registry.getClient(name).getToolMetadata();
-    return undefined;
-  } catch (error) {
-    if (!isConnectionAuthorizationRequiredError(error)) return undefined;
-    const scoped = await resolveInteractiveAuthorization(registry, name);
-    if (scoped === undefined) {
-      throw new Error(`"${name}" requires authorization and cannot start interactive sign-in.`);
-    }
-    return await auth.handleError(error, scoped);
-  }
-}
-
 type ListedConnectionTools =
   | { readonly tools: readonly ConnectionToolMetadata[] }
+  | { readonly signIn: AuthorizationSignal }
   | { readonly unavailable: UnavailableConnection };
 
+/** Lists a connection's tools, starting its sign-in instead when `signIn` asks for it. */
 async function listConnectionTools(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
   auth: ReturnType<typeof createAuthorizationExecution>,
+  signIn: boolean,
 ): Promise<ListedConnectionTools> {
   const name = connection.connectionName;
   try {
@@ -317,14 +294,11 @@ async function listConnectionTools(
         };
       }
       if (scoped === undefined) {
-        return {
-          unavailable: {
-            connection: name,
-            error: `"${name}" requires authorization and cannot start interactive sign-in.`,
-            terminal: false,
-          },
-        };
+        const cannotSignIn = `"${name}" requires authorization and cannot start interactive sign-in.`;
+        if (signIn) throw new Error(cannotSignIn);
+        return { unavailable: { connection: name, error: cannotSignIn, terminal: false } };
       }
+      if (signIn) return { signIn: await auth.handleError(error, scoped) };
       return {
         unavailable: {
           connection: name,
