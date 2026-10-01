@@ -152,11 +152,19 @@ function truncateSingleSemanticMessage(
     typeof message.kind === "string"
       ? { kind: message.kind, role: message.role }
       : { role: message.role };
-  return fitSemanticText(text, (content) => [{ ...base, parts: [{ content, type: "text" }] }]);
+  return fitSemanticText(
+    text,
+    (content) => [{ ...base, parts: [{ content, type: "text" }] }],
+    true,
+  );
 }
 
-function fitSemanticText(text: string, wrap: (content: string) => unknown): string | undefined {
-  if (text.length <= CONTENT_ATTRIBUTE_LIMIT) {
+function fitSemanticText(
+  text: string,
+  wrap: (content: string) => unknown,
+  alwaysMark = false,
+): string | undefined {
+  if (!alwaysMark && text.length <= CONTENT_ATTRIBUTE_LIMIT) {
     const full = semanticJsonAttribute(wrap(text));
     if (full !== undefined) return full;
   }

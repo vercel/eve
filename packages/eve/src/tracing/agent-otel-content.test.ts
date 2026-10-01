@@ -166,6 +166,33 @@ describe("GenAI message attributes", () => {
     expect(parsed[0]).toMatchObject({ type: "text" });
     expect(parsed[0]?.content).toEqual(expect.stringContaining("… [truncated]"));
   });
+
+  it("marks a message truncated when oversized non-text parts are omitted", () => {
+    const attribute = genAiInputMessagesAttribute([
+      {
+        content: [
+          { text: "partial assistant answer", type: "text" },
+          {
+            input: { payload: "x".repeat(CONTENT_ATTRIBUTE_LIMIT) },
+            toolCallId: "call-1",
+            toolName: "delegate",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+
+    expect(attribute).toBeDefined();
+    expect(attribute!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+    const parsed = JSON.parse(attribute!) as Array<Record<string, unknown>>;
+    expect(parsed).toEqual([
+      {
+        parts: [{ content: "partial assistant answer… [truncated]", type: "text" }],
+        role: "assistant",
+      },
+    ]);
+  });
 });
 
 describe("toolResultsContentAttribute", () => {
