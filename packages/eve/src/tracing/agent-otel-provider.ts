@@ -20,7 +20,6 @@ import {
   genAiInputMessagesAttribute,
   genAiOutputMessagesAttribute,
   genAiSystemInstructionsAttribute,
-  systemPromptAttribute,
   textContentAttribute,
   toolResultsContentAttribute,
 } from "#tracing/agent-otel-content.js";
@@ -387,8 +386,6 @@ export function createAgentOtelInstrumentation(
     if (recordInputs && event.input !== undefined) {
       const genAiMessages = genAiInputMessagesAttribute(event.input.messages);
       if (genAiMessages !== undefined) span.setAttribute("gen_ai.input.messages", genAiMessages);
-      const system = systemPromptAttribute(event.input.instructions);
-      if (system !== undefined) span.setAttribute("ai.prompt.system", system);
       const genAiSystem = genAiSystemInstructionsAttribute(event.input.instructions);
       if (genAiSystem !== undefined) {
         span.setAttribute("gen_ai.system_instructions", genAiSystem);

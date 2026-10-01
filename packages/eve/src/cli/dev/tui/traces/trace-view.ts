@@ -192,7 +192,7 @@ function overlayRight(row: string, segment: string, width: number, margin: numbe
  */
 const CONVERSATION_CONTENT_KEYS: ReadonlySet<string> = new Set([
   "gen_ai.input.messages",
-  "ai.prompt.system",
+  "gen_ai.system_instructions",
   "ai.response.reasoning",
   "ai.response.text",
   "ai.response.tool_calls",

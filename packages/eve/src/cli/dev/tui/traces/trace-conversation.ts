@@ -72,8 +72,9 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   const entries: { readonly item: ConversationItem; readonly order: bigint }[] = [];
   const firstSystemSpan = [...trace.spans]
     .sort(compareLocalTraceSpans)
-    .find((span) => isModelSpan(span) && typeof span.attributes["ai.prompt.system"] === "string");
-  const systemText = firstSystemSpan?.attributes["ai.prompt.system"];
+    .find((span) => isModelSpan(span) && systemInstructionsText(span.attributes) !== undefined);
+  const systemText =
+    firstSystemSpan === undefined ? undefined : systemInstructionsText(firstSystemSpan.attributes);
   if (firstSystemSpan !== undefined && typeof systemText === "string" && systemText.length > 0) {
     entries.push({
       item: {
@@ -180,6 +181,32 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   return entries
     .sort((left, right) => (left.order === right.order ? 0 : left.order < right.order ? -1 : 1))
     .map((entry) => entry.item);
+}
+
+function systemInstructionsText(attributes: Readonly<Record<string, unknown>>): string | undefined {
+  const value = attributes["gen_ai.system_instructions"];
+  if (typeof value !== "string") return undefined;
+  try {
+    const instructions: unknown = JSON.parse(value);
+    if (!Array.isArray(instructions)) return undefined;
+    const text = instructions
+      .flatMap((instruction: unknown) => {
+        if (
+          typeof instruction !== "object" ||
+          instruction === null ||
+          !("type" in instruction) ||
+          instruction.type !== "text" ||
+          !("content" in instruction) ||
+          typeof instruction.content !== "string"
+        )
+          return [];
+        return [instruction.content];
+      })
+      .join("\n\n");
+    return text.length > 0 ? text : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function subagentFor(

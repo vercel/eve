@@ -102,7 +102,7 @@ function cappedToolResult(entry: Record<string, unknown>, cap: number): Record<s
   return out;
 }
 
-/** Normalizes the AI SDK's `instructions` prompt to plain text for `ai.prompt.system`. */
+/** Normalizes the AI SDK's `instructions` prompt to plain text. */
 export function systemPromptAttribute(instructions: unknown): string | undefined {
   if (typeof instructions === "string") return textContentAttribute(instructions);
   if (!isRecord(instructions) && !Array.isArray(instructions)) return undefined;

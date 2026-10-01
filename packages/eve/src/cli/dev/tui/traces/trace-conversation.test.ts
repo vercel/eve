@@ -443,7 +443,8 @@ describe("renderConversationItem", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
     const step = span("b".repeat(16), "agent.step", 10, 100, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 50, step.spanId, {
-      "ai.prompt.system": "You are a test assistant. Be brief.",
+      "gen_ai.system_instructions":
+        '[{"content":"You are a test assistant. Be brief.","type":"text"}]',
       "gen_ai.input.messages": JSON.stringify([
         { parts: [{ content: "hi", type: "text" }], role: "user" },
       ]),

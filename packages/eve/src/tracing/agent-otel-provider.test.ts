@@ -2730,9 +2730,6 @@ describe("createAgentOtelInstrumentation", () => {
     const spans = runtime.exporter.getFinishedSpans();
     const model = byName(spans, "chat claude-test")[0]!;
     const tool = byName(spans, "execute_tool weather")[0]!;
-    expect(model.attributes["ai.prompt.system"]).toBe(
-      "You are a weather assistant (system prompt).",
-    );
     expect(model.attributes["ai.response.finish_reason"]).toBe("tool-calls");
     expect(model.attributes["ai.response.reasoning"]).toBe("thinking about weather");
     expect(model.attributes["ai.response.text"]).toBe("Checking the weather.");
@@ -2746,6 +2743,7 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.system_instructions":
         '[{"content":"You are a weather assistant (system prompt).","type":"text"}]',
     });
+    expect(model.attributes).not.toHaveProperty("ai.prompt.system");
     expect(model.attributes["agent.input.messages.delta"]).toBeUndefined();
     // Provider-executed tools never reach the tool loop; their calls and
     // results are captured off the model response content.
@@ -2782,6 +2780,9 @@ describe("createAgentOtelInstrumentation", () => {
     const spans = runtime.exporter.getFinishedSpans();
     expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
       "gen_ai.input.messages",
+    );
+    expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.system_instructions",
     );
     expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
       "gen_ai.output.messages",
@@ -3034,11 +3035,8 @@ describe("createAgentOtelInstrumentation", () => {
     }
     const firstModel = byName(firstRuntime.exporter.getFinishedSpans(), "chat claude-test")[0]!;
     const secondModel = byName(secondRuntime.exporter.getFinishedSpans(), "chat claude-test")[0]!;
-    expect(firstModel.attributes["ai.prompt.system"]).toBe(
-      "You are a weather assistant (system prompt).",
-    );
-    expect(secondModel.attributes["ai.prompt.system"]).toBe(
-      "You are a weather assistant (system prompt).",
+    expect(firstModel.attributes["gen_ai.system_instructions"]).toBe(
+      '[{"content":"You are a weather assistant (system prompt).","type":"text"}]',
     );
     expect(secondModel.attributes["gen_ai.system_instructions"]).toBe(
       '[{"content":"You are a weather assistant (system prompt).","type":"text"}]',
