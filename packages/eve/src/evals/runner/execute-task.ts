@@ -171,6 +171,7 @@ function combineDerivedFacts(sessions: readonly EveEvalSessionResult[]): EveEval
     parked: sessions.some((session) => session.derived.parked),
     messageCount: sum(sessions, (session) => session.derived.messageCount),
     reasoningBlockCount: sum(sessions, (session) => session.derived.reasoningBlockCount),
+    models: [...new Set(sessions.flatMap((session) => session.derived.models))],
     failureCode,
   };
 }

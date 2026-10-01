@@ -67,6 +67,7 @@ export function deriveRunFacts(
   let turnIndex = -1;
   let messageCount = 0;
   let reasoningBlockCount = 0;
+  const models = new Set<string>();
   let failureCode: string | undefined;
 
   const ensureToolCall = (callId: string, name: string, input: JsonObject): MutableToolCall => {
@@ -151,6 +152,11 @@ export function deriveRunFacts(
         break;
       }
 
+      case "step.started": {
+        models.add(event.data.modelId);
+        break;
+      }
+
       case "session.failed": {
         failureCode = event.data.code;
         break;
@@ -173,6 +179,7 @@ export function deriveRunFacts(
     parked: endedParkedOnInput(events),
     messageCount,
     reasoningBlockCount,
+    models: [...models],
     failureCode,
   };
 }
@@ -221,6 +228,7 @@ export function createEmptyDerivedFacts(): EveEvalDerivedFacts {
     parked: false,
     messageCount: 0,
     reasoningBlockCount: 0,
+    models: [],
   };
 }
 

@@ -87,6 +87,13 @@ export interface EveEvalDerivedFacts {
   readonly parked: boolean;
   readonly messageCount: number;
   readonly reasoningBlockCount: number;
+  /**
+   * Distinct ids of the models the steps started with (`step.started`): in first-use order for one
+   * session, and in session order for an eval. Covers only the sessions the eval created or
+   * attached, so a subagent session the eval did not attach, compaction, and `auto` routing calls
+   * are not included.
+   */
+  readonly models: readonly string[];
   readonly failureCode?: string;
 }
 
