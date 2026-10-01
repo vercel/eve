@@ -1,8 +1,6 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
-import { isEnclosingExtensionMount } from "#compiler/source-graph.js";
-
 const MOUNT_QUERY = "?eve-mount=";
 
 interface Mount {
@@ -44,7 +42,9 @@ export function createExtensionMountPlugin(
     return canonicalPath;
   };
   const roots = mounts.map((mount) => ({ ...mount, root: canonical(mount.sourceRoot) }));
-  // A mount file inside an extension subagent declares one mount per enclosing mount.
+  // A mount file inside an extension subagent declares one mount per enclosing mount. Extension
+  // subagents live at `<mountId>/subagents/<id>`, so a nested mount id extends its enclosing
+  // mount ids; the trailing `/` keeps `a` from enclosing `ab/...`.
   const declarationPaths = new Map<string, (typeof roots)[number][]>();
   for (const mount of roots) {
     if (mount.mountSourcePath === undefined) continue;
@@ -87,7 +87,7 @@ export function createExtensionMountPlugin(
           ? declarations[0]
           : declarations.find(
               (candidate) =>
-                inherited !== undefined && isEnclosingExtensionMount(inherited, candidate.mountId),
+                inherited !== undefined && candidate.mountId.startsWith(`${inherited}/`),
             );
       // A nested mount file is loaded as its enclosing extension's source, but the extension it
       // mounts must bind that mount's own instance.
@@ -157,7 +157,7 @@ export function createExtensionMountPlugin(
         // the extension is mounted more than once, the enclosing mount disambiguates.
         const owner =
           owners
-            .filter((candidate) => isEnclosingExtensionMount(candidate.mountId, mount.mountId))
+            .filter((candidate) => mount.mountId.startsWith(`${candidate.mountId}/`))
             .sort((left, right) => right.mountId.length - left.mountId.length)[0] ??
           (owners.length === 1 ? owners[0] : undefined);
         return owner === undefined

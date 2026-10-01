@@ -1,5 +1,4 @@
 import {
-  isEnclosingExtensionMount,
   type AgentModuleBinding,
   type AgentSourceRegistry,
   loadProgrammaticModuleNamespace,
@@ -20,12 +19,13 @@ export interface ExtensionCompileMount {
   readonly entry?: NonNullable<AuthoredModuleLoadOptions["extension"]>["entry"];
 }
 
-/** Filesystem mounts enclosing `mountId`, outermost first. */
+/**
+ * Filesystem mounts enclosing `mountId`, outermost first. Extension subagents live at
+ * `<mountId>/subagents/<id>`, so a nested mount id extends its enclosing mount ids.
+ */
 function ancestorMountEntries(mounts: ReadonlyMap<string, ExtensionCompileMount>, mountId: string) {
   return [...mounts.values()]
-    .filter(
-      (mount) => mount.entry !== undefined && isEnclosingExtensionMount(mount.mountId, mountId),
-    )
+    .filter((mount) => mount.entry !== undefined && mountId.startsWith(`${mount.mountId}/`))
     .sort((left, right) => left.mountId.length - right.mountId.length)
     .map((mount) => ({ ...mount.entry!, mountId: mount.mountId }));
 }
