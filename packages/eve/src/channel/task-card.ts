@@ -290,6 +290,25 @@ function trackTurnEvent(
   }
 }
 
+/**
+ * Splits a turn's card when the turn starts a task after every task on the
+ * card settled, which happens when the turn's caller keeps talking to an open
+ * turn. The settled calls end as their own finished card; the calls still
+ * working, including the one starting, open a new card. Returns nothing while
+ * any of the card's tasks works.
+ */
+export function closeSettledTasks(
+  turn: TaskCardTurn,
+  callId: string,
+): { readonly closed: TaskCardTurn; readonly open: TaskCardTurn } | undefined {
+  const tasks = turn.calls.filter((call) => call.task !== undefined && call.callId !== callId);
+  if (tasks.length === 0 || tasks.some((call) => call.status === "working")) return undefined;
+  return {
+    closed: { calls: turn.calls.filter((call) => call.status !== "working"), ended: true },
+    open: { calls: turn.calls.filter((call) => call.status === "working"), ended: false },
+  };
+}
+
 /** The view a renderer draws one turn's card from. */
 export function taskCardView(
   turnId: string,

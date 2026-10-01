@@ -486,6 +486,8 @@ Each row shows:
 
 The plan title summarizes the turn: `Working on 2 tasks`, `1 of 2 tasks done`, `Waiting for approval`, then `Finished 2 tasks in 3m` or `Finished 3 tasks in 5m 12s: 1 failed, 1 stopped`. When every task calls a declared subagent or remote agent, and the turn calls three or fewer of them, the title names them instead of counting: `Asking researcher and reviewer`, then `Waiting on reviewer · 1 of 2 tasks done`. Tasks the model cancelled with `task_cancel` count as finished, not stopped. A resumable task continued in a later turn appears in that turn's card.
 
+A turn stays open while its tasks work, so messages you send during that time continue the same turn. When that turn starts a task after every task on its card has settled, eve marks that card finished and posts a new card for the new work, so the new tasks don't update a card further up the thread.
+
 eve writes the card from the session's own events as they happen, and only when it changed. A failed Slack call never fails the turn: eve tries a failed write once more after a second, then again on the turn's next change. If someone deletes the card, eve posts it again on its next change. Card posts never unfurl links. Schedule sessions and sessions without a Slack thread get no card.
 
 ### Customize rendering

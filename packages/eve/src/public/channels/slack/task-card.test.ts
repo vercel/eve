@@ -311,6 +311,54 @@ describe("Slack task card", () => {
     expect([...blockIds]).toEqual([`eve_task_card_${TURN_ID}`]);
   });
 
+  it("finishes a card and posts a new one when an open turn starts tasks after its earlier ones settled", async () => {
+    const followUp = "call_follow_up";
+    const { cardCalls, emit } = slackThread();
+    await emit(...TWO_TASKS_STARTED, ...BOTH_TASKS_SETTLED);
+    const firstCardTs = cardCalls().at(-1)!.body["ts"];
+
+    // The person keeps talking while the turn is open, and the turn starts more work.
+    await emit(
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: followUp,
+            input: { message: "Check whether Bob's rollback fixed checkout." },
+            kind: "tool-call",
+            toolName: "researcher",
+          },
+        ],
+        presentation: {
+          [followUp]: { label: "researcher: Check whether Bob's rollback fixed checkout" },
+        },
+        sequence: 1,
+        stepIndex: 2,
+        turnId: TURN_ID,
+      }),
+      createTaskStartedEvent({
+        callId: followUp,
+        kind: "agent",
+        name: "researcher",
+        taskId: "researcher-9w4n2c",
+        turnId: TURN_ID,
+      }),
+    );
+
+    const [closed, opened] = cardCalls().slice(-2);
+    expect(closed).toMatchObject({
+      body: { blocks: [{ title: "Finished 2 tasks: 1 failed", type: "plan" }], ts: firstCardTs },
+      operation: "chat.update",
+    });
+    expect(opened!.operation).toBe("chat.postMessage");
+    expect(opened!.body["blocks"]).toEqual([
+      expect.objectContaining({
+        status: "in_progress",
+        title: "researcher: Check whether Bob's rollback fixed checkout",
+        type: "task_card",
+      }),
+    ]);
+  });
+
   it("shows a failure without its error text outside private conversations", async () => {
     const { cardCalls, emit } = slackThread({ state: { ...THREAD, audience: "public" } });
 

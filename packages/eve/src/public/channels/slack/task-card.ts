@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  closeSettledTasks,
   taskCardView,
   trackTaskCardEvent,
   type TaskCardBlocker,
@@ -317,6 +318,7 @@ export function withTaskCards(
     const handler = events[type] as TrackedHandler | undefined;
     wrapped[type] = async (data, channel, ctx) => {
       const event = { data, type } as UnstampedMessageStreamEvent;
+      if (event.type === "task.started") await closeSettledCard(channel, event.data, taskCard);
       const changed = trackTaskCardEvent(
         trackedTurns(channel.state),
         event,
@@ -332,6 +334,32 @@ export function withTaskCards(
     };
   }
   return { ...events, ...wrapped } as SlackChannelInternalEvents;
+}
+
+/**
+ * Writes a turn's card one last time as finished when the turn starts a task
+ * after all of the card's tasks settled, then leaves the turn's working calls
+ * to post a new card. Without this, a turn the caller kept talking to would
+ * add its next tasks to a card far up the thread.
+ */
+async function closeSettledCard(
+  channel: SlackEventContext,
+  data: { readonly callId: string; readonly turnId: string },
+  taskCard: (view: TaskCardView) => SlackTaskCard | null,
+): Promise<void> {
+  const current = channel.state.taskCards?.[data.turnId];
+  const split = current && closeSettledTasks(current.turn, data.callId);
+  if (split === undefined) return;
+  channel.state.taskCards = {
+    ...channel.state.taskCards,
+    [data.turnId]: { ...current, turn: split.closed },
+  };
+  await writeTaskCard(channel, data.turnId, taskCard);
+  // No `ts`: the working calls post a new card, even if the closing write failed.
+  channel.state.taskCards = {
+    ...channel.state.taskCards,
+    [data.turnId]: { turn: split.open },
+  };
 }
 
 function trackedTurns(state: SlackChannelState): Readonly<Record<string, TaskCardTurn>> {
