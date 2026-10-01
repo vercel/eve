@@ -23,6 +23,7 @@ import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { withAgentToolSpanContext } from "#tracing/agent-tool-span-context.js";
+import { startEveSpan } from "#tracing/adapters/eve/span.js";
 
 interface ToolSpanState {
   readonly actionKey: string;
@@ -190,15 +191,18 @@ export function createAgentToolInstrumentation(input: {
   function startSpan(state: ToolSpanState, parent: Context): void {
     if (state.span !== undefined || state.finished === true) return;
     state.span = input.idGenerator.withSpanId(state.spanId, () =>
-      input.tracer.startSpan(
-        `execute_tool ${state.event.toolName}`,
-        {
+      startEveSpan({
+        tracer: input.tracer,
+        type: "tool",
+        operationId: state.idempotencyKey,
+        name: `execute_tool ${state.event.toolName}`,
+        options: {
           attributes: { ...toolAttributes(state.event), ...state.additionalAttributes },
           kind: SpanKind.INTERNAL,
           startTime: state.startTimeMs,
         },
         parent,
-      ),
+      }),
     );
     if (state.pendingError !== undefined) {
       recordError(state.span, state.pendingError.error, state.pendingError.errorType);

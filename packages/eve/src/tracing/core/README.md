@@ -1,7 +1,8 @@
 # Agent tracing library
 
 This internal library records agent traces without an eve session or workflow.
-It does not register an OTel provider or change eve's installed instrumentation.
+It does not register an OTel provider. eve also uses its engine through the eve
+span adapter, with the existing lifecycle bus and durable state.
 The modules are not public package exports.
 
 ## Trace an AI SDK turn
@@ -77,6 +78,6 @@ Other output mappings can override names, metadata attributes, and links.
 Do not rename content attributes without a matching destination redaction policy.
 Apply destination policies after the backend mapping. No mapping changes topology.
 
-This PR supplies the compatibility option but does not install it in eve.
+eve installs the compatibility mapping for its framework spans.
 Agent Runs export, deployment configuration, and remote protocol handling remain
 outside this library.

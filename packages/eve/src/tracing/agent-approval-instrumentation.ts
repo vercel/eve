@@ -22,6 +22,8 @@ import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
+import { startEveSpan } from "#tracing/adapters/eve/span.js";
+import { frameworkAttributes } from "#tracing/core/attributes.js";
 
 interface AgentApprovalSpanState {
   readonly traceSessionId: string;
@@ -96,17 +98,19 @@ export function createAgentApprovalInstrumentation(input: {
     const span = input.idGenerator.withSpanId(
       input.idGenerator.deriveSpanId(`approval:${event.idempotencyKey}`),
       () =>
-        input.tracer.startSpan(
-          AGENT_SPAN_NAMES.approval,
-          {
+        startEveSpan({
+          tracer: input.tracer,
+          type: "approval",
+          operationId: event.idempotencyKey,
+          name: AGENT_SPAN_NAMES.approval,
+          options: {
             attributes: {
               "agent.action.call_id": state.actionCallId,
               "agent.action.name": state.actionName,
               "agent.approval.kind": "tool-approval",
               "agent.approval.outcome": event.outcome,
               "agent.approval.request_id": state.requestId,
-              "agent.framework.name": "eve",
-              "agent.framework.version": input.frameworkVersion,
+              ...frameworkAttributes({ name: "eve", version: input.frameworkVersion }),
               "agent.step.attempt": state.attemptIndex,
               "agent.step.index": state.stepIndex,
               "agent.turn.id": state.turnId,
@@ -119,14 +123,14 @@ export function createAgentApprovalInstrumentation(input: {
             },
             startTime: state.startTimeMs,
           },
-          withChannelAudience(
+          parent: withChannelAudience(
             trace.setSpan(
               ROOT_CONTEXT,
               trace.wrapSpanContext({ ...state.parent, isRemote: false }),
             ),
             state.channelAudience,
           ),
-        ),
+        }),
     );
     if (state.requestAttribute !== undefined) {
       span.setAttribute("agent.approval.request", state.requestAttribute);

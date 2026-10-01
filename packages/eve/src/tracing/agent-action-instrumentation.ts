@@ -27,6 +27,8 @@ import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
+import { startEveSpan } from "#tracing/adapters/eve/span.js";
+import { frameworkAttributes } from "#tracing/core/attributes.js";
 
 interface AgentActionInstrumentation {
   readonly events: Pick<
@@ -109,15 +111,17 @@ export function createAgentActionInstrumentation(input: {
   const startSpan = (state: AgentActionTraceState): Span => {
     const invocation = isAgentInvocation(state.kind);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
-      input.tracer.startSpan(
-        AGENT_SPAN_NAMES.action,
-        {
+      startEveSpan({
+        tracer: input.tracer,
+        type: "action",
+        operationId: `${state.sessionId}:${state.callId}`,
+        name: AGENT_SPAN_NAMES.action,
+        options: {
           attributes: {
             "agent.action.call_id": state.callId,
             "agent.action.kind": state.kind,
             "agent.action.name": state.name,
-            "agent.framework.name": "eve",
-            "agent.framework.version": input.frameworkVersion,
+            ...frameworkAttributes({ name: "eve", version: input.frameworkVersion }),
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
@@ -137,8 +141,8 @@ export function createAgentActionInstrumentation(input: {
           kind: state.kind === "remote-agent-call" ? SpanKind.CLIENT : SpanKind.INTERNAL,
           startTime: state.startTimeMs,
         },
-        contextFromActionState(state),
-      ),
+        parent: contextFromActionState(state),
+      }),
     );
     if (!invocation && state.inputAttribute !== undefined) {
       span.setAttribute("gen_ai.tool.call.arguments", state.inputAttribute);

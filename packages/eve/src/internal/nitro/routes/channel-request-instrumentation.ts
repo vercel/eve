@@ -13,6 +13,7 @@ import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
+import { startEveSpan } from "#tracing/adapters/eve/span.js";
 
 /**
  * Stable tracer name for every inbound eve channel HTTP request. Kept
@@ -76,17 +77,20 @@ export async function traceChannelRequest<T extends Response>(
   const { request, routeKey } = input;
   const parentContext = propagation.extract(context.active(), request.headers, headersGetter);
   const spanName = AGENT_SPAN_NAMES.channelRequest;
-  const span = trace.getTracer(TRACER_NAME).startSpan(
-    spanName,
-    {
+  const span = startEveSpan({
+    tracer: trace.getTracer(TRACER_NAME),
+    type: "channelRequest",
+    operationId: routeKey,
+    name: spanName,
+    options: {
       attributes: {
         ...baseAttributes(request, routeKey),
         ...(spanName === "agent.channel.request" ? agentSpanNamingAttributes(spanName) : undefined),
       },
       kind: SpanKind.SERVER,
     },
-    parentContext,
-  );
+    parent: parentContext,
+  });
   const activeContext = markAgentTraceContext(
     withErrorContent(trace.setSpan(parentContext, span), false),
   );
