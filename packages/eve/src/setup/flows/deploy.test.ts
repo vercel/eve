@@ -119,6 +119,7 @@ describe("runDeployFlow", () => {
     const fake = createFakePrompter({});
     const deployDeps = createDeployProjectDeps();
     const login = createLoginFlow();
+    const offer = vi.fn(async () => {});
 
     const result = await runDeployFlow({
       appRoot: APP_ROOT,
@@ -128,12 +129,17 @@ describe("runDeployFlow", () => {
         detectDeployment: vi.fn(async () => LINKED),
         runLoginFlow: login,
         deployProject: deployDeps,
+        offerTraceSampling: offer,
       },
     });
 
     expect(result).toEqual({ kind: "deployed", productionUrl: "https://my-agent.vercel.app" });
     expect(login).toHaveBeenCalledOnce();
     expect(fake.selectMessages).toEqual([]);
+    expect(offer).toHaveBeenCalledWith(APP_ROOT, "prj_1", fake.prompter, undefined);
+    expect(offer.mock.invocationCallOrder[0]).toBeGreaterThan(
+      deployDeps.runVercel.mock.invocationCallOrder[0]!,
+    );
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
       ["deploy", "--prod", "--yes"],
       expect.objectContaining({ cwd: APP_ROOT }),
@@ -240,6 +246,7 @@ describe("runDeployFlow", () => {
     const fake = createFakePrompter({});
     const deployDeps = createDeployProjectDeps();
     const login = createLoginFlow();
+    const offer = vi.fn(async () => {});
 
     const result = await runDeployFlow({
       appRoot: APP_ROOT,
@@ -249,14 +256,109 @@ describe("runDeployFlow", () => {
         detectDeployment: vi.fn(async () => LINKED),
         runLoginFlow: login,
         deployProject: deployDeps,
+        offerTraceSampling: offer,
       },
     });
 
     expect(result).toEqual({ kind: "deployed", productionUrl: "https://my-agent.vercel.app" });
     expect(login).not.toHaveBeenCalled();
+    expect(offer).not.toHaveBeenCalled();
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
       ["deploy", "--prod", "--yes", "--non-interactive"],
       expect.objectContaining({ cwd: APP_ROOT, nonInteractive: true }),
+    );
+  });
+
+  it("skips the offer when sampling setup is disabled", async () => {
+    const offer = vi.fn(async () => {});
+    await runDeployFlow({
+      appRoot: APP_ROOT,
+      prompter: createFakePrompter().prompter,
+      interactive: true,
+      traceSampling: false,
+      deps: {
+        detectDeployment: async () => LINKED,
+        runLoginFlow: createLoginFlow(),
+        deployProject: createDeployProjectDeps(),
+        offerTraceSampling: offer,
+      },
+    });
+    expect(offer).not.toHaveBeenCalled();
+  });
+
+  it("offers after linking an existing project", async () => {
+    const offer = vi.fn(async () => {});
+    const fake = createFakePrompter({
+      single: (opts) => {
+        if (opts.message === "Vercel project") return "link";
+        throw new Error(`Unexpected select: ${opts.message}`);
+      },
+    });
+
+    const result = await runDeployFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      interactive: true,
+      deps: {
+        detectDeployment: async () => UNLINKED,
+        runLoginFlow: createLoginFlow(),
+        resolveProvisioning: createProvisioningDeps(),
+        linkProject: createLinkProjectDeps(),
+        deployProject: createDeployProjectDeps(),
+        offerTraceSampling: offer,
+      },
+    });
+
+    expect(result.kind).toBe("deployed");
+    expect(offer).toHaveBeenCalledWith(APP_ROOT, "prj_1", fake.prompter, undefined);
+  });
+
+  it("does not offer tracing after creating a new project", async () => {
+    const offer = vi.fn(async () => {});
+    const fake = createFakePrompter({
+      single: (opts) => {
+        if (opts.message === "Vercel project") return "new";
+        throw new Error(`Unexpected select: ${opts.message}`);
+      },
+    });
+
+    await runDeployFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      interactive: true,
+      traceSampling: true,
+      deps: {
+        detectDeployment: async () => UNLINKED,
+        runLoginFlow: createLoginFlow(),
+        resolveProvisioning: createProvisioningDeps(),
+        linkProject: createLinkProjectDeps(),
+        deployProject: createDeployProjectDeps(),
+        offerTraceSampling: offer,
+      },
+    });
+
+    expect(offer).not.toHaveBeenCalled();
+  });
+
+  it("reports a successful deploy even if the optional tracing check fails", async () => {
+    const fake = createFakePrompter();
+    const result = await runDeployFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      interactive: true,
+      deps: {
+        detectDeployment: async () => LINKED,
+        runLoginFlow: createLoginFlow(),
+        deployProject: createDeployProjectDeps(),
+        offerTraceSampling: vi.fn(async () => {
+          throw new Error("Vercel API unavailable");
+        }),
+      },
+    });
+
+    expect(result).toEqual({ kind: "deployed", productionUrl: "https://my-agent.vercel.app" });
+    expect(fake.prompter.log.warning).toHaveBeenCalledWith(
+      expect.stringContaining("Deployment succeeded"),
     );
   });
 });
