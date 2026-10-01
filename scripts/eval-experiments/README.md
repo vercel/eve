@@ -1,0 +1,72 @@
+# Eval experiments
+
+This internal harness compares immutable eve source revisions and named runtime configurations over existing evals. `eve eval` remains the execution engine; the harness only plans scheduled runs, archives evidence, derives measurements, and compares paired samples. It is not a public `eve` command and does not make experiments part of product CI.
+
+## Define an experiment
+
+Create `experiments/<name>.mjs` and export a default `Experiment` object. The checked-in `experiments/self-modification.mjs` is a complete self-modification experiment definition. Selections currently support only eval files with a direct `export default defineEval(...)`; array-exported eval files are rejected until the planner can expand their indexed IDs. GitHub Actions runs each selected eval and repetition in an isolated checkout/job (up to eight jobs at once). Within each shard, its scheduled configurations remain serial; parallel execution within a checkout is not configurable.
+
+Both matrix axes are named maps. Omit `matrix.source` to run against the planner checkout's HEAD: the planner records one source entry named `head` with the full commit SHA. In GitHub Actions, this is the PR head commit or dispatched revision, not a moving branch reference. Uncommitted source changes are not included. Set `analysis.compare.axis` to `"configuration"` and choose a configuration baseline when using this default; the compared axis requires at least two entries. An explicit source map must be non-empty and use full commit SHAs, not `"HEAD"`.
+
+Source values are whole immutable commit trees and configuration values are explicit combinations of full model IDs and reasoning settings. Shared settings are merged with each configuration field-by-field in the `parent` and `selfModification` scopes. Overrides win; a configuration that overrides an authored model default changes that source behavior and should be avoided in an instruction-change experiment. Omitted reasoning means the fixture default. The fixture adapter rejects unknown scopes and source checkouts that do not implement scoped overrides. Judge configuration remains fixed.
+
+For the self-modification fixture, `parent` controls the user-facing agent that receives the request, delegates the edit, and uses the changed agent in verification conversations. `selfModification` controls the child agent that edits the source. Neither override is required: omitted models keep their authored defaults. To isolate editing-model differences, vary only `selfModification`; to compare each model across the whole workflow, override both scopes in each configuration.
+
+Measurement definitions and derivation logic live together in `experiments/`; see `experiments/self-modification-metrics.mjs`. The experiment owns metric names, event selection, and which missing evidence makes each metric unavailable. The harness provides reusable helpers under `scripts/eval-experiments/measurements/`, not experiment-specific metric bundles:
+
+- `events.mjs`: `captureSessions` validates and deduplicates event identities and provides evidence references; `selectEvents` filters by event type and exact data fields.
+- `lifecycle.mjs`: `delegatedSessions` verifies child invocation links when present; for captures without invocation metadata it checks the child's runtime agent identity against the parent's explicit child session link. `parentTurnStarts` finds unique parent starts, and `completedTurns` pairs all turns in selected sessions, including resumed turns.
+- `metrics.mjs`: `elapsedTime` measures a wall-clock span, `totalTurnDuration` sums active turn durations, `totalToolCalls` counts distinct requested tool-call IDs per session, and `totalModelCost` sums recorded USD costs for fully evidenced model steps. Each returns a measurement with evidence or an unavailable reason.
+
+Lifecycle helpers return `status: "ready"` with the selected evidence or `status: "unavailable"` with a reason. Malformed capture shapes and conflicting identities throw instead. Helpers do not decide dependencies between metrics: for example, the self-modification experiment requires valid child durations before counting tools, while `totalToolCalls` itself does not require timestamps.
+
+Each measurement definition is a plain synchronous ESM object. Its declared metric keys and metadata define report metrics; namespace is assigned in the experiment. Derivation receives the validated captured eval, including its eval ID, and must be deterministic and side-effect-free. A thrown derive function or invalid metric result is an analysis error. Correctness, execution health, and measurement missingness remain independent.
+
+## Dispatch
+
+Commit and push the definition and imported measurement modules before triggering a run. Only run trusted repository code: experiments execute with model-provider credentials.
+
+### Run on a draft PR
+
+Add the `run-eval-experiment` label to a same-repository PR, including a draft, to run `experiments/self-modification.mjs` at that PR's head commit:
+
+```sh
+gh pr edit <pr-number> --add-label run-eval-experiment
+```
+
+The label must already exist in the repository. If needed, a maintainer can create it with `gh label create run-eval-experiment`. Fork PRs are excluded. The workflow uses `pull_request`, so it can run before the workflow is merged to `main`.
+
+Only adding the label triggers the experiment; opening the PR, pushing commits, or marking it ready for review does not. Remove and re-add the label to run again at the latest PR head. An existing run continues at its original commit.
+
+### Dispatch another definition
+
+Once the workflow exists on the repository's default branch, you can manually dispatch any committed experiment definition from a trusted repository ref:
+
+```sh
+gh workflow run eval-experiment.yml --ref my-experiment-branch \
+  -f definition=experiments/self-modification.mjs
+```
+
+The workflow does not accept arbitrary uploads. GitHub Actions is the live execution environment; do not run provider-backed e2e suites locally. The planner resolves full source SHAs, fixture/eval selections, requested settings, measurement schemas, and a deterministic counterbalanced schedule into `plan.json`. Source comparisons retain baseline-to-candidate diff evidence but do not apply patches to another checkout.
+
+## Artifacts and offline reanalysis
+
+The Actions run summary contains the detailed Markdown report. Same-repository PR label runs also post a compact comment for that run (retries update it; another label-triggered run gets its own comment). If the PR has advanced, the comment identifies the older evaluated revision. Failed runs without a report get a notice linking to the run. Manual dispatches do not comment. The workflow archives the immutable plan and each eval/repetition shard separately, then downloads and merges the shard evidence for analysis. The final artifact contains `plan.json`, per-invocation records, raw logs and timestamped eval artifact directories, normalized samples, JSON/Markdown reports and `pr-summary.md` for 14 days. Download the merged artifact with `gh run download <run-id> -n eval-experiment-<run-id>`. To rederive from the downloaded execution evidence without launching an eval:
+
+```sh
+node scripts/eval-experiments/extract.mjs ./execution ./plan.json ./samples.json ./experiments/self-modification.mjs <analysis-revision>
+node scripts/eval-experiments/compare.mjs ./plan.json ./samples.json ./report.json ./report.md
+node scripts/eval-experiments/pr-summary.mjs ./plan.json ./report.json ./pr-summary.md <actions-run-url>
+```
+
+The default analysis module should be the pinned experiment revision's module. Extraction checks the definition and imported module hashes against the plan. If intentionally using changed modules, retain the original plan and invocation provenance and supply a distinct analysis revision; never silently replace the original report meaning.
+
+## Reading reports
+
+Detailed comparisons remain separate by eval, fixed matrix entry, and metric. The PR comment additionally displays descriptive medians across measured passing invocations for each matrix entry, weighted equally per invocation, with separate tables for fixed-axis entries and per-metric coverage counts. These pooled medians are not paired comparisons or significance tests. The comment highlights at most five per-eval cuts (correctness regressions, at least 25% primary-metric differences with two eligible pairs, or sparse coverage). Paired metrics require both evals to pass, both invocations to be healthy, and that metric to be measured. Zero is a valid measurement; a zero denominator does not produce a ratio. Missing samples, unavailable measurements, not-applicable measurements, execution errors, and analysis errors are distinct. A correctness regression is never labeled a performance win.
+
+Self-modification metrics cover all seven evals in `experiments/self-modification.mjs`. `parentTurnToFinalChildCompletion` measures from the earliest parent turn that delegates to self-modification through the latest corresponding child turn completion. `totalChildDuration` sums each child turn's own duration, and `toolCalls` counts distinct requested tool call IDs across those turns. The eval ID comes from the captured artifact; the measurement definition does not need to repeat the experiment's eval selection. This includes resumed child turns after approval and subsequent repair delegations. The wall-clock span includes pauses between child turns and is closer to end-to-end child-flow latency, but can include approval and scheduling delays. Summed child duration excludes those gaps and better isolates time spent in child turns, but omits time between turns. Both exclude ingress, startup/build, verification conversations, and teardown, so they do not represent full eval runtime.
+
+`childCost` sums recorded `step.completed.data.usage.costUsd` values across the self-modification child turns, including approval resumptions and later repair delegations. It excludes parent-agent, judge, and infrastructure costs; it is not a token-price estimate. Repeated captures are deduplicated. Missing or invalid costs, failed steps, unmatched starts/completions, ambiguous step identities, or turns without model-step evidence make the cost unavailable rather than zero. Explicit zero costs are valid. PR summaries show median child cost in USD to four decimal places across healthy passing evals, with coverage counts; detailed reports retain paired-correct comparisons. Cost derivation does not require duration timestamps. This metric is declared in measurement bundle version 4 and is included in new experiment plans.
+
+Harness tests run with `pnpm test:eval-experiments`. Internal definition typing runs with `pnpm typecheck:eval-experiments`.

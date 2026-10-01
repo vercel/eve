@@ -1,0 +1,224 @@
+name: Eval experiment
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      definition:
+        description: Repository-relative experiment module
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: eval-experiment-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.label.name == 'run-eval-experiment' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    env:
+      DEFINITION: ${{ inputs.definition || 'experiments/self-modification.mjs' }}
+      EXPERIMENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout experiment revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPERIMENT_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Validate definition and write plan
+        id: plan
+        run: |
+          case "$DEFINITION" in experiments/*.mjs) ;; *) echo "Definition must be under experiments/"; exit 1 ;; esac
+          node scripts/eval-experiments/plan.mjs "$DEFINITION" plan.json
+          echo "shards=$(node --input-type=module -e 'import { readFileSync } from "node:fs"; import { shardIndices } from "./scripts/eval-experiments/run.mjs"; console.log(JSON.stringify(shardIndices(JSON.parse(readFileSync("plan.json")))))')" >> "$GITHUB_OUTPUT"
+      - name: Upload immutable plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eval-experiment-plan-${{ github.run_id }}
+          path: plan.json
+          retention-days: 14
+
+  execute:
+    name: execute (eval/repetition shard ${{ matrix.shard }})
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      EVE_SANDBOX_IMAGE_TAG: latest
+      EXPERIMENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout experiment revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPERIMENT_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Download immutable plan
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: eval-experiment-plan-${{ github.run_id }}
+      - name: Prepare source checkouts
+        run: node scripts/eval-experiments/prepare-checkouts.mjs "$GITHUB_WORKSPACE" plan.json checkouts.json .experiment-worktrees
+      - name: Execute eval/repetition shard
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+        run: node scripts/eval-experiments/run.mjs plan.json checkouts.json execution "${{ matrix.shard }}"
+      - name: Upload shard evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eval-experiment-shard-${{ github.run_id }}-${{ matrix.shard }}
+          path: execution/raw/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  analyze:
+    needs: [plan, execute]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      DEFINITION: ${{ inputs.definition || 'experiments/self-modification.mjs' }}
+      EXPERIMENT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - name: Checkout experiment revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.EXPERIMENT_SHA }}
+          persist-credentials: false
+      - name: Download immutable plan
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: eval-experiment-plan-${{ github.run_id }}
+      - name: Download shard evidence
+        id: evidence
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: eval-experiment-shard-${{ github.run_id }}-*
+          path: execution/raw
+          merge-multiple: true
+      - name: Reanalyze archived evidence
+        if: always()
+        run: |
+          set +e
+          node scripts/eval-experiments/extract.mjs execution plan.json samples.json "$DEFINITION" "$EXPERIMENT_SHA"
+          extract_status=$?
+          node scripts/eval-experiments/compare.mjs plan.json samples.json report.json report.md
+          compare_status=$?
+          summary_status=0
+          if [ -f report.json ]; then
+            node scripts/eval-experiments/pr-summary.mjs plan.json report.json pr-summary.md "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || summary_status=$?
+          fi
+          cat report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          if [ "$extract_status" -ne 0 ]; then exit "$extract_status"; fi
+          if [ "$compare_status" -ne 0 ]; then exit "$compare_status"; fi
+          if [ "$summary_status" -ne 0 ]; then exit "$summary_status"; fi
+          test "${{ needs.execute.result }}" = success
+          test "${{ steps.evidence.outcome }}" = success
+      - name: Upload reproducible experiment artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eval-experiment-${{ github.run_id }}
+          path: |
+            plan.json
+            execution
+            samples.json
+            report.json
+            report.md
+            pr-summary.md
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload PR summary
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eval-experiment-summary-${{ github.run_id }}
+          path: pr-summary.md
+          if-no-files-found: ignore
+          retention-days: 14
+
+  notify:
+    needs: [plan, execute, analyze]
+    if: >-
+      always() && github.event_name == 'pull_request' &&
+      github.event.label.name == 'run-eval-experiment' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      # PR conversation comments need PR write access, even through the issues API.
+      pull-requests: write
+    steps:
+      - name: Download experiment report
+        id: report
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: eval-experiment-summary-${{ github.run_id }}
+          path: report
+      - name: Update PR comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          REPORT_OUTCOME: ${{ steps.report.outcome }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+          EXECUTE_RESULT: ${{ needs.execute.result }}
+          ANALYZE_RESULT: ${{ needs.analyze.result }}
+          EXPERIMENT_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const marker = `<!-- eve-eval-experiment-run-${context.runId} -->`;
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const reportPath = path.join(process.env.GITHUB_WORKSPACE, 'report', 'pr-summary.md');
+            const summary = process.env.REPORT_OUTCOME === 'success' && fs.existsSync(reportPath)
+              ? fs.readFileSync(reportPath, 'utf8').slice(0, 60000)
+              : `## Eval experiment results\n\nNo report was produced (plan: ${process.env.PLAN_RESULT}, execution: ${process.env.EXECUTE_RESULT}, analysis: ${process.env.ANALYZE_RESULT}). [View the run](${runUrl}).`;
+            const pr = await github.rest.pulls.get({ ...context.repo, pull_number: context.issue.number });
+            const stale = pr.data.head.sha !== process.env.EXPERIMENT_SHA
+              ? `\n\n⚠️ This run evaluated ${process.env.EXPERIMENT_SHA.slice(0, 12)}, not the current PR head.\n`
+              : '';
+            const body = `${marker}\n${summary}${stale}`;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number: context.issue.number, per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.user?.type === 'Bot' && comment.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+            }

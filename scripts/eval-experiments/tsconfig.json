@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "skipLibCheck": true,
+    "customConditions": ["eve-source"],
+    "paths": {
+      "eve": ["../../packages/eve/src/index.ts"],
+      "eve/evals": ["../../packages/eve/src/evals/index.ts"]
+    },
+    "types": ["node"]
+  },
+  "include": ["types.ts", "../../experiments/*.mjs", "measurements/*.mjs"],
+  "exclude": ["measurements/*.test.mjs"]
+}
