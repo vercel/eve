@@ -1,6 +1,6 @@
 import { defineChannel } from "#public/channels/index.js";
 
-// Epoch 43 `turn.waiting` events had no `awaitingPerson`; epoch 44 adds it as optional.
+// Epoch 43 `turn.waiting` events had no `on`; epoch 44 adds it.
 // Channels that read only `turnId` keep working.
 export default defineChannel({
   routes: [],

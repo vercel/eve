@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineTool } from "#public/tools/index.js";
 
-// Epoch 71 `turn.waiting` events had no `awaitingPerson`; epoch 72 adds it as optional.
+// Epoch 71 `turn.waiting` events had no `on`; epoch 72 adds it.
 // Tools that need approval keep working.
 export default defineTool({
   description: "Summarize the open incidents for a service.",

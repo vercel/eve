@@ -1,7 +1,7 @@
 import { defineChannel } from "#public/channels/index.js";
 import { defineSchedule } from "#public/schedules/index.js";
 
-// Epoch 24 `turn.waiting` events had no `awaitingPerson`; epoch 25 adds it as optional.
+// Epoch 24 `turn.waiting` events had no `on`; epoch 25 adds it.
 const reports = defineChannel({
   routes: [],
   events: {

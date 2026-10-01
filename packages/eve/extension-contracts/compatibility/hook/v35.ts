@@ -1,6 +1,6 @@
 import { defineHook } from "#public/hooks/index.js";
 
-// Epoch 35 `turn.waiting` events had no `awaitingPerson`; epoch 36 adds it as optional.
+// Epoch 35 `turn.waiting` events had no `on`; epoch 36 adds it.
 // Hooks that read only `turnId` keep working.
 export default defineHook({
   events: {

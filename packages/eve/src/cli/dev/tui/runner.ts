@@ -2572,7 +2572,7 @@ async function* eveEventsToTUIStream(
         // The turn stays open; it ends this stream only when it waits on the
         // person: a sign-in or approval, or a question a call it runs asked.
         if (
-          event.data.awaitingPerson !== true &&
+          event.data.on !== "input" &&
           turnState.pendingApprovals.length === 0 &&
           turnState.pendingQuestions.length === 0
         ) {

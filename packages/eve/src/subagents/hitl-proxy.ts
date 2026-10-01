@@ -63,17 +63,13 @@ export async function emitProxiedAuthorizationEvent(input: {
 }): Promise<void> {
   await input.emit(input.hookPayload.event);
   if (input.hookPayload.event.type === "authorization.required") {
-    await emitTurnWaiting(input.emit, input.session, { awaitingPerson: true });
+    await emitTurnWaiting(input.emit, input.session);
   }
 }
 
-async function emitTurnWaiting(
-  emit: HarnessEmitFn,
-  session: HarnessSessionBase,
-  options: { readonly awaitingPerson?: boolean } = {},
-): Promise<void> {
+async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSessionBase): Promise<void> {
   const turn = getHarnessEmissionState(session.state);
-  await emit(createTurnWaitingEvent({ ...options, sequence: turn.sequence, turnId: turn.turnId }));
+  await emit(createTurnWaitingEvent({ on: "input", sequence: turn.sequence, turnId: turn.turnId }));
 }
 
 // ---------------------------------------------------------------------------

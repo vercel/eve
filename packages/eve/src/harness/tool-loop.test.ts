@@ -3226,7 +3226,7 @@ describe("createToolLoopHarness", () => {
     });
     expect(events.filter((event) => event.type === "turn.waiting").at(-1)).toEqual({
       data: {
-        awaitingPerson: true,
+        on: "input",
         sequence: 0,
         turnId: "turn_0",
       },
@@ -4706,7 +4706,7 @@ describe("createToolLoopHarness", () => {
       }),
     );
     expect(events.at(-1)).toEqual({
-      data: { sequence: 0, turnId: "turn_0" },
+      data: { on: "tasks", sequence: 0, turnId: "turn_0" },
       type: "turn.waiting",
     });
     expect(events.map((event) => event.type)).not.toContain("session.waiting");

@@ -26,7 +26,7 @@ task or `ctx.ask` does:
 turn.started
   … tool call needs sign-in or approval …
 authorization.required | input.requested
-turn.waiting                 ← awaitingPerson: true; same turnId
+turn.waiting                 ← on: "input"; same turnId
   … the person acts …
 authorization.completed | input.resolved
 step.started                 ← same turnId, no new turn.started
@@ -54,11 +54,13 @@ also hold the turn they run in.
 
 ## Where a response ends
 
-A hold on a person marks its `turn.waiting` with `awaitingPerson: true`.
-Clients stop reading there, in addition to the existing stop at a
-`turn.waiting` while an input request they read is unanswered. The flag
-matters when the request was read earlier, such as a refused approval answer
-or a resumed stream. A task hold's `turn.waiting` stays informational.
+Every `turn.waiting` says what the turn waits on: `on: "input"` when a
+person must act (a sign-in, approval, or question, including ones proxied from
+a workflow tool or subagent), and `on: "tasks"` when work the turn started is
+still running. `"input"` wins when both apply. Clients stop reading at
+`"input"`, which matters when the request was read earlier, such as a refused
+approval answer or a resumed stream. Other human-in-the-loop paths, such as
+the session-limit prompt, adopt `"input"` when they move to holding the turn.
 
 ## Channels
 

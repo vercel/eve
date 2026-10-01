@@ -2875,6 +2875,7 @@ async function handleStepResult(input: {
       if (emit) {
         await emit(
           createTurnWaitingEvent({
+            on: "tasks",
             sequence: emissionState.sequence,
             turnId: emissionState.turnId,
           }),
@@ -2907,9 +2908,7 @@ async function holdTurnForRequest(
   emissionState: ReturnType<typeof getHarnessEmissionState>,
 ): Promise<ReturnType<typeof getHarnessEmissionState>> {
   const next = advanceStep(emissionState);
-  await emit(
-    createTurnWaitingEvent({ awaitingPerson: true, sequence: next.sequence, turnId: next.turnId }),
-  );
+  await emit(createTurnWaitingEvent({ on: "input", sequence: next.sequence, turnId: next.turnId }));
   return next;
 }
 

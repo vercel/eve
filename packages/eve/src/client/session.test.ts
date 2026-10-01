@@ -1204,7 +1204,7 @@ describe("ClientSession", () => {
     expect(result.inputRequests.at(-1)?.requestId).toBe("request_2");
   });
 
-  it("stops at a turn.waiting that waits on a person when its request was read earlier", async () => {
+  it("stops at a turn.waiting on input when its request was read earlier", async () => {
     const turn = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) =>
       (init?.method ?? "GET") === "POST"
@@ -1216,7 +1216,7 @@ describe("ClientSession", () => {
             },
             {
               type: "turn.waiting",
-              data: { awaitingPerson: true, sequence: 0, turnId: "turn_0" },
+              data: { on: "input", sequence: 0, turnId: "turn_0" },
             },
             { type: "turn.completed", data: { sequence: 0, turnId: "turn_0" } },
           ]),

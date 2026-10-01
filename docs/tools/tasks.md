@@ -268,7 +268,7 @@ same `taskId` continues where it left off. A `serve` body that doesn't return to
 | `task.started`  | A call starts a task, or reaches a resumable task by its `taskId`                     | `taskId`, `callId`, `turnId`, the tool `name`, and `kind`                                  |
 | `task.settled`  | A reply, return, failure, or cancel settles one call                                  | `taskId`, `callId`, `turnId`, `name`, `kind`, `status`, and `output`, `error`, or `cancel` |
 | `agent.started` | A workflow run, including an agent tool's, opens a session with an agent              | `callId`, `turnId`, `taskId`, `name`, `sessionId`, `streamPath`                            |
-| `turn.waiting`  | An open turn parks on its tasks, a `task_wait`, a question, a sign-in, or an approval | `turnId`, `sequence`, and `awaitingPerson` for a sign-in or approval                       |
+| `turn.waiting`  | An open turn parks on its tasks, a `task_wait`, a question, a sign-in, or an approval | `turnId`, `sequence`, and `on`: `"input"` when a person must act, otherwise `"tasks"`      |
 
 `task.started` and `task.settled` come once each per call, and `(taskId, callId)` identifies the
 call. Both carry that call's `turnId`, which for a resumable task's later call can be a later turn

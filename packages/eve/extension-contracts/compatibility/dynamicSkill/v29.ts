@@ -1,6 +1,6 @@
 import { defineDynamic, defineSkill } from "#public/skills/index.js";
 
-// Epoch 29 `turn.waiting` events had no `awaitingPerson`; epoch 30 adds it as optional.
+// Epoch 29 `turn.waiting` events had no `on`; epoch 30 adds it.
 export default defineDynamic({
   events: {
     "turn.started": (_event, ctx) =>

@@ -56,12 +56,11 @@ This consumes the stream until the current turn boundary:
 - `session.waiting`
 - `session.completed`
 - `session.failed`
-- `turn.waiting` with `awaitingPerson: true`, which the turn emits while it
-  waits on a sign-in or tool approval
-- `turn.waiting` while an `input.requested` the response read is unanswered
+- `turn.waiting` with `on: "input"`, which the turn emits while a person must
+  act on a sign-in, approval, or question
 
-Any other `turn.waiting` is informational: the turn stays open, and `result()`
-keeps reading to its final reply. When a call the turn
+A `turn.waiting` with `on: "tasks"` is informational: the turn stays open, and
+`result()` keeps reading to its final reply. When a call the turn
 runs asks a question, such as a workflow tool's `ctx.ask()`, `result()` returns
 `status: "waiting"` with the question in `inputRequests`. Answer it with
 `respond()`, which keeps reading the same turn. A question stays pending until
@@ -69,7 +68,7 @@ its `input.resolved`, which the session you answer on also emits for a
 subagent's or workflow tool's question.
 
 A turn that waits on its [tasks](/docs/tools/workflows#run-calls-as-tasks-task)
-also emits `turn.waiting` without a pending request. The text the model wrote
+emits `turn.waiting` with `on: "tasks"`. The text the model wrote
 before the wait is not the reply: `result()` resolves with the final reply
 after the tasks finish.
 
