@@ -31,6 +31,13 @@ export interface EveNuxtModuleOptions {
    * dependencies (`node <path-to>/eve/bin/eve.js build`).
    */
   eveBuildCommand?: string;
+  /**
+   * Origin of a separately deployed eve agent, such as
+   * `"https://agent.example.com"`. When set, `/eve/v1/**` routes to that agent
+   * and no local agent is built, spawned, or deployed. In dev, `EVE_BASE_URL`
+   * still takes precedence.
+   */
+  remote?: string;
 }
 
 function resolveApplicationRoot(nuxtRoot: string, appPath: string | undefined): string {
@@ -55,8 +62,8 @@ interface NitroVercelConfigHost {
 
 /**
  * Resolve the destination eve routes proxy to. In dev this is an explicit
- * `EVE_BASE_URL` or a shared dev server spawned on demand; in non-Vercel
- * production it is a configured origin/port.
+ * `EVE_BASE_URL`, the remote agent, or a shared dev server spawned on demand;
+ * in non-Vercel production it is the remote agent or a configured origin/port.
  *
  * When a dev server is spawned by this process, `onDevServerSpawned` is invoked
  * with the child handle so the caller can wire lifecycle-scoped cleanup.
@@ -64,15 +71,20 @@ interface NitroVercelConfigHost {
 async function resolveEveProxyTarget(input: {
   readonly appRoot: string;
   readonly dev: boolean;
+  readonly remoteOrigin: string | undefined;
   readonly onDevServerSpawned?: (child: ChildProcess) => void;
 }): Promise<string> {
-  if (!input.dev) {
-    return resolveProductionTarget();
+  const configuredEveBaseUrl = process.env[EVE_BASE_URL_ENV]?.trim();
+  if (input.dev && configuredEveBaseUrl && configuredEveBaseUrl.length > 0) {
+    return joinRoutePrefix(normalizeOrigin(configuredEveBaseUrl), EVE_ROUTE_PREFIX);
   }
 
-  const configuredEveBaseUrl = process.env[EVE_BASE_URL_ENV]?.trim();
-  if (configuredEveBaseUrl && configuredEveBaseUrl.length > 0) {
-    return joinRoutePrefix(normalizeOrigin(configuredEveBaseUrl), EVE_ROUTE_PREFIX);
+  if (input.remoteOrigin !== undefined) {
+    return joinRoutePrefix(input.remoteOrigin, EVE_ROUTE_PREFIX);
+  }
+
+  if (!input.dev) {
+    return resolveProductionTarget();
   }
 
   const handle = await resolveSharedEveDevServer(input.appRoot);
@@ -89,7 +101,8 @@ async function resolveEveProxyTarget(input: {
  * composable and routes eve transport requests (`/eve/v1/**`) to the eve
  * service: a shared dev server spawned on demand in dev, a generated Vercel
  * service on Vercel deployments, and a configured origin/port in non-Vercel
- * production. Requires Nuxt >= 4.0.0. Configure via
+ * production. With `remote`, it routes to a separately deployed agent
+ * instead. Requires Nuxt >= 4.0.0. Configure via
  * {@link EveNuxtModuleOptions}.
  */
 const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxtModuleOptions>({
@@ -104,17 +117,37 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
   async setup(options, nuxt) {
     const nuxtRoot = nuxt.options.rootDir;
     const appRoot = resolveApplicationRoot(nuxtRoot, options.eveRoot);
+    const remoteOrigin = options.remote ? normalizeOrigin(options.remote) : undefined;
 
     // Auto-import the Vue composable so app code can call `useEveAgent()`
     // without an explicit import, matching Nuxt's composable conventions.
     addImports({ name: "useEveAgent", from: "eve/vue" });
 
-    // On Vercel the eve app deploys as a sibling service. A Nitro runtime
-    // `proxy` rule can't reach it — the proxied request loops back into the
-    // Nuxt function and 404s — so declare the service and route eve transport
-    // to it at the edge through the build output config, mirroring the Next.js
-    // integration.
     if (!nuxt.options.dev && process.env.VERCEL) {
+      const nitro = (nuxt.options as typeof nuxt.options & { nitro: NitroVercelConfigHost }).nitro;
+
+      // A Nitro `proxy` rule would hold a Nuxt function open for every agent
+      // stream, so rewrite to the remote agent at the platform edge instead.
+      if (remoteOrigin !== undefined) {
+        const config = nitro.vercel?.config;
+        nitro.vercel = {
+          ...nitro.vercel,
+          config: {
+            ...config,
+            routes: [
+              { src: `^${EVE_ROUTE_PREFIX}/(.*)$`, dest: `${remoteOrigin}${EVE_ROUTE_PREFIX}/$1` },
+              ...(config?.routes ?? []),
+            ],
+          },
+        };
+        return;
+      }
+
+      // On Vercel the eve app deploys as a sibling service. A Nitro runtime
+      // `proxy` rule can't reach it — the proxied request loops back into the
+      // Nuxt function and 404s — so declare the service and route eve transport
+      // to it at the edge through the build output config, mirroring the Next.js
+      // integration.
       const configured = await ensureEveVercelServicesConfig({
         appRoot,
         eveBuildCommand: options.eveBuildCommand,
@@ -123,8 +156,6 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
       });
 
       if (configured.mode === "generated") {
-        const nitro = (nuxt.options as typeof nuxt.options & { nitro: NitroVercelConfigHost })
-          .nitro;
         nitro.vercel = {
           ...nitro.vercel,
           config: mergeEveVercelConfig(nitro.vercel?.config, configured),
@@ -140,6 +171,7 @@ const eveNuxtModule: NuxtModule<EveNuxtModuleOptions> = defineNuxtModule<EveNuxt
         const proxyTarget = await resolveEveProxyTarget({
           appRoot,
           dev: nuxt.options.dev,
+          remoteOrigin,
           onDevServerSpawned: (child) => {
             // Prefer Nuxt's lifecycle for cleanup so the dev server is torn
             // down on graceful shutdown and dev restarts. The process-exit

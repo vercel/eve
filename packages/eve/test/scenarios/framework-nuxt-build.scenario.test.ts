@@ -12,6 +12,10 @@ const scenarioApp = useScenarioApp();
 const NUXT_EVE_SERVICE_DESCRIPTOR = createNuxtEveServiceDescriptor({
   installDependencies: true,
 });
+const NUXT_EVE_REMOTE_DESCRIPTOR = createNuxtEveServiceDescriptor({
+  installDependencies: true,
+  remote: "https://agent.example.com",
+});
 
 async function readVercelOutputConfig(outputRoot: string): Promise<{
   readonly routes: readonly unknown[];
@@ -55,32 +59,33 @@ function isFilesystemHandle(route: unknown): boolean {
   );
 }
 
+// Build the Nuxt app directly with the env a real Vercel build container
+// always provides. `VERCEL` triggers both Nitro's Vercel preset (via std-env
+// provider detection) and the eve module's Vercel routing; `NITRO_PRESET` pins
+// the preset so the assertion does not depend on detection heuristics.
+// `vercel build` is intentionally not used here: run unauthenticated it strips
+// these system env vars, so Nitro would fall back to the node-server preset
+// and emit no Build Output. Vercel's own assembly of the generated service is
+// covered by the Next.js scenario.
+async function buildForVercel(appRoot: string): ReturnType<typeof readVercelOutputConfig> {
+  await runPnpmCommand({
+    args: ["exec", "nuxt", "build"],
+    cwd: appRoot,
+    env: {
+      ...process.env,
+      NITRO_PRESET: "vercel",
+      VERCEL: "1",
+      VERCEL_ENV: "production",
+    },
+  });
+
+  return await readVercelOutputConfig(join(appRoot, ".vercel", "output"));
+}
+
 describe("framework-nuxt build", () => {
   it("emits the eve service and route into the Vercel Build Output", async () => {
     const app = await scenarioApp(NUXT_EVE_SERVICE_DESCRIPTOR);
-
-    // Build the Nuxt app directly with the env a real Vercel build container
-    // always provides. `VERCEL` triggers both Nitro's Vercel preset (via
-    // std-env provider detection) and the eve module's service generation;
-    // `NITRO_PRESET` pins the preset so the assertion does not depend on
-    // detection heuristics. `vercel build` is intentionally not used here: run
-    // unauthenticated it strips these system env vars, so Nitro would fall back
-    // to the node-server preset and emit no Build Output. Vercel's own
-    // assembly of the generated service is covered by the Next.js scenario.
-    await runPnpmCommand({
-      args: ["exec", "nuxt", "build"],
-      cwd: app.appRoot,
-      env: {
-        ...process.env,
-        NITRO_PRESET: "vercel",
-        VERCEL: "1",
-        VERCEL_ENV: "production",
-      },
-    });
-
-    const { routes, services } = await readVercelOutputConfig(
-      join(app.appRoot, ".vercel", "output"),
-    );
+    const { routes, services } = await buildForVercel(app.appRoot);
     const eveRouteIndex = routes.findIndex(isEveServiceRoute);
     const filesystemIndex = routes.findIndex(isFilesystemHandle);
 
@@ -99,5 +104,16 @@ describe("framework-nuxt build", () => {
         root: ".eve/vercel-services/eve",
       }),
     );
+  }, 300_000);
+
+  it("rewrites eve transport to a remote agent ahead of every other route", async () => {
+    const app = await scenarioApp(NUXT_EVE_REMOTE_DESCRIPTOR);
+    const { routes, services } = await buildForVercel(app.appRoot);
+
+    expect(routes[0]).toEqual({
+      dest: "https://agent.example.com/eve/v1/$1",
+      src: "^/eve/v1/(.*)$",
+    });
+    expect(services).toEqual({});
   }, 300_000);
 });

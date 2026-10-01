@@ -1,14 +1,14 @@
 ---
 title: "Nuxt"
-description: "Run an eve agent and a Nuxt app as one project with the eve/nuxt module."
+description: "Run an eve agent and a Nuxt app as one project, or connect a Nuxt app to a separately deployed agent, with the eve/nuxt module."
 ---
 
-The `eve/nuxt` module runs a Nuxt frontend and an eve agent as a single project from one dev server and one Vercel deploy. The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so there's no CORS to configure and no URL env vars to keep in sync.
+The `eve/nuxt` module runs a Nuxt frontend and an eve agent as a single project from one dev server and one Vercel deploy, or routes a Nuxt app to an agent deployed on its own (see [Remote agent](#remote-agent)). The auto-imported [`useEveAgent`](./use-eve-agent-vue) composable finds the mounted routes on its own, so there's no CORS to configure and no URL env vars to keep in sync.
 
 ## Prerequisites
 
 - The `eve` package installed in your project (`npm install eve@latest`).
-- An existing eve agent directory. If you don't have one, start from [Getting started](../../getting-started).
+- An existing eve agent directory, or the origin of a deployed agent. If you don't have one, start from [Getting started](../../getting-started).
 - A Nuxt app to mount the agent in.
 
 ## Register the module
@@ -30,7 +30,7 @@ export default defineNuxtConfig({
 });
 ```
 
-The `eve` key accepts only two options, `eveRoot` and `eveBuildCommand`.
+The `eve` key accepts three options: `eveRoot`, `eveBuildCommand`, and `remote` (see [Remote agent](#remote-agent)).
 
 ## Call the composable
 
@@ -77,12 +77,35 @@ The browser still needs a production authentication policy. See [Authenticate br
   });
   ```
 
-- **Non-Vercel hosts.** Point Nuxt at a separate eve origin with `EVE_NUXT_PRODUCTION_ORIGIN`. To override the local port (default `4274`), use `EVE_NUXT_PRODUCTION_PORT`:
+- **Non-Vercel hosts.** Point Nuxt at a separate eve origin with `EVE_NUXT_PRODUCTION_ORIGIN`. To override the local port (default `4274`), use `EVE_NUXT_PRODUCTION_PORT`. Both are ignored when [`remote`](#remote-agent) is set, which works on every host:
 
   ```bash
   EVE_NUXT_PRODUCTION_ORIGIN=https://agent.example.com npm run build
   EVE_NUXT_PRODUCTION_PORT=5000 npm run build && npm run preview
   ```
+
+## Remote agent
+
+When the agent is deployed on its own, for example as a separate Vercel project, set `remote` to its origin. The Nuxt app keeps the auto-imported `useEveAgent` and same-origin `/eve/v1/**` requests, but builds, spawns, and deploys no agent of its own:
+
+```ts title="nuxt.config.ts"
+export default defineNuxtConfig({
+  modules: ["eve/nuxt"],
+  eve: {
+    remote: process.env.EVE_AGENT_URL, // e.g. https://agent.example.com
+  },
+});
+```
+
+With `remote` set, no `agent/` directory is needed:
+
+- **On Vercel**, the module adds an external rewrite from `/eve/v1/(.*)` to the remote agent instead of generating an eve service. The rewrite runs at the edge, so agent streams don't keep a Nuxt function open.
+- **On other hosts**, `/eve/v1/**` is proxied to the remote agent.
+- **In dev**, `EVE_BASE_URL` takes precedence, so you can point Nuxt at a local `eve dev`.
+
+`remote` is read at build time, so pointing the app at a different agent requires a rebuild.
+
+Requests stay same-origin, so the browser sends the Nuxt app's cookies to the agent and no CORS configuration is needed. The agent's channel still decides who may call it: see [Auth & route protection](../auth-and-route-protection).
 
 ## Managing vercel.json yourself
 
