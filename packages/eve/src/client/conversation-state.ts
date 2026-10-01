@@ -176,3 +176,20 @@ export function agentCallTurns(
   }
   return turns;
 }
+
+/**
+ * Whether a call's content may still arrive on its agent tool session: one of the call's turns is
+ * still open there, or the call completed before its message reached the session.
+ */
+export function isAgentCallContentPending(
+  task: ConversationTask,
+  call: ConversationTaskCall,
+  conversation: ConversationState,
+): boolean {
+  const turnIds = agentCallTurns(task, conversation).get(call.callId) ?? [];
+  const { activeTurnId } = conversation;
+  if (activeTurnId !== undefined && turnIds.includes(activeTurnId)) return true;
+  if (call.status !== "completed") return false;
+  const received = conversation.messages.filter((message) => message.role === "user").length;
+  return received <= Object.keys(task.calls).indexOf(call.callId);
+}

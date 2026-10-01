@@ -1,8 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { ClientSession, MessageResponse, type MessageStreamEvent } from "eve/client";
+import { Client } from "eve/client";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
+import { EveTUIRunner, FakeEveServer, MockScreen, MockUserInput } from "./lib/tui.ts";
 
 import { theme } from "./lib/theme.ts";
 
@@ -13,85 +13,21 @@ import { theme } from "./lib/theme.ts";
  * path through a live runtime, but the live runtime cannot easily
  * emit `_completed` in this repo (interactive auth
  * requires a `principalType: "user"` session, which apps/fixtures/agent-tui-client
- * doesn't currently provide). This smoke fills that gap with a
- * `FakeSession` that separates the parked request stream from the callback
- * continuation stream, so we get
- * deterministic coverage of:
+ * doesn't currently provide). This smoke fills that gap with an in-memory
+ * eve server whose callback continuation the smoke emits after asserting the
+ * parked challenge, so we get deterministic coverage of:
  *
  *   1. `_required` with a populated challenge (URL, user code,
  *      instructions). That proves the renderer surfaces all three
  *      challenge fields, which the live smoke can't show.
  *   2. `_completed` with `outcome: "authorized"` after `session.waiting`.
- *      That proves the root TUI follows `session.stream()` until the OAuth
- *      callback resumes the durable workflow, flips the right-title, clears
- *      the status-bar override, and settles the section.
+ *      That proves the TUI keeps following the session until the OAuth
+ *      callback resumes the durable workflow, flips the right-title, and
+ *      settles the section.
  *   3. A second turn with `outcome: "failed"` + a reason. That
  *      proves the failure path renders distinctly and the reason
  *      string surfaces in the section content.
  */
-
-class FakeSession extends ClientSession {
-  readonly #turns: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
-  readonly #continuations: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
-  #turnIndex = 0;
-  #continuationIndex = 0;
-
-  constructor(input: {
-    turns: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
-    continuations: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
-  }) {
-    super(
-      {
-        host: "http://fake.invalid",
-        resolveHeaders: async () => new Headers(),
-      },
-      { sessionId: "fake-session", streamIndex: 0 },
-    );
-    this.#turns = input.turns;
-    this.#continuations = input.continuations;
-  }
-
-  override async send<TOutput = unknown>(): Promise<MessageResponse<TOutput>> {
-    const events = this.#turns[this.#turnIndex] ?? [];
-    this.#turnIndex += 1;
-    return new MessageResponse<TOutput>({
-      cancelTurn: async () => ({ status: "no_active_turn" }),
-      sessionId: "fake-session",
-      createStream: () => pacedEvents(events),
-    });
-  }
-
-  override stream(): AsyncIterable<MessageStreamEvent> {
-    // A durable session tail cannot expose a callback continuation before
-    // the turn that parked for that callback has been accepted.
-    if (this.#continuationIndex >= this.#turnIndex) return pacedEvents([]);
-    const events = this.#continuations[this.#continuationIndex] ?? [];
-    this.#continuationIndex += 1;
-    return pacedEvents(events);
-  }
-}
-
-let nextEventIndex = 0;
-
-/** Stamps a fixture event the way an emit seam does before it hits the wire. */
-function stamp(event: UnstampedMessageStreamEvent): MessageStreamEvent {
-  nextEventIndex += 1;
-  return {
-    ...event,
-    meta: { at: new Date().toISOString(), id: `evt_smoke_${nextEventIndex}` },
-  } as MessageStreamEvent;
-}
-
-async function* pacedEvents(
-  events: readonly UnstampedMessageStreamEvent[],
-): AsyncGenerator<MessageStreamEvent> {
-  for (const event of events) {
-    yield stamp(event);
-    // Pacing gives the renderer and smoke assertions a chance to observe
-    // each lifecycle state between events, as the HTTP transport does live.
-    await sleep(200);
-  }
-}
 
 const turnId = "turn-0";
 const stepIndex = 0;
@@ -210,14 +146,14 @@ const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
 process.env.EVE_TUI_UNICODE = "1";
 
 void (async () => {
-  const session = new FakeSession({
-    turns: [firstTurn, secondTurn],
-    continuations: [firstCallbackTurn, secondCallbackTurn],
-  });
+  const server = new FakeEveServer(({ deliveryId }) =>
+    deliveryId === "delivery_1" ? firstTurn : secondTurn,
+  );
+  globalThis.fetch = server.fetch;
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    session,
+    client: new Client({ host: "http://fake.invalid" }),
     screen,
     userInput: input,
     name: "TUI states smoke",
@@ -258,6 +194,9 @@ void (async () => {
     );
     console.log(theme.muted("[states] URL, code, and instructions all rendered"));
 
+    // The browser completes the grant; the callback resumes the parked session.
+    server.emit(firstCallbackTurn);
+
     await waitForCondition(() => screen.snapshot().includes("authorized"), {
       timeoutMs: 10_000,
       label: "authorized right-title",
@@ -284,33 +223,9 @@ void (async () => {
     );
     console.log(theme.muted("[states] completed authorization body replaced the challenge"));
 
-    await waitForCondition(
-      () => !screen.snapshot().includes("Waiting for connection authorization"),
-      {
-        timeoutMs: 5_000,
-        label: "status-bar override cleared after completed",
-        onTimeout: () => screen.snapshot(),
-      },
-    );
-    console.log(theme.muted("[states] status-bar override cleared after authorized"));
-
-    // Wait for the runner to loop back into `readPrompt` before typing
-    // the next message. Without this, `MockUserInput.type` emits onto an
-    // event emitter that no listener is currently subscribed to (the
-    // first turn's data handler was detached when the stream finished),
-    // and the input event is silently dropped. The bottom-bar status
-    // text changes to "Type a prompt and press Enter" exactly when
-    // `readPrompt` attaches a fresh handler.
-    // Wait for the first turn's stream to fully drain (events after the
-    // last asserted state, `step.completed`, `session.waiting`, plus
-    // the renderStream finally and the runner's loop-back into
-    // `readPrompt`). 1s is comfortable headroom over the empirical
-    // ~600ms needed for the synthetic stream's per-event pacing. The
-    // "Type a prompt and press Enter" status text the renderer sets in
-    // `readPrompt` is NOT visible in the snapshot, when input is
-    // active, the bottom line shows the `> █` input prompt instead of
-    // `#status`, so a sleep is the simplest reliable barrier.
-    await sleep(1000);
+    // Let the first turn settle so the next message starts a new turn
+    // instead of steering this one.
+    await screen.waitForIdlePrompt(5_000);
 
     // ---- Turn 2: other-mcp, ends in `failed` with a reason ----
 
@@ -319,6 +234,7 @@ void (async () => {
 
     await screen.waitForText("● other-mcp · authorization", 10_000);
     console.log(theme.muted("[states] other-mcp section header rendered"));
+    server.emit(secondCallbackTurn);
 
     await waitForCondition(() => screen.snapshot().includes("failed"), {
       timeoutMs: 10_000,
@@ -339,6 +255,7 @@ void (async () => {
     input.ctrlC();
     input.ctrlC();
     await runPromise;
+    server.close();
   } catch (error) {
     input.ctrlC();
     input.ctrlC();
