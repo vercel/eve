@@ -13,6 +13,8 @@ changesets. When updating a PR, read its current body first.
 Fill in `.github/pull_request_template.md`. Write for a reviewer, not a
 changelog:
 
+- Write in ASD-STE100 English. Use simple, direct wording and keep technical
+  terms and proper nouns when they are needed.
 - Keep the Summary to one short paragraph: usually 2–4 sentences and about
   100 words or fewer.
 - Lead with the concrete problem, user need, or decision behind the change;
