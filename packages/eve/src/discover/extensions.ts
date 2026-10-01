@@ -367,6 +367,11 @@ async function resolvePackageRoot(input: {
   }
 
   const packageSubpath = bareSpecifierPackagePath(input.specifier);
+  // Node resolves a package's own name through self-reference; bundled extensions
+  // discovered from inside eve use it to mount other built-in extensions.
+  if ((await readPackageName(input.source, input.appRoot)) === packageSubpath) {
+    return resolve(input.appRoot);
+  }
   let current = resolve(input.appRoot);
   while (true) {
     const candidate = join(current, "node_modules", packageSubpath);
@@ -397,6 +402,18 @@ function bareSpecifierPackagePath(specifier: string): string {
     return segments.slice(0, 2).join("/");
   }
   return segments[0] ?? specifier;
+}
+
+async function readPackageName(source: ProjectSource, root: string): Promise<string | undefined> {
+  if (!(await hasPackageJson(source, root))) return undefined;
+  try {
+    const { name } = JSON.parse(await source.readTextFile(join(root, "package.json"))) as {
+      name?: unknown;
+    };
+    return typeof name === "string" ? name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function hasPackageJson(source: ProjectSource, packageRoot: string): Promise<boolean> {

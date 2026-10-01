@@ -52,6 +52,39 @@ describe("locateExtensionMountPackage", () => {
     });
   });
 
+  it("resolves a built-in extension mounted from inside the eve package by self-reference", async () => {
+    const packageRoot = "/repo/packages/eve";
+    const agentRoot = `${packageRoot}/src/example/extension`;
+    const source = createMemoryProjectSource({
+      files: {
+        [`${agentRoot}/subagents/coder/extensions/code.ts`]:
+          'import code from "eve/extensions/code";\nexport default code({});\n',
+        [`${packageRoot}/package.json`]: JSON.stringify({
+          name: "eve",
+          eve: {
+            builtInExtensions: {
+              "./extensions/code": { dist: "dist/src/extensions/code/extension" },
+            },
+          },
+        }),
+      },
+    });
+
+    const result = await locateExtensionMount({
+      source,
+      agentRoot: `${agentRoot}/subagents/coder`,
+      appRoot: packageRoot,
+      mount: createModuleSourceRef({ logicalPath: "extensions/code.ts" }),
+      namespace: "code",
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.location).toMatchObject({
+      packageRoot,
+      sourceRoot: `${packageRoot}/dist/src/extensions/code/extension`,
+    });
+  });
+
   it("resolves source and dist roots before the distribution exists", async () => {
     const appRoot = "/repo/apps/agent";
     const agentRoot = `${appRoot}/agent`;
