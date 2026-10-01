@@ -246,6 +246,7 @@ export function resolveExtensionMountSource(
 export function createExtensionCompileMounts(
   manifest: AgentSourceManifest,
   nodePath: string,
+  parentMountId?: string,
 ): {
   mounts: Map<string, ExtensionCompileMount>;
   sourceIds: Map<string, string>;
@@ -258,6 +259,7 @@ export function createExtensionCompileMounts(
     sourceIds.set(source.mountId, source.mountSourceId);
     mounts.set(source.mountId, {
       mountId: source.mountId,
+      parentMountId,
       entry:
         mount.programmaticDeclaration === undefined
           ? {

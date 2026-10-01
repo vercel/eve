@@ -767,6 +767,85 @@ describe("mounted extension via directory form with override", () => {
   });
 });
 
+describe("nested extension mounts", () => {
+  it("binds an enclosing extension's config before a mount declared inside it", async () => {
+    const app = await createAppRoot("eve-nested-extension-config-", {
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };',
+        "agent/instructions.md": "Work with the available tools.",
+        "agent/extensions/outer.mjs":
+          'import outer from "@acme/outer"; export default outer({ label: "from-outer" });',
+        "node_modules/@acme/outer/package.json": JSON.stringify({
+          name: "@acme/outer",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        }),
+        "node_modules/@acme/outer/extension/_manifest.json": compatibilityManifest({
+          extension: 1,
+          subagent: 6,
+          config: 1,
+        }),
+        "node_modules/@acme/outer/extension/extension.mjs": [
+          'import { defineExtension } from "eve/extension";',
+          "const config = { '~standard': { version: 1, vendor: 'test', validate: value => typeof value?.label === 'string' ? { value } : { issues: [{ message: 'label is required' }] } } };",
+          "export default defineExtension({ config });",
+        ].join("\n"),
+        "node_modules/@acme/outer/extension/subagents/helper/agent.mjs":
+          'export default { model: "openai/gpt-5.4", description: "Help with labels" };',
+        "node_modules/@acme/outer/extension/subagents/helper/extensions/inner.mjs": [
+          'import inner from "@acme/inner";',
+          'import outer from "../../../extension.mjs";',
+          "export default inner({ label: outer.config.label });",
+        ].join("\n"),
+        "node_modules/@acme/inner/package.json": JSON.stringify({
+          name: "@acme/inner",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        }),
+        "node_modules/@acme/inner/extension/_manifest.json": compatibilityManifest({
+          extension: 1,
+          tool: 1,
+          config: 1,
+        }),
+        "node_modules/@acme/inner/extension/extension.mjs": [
+          'import { defineExtension } from "eve/extension";',
+          "const config = { '~standard': { version: 1, vendor: 'test', validate: value => ({ value }) } };",
+          "export default defineExtension({ config });",
+        ].join("\n"),
+        "node_modules/@acme/inner/extension/tools/label.mjs": [
+          'import ext from "@acme/inner";',
+          "const label = ext.config.label;",
+          "export default { description: label, inputSchema: {}, execute: () => label };",
+        ].join("\n"),
+      },
+    });
+
+    const { manifest, moduleMap } = await compileRuntimeGraph(app.appRoot);
+    const helper = manifest.subagents.find((node) => node.name === "outer__helper")!;
+    const tool = helper.agent.tools.find((entry) => entry.name === "inner__label")!;
+    expect(tool.description).toBe("from-outer");
+
+    const moduleMapPath = join(app.appRoot, ".eve", "compile", "nested-map.mjs");
+    const { code } = await bundleAuthoredModuleMapForGeneration({
+      appRoot: app.appRoot,
+      manifest,
+      moduleMapPath,
+    });
+    await writeFile(moduleMapPath, code);
+    const generated = (await import(`${moduleMapPath}?test=nested-config`)) as {
+      default: typeof moduleMap;
+    };
+    for (const map of [moduleMap, generated.default]) {
+      const definition = map.nodes[helper.nodeId]!.modules[tool.sourceId]!.default as {
+        execute: () => string;
+      };
+      expect(definition.execute()).toBe("from-outer");
+    }
+  });
+});
+
 describe("mounted extension subagent resources", () => {
   it("materializes extension subagent resources under a Windows-safe directory", async () => {
     const app = await createAppRoot("eve-mounted-extension-subagent-resources-", {

@@ -93,6 +93,17 @@ Author a subagent under `extension/subagents/<id>/` using the same files as a su
 
 Modules inside the contributed subagent can import the extension handle. For example, a tool under `extension/subagents/reviewer/tools/` can read the configuration bound by the consumer's `agent/extensions/crm.ts` mount.
 
+A contributed subagent can mount another extension under `extension/subagents/<id>/extensions/` and derive that mount's configuration from its own extension's configuration:
+
+```ts
+// extension/subagents/reviewer/extensions/search.ts
+import search from "@acme/search";
+
+import crm from "../../../extension.js";
+
+export default search({ apiKey: crm.config.searchApiKey });
+```
+
 ### Build and optionally publish
 
 The scaffold's `package.json` declares separate source and distribution roots:

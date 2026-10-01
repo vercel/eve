@@ -8,6 +8,7 @@ import {
 import {
   loadAuthoredModuleNamespace,
   type AuthoredModuleLoadOptions,
+  type ExtensionMountEntry,
 } from "#internal/authored-module-loader.js";
 
 export type CompiledBindingNamespaceLoader = (
@@ -17,6 +18,25 @@ export type CompiledBindingNamespaceLoader = (
 export interface ExtensionCompileMount {
   readonly mountId: string;
   readonly entry?: NonNullable<AuthoredModuleLoadOptions["extension"]>["entry"];
+  /** Mount that contributed the node declaring this mount, when that node is extension-owned. */
+  readonly parentMountId?: string;
+}
+
+function ancestorMountEntries(
+  mounts: ReadonlyMap<string, ExtensionCompileMount>,
+  mount: ExtensionCompileMount | undefined,
+) {
+  const ancestors: (ExtensionMountEntry & { readonly mountId: string })[] = [];
+  const seen = new Set<string>();
+  for (
+    let parent = mount?.parentMountId === undefined ? undefined : mounts.get(mount.parentMountId);
+    parent !== undefined && !seen.has(parent.mountId);
+    parent = parent.parentMountId === undefined ? undefined : mounts.get(parent.parentMountId)
+  ) {
+    seen.add(parent.mountId);
+    if (parent.entry !== undefined) ancestors.unshift({ ...parent.entry, mountId: parent.mountId });
+  }
+  return ancestors;
 }
 
 /** Loads one node's selected bindings with dependency ordering and per-phase caching. */
@@ -90,6 +110,8 @@ async function loadCompiledBindingNamespace(input: {
             mountId,
             evaluationId: input.evaluationId,
             entry: mount?.entry,
+            ancestors:
+              input.mounts === undefined ? undefined : ancestorMountEntries(input.mounts, mount),
           };
     return await loadAuthoredModuleNamespace(input.binding.backing.sourcePath, {
       externalDependencies: input.binding.backing.externalDependencies,

@@ -122,9 +122,14 @@ export function createExtensionMountPlugin(
       ) {
         return { id: `${resolved.id}${MOUNT_QUERY}${encodeURIComponent(mountId!)}` };
       }
-      if (mount !== undefined) return resolved;
-      if (importer === undefined || importer.startsWith("\0")) return undefined;
+      if (override) return resolved;
+      if (mount === undefined && (importer === undefined || importer.startsWith("\0"))) {
+        return undefined;
+      }
+      // Source owned by another extension keeps that extension's mount identity, so a mount
+      // declared inside an extension reads the configuration its enclosing mount bound.
       const owners = roots.filter((root) => within(path, root.root));
+      if (mount !== undefined && owners.length !== 1) return resolved;
       if (owners.length > 1) {
         throw new Error(
           `Import "${source}" from "${importer}" refers to multiple extension mounts (${owners.map((owner) => owner.mountId).join(", ")}). Import it from an owned mount or contribution instead.`,
