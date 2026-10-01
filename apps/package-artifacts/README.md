@@ -24,6 +24,8 @@ npm exec --yes --package=https://pkg.eve.dev/pr/123/eve.tgz -- eve init my-agent
 
 Both moving routes redirect to an immutable `/<sha>/eve.tgz` artifact. The packaged CLI also stamps that immutable URL into generated projects.
 
+Each `latest.json` manifest includes `integrity`, the tarball's SHA-512 Subresource Integrity value, and `dependency`, an integrity-qualified package specifier of the form `<tarball>#<integrity>`. Consumers that write the tarball into a project dependency should use `dependency` so package managers can preserve and verify its integrity in the lockfile.
+
 ## Publishing
 
 Vercel deploys `main` to Production and same-repository pull requests to Preview. The build derives the source SHA and PR number from Vercel system environment variables, packages eve, verifies that the source still represents the current branch or pull-request head, and writes the following objects:
