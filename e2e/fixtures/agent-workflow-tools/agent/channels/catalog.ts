@@ -48,6 +48,16 @@ export default defineChannel({
         });
       }
 
+      if (method === "tools/call") {
+        return Response.json({
+          jsonrpc: "2.0",
+          id,
+          result: {
+            content: [{ type: "text", text: JSON.stringify({ items: ["Alice's lamp"] }) }],
+          },
+        });
+      }
+
       return Response.json({
         jsonrpc: "2.0",
         id,

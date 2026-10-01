@@ -12,12 +12,7 @@ import {
 } from "#connections/errors.js";
 import { loadContext } from "#context/container.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import {
-  getAuthorizationResults,
-  requestAuthorization,
-  type AuthorizationChallenge,
-  type AuthorizationSignal,
-} from "#harness/authorization.js";
+import { getAuthorizationResults } from "#harness/authorization.js";
 import { reportNestedToolAction } from "#harness/nested-actions.js";
 import { createLogger } from "#internal/logging.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
@@ -199,7 +194,7 @@ function connectionSearchLabel(_closure: object, input: unknown): string {
 async function searchConnectionTools(
   _closure: object,
   rawInput: unknown,
-): Promise<ConnectionSearchOutput | AuthorizationSignal> {
+): Promise<ConnectionSearchOutput> {
   const input = (isObject(rawInput) ? rawInput : {}) as ConnectionSearchInput;
   const registry = requireRegistry();
   const targets =
@@ -207,22 +202,20 @@ async function searchConnectionTools(
       ? registry.getConnections()
       : [requireConnection(registry, input.connection)];
 
-  const auth = createAuthorizationExecution();
-  await completePendingAuthorizations(registry, targets, auth);
+  // Search only finishes sign-ins the user already completed; starting one is
+  // left to connection_execute so discovery never prompts the user.
+  await completePendingAuthorizations(registry, targets, createAuthorizationExecution());
 
-  const challenges: AuthorizationChallenge[] = [];
   const unavailable: UnavailableConnection[] = [];
   const candidates: RankCandidate[] = [];
   for (const connection of targets) {
-    const listed = await listConnectionTools(registry, connection, auth);
-    if ("challenges" in listed) challenges.push(...listed.challenges);
-    else if ("unavailable" in listed) unavailable.push(listed.unavailable);
+    const listed = await listConnectionTools(registry, connection);
+    if ("unavailable" in listed) unavailable.push(listed.unavailable);
     else {
       for (const tool of listed.tools) candidates.push({ connection, tool });
     }
   }
 
-  if (challenges.length > 0) return requestAuthorization(challenges);
   const terminal = unavailable.filter((entry) => entry.terminal);
   if (targets.length > 0 && terminal.length === targets.length) {
     throw new Error(terminal.map((entry) => entry.error).join("\n"));
@@ -253,43 +246,28 @@ async function searchConnectionTools(
 
 type ListedConnectionTools =
   | { readonly tools: readonly ConnectionToolMetadata[] }
-  | { readonly challenges: readonly AuthorizationChallenge[] }
   | { readonly unavailable: UnavailableConnection };
 
 async function listConnectionTools(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
-  auth: ReturnType<typeof createAuthorizationExecution>,
 ): Promise<ListedConnectionTools> {
   const name = connection.connectionName;
   try {
     return { tools: await registry.getClient(name).getToolMetadata() };
   } catch (error) {
     if (isConnectionAuthorizationRequiredError(error)) {
-      const scoped = await resolveInteractiveAuthorization(registry, name);
-      if (scoped === undefined) {
-        return {
-          unavailable: {
-            connection: name,
-            error: `"${name}" requires authorization and cannot start interactive sign-in.`,
-            terminal: false,
-          },
-        };
-      }
-      try {
-        return { challenges: (await auth.handleError(error, scoped)).challenges };
-      } catch (startError) {
-        log.warn("connection authorization failed", { connection: name, error: startError });
-        return {
-          unavailable: {
-            connection: name,
-            error: isConnectionAuthorizationFailedError(startError)
-              ? startError.message
-              : `Failed to start authorization for "${name}": ${toErrorMessage(startError)}`,
-            terminal: true,
-          },
-        };
-      }
+      const interactive = (await resolveInteractiveAuthorization(registry, name)) !== undefined;
+      return {
+        unavailable: {
+          connection: name,
+          error: interactive
+            ? `"${name}" requires the user to sign in before its tools can be listed. ` +
+              `Call connection_execute on "${name}" to ask the user to sign in, then search again.`
+            : `"${name}" requires authorization and cannot start interactive sign-in.`,
+          terminal: false,
+        },
+      };
     }
     log.warn("failed to load connection tools", { connection: name, error });
     return {

@@ -279,6 +279,20 @@ describe("nextTurnDelivery", () => {
     expect(next.payloads).toEqual(authorizationCallbackPayload.payloads);
   });
 
+  it("resumes a completed sign-in while another sign-in prompt is still open", async () => {
+    const inbox = createMockInbox([authorizationRead()]);
+
+    const next = await nextTurnDelivery({
+      ...waitInput(inbox),
+      expectedAttemptIds: new Set(["ignored-attempt", "attempt-1"]),
+    });
+
+    expect(next).toEqual({
+      kind: "authorization-resume",
+      payloads: authorizationCallbackPayload.payloads,
+    });
+  });
+
   it("resumes authorization after a consumed no-op cancel", async () => {
     // A cancel with no active turn is consumed without producing a parent
     // turn; the wait continues and the callback must still resume the challenge.

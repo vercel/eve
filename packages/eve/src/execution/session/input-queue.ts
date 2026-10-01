@@ -128,10 +128,11 @@ export class SessionInputQueue {
 
   takeNext(options?: {
     /**
-     * Attempt ids of the open authorization challenge. Callbacks for other
-     * attempts are stale and dropped; once every expected attempt has
-     * reported, the collected payloads resume the challenge ahead of
-     * ordinary input.
+     * Attempt ids of the open authorization challenges. Callbacks for other
+     * attempts are stale and dropped. Any expected callback resumes ahead of
+     * ordinary input; the other challenges stay pending. Waiting for every
+     * attempt would let one ignored sign-in prompt, possibly from an earlier
+     * turn, keep a completed sign-in from ever resuming the session.
      */
     readonly expectedAttemptIds?: ReadonlySet<string>;
     /** Sequence of a delivery admitted while nothing else was pending. */
@@ -139,19 +140,12 @@ export class SessionInputQueue {
   }): SessionInputSelection | undefined {
     const expected = options?.expectedAttemptIds ?? new Set<string>();
     this.retain((entry) => entry.kind !== "authorization" || expected.has(entry.attemptId));
-    if (expected.size > 0) {
-      const collected = new Map(
-        this.entries.flatMap((entry) =>
-          entry.kind === "authorization" ? [[entry.attemptId, entry.payload] as const] : [],
-        ),
-      );
-      if ([...expected].every((attemptId) => collected.has(attemptId))) {
-        this.retain((entry) => entry.kind !== "authorization");
-        return {
-          kind: "authorization-resume",
-          payloads: [...expected].map((attemptId) => collected.get(attemptId)!),
-        };
-      }
+    const payloads = this.entries.flatMap((entry) =>
+      entry.kind === "authorization" ? [entry.payload] : [],
+    );
+    if (payloads.length > 0) {
+      this.retain((entry) => entry.kind !== "authorization");
+      return { kind: "authorization-resume", payloads };
     }
     const index = this.entries.findIndex((entry) => entry.kind !== "authorization");
     if (index < 0) return undefined;

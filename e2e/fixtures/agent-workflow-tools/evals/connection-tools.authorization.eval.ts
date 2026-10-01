@@ -4,30 +4,46 @@ import { z } from "zod";
 import { fixtureAuthorizationCallback } from "../agent/lib/fake-service.ts";
 
 const searchResult = z.object({
-  tools: z.array(z.object({ connection: z.string(), tool: z.string(), signature: z.string() })),
+  tools: z.array(z.unknown()).length(0),
+  unavailable: z.array(z.object({ connection: z.string(), error: z.string() })),
 });
+const executeResult = z.object({ items: z.array(z.string()) });
 
 export default defineEval({
-  description: "Connection search pauses for sign-in, then finds tools over authenticated HTTP.",
+  description:
+    "Connection search reports a connection that needs sign-in without prompting; executing its tool prompts, then runs over authenticated HTTP.",
   timeoutMs: 90_000,
 
   async test(t) {
     const started = await t.send(
-      "Alice wants to see which tools are available in private-catalog. Search that connection for its items tools, then report the available tool names.",
+      "Alice wants to see the items in private-catalog. Search that connection for its items tools, then list the items and report them.",
     );
     const session = started.session;
     started.expectOk();
+    started.calledTool("connection_search", {
+      count: 1,
+      output: (value) => {
+        const result = searchResult.safeParse(value);
+        return (
+          result.success &&
+          result.data.unavailable.some(
+            (entry) =>
+              entry.connection === "private-catalog" && entry.error.includes("connection_execute"),
+          )
+        );
+      },
+    });
     started.event("authorization.required", { count: 1 });
     started.notEvent("authorization.completed");
     started.event("session.waiting", { count: 1 });
 
     const required = started.events.find((event) => event.type === "authorization.required");
     if (required?.type !== "authorization.required") {
-      throw new Error("Connection search did not produce an authorization challenge.");
+      throw new Error("Connection execute did not produce an authorization challenge.");
     }
     const callback = fixtureAuthorizationCallback(t.target.url, required.data.authorization?.url);
     if (session.sessionId === undefined || session.state === undefined) {
-      throw new Error("Connection search did not create a session.");
+      throw new Error("Connection execute did not create a session.");
     }
 
     const resumed = t.target.watchTurn(session.sessionId, {
@@ -46,23 +62,11 @@ export default defineEval({
       count: 1,
       data: { candidateId: required.data.candidateId, outcome: "authorized" },
     });
-    completed.calledTool("connection_search", {
+    completed.calledTool("connection_execute", {
       count: 1,
-      output: (value) => {
-        const result = searchResult.safeParse(value);
-        return (
-          result.success &&
-          result.data.tools.some(
-            (entry) =>
-              entry.connection === "private-catalog" &&
-              entry.tool === "list_items" &&
-              entry.signature.startsWith("list_items("),
-          )
-        );
-      },
+      output: (value) =>
+        executeResult.safeParse(value).data?.items.includes("Alice's lamp") === true,
     });
-    // Calling the tool needs the token in a later step. A real provider persists
-    // it; this fixture's fake provider keeps none after sign-in.
-    completed.messageIncludes("list_items");
+    completed.messageIncludes("Alice's lamp");
   },
 });

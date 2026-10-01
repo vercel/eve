@@ -80,7 +80,19 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
         ],
       };
     }
-    return JSON.stringify(search.output);
+    // Search reports the connection as needing sign-in; executing its tool asks the user.
+    const execute = request.toolResults.find((entry) => entry.name === "connection_execute");
+    if (execute === undefined) {
+      return {
+        toolCalls: [
+          {
+            name: "connection_execute",
+            input: { connection: "private-catalog", tool: "list_items", input: {} },
+          },
+        ],
+      };
+    }
+    return JSON.stringify(execute.output);
   }
 
   const stepAuth = /WORKFLOW-STEP-AUTH-(IMPLICIT|EXPLICIT|REJECTED)/u.exec(message);

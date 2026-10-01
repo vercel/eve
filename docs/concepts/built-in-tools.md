@@ -269,8 +269,8 @@ export default disableTool();
 
 `connection_search` and `connection_execute` give the model every tool from the agent's [connections](../connections) without adding each tool to the model's tool list. eve adds both when the agent has a static connection or a dynamic connection resolver, even when `defaultTools` is `false`, so there is no add command.
 
-- `connection_search({ query?, connection?, limit?, offset? })` returns matching tools with their connection, name, description, and a TypeScript signature rendered from the tool's schemas. Omit `query` to list every tool, or pair it with `connection` to list one connection's tools.
-- `connection_execute({ connection, tool, input })` checks `input` against the tool's input schema, calls the tool, and returns its result. The stream reports the call as a nested action named `<connection>__<tool>`, such as `linear__list_issues`, whose `parentCallId` is the `connection_execute` call id.
+- `connection_search({ query?, connection?, limit?, offset? })` returns matching tools with their connection, name, description, and a TypeScript signature rendered from the tool's schemas. Omit `query` to list every tool, or pair it with `connection` to list one connection's tools. `connection_search` never asks the user to sign in. A connection whose tools cannot be listed until the user signs in appears under `unavailable`, and tools from the other connections are still returned.
+- `connection_execute({ connection, tool, input })` checks `input` against the tool's input schema, calls the tool, and returns its result. It is the only connection tool that asks the user to sign in: when the connection needs the user's authorization, the call parks until sign-in completes. The stream reports the call as a nested action named `<connection>__<tool>`, such as `linear__list_issues`, whose `parentCallId` is the `connection_execute` call id.
 
 The definitions of both tools never change during a session. eve lists connection names and descriptions in append-only context messages rather than in the system prompt, so finding a tool, signing in, or resolving a dynamic connection keeps the cached prompt prefix.
 
