@@ -103,6 +103,14 @@ export function waitingLabel(entries: readonly TaskEntry[]): string {
   return `Waiting for ${String(names.length)} tasks`;
 }
 
+/** Names the connections a parked session waits on: `Waiting for sign-in to Linear`. */
+export function signInLabel(names: readonly string[]): string {
+  const unique = [...new Set(names)];
+  if (unique.length === 1) return `Waiting for sign-in to ${unique[0]!}`;
+  if (unique.length === 2) return `Waiting for sign-in to ${unique[0]!} and ${unique[1]!}`;
+  return `Waiting for ${String(unique.length)} sign-ins`;
+}
+
 /** What a working task is doing right now, in one short line. */
 function currentActivity(entry: TaskEntry): { text: string; attention: boolean } {
   if (entry.finishing === true) return { text: "Finishing", attention: false };

@@ -55,7 +55,7 @@ export function AgentMessage({
   message,
   onInputResponses,
 }: {
-  readonly canRespond: boolean;
+  readonly canRespond: (requestId: string) => boolean;
   readonly isStreaming: boolean;
   readonly message: EveMessage;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
@@ -96,7 +96,7 @@ function AgentMessagePart({
   part,
   showCaret,
 }: {
-  readonly canRespond: boolean;
+  readonly canRespond: (requestId: string) => boolean;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly part: EveMessagePart;
   readonly showCaret: boolean;
@@ -126,7 +126,7 @@ function AgentMessagePart({
       if (inputRequest?.kind === "question") {
         return (
           <QuestionRequest
-            canRespond={canRespond}
+            canRespond={canRespond(inputRequest.requestId)}
             inputRequest={inputRequest}
             inputResponse={part.toolMetadata?.eve?.inputResponse}
             onInputResponses={onInputResponses}
@@ -405,7 +405,7 @@ function InputRequestActions({
   onInputResponses,
   part,
 }: {
-  readonly canRespond: boolean;
+  readonly canRespond: (requestId: string) => boolean;
   readonly onInputResponses: (responses: readonly AgentInputResponse[]) => void | Promise<void>;
   readonly part: EveDynamicToolPart;
 }) {
@@ -418,19 +418,30 @@ function InputRequestActions({
   const selectedOption = inputRequest.options?.find(
     (option) => option.id === inputResponse?.optionId,
   );
+  // An approval can settle before its batch resolves, without an input response.
+  const settledApproval =
+    part.approval?.approved === undefined
+      ? undefined
+      : part.approval.approved
+        ? "Approved"
+        : "Denied";
 
   return (
     <div className="space-y-3 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3">
       <p className="text-muted-foreground text-sm">{inputRequest.prompt}</p>
-      {inputResponse ? (
+      {inputResponse || settledApproval ? (
         <p className="font-medium text-sm">
-          Responded: {selectedOption?.label ?? inputResponse.text ?? inputResponse.optionId}
+          Responded:{" "}
+          {selectedOption?.label ??
+            inputResponse?.text ??
+            inputResponse?.optionId ??
+            settledApproval}
         </p>
       ) : (
         <div className="flex flex-wrap gap-2">
           {inputRequest.options?.map((option) => (
             <Button
-              disabled={!canRespond}
+              disabled={!canRespond(inputRequest.requestId)}
               key={option.id}
               onClick={() => {
                 void onInputResponses([
@@ -456,9 +467,14 @@ function InputRequestActions({
 function partKey(part: EveMessagePart, index: number): string {
   switch (part.type) {
     case "authorization":
-      return `authorization:${part.turnId}:${part.stepIndex}:${part.name}`;
+      return part.attemptId === undefined
+        ? `authorization:${part.turnId}:${part.stepIndex}:${part.name}`
+        : `authorization:${part.attemptId}`;
     case "dynamic-tool":
       return part.toolCallId;
+    case "reasoning":
+    case "text":
+      return `${part.type}:${part.id ?? index}`;
     default:
       return `${part.type}:${index}`;
   }

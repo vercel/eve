@@ -1454,12 +1454,12 @@ export function createTaskStartedEvent(
 
 /** Creates the `task.settled` event for one settled task call. */
 export function createTaskSettledEvent(
-  input: TaskSettledStreamEvent["data"] & Pick<TaskStartedStreamEvent["data"], "kind" | "name">,
+  input: TaskSettledStreamEvent["data"],
 ): TaskSettledStreamEvent {
   const data: TaskSettledStreamEvent["data"] = {
     callId: input.callId,
-    kind: input.kind,
-    name: input.name,
+    ...(input.kind !== undefined && { kind: input.kind }),
+    ...(input.name !== undefined && { name: input.name }),
     status: input.status,
     taskId: input.taskId,
     turnId: input.turnId,

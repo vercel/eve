@@ -31,39 +31,38 @@ export function partKey(part: EveMessagePart): string {
     case "step-start":
       return "step-start";
     case "authorization":
-      return `authorization:${part.turnId}:${part.stepIndex}:${part.name}`;
+      return part.attemptId === undefined
+        ? `authorization:${part.turnId}:${part.stepIndex}:${part.name}`
+        : `authorization:${part.attemptId}`;
     case "dynamic-tool":
       return `dynamic-tool:${part.toolCallId}`;
   }
 }
 
-export function upsertMessage(data: EveMessageData, next: EveMessage): EveMessageData {
-  const index = data.messages.findIndex((message) => message.id === next.id);
-  if (index === -1) {
-    return { messages: [...data.messages, next] };
-  }
-
-  return {
-    messages: [...data.messages.slice(0, index), next, ...data.messages.slice(index + 1)],
-  };
-}
-
-export function removeStreamingToolPartsForTurn(
+export function upsertMessage(
   data: EveMessageData,
-  turnId: string,
+  next: EveMessage,
+  beforeAssistantTurnId?: string,
 ): EveMessageData {
-  const index = data.messages.findIndex(
-    (message) => message.role === "assistant" && message.metadata?.turnId === turnId,
-  );
-  const message = data.messages[index];
-  if (message === undefined) return data;
-
-  return upsertMessage(data, {
-    ...message,
-    parts: message.parts.filter(
-      (part) => part.type !== "dynamic-tool" || part.state !== "input-streaming",
-    ),
-  });
+  const index = data.messages.findIndex((message) => message.id === next.id);
+  if (index !== -1) {
+    return {
+      ...data,
+      messages: [...data.messages.slice(0, index), next, ...data.messages.slice(index + 1)],
+    };
+  }
+  const before =
+    beforeAssistantTurnId === undefined
+      ? -1
+      : data.messages.findIndex(
+          (message) =>
+            message.role === "assistant" && message.metadata?.turnId === beforeAssistantTurnId,
+        );
+  if (before === -1) return { ...data, messages: [...data.messages, next] };
+  return {
+    ...data,
+    messages: [...data.messages.slice(0, before), next, ...data.messages.slice(before)],
+  };
 }
 
 export function optimisticUserMessageId(submissionId: string): string {

@@ -18,11 +18,7 @@ import type {
   TurnFailureStreamEvent,
 } from "#protocol/message.js";
 import { isTurnFailureEvent } from "#protocol/message.js";
-import {
-  isTurnSegmentBoundary,
-  summarizeTurnEvents,
-  updatePendingInputRequests,
-} from "#client/session-utils.js";
+import { summarizeTurnEvents, TurnSegment } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
@@ -451,10 +447,10 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
-      const pendingInputRequests = new Set<string>();
+      const segment = new TurnSegment();
       for await (const event of source) {
         this.#events.push(event);
-        updatePendingInputRequests(pendingInputRequests, event);
+        const endsSegment = segment.observe(event);
         observe(event);
         this.#resolveWaiters(event);
 
@@ -466,7 +462,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
           );
         }
 
-        if (isTurnSegmentBoundary(event, pendingInputRequests)) {
+        if (endsSegment) {
           sawBoundary = true;
           this.#closeWaiters(
             new Error(`Session ${this.sessionId} reached ${event.type} before the expected event.`),

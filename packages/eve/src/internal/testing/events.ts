@@ -1,5 +1,5 @@
 import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
-import { isTurnSegmentBoundary, updatePendingInputRequests } from "#client/session-utils.js";
+import { TurnSegment } from "#client/session-utils.js";
 
 /**
  * Minimal, duck-typed handle to one workflow `Run`'s readable stream.
@@ -65,7 +65,8 @@ export function captureTurnEvents(
 
   return {
     async nextTurn() {
-      return await readUntil(createTurnSegmentBoundary());
+      const segment = new TurnSegment();
+      return await readUntil((event) => segment.observe(event));
     },
     async nextUntil(matches) {
       return await readUntil(matches);
@@ -155,14 +156,6 @@ interface CaptureTurnEventsOptions {
 
 interface StreamState {
   buffer: string;
-}
-
-function createTurnSegmentBoundary(): (event: MessageStreamEvent) => boolean {
-  const pendingInputRequests = new Set<string>();
-  return (event) => {
-    updatePendingInputRequests(pendingInputRequests, event);
-    return isTurnSegmentBoundary(event, pendingInputRequests);
-  };
 }
 
 async function readUntilMatch(
