@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-The first local or remote subagent turn now appears beneath its dispatch span in the same OpenTelemetry trace; persistent follow-up turns still start fresh traces. Conversation IDs also propagate to third-party spans created during model, tool, and memory execution.
+The first local or remote subagent turn now uses the caller's OpenTelemetry trace as a child of its dispatch span. Later child turns start new traces, and third-party spans created during model, tool, and memory execution receive the conversation ID.
