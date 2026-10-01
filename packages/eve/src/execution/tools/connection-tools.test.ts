@@ -4,7 +4,13 @@ import { ConnectionAuthorizationRequiredError } from "#connections/errors.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
-import { CallbackBaseUrlKey, isAuthorizationSignal } from "#harness/authorization.js";
+import {
+  type AuthorizationChallenge,
+  CallbackBaseUrlKey,
+  isAuthorizationSignal,
+  OpenAuthorizationChallengesKey,
+  PendingAuthorizationResultKey,
+} from "#harness/authorization.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
@@ -82,7 +88,7 @@ function setup() {
     });
   }
 
-  return { call, startAuthorization };
+  return { call, ctx, startAuthorization };
 }
 
 describe("connection tools authorization", () => {
@@ -131,5 +137,41 @@ describe("connection tools authorization", () => {
     });
     expect(executed).toMatchObject({ challenges: [{ name: "notion" }] });
     expect(startAuthorization).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a token refused right after sign-in instead of asking again", async () => {
+    const { call, ctx, startAuthorization } = setup();
+    // The user finished signing in to linear, but the service still refuses the token.
+    ctx.set(PendingAuthorizationResultKey, [
+      {
+        callback: { method: "GET", params: { code: "ok" } },
+        hookUrl: "https://agent.example.com/callback",
+        name: "linear",
+      },
+    ]);
+
+    await expect(call(CONNECTION_SEARCH_TOOL_NAME, { connection: "linear" })).rejects.toThrow(
+      'Authorization failed for "linear": the service rejected the token immediately after authorization.',
+    );
+    expect(startAuthorization).not.toHaveBeenCalled();
+  });
+
+  it("reuses the open sign-in for a retried call instead of replacing its prompt", async () => {
+    const { call, ctx, startAuthorization } = setup();
+    const first = (await call(CONNECTION_EXECUTE_TOOL_NAME, {
+      connection: "notion",
+      tool: "list_issues",
+    })) as { challenges: readonly AuthorizationChallenge[] };
+    // The turn resumed for another sign-in while notion's prompt stayed open.
+    ctx.set(OpenAuthorizationChallengesKey, first.challenges);
+
+    const retried = await call(CONNECTION_EXECUTE_TOOL_NAME, {
+      connection: "notion",
+      tool: "list_issues",
+    });
+    expect(retried).toMatchObject({
+      challenges: [{ attemptId: first.challenges[0]!.attemptId, name: "notion" }],
+    });
+    expect(startAuthorization).toHaveBeenCalledOnce();
   });
 });

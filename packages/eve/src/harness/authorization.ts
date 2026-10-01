@@ -35,7 +35,7 @@ import {
  * nonce that re-derives it) from start to finish.
  */
 
-import { loadContext } from "#context/container.js";
+import { contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { SessionIdKey, type SessionAuthContext } from "#context/keys.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
@@ -297,6 +297,28 @@ export const CallbackBaseUrlKey = new ContextKey<string>("eve.callbackBaseUrl");
 /** Hook token of a runtime that owns its callback instead of using the session hook. */
 export const AuthorizationHookKey = new ContextKey<string>("eve.authorizationHook");
 
+/**
+ * Sign-ins still waiting on the person when the step starts. A call that needs
+ * the same sign-in again reuses its attempt, so the prompt the person already
+ * has keeps working instead of being replaced.
+ */
+export const OpenAuthorizationChallengesKey = new ContextKey<readonly AuthorizationChallenge[]>(
+  "eve.openAuthorizationChallenges",
+);
+
+/** The open sign-in a new challenge for the same scope and principal should reuse. */
+export function findOpenAuthorizationChallenge(
+  challenge: Pick<AuthorizationChallenge, "candidateId" | "grant" | "name" | "principal">,
+): AuthorizationChallenge | undefined {
+  const open = contextStorage.getStore()?.get(OpenAuthorizationChallengesKey) ?? [];
+  return open.find(
+    (candidate) =>
+      candidate.attemptId !== undefined &&
+      candidate.candidateId === challenge.candidateId &&
+      sameSignIn(candidate, challenge),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Session state persistence (internal — used by framework only)
 // ---------------------------------------------------------------------------
@@ -315,10 +337,18 @@ export function setPendingAuthorization(
   const pending = getPendingAuthorization(sessionState);
   const previous = pending?.challenges ?? [];
   const superseded = getSupersededAuthorizationChallenges(sessionState, active);
+  const reused = new Set(active.flatMap((challenge) => challenge.attemptId ?? []));
   return {
     ...sessionState,
     [PENDING_AUTHORIZATION_KEY]: {
-      challenges: [...previous.filter((challenge) => !superseded.includes(challenge)), ...active],
+      challenges: [
+        ...previous.filter(
+          (challenge) =>
+            !superseded.includes(challenge) &&
+            (challenge.attemptId === undefined || !reused.has(challenge.attemptId)),
+        ),
+        ...active,
+      ],
     },
   };
 }
@@ -340,7 +370,11 @@ export function getSupersededAuthorizationChallenges(
 ): readonly AuthorizationChallenge[] {
   const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
   return previous.filter((candidate) =>
-    replacements.some((replacement) => sameSignIn(candidate, replacement)),
+    replacements.some(
+      (replacement) =>
+        sameSignIn(candidate, replacement) &&
+        (candidate.attemptId === undefined || candidate.attemptId !== replacement.attemptId),
+    ),
   );
 }
 
@@ -349,7 +383,10 @@ export function getSupersededAuthorizationChallenges(
  * connection that all use one Vercel Connect connector. Approval sign-ins
  * stay per candidate because each one settles its own approval.
  */
-function sameSignIn(left: AuthorizationChallenge, right: AuthorizationChallenge): boolean {
+function sameSignIn(
+  left: Pick<AuthorizationChallenge, "candidateId" | "grant" | "name" | "principal">,
+  right: Pick<AuthorizationChallenge, "candidateId" | "grant" | "name" | "principal">,
+): boolean {
   const sameGrant =
     left.grant !== undefined &&
     left.grant === right.grant &&

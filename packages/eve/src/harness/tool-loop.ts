@@ -2797,7 +2797,15 @@ async function handleStepResult(input: {
           }),
         );
       }
+      // A reused attempt already has its prompt; announcing it again would
+      // post a second card for one sign-in.
+      const announced = new Set(
+        (getPendingAuthorization(baseSession.state)?.challenges ?? []).flatMap(
+          (challenge) => challenge.attemptId ?? [],
+        ),
+      );
       for (const ch of challenges) {
+        if (ch.attemptId !== undefined && announced.has(ch.attemptId)) continue;
         await emit(
           createAuthorizationRequiredEvent({
             ...authorizationEventFields(ch),

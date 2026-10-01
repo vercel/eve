@@ -232,7 +232,7 @@ async function searchConnectionTools(
   const unavailable: UnavailableConnection[] = [];
   const candidates: RankCandidate[] = [];
   for (const connection of targets) {
-    const listed = await listConnectionTools(registry, connection);
+    const listed = await listConnectionTools(registry, connection, auth);
     if ("unavailable" in listed) unavailable.push(listed.unavailable);
     else {
       for (const tool of listed.tools) candidates.push({ connection, tool });
@@ -297,14 +297,26 @@ type ListedConnectionTools =
 async function listConnectionTools(
   registry: ConnectionRegistry,
   connection: ResolvedConnectionDefinition,
+  auth: ReturnType<typeof createAuthorizationExecution>,
 ): Promise<ListedConnectionTools> {
   const name = connection.connectionName;
   try {
     return { tools: await registry.getClient(name).getToolMetadata() };
   } catch (error) {
     if (isConnectionAuthorizationRequiredError(error)) {
-      const interactive = (await resolveInteractiveAuthorization(registry, name)) !== undefined;
-      if (!interactive) {
+      const scoped = await resolveInteractiveAuthorization(registry, name);
+      // The token the user just signed in with was refused. Asking again would
+      // loop, so report the failure instead.
+      if (scoped !== undefined && auth.isJustAuthorized(scoped)) {
+        return {
+          unavailable: {
+            connection: name,
+            error: `Authorization failed for "${name}": the service rejected the token immediately after authorization.`,
+            terminal: true,
+          },
+        };
+      }
+      if (scoped === undefined) {
         return {
           unavailable: {
             connection: name,

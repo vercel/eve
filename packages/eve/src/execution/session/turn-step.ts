@@ -71,6 +71,7 @@ import {
   CallbackBaseUrlKey,
   clearPendingAuthorization,
   getPendingAuthorization,
+  OpenAuthorizationChallengesKey,
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
@@ -179,6 +180,11 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       };
     }
   }
+
+  ctx.set(
+    OpenAuthorizationChallengesKey,
+    getPendingAuthorization(durableSession.state)?.challenges ?? [],
+  );
 
   const previousAuth = ctx.get(AuthKey);
 
