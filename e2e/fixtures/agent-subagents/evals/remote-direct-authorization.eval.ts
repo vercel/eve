@@ -40,7 +40,11 @@ export default defineEval({
       data: { name: "direct-release-authorization", outcome: "authorized", principalId: ALICE },
     });
     turn.messageIncludes("PARENT-DIRECT-COMPLETE: DIRECT-AUTHORIZATION-COMPLETE");
-    t.calledSubagent("remote-loopback", { status: "completed", count: 1 });
+    // The call starts in the held segment and settles in the resumed one.
+    turn.event("task.settled", {
+      count: 1,
+      data: { name: "remote-loopback", status: "completed" },
+    });
     t.noFailedActions();
   },
 });

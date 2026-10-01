@@ -18,8 +18,11 @@ export default defineEval({
   timeoutMs: 90_000,
 
   async test(t) {
+    // A fresh principal per run: the fixture provider remembers each user's token.
+    const alice = { "x-eve-forwarded-principal-id": `catalog-alice-${crypto.randomUUID()}` };
     const started = await t.send(
       "Alice wants to see the items in private-catalog. Search that connection for its items tools, then list the items and report them.",
+      { headers: alice },
     );
     const session = started.session;
     started.expectOk();

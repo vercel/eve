@@ -1,6 +1,12 @@
 import { ConnectionAuthorizationRequiredError } from "eve/connections";
 import type { ToolAuthProvider } from "eve/tools";
 
+/**
+ * Tokens kept after sign-in, by user. Module scope because a dynamic
+ * connection builds a new provider each time it resolves.
+ */
+const rememberedTokens = new Map<string, string>();
+
 /** Simulates the external auth service; the tool uses eve's real ctx auth methods. */
 export function createFakeAuthProvider({
   expiredToken,
@@ -13,12 +19,14 @@ export function createFakeAuthProvider({
    */
   rememberSignIns?: boolean;
 }): ToolAuthProvider {
-  const tokens = new Map<string, string>();
   return {
     principalType: "user",
     async getToken({ principal }) {
       if (expiredToken) return { token: "expired-fixture-token" };
-      const token = principal.type === "user" ? tokens.get(principal.id) : undefined;
+      const token =
+        rememberSignIns && principal.type === "user"
+          ? rememberedTokens.get(principal.id)
+          : undefined;
       if (token !== undefined) return { token };
       throw new ConnectionAuthorizationRequiredError("workflow-step");
     },
@@ -37,7 +45,7 @@ export function createFakeAuthProvider({
         throw new Error("Authorization did not match the workflow requester");
       }
       const token = "authorized-fixture-token";
-      if (rememberSignIns) tokens.set(principal.id, token);
+      if (rememberSignIns) rememberedTokens.set(principal.id, token);
       return { token };
     },
   };
