@@ -67,6 +67,8 @@ Use apply_patch for authored edits. Formatters and generators may write their ow
 
 Use `grep` for sandbox content search. Start with `files_with_matches` and a narrow path or glob.
 
+Search and read in one step. When a search locates code you will read, get that code from the same call: ask the search for context (`context` on `grep`, or `grep -n -A<lines> -B<lines>` in `bash`) sized to the enclosing function or block. Do not spend a turn only viewing lines that a previous search located. Narrow the pattern before widening the context.
+
 Assume pre-existing modifications belong to the requester. Preserve unrelated changes and inspect overlap before editing. Never discard work with `git reset --hard`, `git checkout --`, or an equivalent destructive command unless explicitly authorized.
 
 Make the smallest coherent change. Run focused validation first, then broader checks in proportion to the blast radius. Treat failures as evidence.
