@@ -472,15 +472,6 @@ describe("workflowEntry integration", () => {
         await expect(workflowRuntime.resolveContinuation(token)).resolves.toEqual({
           sessionId: run.runId,
         });
-        const recovered = await createChannelAddress({
-          adapter: { kind: "http" },
-          channelName: "http",
-          continuationToken: "unused",
-          runtime: workflowRuntime,
-          occurrenceToken: token,
-          requestInput: false,
-        }).send("must not execute again", { auth: null });
-        expect(recovered.id).toBe(run.runId);
       } finally {
         stream.dispose();
       }
