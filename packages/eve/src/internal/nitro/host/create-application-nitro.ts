@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { resolveAuthoredTsConfigPath } from "#internal/authored-module-loader.js";
+import { resolveAuthoredTsConfigPath } from "#internal/authored-module-build-options.js";
 import { createNitro } from "nitro/builder";
 import type { Nitro } from "nitro/types";
 import { configureInstrumentationEntry } from "#internal/nitro/host/instrumentation-entry.js";

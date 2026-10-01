@@ -587,7 +587,8 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistries: [sourceRegistry],
     });
 
-    expect(toolSourceIterations).toBe(1);
+    // One read lists the module graph's entries; the other is the projection.
+    expect(toolSourceIterations).toBe(2);
     expect(compiled.config.build?.externalDependencies).toEqual(["sharp"]);
   });
 
@@ -762,7 +763,8 @@ describe("compileAgentManifest source graph", () => {
       }),
     ).rejects.toThrow('Subagent "subagents/child" must define a non-empty description.');
 
-    expect(toolSourceIterations).toBe(1);
+    // One read lists the module graph's entries; the other is the projection.
+    expect(toolSourceIterations).toBe(2);
   });
 
   it("disables a lower-precedence framework slot without retaining a binding", async () => {
