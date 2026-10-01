@@ -1,4 +1,4 @@
-/** Rolldown AST subset consumed by the dynamic-tool transform. */
+/** Rolldown AST subset consumed by the dynamic tool and remote agent transforms. */
 export type DynamicToolAstNode = {
   argument?: DynamicToolAstNode | null;
   arguments?: DynamicToolAstNode[];
@@ -36,6 +36,8 @@ export type DynamicToolAstNode = {
   value?: DynamicToolAstNode | unknown;
   elements?: Array<DynamicToolAstNode | null>;
 };
+
+type AstNode = DynamicToolAstNode;
 
 type IdentifierContext = "binding" | "reference";
 
@@ -200,10 +202,95 @@ function isRuntimeTypeScriptExpression(node: DynamicToolAstNode): boolean {
   );
 }
 
-function isAstNode(value: unknown): value is DynamicToolAstNode {
+export function isAstNode(value: unknown): value is DynamicToolAstNode {
   return (
     value !== null &&
     typeof value === "object" &&
     typeof (value as DynamicToolAstNode).type === "string"
+  );
+}
+
+/**
+ * Local names (`alias` or `namespace.name`) that refer to the given exports of
+ * an `eve` or `eve/*` import.
+ */
+export function findEveImportAliases(ast: AstNode, names: readonly string[]): ReadonlySet<string> {
+  const aliases = new Set<string>();
+  walkNode(ast, (node) => {
+    if (node.type !== "ImportDeclaration") return true;
+    const source = node.source?.value;
+    if (typeof source !== "string" || (source !== "eve" && !source.startsWith("eve/"))) {
+      return false;
+    }
+    for (const specifier of node.specifiers ?? []) {
+      if (specifier.type === "ImportNamespaceSpecifier" && specifier.local?.name) {
+        for (const name of names) aliases.add(`${specifier.local.name}.${name}`);
+      }
+      if (
+        specifier.type === "ImportSpecifier" &&
+        names.includes(String(specifier.imported?.name ?? specifier.imported?.value)) &&
+        specifier.local?.name
+      ) {
+        aliases.add(specifier.local.name);
+      }
+    }
+    return false;
+  });
+  return aliases;
+}
+
+export function readDefinerName(callee: AstNode | undefined): string | undefined {
+  if (callee?.type === "Identifier") return callee.name;
+  if (callee?.type !== "MemberExpression" || callee.object?.type !== "Identifier") return undefined;
+  const property = callee.computed ? callee.property?.value : callee.property?.name;
+  return typeof property === "string" ? `${callee.object.name}.${property}` : undefined;
+}
+
+export function collectScopeVarDeclarations(bodyNode: AstNode): string[] {
+  const names: string[] = [];
+  walkNode(bodyNode, (node) => {
+    if (node !== bodyNode && isFunction(node)) return false;
+    if (node.type === "VariableDeclarator") collectPatternNames(node.id as AstNode | null, names);
+    if (node.type === "FunctionDeclaration" && node.id?.name) names.push(node.id.name);
+    return true;
+  });
+  return names;
+}
+
+function collectPatternNames(pattern: AstNode | null, names: string[]): void {
+  if (!pattern) return;
+  if (pattern.type === "Identifier" && pattern.name) {
+    names.push(pattern.name);
+    return;
+  }
+  if (pattern.type === "ObjectPattern") {
+    for (const property of pattern.properties ?? []) {
+      collectPatternNames(
+        property.type === "RestElement"
+          ? (property.argument as AstNode | null)
+          : (property.value as AstNode | null),
+        names,
+      );
+    }
+  }
+  if (pattern.type === "ArrayPattern") {
+    for (const element of pattern.elements ?? []) collectPatternNames(element, names);
+  }
+  if (pattern.type === "AssignmentPattern") {
+    collectPatternNames(pattern.left as AstNode | null, names);
+  }
+}
+
+export function extractParamNames(fn: AstNode): string[] {
+  const names: string[] = [];
+  for (const parameter of fn.params ?? []) collectPatternNames(parameter, names);
+  return names;
+}
+
+export function isFunction(node: AstNode): boolean {
+  return (
+    node.type === "ArrowFunctionExpression" ||
+    node.type === "FunctionDeclaration" ||
+    node.type === "FunctionExpression"
   );
 }

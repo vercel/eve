@@ -131,6 +131,63 @@ export default defineDynamic({
     expect(credentials.headers!()).toEqual({ "x-runtime": "fresh" });
   });
 
+  it("hoists credentials from aliased and namespace imports", async () => {
+    for (const source of [
+      `import { defineDynamic, defineRemoteAgent as remote } from "eve";
+export default defineDynamic({ events: { "session.started": () => remote({ description: "Research", url: "https://example.com", headers: () => ({ "x-runtime": "fresh" }) }) } });`,
+      `import * as eve from "eve";
+export default eve.defineDynamic({ events: { "session.started": () => eve.defineRemoteAgent({ description: "Research", url: "https://example.com", headers: () => ({ "x-runtime": "fresh" }) }) } });`,
+    ]) {
+      expect(await transformSource(source)).toContain("__eveResolveRemoteAgentCredentials");
+    }
+  });
+
+  it("fails the build when credentials reference a function-local binding", async () => {
+    // The hoisted copy would silently read the module-level "env" instead.
+    const source = `
+import { defineDynamic, defineRemoteAgent } from "eve";
+
+const env = "STAGING";
+export default defineDynamic({
+  events: {
+    "session.started": () => {
+      const env = "PRODUCTION";
+      return defineRemoteAgent({
+        description: "Remote research.",
+        headers: () => ({ "x-env": env }),
+        url: "https://research.example.com",
+      });
+    },
+  },
+});
+`;
+    await expect(transformSource(source)).rejects.toThrow(
+      /Dynamic remote agent "headers" in subagents\/research\.ts references "env", declared inside a function/,
+    );
+  });
+
+  it("allows credentials that use module bindings and their own locals", async () => {
+    const source = `
+import { defineDynamic, defineRemoteAgent } from "eve";
+
+const ENV = "PRODUCTION";
+export default defineDynamic({
+  events: {
+    "session.started": (_event, ctx) =>
+      defineRemoteAgent({
+        async auth(request) {
+          const ctx = { token: ENV };
+          return { headers: { authorization: ctx.token, url: request?.url } };
+        },
+        description: "Remote research.",
+        url: "https://research.example.com",
+      }),
+  },
+});
+`;
+    expect(await transformSource(source)).toContain("__eveResolveRemoteAgentCredentials");
+  });
+
   it("does not transform public remote definitions without credentials", async () => {
     await expect(
       transformDynamicRemoteAgentCredentials(
