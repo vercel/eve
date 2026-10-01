@@ -23,7 +23,7 @@ import {
   resolveForwardedTraceSeed,
 } from "#shared/forwarded-trace-policy.js";
 import { genAiMemoryRecordsAttribute } from "#tracing/agent-otel-content.js";
-import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
 import { isAgentTraceContext, markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { recordAgentSpanError } from "#tracing/agent-span-error.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
@@ -164,7 +164,7 @@ function memorySpanAttributes(
     ...agentSpanNamingAttributes(event.operationName, event.operationName),
     ...agentTraceIdentityAttributes({
       rootSessionId: event.rootSessionId,
-      traceSessionId: event.traceSessionId ?? event.rootSessionId,
+      traceSessionId: traceSessionIdOf(event),
       sessionId: event.sessionId,
     }),
   };

@@ -16,7 +16,7 @@ import type {
   InstrumentationProviderDefinition,
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
-import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
 import { contentAttribute, textContentAttribute } from "#tracing/agent-otel-content.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
@@ -79,8 +79,7 @@ export function createAgentActionInstrumentation(input: {
         traceId: traceContext.traceId,
       },
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
-      traceSessionId:
-        event.scope.traceSessionId ?? event.scope.rootSessionId ?? event.scope.sessionId,
+      traceSessionId: traceSessionIdOf(event.scope),
       sessionId: event.scope.sessionId,
       spanId: input.idGenerator.deriveSpanId(`action:${event.idempotencyKey}`),
       startTimeMs: Date.now(),
@@ -125,7 +124,7 @@ export function createAgentActionInstrumentation(input: {
             ...agentSpanNamingAttributes(AGENT_SPAN_NAMES.action),
             ...agentTraceIdentityAttributes({
               rootSessionId: state.rootSessionId,
-              traceSessionId: state.traceSessionId ?? state.rootSessionId,
+              traceSessionId: state.traceSessionId,
               sessionId: state.sessionId,
             }),
             ...(invocation

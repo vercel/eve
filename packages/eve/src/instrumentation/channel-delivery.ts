@@ -19,7 +19,7 @@ import {
 } from "#shared/conversation-context.js";
 
 export interface ChannelDeliveryStartInstrumentation {
-  readonly traceSessionId?: string;
+  readonly traceSessionId: string;
   readonly agentName?: string;
   readonly ctx: AlsContext;
   readonly delivery: DeliverHookPayload;

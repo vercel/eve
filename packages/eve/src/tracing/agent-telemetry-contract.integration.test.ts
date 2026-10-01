@@ -16,6 +16,7 @@ import {
   ParentSessionKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
+  TraceRootKey,
 } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
@@ -125,6 +126,178 @@ function scopeFor(sessionId: string, audience: "public" | "private"): Instrument
 }
 
 describe("exported agent telemetry contract", () => {
+  it("preserves explicit trace-session identity on every remote and local-child span", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const runtime = { ...createRuntime(), memoryOperations: true };
+    try {
+      for (const sessionId of ["remote", "local-child"]) {
+        const ctx = contextFor("public");
+        ctx.set(ConversationIdKey, "caller-conversation");
+        ctx.set(
+          TraceRootKey,
+          sessionId === "remote" ? { kind: "own" } : { kind: "inherited", sessionId: "remote" },
+        );
+        ctx.set(ParentSessionKey, {
+          callId: "dispatch",
+          rootSessionId: "caller-root",
+          sessionId: sessionId === "remote" ? "caller" : "remote",
+          turn: { id: "turn_0", sequence: 0 },
+        });
+        const bound = bindInstrumentationRuntime(runtime, ctx, {
+          agentName: sessionId,
+          rootSessionId: "caller-root",
+          sessionId,
+        })!;
+        const hooks = runtime.hooks.forTrace!(traceContext(sessionId, "public"));
+        await contextStorage.run(ctx, async () => {
+          await bound.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
+          await bound.prepareExecution().runStep(
+            {
+              environment: "production",
+              eveVersion: "test",
+              hasInput: true,
+              session: { sessionId },
+            },
+            async (step) => {
+              const attempt = step.prepareAttempt({
+                attemptIndex: 0,
+                stepIndex: 0,
+                turnId: "turn_0",
+              });
+              const scope = attempt.scope;
+              await hooks.publish({
+                type: "step.attempt.started",
+                idempotencyKey: attemptIdempotencyKey(scope),
+                scope,
+                operation: { modelId: "test", operationId: "ai.streamText", provider: "test" },
+              });
+              const actionKey = actionIdempotencyKey(sessionId, "turn_0", "tool");
+              const toolKey = toolCallIdempotencyKey(scope, "tool", 0);
+              const modelKey = modelCallIdempotencyKey(scope, 0, 0);
+              await hooks.publish({
+                type: "action.started",
+                idempotencyKey: actionKey,
+                scope,
+                callId: "tool",
+                name: "inspect",
+                kind: "tool-call",
+                input: {},
+              });
+              await hooks.publish({
+                type: "tool.call.started",
+                idempotencyKey: toolKey,
+                scope,
+                callId: "tool",
+                toolName: "inspect",
+                input: {},
+              });
+              await hooks.publish({
+                type: "model.call.started",
+                idempotencyKey: modelKey,
+                scope,
+                model: { modelId: "test", provider: "test" },
+              });
+              await hooks.publish({
+                type: "model.call.completed",
+                idempotencyKey: modelKey,
+                scope,
+                finishReason: "stop",
+                content: [],
+                usage: { inputTokens: 1, outputTokens: 1 },
+              });
+              const approvalKey = inputIdempotencyKey(sessionId, "turn_0", "approval");
+              await hooks.publish({
+                type: "input.requested",
+                idempotencyKey: approvalKey,
+                scope,
+                requestId: "approval",
+                kind: "tool-approval",
+                action: { callId: "tool", name: "inspect" },
+                request: { prompt: "Approve" },
+              });
+              // State must preserve identity when execution resumes with a different context.
+              const saved = serializeContext(ctx);
+              const restored = await deserializeContext(saved);
+              await contextStorage.run(restored, async () => {
+                await hooks.publish({
+                  type: "input.resolved",
+                  idempotencyKey: approvalKey,
+                  scope,
+                  requestId: "approval",
+                  kind: "tool-approval",
+                  outcome: "approved",
+                  response: {},
+                });
+                await hooks.publish({
+                  type: "tool.call.completed",
+                  idempotencyKey: toolKey,
+                  scope,
+                  output: { type: "result", output: {} },
+                });
+                await hooks.publish({
+                  type: "action.completed",
+                  idempotencyKey: actionKey,
+                  scope,
+                  outcome: "completed",
+                  output: { type: "result", output: {} },
+                });
+              });
+              await bound.memory!.execute(
+                {
+                  idempotencyKey: `memory:${sessionId}`,
+                  operationName: "search_memory",
+                  phase: "turn.started",
+                  slot: "notes",
+                  storeId: "store",
+                  turnId: "turn_0",
+                },
+                async () => ({ value: undefined }),
+              );
+              await attempt.complete();
+            },
+          );
+          await hooks.publish({
+            type: "turn.completed",
+            idempotencyKey: turnIdempotencyKey(sessionId, "turn_0"),
+            sessionId,
+            turnId: "turn_0",
+          });
+          await hooks.publish({
+            type: "session.waiting",
+            idempotencyKey: sessionIdempotencyKey(sessionId),
+            sessionId,
+            turnId: "turn_0",
+          });
+        });
+      }
+      await runtime.forceFlush();
+      const owned = runtime.exporter
+        .getFinishedSpans()
+        .filter((span) => typeof span.attributes["agent.run.id"] === "string");
+      for (const runId of ["remote", "local-child"]) {
+        const spans = owned.filter((span) => span.attributes["agent.run.id"] === runId);
+        expect(spans.map((span) => span.name).sort()).toEqual(
+          [
+            `invoke_agent ${runId}`,
+            "agent.step",
+            "chat test",
+            "execute_tool inspect",
+            "agent.action",
+            "agent.approval",
+            "search_memory",
+          ].sort(),
+        );
+        for (const span of spans) {
+          expect(span.attributes["vercel.session_id"]).toBe("remote");
+          expect(span.attributes["gen_ai.conversation.id"]).toBe("caller-conversation");
+        }
+      }
+    } finally {
+      await runtime.shutdown();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it.each(["public", "private"] as const)(
     "round-trips the normalized %s v4 trace forest through OTLP",
     async (audience) => {

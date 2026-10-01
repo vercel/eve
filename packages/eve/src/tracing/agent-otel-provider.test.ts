@@ -1156,6 +1156,7 @@ describe("createAgentOtelInstrumentation", () => {
           delivery: started.delivery,
           policyAgentName: started.agentName,
           rootSessionId: started.rootSessionId,
+          traceSessionId: started.rootSessionId,
           sequence: 0,
           sessionId: started.sessionId,
           turnId: "turn_0",
@@ -1227,6 +1228,7 @@ describe("createAgentOtelInstrumentation", () => {
           idempotencyKey: `channel-delivery:remote-session:${delivery.deliveryId}`,
           parentTraceContext,
           rootSessionId: "parent-session",
+          traceSessionId: "parent-session",
           sequence: 0,
           sessionId: "remote-session",
           turnId: "turn-remote",
@@ -1244,6 +1246,7 @@ describe("createAgentOtelInstrumentation", () => {
           delivery,
           policyAgentName: "weather",
           rootSessionId: "parent-session",
+          traceSessionId: "parent-session",
           sequence: 0,
           sessionId: "remote-session",
           turnId: "turn-remote",
@@ -1663,6 +1666,7 @@ describe("createAgentOtelInstrumentation", () => {
       context: spanContext("1", "2"),
       decision: { action: "record", recordInputs: false, recordOutputs: true },
       rootSessionId: "session-policy",
+      traceSessionId: "session-policy",
     });
     const runtime = createRuntime(stateStore, null);
 
@@ -1678,6 +1682,7 @@ describe("createAgentOtelInstrumentation", () => {
       context: spanContext("1", "2"),
       decision: { action: "record", recordInputs: true, recordOutputs: false },
       rootSessionId: "session-forwarded-private",
+      traceSessionId: "session-forwarded-private",
     });
     const runtime = createRuntime(stateStore, null);
     const ctx = new ContextContainer();
@@ -1798,6 +1803,7 @@ describe("createAgentOtelInstrumentation", () => {
       channelAudience: "public",
       context: spanContext("1", "2"),
       rootSessionId: "session-sampled",
+      traceSessionId: "session-sampled",
     });
     const runtime = createRuntime(stateStore, null);
 
@@ -1814,6 +1820,7 @@ describe("createAgentOtelInstrumentation", () => {
       channelAudience: "public",
       context: { ...spanContext("1", "2"), traceFlags: 0 },
       rootSessionId: "session-unsampled",
+      traceSessionId: "session-unsampled",
     });
     const runtime = createRuntime(stateStore, null);
 

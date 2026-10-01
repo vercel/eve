@@ -85,7 +85,7 @@ export function createMemoryInstrumentation(input: {
   readonly resolveContext: () => {
     readonly hooks: InstrumentationHooks;
     readonly rootSessionId: string;
-    readonly traceSessionId?: string;
+    readonly traceSessionId: string;
   };
   readonly runInContext: InstrumentationContextRunner;
   readonly sessionId: string;

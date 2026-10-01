@@ -13,6 +13,18 @@ import { isInstrumentationPrincipalType } from "#instrumentation/lifecycle.js";
 
 export const AGENT_TRACE_CONTEXT_KEY = "eve.harness.agentTrace";
 
+export function decodeTraceSessionId(state: {
+  readonly traceSessionId?: unknown;
+  readonly rootSessionId?: unknown;
+}): string {
+  // Persisted state from before trace-session identity uses the lineage root.
+  return typeof state.traceSessionId === "string"
+    ? state.traceSessionId
+    : typeof state.rootSessionId === "string"
+      ? state.rootSessionId
+      : "";
+}
+
 export interface AgentTraceContextState {
   readonly actionAnchors: Readonly<Record<string, AgentActionTraceState>>;
   readonly actions: Readonly<Record<string, AgentActionTraceState>>;
@@ -84,10 +96,9 @@ function deserializeSession(value: unknown): AgentSessionTraceState | undefined 
     decision: readInstrumentationDecision(value.decision),
     parentLineage: deserializeParentLineage(value.parentLineage),
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
-    traceSessionId: typeof value.traceSessionId === "string" ? value.traceSessionId : undefined,
+    traceSessionId: decodeTraceSessionId(value),
     scheduleId: typeof value.scheduleId === "string" ? value.scheduleId : undefined,
     title: typeof value.title === "string" ? value.title : undefined,
-    ownsTraceSession: value.ownsTraceSession === true,
   };
 }
 
@@ -104,7 +115,7 @@ function deserializeTurn(value: unknown): AgentTurnTraceState | undefined {
     modelUsage: deserializeModelUsage(value.modelUsage),
     parentLineage: deserializeParentLineage(value.parentLineage),
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
-    traceSessionId: typeof value.traceSessionId === "string" ? value.traceSessionId : undefined,
+    traceSessionId: decodeTraceSessionId(value),
     sequence: typeof value.sequence === "number" ? value.sequence : 0,
     startTimeMs: value.startTimeMs,
     subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
@@ -167,7 +178,7 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     name: value.name,
     parent: value.parent,
     rootSessionId: value.rootSessionId,
-    traceSessionId: typeof value.traceSessionId === "string" ? value.traceSessionId : undefined,
+    traceSessionId: decodeTraceSessionId(value),
     sessionId: value.sessionId,
     spanId: value.spanId,
     startTimeMs: value.startTimeMs,

@@ -1,6 +1,14 @@
 import { resolveConversationId } from "#shared/conversation-identity.js";
 import { AGENT_TRACE_SCHEMA_VERSION } from "#tracing/agent-span-contract.js";
 
+export function traceSessionIdOf(scope: {
+  readonly traceSessionId?: string;
+  readonly rootSessionId?: string;
+  readonly sessionId: string;
+}): string {
+  return scope.traceSessionId ?? scope.rootSessionId ?? scope.sessionId;
+}
+
 export function agentTraceIdentityAttributes(input: {
   readonly rootSessionId: string;
   readonly sessionId: string;

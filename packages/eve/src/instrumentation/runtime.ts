@@ -91,6 +91,7 @@ export interface InstrumentationStepScope<TSession> {
       | "parentLineage"
       | "parentTraceContext"
       | "rootSessionId"
+      | "traceSessionId"
       | "sessionId"
     >,
   ) => HandleEventFn | undefined;
@@ -130,6 +131,7 @@ export interface PreparedInstrumentationAttempt {
 export type InstrumentationAttempt = InstrumentationAttemptScope;
 
 export interface BoundInstrumentationSession {
+  readonly traceSessionId: string;
   readonly agentName: string;
   readonly rootSessionId: string;
   readonly sessionId: string;
@@ -178,7 +180,7 @@ export interface ExecutionInstrumentation {
   readonly flush: () => Promise<void>;
   readonly instrumentChannelDelivery: (
     input:
-      | Omit<ChannelDeliveryStartInstrumentation, "hooks" | "policyAgentName">
+      | Omit<ChannelDeliveryStartInstrumentation, "hooks" | "policyAgentName" | "traceSessionId">
       | Omit<ChannelDeliveryTerminalInstrumentation, "hooks">,
   ) => Promise<void>;
   readonly memory?: MemoryInstrumentation;
@@ -189,8 +191,12 @@ export interface ExecutionInstrumentation {
 export function bindInstrumentationRuntime(
   runtime: InstrumentationRuntime | undefined,
   ctx: ContextContainer,
-  boundSession: BoundInstrumentationSession,
+  boundInput: Omit<BoundInstrumentationSession, "traceSessionId">,
 ): ExecutionInstrumentation | undefined {
+  const boundSession: BoundInstrumentationSession = {
+    ...boundInput,
+    traceSessionId: resolveTraceRootSessionId(ctx, boundInput.sessionId),
+  };
   if (readConversationId(ctx.get(ConversationIdKey)) === undefined) {
     ctx.set(
       ConversationIdKey,
@@ -199,12 +205,13 @@ export function bindInstrumentationRuntime(
   }
   if (runtime === undefined) return undefined;
   const baseHooks = runtime.hooks;
+  const traceSessionId = boundSession.traceSessionId;
   const readSessionContext = () => {
     const sessionContext = readInstrumentationSessionContext(contextStorage.getStore() ?? ctx);
     return {
       ...sessionContext,
       rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
-      traceSessionId: resolveTraceRootSessionId(sessionContext.context, boundSession.sessionId),
+      traceSessionId,
     };
   };
   const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
@@ -509,14 +516,15 @@ export function bindInstrumentationRuntime(
     flush: runtime.forceFlush,
     instrumentChannelDelivery: (input) => {
       const sessionContext = readSessionContext();
-      const deliveryInput = {
-        ...input,
-        hooks: baseHooks,
-        policyAgentName: boundSession.agentName,
-      };
-      if ("delivery" in deliveryInput)
-        Object.assign(deliveryInput, { traceSessionId: sessionContext.traceSessionId });
-      return instrumentChannelDelivery(deliveryInput);
+      if ("delivery" in input) {
+        return instrumentChannelDelivery({
+          ...input,
+          hooks: baseHooks,
+          policyAgentName: boundSession.agentName,
+          traceSessionId: sessionContext.traceSessionId,
+        });
+      }
+      return instrumentChannelDelivery({ ...input, hooks: baseHooks });
     },
     memory,
     prepareExecution,
@@ -530,11 +538,13 @@ export function bindSessionInstrumentation(input: {
   readonly rootSessionId: string;
   readonly sessionId: string;
 }): ExecutionInstrumentation | undefined {
-  return bindInstrumentationRuntime(getInstrumentationRuntime(), input.ctx, {
+  const session: BoundInstrumentationSession = {
     agentName: input.agentName,
     rootSessionId: input.rootSessionId,
+    traceSessionId: resolveTraceRootSessionId(input.ctx, input.sessionId),
     sessionId: input.sessionId,
-  });
+  };
+  return bindInstrumentationRuntime(getInstrumentationRuntime(), input.ctx, session);
 }
 
 function resolveStepInstrumentationDecision(

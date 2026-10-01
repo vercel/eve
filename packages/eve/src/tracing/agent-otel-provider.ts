@@ -30,7 +30,7 @@ import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channe
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
-import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
 import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
 import { createAgentMemoryInstrumentation } from "#tracing/agent-memory-instrumentation.js";
 import {
@@ -375,8 +375,7 @@ export function createAgentOtelInstrumentation(
           ...agentSpanNamingAttributes(modelSpanName(event.model.modelId), "chat"),
           ...agentTraceIdentityAttributes({
             rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
-            traceSessionId:
-              event.scope.traceSessionId ?? event.scope.rootSessionId ?? event.scope.sessionId,
+            traceSessionId: traceSessionIdOf(event.scope),
             sessionId: event.scope.sessionId,
           }),
           ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),

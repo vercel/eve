@@ -2,7 +2,7 @@ import type { AgentSessionTraceState, AgentTurnTraceState } from "#tracing/agent
 import type { InstrumentationStepAttemptStartedEvent } from "#instrumentation/lifecycle.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { agentInvocationSpanName } from "#tracing/agent-span-contract.js";
-import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
 import { normalizeInstrumentationChannelKind } from "#internal/instrumentation.js";
 
 type SpanAttributePrimitive = string | number | boolean;
@@ -21,8 +21,12 @@ export function agentActivationAttributes(input: {
   const recordsOutputs = recordsTrace && input.session?.decision?.recordOutputs === true;
   const parentLineage = input.turn.parentLineage ?? input.session?.parentLineage;
   const isSubagent = parentLineage !== undefined;
-  const ownsSessionMetadata = !isSubagent || input.session?.ownsTraceSession === true;
-  const channelClassification = agentChannelClassificationAttributes(input.session, input.turn);
+  const ownsSessionMetadata = !isSubagent || input.turn.traceSessionId === input.sessionId;
+  const channelClassification = agentChannelClassificationAttributes(
+    input.session,
+    input.turn,
+    input.sessionId,
+  );
   const scheduleId = isSubagent ? undefined : input.session?.scheduleId;
   return {
     "agent.framework.name": "eve",
@@ -50,8 +54,7 @@ export function agentActivationAttributes(input: {
     ...agentSpanNamingAttributes(agentInvocationSpanName(input.agentName), "invoke_agent"),
     ...agentTraceIdentityAttributes({
       rootSessionId: input.turn.rootSessionId,
-      traceSessionId:
-        input.turn.traceSessionId ?? input.session?.traceSessionId ?? input.turn.rootSessionId,
+      traceSessionId: input.turn.traceSessionId,
       sessionId: input.sessionId,
     }),
   };
@@ -60,12 +63,13 @@ export function agentActivationAttributes(input: {
 export function agentChannelClassificationAttributes(
   session: AgentSessionTraceState | undefined,
   turn: AgentTurnTraceState,
+  sessionId: string,
 ): {
   readonly "agent.channel.kind": string | undefined;
   readonly "agent.session.origin": string | undefined;
 } {
   const isSubagent = (turn.parentLineage ?? session?.parentLineage) !== undefined;
-  const ownsSessionMetadata = !isSubagent || session?.ownsTraceSession === true;
+  const ownsSessionMetadata = !isSubagent || turn.traceSessionId === sessionId;
   const channelKind =
     turn.channelDelivery?.channelKind ??
     (!ownsSessionMetadata
@@ -93,7 +97,11 @@ export function agentStepAttributes(input: {
   readonly turn: AgentTurnTraceState;
 }) {
   const { event, session, turn } = input;
-  const channelClassification = agentChannelClassificationAttributes(session, turn);
+  const channelClassification = agentChannelClassificationAttributes(
+    session,
+    turn,
+    event.scope.sessionId,
+  );
   return {
     "agent.framework.name": "eve",
     "agent.framework.version": input.frameworkVersion,
@@ -108,11 +116,7 @@ export function agentStepAttributes(input: {
     ...agentSpanNamingAttributes("agent.step"),
     ...agentTraceIdentityAttributes({
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
-      traceSessionId:
-        event.scope.traceSessionId ??
-        session?.traceSessionId ??
-        event.scope.rootSessionId ??
-        event.scope.sessionId,
+      traceSessionId: traceSessionIdOf(event.scope),
       sessionId: event.scope.sessionId,
     }),
     ...runtimeContextAttributes(event.runtimeContext),
