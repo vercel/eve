@@ -1,5 +1,5 @@
 import { isTaskControlTool } from "#protocol/task-tools.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { TaskCancelReason, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -46,6 +46,11 @@ export interface TaskCardTask {
    * only in a private conversation, since error text can carry internals.
    */
   readonly summary?: string;
+  /**
+   * Why a cancelled task stopped: `task_cancel` when the model no longer
+   * needed it. Absent when the task's run stopped on its own.
+   */
+  readonly cancelReason?: TaskCancelReason;
   readonly startedAt: string;
   readonly settledAt?: string;
 }
@@ -93,6 +98,7 @@ interface TrackedCall {
     readonly id: string;
     readonly kind: "agent" | "tool";
     readonly summary?: string;
+    readonly cancelReason?: TaskCancelReason;
     /** Open requests and sign-ins the task waits on, oldest first. */
     readonly blockers?: readonly (TaskCardBlocker & { readonly id: string })[];
   };
@@ -268,6 +274,8 @@ function trackTurnEvent(
       };
       const summary = taskSummary(event.data);
       if (summary !== undefined) task.summary = summary;
+      const cancelReason = event.data.cancel?.reason;
+      if (cancelReason !== undefined) task.cancelReason = cancelReason;
       return { turn: replaceCall(current, { ...call, settledAt: at, status, task }), turnId };
     }
     case "turn.completed":
@@ -365,6 +373,7 @@ function toTask(
   }
   const shown = call.status !== "failed" || shareable;
   if (task.summary !== undefined && shown) row.summary = task.summary;
+  if (task.cancelReason !== undefined) row.cancelReason = task.cancelReason;
   if (call.settledAt !== undefined) row.settledAt = call.settledAt;
   return row;
 }

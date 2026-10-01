@@ -43,6 +43,7 @@ import { withdrawProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 import {
   createTaskSettledEvent,
+  type TaskCancelReason,
   type TaskSettledStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
@@ -124,24 +125,30 @@ async function applyTaskRunMessage(
  * run withdraws its stretch's questions itself, and the session decides each one.
  */
 export async function cancelTasksStep(
-  input: SessionStepState & { readonly taskIds: readonly string[] },
+  input: SessionStepState & TaskCancellationInput,
 ): Promise<SessionStateTransition> {
   "use step";
   return await withSessionStateDelta(input, cancelTasks);
 }
 
+interface TaskCancellationInput {
+  readonly reason: TaskCancelReason;
+  readonly taskIds: readonly string[];
+}
+
 async function cancelTasks(
-  input: SessionStepState & { readonly taskIds: readonly string[] },
+  input: SessionStepState & TaskCancellationInput,
 ): Promise<PublishedSessionEvents> {
   const session = readDurableSession(input.sessionState);
   let table = readTaskTable(session.state);
   const events: TaskSettledStreamEvent[] = [];
   const stoppedRunIds = new Set<string>();
+  const outcome: TaskOutcome = { reason: input.reason, status: "cancelled" };
   for (const taskId of input.taskIds) {
     const record = findTask(table, taskId);
     const cancelled = cancelTask(table, taskId);
     table = cancelled.table;
-    events.push(...taskSettledEvents(record, cancelled.settled, CANCELLED));
+    events.push(...taskSettledEvents(record, cancelled.settled, outcome));
     if (cancelled.send === undefined) continue;
     if (record?.resumable === false) stoppedRunIds.add(cancelled.send.run.runId);
     await sendTaskRunCommands(cancelled.send);
@@ -156,8 +163,6 @@ async function cancelTasks(
   );
   return await publishSessionEvents({ ...input, ...relayed }, events);
 }
-
-const CANCELLED: TaskOutcome = { status: "cancelled" };
 
 /** The `task.settled` events for a task's settled calls; calls only settle on a known task. */
 function taskSettledEvents(
@@ -191,7 +196,11 @@ function taskSettledEvent(
         status: "failed",
       });
     case "cancelled":
-      return createTaskSettledEvent({ ...base, status: "cancelled" });
+      return createTaskSettledEvent(
+        outcome.reason === undefined
+          ? { ...base, status: "cancelled" }
+          : { ...base, cancel: { reason: outcome.reason }, status: "cancelled" },
+      );
   }
 }
 

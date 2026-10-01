@@ -9,6 +9,7 @@ import {
   type TaskTable,
 } from "#execution/tasks/table.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
+import type { TaskCancelReason } from "#protocol/message.js";
 import { TASK_CANCEL_TOOL_NAME, UNKNOWN_TASK_CODE } from "#protocol/task-tools.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
@@ -33,13 +34,16 @@ export function sessionTaskTable(cursor: SessionStateCursor): TaskTable {
 }
 
 /**
- * Cancels every working task: a turn that ends anyway, such as by failing,
- * cancels the tasks it held on.
+ * Cancels every working task: `session.cancel()` stops them, and a turn that
+ * ends anyway, such as by failing, cancels the tasks it held on.
  */
-export async function cancelWorkingTasks(cursor: SessionStateCursor): Promise<void> {
+export async function cancelWorkingTasks(
+  cursor: SessionStateCursor,
+  reason: Exclude<TaskCancelReason, "task_cancel">,
+): Promise<void> {
   const taskIds = workingTasks(sessionTaskTable(cursor)).map((record) => record.id);
   if (taskIds.length === 0) return;
-  await cursor.advance((state) => cancelTasksStep({ ...state, taskIds }));
+  await cursor.advance((state) => cancelTasksStep({ ...state, reason, taskIds }));
 }
 
 export async function answerTaskCancel(
@@ -55,7 +59,9 @@ export async function answerTaskCancel(
     return { ...taskToolResult(call.callId, TASK_CANCEL_TOOL_NAME, error), isError: true };
   }
   if (result.status === "cancelled") {
-    await cursor.advance((state) => cancelTasksStep({ ...state, taskIds: [call.taskId] }));
+    await cursor.advance((state) =>
+      cancelTasksStep({ ...state, reason: "task_cancel", taskIds: [call.taskId] }),
+    );
   }
   return taskToolResult(
     call.callId,

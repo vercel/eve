@@ -224,7 +224,7 @@ async function runSessionLoop(
         continue;
       }
       if (next.kind === "cancel-working-tasks") {
-        await cancelWorkingTasks(cursor);
+        await cancelWorkingTasks(cursor, "session_cancel");
         continue;
       }
       return next;
@@ -348,7 +348,7 @@ async function runSessionLoop(
           await cancelDescendantTurnsStep({
             sessionState: cursor.sessionState,
           });
-          await cancelWorkingTasks(cursor);
+          await cancelWorkingTasks(cursor, "session_cancel");
           await settleCancelledTurn(false);
           // Cancellation consumes any outstanding caller; do not report the prior turn.
           action = { ...action, settled: undefined };

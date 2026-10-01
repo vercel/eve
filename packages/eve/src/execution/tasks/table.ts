@@ -4,7 +4,7 @@ import type { SessionStateMap } from "#harness/types.js";
 import { isNonEmptyString, isObject } from "#shared/guards.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { TaskStartedStreamEvent } from "#protocol/message.js";
+import type { TaskCancelReason, TaskStartedStreamEvent } from "#protocol/message.js";
 import { UNREADABLE_TASK_ERROR } from "#execution/tasks/render.js";
 
 // The session's task table. Every write to a task record goes through this
@@ -62,7 +62,7 @@ export interface TaskRunCommands {
 export type TaskOutcome =
   | { readonly output: JsonValue; readonly status: "completed" }
   | { readonly error: string; readonly status: "failed" }
-  | { readonly status: "cancelled" };
+  | { readonly reason?: TaskCancelReason; readonly status: "cancelled" };
 
 /**
  * An outcome the model receives, one per reply or run end, however many calls

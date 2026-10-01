@@ -83,6 +83,7 @@ describe("answerTaskCancel", () => {
         event: {
           data: {
             callId: "research-call",
+            cancel: { reason: "task_cancel" },
             kind: "tool",
             name: "research",
             status: "cancelled",
