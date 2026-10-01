@@ -1,3 +1,4 @@
+import { isApprovalRequest } from "#harness/input-request-class.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { GenerationSteering } from "#harness/generation-steering.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
@@ -957,15 +958,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         return { held: { kind: "request" }, next: null, session: parkedSession };
       }
 
-      if (
-        coordinated.kind === "responses-completed" &&
-        getPendingAuthorization(pending.session.state) === undefined
-      ) {
+      if (getPendingAuthorization(pending.session.state) === undefined) {
         if (isHarnessBetweenTurns(pending.session)) {
-          await emit?.(createSessionWaitingEvent());
-        } else {
-          // A response attempt that settled without resolving the request (a
-          // refused responder, say) leaves the turn held on it.
+          if (coordinated.kind === "responses-completed") {
+            await emit?.(createSessionWaitingEvent());
+          }
+        } else if (holdsOwnApproval(pending.session, activeTurnId(emissionState))) {
+          // A delivery that left this turn's approval unresolved (a partial
+          // answer, or a responder the policy refused) keeps the turn held.
           let heldSession = pending.session;
           if (emit) {
             emissionState = await holdTurnForRequest(emit, emissionState);
@@ -2904,6 +2904,13 @@ async function handleStepResult(input: {
     // Text written before an `endsTurn` call was narration, not the reply.
     stepOutput: endsTurn ? null : stepOutput,
   });
+}
+
+/** Whether `turnId` raised a tool approval that is still waiting for an answer. */
+function holdsOwnApproval(session: HarnessSession, turnId: string): boolean {
+  return getPendingInputBatches(session.state).some(
+    (batch) => batch.event?.turnId === turnId && batch.requests.every(isApprovalRequest),
+  );
 }
 
 /**

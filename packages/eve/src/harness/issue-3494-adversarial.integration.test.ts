@@ -555,6 +555,32 @@ it("cancels a held approval when the same person steers the turn", async () => {
   expect(result.settledTurn?.output).toBe("FINAL");
 });
 
+it("runs an approved call and cancels the rest when a partial approval is steered", async () => {
+  const f = fixture("steer-partial-approval");
+  f.script.push(calls("gateA", "gateB"));
+  const parked = await f.drive({ message: "Prepare gateA and gateB." });
+  expect(parked.held).toEqual({ kind: "request" });
+  const partialStart = f.events.length;
+  const partial = await f.drive(f.respond("gateA"));
+  // The partial answer leaves gateB open, so the turn stays held on it.
+  expect(partial.held).toEqual({ kind: "request" });
+  expect(f.events.slice(partialStart).map((event) => event.type)).toEqual(["turn.waiting"]);
+  expect(f.executions).toEqual([]);
+  expect(f.pending().map((request) => request.action.toolName)).toEqual(["gateA", "gateB"]);
+
+  f.script.push("FINAL", "FINAL");
+  const result = await f.drive({ message: "Skip gateB for now." });
+  expect(f.executions).toEqual(["gateA"]);
+  expect(f.pending()).toEqual([]);
+  expect(
+    f.events
+      .filter((event) => event.type === "input.resolved")
+      .flatMap((event) => event.data.resolutions)
+      .map((resolution) => resolution.outcome),
+  ).toEqual(["approved", "ignored"]);
+  expect(result.settledTurn?.output).toBe("FINAL");
+});
+
 it("keeps holding the turn after a refused response and resumes it on retry", async () => {
   let allowed = false;
   const f = fixture("held-refused-response", () =>

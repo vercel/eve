@@ -103,24 +103,29 @@ export function resolveApprovalInputBatches(
 }
 
 /**
- * Resolves the first open approval batch with no responses, so each of its
- * approvals reports `ignored`: the person steered the held turn with a message
- * instead of answering. Later batches stay open, as with answered batches.
+ * Resolves the first open approval batch when the person steered the held turn
+ * with a message instead of finishing it. Requests they already answered, as in
+ * a partial approval, keep that answer; the rest report `ignored`. Later
+ * batches stay open, as with answered batches.
  */
 export function ignoreApprovalInputBatch(
-  input: InputDomainResolverInput,
+  input: InputDomainResolverInput & {
+    readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
+  },
 ): ResolvePendingInputResult {
   const batch = input.batches[0]!;
+  const answers = responsesForBatches(input.responses, [batch]);
   const approval = resolveApprovalBatch({
     batch,
     messages: [...input.baseHistory],
-    responses: [],
+    resolveApprovalKey: input.resolveApprovalKey,
+    responses: answers,
     session: input.session,
   });
-  const resolved = buildResolvedInputBatch(batch, []);
+  const resolved = buildResolvedInputBatch(batch, answers);
   return finishResolvedInput({
     deferTurnInput: true,
-    leftoverResponses: [],
+    leftoverResponses: responsesForBatches(input.responses, input.batches.slice(1)),
     messages: approval.messages,
     rejectedActions: approval.rejectedActions,
     resolvedInputs: resolved === undefined ? [] : [resolved],

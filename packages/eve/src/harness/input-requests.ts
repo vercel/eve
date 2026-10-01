@@ -180,17 +180,21 @@ export function resolvePendingInput(input: {
     responses,
     session: input.session,
   };
-  // A message that steers a turn held on its own approval cancels that
-  // approval, so the turn moves on instead of waiting behind it.
+  // A message that steers a turn held on its own approval cancels what is
+  // still waiting, so the turn moves on instead of waiting behind it. Requests
+  // already answered, as in a partial approval, keep their answer.
   if (
     input.internalStep === true &&
     route.kind === "approvals" &&
-    responses.length === 0 &&
+    findAnsweredApprovalBatches(batches, responses).length === 0 &&
     resolvedStepInput?.message !== undefined &&
     input.activeTurnId !== undefined &&
     batches[0]?.event?.turnId === input.activeTurnId
   ) {
-    return ignoreApprovalInputBatch(resolverInput);
+    return ignoreApprovalInputBatch({
+      ...resolverInput,
+      resolveApprovalKey: input.resolveApprovalKey,
+    });
   }
   switch (route.kind) {
     case "session-limit":
