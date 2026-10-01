@@ -1,4 +1,5 @@
 import type { TaskCancelResult, TaskWaitResult } from "#execution/tasks/calls.js";
+import { formatDuration } from "#shared/format-duration.js";
 
 // Every string the model reads about tasks lives in this file.
 
@@ -276,19 +277,6 @@ export function renderTasksNote(input: {
 
 function listedTaskAttributes(task: ListedTask): string {
   return `id="${escapeAttribute(task.id)}" tool="${escapeAttribute(task.tool)}"`;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1_000) return `${String(Math.max(0, Math.round(ms)))}ms`;
-  const totalSeconds = Math.round(ms / 1_000);
-  const hours = Math.floor(totalSeconds / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-  const parts: string[] = [];
-  if (hours > 0) parts.push(`${String(hours)}h`);
-  if (minutes > 0) parts.push(`${String(minutes)}m`);
-  if (seconds > 0) parts.push(`${String(seconds)}s`);
-  return parts.join(" ");
 }
 
 function joinList(items: readonly string[]): string {

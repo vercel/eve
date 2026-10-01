@@ -228,6 +228,89 @@ describe("Slack task card", () => {
     expect(cardCalls()).toHaveLength(written);
   });
 
+  it("names the agents a turn asks, times their work, and keeps one block id across updates", async () => {
+    const start = Date.parse("2026-10-01T10:00:00.000Z");
+    vi.useFakeTimers({ now: start, toFake: ["Date"] });
+    const agents = [
+      { callId: RESEARCH_CALL, name: "researcher", taskId: "researcher-7k2m9q" },
+      { callId: "call_review", name: "reviewer", taskId: "reviewer-p3x8vd" },
+    ];
+    const { cardCalls, emit } = slackThread();
+    const plan = () => (cardCalls().at(-1)!.body["blocks"] as BlockKitBlock[])[0]!;
+
+    await emit(
+      createActionsRequestedEvent({
+        actions: agents.map(({ callId, name }) => ({
+          callId,
+          input: { message: "Look into the checkout spike." },
+          kind: "tool-call" as const,
+          toolName: name,
+        })),
+        sequence: 1,
+        stepIndex: 0,
+        turnId: TURN_ID,
+      }),
+      ...agents.map(({ callId, name, taskId }) =>
+        createTaskStartedEvent({ callId, kind: "agent", name, taskId, turnId: TURN_ID }),
+      ),
+    );
+    expect(plan()).toMatchObject({ title: "Asking researcher and reviewer", type: "plan" });
+
+    vi.setSystemTime(start + 74_000);
+    await emit(
+      createTaskSettledEvent({
+        callId: RESEARCH_CALL,
+        kind: "agent",
+        name: "researcher",
+        output: { message: "Alice found three incidents. Details follow." },
+        status: "completed",
+        taskId: "researcher-7k2m9q",
+        turnId: TURN_ID,
+      }),
+    );
+    expect(plan()).toMatchObject({
+      tasks: [
+        {
+          output: {
+            elements: [{ elements: [{ text: "Done in 1m 14s: Alice found three incidents." }] }],
+          },
+        },
+        { status: "in_progress" },
+      ],
+      title: "Waiting on reviewer · 1 of 2 tasks done",
+    });
+
+    vi.setSystemTime(start + 180_000);
+    await emit(
+      createTaskSettledEvent({
+        callId: "call_review",
+        error: { message: "Bob's review timed out." },
+        kind: "agent",
+        name: "reviewer",
+        status: "failed",
+        taskId: "reviewer-p3x8vd",
+        turnId: TURN_ID,
+      }),
+      TURN_COMPLETED,
+    );
+    expect(plan()).toMatchObject({
+      tasks: [
+        {},
+        {
+          output: {
+            elements: [{ elements: [{ text: "Failed after 3m: Bob's review timed out." }] }],
+          },
+        },
+      ],
+      title: "Finished 2 tasks in 3m: 1 failed",
+    });
+
+    const blockIds = new Set(
+      cardCalls().map((call) => (call.body["blocks"] as BlockKitBlock[])[0]!["block_id"]),
+    );
+    expect([...blockIds]).toEqual([`eve_task_card_${TURN_ID}`]);
+  });
+
   it("shows a failure without its error text outside private conversations", async () => {
     const { cardCalls, emit } = slackThread({ state: { ...THREAD, audience: "public" } });
 
