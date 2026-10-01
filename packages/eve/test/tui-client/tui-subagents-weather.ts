@@ -94,7 +94,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   input.emit("data", Buffer.from("y"));
   console.log(theme.muted("[tui-weather] approved get_stock_price"));
 
-  await waitForCondition(() => screen.snapshot().includes("✓ stock-price"), {
+  await waitForCondition(() => screen.snapshot().includes("✓ subagent(stock-price)"), {
     timeoutMs: 120_000,
     label: "task end line",
     onTimeout: () => screen.snapshot(),
