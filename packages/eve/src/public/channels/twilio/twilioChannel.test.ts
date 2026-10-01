@@ -663,6 +663,54 @@ describe("twilioChannel() default event handlers", () => {
     });
   });
 
+  it("input.requested sends a tool approval as an SMS with numbered options", async () => {
+    const bodies: string[] = [];
+    const fetchMock: typeof fetch = async (_input, init) => {
+      bodies.push(new URLSearchParams(String(init?.body)).get("Body") ?? "");
+      return new Response(JSON.stringify({ sid: "SM999" }), {
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const adapter = withState(
+      getAdapter(
+        twilioChannel({
+          allowFrom: "*",
+          api: { apiBaseUrl: "https://twilio.test", fetch: fetchMock },
+          messaging: { from: "+15557654321" },
+        }),
+      ),
+      { from: "+15551234567", lastCallSid: null, lastMessageSid: "SM123", to: "+15557654321" },
+    );
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy_release" },
+            allowFreeform: false,
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Approve" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve Deploy release?",
+            requestId: "approval_1",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      buildAdapterContext(adapter, stubAccessor()),
+    );
+
+    expect(bodies).toEqual([
+      "Approve Deploy release?\n\n1. Approve\n2. Cancel\n\nReply with a number to choose.",
+    ]);
+  });
+
   it("receive starts a phone-pair session with an explicit continuation token", async () => {
     const channel = twilioChannel({
       allowFrom: "*",

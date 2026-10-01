@@ -12,6 +12,7 @@ import type {
   TwilioInboundResult,
   TwilioVoiceResult,
 } from "#public/channels/twilio/twilioChannel.js";
+import type { InputRequest } from "#shared/input.js";
 
 /** Default phone-number auth projection for Twilio webhook actors. */
 function defaultTwilioAuth(input: {
@@ -74,6 +75,12 @@ export const defaultEvents: TwilioChannelEvents = {
     await channel.twilio.sendMessage(event.message);
   },
 
+  async "input.requested"(event, channel, _ctx) {
+    for (const request of event.requests) {
+      await channel.twilio.sendMessage(renderTwilioInputRequest(request));
+    }
+  },
+
   async "turn.failed"(event, channel, _ctx) {
     const hint = formatErrorHint(event);
     const errorId = extractErrorId(event.details);
@@ -100,3 +107,23 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 };
+
+// SMS has no buttons, so options are numbered; a reply with the number, label, or id answers the question.
+function renderTwilioInputRequest(request: InputRequest): string {
+  const lines = [request.prompt];
+  const options = request.options ?? [];
+  if (options.length > 0) {
+    lines.push(
+      "",
+      ...options.map((option, index) => {
+        const description = option.description ? ` - ${option.description}` : "";
+        return `${index + 1}. ${option.label}${description}`;
+      }),
+      "",
+      request.allowFreeform === true
+        ? "Reply with a number, or with your own answer."
+        : "Reply with a number to choose.",
+    );
+  }
+  return lines.join("\n");
+}

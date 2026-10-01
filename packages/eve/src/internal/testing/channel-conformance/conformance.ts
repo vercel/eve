@@ -80,35 +80,7 @@ const hitlConformance = {
       },
     },
   ],
-  twilio: [
-    {
-      driver: twilioDriver,
-      broken: {
-        "a rendered question shows every option a person can choose": {
-          reason: "the channel never sends the question (no input.requested handler)",
-          symptom:
-            /Timed out waiting for the question "Which day works for the review\?" on twilio/,
-        },
-        "a text reply matching an option answers the only pending question": {
-          reason: "the channel never sends the question (no input.requested handler)",
-          symptom:
-            /Timed out waiting for the question "Which day works for the review\?" on twilio/,
-        },
-        "a tool approval shows Approve and Cancel": {
-          reason: "the channel never sends the approval (no input.requested handler)",
-          symptom: /Timed out waiting for the question "Approve Deploy release\?" on twilio/,
-        },
-        "a text reply of approve runs the gated tool": {
-          reason: "the channel never sends the approval (no input.requested handler)",
-          symptom: /Timed out waiting for the question "Approve Deploy release\?" on twilio/,
-        },
-        "a text reply of cancel stops the gated tool without running it": {
-          reason: "the channel never sends the approval (no input.requested handler)",
-          symptom: /Timed out waiting for the question "Approve Deploy release\?" on twilio/,
-        },
-      },
-    },
-  ],
+  twilio: [{ driver: twilioDriver }],
 } satisfies Record<string, readonly ConformanceChannel[]>;
 
 /**

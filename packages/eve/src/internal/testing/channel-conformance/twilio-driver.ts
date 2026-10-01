@@ -62,6 +62,7 @@ export function twilioDriver(): ChannelDriver {
       return body.Body.split("\n")
         .map((line) => /^\s*\d+[.)]\s*(.+?)\s*$/u.exec(line)?.[1])
         .filter((label): label is string => label !== undefined)
+        .map((line) => line.split(" - ", 1)[0]!)
         .map((label) => ({ handle: label, label }));
     },
     press: () => {
