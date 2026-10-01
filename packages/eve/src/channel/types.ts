@@ -83,6 +83,20 @@ export interface SessionParent {
 }
 
 /**
+ * Session whose id a run's spans carry as their trace session.
+ *
+ * Lineage and tracing usually share a root: every span in a conversation
+ * carries `parent.rootSessionId`. A remote agent runs in another deployment,
+ * so its spans start their own trace session (`own`) while its lineage still
+ * names the caller's root. Its local subagents then carry that session
+ * (`inherited`). Conversation correlation across deployments stays on
+ * `gen_ai.conversation.id`.
+ */
+export type SessionTraceRoot =
+  | { readonly kind: "own" }
+  | { readonly kind: "inherited"; readonly sessionId: string };
+
+/**
  * Serializable W3C span context identifying a parent's open trace window.
  * Structural rather than an OTel `SpanContext` so the channel surface stays
  * free of tracing dependencies.
@@ -490,6 +504,8 @@ export interface RunInput {
   /** Observability correlation only; never grants delegated-session privileges. */
   readonly conversationId?: string;
   readonly parent?: SessionParent;
+  /** Trace session for this run when it differs from `parent.rootSessionId`. */
+  readonly traceRoot?: SessionTraceRoot;
   /**
    * Dispatching parent's open trace window. Handed down rather than looked up
    * because trace state is scoped to one session's context.

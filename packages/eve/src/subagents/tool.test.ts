@@ -239,20 +239,18 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.input.outputSchema).toEqual(schema);
   });
 
-  it("hands the parent's trace window down to the child, and omits it when absent", () => {
+  it("hands the parent's trace window and trace root down to the child, and omits them when absent", () => {
     const traceContext = { spanId: "2".repeat(16), traceFlags: 1, traceId: "1".repeat(32) };
+    const traceRoot = { kind: "inherited", sessionId: "remote-root" } as const;
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
       initiatorAuth: null,
       session: makeSession(),
-      parent: makeParent(
-        makeSession(),
-        { id: "turn-0", sequence: 0 },
-        { traceContext: traceContext },
-      ),
+      parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }, { traceContext, traceRoot }),
     });
     expect(runInput.parentTraceContext).toEqual(traceContext);
+    expect(runInput.traceRoot).toEqual(traceRoot);
 
     const untraced = buildRuntimeSubagentRunInput({
       action: makeAction(),
@@ -262,6 +260,7 @@ describe("buildSubagentRunInput", () => {
       parent: makeParent(makeSession(), { id: "turn-0", sequence: 0 }),
     });
     expect(untraced.runInput.parentTraceContext).toBeUndefined();
+    expect(untraced.runInput.traceRoot).toBeUndefined();
   });
 
   it("passes a resolved local subagent description into the child message", () => {

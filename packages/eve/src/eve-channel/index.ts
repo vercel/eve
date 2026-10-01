@@ -345,6 +345,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                 : readConversationBaggage(req.headers.get("baggage")),
             parent,
             parentTraceContext,
+            // A remote agent's spans form their own session in this
+            // deployment; its lineage still names the caller's root.
+            traceRoot: parent === undefined ? undefined : { kind: "own" },
             title: messageResult.title,
           });
         } catch (error) {

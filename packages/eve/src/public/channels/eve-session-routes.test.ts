@@ -393,6 +393,9 @@ describe("eve ID-addressed session routes", () => {
           parent: trusted ? parent : undefined,
         }),
       );
+      expect(createSession.mock.calls[0]?.[0].traceRoot).toEqual(
+        trusted ? { kind: "own" } : undefined,
+      );
       const untrusted = logs.records.filter(
         (record) => record.message === "ignoring remote parent lineage from an untrusted forwarder",
       );

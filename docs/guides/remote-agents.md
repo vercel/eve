@@ -151,6 +151,12 @@ eve carries parent session lineage separately. The receiver accepts it only
 when `trustedForwarders` approves the authenticated caller; otherwise, trace
 correlation continues without it.
 
+On Vercel, a remote agent's spans and its local subagents' spans carry the
+remote session's ID as `vercel.session_id`, so the receiving project groups
+them as their own session. `gen_ai.conversation.id` still names the sender's
+conversation, and the remote agent's `agent.parent_run.id` names the calling
+session.
+
 ## Preserving trace content
 
 With `forwardPrincipal: true`, a sampled remote dispatch forwards its original

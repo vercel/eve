@@ -61,6 +61,7 @@ import { readInstrumentationSessionContext } from "#instrumentation/session-cont
 import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
+import { resolveTraceRootSessionId } from "#shared/trace-root.js";
 import { readConversationId } from "#shared/conversation-identity.js";
 import {
   getInstrumentationRuntime,
@@ -198,8 +199,13 @@ export function bindInstrumentationRuntime(
   }
   if (runtime === undefined) return undefined;
   const baseHooks = runtime.hooks;
-  const readSessionContext = () =>
-    readInstrumentationSessionContext(contextStorage.getStore() ?? ctx);
+  const readSessionContext = () => {
+    const sessionContext = readInstrumentationSessionContext(contextStorage.getStore() ?? ctx);
+    return {
+      ...sessionContext,
+      traceRootSessionId: resolveTraceRootSessionId(sessionContext.context, boundSession.sessionId),
+    };
+  };
   const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
     return (
       baseHooks.forTrace?.({
@@ -235,7 +241,7 @@ export function bindInstrumentationRuntime(
         channelType: sessionContext.instrumentation?.channelType,
         parentLineage: sessionContext.parentLineage,
         parentTraceContext: sessionContext.parentTraceContext,
-        rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
+        rootSessionId: sessionContext.traceRootSessionId,
         scheduleId: sessionContext.scheduleId,
         sessionId: boundSession.sessionId,
         title: sessionContext.title,
@@ -250,7 +256,7 @@ export function bindInstrumentationRuntime(
             const sessionContext = readSessionContext();
             return {
               hooks: bindHooks(sessionContext),
-              rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
+              rootSessionId: sessionContext.traceRootSessionId,
             };
           },
           runInContext: runtime.runInContext,
@@ -396,7 +402,7 @@ export function bindInstrumentationRuntime(
                 hooks,
                 parentLineage: sessionContext.parentLineage,
                 parentTraceContext: sessionContext.parentTraceContext,
-                rootSessionId: sessionContext.parent?.rootSessionId,
+                rootSessionId: sessionContext.traceRootSessionId,
                 scheduleId: sessionContext.scheduleId,
                 sessionId: boundSession.sessionId,
                 title: sessionContext.title,
@@ -407,7 +413,7 @@ export function bindInstrumentationRuntime(
                 attemptIndex: attemptInput.attemptIndex,
                 channelAudience: audience,
                 functionId: settings?.functionId ?? boundSession.agentName,
-                rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.sessionId,
+                rootSessionId: sessionContext.traceRootSessionId,
                 sessionId: boundSession.sessionId,
                 stepIndex: attemptInput.stepIndex,
                 turnId: attemptInput.turnId,

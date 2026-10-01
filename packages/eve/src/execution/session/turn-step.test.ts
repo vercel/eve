@@ -19,14 +19,17 @@ import {
   SessionDynamicModelReferenceKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
+  ParentSessionKey,
   SessionIdKey,
   SessionTraceSeedKey,
+  TraceRootKey,
   TurnDynamicToolMetadataKey,
   TurnDeliveryIdsKey,
   HistoryStateKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { serializeContext } from "#context/serialize.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { startWorkflowTask } from "#execution/tools/workflow/start.js";
 import { getPendingCoordinationBatch, setPendingCoordinationBatch } from "#harness/coordination.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { setHarnessEmissionState } from "#harness/emission-state.js";
@@ -658,7 +661,7 @@ function currentSessionHook(token: string) {
 }
 
 describe("dispatchCoordinationStep", () => {
-  it("repairs an empty pending turn id from the active session turn", async () => {
+  function mockCoordinationBundle(): void {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       adapterRegistry: {
         adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
@@ -674,7 +677,10 @@ describe("dispatchCoordinationStep", () => {
       toolRegistry: {},
       turnAgent: TestTurnAgent,
     } as never);
-    const session = setPendingCoordinationBatch({
+  }
+
+  function pendingWorkflowTask(turnId: string): HarnessSession {
+    return setPendingCoordinationBatch({
       tasks: [
         {
           callId: "call-1",
@@ -686,11 +692,15 @@ describe("dispatchCoordinationStep", () => {
           workflowId: "workflow//eve//research",
         },
       ],
-      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      event: { sequence: 3, stepIndex: 2, turnId },
       responseMessages: [],
       session: createStubSession(),
     });
-    installSessionStoreMocks([session]);
+  }
+
+  it("repairs an empty pending turn id from the active session turn", async () => {
+    mockCoordinationBundle();
+    installSessionStoreMocks([pendingWorkflowTask("")]);
     const sessionState = createStubSessionState({
       emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
     });
@@ -706,6 +716,41 @@ describe("dispatchCoordinationStep", () => {
     const persisted = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
     expect(result.stateDelta.sessionState).toBeDefined();
     expect(getPendingCoordinationBatch(persisted?.state)?.event.turnId).toBe("turn_3");
+  });
+
+  it.each([
+    { name: "a remote agent", traceRoot: { kind: "own" } as const, expected: "sess-test" },
+    {
+      name: "a remote agent's descendant",
+      traceRoot: { kind: "inherited", sessionId: "remote-root" } as const,
+      expected: "remote-root",
+    },
+  ])("hands $name's trace session down to the agents it opens", async ({ traceRoot, expected }) => {
+    mockCoordinationBundle();
+    installSessionStoreMocks([pendingWorkflowTask("turn_3")]);
+    const ctx = await deserializeContext(createSerializedContext());
+    ctx.set(ParentSessionKey, {
+      callId: "remote-call",
+      rootSessionId: "caller-root",
+      sessionId: "caller-session",
+      turn: { id: "caller-turn", sequence: 0 },
+    });
+    ctx.set(TraceRootKey, traceRoot);
+
+    await dispatchCoordinationStep({
+      action: "park",
+      workflowToolRunOwner: { inbox: "generated-owner-token" },
+      sessionWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState({
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "turn_3" },
+      }),
+    });
+
+    expect(vi.mocked(startWorkflowTask).mock.calls[0]?.[0].agentContext.traceRoot).toEqual({
+      kind: "inherited",
+      sessionId: expected,
+    });
   });
 });
 

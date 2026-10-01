@@ -14,6 +14,7 @@ import type {
   SessionCapabilities,
   SessionParent,
   SessionTraceContext,
+  SessionTraceRoot,
   SessionTurn,
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
@@ -36,7 +37,12 @@ import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
 
 // Re-export so consumers don't need a direct channel/ import.
-export type { SessionAuthContext, SessionParent, SessionTurn } from "#channel/types.js";
+export type {
+  SessionAuthContext,
+  SessionParent,
+  SessionTraceRoot,
+  SessionTurn,
+} from "#channel/types.js";
 
 // ---------------------------------------------------------------------------
 // Session types (public API surface)
@@ -126,6 +132,8 @@ export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationPr
   "eve.channelInstrumentation",
 );
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
+/** Set only when the trace root differs from `ParentSessionKey`'s root; see {@link SessionTraceRoot}. */
+export const TraceRootKey = new ContextKey<SessionTraceRoot>("eve.traceRoot");
 /** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */
 export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
 
