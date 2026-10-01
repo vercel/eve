@@ -36,6 +36,7 @@ import {
   supportsInteractiveAuthorization,
   type ConnectionToolMetadata,
 } from "#shared/connection-types.js";
+import { displayProperName } from "#shared/display-name.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
@@ -55,6 +56,7 @@ import {
   findConnection,
   qualifiedToolName,
   readExecuteTarget,
+  toolCallDisplayName,
 } from "./connection-target.js";
 
 const log = createLogger("framework.connection-tools");
@@ -159,6 +161,9 @@ export function resolveConnectionTools(): DynamicToolSet | null {
       description: CONNECTION_SEARCH_DESCRIPTION,
       inputSchema: CONNECTION_SEARCH_INPUT_SCHEMA,
       execute: defineDurableCallback({ callback: searchConnectionTools, closure: {} }),
+      label: {
+        start: defineDurableCallback({ callback: connectionSearchLabel, closure: {} }),
+      },
     }),
     [CONNECTION_EXECUTE_TOOL_NAME]: defineTool({
       description: CONNECTION_EXECUTE_DESCRIPTION,
@@ -177,8 +182,14 @@ export function resolveConnectionTools(): DynamicToolSet | null {
 }
 
 function connectionToolLabel(_closure: object, input: unknown): string {
-  const target = readExecuteTarget(input);
-  return target === undefined ? CONNECTION_EXECUTE_TOOL_NAME : qualifiedToolName(target);
+  return toolCallDisplayName(CONNECTION_EXECUTE_TOOL_NAME, input);
+}
+
+function connectionSearchLabel(_closure: object, input: unknown): string {
+  const connection = isObject(input) ? input.connection : undefined;
+  return typeof connection === "string" && connection !== ""
+    ? `Search ${displayProperName(connection)} tools`
+    : "Search connected tools";
 }
 
 // ---------------------------------------------------------------------------

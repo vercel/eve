@@ -18,17 +18,13 @@
  */
 
 import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
+import { displayProperName } from "#shared/display-name.js";
 
 export type { ConnectionAuthorizationOutcome };
 
-/**
- * Title-cases a connection name (`linear` → `Linear`) for display. Empty
- * strings pass through unchanged so the renderer never emits an empty
- * label inside a sentence.
- */
+/** A connection name for display (`linear` → `Linear`, `my_crm` → `My crm`). */
 export function formatConnectionDisplayName(connectionName: string): string {
-  if (connectionName.length === 0) return connectionName;
-  return connectionName.charAt(0).toUpperCase() + connectionName.slice(1);
+  return displayProperName(connectionName);
 }
 
 /**

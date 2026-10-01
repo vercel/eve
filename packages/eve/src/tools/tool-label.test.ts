@@ -16,7 +16,9 @@ describe("provided tool labels", () => {
     expect(grep.label?.start({ pattern: "slackActivityMessage" })).toBe(
       "Search slackActivityMessage",
     );
-    expect(loadSkill.label?.start({ skill: "technical-writing" })).toBe("Load technical-writing");
+    expect(loadSkill.label?.start({ skill: "technical-writing" })).toBe(
+      "Load skill: Technical writing",
+    );
     expect(readFile.label?.start({ filePath: "channels/slack/activity.ts" })).toBe(
       "Read channels/slack/activity.ts",
     );

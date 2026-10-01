@@ -3,6 +3,7 @@ import type { TaskCancelReason, UnstampedMessageStreamEvent } from "#protocol/me
 import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import { displayTitle } from "#shared/display-name.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { firstSentence, normalizePresentationText } from "#shared/presentation-text.js";
 
@@ -34,8 +35,8 @@ export interface TaskCardTask {
   /** The tool or agent name. */
   readonly name: string;
   /**
-   * The tool's start label, or the name. An agent's is `researcher: brief`,
-   * or the brief alone for a call to the agent's own copy.
+   * The tool's start label, or the name's display title. An agent's is
+   * `Researcher: brief`, or the brief alone for a call to the agent's own copy.
    */
   readonly title: string;
   /** `blocked` while the task waits on a person; see {@link TaskCardTask.blockedOn}. */
@@ -64,7 +65,7 @@ export interface TaskCardAction {
   readonly id: string;
   /** The tool name. */
   readonly name: string;
-  /** The tool's start label, or the name. */
+  /** The tool's start label, or the name's display title. */
   readonly title: string;
   readonly status: TaskCardStatus;
   /** The call's input, when its JSON is at most 4,096 characters. */
@@ -247,7 +248,7 @@ function trackTurnEvent(
         name,
         startedAt: at,
         status: "working",
-        title: name,
+        title: displayTitle(name),
       };
       const started: TrackedCall = {
         callId: call.callId,
@@ -347,7 +348,7 @@ function requestedCall(
     name,
     startedAt: at,
     status: "working",
-    title: presentationText(label) ?? name,
+    title: presentationText(label) ?? displayTitle(name),
   };
   const input = boundedInput(action.input);
   if (input !== undefined) call.input = input;

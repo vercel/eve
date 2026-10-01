@@ -161,10 +161,13 @@ function formatModelMessage(
       requestId: string;
       requestType?: "approval";
       response: typeof responseDetails;
+      toolName?: string;
     } = { requestId: response.requestId, response: responseDetails };
     if (request !== undefined) {
       resolved.prompt = request.prompt;
       resolved.requestType = "approval";
+      // The prompt is display text; the model needs the tool's real name.
+      resolved.toolName = request.action.toolName;
     }
 
     return resolved;

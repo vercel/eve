@@ -34,7 +34,7 @@ describe("extractToolApprovalInputRequests", () => {
           { id: "approve", label: "Approve" },
           { id: "cancel", label: "Cancel" },
         ],
-        prompt: "Approve tool call: bash",
+        prompt: "Approve Bash?",
         requestId: "approval-1",
       },
     ]);
@@ -72,7 +72,7 @@ describe("extractToolApprovalInputRequests", () => {
           { id: "approve", label: "Approve" },
           { id: "cancel", label: "Cancel" },
         ],
-        prompt: "Approve tool call: bash",
+        prompt: "Approve Bash?",
         requestId: "approval-1",
       },
     ]);

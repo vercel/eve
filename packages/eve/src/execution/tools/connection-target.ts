@@ -2,6 +2,7 @@
 
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import { displayProperName, displayTitle } from "#shared/display-name.js";
 import { isObject } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -22,6 +23,16 @@ export function readExecuteTarget(value: unknown): ExecuteTarget | undefined {
 
 export function qualifiedToolName(target: Pick<ExecuteTarget, "connection" | "tool">): string {
   return `${target.connection}__${target.tool}`;
+}
+
+/**
+ * How a tool call reads to a person: `Linear: List issues` for a
+ * `connection_execute` call, otherwise the tool's display title.
+ */
+export function toolCallDisplayName(toolName: string, input: unknown): string {
+  const target = toolName === CONNECTION_EXECUTE_TOOL_NAME ? readExecuteTarget(input) : undefined;
+  if (target === undefined) return displayTitle(toolName);
+  return `${displayProperName(target.connection)}: ${displayTitle(target.tool)}`;
 }
 
 export function findConnection(

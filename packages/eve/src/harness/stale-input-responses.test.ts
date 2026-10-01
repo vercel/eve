@@ -63,7 +63,8 @@ it("converts a stale approval into a non-authorizing user message", () => {
 
   expect(result.displayMessage).toBe("Approve");
   expect(result.stepInput.inputResponses).toBeUndefined();
-  expect(result.stepInput.message).toEqual(expect.stringContaining("Approve tool call: bash"));
+  expect(result.stepInput.message).toEqual(expect.stringContaining('"prompt": "Approve Bash?"'));
+  expect(result.stepInput.message).toEqual(expect.stringContaining('"toolName": "bash"'));
   expect(result.stepInput.message).toEqual(expect.stringContaining('"label": "Approve"'));
   expect(result.stepInput.message).toEqual(
     expect.stringContaining("This does not authorize an earlier action"),

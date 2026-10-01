@@ -27,9 +27,9 @@ describe("agent call label", () => {
   it.each([
     [
       "names a subagent before the first sentence of its brief",
-      "researcher",
+      "code__incident_researcher",
       "Find the March incidents. Include timelines.\nThen rank them.",
-      "researcher: Find the March incidents.",
+      "Incident researcher: Find the March incidents.",
     ],
     [
       "shows the brief alone for the agent's own copy",
@@ -55,7 +55,7 @@ describe("agent call label", () => {
       "See PR No. 4035 for details. Then review it.",
       "See PR No. 4035 for details.",
     ],
-    ["falls back to the agent's name for an empty brief", "agent", "  \n", "agent"],
+    ["falls back to the agent's name for an empty brief", "agent", "  \n", "Agent"],
   ])("%s", (_name, tool, message, expected) => {
     expect(withTaskIdInput(agentTool(tool)).label?.start?.({ message })).toBe(expected);
   });

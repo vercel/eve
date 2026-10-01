@@ -751,6 +751,14 @@ describe("turn connection approval restoration", () => {
       const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
         .requests[0]!;
       expect(request.action.toolName).toBe("connection_execute");
+      expect(request.prompt).toBe("Approve Notes: Save note?");
+      expect(
+        fixture.events.flatMap((event) =>
+          event.type === "actions.requested"
+            ? Object.values(event.data.presentation ?? {}).map((entry) => entry.label)
+            : [],
+        ),
+      ).toContain("Notes: Save note");
       expect(fixture.fetch).not.toHaveBeenCalled();
       if (cold) clearDurableDynamicCallbacks(sessionId);
       const candidate = await fixture.step({

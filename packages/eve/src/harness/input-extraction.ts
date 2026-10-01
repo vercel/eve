@@ -1,6 +1,7 @@
 import type { ContentPart, ModelMessage, ToolSet } from "ai";
 import { z } from "#compiled/zod/index.js";
 
+import { toolCallDisplayName } from "#execution/tools/connection-target.js";
 import type { InputRequest } from "#shared/input.js";
 import { createRuntimeToolCallActionFromToolCall } from "#harness/tool-call-action.js";
 
@@ -99,7 +100,7 @@ function extractApprovalRequests(input: {
         { id: "approve", label: "Approve" },
         { id: "cancel", label: "Cancel" },
       ],
-      prompt: `Approve tool call: ${toolCall.toolName}`,
+      prompt: `Approve ${toolCallDisplayName(toolCall.toolName, toolCall.input)}?`,
       requestId: approval.approvalId,
     });
   }

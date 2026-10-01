@@ -23,6 +23,7 @@ import type {
   SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import { displayName } from "#shared/display-name.js";
 import { formatDuration } from "#shared/format-duration.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 
@@ -111,7 +112,7 @@ function agentNames(tasks: readonly TaskCardTask[]): string | undefined {
   if (tasks.some((task) => task.kind !== "agent" || task.name === AGENT_TOOL_NAME)) {
     return undefined;
   }
-  const names = [...new Set(tasks.map((task) => task.name))];
+  const names = [...new Set(tasks.map((task) => displayName(task.name)))];
   if (names.length === 0 || names.length > MAX_NAMED_AGENTS) return undefined;
   if (names.length <= 2) return names.join(" and ");
   return `${names.slice(0, -1).join(", ")}, and ${names.at(-1)!}`;

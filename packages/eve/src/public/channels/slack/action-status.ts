@@ -6,11 +6,12 @@
 import type { ActionPresentationByCallId } from "#protocol/message.js";
 import { actionRequestName } from "#shared/action-request-name.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
+import { displayName, displayTitle } from "#shared/display-name.js";
 import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 
 /**
- * The first call's label, or its tool or agent name, plus `+N more` when the
- * model requested several calls at once.
+ * The first call's label, or its tool or agent display title, plus `+N more`
+ * when the model requested several calls at once.
  */
 export function describeActionRequests(
   actions: readonly RuntimeActionRequest[],
@@ -18,7 +19,7 @@ export function describeActionRequests(
 ): string {
   const [first] = actions;
   if (first === undefined) return "Working...";
-  const label = presentation?.[first.callId]?.label ?? actionRequestName(first);
+  const label = presentation?.[first.callId]?.label ?? displayTitle(actionRequestName(first));
   return actions.length === 1 ? label : `${label} +${String(actions.length - 1)} more`;
 }
 
@@ -29,7 +30,7 @@ export function describeActionRequests(
  */
 export function waitingOnTasks(names: readonly string[]): string {
   const [only] = names;
-  if (names.length === 1 && only !== AGENT_TOOL_NAME) return `Waiting on ${only!}...`;
+  if (names.length === 1 && only !== AGENT_TOOL_NAME) return `Waiting on ${displayName(only!)}...`;
   return names.length === 1
     ? "Waiting on a task..."
     : `Waiting on ${String(names.length)} tasks...`;
