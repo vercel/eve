@@ -49,7 +49,10 @@ export function resolveSessionStepResult(
   }
 
   if (stepResult.next === null) {
-    const pending = derivePendingState(stepResult.session);
+    const { pendingCoordinationCallIds, pendingTaskToolCalls } = derivePendingState(
+      stepResult.session,
+    );
+    const pending = { pendingCoordinationCallIds, pendingTaskToolCalls };
 
     // Usage stays unreported until the turn settles, so the caller's result includes all of it.
     if (stepResult.settledTurn !== undefined) {

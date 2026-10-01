@@ -43,8 +43,7 @@ export interface TurnSelection {
 
 export type SessionInputSelection =
   | TurnSelection
-  | { readonly control: SessionControl; readonly kind: "control" }
-  | { readonly kind: "authorization-resume"; readonly payloads: readonly DeliverPayload[] };
+  | { readonly control: SessionControl; readonly kind: "control" };
 
 /**
  * Ordered, admitted session input. Entries are private; callers receive typed
@@ -149,47 +148,27 @@ export class SessionInputQueue {
     };
   }
 
+  /**
+   * Takes the next turn or control. Sign-ins end with the turn that raised
+   * them, so a callback still queued between turns is stale and dropped.
+   */
   takeNext(options?: {
-    /**
-     * Attempt ids of the open authorization challenges. Callbacks for other
-     * attempts are stale and dropped. Any expected callback resumes ahead of
-     * ordinary input; the other challenges stay pending. Waiting for every
-     * attempt would let one ignored sign-in prompt, possibly from an earlier
-     * turn, keep a completed sign-in from ever resuming the session.
-     */
-    readonly expectedAttemptIds?: ReadonlySet<string>;
     /** Sequence of a delivery admitted while nothing else was pending. */
     readonly freshSequence?: number;
   }): SessionInputSelection | undefined {
-    const expected = options?.expectedAttemptIds ?? new Set<string>();
-    this.retain((entry) => entry.kind !== "authorization" || expected.has(entry.attemptId));
-    const payloads = this.entries.flatMap((entry) =>
-      entry.kind === "authorization" ? [entry.payload] : [],
-    );
-    if (payloads.length > 0) {
-      this.retain((entry) => entry.kind !== "authorization");
-      return { kind: "authorization-resume", payloads };
-    }
-    const index = this.entries.findIndex((entry) => entry.kind !== "authorization");
-    if (index < 0) return undefined;
-    return this.takeSelectionAt(index, options?.freshSequence);
-  }
-
-  private takeSelectionAt(index: number, freshSequence: number | undefined): SessionInputSelection {
-    const first = this.entries.splice(index, 1)[0]!;
+    this.retain((entry) => entry.kind !== "authorization");
+    const first = this.entries.shift() as QueuedDelivery | QueuedControl | undefined;
+    if (first === undefined) return undefined;
     if (first.kind === "control") return { control: first.control, kind: "control" };
-    if (first.kind === "authorization") {
-      return { kind: "authorization-resume", payloads: [first.payload] };
-    }
 
-    const turnEntries = [first, ...this.takeFollowingDeliveriesFrom(first, index)];
+    const turnEntries = [first, ...this.takeFollowingDeliveriesFrom(first)];
     const sequences = turnEntries.map(({ sequence }) => sequence);
     const combined = combine(turnEntries);
     return {
       delivery: combined,
       handoffEligible:
         sequences.length === 1 &&
-        sequences[0] === freshSequence &&
+        sequences[0] === options?.freshSequence &&
         combined.caller === undefined &&
         this.entries.length === 0,
       kind: "turn",
@@ -202,12 +181,12 @@ export class SessionInputQueue {
    * call share a turn, as they would steer it. Claims may change between
    * them; the turn runs with the latest.
    */
-  private takeFollowingDeliveriesFrom(first: QueuedDelivery, index: number): QueuedDelivery[] {
+  private takeFollowingDeliveriesFrom(first: QueuedDelivery): QueuedDelivery[] {
     const principal = principalOf(first.delivery.auth);
     const following: QueuedDelivery[] = [];
     let callId = first.delivery.caller?.callId;
-    while (this.entries.length > index) {
-      const next = this.entries[index];
+    while (true) {
+      const next = this.entries[0];
       if (
         next?.kind !== "delivery" ||
         principal === ANONYMOUS_PRINCIPAL ||
@@ -218,7 +197,8 @@ export class SessionInputQueue {
       ) {
         break;
       }
-      following.push(this.entries.splice(index, 1)[0] as QueuedDelivery);
+      following.push(next);
+      this.entries.shift();
       callId ??= next.delivery.caller?.callId;
     }
     return following;

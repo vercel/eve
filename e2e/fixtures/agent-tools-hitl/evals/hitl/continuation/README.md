@@ -66,7 +66,7 @@ Each row maps to exactly one eval. “Response authorization” here means the f
 
 ## Evidence boundaries
 
-The [adversarial integration probes](../../../../../../packages/eve/src/harness/issue-3494-adversarial.integration.test.ts) also cover `final_output` with an older approval, multiple independent approvals plus an internally deferred message, and a complete independent batch beside a partially answered batch. Those exact scenarios are **integration-only**, not extra E2E cases. Integration workflow results are injected at runtime boundaries; the E2E cases execute fixture tools through the durable runtime.
+The [adversarial integration probes](../../../../../../packages/eve/src/harness/issue-3494-adversarial.integration.test.ts) cover the same held-turn rules at the harness boundary, plus a responder's sign-in expiring and a message waiting behind a budget prompt. Integration workflow results are injected at runtime boundaries; the E2E cases execute fixture tools through the durable runtime.
 
 Partial approvals in E2E use an accepted HTTP response followed by a separate user message; the API rejects combined message/response payloads. The provider cases supply a provider-executed result at the scripted model stream boundary; they do not contact a provider that performs the tool. Budget scripts report synthetic token usage against the fixture's one-million-output-token limit.
 

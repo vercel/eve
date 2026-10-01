@@ -66,9 +66,6 @@ export type DurableStepResult = (
     }
   | {
       readonly action: "park";
-      readonly authorizationAttemptIds?: readonly string[];
-      readonly hasPendingAuthorization: boolean;
-      readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
       readonly pendingTaskToolCalls?: readonly TaskToolCall[];
       readonly settled?: SettledTurn;
@@ -95,7 +92,6 @@ export type TurnOutcome = {
       readonly usageDelta?: TokenUsage;
     }
   | {
-      readonly authorizationAttemptIds?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
       readonly settled?: SettledTurn;

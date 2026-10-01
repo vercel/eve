@@ -71,12 +71,6 @@ function authorizationRead(): ScriptedRead {
   return { result: { done: false, value: authorizationCallbackPayload } };
 }
 
-function cancelRead(): ScriptedRead {
-  return {
-    result: { done: false, value: { kind: "cancel" } },
-  };
-}
-
 function messageRead(message: string): ScriptedRead {
   return {
     result: { done: false, value: { kind: "send", payload: { message } } },
@@ -94,7 +88,6 @@ type WaitInput = {
 function waitInput(inbox: SessionInbox): WaitInput {
   const cursor = createCursor(inbox);
   return {
-    expectedAttemptIds: new Set(["attempt-1"]),
     hasWorkingTasks: () => false,
     inbox: inbox,
     cursor,
@@ -269,52 +262,18 @@ describe("nextTurnDelivery", () => {
     expect(input.queue.pendingCount).toBe(1);
   });
 
-  it("surfaces an authorization callback as its own instruction", async () => {
-    const inbox = createMockInbox([authorizationRead()]);
+  it("drops a sign-in callback that arrives between turns and waits for the next message", async () => {
+    const inbox = createMockInbox([authorizationRead(), messageRead("next question")]);
 
-    const next = await nextTurnDelivery(waitInput(inbox));
+    const next = await nextTurnDelivery({ ...batchingInputFor([]), inbox });
 
-    expect(next.kind).toBe("authorization-resume");
-    if (next.kind !== "authorization-resume") throw new Error("unreachable");
-    expect(next.payloads).toEqual(authorizationCallbackPayload.payloads);
-  });
-
-  it("resumes a completed sign-in while another sign-in prompt is still open", async () => {
-    const inbox = createMockInbox([authorizationRead()]);
-
-    const next = await nextTurnDelivery({
-      ...waitInput(inbox),
-      expectedAttemptIds: new Set(["ignored-attempt", "attempt-1"]),
-    });
-
-    expect(next).toEqual({
-      kind: "authorization-resume",
-      payloads: authorizationCallbackPayload.payloads,
+    expect(next).toMatchObject({
+      delivery: { payloads: [{ message: "next question" }] },
+      kind: "turn",
     });
   });
 
-  it("resumes authorization after a consumed no-op cancel", async () => {
-    // A cancel with no active turn is consumed without producing a parent
-    // turn; the wait continues and the callback must still resume the challenge.
-    const inbox = createMockInbox([cancelRead(), authorizationRead()]);
-
-    const next = await nextTurnDelivery(waitInput(inbox));
-
-    expect(next.kind).toBe("authorization-resume");
-  });
-
-  it("does not let buffered deliveries bypass a ready authorization callback", async () => {
-    const inbox = createMockInbox([]);
-    const queue = queueOf({ kind: "deliver", payloads: [{ message: "later" }] });
-    queue.enqueueAuthorization(authorizationCallbackPayload.payloads);
-
-    const next = await nextTurnDelivery({ ...waitInput(inbox), queue });
-
-    expect(next.kind).toBe("authorization-resume");
-    expect(queue.pendingCount).toBe(1);
-  });
-
-  it("reports session closure while waiting for authorization", async () => {
+  it("reports session closure while parked", async () => {
     const inbox = createMockInbox([{ result: { done: true, value: undefined } }]);
 
     const next = await nextTurnDelivery(waitInput(inbox));
@@ -337,10 +296,7 @@ describe("nextTurnDelivery", () => {
         stateDelta: {},
       });
 
-    const next = await nextTurnDelivery({
-      ...waitInput(inbox),
-      expectedAttemptIds: undefined,
-    });
+    const next = await nextTurnDelivery(waitInput(inbox));
 
     expect(vi.mocked(routeDeliverToChildren).mock.calls[1]?.[0].sessionState).toBe(retiredState);
     expect(next).toMatchObject({

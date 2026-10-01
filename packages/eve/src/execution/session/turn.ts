@@ -219,20 +219,7 @@ export class SessionExecution {
         continue;
       }
 
-      if (result.action === "park") {
-        if (
-          result.hasPendingInputBatch &&
-          this.input.capabilities?.requestInput !== true &&
-          !hasDelegatedCallerContext(this.input.cursor.serializedContext)
-        ) {
-          throw new Error(NO_INPUT_CAPABILITY_ERROR_MESSAGE);
-        }
-        return {
-          authorizationAttemptIds: result.authorizationAttemptIds,
-          kind: "park",
-          settled: result.settled,
-        };
-      }
+      if (result.action === "park") return { kind: "park", settled: result.settled };
 
       const steering = await turn.takeSteering();
       nextStepInput = steering === undefined ? undefined : { delivery: steering };

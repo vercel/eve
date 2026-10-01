@@ -1,4 +1,3 @@
-import type { DeliverPayload } from "#channel/types.js";
 import { routeSelectedDelivery } from "#execution/session/route-selected-delivery.js";
 import type {
   SessionControl,
@@ -12,7 +11,6 @@ import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
-  | { readonly kind: "authorization-resume"; readonly payloads: readonly DeliverPayload[] }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
   | { readonly kind: "cancel-turn" }
@@ -21,15 +19,12 @@ export type NextTurnInstruction =
   | TurnSelection;
 
 /**
- * Waits for the next input the parked owner must act on. While an
- * authorization challenge is open, any expected callback resumes it ahead of
- * other input; ordinary deliveries keep starting turns in the meantime. Fully routed descendant
- * deliveries leave nothing for the parent, so the wait continues.
+ * Waits for the next input the parked owner must act on. Fully routed
+ * descendant deliveries leave nothing for the parent, so the wait continues.
  */
 export async function nextTurnDelivery(input: {
   readonly inbox: SessionInboxReader;
   readonly cursor: SessionStateCursor;
-  readonly expectedAttemptIds?: ReadonlySet<string>;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
 }): Promise<NextTurnInstruction> {
@@ -39,11 +34,9 @@ export async function nextTurnDelivery(input: {
   let freshSequence: number | undefined;
   while (true) {
     const selected = queue.takeNext({
-      expectedAttemptIds: input.expectedAttemptIds,
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
     });
     if (selected?.kind === "control") return { kind: selected.control };
-    if (selected?.kind === "authorization-resume") return selected;
     if (selected?.kind === "turn") {
       const routed = await routeSelectedDelivery(selected, cursor);
       if (routed.kind === "cancel-turn") return routed;

@@ -68,17 +68,8 @@ export function resolveApprovalInputBatches(
         session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
       };
     }
-
-    const session =
-      leftoverResponses.length === 0
-        ? input.session
-        : queueDeferredStepInput(input.session, { inputResponses: leftoverResponses });
-    return {
-      consumedMessage: input.resolvedStepInput.messageConsumed,
-      outcome: "continue",
-      messages: [...input.baseHistory],
-      session,
-    };
+    // A message instead of an answer steers the held turn past its approval.
+    return ignoreApprovalInputBatch(input);
   }
 
   const approval = resolveApprovalBatch({

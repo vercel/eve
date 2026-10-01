@@ -11,7 +11,6 @@ import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
-import { endHeldTurn } from "#internal/testing/held-turn.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -240,14 +239,6 @@ function fixture(
       expect(parked.held).toEqual({ kind: "request" });
       expect(this.pending().filter((r) => r.kind === "tool-approval")).toHaveLength(names.length);
       expect(executions).toHaveLength(0);
-      this.endHeldTurn();
-    },
-    /**
-     * An approval holds its turn, and cancelling withdraws it. These scenarios
-     * cover the cross-turn approval paths that remain until they are removed.
-     */
-    endHeldTurn() {
-      session = endHeldTurn(session);
     },
     respond(tool: string, optionId = "approve"): StepInput {
       const request = this.pending().find((r) => r.action.toolName === tool);
@@ -269,83 +260,10 @@ function fixture(
   };
 }
 
-for (const variant of [
-  "read",
-  "write",
-  "fail",
-  "parallel",
-  "invalid",
-  "response-authorized",
-] as const) {
-  it(`finishes unrelated ${variant} tool turn while an approval stays open`, async () => {
-    const logs = captureLogRecords();
-    const f = fixture(variant, variant === "response-authorized");
-    await f.gate("gateA");
-    f.script.push(
-      variant === "parallel"
-        ? calls("read", "write")
-        : variant === "invalid"
-          ? [{ toolName: "read", input: { n: "invalid" } }]
-          : calls(variant === "response-authorized" ? "read" : variant),
-      "FINAL",
-    );
-    const result = await f.drive({ message: "Do the unrelated work." });
-    expect(f.pending()).toHaveLength(1);
-    expect(f.executions).not.toContain("gateA");
-    const expectedExecutions = {
-      read: ["read"],
-      write: ["write"],
-      fail: ["fail"],
-      parallel: ["read", "write"],
-      invalid: [],
-      "response-authorized": ["read"],
-    }[variant];
-    expect([...f.executions].sort()).toEqual(expectedExecutions.sort());
-    expect(result.settledTurn?.output).toBe("FINAL");
-    expect(
-      logs.records.filter((record) => record.message === "tool execution failed"),
-    ).toHaveLength(variant === "fail" ? 1 : 0);
-  });
-}
-
-for (const variant of ["approve", "cancel"] as const) {
-  it(`continues after ${variant} of one independent approval while another remains`, async () => {
-    const f = fixture(`sibling-${variant}`);
-    await f.gate("gateA");
-    f.script.push(calls("gateB"));
-    await f.drive({ message: "Also prepare B." });
-    expect(f.pending()).toHaveLength(2);
-    f.script.push(calls("read"), "FINAL");
-    const result = await f.drive(f.respond("gateB", variant));
-    expect(f.pending().map((r) => r.action.toolName)).toEqual(["gateA"]);
-    expect(f.executions.filter((x) => x === "gateB")).toHaveLength(variant === "approve" ? 1 : 0);
-    expect(result.settledTurn?.output).toBe("FINAL");
-  });
-}
-
-it("interprets a completed workflow result while an earlier approval remains", async () => {
-  const f = fixture("workflow");
-  await f.gate("gateA");
-  f.script.push(calls("workflow"), "FINAL");
-  await f.drive({ message: "Run unrelated workflow." });
-  const result = await f.finishRuntime();
-  expect(JSON.stringify(result.session.history)).toContain("runtime-RESULT");
-  expect(f.pending()).toHaveLength(1);
-  expect(result.settledTurn?.output).toBe("FINAL");
-});
-
 it("completes a plain tool turn without any pending input [control]", async () => {
   const f = fixture("control-no-pending");
   f.script.push(calls("read"), "FINAL");
   expect((await f.drive({ message: "Read the status." })).settledTurn?.output).toBe("FINAL");
-});
-
-it("completes a text-only follow-up with a pending approval [control]", async () => {
-  const f = fixture("control-text");
-  await f.gate("gateA");
-  f.script.push("FINAL");
-  expect((await f.drive({ message: "Explain the change." })).settledTurn?.output).toBe("FINAL");
-  expect(f.pending()).toHaveLength(1);
 });
 
 it("finishes after resolving the only approval [control]", async () => {
@@ -374,19 +292,6 @@ it("accumulates approvals from one batch across separate deliveries [control]", 
   expect(f.executions.filter((x) => x.startsWith("gate"))).toHaveLength(2);
 });
 
-it("finishes an unrelated tool turn carrying a partial approval response", async () => {
-  const f = fixture("partial-response-with-followup");
-  await f.gate("gateA", "gateB");
-  f.script.push(calls("read"), "FINAL");
-  const result = await f.drive({
-    ...f.respond("gateA"),
-    message: "While B waits, read the status.",
-  });
-  expect(f.executions).toEqual(["read"]);
-  expect(f.pending()).toHaveLength(2);
-  expect(result.settledTurn?.output).toBe("FINAL");
-});
-
 it("finishes after a stale approval response becomes a follow-up message", async () => {
   const f = fixture("stale-response");
   await f.gate("gateA");
@@ -399,18 +304,6 @@ it("finishes after a stale approval response becomes a follow-up message", async
   const result = await f.drive(old);
   expect(f.executions).toEqual(["read"]);
   expect(result.settledTurn?.output).toBe("FINAL");
-});
-
-it("reaches the next budget prompt after a grant while an earlier approval remains", async () => {
-  const f = fixture("session-limit-grant", false, 1);
-  await f.gate("gateA");
-  await f.drive({ message: "Read the status." });
-  expect(f.pending().map((r) => r.kind)).toContain("session-limit");
-  f.script.push(calls("read"));
-  const result = await f.drive(f.respond("session_limit_continuation", "continue"));
-  expect(f.executions).toEqual(["read"]);
-  expect(result.next).toBeNull();
-  expect(f.pending().map((r) => r.kind)).toEqual(["tool-approval", "session-limit"]);
 });
 
 it("runs the steering message after a budget grant that followed the cancelled approval", async () => {
@@ -451,21 +344,6 @@ for (const variant of ["fail", "invalid"]) {
   });
 }
 
-it("settles both independent approval batches and a deferred follow-up [control]", async () => {
-  const f = fixture("control-resolve-multiple");
-  await f.gate("gateA");
-  f.script.push(calls("gateB"));
-  await f.drive({ message: "Also prepare B." });
-  f.script.push("First approved.", "Second approved.", calls("read"), "FINAL");
-  const result = await f.drive({
-    inputResponses: [...f.respond("gateA").inputResponses!, ...f.respond("gateB").inputResponses!],
-    message: "Then read the status.",
-  });
-  expect(f.executions.filter((x) => x.startsWith("gate"))).toHaveLength(2);
-  expect(f.pending()).toHaveLength(0);
-  expect(result.settledTurn?.output).toBe("FINAL");
-});
-
 it("keeps same-turn approval blocked when its parallel workflow finishes [control]", async () => {
   const f = fixture("control-same-turn-workflow-and-approval");
   f.script.push(calls("gateA", "workflow"));
@@ -480,17 +358,27 @@ it("keeps same-turn approval blocked when its parallel workflow finishes [contro
   expect(f.executions).toEqual(["gateA"]);
 });
 
-it("settles a text-only follow-up carrying a partial approval response", async () => {
-  const f = fixture("partial-response-with-text");
-  await f.gate("gateA", "gateB");
-  f.script.push("FINAL");
-  const result = await f.drive({
-    ...f.respond("gateA"),
-    message: "Explain the change while B waits.",
-  });
-  expect(f.executions).toHaveLength(0);
-  expect(f.events.some((e) => e.type === "message.completed")).toBe(true);
-  expect(result.settledTurn?.output).toBe("FINAL");
+it("keeps a message waiting behind a budget prompt and runs it after the grant", async () => {
+  const f = fixture("message-behind-session-limit", false, 1);
+  f.script.push("Initial text.");
+  await f.drive({ message: "Say hello." });
+  await f.drive({ message: "Read the status." });
+  expect(f.pending().map((r) => r.kind)).toEqual(["session-limit"]);
+
+  const waitingStart = f.events.length;
+  expect((await f.drive({ message: "Also say goodbye." })).held).toEqual({ kind: "request" });
+  // The prompt still holds the turn; the message is announced when it runs.
+  expect(f.events.slice(waitingStart).map((event) => event.type)).toEqual(["turn.waiting"]);
+  expect(f.pending().map((r) => r.kind)).toEqual(["session-limit"]);
+
+  f.script.push(calls("read"), "FINAL");
+  await f.drive(f.respond("session_limit_continuation", "continue"));
+  expect(f.executions).toEqual(["read"]);
+  expect(
+    f.events
+      .filter((event) => event.type === "message.received")
+      .map((event) => event.data.message),
+  ).toEqual(["Say hello.", "Read the status.", "Also say goodbye."]);
 });
 
 it("reaches the next budget prompt after a grant without an older approval [control]", async () => {
@@ -520,46 +408,6 @@ for (const pending of [true, false]) {
     expect(result.settledTurn?.output).toBe("FINAL");
   });
 }
-
-it("settles final_output alongside an ordinary tool with older approval [control]", async () => {
-  const f = fixture("control-final-output", false, undefined, {
-    type: "object",
-    properties: { status: { type: "string" } },
-    required: ["status"],
-    additionalProperties: false,
-  });
-  await f.gate("gateA");
-  f.script.push([{ toolName: "read" }, { toolName: "final_output", input: { status: "ready" } }]);
-  const result = await f.drive({
-    message: "Read the status and return it.",
-  });
-  expect(result.settledTurn?.output).toEqual({ status: "ready" });
-  expect(f.executions).toEqual(["read"]);
-  expect(f.pending()).toHaveLength(1);
-});
-
-it("continues after responder-authorized approval with an older approval still open", async () => {
-  const f = fixture("authorized-sibling", true);
-  await f.gate("gateA");
-  f.script.push(calls("gateB"));
-  await f.drive({ message: "Also prepare B." });
-  f.script.push(calls("read"), "FINAL");
-  const result = await f.drive({
-    attributedInputResponses: f.respond("gateB").inputResponses!.map((response) => ({
-      response,
-      auth: {
-        attributes: {},
-        authenticator: "test",
-        issuer: "test",
-        principalId: "user-1",
-        principalType: "user" as const,
-      },
-    })),
-  });
-  expect(f.executions).toEqual(["gateB", "read"]);
-  expect(f.pending().map((r) => r.action.toolName)).toEqual(["gateA"]);
-  expect(result.settledTurn?.output).toBe("FINAL");
-});
 
 it("cancels a held approval when the same person steers the turn", async () => {
   const f = fixture("steer-cancels-held-approval");
@@ -609,76 +457,8 @@ it("runs an approved call and cancels the rest when a partial approval is steere
   expect(result.settledTurn?.output).toBe("FINAL");
 });
 
-it("keeps holding the turn after a refused response and resumes it on retry", async () => {
-  let allowed = false;
-  const f = fixture("held-refused-response", () =>
-    allowed
-      ? { status: "allowed" as const }
-      : { status: "rejected" as const, reason: "Alice needs Bob's approval." },
-  );
-  f.script.push(calls("gateA"));
-  const parked = await f.drive({ message: "Prepare gateA." });
-  expect(parked.held).toEqual({ kind: "request" });
-  const input = {
-    attributedInputResponses: f.respond("gateA").inputResponses!.map((response) => ({
-      response,
-      auth: {
-        attributes: {},
-        authenticator: "test",
-        issuer: "test",
-        principalId: "alice",
-        principalType: "user" as const,
-      },
-    })),
-  };
-  const start = f.events.length;
-  const refused = await f.drive(input);
-  const types = f.events.slice(start).map((event) => event.type);
-  expect(refused.held).toEqual({ kind: "request" });
-  // The turn stays held, and `turn.waiting` gives the responder's send a boundary.
-  expect(types).toEqual(["approval.candidate", "approval.candidate", "turn.waiting"]);
-  expect(f.pending()).toHaveLength(1);
-  expect(f.executions).toEqual([]);
-
-  allowed = true;
-  f.script.push("Bob approved the task.");
-  const resumed = await f.drive(input);
-  expect(f.executions).toEqual(["gateA"]);
-  expect(f.pending()).toEqual([]);
-  expect(resumed.settledTurn?.output).toBe("Bob approved the task.");
-  expect(f.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
-});
-
-it("continues after responder-authorized approval of the older batch", async () => {
-  const f = fixture("authorized-older-sibling", true);
-  await f.gate("gateA");
-  f.script.push(calls("gateB"));
-  await f.drive({ message: "Also prepare B." });
-  f.endHeldTurn();
-  expect(f.pending().map((request) => request.action.toolName)).toEqual(["gateA", "gateB"]);
-  f.script.push(calls("read"), "FINAL");
-  const response = f.respond("gateA").inputResponses![0]!;
-  const result = await f.drive({
-    attributedInputResponses: [
-      {
-        response,
-        auth: {
-          attributes: {},
-          authenticator: "test",
-          issuer: "test",
-          principalId: "user-1",
-          principalType: "user",
-        },
-      },
-    ],
-  });
-  expect(f.executions).toEqual(["gateA", "read"]);
-  expect(f.pending().map((request) => request.action.toolName)).toEqual(["gateB"]);
-  expect(result.settledTurn?.output).toBe("FINAL");
-});
-
 it.each(["rejected", "failed", "timed-out"] as const)(
-  "finishes a %s response attempt without starting a turn and permits retry",
+  "keeps holding the turn after a %s response and resumes it on retry",
   async (outcome) => {
     let allowed = false;
     const policy = vi.fn(() => {
@@ -709,14 +489,16 @@ it.each(["rejected", "failed", "timed-out"] as const)(
       outcome === "timed-out"
         ? vi.spyOn(Date, "now").mockReturnValue(Date.now() + 600_001)
         : undefined;
+    let refused: StepResult;
     try {
-      await f.drive();
+      refused = await f.drive();
     } finally {
       clock?.mockRestore();
     }
+    // The turn stays held, and `turn.waiting` gives the responder's send a boundary.
     const events = f.events.slice(start);
-    expect(events.at(-1)?.type).toBe("session.waiting");
-    expect(events.filter((event) => event.type === "session.waiting")).toHaveLength(1);
+    expect(refused.held).toEqual({ kind: "request" });
+    expect(events.at(-1)).toMatchObject({ data: { on: "input" }, type: "turn.waiting" });
     expect(events.some((event) => event.type === "turn.started")).toBe(false);
     expect(getApprovalAuditState(f.session.state).candidateHistory.at(-1)?.status).toBe(outcome);
     expect(f.pending()).toHaveLength(1);
@@ -724,17 +506,15 @@ it.each(["rejected", "failed", "timed-out"] as const)(
 
     allowed = true;
     f.script.push("Bob approved the task.");
-    const retryStart = f.events.length;
-    await f.drive(input);
+    const resumed = await f.drive(input);
     expect(f.pending()).toEqual([]);
     expect(f.executions).toEqual(["gateA"]);
-    expect(
-      f.events.slice(retryStart).filter((event) => event.type === "session.waiting"),
-    ).toHaveLength(1);
+    expect(resumed.settledTurn?.output).toBe("Bob approved the task.");
+    expect(f.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
   },
 );
 
-it("does not announce waiting while a candidate needs sign-in, then completes on expiry", async () => {
+it("keeps the turn held while a responder signs in, and fails the sign-in on expiry", async () => {
   const policy = vi.fn(() => ({ status: "allowed" as const }));
   const f = fixture("candidate-sign-in", policy);
   await f.gate("gateA");
@@ -771,19 +551,20 @@ it("does not announce waiting while a candidate needs sign-in, then completes on
     ),
   }));
   const start = f.events.length;
-  await f.drive();
-  expect(f.events.slice(start)).toEqual([]);
+  expect((await f.drive()).held).toEqual({ kind: "request" });
+  expect(f.events.slice(start).map((event) => event.type)).toEqual(["turn.waiting"]);
   expect(policy).not.toHaveBeenCalled();
+  const expiry = f.events.length;
   const clock = vi.spyOn(Date, "now").mockReturnValue(candidate.expiresAt + 1);
   try {
     await f.drive();
   } finally {
     clock.mockRestore();
   }
-  expect(f.events.slice(start).map((event) => event.type)).toEqual([
-    "authorization.completed",
-    "approval.candidate",
-    "session.waiting",
+  expect(f.events.slice(expiry)).toMatchObject([
+    { data: { outcome: "failed" }, type: "authorization.completed" },
+    { data: { outcome: "timed-out" }, type: "approval.candidate" },
+    { data: { on: "input" }, type: "turn.waiting" },
   ]);
   expect(f.pending()).toHaveLength(1);
 });
@@ -827,63 +608,4 @@ it("announces a candidate's sign-in with the attempt its completion will name", 
   ).toMatchObject({
     data: { attemptId: "attempt_alice", candidateId: candidate.candidateId, name: "notes" },
   });
-});
-
-it("uses the normal turn boundary for a mixed accepted and refused delivery", async () => {
-  const f = fixture("mixed-response", ({ request }) =>
-    request.toolName === "gateA"
-      ? { status: "allowed" }
-      : { status: "rejected", reason: "Bob must approve this task." },
-  );
-  await f.gate("gateA");
-  f.script.push(calls("gateB"));
-  await f.drive({ message: "Prepare Bob's independent task." });
-  const start = f.events.length;
-  f.script.push("Alice's task is complete.");
-  await f.drive({
-    attributedInputResponses: f.pending().map((request) => ({
-      response: { requestId: request.requestId, optionId: "approve" },
-      auth: {
-        attributes: {},
-        authenticator: "test",
-        issuer: "test",
-        principalId: "alice",
-        principalType: "user" as const,
-      },
-    })),
-  });
-  expect(f.executions).toEqual(["gateA"]);
-  expect(f.pending().map((request) => request.action.toolName)).toEqual(["gateB"]);
-  expect(f.events.slice(start).filter((event) => event.type === "session.waiting")).toHaveLength(1);
-});
-
-it("resumes a complete batch while another batch has only a partial approval [control]", async () => {
-  const f = fixture("complete-and-partial-approvals");
-  // Given A and B need approval together, and a second independent B is pending.
-  await f.gate("gateA", "gateB");
-  const approvalA = f.respond("gateA");
-  const approvalB = f.respond("gateB");
-  f.script.push(calls("gateB"));
-  await f.drive({ message: "Prepare another independent B." });
-  const independentB = f.pending().at(-1)!;
-  const independentTurn = getPendingInputBatches(f.session.state)[1]!.event!.turnId;
-
-  // When one delivery answers A and the independent B.
-  f.script.push("Independent B approved.");
-  const result = await f.drive({
-    inputResponses: [
-      ...approvalA.inputResponses!,
-      { requestId: independentB.requestId, optionId: "approve" },
-    ],
-  });
-
-  // Then only the complete batch executes and replies, without another model call.
-  expect(result.settledTurn?.output).toBe("Independent B approved.");
-  expect(f.restoredTurns).toEqual([independentTurn]);
-  expect(f.executions).toEqual(["gateB"]);
-  expect(f.pending()).toHaveLength(2);
-  f.script.push("Both approved.");
-  await f.drive(approvalB);
-  expect(f.executions).toEqual(["gateB", "gateA", "gateB"]);
-  expect(f.pending()).toHaveLength(0);
 });
