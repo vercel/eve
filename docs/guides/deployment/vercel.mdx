@@ -81,8 +81,6 @@ export default await withEve({
 
 Vercel evaluates `vercel.ts` before resolving the service graph. `withEve` adds the root agent, or every direct workspace member, as an independently built service and returns a plain Vercel configuration. Named workspace agents mount at `/eve/<name>/v1/*`; a root agent mounts at `/eve/v1/*`. Vercel then builds the frontend and each eve agent separately. The frontend does not need `withEve` in its framework configuration or a build script that builds the agents.
 
-The explicit frontend build command uses Next.js installed in the root package while building from `apps/web`. This avoids relying on a package-manager script in a nested package that does not own the dependencies.
-
 The Web Chat installer can generate this composition for a standalone agent or a selected workspace agent. Configure authentication for every exposed agent. To self-host the same source layout, replace Vercel composition with your own [process and proxy configuration](./self-hosting#run-workspace-members).
 
 Run Vercel CLI 59.16.0 or newer with `vercel dev --local` to start the complete service graph locally without linking a Vercel project. A generated Vercel Web Chat project exposes this as `pnpm dev:all`. When the directory is linked, Vercel also loads its development environment and settings. Use `pnpm dev` or `pnpm dev:eve` when you want one agent and the eve terminal UI, or `pnpm dev:web` when you want the frontend without its agent services. Named agents use the same `/eve/<name>/v1/*` routes in development, and default `defineWorkspaceAgent` transports can call peers without deployment credentials.
@@ -123,7 +121,7 @@ Deploy the linked project to production from its root:
 eve deploy
 ```
 
-`eve deploy` installs dependencies, runs `vercel deploy --prod --logs` to show build logs, and pulls the project environment after deployment. The development TUI's `/deploy` command uses the same deployment flow. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
+`eve deploy` installs dependencies, runs `vercel deploy --prod --logs` to show build logs, and pulls the project environment after deployment. You can also push to a Git-connected Vercel project. Hosted Vercel builds set `VERCEL`, so `eve build` writes the deployment bundle under `.vercel/output`.
 
 When `eve deploy` creates a new Vercel project, it configures trace sampling so traces appear in Agent Runs automatically. See [Agent Runs](../../observability/agent-runs) for details. Pass `--no-trace-sampling` to skip this setting.
 
@@ -139,20 +137,6 @@ Vercel uses the generated output to configure these services:
 - **Vercel Workflow**: persists and resumes durable runs, with optimistic replay preconditions enabled so stale event-log snapshots reload before they can commit
 - **Vercel Cron**: invokes authored schedules
 - **Vercel Sandbox**: runs sandbox sessions selected by the default sandbox environment
-
-### Diagnose a failed build
-
-`Command ... exited with 1` reports that a build command failed, not why it failed. Check the preceding build logs for the first error. In a services project, check which service failed: the Next.js frontend and eve agent build separately.
-
-If a generated Web Chat service fails with `next: command not found`, add `buildCommand: "node ../../node_modules/next/dist/bin/next build"` to the `web` service in your root `vercel.ts`, as shown above, then redeploy. The service still uses the Next.js framework; the root project uses Vercel services, not `eve/next`.
-
-`eve deploy` and the TUI's `/deploy` show build logs during deployment. To retrieve them again, run this from the linked project root using the failed deployment URL printed by Vercel:
-
-```bash
-vercel inspect <deployment-url> --logs
-```
-
-Build logs require access to the deployment's Vercel team. If Vercel reports that it cannot find the deployment, check your account and team scope; use `--scope <team-slug>` when needed. You can also open the deployment's build logs in the Vercel dashboard.
 
 ## Verify the deployment
 
