@@ -401,6 +401,11 @@ describe("runInitCommand", () => {
       model: "openai/gpt-6-luna-fast",
       reasoning: undefined,
     },
+    {
+      options: { nonInteractive: true },
+      model: "openai/gpt-6-luna-fast",
+      reasoning: "high",
+    },
   ])(
     "adds only agent files to an existing workspace with $options",
     async ({ options, model, reasoning }) => {
@@ -433,6 +438,10 @@ describe("runInitCommand", () => {
       );
       expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
       expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+      expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+      const transcript = stripAnsi(output.messages.join("\n"));
+      expect(transcript.match(/☰eve v/gu)).toHaveLength(1);
+      expect(transcript.indexOf("☰eve v")).toBeLessThan(transcript.indexOf("✓ Added agent"));
     },
   );
 

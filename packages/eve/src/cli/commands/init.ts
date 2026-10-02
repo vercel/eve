@@ -496,7 +496,6 @@ export async function runInitCommand(
   const interactive = dependencies.hasInteractiveTerminal();
   const startDevelopment = interactive && !agentLaunched && !options.nonInteractive;
   if (interactive && !agentLaunched) logger.log("");
-  if (!startDevelopment) logger.log(eveCliBanner());
 
   trackStep?.("resolve_target");
   let result: InitResult;
@@ -515,6 +514,7 @@ export async function runInitCommand(
       return;
     }
 
+    if (!startDevelopment) logger.log(eveCliBanner());
     result = await runInitSteps({
       agentLaunched,
       interactive,
