@@ -792,11 +792,11 @@ export class EveTUIRunner {
           invoke: () => this.#store.compact(),
         });
         return;
-      case "clear":
+      case "new":
         await this.#runSessionCommand({
-          absent: "No active session to clear",
-          failed: "Couldn't clear the session",
-          dismissOnAccepted: true,
+          absent: "Already in a new conversation",
+          accepted: "Started a new conversation. Earlier context was cleared.",
+          failed: "Couldn't start a new conversation",
           invoke: () => this.#store.clear(),
         });
         return;
@@ -1031,9 +1031,8 @@ export class EveTUIRunner {
   /** Runs a session mutation and gives every control command one completion policy. */
   async #runSessionCommand(input: {
     readonly absent: string;
-    readonly accepted?: string;
+    readonly accepted: string;
     readonly failed: string;
-    readonly dismissOnAccepted?: boolean;
     readonly invoke: () => Promise<{ status: string }>;
   }): Promise<void> {
     if (this.#store.snapshot.session === undefined) {
@@ -1046,11 +1045,7 @@ export class EveTUIRunner {
         this.#finishCommand({ kind: "result", summary: input.absent });
         return;
       }
-      this.#finishCommand(
-        input.dismissOnAccepted === true
-          ? { kind: "dismiss" }
-          : { kind: "result", summary: input.accepted },
-      );
+      this.#finishCommand({ kind: "result", summary: input.accepted });
     } catch (error) {
       this.#finishCommand({
         kind: "result",

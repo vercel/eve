@@ -17,8 +17,9 @@ describe("parsePromptCommand", () => {
     expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
   });
 
-  it("parses /new as a context clear", () => {
-    expect(parsePromptCommand("/new")).toEqual({ type: "clear" });
+  it("parses /new and no longer accepts /clear", () => {
+    expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+    expect(parsePromptCommand("/clear")).toBeNull();
   });
 
   it("parses /exit and its /quit alias", () => {

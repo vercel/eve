@@ -6,7 +6,7 @@ type PromptCommandTarget = "local" | "remote";
 export type PromptCommand =
   | { type: "reset" }
   | { type: "cancel" }
-  | { type: "clear" }
+  | { type: "new" }
   | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
@@ -69,12 +69,12 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local", "remote"],
   },
   {
-    name: "clear",
+    name: "new",
     history: "keep",
-    aliases: ["new"],
-    description: "Clear the current session context",
+    aliases: [],
+    description: "Start a new conversation with cleared context",
     takesArgument: false,
-    build: () => ({ type: "clear" }),
+    build: () => ({ type: "new" }),
     targets: ["local", "remote"],
   },
   {
@@ -208,8 +208,8 @@ export function isPromptCommandAvailableFor(
 
 /**
  * Recognizes the slash commands the prompt accepts. `/reset` clears the
- * session and transcript; `/cancel` stops the running turn; `/clear` (and
- * `/new`) clears context; `/compact` queues context compaction; `/exit` (and
+ * session and transcript; `/cancel` stops the running turn; `/new` clears
+ * context; `/compact` queues context compaction; `/exit` (and
  * `/quit`) terminate the TUI like Ctrl+C; extension commands are dispatched
  * outside the runner. Anything else — including unknown `/text` — is a normal
  * message.
