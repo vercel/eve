@@ -30,6 +30,7 @@ import type {
   WebhookOptions,
 } from "#compiled/chat/index.js";
 import { Message, parseMarkdown } from "#compiled/chat/index.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 it("shares Chat SDK type identity with external adapters and handlers", () => {
   expectTypeOf<Message>().toEqualTypeOf<ExternalMessage>();
@@ -117,6 +118,7 @@ async function firePost(
       method: "POST",
     }),
     {
+      ...mockAgentRouteArgs(),
       from(continuationToken) {
         return {
           ...channelContext.from(continuationToken),
@@ -218,6 +220,7 @@ describe("chatSdkChannel", () => {
     const response = await get.handler(
       new Request("https://example.com/eve/v1/test?crc_token=abc123", { method: "GET" }),
       {
+        ...mockAgentRouteArgs(),
         ...mockChannelContext(vi.fn()),
         attachSession: vi.fn() as any,
         params: {},

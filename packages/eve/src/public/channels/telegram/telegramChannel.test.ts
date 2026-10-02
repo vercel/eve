@@ -15,6 +15,7 @@ import {
 } from "#public/channels/telegram/index.js";
 import { isTelegramBotMentioned } from "#public/channels/telegram/defaults.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 const SECRET = "telegram-secret";
 
@@ -94,6 +95,7 @@ async function firePost(
   const waitUntil = vi.fn();
 
   const response = await post.handler(signedRequest(JSON.stringify(body)), {
+    ...mockAgentRouteArgs(),
     attachSession: vi.fn() as any,
     ...mockChannelContext(send),
     resolveSession: options.resolveSession ?? (async () => undefined),
@@ -364,6 +366,7 @@ describe("telegramChannel() inbound route", () => {
         method: "POST",
       }),
       {
+        ...mockAgentRouteArgs(),
         attachSession: vi.fn() as any,
         ...mockChannelContext(send),
         to: vi.fn() as any,

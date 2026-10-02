@@ -6,6 +6,7 @@ import type { InputResponse } from "#shared/input.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
+import type { AgentDescription } from "#channel/agent-description.js";
 
 type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Record<string, string>;
 
@@ -32,6 +33,12 @@ export interface RouteHandlerArgs<TState = undefined> {
   waitUntil: (task: Promise<unknown>) => void;
   /** Best-effort client IP reported by the host, or `null` when unavailable. */
   requestIp: string | null;
+  /**
+   * Describes the agent for callers: its name, description, and the compiled
+   * tools that can run outside a turn, sorted by name. Carries none of the
+   * inspection detail of `GET /eve/v1/info`.
+   */
+  describe(): Promise<AgentDescription>;
 }
 
 export interface SendPayload {

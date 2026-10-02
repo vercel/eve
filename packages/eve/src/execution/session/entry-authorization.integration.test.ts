@@ -34,6 +34,7 @@ import {
   expectHookClaims,
   expectSingleTurn,
 } from "#internal/testing/entry-test-helpers.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -115,6 +116,7 @@ describe("workflowEntry integration", () => {
           method: "POST",
         }),
         {
+          ...mockAgentRouteArgs(),
           ...operations,
           attachSession: vi.fn() as never,
           params: {},

@@ -9,6 +9,7 @@ import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel, type TrustedForwarders } from "#public/channels/eve.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 function route(
   method: "GET" | "POST",
@@ -39,6 +40,7 @@ function createFixedSession(overrides: Partial<Session> = {}): Session {
 
 function createArgs(session = createFixedSession()): RouteHandlerArgs {
   return {
+    ...mockAgentRouteArgs(),
     ...mockChannelContext(vi.fn()),
     attachSession: () => session,
     to: vi.fn() as never,

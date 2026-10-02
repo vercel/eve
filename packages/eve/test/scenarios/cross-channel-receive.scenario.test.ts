@@ -17,6 +17,7 @@ import {
 } from "../../src/runtime/sessions/runtime-session.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 import { mockChannelContext } from "../../src/internal/testing/mocks/mock-channel-operations.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 /**
  * Locks the cross-channel `ctx.to(channel, target).send(...)` path end-to-end:
@@ -172,6 +173,7 @@ describe("cross-channel receive end-to-end", () => {
           }),
         }),
         {
+          ...mockAgentRouteArgs(),
           ...mockChannelContext(() => {
             throw new Error("webhook should not send directly");
           }),

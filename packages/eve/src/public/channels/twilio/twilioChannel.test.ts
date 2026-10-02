@@ -12,6 +12,7 @@ import type { TwilioTextMessage } from "#public/channels/twilio/inbound.js";
 import { twilioChannel, type TwilioContext } from "#public/channels/twilio/twilioChannel.js";
 import { signTwilioRequest } from "#public/channels/twilio/verify.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 const AUTH_TOKEN = "test-auth-token";
 
@@ -111,6 +112,7 @@ async function firePost(
   const waitUntil = vi.fn();
 
   const response = await post.handler(signedFormRequest(path, params), {
+    ...mockAgentRouteArgs(),
     attachSession: vi.fn() as any,
     ...mockChannelContext(send),
     to: vi.fn() as any,
@@ -147,6 +149,7 @@ async function fireGet(
   const waitUntil = vi.fn();
 
   const response = await get.handler(signedGetRequest(path, params), {
+    ...mockAgentRouteArgs(),
     attachSession: vi.fn() as any,
     ...mockChannelContext(send),
     to: vi.fn() as any,
@@ -380,6 +383,7 @@ describe("twilioChannel() inbound text pipeline", () => {
         method: "POST",
       }),
       {
+        ...mockAgentRouteArgs(),
         attachSession: vi.fn() as any,
         ...mockChannelContext(send),
         to: vi.fn() as any,

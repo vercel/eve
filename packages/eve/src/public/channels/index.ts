@@ -42,6 +42,8 @@ export {
   type TurnPolicy,
   type RouteDefinition,
   type RouteHandlerArgs,
+  type AgentDescription,
+  type AgentToolDescription,
   type HttpRouteDefinition,
   type WebSocketMessage,
   type WebSocketPeer,

@@ -67,6 +67,7 @@ Each route receives these operation surfaces:
 - `attachSession(sessionId)` creates an I/O-free handle pinned to one durable session ID.
 - `to(channel, target).send(message, options)` hands work to another authored channel.
 - `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
+- `describe()` returns the agent's name, description, and the compiled tools a caller can run outside a turn, with their JSON schemas, sorted by name. It carries no paths, config, or other inspection detail, so a channel can publish it to its callers. Tools that need a turn (framework tools, workflow and provider tools, tools without `execute`) and tools added by dynamic resolvers or subagents are left out.
 
 Event handlers receive `(eventData, channel, ctx)`. `ctx.session.id` identifies
 the exact session, while `channel.continuation` exposes the current address and

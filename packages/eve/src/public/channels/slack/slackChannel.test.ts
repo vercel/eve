@@ -54,6 +54,7 @@ import {
 } from "#public/channels/slack/slackChannel.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import { type InputResponse, parseInputResponses } from "#shared/input.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 function slackRespondTypeChecks(
   interaction: SlackInteractionContext,
@@ -479,6 +480,7 @@ async function firePost(
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
+    ...mockAgentRouteArgs(),
     from,
     resolveSession: (address) =>
       (overrides.resolveSession?.(address) ?? Promise.resolve({ id: "s1" })) as never,
@@ -5792,6 +5794,7 @@ describe("slackChannel().receive", () => {
     if (!post) throw new Error("expected POST route");
     const waitUntil = vi.fn();
     await post.handler(req, {
+      ...mockAgentRouteArgs(),
       attachSession: vi.fn() as any,
       ...mockChannelContext(inboundSend),
       waitUntil,

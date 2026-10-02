@@ -19,6 +19,7 @@ import {
 import { EVE_SUBAGENT_STREAM_ROUTE_PATTERN } from "#protocol/routes.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 const PARENT_ORIGIN = "https://parent.test";
 const REMOTE_URL = "https://remote.test/base";
@@ -157,6 +158,7 @@ function createParentRoute(
     const segments = new URL(request.url).pathname.split("/");
     const args = attachRemoteAgentStreamHeadersResolver(
       {
+        ...mockAgentRouteArgs(),
         ...mockChannelContext(vi.fn()),
         attachSession: vi.fn().mockReturnValue(parent),
         params: {

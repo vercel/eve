@@ -30,6 +30,7 @@ import {
 import { createMessageCompletedEvent } from "#protocol/message.js";
 import { writeForwardedParentSessionBaggage } from "#protocol/baggage.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
+import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 /**
  * Unit coverage for the inbound HTTP route's message-body parser and
@@ -93,6 +94,7 @@ function createMockSession(overrides: Partial<Session> = {}): Session {
 
 function createRouteArgs(): RouteHandlerArgs {
   return {
+    ...mockAgentRouteArgs(),
     ...mockChannelContext(vi.fn()),
     attachSession: () => createMockSession(),
     to: vi.fn() as never,
