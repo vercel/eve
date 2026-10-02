@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { type HitlRule, hitlContract } from "#internal/testing/channel-conformance/contract.js";
 import {
   type ChannelDriver,
+  type ClientDriver,
   withChannelConversation,
 } from "#internal/testing/channel-conformance/harness.js";
 import {
@@ -16,6 +17,7 @@ import { linqDriver } from "#internal/testing/channel-conformance/linq-driver.js
 import { slackDriver } from "#internal/testing/channel-conformance/slack-driver.js";
 import { teamsDriver } from "#internal/testing/channel-conformance/teams-driver.js";
 import { telegramDriver } from "#internal/testing/channel-conformance/telegram-driver.js";
+import { tuiDriver } from "#internal/testing/channel-conformance/tui-driver.js";
 import { twilioDriver } from "#internal/testing/channel-conformance/twilio-driver.js";
 
 export interface BrokenCell {
@@ -25,13 +27,18 @@ export interface BrokenCell {
 }
 
 interface ConformanceChannel {
-  readonly driver: () => ChannelDriver;
+  readonly driver: () => ChannelDriver | ClientDriver;
   readonly broken?: Partial<Record<HitlRule, BrokenCell>>;
 }
 
+const TUI_APPROVAL_PROMPT: BrokenCell = {
+  reason: "the approval drawer titles the raw tool name instead of the request's prompt",
+  symptom: /Timed out waiting for the question "Approve Deploy release\?" on tui/,
+};
+
 /**
- * Every first-party channel's place in the HITL contract, keyed by the channel
- * directory whose `hitl-conformance.integration.test.ts` runs it. Each cell is
+ * Every first-party channel's and client's place in the HITL contract, keyed by
+ * the directory whose `hitl-conformance.integration.test.ts` runs it. Each cell is
  * one of:
  *
  * - must pass;
@@ -49,6 +56,18 @@ const hitlConformance = {
   slack: [{ driver: slackDriver }],
   teams: [{ driver: teamsDriver }],
   telegram: [{ driver: telegramDriver }],
+  tui: [
+    {
+      driver: tuiDriver,
+      broken: {
+        "a tool approval shows a choice to approve and one to cancel": TUI_APPROVAL_PROMPT,
+        "pressing Approve runs the gated tool": TUI_APPROVAL_PROMPT,
+        "pressing Cancel stops the gated tool without running it": TUI_APPROVAL_PROMPT,
+        "a text reply of approve runs the gated tool": TUI_APPROVAL_PROMPT,
+        "a text reply of cancel stops the gated tool without running it": TUI_APPROVAL_PROMPT,
+      },
+    },
+  ],
   twilio: [{ driver: twilioDriver }],
 } satisfies Record<string, readonly ConformanceChannel[]>;
 

@@ -29,6 +29,9 @@ async function askWhichDay(conversation: ChannelConversation) {
 }
 
 const DEPLOY = `Use ${GATED_TOOL} to ship the release.`;
+// Channels word the two approval choices differently; the TUI asks Yes or No.
+const APPROVE_LABELS = ["Approve", "Yes"];
+const CANCEL_LABELS = ["Cancel", "No"];
 const APPROVAL_PROMPT = "Approve Deploy release?";
 
 async function askToDeploy(conversation: ChannelConversation) {
@@ -97,16 +100,22 @@ export const hitlContract = [
     },
   },
   {
-    rule: "a tool approval shows Approve and Cancel",
+    rule: "a tool approval shows a choice to approve and one to cancel",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: [],
     async run(conversation) {
       const options = await askToDeploy(conversation);
-      const labels = options.map((option) => option.label).sort();
-      expect(labels, `the approval showed ${JSON.stringify(labels)}`).toEqual([
-        "Approve",
-        "Cancel",
-      ]);
+      const labels = options.map((option) => option.label);
+      const message = `the approval showed ${JSON.stringify(labels)}`;
+      expect(labels, message).toHaveLength(2);
+      expect(
+        labels.filter((label) => APPROVE_LABELS.includes(label)),
+        message,
+      ).toHaveLength(1);
+      expect(
+        labels.filter((label) => CANCEL_LABELS.includes(label)),
+        message,
+      ).toHaveLength(1);
     },
   },
   {
@@ -115,7 +124,7 @@ export const hitlContract = [
     requires: ["buttons"],
     async run(conversation) {
       const options = await askToDeploy(conversation);
-      const approve = options.find((option) => option.label === "Approve");
+      const approve = options.find((option) => APPROVE_LABELS.includes(option.label));
       expect(approve, "an Approve option to press").toBeDefined();
       await conversation.press(approve!);
       await expectDeployed(conversation);
@@ -127,7 +136,7 @@ export const hitlContract = [
     requires: ["buttons"],
     async run(conversation) {
       const options = await askToDeploy(conversation);
-      const cancel = options.find((option) => option.label === "Cancel");
+      const cancel = options.find((option) => CANCEL_LABELS.includes(option.label));
       expect(cancel, "a Cancel option to press").toBeDefined();
       await conversation.press(cancel!);
       await expectNotDeployed(conversation);
