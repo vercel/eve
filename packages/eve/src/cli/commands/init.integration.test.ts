@@ -240,6 +240,7 @@ describe("runInitCommand", () => {
           client,
           renderer,
           appRoot: projectPath,
+          serverUrl: "http://eve-test.invalid",
           onboard: true,
           bootDetections: [],
           onBootProgress: report,
@@ -267,6 +268,8 @@ describe("runInitCommand", () => {
         input.enter();
         await screen.waitForText("Hello Alice, your agent is ready.");
         await screen.waitForIdlePrompt();
+        expect(output.messages.join("\n")).not.toContain("☰eve");
+        expect(stripAnsi(screen.rawOutput())).toContain("☰eve v");
         input.type("/exit");
         input.enter();
         await run;
@@ -284,48 +287,53 @@ describe("runInitCommand", () => {
   );
 
   it.each([
-    { interactive: true, agent: false },
-    { interactive: false, agent: false },
-    { interactive: true, agent: true },
-  ])("keeps init inline with the shell command (%j)", async ({ interactive, agent }) => {
-    vi.stubEnv("CI", "");
-    vi.stubEnv("TERM", "xterm-256color");
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-inline-"));
-    const screen = new MockScreen({ columns: 100, rows: 30 });
-    const properties = ["isTTY", "rows", "columns"] as const;
-    const original = properties.map((key) => Object.getOwnPropertyDescriptor(process.stdout, key));
-    for (const key of properties) {
-      Object.defineProperty(process.stdout, key, { configurable: true, value: screen[key] });
-    }
-    vi.spyOn(process.stdout, "write").mockImplementation((chunk) => screen.write(String(chunk)));
-    const output = logger();
-    output.log = (message) => {
-      screen.write(`${message}\n`);
-    };
-    const deps = { ...dependencies(), hasInteractiveTerminal: () => interactive };
-    deps.isCodingAgentLaunch.mockResolvedValue(agent);
-    const shellOutput = "$ pnpm dlx eve init agent\nProgress: resolved 47, added 33, done\n";
-    screen.write(shellOutput);
-    try {
-      await runInitCommand(output, parentDirectory, "agent", {}, deps);
-      const transcript = stripAnsi(screen.snapshot());
-      expect(transcript.startsWith(`${shellOutput}${interactive && !agent ? "\n" : ""}☰eve`)).toBe(
-        true,
+    { interactive: true, agent: false, nonInteractive: false },
+    { interactive: false, agent: false, nonInteractive: false },
+    { interactive: true, agent: true, nonInteractive: false },
+    { interactive: true, agent: false, nonInteractive: true },
+  ])(
+    "keeps init inline with the shell command (%j)",
+    async ({ interactive, agent, nonInteractive }) => {
+      vi.stubEnv("CI", "");
+      vi.stubEnv("TERM", "xterm-256color");
+      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-inline-"));
+      const screen = new MockScreen({ columns: 100, rows: 30 });
+      const properties = ["isTTY", "rows", "columns"] as const;
+      const original = properties.map((key) =>
+        Object.getOwnPropertyDescriptor(process.stdout, key),
       );
-      expect(transcript).not.toContain("\n\n\n");
-      expect(screen.rawOutput()).not.toContain("\u001B[H");
-      expect(screen.rawOutput()).not.toContain("\u001B[2J");
-      expect(screen.rawOutput()).not.toContain("\u001B[3J");
-      expect(transcript.match(/☰eve/gu)).toHaveLength(1);
-      expect(deps.spawnPackageManager).toHaveBeenCalledTimes(interactive && !agent ? 1 : 0);
-    } finally {
-      for (const [index, key] of properties.entries()) {
-        const descriptor = original[index];
-        if (descriptor === undefined) Reflect.deleteProperty(process.stdout, key);
-        else Object.defineProperty(process.stdout, key, descriptor);
+      for (const key of properties) {
+        Object.defineProperty(process.stdout, key, { configurable: true, value: screen[key] });
       }
-    }
-  });
+      vi.spyOn(process.stdout, "write").mockImplementation((chunk) => screen.write(String(chunk)));
+      const output = logger();
+      output.log = (message) => {
+        screen.write(`${message}\n`);
+      };
+      const deps = { ...dependencies(), hasInteractiveTerminal: () => interactive };
+      deps.isCodingAgentLaunch.mockResolvedValue(agent);
+      const shellOutput = "$ pnpm dlx eve init agent\nProgress: resolved 47, added 33, done\n";
+      screen.write(shellOutput);
+      try {
+        await runInitCommand(output, parentDirectory, "agent", { nonInteractive }, deps);
+        const transcript = stripAnsi(screen.snapshot());
+        const startsDevelopment = interactive && !agent && !nonInteractive;
+        expect(transcript.startsWith(shellOutput)).toBe(true);
+        expect(transcript).not.toContain("\n\n\n");
+        expect(screen.rawOutput()).not.toContain("\u001B[H");
+        expect(screen.rawOutput()).not.toContain("\u001B[2J");
+        expect(screen.rawOutput()).not.toContain("\u001B[3J");
+        expect(transcript.match(/☰eve v/gu) ?? []).toHaveLength(startsDevelopment ? 0 : 1);
+        expect(deps.spawnPackageManager).toHaveBeenCalledTimes(startsDevelopment ? 1 : 0);
+      } finally {
+        for (const [index, key] of properties.entries()) {
+          const descriptor = original[index];
+          if (descriptor === undefined) Reflect.deleteProperty(process.stdout, key);
+          else Object.defineProperty(process.stdout, key, descriptor);
+        }
+      }
+    },
+  );
 
   it("returns after scaffolding without opening the TUI in a noninteractive terminal", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-headless-"));
@@ -521,16 +529,15 @@ describe("runInitCommand", () => {
       "--onboard",
     ]);
     const messages = output.messages.map(stripAnsi);
-    expect(messages).toHaveLength(7);
+    expect(messages).toHaveLength(6);
     expect(messages[0]).toBe("");
-    expect(messages[1]).toContain("☰eve");
-    expect(messages.slice(2, 5)).toEqual([
+    expect(messages.slice(1, 4)).toEqual([
       "Creating agent...",
       "Installing dependencies...",
       "Initializing Git...",
     ]);
-    expect(messages[5]).toBe(`✓ Created an eve agent in ${projectPath} in 13.8s`);
-    expect(messages[6]).toBe("");
+    expect(messages[4]).toBe(`✓ Created an eve agent in ${projectPath} in 13.8s`);
+    expect(messages[5]).toBe("");
     expect(messages.join("\n")).not.toContain("$ eve dev");
     expect(output.messages.join("\n")).not.toContain("Instructions ");
   });

@@ -218,8 +218,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const lines = screen.snapshot().trimEnd().split("\n");
-    expect(lines.at(-1)).toMatch(/^☰eve {2}v\d+\.\d+\.\d+/u);
-    expect(screen.rawOutput()).toContain(`\x1b[2m☰eve  v`);
+    expect(lines.at(-1)).toMatch(/^☰eve v\d+\.\d+\.\d+/u);
+    expect(screen.rawOutput()).toContain(`\x1b[2m☰eve v`);
     // Once, ever — repeated teardown must not repeat the tag.
     renderer.shutdown();
     expect(screen.snapshot().match(/☰eve/gu)).toHaveLength(1);
@@ -240,7 +240,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const lines = screen.snapshot().trimEnd().split("\n");
-    expect(lines.at(-1)).toMatch(/^☰eve {2}v\d+\.\d+\.\d+ · session ses_0123456789$/u);
+    expect(lines.at(-1)).toMatch(/^☰eve v\d+\.\d+\.\d+ · session ses_0123456789$/u);
 
     // Repeated reports keep the latest id; a renderer that never received
     // one prints the bare tag.
@@ -1998,9 +1998,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Every runtime-artifacts change re-sends the header; an identical one
     // must not stack another banner under the transcript.
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.shutdown();
-
     expect(countOccurrences(screen.snapshot(), "☰eve v")).toBe(1);
+    renderer.shutdown();
   });
 
   it("reset clears committed transcript rows", () => {
