@@ -414,14 +414,16 @@ export function renderHitlConformanceMatrix(): string {
   const names = entries.map((entry) => entry.driver().name);
   const escape = (text: string) => text.replaceAll("|", "\\|");
   const row = (cells: readonly string[]) => `| ${cells.join(" | ")} |`;
-  // One footnote per distinct reason, numbered in reading order, so every
-  // cell sharing a cause links to the same note.
+  // One note per distinct reason, numbered in reading order, so every cell
+  // sharing a cause links to the same note. Plain anchors rather than Markdown
+  // footnotes, which GitHub renders with links back up to every citing cell.
   const notes = new Map<string, number>();
   const shown = (cell: Cell) => {
     if (cell.kind === "pass") return MATRIX_SYMBOLS.pass;
     const note = `${MATRIX_SYMBOLS[cell.kind]} ${cell.kind === "broken" ? cell.broken.reason : cell.reason}`;
     if (!notes.has(note)) notes.set(note, notes.size + 1);
-    return `${MATRIX_SYMBOLS[cell.kind]}[^${notes.get(note)}]`;
+    const index = notes.get(note)!;
+    return `${MATRIX_SYMBOLS[cell.kind]}<sup>[${index}](#note-${index})</sup>`;
   };
   const rows = hitlContract.map((rule) =>
     row([
@@ -444,15 +446,16 @@ export function renderHitlConformanceMatrix(): string {
     "pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conformance/matrix -u",
     "```",
     "",
-    "✅ passes · ❌ broken · — not supported. Every ❌ and — cell links to a note on why;",
-    "cells with the same cause share one. A `-dm` column is the same channel in a",
+    "✅ passes · ❌ broken · — not supported. A `-dm` column is the same channel in a",
     "direct message instead of a shared thread.",
     "",
     row(["Rule", ...names.map((name) => `\`${name}\``)]),
     row(["---", ...names.map(() => ":---:")]),
     ...rows,
     "",
-    ...[...notes].map(([note, index]) => `[^${index}]: ${note}`),
+    "## Notes",
+    "",
+    ...[...notes].map(([note, index]) => `${index}. <a id="note-${index}"></a>${note}`),
     "",
   ].join("\n");
 }
