@@ -11,9 +11,7 @@ recorded symptom. Regenerate it after changing either file:
 pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conformance/matrix -u
 ```
 
-✅ passes · ❌ broken · — not supported. A `-dm` column is the same channel in a
-direct message instead of a shared thread, and is blank for rules that don't vary
-between the two.
+✅ passes · ❌ broken · — not supported
 
 | Rule | `tui` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `github` | `linear` | `twilio` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
