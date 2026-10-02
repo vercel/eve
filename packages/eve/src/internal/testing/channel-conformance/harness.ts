@@ -10,6 +10,7 @@ import { z } from "#compiled/zod/index.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { askQuestion } from "#tools/provided/ask-question.js";
+import { getWorld } from "#internal/workflow/runtime.js";
 
 /** One outbound call a channel made to its platform API. */
 export interface PlatformCall {
@@ -276,12 +277,40 @@ async function converse(
       return session;
     }
 
+    // The test file's workflow world closes after its last test, so a session
+    // still writing then fails with an unhandled rejection.
+    const settle = () => Promise.all([...sessions.values()].map(cancelUntilResting));
     try {
       await body(conversation);
-    } finally {
-      await Promise.allSettled([...sessions.values()].map((session) => session.cancel()));
+    } catch (error) {
+      await settle().catch(() => {});
+      throw error;
     }
+    await settle();
   });
+}
+
+const TERMINAL_STEP_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+/**
+ * Cancels `session` until it waits for its next message with none of its steps
+ * still running. A turn that starts after the first cancel needs another.
+ */
+async function cancelUntilResting(session: Session): Promise<void> {
+  const world = await getWorld();
+  const deadline = Date.now() + WAIT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await session.cancel();
+    const tail = await session.getStreamTailIndex();
+    const reader = (await session.getEventStream({ startIndex: tail })).getReader();
+    const last = await reader.read().finally(() => reader.cancel());
+    if (last.value?.type === "session.waiting") {
+      const steps = await world.steps.list({ resolveData: "none", runId: session.id });
+      if (steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status))) return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for session ${session.id} to rest.`);
 }
 
 async function countInputHolds(session: Session): Promise<number> {
