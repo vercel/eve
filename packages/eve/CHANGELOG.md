@@ -1,5 +1,29 @@
 # eve
 
+## 0.70.2
+
+### Patch Changes
+
+- 43f585c: A model step that ends early, for example at the output token limit, no longer leaves its tool calls unanswered. The AI SDK does not run tools from such a step, so the next model call failed with "Tool results are missing". eve now answers each skipped call with an error, and the model can call the tool again.
+- 1360a1f: Chat SDK adapters without card support, such as Photon iMessage and Linq, now show `ask_question` prompts and tool approvals with numbered options, so a person can answer by replying with an option's number or label (for example `approve` or `cancel`). Freeform questions now ask for a typed reply on every adapter instead of pointing to the eve session UI.
+- 1062c92: After compaction, eve now moves an idle session to a fresh workflow run on the same deployment, so long-running sessions no longer accumulate an ever-growing workflow event log. The session keeps its ID, event stream, continuation addresses, and deadline.
+- 285cbe6: A plain-text reply that answers a pending `ask_question` or `ctx.ask()` question no longer leaves its channel context behind. Before, channels that attach per-message context, such as Telegram, Discord, Teams, and Twilio, added that block to history as a separate message after the answer, and the model replied to it instead of continuing from the answer.
+- f9d2071: Fix discovery of packaged extension mounts whose default exports are rewritten during compilation, and of built-in extensions mounted from inside the eve package itself.
+- 1062c92: Eval sessions now have `session.compact()`, which compacts the session between turns and resolves to the compaction events through `session.waiting`, so evals no longer need raw `fetch` calls to cover compaction.
+- 11e7cad: An installed extension mounted in both the root agent and a subagent now builds when its distribution has shared chunks in `dist/_chunks`. Each mount owns those chunks, so they read that mount's configuration and state instead of failing with `refers to multiple extension mounts`.
+- f8ef817: Sessions from eve 0.68 and earlier now hand off to a newer deployment even when the agent or one of its extensions has since removed a `defineState` key. The removed state is dropped with a warning instead of keeping the session on its old deployment.
+- bdba125: Avoid repeating the eve header when interactive `eve init` opens onboarding. Standalone init runs still print their header, and all CLI banners now use a single space between the eve wordmark and version.
+- 0bf95b0: The default Slack thread status now keeps naming the latest work across model steps, including tool progress, reasoning, and long replies, instead of resetting to `Thinking...`. eve clears it while a turn waits on an approval, answer, or sign-in.
+- ef1a6b9: Slack thread replies now answer pending tool approvals and `ctx.ask()` questions by what the person typed, such as `approve` or an option label. Before, eve matched the attributed `<slack_message>` envelope instead, so typed answers never resolved a choice and free-text answers included the envelope.
+- 1f81fcd: Update eve's bundled Workflow SDK packages from prerelease builds to the stable 5.0.1 release family.
+- 79c4379: Telegram's Approve and Cancel buttons answer a tool approval again. Since approvals started holding the turn, a button press never resumed it and the turn waited until the person typed a reply.
+- 0df9bbf: Files that tools return to the model now live in the session sandbox, with only a reference in session history, so workflow state no longer re-stores image bytes on every step; each model call sends the same file, keeping it visible on later turns and the provider's prompt cache valid. Compaction now counts images at roughly what providers bill for them instead of their base64 length, and `read_file` shows PNG, JPEG, GIF, and WebP files to the model as images. Message attachments and tool files now stage under `/workspace/.eve/attachments` instead of `/workspace/attachments`, so they no longer collide with an agent's own files.
+- f7b07c1: The `eve dev` TUI's approval drawer now asks the approval's own prompt, such as `Approve Deploy release?`, instead of `Approve deploy_release?` built from the raw tool name. It now matches what channels and the web client show.
+- d18970c: Fix blank lines accumulating after model selection in the dev TUI under tmux. The speed marker now uses a single-column glyph so rebuild status lines do not wrap or leave a stray character below the status bar.
+- 0bf95b0: The dev TUI now shows readable names for subagents and unlabeled tools, such as `subagent(worker)` for `code__worker` and `List issues` for `linear__list_issues`, using the same naming as the Slack status and task cards.
+- 46f8a6e: The Twilio channel now sends `ask_question` prompts and tool approvals by SMS with numbered options, so a person can answer by replying with an option's number or label (for example `approve` or `cancel`). Previously the request was never sent and the session stayed parked.
+- beb0dd1: Agents on the Vercel workflow world now write workflow events over WebSocket by default (`WORKFLOW_EVENTS_TRANSPORT=ws`). Set `WORKFLOW_EVENTS_TRANSPORT=http` to keep the HTTP transport.
+
 ## 0.70.1
 
 ### Patch Changes
