@@ -57,25 +57,25 @@ direct message instead of a shared thread.
 
 ## Notes
 
-1. <a id="note-1"></a>— it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-2. <a id="note-2"></a>— the platform has no buttons a person can press
-3. <a id="note-3"></a>— the platform has no plain-text replies
-4. <a id="note-4"></a>— an answered question's drawer closes, so nothing is left to press
-5. <a id="note-5"></a>— the approval drawer holds the keyboard; a person answers it with y or n
-6. <a id="note-6"></a>❌ only the button interaction handler edits a question; a typed answer leaves it
-7. <a id="note-7"></a>❌ a resolved prompt doesn't say who answered; input.resolved carries no responder
-8. <a id="note-8"></a>— one person answers at their own terminal; there's nobody else to tell
-9. <a id="note-9"></a>❌ the card loses its buttons after a typed approval but doesn't say who approved
-10. <a id="note-10"></a>❌ a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws
-11. <a id="note-11"></a>❌ a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen
-12. <a id="note-12"></a>❌ eve coalesces the queued reply with the later approve, which then matches no option
-13. <a id="note-13"></a>❌ outside a DM the bot says to continue in a direct message but never sends one
-14. <a id="note-14"></a>❌ the channel has no default sign-in renderer
-15. <a id="note-15"></a>— the rule applies only where the conversation is shared or private, and this one is public
-16. <a id="note-16"></a>❌ the TUI labels a sign-in with the tool name, not the challenge's displayName
-17. <a id="note-17"></a>❌ the Teams sign-in card omits the challenge's user code
-18. <a id="note-18"></a>— the rule applies only where the conversation is public or shared, and this one is private
-19. <a id="note-19"></a>❌ the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
-20. <a id="note-20"></a>❌ the sign-in prompt, link included, is posted to the whole thread
-21. <a id="note-21"></a>❌ Slack sends the private sign-in prompt only for a challenge with a URL
-22. <a id="note-22"></a>❌ the Teams sign-in card omits the challenge's instructions
+1. <a id="note-1"></a>it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
+2. <a id="note-2"></a>the platform has no buttons a person can press
+3. <a id="note-3"></a>the platform has no plain-text replies
+4. <a id="note-4"></a>an answered question's drawer closes, so nothing is left to press
+5. <a id="note-5"></a>the approval drawer holds the keyboard; a person answers it with y or n
+6. <a id="note-6"></a>only the button interaction handler edits a question; a typed answer leaves it
+7. <a id="note-7"></a>a resolved prompt doesn't say who answered; input.resolved carries no responder
+8. <a id="note-8"></a>one person answers at their own terminal; there's nobody else to tell
+9. <a id="note-9"></a>the card loses its buttons after a typed approval but doesn't say who approved
+10. <a id="note-10"></a>a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws
+11. <a id="note-11"></a>a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen
+12. <a id="note-12"></a>eve coalesces the queued reply with the later approve, which then matches no option
+13. <a id="note-13"></a>outside a DM the bot says to continue in a direct message but never sends one
+14. <a id="note-14"></a>the channel has no default sign-in renderer
+15. <a id="note-15"></a>the rule applies only where the conversation is shared or private, and this one is public
+16. <a id="note-16"></a>the TUI labels a sign-in with the tool name, not the challenge's displayName
+17. <a id="note-17"></a>the Teams sign-in card omits the challenge's user code
+18. <a id="note-18"></a>the rule applies only where the conversation is public or shared, and this one is private
+19. <a id="note-19"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
+20. <a id="note-20"></a>the sign-in prompt, link included, is posted to the whole thread
+21. <a id="note-21"></a>Slack sends the private sign-in prompt only for a challenge with a URL
+22. <a id="note-22"></a>the Teams sign-in card omits the challenge's instructions

@@ -420,7 +420,7 @@ export function renderHitlConformanceMatrix(): string {
   const notes = new Map<string, number>();
   const shown = (cell: Cell) => {
     if (cell.kind === "pass") return MATRIX_SYMBOLS.pass;
-    const note = `${MATRIX_SYMBOLS[cell.kind]} ${cell.kind === "broken" ? cell.broken.reason : cell.reason}`;
+    const note = cell.kind === "broken" ? cell.broken.reason : cell.reason;
     if (!notes.has(note)) notes.set(note, notes.size + 1);
     const index = notes.get(note)!;
     return `${MATRIX_SYMBOLS[cell.kind]}<sup>[${index}](#note-${index})</sup>`;
