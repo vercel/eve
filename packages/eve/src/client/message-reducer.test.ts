@@ -1711,6 +1711,23 @@ describe("defaultMessageReducer", () => {
     });
   });
 
+  it("shows a call eve stopped as a tool error, not a success", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionResultEvent({
+        result: { callId: "call_1", kind: "tool-result", output: "partial", toolName: "deploy" },
+        sequence: 0,
+        stepIndex: 0,
+        stopped: { code: "TURN_CANCELLED", message: "The turn was cancelled." },
+        turnId: "turn_1",
+      }),
+    ]);
+    expect(data.messages[0]?.parts.at(-1)).toMatchObject({
+      errorText: "The turn was cancelled.",
+      state: "output-error",
+    });
+  });
+
   it("preserves separate participant messages received within one turn", () => {
     const reducer = defaultMessageReducer();
     const events = stampTestEvents([

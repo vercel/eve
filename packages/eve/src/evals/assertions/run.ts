@@ -206,7 +206,9 @@ export function noFailedActions(): RunAssertion {
       const failed = result.events.filter(
         (evt): evt is Extract<MessageStreamEvent, { type: "action.result" }> =>
           evt.type === "action.result" &&
-          (evt.data.status === "failed" || evt.data.result.isError === true),
+          // A call eve stopped didn't fail: its turn ended before the call finished.
+          (evt.data.status === "failed" ||
+            (evt.data.result.isError === true && evt.data.status !== "cancelled")),
       );
       if (failed.length === 0) return PASS;
       const details = failed.map(formatFailedActionResult);

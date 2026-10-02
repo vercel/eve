@@ -53,10 +53,12 @@ interface MessageStreamAppendEventsByVersion {
     | ReasoningAppendedStreamEventV24;
   "25": ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent;
   "26": ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent;
+  // v27 adds values an older client would misread, such as the `cancelled` call status.
+  "27": ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent;
 }
 
 export type MessageStreamVersion = keyof MessageStreamAppendEventsByVersion;
-type DeltaMessageStreamVersion = "25" | "26";
+type DeltaMessageStreamVersion = "25" | "26" | "27";
 type LegacyMessageStreamVersion = Exclude<MessageStreamVersion, DeltaMessageStreamVersion>;
 
 type VersionIndependentMessageStreamEvent = Exclude<
@@ -97,6 +99,7 @@ export function normalizeMessageStreamEvent(
       );
     case "25":
     case "26":
+    case "27":
       return validateDeltaMessageStreamEvent(
         version,
         event as MessageStreamEventForVersion<DeltaMessageStreamVersion>,

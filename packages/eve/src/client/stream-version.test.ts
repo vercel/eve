@@ -18,7 +18,7 @@ describe("readMessageStreamVersion", () => {
 
   it("rejects an unsupported version", () => {
     expect(() =>
-      readMessageStreamVersion(new Headers({ [EVE_STREAM_VERSION_HEADER]: "27" })),
-    ).toThrow("Unsupported message stream version: 27.");
+      readMessageStreamVersion(new Headers({ [EVE_STREAM_VERSION_HEADER]: "28" })),
+    ).toThrow("Unsupported message stream version: 28.");
   });
 });

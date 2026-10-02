@@ -935,7 +935,7 @@ describe("ClientSession", () => {
       for await (const _event of session.stream()) {
         // Invalid events fail before delivery.
       }
-    }).rejects.toThrow("Invalid message append delta for stream version 26.");
+    }).rejects.toThrow("Invalid message append delta for stream version 27.");
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 

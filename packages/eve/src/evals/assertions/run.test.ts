@@ -313,6 +313,28 @@ describe("run assertions", () => {
     expect(outcome.message).toContain("Subagent recursion stopped");
   });
 
+  it("noFailedActions does not count a call eve stopped", async () => {
+    const stopped = {
+      type: "action.result",
+      data: {
+        error: { code: "TURN_CANCELLED", message: "The turn was cancelled." },
+        result: {
+          callId: "call-a",
+          isError: true,
+          kind: "tool-result",
+          output: "The turn was cancelled.",
+          toolName: "review",
+        },
+        sequence: 0,
+        status: "cancelled",
+        stepIndex: 0,
+        turnId: "turn_0",
+      },
+    } as UnstampedMessageStreamEvent;
+
+    expect((await Run.noFailedActions().evaluate(makeResult({ events: [stopped] }))).score).toBe(1);
+  });
+
   it("matches typed event counts and ordered event groups", async () => {
     const called = {
       type: "task.started",

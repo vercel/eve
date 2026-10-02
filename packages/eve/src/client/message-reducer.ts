@@ -262,7 +262,9 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       const existing = findToolPart(data, event.data.result.callId);
       const denied =
         event.data.status === "rejected" || event.data.error?.code === "TOOL_EXECUTION_DENIED";
-      const failed = event.data.status === "failed" && !denied;
+      // A call eve stopped didn't succeed: it shows as an error, like a failure.
+      const cancelled = event.data.status === "cancelled";
+      const failed = (event.data.status === "failed" || cancelled) && !denied;
       const approvalId = existing?.approval?.id ?? event.data.result.callId;
       const toolMetadata = mergeToolMetadata(
         existing?.toolMetadata,
@@ -292,7 +294,9 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
         nextPart = {
           ...resultPartBase,
           approval: approvedApproval(existing),
-          errorText: event.data.error?.message ?? stringifyUnknown(event.data.result.output),
+          errorText:
+            event.data.error?.message ??
+            (cancelled ? "Action was cancelled." : stringifyUnknown(event.data.result.output)),
           state: "output-error",
         };
       } else {

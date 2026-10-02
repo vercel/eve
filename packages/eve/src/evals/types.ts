@@ -29,7 +29,7 @@ import type {
 } from "#evals/match.js";
 
 /** Lifecycle outcome of an eval-observed tool action. */
-export type EveEvalActionStatus = "pending" | "completed" | "failed" | "rejected";
+export type EveEvalActionStatus = "pending" | "completed" | "failed" | "rejected" | "cancelled";
 
 /**
  * One tool call extracted from the captured stream, pairing the
