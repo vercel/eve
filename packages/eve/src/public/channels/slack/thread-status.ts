@@ -74,9 +74,13 @@ const LIST_MARKER = /^(?:[-*+]|\d{1,2}[.)])\s+/u;
  * The newest readable piece of a reasoning block so far: its latest heading
  * when the model titles its reasoning, as reasoning summaries do, otherwise
  * its latest finished sentence. A sentence still streaming counts once it
- * fills the status, so the status never shows half a short sentence.
+ * fills the status, so the status never shows half a short sentence. A
+ * `complete` block has nothing streaming: its last sentence is finished.
  */
-export function reasoningStatus(reasoning: string): string | undefined {
+export function reasoningStatus(
+  reasoning: string,
+  options?: { readonly complete?: boolean },
+): string | undefined {
   const heading = [...reasoning.matchAll(HEADING)].findLast((match) => match[1]!.trim() !== "");
   if (heading) return heading[1]!.trim();
 
@@ -84,8 +88,8 @@ export function reasoningStatus(reasoning: string): string | undefined {
     .split(/\r?\n/u)
     .flatMap((line) => line.split(SENTENCE_BOUNDARY))
     .map((piece) => piece.trim().replace(LIST_MARKER, ""));
-  const streaming = pieces.length - 1;
-  for (let index = streaming; index >= 0; index -= 1) {
+  const streaming = options?.complete === true ? -1 : pieces.length - 1;
+  for (let index = pieces.length - 1; index >= 0; index -= 1) {
     const piece = pieces[index]!;
     const minLength =
       index === streaming ? SLACK_TYPING_STATUS_MAX_LENGTH : MIN_REASONING_PIECE_LENGTH;

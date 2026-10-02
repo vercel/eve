@@ -238,26 +238,10 @@ export interface SlackChannelState {
    */
   pendingToolCallMessage?: string | null;
   /**
-   * When the default `reasoning.appended` handler last showed a piece of the
-   * current reasoning block, so each piece stays up long enough to read.
-   */
-  lastReasoningTypingAtMs?: number | null;
-  /**
    * The thread status the default renderer last set. A later model step shows
    * it again, as does a new task card, which Slack clears the status for.
    */
   threadStatus?: SlackThreadStatus | null;
-  /**
-   * The current model step's tool calls, which stream in one at a time: the
-   * first call's label, or the model's narration, and how many calls followed.
-   */
-  stepCalls?: {
-    readonly count: number;
-    readonly label: string;
-    readonly narrated: boolean;
-    readonly stepIndex: number;
-    readonly turnId: string;
-  } | null;
   /**
    * Connection name to Slack message ts. Each entry is the public
    * link-free status post created by the default
@@ -887,7 +871,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       triggeringUserId: null,
       triggeringMessageTs: null,
       pendingToolCallMessage: null,
-      lastReasoningTypingAtMs: null,
       pendingAuthMessageTs: {},
       pendingApprovalCards: {},
       slackUsersByPrincipal: {},

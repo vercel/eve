@@ -26,6 +26,7 @@ import type {
   SlackChannelInternalEvents,
   SlackChannelState,
   SlackContext,
+  SlackEventContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
 import {
@@ -42,12 +43,16 @@ const STATUS_HOLD_MS = 3_000;
 const WRITING_REPLY_MIN_CHARS = 280;
 
 /**
- * The current model step's streamed text. One workflow step runs a model call
- * and delivers its events to the same state object, so this never needs to
- * survive serialization, and a new step starts empty.
+ * What the current model step has streamed so far. One workflow step runs a
+ * model call and delivers its events to the same state object, so this never
+ * needs to survive serialization, and a new step starts empty.
  */
 interface StepStream {
+  /** The step's tool calls: the first call's label, or the model's narration, and how many. */
+  calls: { readonly count: number; readonly label: string; readonly narrated: boolean } | null;
+  /** The current reasoning block, and when a piece of it last showed. */
   reasoning: string;
+  reasoningShownAtMs: number | null;
   replyChars: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -57,13 +62,34 @@ const streamByState = new WeakMap<SlackChannelState, StepStream>();
 function stepStream(state: SlackChannelState, turnId: string, stepIndex: number): StepStream {
   const current = streamByState.get(state);
   if (current?.turnId === turnId && current.stepIndex === stepIndex) return current;
-  const fresh: StepStream = { reasoning: "", replyChars: 0, stepIndex, turnId };
+  const fresh: StepStream = {
+    calls: null,
+    reasoning: "",
+    reasoningShownAtMs: null,
+    replyChars: 0,
+    stepIndex,
+    turnId,
+  };
   streamByState.set(state, fresh);
   return fresh;
 }
 
 function heldWithin(atMs: number | null | undefined, now: number): boolean {
   return atMs != null && now - atMs >= 0 && now - atMs < STATUS_HOLD_MS;
+}
+
+async function showReasoning(
+  channel: SlackEventContext,
+  stream: StepStream,
+  options?: { readonly complete?: boolean },
+): Promise<void> {
+  const piece = reasoningStatus(stream.reasoning, options);
+  if (piece === undefined) return;
+  if (truncateTypingStatus(piece) === channel.state.threadStatus?.text) return;
+  const now = Date.now();
+  if (heldWithin(stream.reasoningShownAtMs, now)) return;
+  await showStatus(channel, piece);
+  stream.reasoningShownAtMs = now;
 }
 
 interface SlackSemanticErrorSummary {
@@ -240,8 +266,6 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "turn.started"(_event, channel, _ctx) {
     channel.state.pendingTaskResults = null;
     channel.state.pendingToolCallMessage = null;
-    channel.state.lastReasoningTypingAtMs = null;
-    channel.state.stepCalls = null;
     streamByState.delete(channel.state);
     await showStatus(channel, "Thinking...", { force: true });
   },
@@ -256,20 +280,17 @@ export const defaultEvents: SlackChannelInternalEvents = {
   // a long reasoning block reads as progress instead of its opening words.
   async "reasoning.appended"(event, channel, _ctx) {
     const stream = stepStream(channel.state, event.turnId, event.stepIndex);
-    if (stream.reasoning === "") channel.state.lastReasoningTypingAtMs = null;
+    if (stream.reasoning === "") stream.reasoningShownAtMs = null;
     stream.reasoning += event.reasoningDelta;
-    const piece = reasoningStatus(stream.reasoning);
-    if (piece === undefined) return;
-    if (truncateTypingStatus(piece) === channel.state.threadStatus?.text) return;
-    const now = Date.now();
-    if (heldWithin(channel.state.lastReasoningTypingAtMs, now)) return;
-    await showStatus(channel, piece);
-    channel.state.lastReasoningTypingAtMs = now;
+    await showReasoning(channel, stream);
   },
 
+  // The block's last sentence never shows while it streams unless it fills
+  // the status, so a short one only shows once the block ends.
   async "reasoning.completed"(event, channel, _ctx) {
-    const stream = streamByState.get(channel.state);
-    if (stream?.turnId !== event.turnId || stream.stepIndex !== event.stepIndex) return;
+    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+    stream.reasoning = event.reasoning;
+    await showReasoning(channel, stream, { complete: true });
     stream.reasoning = "";
   },
 
@@ -283,26 +304,27 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   // Calls in one step stream in one at a time, so the step keeps its first
-  // label, or the model's narration, and counts the rest.
+  // label, or the model's narration, and counts the rest. Calls a tool makes
+  // on the model's behalf, such as a connection tool, belong to their parent.
   async "actions.requested"(event, channel, _ctx) {
     const narration = channel.state.pendingToolCallMessage;
     channel.state.pendingToolCallMessage = null;
     const actions = event.actions.filter(
-      (action) => action.kind !== "tool-call" || !isTaskControlTool(action.toolName),
+      (action) =>
+        action.kind !== "tool-call" ||
+        (!isTaskControlTool(action.toolName) && action.parentCallId === undefined),
     );
     if (!narration && actions.length === 0) return;
-    const previous = channel.state.stepCalls;
+    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
     const calls =
-      !narration && previous?.turnId === event.turnId && previous.stepIndex === event.stepIndex
-        ? { ...previous, count: previous.count + actions.length }
+      !narration && stream.calls
+        ? { ...stream.calls, count: stream.calls.count + actions.length }
         : {
             count: actions.length,
             label: narration ?? actionLabel(actions[0]!, event.presentation),
             narrated: narration != null,
-            stepIndex: event.stepIndex,
-            turnId: event.turnId,
           };
-    channel.state.stepCalls = calls;
+    stream.calls = calls;
     await showStatus(
       channel,
       calls.narrated ? calls.label : withMoreCalls(calls.label, calls.count),

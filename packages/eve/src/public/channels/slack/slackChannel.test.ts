@@ -955,7 +955,7 @@ describe("slackChannel() default event handlers", () => {
     expect(ctx.state.pendingToolCallMessage).toBeNull();
   });
 
-  it("shows a step's first call label, or its display title, and counts the step's other calls, without the model's own task calls", async () => {
+  it("shows a step's first call label, or its display title, and counts the step's other calls, without the model's own task calls or calls its tools make", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
@@ -981,6 +981,24 @@ describe("slackChannel() default event handlers", () => {
     await callEvent(adapter, requested(["task_cancel", "search", "ops__deploy_preview"], 0), ctx);
     // Streamed calls arrive one at a time; the step keeps its first label.
     await callEvent(adapter, requested(["lookup"], 0), ctx);
+    await callEvent(
+      adapter,
+      makeEvent("actions.requested", {
+        actions: [
+          {
+            callId: "call_lookup:1",
+            input: {},
+            kind: "tool-call",
+            parentCallId: "call_lookup",
+            toolName: "linear__search_issues",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
     await callEvent(adapter, requested(["task_cancel", "ops__deploy_preview"], 1), ctx);
     expect(slackStatuses(fetchMock)).toEqual([
       "Search checkout incidents +1 more",
@@ -1524,6 +1542,35 @@ describe("slackChannel() default event handlers", () => {
       "Need to inspect the implementation and verify...",
       "Finally check the docs table.",
     ]);
+  });
+
+  it("shows a reasoning block's short closing sentence once the block ends", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const reasoning = "Checking the failed deploys.";
+
+    await callEvent(
+      adapter,
+      makeEvent("reasoning.appended", {
+        reasoningDelta: reasoning,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    // It might still be streaming, so it waits for the block to end.
+    expect(fetchMock).not.toHaveBeenCalled();
+    await callEvent(
+      adapter,
+      makeEvent("reasoning.completed", { reasoning, sequence: 0, stepIndex: 0, turnId: "t1" }),
+      ctx,
+    );
+
+    expect(slackStatuses(fetchMock)).toEqual([reasoning]);
   });
 
   it("shows the latest heading of titled reasoning", async () => {
