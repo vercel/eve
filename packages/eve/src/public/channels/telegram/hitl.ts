@@ -157,11 +157,10 @@ export function resolveTelegramInputResponses(
   for (const response of responses) {
     if (response.requestId.startsWith(TELEGRAM_CALLBACK_RESPONSE_PREFIX)) {
       const callbackData = response.requestId.slice(TELEGRAM_CALLBACK_RESPONSE_PREFIX.length);
+      // The mapping outlives the press: a later press of the same button still
+      // reaches the session, which reads an answered request's option as new input.
       const mapped = state.hitlCallbacks?.[callbackData];
-      if (mapped !== undefined) {
-        resolved.push(mapped);
-        delete state.hitlCallbacks?.[callbackData];
-      }
+      if (mapped !== undefined) resolved.push(mapped);
       continue;
     }
 

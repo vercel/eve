@@ -20,8 +20,13 @@ import type {
 
 const log = createLogger("telegram.defaults");
 
-/** Default auth projection for Telegram webhook actors. */
-export function defaultTelegramAuth(message: TelegramMessage): SessionAuthContext | null {
+/**
+ * Default auth projection for Telegram webhook actors. A button press passes
+ * the message it was on with the presser as `from`.
+ */
+export function defaultTelegramAuth(
+  message: Pick<TelegramMessage, "chat" | "from" | "messageId" | "messageThreadId">,
+): SessionAuthContext | null {
   const user = message.from;
   if (!user) return null;
 
