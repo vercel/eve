@@ -52,6 +52,14 @@ describe("truncateTypingStatus", () => {
     expect(result.endsWith("...")).toBe(true);
   });
 
+  it("cuts at a word boundary when one is near", () => {
+    expect(
+      truncateTypingStatus(
+        "Need to inspect the implementation and verify the Slack typing status behavior.",
+      ),
+    ).toBe("Need to inspect the implementation and verify...");
+  });
+
   it("does not append ellipsis when the input is exactly at the limit", () => {
     const exact = "a".repeat(SLACK_TYPING_STATUS_MAX_LENGTH);
     expect(truncateTypingStatus(exact)).toBe(exact);

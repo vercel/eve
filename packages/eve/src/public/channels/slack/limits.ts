@@ -69,11 +69,15 @@ export const SLACK_MODAL_TITLE_MAX_LENGTH = 24;
  * assistant-thread status does not render, trims, collapses runs of
  * whitespace into a single space, then truncates to
  * {@link SLACK_TYPING_STATUS_MAX_LENGTH} with a trailing ellipsis when
- * needed.
+ * needed, at a word boundary when one is near.
  */
 export function truncateTypingStatus(status: string): string {
   const normalized = stripTypingStatusMarkdown(status).trim().replace(/\s+/gu, " ");
-  return truncateWithEllipsis(normalized, SLACK_TYPING_STATUS_MAX_LENGTH);
+  if (normalized.length <= SLACK_TYPING_STATUS_MAX_LENGTH) return normalized;
+  const cut = normalized.slice(0, SLACK_TYPING_STATUS_MAX_LENGTH - 3);
+  const space = cut.lastIndexOf(" ");
+  const words = space > SLACK_TYPING_STATUS_MAX_LENGTH / 2 ? cut.slice(0, space) : cut;
+  return `${words.trimEnd()}...`;
 }
 
 /**

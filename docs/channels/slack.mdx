@@ -457,20 +457,26 @@ The bases say where a call may go. `apiBaseUrl` is the base Slack Web API method
 
 eve shows an agent's progress in two places. Short work, such as thinking or a tool call, appears in the thread status and never posts a message. [Tasks](/docs/tools/tasks), which keep working while the conversation continues, appear in a task card: one message per turn that eve updates in place. Replies post as ordinary messages, so the thread holds the conversation, the task card, and nothing else.
 
-| Moment                             | Thread status                                                                   |
-| ---------------------------------- | ------------------------------------------------------------------------------- |
-| A mention or DM arrives            | `Thinking...`, right away, while the message hook is still deciding             |
-| The message hook drops the message | Cleared                                                                         |
-| The turn starts                    | `Working...`                                                                    |
-| The model reasons                  | The first line of its reasoning                                                 |
-| The model calls tools              | Its narration before the calls, or an action label such as `Search useEveAgent` |
-| The turn waits on its tasks        | `Waiting on researcher...`, or `Waiting on 3 tasks...`                          |
-| The model starts its next step     | `Reviewing results...` after a task finishes, otherwise `Thinking...`           |
-| A reply posts                      | Cleared by Slack                                                                |
+| Moment                                            | Thread status                                                                                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| A mention or DM arrives                           | `Thinking...`, right away, while the message hook is still deciding                                                                |
+| The message hook drops the message                | Cleared                                                                                                                            |
+| The turn starts                                   | `Thinking...`                                                                                                                      |
+| The model reasons                                 | Its latest reasoning heading, or its latest finished sentence                                                                      |
+| The model calls tools                             | Its narration before the calls, or the first action label, such as `Search useEveAgent`, plus `+N more` for the step's other calls |
+| A tool reports progress                           | The tool's `label.delta` text                                                                                                      |
+| A tool finishes                                   | The tool's `label.complete` text, when it defines one; otherwise the status stays                                                  |
+| The model starts its next step                    | `Reviewing researcher's results...` after a task finishes, otherwise the same status again                                         |
+| The model streams a long reply                    | `Writing a reply...`, once the text runs past 280 characters                                                                       |
+| The turn waits on its tasks                       | `Waiting on researcher...`, or `Waiting on 3 tasks...`                                                                             |
+| The turn waits on an approval, answer, or sign-in | Cleared until the turn resumes, then the status it had                                                                             |
+| A reply posts                                     | Cleared by Slack                                                                                                                   |
 
-Slack clears a thread status after two minutes without a message, so during a long wait the task card is what shows the work is still going.
+A model step never resets the status to a generic line. The status keeps naming the latest work until something newer replaces it, so a user watching the thread sees `Checking recent deploys`, then `Found 4 failed deploys`, then `Reading build logs`, without `Thinking...` in between.
 
-Action labels follow the same rule as the task card titles described below, plus `+N more` when the model requests several actions at once. They leave out the model's own `task_wait` and `task_cancel` calls. Reasoning snippets build progressively: extensions of at least four characters appear immediately, while smaller streamed deltas use a five-second refresh interval to avoid one Slack request per token.
+Slack removes a thread status after two minutes without a message from the app, and clears it whenever the app posts in the thread. eve sets the current status again at each model step, after it posts a new task card, and as a tool reports progress. A tool that runs longer than two minutes without reporting progress loses its status. Report progress with [`label.delta`](/docs/tools#label-tool-activity), or run the work as a [task](/docs/tools/tasks), whose card shows it is still going.
+
+Action labels follow the same rule as the task card titles described below. They leave out the model's own `task_wait` and `task_cancel` calls. Reasoning shows one piece at a time: a heading when the model titles its reasoning, as reasoning summaries do, otherwise the latest finished sentence. Each piece of reasoning, and each progress label, stays up for at least three seconds, so the status changes at a readable pace instead of sending a Slack request per token. Every status is cut to 50 characters at a word boundary.
 
 Replies up to 12,000 characters render inline. Longer replies are uploaded unchanged as a Markdown snippet named `eve-response.md` with a short in-thread note, which requires the `files:write` bot scope.
 

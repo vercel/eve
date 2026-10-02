@@ -2,7 +2,12 @@ import { workingTaskNames } from "#channel/task-card.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import { describeActionRequests, waitingOnTasks } from "#public/channels/slack/action-status.js";
+import {
+  actionLabel,
+  reviewingResults,
+  waitingOnTasks,
+  withMoreCalls,
+} from "#public/channels/slack/action-status.js";
 import { isTaskControlTool } from "#protocol/task-tools.js";
 import { buildSlackAuthContext, slackUserIdForPrincipal } from "#public/channels/slack/auth.js";
 import {
@@ -23,16 +28,43 @@ import type {
   SlackContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
+import {
+  clearStatus,
+  hideStatus,
+  reasoningStatus,
+  showStatus,
+} from "#public/channels/slack/thread-status.js";
 
 const log = createLogger("slack.defaults");
-const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
-const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
-interface ReasoningAccumulator {
+/** Each piece of reasoning, or a tool's progress, stays up at least this long so it can be read. */
+const STATUS_HOLD_MS = 3_000;
+/** Narration before tool calls rarely runs this long, so longer text is the reply being written. */
+const WRITING_REPLY_MIN_CHARS = 280;
+
+/**
+ * The current model step's streamed text. One workflow step runs a model call
+ * and delivers its events to the same state object, so this never needs to
+ * survive serialization, and a new step starts empty.
+ */
+interface StepStream {
+  reasoning: string;
+  replyChars: number;
   readonly stepIndex: number;
-  readonly text: string;
   readonly turnId: string;
 }
-const reasoningByState = new WeakMap<SlackChannelState, ReasoningAccumulator>();
+const streamByState = new WeakMap<SlackChannelState, StepStream>();
+
+function stepStream(state: SlackChannelState, turnId: string, stepIndex: number): StepStream {
+  const current = streamByState.get(state);
+  if (current?.turnId === turnId && current.stepIndex === stepIndex) return current;
+  const fresh: StepStream = { reasoning: "", replyChars: 0, stepIndex, turnId };
+  streamByState.set(state, fresh);
+  return fresh;
+}
+
+function heldWithin(atMs: number | null | undefined, now: number): boolean {
+  return atMs != null && now - atMs >= 0 && now - atMs < STATUS_HOLD_MS;
+}
 
 interface SlackSemanticErrorSummary {
   readonly hint?: string;
@@ -170,99 +202,122 @@ function firstNonEmptyLine(text: string): string | undefined {
  */
 export const defaultEvents: SlackChannelInternalEvents = {
   ...approvalEvents,
+  // A turn held on a person's approval, answer, or sign-in isn't working, and
+  // the prompt asking them says so. Its status comes back when it resumes.
   async "turn.waiting"(event, channel, _ctx) {
+    if (event.on === "input") {
+      await hideStatus(channel);
+      return;
+    }
     const working = workingTaskNames(channel.state.taskCards?.[event.turnId]?.turn);
-    if (working.length > 0) await channel.thread.startTyping(waitingOnTasks(working));
+    if (working.length > 0) await showStatus(channel, waitingOnTasks(working));
   },
 
   // The turn's next model step reads the results, so `step.started` can say so.
   async "task.settled"(event, channel, _ctx) {
-    if (event.cancel === undefined) channel.state.pendingTaskResultsTurnId = event.turnId;
+    if (event.cancel !== undefined) return;
+    const pending = channel.state.pendingTaskResults;
+    const names = pending?.turnId === event.turnId ? pending.names : [];
+    const name = event.kind === "agent" && event.name !== undefined ? event.name : null;
+    channel.state.pendingTaskResults = { names: [...names, name], turnId: event.turnId };
   },
 
-  // Each later step replaces the status left by the previous one, such as a
-  // finished tool's label or `Waiting on 3 tasks...`, which would otherwise
-  // linger until the model streams something. `turn.started` covers step 0.
+  // A model step means nothing to someone reading the thread, so the status
+  // keeps naming the work, such as the call that just finished, and is written
+  // again so Slack doesn't time it out. Only task results the step is about to
+  // read change it. `turn.started` covers step 0.
   async "step.started"(event, channel, _ctx) {
     if (event.stepIndex === 0) return;
-    const reviewing = channel.state.pendingTaskResultsTurnId === event.turnId;
-    channel.state.pendingTaskResultsTurnId = null;
-    await channel.thread.startTyping(reviewing ? "Reviewing results..." : "Thinking...");
+    const pending = channel.state.pendingTaskResults;
+    channel.state.pendingTaskResults = null;
+    const status =
+      pending?.turnId === event.turnId
+        ? reviewingResults(pending.names)
+        : (channel.state.threadStatus?.text ?? "Thinking...");
+    await showStatus(channel, status, { force: true });
   },
 
   async "turn.started"(_event, channel, _ctx) {
-    channel.state.pendingTaskResultsTurnId = null;
+    channel.state.pendingTaskResults = null;
     channel.state.pendingToolCallMessage = null;
     channel.state.lastReasoningTypingAtMs = null;
-    channel.state.lastReasoningTypingStatus = null;
-    reasoningByState.delete(channel.state);
-    await channel.thread.startTyping("Working...");
+    channel.state.stepCalls = null;
+    streamByState.delete(channel.state);
+    await showStatus(channel, "Thinking...", { force: true });
   },
 
   // A reply clears the status, but a turn ended by an `endsTurn` tool posts
   // none, and Slack would otherwise show the status until it times out.
   async "turn.completed"(_event, channel, _ctx) {
-    await channel.thread.startTyping();
+    await clearStatus(channel);
   },
 
+  // Shows the newest heading or sentence, each for at least a few seconds, so
+  // a long reasoning block reads as progress instead of its opening words.
   async "reasoning.appended"(event, channel, _ctx) {
-    const current = reasoningByState.get(channel.state);
-    const continuesCurrentBlock =
-      current?.turnId === event.turnId && current.stepIndex === event.stepIndex;
-    if (!continuesCurrentBlock) {
-      channel.state.lastReasoningTypingAtMs = null;
-      channel.state.lastReasoningTypingStatus = null;
-    }
-    const reasoning = (continuesCurrentBlock ? current.text : "") + event.reasoningDelta;
-    reasoningByState.set(channel.state, {
-      stepIndex: event.stepIndex,
-      text: reasoning,
-      turnId: event.turnId,
-    });
-    const line = firstNonEmptyLine(reasoning);
-    if (line === undefined) return;
-
-    const status = truncateTypingStatus(line);
-    const lastStatus = channel.state.lastReasoningTypingStatus;
-    const isProgressiveExtension =
-      lastStatus !== null &&
-      lastStatus !== undefined &&
-      status.startsWith(lastStatus) &&
-      status.length >= lastStatus.length + REASONING_TYPING_MIN_PROGRESS_CHARS;
+    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+    if (stream.reasoning === "") channel.state.lastReasoningTypingAtMs = null;
+    stream.reasoning += event.reasoningDelta;
+    const piece = reasoningStatus(stream.reasoning);
+    if (piece === undefined) return;
+    if (truncateTypingStatus(piece) === channel.state.threadStatus?.text) return;
     const now = Date.now();
-    const lastAt = channel.state.lastReasoningTypingAtMs;
-    if (!isProgressiveExtension && lastAt !== null && lastAt !== undefined) {
-      const elapsed = now - lastAt;
-      if (elapsed >= 0 && elapsed < REASONING_TYPING_REFRESH_INTERVAL_MS) return;
-    }
-
-    await channel.thread.startTyping(status);
+    if (heldWithin(channel.state.lastReasoningTypingAtMs, now)) return;
+    await showStatus(channel, piece);
     channel.state.lastReasoningTypingAtMs = now;
-    channel.state.lastReasoningTypingStatus = status;
   },
 
   async "reasoning.completed"(event, channel, _ctx) {
-    const current = reasoningByState.get(channel.state);
-    if (current?.turnId !== event.turnId || current.stepIndex !== event.stepIndex) return;
-    reasoningByState.delete(channel.state);
-    channel.state.lastReasoningTypingAtMs = null;
-    channel.state.lastReasoningTypingStatus = null;
+    const stream = streamByState.get(channel.state);
+    if (stream?.turnId !== event.turnId || stream.stepIndex !== event.stepIndex) return;
+    stream.reasoning = "";
   },
 
-  async "actions.requested"(event, channel, _ctx) {
-    const buffered = channel.state.pendingToolCallMessage;
-    channel.state.pendingToolCallMessage = null;
-    if (buffered) {
-      await channel.thread.startTyping(truncateTypingStatus(buffered));
-      return;
+  async "message.appended"(event, channel, _ctx) {
+    const stream = stepStream(channel.state, event.turnId, event.stepIndex);
+    const before = stream.replyChars;
+    stream.replyChars += event.messageDelta.length;
+    if (before < WRITING_REPLY_MIN_CHARS && stream.replyChars >= WRITING_REPLY_MIN_CHARS) {
+      await showStatus(channel, "Writing a reply...");
     }
+  },
+
+  // Calls in one step stream in one at a time, so the step keeps its first
+  // label, or the model's narration, and counts the rest.
+  async "actions.requested"(event, channel, _ctx) {
+    const narration = channel.state.pendingToolCallMessage;
+    channel.state.pendingToolCallMessage = null;
     const actions = event.actions.filter(
       (action) => action.kind !== "tool-call" || !isTaskControlTool(action.toolName),
     );
-    if (actions.length === 0) return;
-    await channel.thread.startTyping(
-      truncateTypingStatus(describeActionRequests(actions, event.presentation)),
+    if (!narration && actions.length === 0) return;
+    const previous = channel.state.stepCalls;
+    const calls =
+      !narration && previous?.turnId === event.turnId && previous.stepIndex === event.stepIndex
+        ? { ...previous, count: previous.count + actions.length }
+        : {
+            count: actions.length,
+            label: narration ?? actionLabel(actions[0]!, event.presentation),
+            narrated: narration != null,
+            stepIndex: event.stepIndex,
+            turnId: event.turnId,
+          };
+    channel.state.stepCalls = calls;
+    await showStatus(
+      channel,
+      calls.narrated ? calls.label : withMoreCalls(calls.label, calls.count),
     );
+  },
+
+  async "action.partial"(event, channel, _ctx) {
+    const label = event.presentation?.[event.result.callId]?.label;
+    if (!label || heldWithin(channel.state.threadStatus?.atMs, Date.now())) return;
+    await showStatus(channel, label);
+  },
+
+  async "action.result"(event, channel, _ctx) {
+    const label = event.presentation?.[event.result.callId]?.label;
+    if (label) await showStatus(channel, label);
   },
 
   async "message.completed"(event, channel, _ctx) {
@@ -274,9 +329,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
     }
     channel.state.pendingToolCallMessage = null;
     if (!event.message) {
-      await channel.thread.startTyping();
+      await clearStatus(channel);
       return;
     }
+    // Slack clears the status when the reply posts.
+    channel.state.threadStatus = null;
     await deliverCompletedSlackReply(channel, event.message, { turnId: event.turnId });
   },
 
@@ -393,7 +450,7 @@ export const defaultEvents: SlackChannelInternalEvents = {
   async "authorization.completed"(event, channel, _ctx) {
     const displayName = event.authorization?.displayName ?? formatConnectionDisplayName(event.name);
     if (event.outcome === "authorized" && event.candidateId === undefined) {
-      await channel.thread.startTyping(`Connected to ${displayName}. Resuming...`);
+      await showStatus(channel, `Connected to ${displayName}. Resuming...`, { force: true });
     }
 
     const pending = channel.state.pendingAuthMessageTs ?? {};
