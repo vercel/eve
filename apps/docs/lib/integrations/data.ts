@@ -1924,33 +1924,71 @@ The extension also supports inline screenshots, session naming, proxies, and pro
     logo: "link",
     docsHref: "https://github.com/stripe/link-cli/tree/main/packages/integrations/eve/README.md",
     keywords: ["stripe", "wallet", "payments", "checkout", "spend requests", "approval"],
-    install: `Install the Link extension for eve:
+    install: `Install the Link extension from eve's registry:
 
 \`\`\`bash
 eve add extension/link
 \`\`\`
 
-The extension requires Node.js 24 or later. It uses a configured Link access token; it does not start OAuth or refresh tokens. The token's wallet is shared by every caller who can reach this agent, so mount it only on an appropriately access-controlled agent.`,
-    quickStart: `Add a Link access token to the agent's server environment:
+This scaffolds a static access-token mount. It is suitable when one trusted operator controls the agent and its wallet; the token is shared by every caller. For an agent serving multiple users, use Link OAuth so each authenticated eve principal accesses their own connected wallet. The OAuth setup also requires an application authentication system and persistent storage for user accounts and grants.
 
-\`\`\`bash title=".env.local"
-LINK_ACCESS_TOKEN=...
+The extension requires Node.js 24 or later. For the OAuth example below, install Better Auth and Stripe's Link provider:
+
+\`\`\`bash
+pnpm add better-auth @stripe/link-integrations-better-auth
 \`\`\`
 
-The registry mounts the extension under \`agent/extensions/link.ts\`:
+Register the exact Better Auth callback URL with Link, including each environment you use. The default local callback is \`http://localhost:3000/api/auth/callback/link\`; use your deployed origin for production. See [Stripe's Link OAuth setup](https://docs.stripe.com/agentic-commerce/link-cli/oauth) to create a client and obtain its credentials.`,
+    quickStart: `Add Stripe's Link provider to your existing Better Auth server configuration. Keep its client secret server-side and use persistent database storage for accounts and OAuth grants:
 
-\`\`\`ts title="agent/extensions/link.ts"
-import link from "@stripe/link-integrations-eve";
+\`\`\`ts title="agent/lib/auth.ts"
+import { betterAuth } from "better-auth";
+import { link as linkProvider } from "@stripe/link-integrations-better-auth";
 
-export default link({
-  accessToken: process.env.LINK_ACCESS_TOKEN!,
+export const auth = betterAuth({
+  // Keep your existing database and authentication options here.
+  account: {
+    encryptOAuthTokens: true,
+    accountLinking: {
+      trustedProviders: ["link"],
+      allowDifferentEmails: true,
+    },
+  },
+  plugins: [
+    linkProvider({
+      clientId: process.env.LINK_CLIENT_ID!,
+      clientSecret: process.env.LINK_CLIENT_SECRET!,
+      publishableKey: process.env.STRIPE_PUBLISHABLE_KEY!,
+    }),
+  ],
 });
 \`\`\`
 
-The extension contributes \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, and purchase reports, plus a wallet skill with the checkout workflow.`,
-    configure: `Creating a spend request requires eve approval on every call by default. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` only creates a draft; it does not authorize a purchase.
+Add these server environment variables: \`LINK_CLIENT_ID\`, \`LINK_CLIENT_SECRET\`, and \`STRIPE_PUBLISHABLE_KEY\`. Better Auth's default callback is \`/api/auth/callback/link\`; register the full URL with Link. Its default scopes are \`payment_methods.agentic\` and \`userinfo:read\`.
 
-Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. The skill tells the agent not to repeat credentials in chat, but applications remain responsible for transcript access and retention. Keep the token out of prompts and source control; a 401 requires the operator to configure a replacement token. See the [extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
+Mount the eve extension with an application-owned authorization provider:
+
+\`\`\`ts title="agent/extensions/link.ts"
+import link from "@stripe/link-integrations-eve";
+import { linkAuth } from "../lib/link-auth";
+
+export default link({ auth: linkAuth });
+\`\`\`
+
+\`linkAuth\` bridges eve's authenticated principal to the Link account and token managed by Better Auth. Implement token lookup/refresh and the OAuth start and callback flow with eve's \`defineInteractiveAuthorization\`; the [runnable example](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve/example) demonstrates this bridge, including its channel routes. Better Auth's Link plugin alone does not provide the eve authorization provider. The extension adds \`link__\` tools for wallet details, payment methods, spend requests, transactions, balances, and purchase reports, plus a wallet skill with the checkout workflow.`,
+    configure: `For a multi-user agent, authenticate each caller on its eve channel and map that channel's user principal to the same application user whose Link account Better Auth stores. Keep OAuth grants in persistent, protected storage; do not use the example's local single-user session or SQLite setup as a production identity system. Link redirects must match the registered callback exactly, and your app must complete the callback before eve can resume the authorized turn.
+
+By default, \`create_spend_request\` requires eve approval on every call. This is separate from Link's purchase approval: leave \`request_approval\` enabled for the normal flow, show the approval URL, then retrieve the same request and verify its current status before using credentials. Setting \`request_approval: false\` only creates a draft; it does not authorize a purchase.
+
+Payment credentials requested with \`include: ["card"]\` are returned as tool output and may appear in stored session events. Control transcript access and retention, and do not expose credentials in chat. Financial-data tools may need additional OAuth scopes and source permissions. For a single shared wallet instead, keep the generated static-token mount, store \`LINK_ACCESS_TOKEN\` only in the server environment, and restrict access to the agent; static-token mode does not refresh expired tokens. See the [Link extension documentation](https://github.com/stripe/link-cli/tree/main/packages/integrations/eve) for the full tool contract and security guidance.`,
+    relatedResources: [
+      {
+        title: "Runnable Link OAuth example for eve",
+        description:
+          "A local eve agent example that connects Link OAuth through Better Auth and an eve interactive authorization provider. Its auth and session wiring is illustrative and assumes one local user.",
+        href: "https://github.com/stripe/link-cli/tree/main/packages/integrations/eve/example",
+      },
+    ],
   },
 };
 
