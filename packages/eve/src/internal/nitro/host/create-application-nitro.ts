@@ -20,6 +20,7 @@ import {
 import { createProductionNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { createCompiledSandboxProviderPrunePlugin } from "#internal/nitro/host/compiled-sandbox-provider-prune-plugin.js";
 import { createDevelopmentRuntimePrunePlugin } from "#internal/nitro/host/development-runtime-prune-plugin.js";
+import { prepareSkillServerAssets } from "#internal/nitro/host/skill-server-assets.js";
 import { createExtensionScopePlugin } from "#internal/bundler/extension-scope-plugin.js";
 import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
@@ -802,6 +803,18 @@ export async function createProductionApplicationNitro(
   );
 
   await prepareEveVersionedCacheDirectory(options.buildDir);
+  // Production reads skill files through Nitro server assets; dev reads the
+  // compile directory directly (see `createCompiledSkillFileSource`).
+  const { manifest, paths } = preparedHost.compileResult;
+  const skillServerAssets = await prepareSkillServerAssets({
+    stagingDirectory: join(options.buildDir, "eve-skill-assets"),
+    skills: manifest.skills.map((skill) => skill.name),
+    skillsRoot: join(
+      paths.compileDirectoryPath,
+      manifest.workspaceResourceRoot.logicalPath,
+      "skills",
+    ),
+  });
   const nitro = await createNitro({
     _cli: { command: "build" },
     buildDir: options.buildDir,
@@ -819,6 +832,7 @@ export async function createProductionApplicationNitro(
     rolldownConfig: bundler.nitroRolldownConfig,
     rollupConfig: bundler.nitroRollupConfig,
     rootDir: preparedHost.appRoot,
+    serverAssets: skillServerAssets,
     serverDir: false,
     traceDeps: bundler.tracedAppDependencies,
     traceOpts: { nft: { paths: bundler.tracedAppDependencyPaths } },
@@ -830,6 +844,12 @@ export async function createProductionApplicationNitro(
     }),
   });
   await writeEveVersionedCacheMetadata(options.buildDir);
+  // Nitro always appends a `server` asset for `<rootDir>/assets`. eve reads
+  // only its own bases, and reading storage would otherwise start bundling
+  // an app's `assets/` directory.
+  nitro.options.serverAssets = nitro.options.serverAssets.filter(
+    (asset) => asset.baseName !== "server",
+  );
 
   configureSharedApplicationNitro(nitro, preparedHost);
   configureNitroStepPlugins(nitro, join(preparedHost.workflowBuildDir, "steps.mjs"));

@@ -522,7 +522,7 @@ describe("mcpChannel tools", () => {
     const post = channel.routes[1]!;
     if (post.transport === "websocket") throw new Error("expected HTTP route");
     const args = routeArgs(vi.fn(), {
-      describe: async () => ({ name: "compiled-agent", tools }),
+      describe: async () => ({ name: "compiled-agent", skills: [], tools }),
       invokeTool,
     });
     return async (method: string, params?: unknown) =>
@@ -561,7 +561,7 @@ describe("mcpChannel tools", () => {
 
     expect(await names(serve({}))).toHaveLength(4);
     expect(() => mcpChannel({ agent: false, auth: none() })).toThrow(
-      "mcpChannel publishes nothing with agent and tools both false. Enable one.",
+      "mcpChannel publishes nothing with agent, tools, and skills all false. Enable one.",
     );
   });
 
@@ -662,7 +662,7 @@ describe("mcpChannel tools", () => {
       overrides: { createSession?: () => Promise<never>; invokeTool?: InvokeToolFn },
     ) {
       const args = routeArgs(overrides.createSession, {
-        describe: async () => ({ name: "compiled-agent", tools: [note] }),
+        describe: async () => ({ name: "compiled-agent", skills: [], tools: [note] }),
         invokeTool: overrides.invokeTool,
       });
       const route = mcpChannel({ auth: () => principal, tools: true, ...options }).routes[1]!;

@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 
 import { describeCompiledAgent } from "#channel/agent-description.js";
 
-it("describes only the tools invokeTool can run, sorted by name", () => {
+it("describes only the tools invokeTool can run, sorted by name", async () => {
   const tool = (name: string, extra: Record<string, unknown> = {}) => ({
     description: `${name} description`,
     hasExecute: true,
@@ -21,6 +21,7 @@ it("describes only the tools invokeTool can run, sorted by name", () => {
       "source:remote": { owner: { kind: "application" } },
     },
     config: { description: "Runs the kennel.", name: "kennel" },
+    skills: [],
     tools: [
       tool("lookup", { outputSchema: { type: "object" } }),
       tool("deploy", { requiresApproval: true }),
@@ -30,7 +31,8 @@ it("describes only the tools invokeTool can run, sorted by name", () => {
     ],
   };
 
-  expect(describeCompiledAgent(manifest as never)).toEqual({
+  const files = { listFiles: async () => [], readFile: async () => new Uint8Array() };
+  expect(await describeCompiledAgent(manifest as never, files)).toEqual({
     description: "Runs the kennel.",
     name: "kennel",
     tools: [
@@ -48,5 +50,6 @@ it("describes only the tools invokeTool can run, sorted by name", () => {
         outputSchema: { type: "object" },
       },
     ],
+    skills: [],
   });
 });

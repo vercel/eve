@@ -23,6 +23,7 @@ import {
 } from "#internal/mcp/forwarded-principal-header.js";
 import type { TrustedForwarders } from "#channel/forwarded-principal.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import { createMcpSkillsFeature } from "#internal/mcp/skills.js";
 import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
 import {
   createMcpStreamableHttpServer,
@@ -55,7 +56,7 @@ export interface McpChannelInput {
   readonly route?: string;
   /**
    * Serve the `agent_*` tools, which start and follow a durable agent task.
-   * With `false`, the channel serves only the tools `tools` publishes.
+   * With `false`, the channel serves only what `tools` and `skills` publish.
    * @default true
    */
   readonly agent?: boolean;
@@ -76,17 +77,25 @@ export interface McpChannelInput {
    * caller. Omit to refuse any request carrying the header with 403.
    */
   readonly trustedForwarders?: TrustedForwarders;
+  /**
+   * Also serve the agent's skills as SEP-2640 skills under `skill://`
+   * (`skills/list`, `skills/get`, and the `resources/*` methods), readable
+   * by every route-authenticated caller.
+   * @default false
+   */
+  readonly skills?: boolean;
 }
 
-/** Public MCP channel publishing this agent's `agent_*` tools and, optionally, its own tools. */
+/** Public MCP channel publishing this agent's `agent_*` tools and, optionally, its tools and skills. */
 export type McpChannel = Channel;
 
 /**
  * Publishes this agent as a stateless Streamable HTTP MCP server.
  *
  * This channel owns MCP transport, durable eve invocation through the
- * `agent_*` tools (unless `agent: false`), and, with `tools: true`, the
- * agent's invocable tools, each call run through `invokeTool`. It reuses
+ * `agent_*` tools (unless `agent: false`), with `tools: true` the agent's
+ * invocable tools, each call run through `invokeTool`, and with
+ * `skills: true` the agent's skills, read through `readSkill`. It reuses
  * eve's inbound auth strategies and recognizes `oauthResource(...)` metadata
  * when OAuth discovery is needed.
  * The file containing this channel must be `agent/channels/mcp.ts`.
@@ -95,9 +104,15 @@ export function mcpChannel(input: McpChannelInput): McpChannel {
   if (input?.auth === undefined) {
     throw new Error("mcpChannel requires auth. Use none() for explicit public access.");
   }
-  const publish: McpPublishOptions = { agent: input.agent ?? true, tools: input.tools ?? false };
-  if (!publish.agent && !publish.tools) {
-    throw new Error("mcpChannel publishes nothing with agent and tools both false. Enable one.");
+  const publish: McpPublishOptions = {
+    agent: input.agent ?? true,
+    skills: input.skills ?? false,
+    tools: input.tools ?? false,
+  };
+  if (!publish.agent && !publish.tools && !publish.skills) {
+    throw new Error(
+      "mcpChannel publishes nothing with agent, tools, and skills all false. Enable one.",
+    );
   }
   const path = input.route ?? "/eve/v1/mcp";
   const oauth = readOAuthResourceOptions(input.auth);
@@ -366,6 +381,7 @@ async function authenticateMcpRequest(
 
 interface McpPublishOptions {
   readonly agent: boolean;
+  readonly skills: boolean;
   readonly tools: boolean;
 }
 
@@ -417,9 +433,10 @@ async function handleMcpRequest(
     : [];
   return await createMcpStreamableHttpServer({
     authenticate: async () => auth,
+    features: publish.skills ? [createMcpSkillsFeature(args)] : [],
     instructions: publish.agent ? MCP_SERVER_INSTRUCTIONS : undefined,
     name: agentInfo.agent.name,
-    tools: [...agentTools, ...publishedTools],
+    tools: publish.agent || publish.tools ? [...agentTools, ...publishedTools] : undefined,
     version: resolveInstalledPackageInfo().version,
   })(request);
 }

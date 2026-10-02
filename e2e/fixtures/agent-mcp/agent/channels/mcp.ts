@@ -12,6 +12,7 @@ export default mcpChannel({
           principalType: "service",
         }
       : null,
+  skills: true,
   tools: true,
   // The loopback connection forwards the turn's user; only this service may.
   trustedForwarders: (forwarder) =>
