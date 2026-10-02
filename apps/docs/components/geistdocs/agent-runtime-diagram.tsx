@@ -7,6 +7,7 @@ import {
   IconWrench,
 } from "@vercel/geistdocs/assets/icons";
 import type { JSX, ReactNode } from "react";
+import { agentRuntimeDiagram } from "@/lib/geistdocs/agent-runtime-diagram";
 import { cn } from "@/lib/utils";
 
 function Environment({
@@ -73,7 +74,7 @@ function SandboxBridge(): JSX.Element {
       />
       <div className="relative rounded-lg border border-gray-alpha-700 bg-background-100 px-3 py-2 text-center shadow-sm">
         <code className="bg-transparent! p-0! font-medium text-copy-13! text-gray-1000!">
-          ctx.getSandbox()
+          {agentRuntimeDiagram.bridge}
         </code>
       </div>
     </div>
@@ -89,56 +90,29 @@ export function AgentRuntimeDiagram(): JSX.Element {
       aria-label="Agent loop and sandbox execution boundary"
       className="my-8 grid w-full min-w-0 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_160px_minmax(0,1fr)]"
     >
-      <Environment title="Trusted app runtime" description="Full Node.js access and credentials">
-        <RuntimeCard
-          icon={<IconWorkflow size={18} />}
-          title="Agent loop"
-          description="Durable workflow, model calls, and orchestration"
-          paths={["agent/agent.ts", "agent/instructions.md"]}
-        />
-        <RuntimeCard
-          icon={<IconWrench size={18} />}
-          title="Runtime code"
-          description="Tools, hooks, instrumentation, and connections"
-          paths={[
-            "agent/tools/**",
-            "agent/hooks/**",
-            "agent/instrumentation/**",
-            "agent/connections/**",
-          ]}
-        />
-        <RuntimeCard
-          icon={<IconLinked size={18} />}
-          title="Secrets and credentials"
-          description="Provider keys, tool secrets, and MCP/OpenAPI auth stay here"
-        />
+      <Environment {...agentRuntimeDiagram.runtime}>
+        <RuntimeCard icon={<IconWorkflow size={18} />} {...agentRuntimeDiagram.runtime.cards[0]} />
+        <RuntimeCard icon={<IconWrench size={18} />} {...agentRuntimeDiagram.runtime.cards[1]} />
+        <RuntimeCard icon={<IconLinked size={18} />} {...agentRuntimeDiagram.runtime.cards[2]} />
       </Environment>
 
       <SandboxBridge />
 
-      <Environment
-        title="Isolated sandbox"
-        description="Filesystem and processes without app secrets"
-      >
+      <Environment {...agentRuntimeDiagram.sandbox}>
         <div className="grid gap-3">
           <RuntimeCard
             icon={<IconFileText size={18} />}
-            title="Skills"
-            description="Materialized for the agent"
-            paths={["$HOME/.agents/skills", "from agent/skills/**"]}
+            {...agentRuntimeDiagram.sandbox.cards[0]}
             className="order-2 lg:order-1"
           />
           <RuntimeCard
             icon={<IconSandbox size={18} />}
-            title="Sandbox operations"
-            description="Shell commands, file access, scripts, and servers"
+            {...agentRuntimeDiagram.sandbox.cards[1]}
             className="order-1 lg:order-2"
           />
           <RuntimeCard
             icon={<IconFolderOpen size={18} />}
-            title="Workspace"
-            description="Persistent per-session files"
-            paths={["/workspace", "from agent/sandbox/workspace/**"]}
+            {...agentRuntimeDiagram.sandbox.cards[2]}
             className="order-3"
           />
         </div>
