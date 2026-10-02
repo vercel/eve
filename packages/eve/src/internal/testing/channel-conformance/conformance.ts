@@ -41,10 +41,7 @@ interface ConformanceChannel {
  *   failure (such as harness breakage) both turn it red.
  */
 const hitlConformance = {
-  "chat-sdk": [
-    { driver: chatSdkDriver },
-    { driver: chatSdkTextDriver },
-  ],
+  "chat-sdk": [{ driver: chatSdkDriver }, { driver: chatSdkTextDriver }],
   discord: [{ driver: discordDriver }],
   github: [{ driver: githubDriver }],
   linear: [{ driver: linearDriver }],

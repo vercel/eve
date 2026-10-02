@@ -3,6 +3,7 @@ import { signTwilioRequest } from "#public/channels/twilio/verify.js";
 import {
   type ChannelDriver,
   type PlatformCall,
+  numberedOptions,
   recordingFetch,
 } from "#internal/testing/channel-conformance/harness.js";
 
@@ -59,11 +60,7 @@ export function twilioDriver(): ChannelDriver {
       if (call.method !== "Messages.json") return undefined;
       const body = call.body as { readonly Body?: unknown };
       if (typeof body.Body !== "string" || !body.Body.includes(prompt)) return undefined;
-      return body.Body.split("\n")
-        .map((line) => /^\s*\d+[.)]\s*(.+?)\s*$/u.exec(line)?.[1])
-        .filter((label): label is string => label !== undefined)
-        .map((line) => line.split(" - ", 1)[0]!)
-        .map((label) => ({ handle: label, label }));
+      return numberedOptions(body.Body);
     },
     press: () => {
       throw new Error("Twilio SMS does not support pressing options.");

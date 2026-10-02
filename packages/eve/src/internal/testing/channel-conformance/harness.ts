@@ -26,6 +26,16 @@ export interface RenderedOption {
   readonly handle: unknown;
 }
 
+/** Reads text-only options rendered as `1. Label` or `1. Label - description` lines. */
+export function numberedOptions(text: string): RenderedOption[] {
+  return text
+    .split("\n")
+    .map((line) => /^\s*\d+[.)]\s*(.+?)\s*$/u.exec(line)?.[1])
+    .filter((label): label is string => label !== undefined)
+    .map((line) => line.split(" - ", 1)[0]!)
+    .map((label) => ({ handle: label, label }));
+}
+
 /**
  * What a platform can do for a person, independent of eve. A rule that needs a
  * capability a driver lacks is skipped for that channel as "not supported".

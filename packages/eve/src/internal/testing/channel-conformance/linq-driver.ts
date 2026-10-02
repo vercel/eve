@@ -4,6 +4,7 @@ import { linqChannel } from "#public/channels/linq/index.js";
 import {
   type ChannelDriver,
   type PlatformCall,
+  numberedOptions,
   recordingFetch,
 } from "#internal/testing/channel-conformance/harness.js";
 
@@ -95,11 +96,8 @@ export function linqDriver(): ChannelDriver {
     findOptions(call, prompt) {
       if (!call.method.endsWith("/messages") || !postedText(call)?.includes(prompt))
         return undefined;
-      const text = postedText(call)!;
-      const options = text.match(/Options:\s*(.+)$/u)?.[1];
-      return options === undefined
-        ? []
-        : options.split(",").map((label) => ({ handle: label.trim(), label: label.trim() }));
+      // The Chat SDK bridge's fallback text replaces Linq's own `Options:` card flattening.
+      return numberedOptions(postedText(call)!);
     },
     press() {
       throw new Error("Linq has no pressable HITL controls.");
