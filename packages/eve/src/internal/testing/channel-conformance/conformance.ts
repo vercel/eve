@@ -410,9 +410,6 @@ const MATRIX_SYMBOLS = { broken: "❌", pass: "✅", unsupported: "—" } as con
  * Renders every channel's and client's cell for every rule as Markdown. The
  * suite holds each cell to what this table says, so the rendered matrix is
  * current whenever the suite passes.
- *
- * The table is HTML so a rule a DM column doesn't run can span the channel's
- * shared-thread and DM columns; Markdown tables can't merge cells.
  */
 export function renderHitlConformanceMatrix(): string {
   const all = Object.values(hitlConformance).flatMap(
@@ -426,31 +423,28 @@ export function renderHitlConformanceMatrix(): string {
       entry,
       ...all.filter((dm) => dm.dm === true && nameOf(dm) === `${nameOf(entry)}-dm`),
     ]);
-  const html = (text: string) =>
-    text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-  const td = (content: string, span = 1) =>
-    `<td${span > 1 ? ` colspan="${span}"` : ""}>${content}</td>`;
+  const escape = (text: string) => text.replaceAll("|", "\\|");
+  const row = (cells: readonly string[]) => `| ${cells.join(" | ")} |`;
   // One note per distinct reason, numbered in reading order, so every cell
   // sharing a cause links to the same note. Plain anchors rather than Markdown
   // footnotes, which GitHub renders with links back up to every citing cell.
   const notes = new Map<string, number>();
-  const shown = (cell: Cell) => {
+  const shown = (entry: ConformanceChannel, rule: (typeof hitlContract)[number]) => {
+    // A DM column leaves blank what only the shared-thread column runs.
+    if (entry.dm === true && !variesByConversation(rule)) return "";
+    const cell = cellOf(entry, rule);
     if (cell.kind === "pass") return MATRIX_SYMBOLS.pass;
     const note = cell.kind === "broken" ? cell.broken.reason : cell.reason;
     if (!notes.has(note)) notes.set(note, notes.size + 1);
     const index = notes.get(note)!;
-    return `${MATRIX_SYMBOLS[cell.kind]}<sup><a href="#note-${index}">${index}</a></sup>`;
+    return `${MATRIX_SYMBOLS[cell.kind]}<sup>[${index}](#note-${index})</sup>`;
   };
-  const cells = (rule: (typeof hitlContract)[number]) =>
-    entries.flatMap((entry, index) => {
-      if (entry.dm === true && !variesByConversation(rule)) return [];
-      const spansDm = entries[index + 1]?.dm === true && !variesByConversation(rule);
-      return [td(shown(cellOf(entry, rule)), spansDm ? 2 : 1)];
-    });
-  const rows = hitlContract.map(
-    (rule) =>
+  const rows = hitlContract.map((rule) =>
+    row([
       // Non-breaking spaces keep each rule on one line; GitHub scrolls the table instead.
-      `<tr><td>${html(rule.rule).replaceAll(" ", "&nbsp;")}</td>${cells(rule).join("")}</tr>`,
+      escape(rule.rule).replaceAll(" ", "\u00a0"),
+      ...entries.map((entry) => shown(entry, rule)),
+    ]),
   );
   return [
     "# HITL conformance matrix",
@@ -467,13 +461,12 @@ export function renderHitlConformanceMatrix(): string {
     "```",
     "",
     "✅ passes · ❌ broken · — not supported. A `-dm` column is the same channel in a",
-    "direct message instead of a shared thread; a rule that doesn't vary between the",
-    "two runs only in the thread, in a cell spanning both.",
+    "direct message instead of a shared thread, and is blank for rules that don't vary",
+    "between the two.",
     "",
-    "<table>",
-    `<tr><th align="left">Rule</th>${entries.map((entry) => `<th align="left"><code>${nameOf(entry)}</code></th>`).join("")}</tr>`,
+    row(["Rule", ...entries.map((entry) => `\`${nameOf(entry)}\``)]),
+    row(["---", ...entries.map(() => ":---:")]),
     ...rows,
-    "</table>",
     "",
     "## Notes",
     "",
