@@ -86,6 +86,63 @@ interface ConformanceChannel {
   readonly unsupported?: Partial<Record<HitlRule, string>>;
 }
 
+const UNNAMED_RESPONDER =
+  "a resolved prompt doesn't say who answered; input.resolved carries no responder";
+
+const CHAT_SDK_BROKEN = unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
+  "approvalPress",
+  "approvalText",
+  "questionPress",
+  "questionText",
+]);
+
+const DISCORD_BROKEN = unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
+  "approvalPress",
+  "questionPress",
+]);
+
+const SLACK_BROKEN = {
+  ...staleAnsweredPrompts(
+    "only the button interaction handler edits a question; a typed answer leaves it",
+    ["questionText"],
+  ),
+  "approving by text names who approved on the approval": {
+    reason: "the card loses its buttons after a typed approval but doesn't say who approved",
+    symptom: /the answered prompt never names who answered/,
+  },
+} satisfies Partial<Record<HitlRule, BrokenCell>>;
+
+/**
+ * In a channel thread a person mentions the bot, and the mention stays in the
+ * typed answer, so it matches no option. An option answer comes back with the
+ * mention attached; an approval or a budget prompt never resolves.
+ */
+function typedAnswerKeepsMention(...rules: HitlRule[]): Partial<Record<HitlRule, BrokenCell>> {
+  return Object.fromEntries(
+    rules.map((rule) => [
+      rule,
+      {
+        reason:
+          "a typed answer keeps the bot mention a channel reply needs, so it matches no option",
+        symptom: /"answer":"[^"]*<@U_EVE>|Timed out waiting for/u,
+      },
+    ]),
+  );
+}
+
+const TEAMS_BROKEN = unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
+  "approvalText",
+  "questionPress",
+  "questionText",
+]);
+
+const TELEGRAM_BROKEN = unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
+  "approvalPress",
+  "approvalText",
+  "questionPress",
+  "questionText",
+]);
+
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
 const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nobody else to tell";
@@ -103,61 +160,38 @@ const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nob
  *   failure (such as harness breakage) both turn it red.
  */
 const hitlConformance = {
-  "chat-sdk": [
-    {
-      driver: chatSdkDriver,
-      broken: unnamedAnsweredPrompts(
-        "a resolved prompt doesn't say who answered; input.resolved carries no responder",
-        ["approvalPress", "approvalText", "questionPress", "questionText"],
-      ),
-    },
-    { driver: chatSdkTextDriver },
-  ],
-  discord: [
-    {
-      driver: discordDriver,
-      broken: unnamedAnsweredPrompts(
-        "a resolved prompt doesn't say who answered; input.resolved carries no responder",
-        ["approvalPress", "questionPress"],
-      ),
-    },
-  ],
+  "chat-sdk": [{ driver: chatSdkDriver, broken: CHAT_SDK_BROKEN }, { driver: chatSdkTextDriver }],
+  "chat-sdk-dm": [{ driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
+  discord: [{ driver: discordDriver, broken: DISCORD_BROKEN }],
+  "discord-dm": [{ driver: () => discordDriver("private"), broken: DISCORD_BROKEN }],
   github: [{ driver: githubDriver }],
   linear: [{ driver: linearDriver }],
   linq: [{ driver: linqDriver }],
+  "linq-dm": [{ driver: () => linqDriver("private") }],
   slack: [
     {
       driver: slackDriver,
       broken: {
-        ...staleAnsweredPrompts(
-          "only the button interaction handler edits a question; a typed answer leaves it",
-          ["questionText"],
+        ...SLACK_BROKEN,
+        ...typedAnswerKeepsMention(
+          "a text reply matching an option answers the only pending question",
+          "a text reply that matches no option answers the question with the person's words",
+          "a text reply answers an open-ended question with the person's words",
+          "a text reply of approve runs the gated tool",
+          "a text reply of cancel stops the gated tool without running it",
+          "answering a question by text clears its buttons",
+          "answering a question by text names who answered on the question",
+          "approving by text clears the approval's buttons",
+          "approving by text names who approved on the approval",
         ),
-        "approving by text names who approved on the approval": {
-          reason: "the card loses its buttons after a typed approval but doesn't say who approved",
-          symptom: /the answered prompt never names who answered/,
-        },
       },
     },
   ],
-  teams: [
-    {
-      driver: teamsDriver,
-      broken: unnamedAnsweredPrompts(
-        "a resolved prompt doesn't say who answered; input.resolved carries no responder",
-        ["approvalText", "questionPress", "questionText"],
-      ),
-    },
-  ],
-  telegram: [
-    {
-      driver: telegramDriver,
-      broken: unnamedAnsweredPrompts(
-        "a resolved prompt doesn't say who answered; input.resolved carries no responder",
-        ["approvalPress", "approvalText", "questionPress", "questionText"],
-      ),
-    },
-  ],
+  "slack-dm": [{ driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
+  teams: [{ driver: teamsDriver, broken: TEAMS_BROKEN }],
+  "teams-dm": [{ driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],
+  telegram: [{ driver: telegramDriver, broken: TELEGRAM_BROKEN }],
+  "telegram-dm": [{ driver: () => telegramDriver("private"), broken: TELEGRAM_BROKEN }],
   tui: [
     {
       driver: tuiDriver,

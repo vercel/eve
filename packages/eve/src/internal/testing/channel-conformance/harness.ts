@@ -63,6 +63,19 @@ export type ChannelCapability =
   | "text-replies";
 
 /**
+ * Who can see the conversation a driver holds. Anything meant for the person
+ * alone must reach them privately on a shared surface and can't be shown at
+ * all on a public one.
+ */
+export type Surface =
+  /** Anyone, such as a GitHub issue. */
+  | "public"
+  /** Members of a channel, group, or workspace, such as a Slack channel thread. Most agents run here. */
+  | "shared"
+  /** Only the person, such as a direct message or a local terminal. */
+  | "private";
+
+/**
  * Teaches the HITL conformance suite to speak one channel's platform protocol.
  *
  * Drivers translate only between platform wire formats and conversation
@@ -72,6 +85,7 @@ export type ChannelCapability =
 export interface ChannelDriver {
   readonly name: string;
   readonly capabilities: readonly ChannelCapability[];
+  readonly surface: Surface;
   /**
    * Builds the channel against a fake platform that reports each outbound call
    * to `record`. HTTP platforms use {@link recordingFetch}.
@@ -151,6 +165,7 @@ export interface ChannelConversation {
 export interface ClientDriver {
   readonly name: string;
   readonly capabilities: readonly ChannelCapability[];
+  readonly surface: Surface;
   /**
    * Starts the client against the agent at `host`. The global `fetch` serves
    * that origin from the eve channel's routes until the client closes.

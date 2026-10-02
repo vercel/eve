@@ -5,6 +5,7 @@ import {
   type ChannelDriver,
   type PlatformCall,
   type RenderedOption,
+  type Surface,
   recordingFetch,
 } from "#internal/testing/channel-conformance/harness.js";
 
@@ -35,8 +36,16 @@ function testKeys(): { privateKey: KeyObject; publicKeyHex: string } {
   };
 }
 
-/** Drives Discord's signed application-command and component interaction webhooks. */
-export function discordDriver(): ChannelDriver {
+/**
+ * Drives Discord's signed application-command and component interaction
+ * webhooks, in a server text channel by default or in a DM.
+ */
+export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
+  const dm = surface === "private";
+  // In a server, Discord names the actor as a member; in a DM, as a user.
+  const where = dm
+    ? { channel: { type: 1 }, user: PERSON }
+    : { channel: { type: 0 }, guild_id: "G_CONFORMANCE", member: { roles: [], user: PERSON } };
   nextChannel += 1;
   const channelId = `C_CONFORMANCE_${nextChannel}`;
   const { privateKey, publicKeyHex } = testKeys();
@@ -100,8 +109,9 @@ export function discordDriver(): ChannelDriver {
   }
 
   return {
-    name: "discord",
+    name: dm ? "discord-dm" : "discord",
     capabilities: ["buttons"],
+    surface,
     createChannel: (record) =>
       discordChannel({
         api: { fetch: recordingFetch(record, decode) },
@@ -111,14 +121,13 @@ export function discordDriver(): ChannelDriver {
       const id = nextInteraction();
       return signed(
         JSON.stringify({
+          ...where,
           application_id: "APP1",
-          channel: { type: 1 },
           channel_id: channelId,
           data: { name: "ask", options: [{ name: "message", type: 3, value: text }] },
           id,
           token: `tok-${id}`,
           type: 2,
-          user: PERSON,
           version: 1,
         }),
       );
@@ -155,10 +164,10 @@ export function discordDriver(): ChannelDriver {
               ? { component_type: 2, custom_id: handle.customId }
               : { component_type: 3, custom_id: handle.customId, values: [handle.value] },
           id,
+          ...where,
           message: { id: handle.messageId },
           token: `tok-${id}`,
           type: 3,
-          user: PERSON,
           version: 1,
         }),
       );

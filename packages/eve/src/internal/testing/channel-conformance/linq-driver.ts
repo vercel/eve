@@ -4,6 +4,7 @@ import { linqChannel } from "#public/channels/linq/index.js";
 import {
   type ChannelDriver,
   type PlatformCall,
+  type Surface,
   numberedOptions,
   recordingFetch,
 } from "#internal/testing/channel-conformance/harness.js";
@@ -24,8 +25,9 @@ interface LinqMessageBody {
   readonly message?: { readonly parts?: readonly LinqPart[] };
 }
 
-/** Drives the real Linq adapter through a signed direct-message webhook. */
-export function linqDriver(): ChannelDriver {
+/** Drives the real Linq adapter through signed webhooks, in a group chat by default or 1:1. */
+export function linqDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
+  const group = surface === "shared";
   nextChat += 1;
   const chatId = `linq-conformance-chat-${nextChat}`;
   let messageId = 0;
@@ -35,7 +37,8 @@ export function linqDriver(): ChannelDriver {
     messageId += 1;
     const body = JSON.stringify({
       data: {
-        chat: { id: chatId, is_group: false },
+        // Linq's bridge hears every group message; a mention would route past its handler.
+        chat: { id: chatId, is_group: group },
         direction: "inbound",
         id: `linq-inbound-${messageId}`,
         parts: [{ type: "text", value: text }],
@@ -61,8 +64,9 @@ export function linqDriver(): ChannelDriver {
   }
 
   return {
-    name: "linq",
+    name: group ? "linq" : "linq-dm",
     capabilities: ["text-replies"],
+    surface,
     createChannel(record) {
       const previousFetch = globalThis.fetch;
       const fakeFetch = recordingFetch(record, async (request) => {

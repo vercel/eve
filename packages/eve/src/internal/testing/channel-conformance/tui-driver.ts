@@ -27,6 +27,8 @@ export function tuiDriver(): ClientDriver {
   return {
     name: "tui",
     capabilities: ["buttons", "text-replies"],
+    // A local terminal shows only the person at it.
+    surface: "private",
     async open(host, wait) {
       // Wide enough that no reply wraps, so each one stays on one screen row.
       const screen = new MockScreen({ columns: 1000, rows: 60 });
