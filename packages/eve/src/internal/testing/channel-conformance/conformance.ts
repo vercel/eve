@@ -26,6 +26,44 @@ export interface BrokenCell {
   readonly symptom: RegExp;
 }
 
+/** Rules that check how an answered prompt's message changes, by prompt kind and how it was answered. */
+const answeredPromptRules = {
+  approvalPress: [
+    "pressing Approve clears the approval's buttons",
+    "pressing Approve names who approved on the approval",
+  ],
+  approvalText: [
+    "approving by text clears the approval's buttons",
+    "approving by text names who approved on the approval",
+  ],
+  questionPress: [
+    "pressing an option clears the question's buttons",
+    "pressing an option names who answered on the question",
+  ],
+  questionText: [
+    "answering a question by text clears its buttons",
+    "answering a question by text names who answered on the question",
+  ],
+} as const satisfies Record<string, readonly HitlRule[]>;
+
+/** Answered prompts in `groups` are never edited, so they keep their buttons and never say who answered. */
+function staleAnsweredPrompts(
+  reason: string,
+  groups: readonly (keyof typeof answeredPromptRules)[],
+): Partial<Record<HitlRule, BrokenCell>> {
+  return Object.fromEntries(
+    groups
+      .flatMap((group) => answeredPromptRules[group])
+      .map((rule) => [
+        rule,
+        {
+          reason,
+          symptom: /the answered prompt (still offers \[".+\]|never names who answered)/,
+        },
+      ]),
+  );
+}
+
 interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   readonly broken?: Partial<Record<HitlRule, BrokenCell>>;
@@ -35,6 +73,7 @@ interface ConformanceChannel {
 
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
+const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nobody else to tell";
 
 /**
  * Every first-party channel's and client's place in the HITL contract, keyed by
@@ -49,14 +88,63 @@ const TUI_TYPED_APPROVAL =
  *   failure (such as harness breakage) both turn it red.
  */
 const hitlConformance = {
-  "chat-sdk": [{ driver: chatSdkDriver }, { driver: chatSdkTextDriver }],
-  discord: [{ driver: discordDriver }],
+  "chat-sdk": [
+    {
+      driver: chatSdkDriver,
+      broken: staleAnsweredPrompts("the bridge never edits an answered prompt", [
+        "approvalPress",
+        "approvalText",
+        "questionPress",
+        "questionText",
+      ]),
+    },
+    { driver: chatSdkTextDriver },
+  ],
+  discord: [
+    {
+      driver: discordDriver,
+      broken: staleAnsweredPrompts(
+        "a press gets a deferred update and the message is never edited",
+        ["approvalPress", "questionPress"],
+      ),
+    },
+  ],
   github: [{ driver: githubDriver }],
   linear: [{ driver: linearDriver }],
   linq: [{ driver: linqDriver }],
-  slack: [{ driver: slackDriver }],
-  teams: [{ driver: teamsDriver }],
-  telegram: [{ driver: telegramDriver }],
+  slack: [
+    {
+      driver: slackDriver,
+      broken: {
+        ...staleAnsweredPrompts(
+          "only the button interaction handler edits a question; a typed answer leaves it",
+          ["questionText"],
+        ),
+        "approving by text names who approved on the approval": {
+          reason: "the card loses its buttons after a typed approval but doesn't say who approved",
+          symptom: /the answered prompt never names who answered/,
+        },
+      },
+    },
+  ],
+  teams: [
+    {
+      driver: teamsDriver,
+      broken: staleAnsweredPrompts(
+        "only a pressed approval card is recorded for editing; questions and typed approvals are not",
+        ["approvalText", "questionPress", "questionText"],
+      ),
+    },
+  ],
+  telegram: [
+    {
+      driver: telegramDriver,
+      broken: staleAnsweredPrompts(
+        "nothing edits an answered prompt; a press only answers the callback query",
+        ["approvalPress", "approvalText", "questionPress", "questionText"],
+      ),
+    },
+  ],
   tui: [
     {
       driver: tuiDriver,
@@ -65,6 +153,11 @@ const hitlConformance = {
           "an answered question's drawer closes, so nothing is left to press",
         "a text reply of approve runs the gated tool": TUI_TYPED_APPROVAL,
         "a text reply of cancel stops the gated tool without running it": TUI_TYPED_APPROVAL,
+        "approving by text clears the approval's buttons": TUI_TYPED_APPROVAL,
+        "approving by text names who approved on the approval": TUI_TYPED_APPROVAL,
+        "pressing Approve names who approved on the approval": TUI_SINGLE_PERSON,
+        "pressing an option names who answered on the question": TUI_SINGLE_PERSON,
+        "answering a question by text names who answered on the question": TUI_SINGLE_PERSON,
       },
     },
   ],
@@ -77,6 +170,23 @@ const hitlConformance = {
  */
 const BROKEN_WAIT_TIMEOUT_MS = 3_000;
 
+/** How one channel or client stands on one rule. */
+type Cell =
+  | { readonly kind: "pass" }
+  | { readonly kind: "unsupported"; readonly reason?: string }
+  | { readonly kind: "broken"; readonly broken: BrokenCell };
+
+function cellOf(entry: ConformanceChannel, rule: (typeof hitlContract)[number]): Cell {
+  const { capabilities } = entry.driver();
+  if (!rule.requires.every((capability) => capabilities.includes(capability))) {
+    return { kind: "unsupported" };
+  }
+  const declined = entry.unsupported?.[rule.rule];
+  if (declined !== undefined) return { kind: "unsupported", reason: declined };
+  const broken = entry.broken?.[rule.rule];
+  return broken === undefined ? { kind: "pass" } : { kind: "broken", broken };
+}
+
 /**
  * Declares the HITL contract cells for one channel directory. Each channel gets
  * its own test file because conversations can't overlap within a process, and
@@ -84,33 +194,90 @@ const BROKEN_WAIT_TIMEOUT_MS = 3_000;
  */
 export function describeHitlConformance(channel: keyof typeof hitlConformance): void {
   const entries: readonly ConformanceChannel[] = hitlConformance[channel];
-  describe.each(entries.map((entry) => ({ ...entry, name: entry.driver().name })))(
+  describe.each(entries.map((entry) => ({ entry, name: entry.driver().name })))(
     "$name HITL contract",
-    ({ driver, broken, unsupported }) => {
-      const { capabilities } = driver();
+    ({ entry }) => {
       for (const rule of hitlContract) {
-        const supported = rule.requires.every((capability) => capabilities.includes(capability));
-        const known = broken?.[rule.rule];
-        const declined = unsupported?.[rule.rule];
-        if (!supported) {
-          it.skip(`${rule.rule} (not supported)`, () => {});
-        } else if (declined !== undefined) {
-          it.skip(`${rule.rule} (not supported: ${declined})`, () => {});
-        } else if (known === undefined) {
-          it(rule.rule, () => withChannelConversation(driver(), (c) => rule.run(c)), 60_000);
+        const cell = cellOf(entry, rule);
+        const run = (options?: { readonly waitTimeoutMs: number }) =>
+          withChannelConversation(entry.driver(), (c) => rule.run(c), options);
+        if (cell.kind === "unsupported") {
+          const why = cell.reason === undefined ? "" : `: ${cell.reason}`;
+          it.skip(`${rule.rule} (not supported${why})`, () => {});
+        } else if (cell.kind === "pass") {
+          it(rule.rule, () => run(), 60_000);
         } else {
           it(
-            `${rule.rule} (broken: ${known.reason})`,
+            `${rule.rule} (broken: ${cell.broken.reason})`,
             () =>
-              expect(
-                withChannelConversation(driver(), (c) => rule.run(c), {
-                  waitTimeoutMs: BROKEN_WAIT_TIMEOUT_MS,
-                }),
-              ).rejects.toThrow(known.symptom),
+              expect(run({ waitTimeoutMs: BROKEN_WAIT_TIMEOUT_MS })).rejects.toThrow(
+                cell.broken.symptom,
+              ),
             60_000,
           );
         }
       }
     },
   );
+}
+
+const MATRIX_SYMBOLS = { broken: "❌", pass: "✅", unsupported: "—" } as const;
+
+/**
+ * Renders every channel's and client's cell for every rule as Markdown. The
+ * suite holds each cell to what this table says, so the rendered matrix is
+ * current whenever the suite passes.
+ */
+export function renderHitlConformanceMatrix(): string {
+  const entries = Object.values(hitlConformance).flatMap(
+    (group): readonly ConformanceChannel[] => group,
+  );
+  const names = entries.map((entry) => entry.driver().name);
+  const escape = (text: string) => text.replaceAll("|", "\\|");
+  const row = (cells: readonly string[]) => `| ${cells.join(" | ")} |`;
+  const notes = (kind: "broken" | "unsupported") =>
+    entries.flatMap((entry, index) =>
+      hitlContract.flatMap((rule) => {
+        const cell = cellOf(entry, rule);
+        if (cell.kind !== kind) return [];
+        const reason = cell.kind === "broken" ? cell.broken.reason : cell.reason;
+        return reason === undefined ? [] : [`- **${names[index]}**, ${rule.rule}: ${reason}`];
+      }),
+    );
+  return [
+    "# HITL conformance matrix",
+    "",
+    "<!-- Generated from conformance.ts by matrix.test.ts. Do not edit by hand. -->",
+    "",
+    "Each channel and client against each rule in [`contract.ts`](./contract.ts), as",
+    "[`conformance.ts`](./conformance.ts) records it. The suite holds every cell to this",
+    "table: a ✅ cell must pass, and a ❌ cell passes only while the rule fails with its",
+    "recorded symptom. Regenerate it after changing either file:",
+    "",
+    "```sh",
+    "pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conformance/matrix -u",
+    "```",
+    "",
+    "✅ passes · ❌ broken · — not supported (the platform lacks a capability the rule",
+    "needs, or the client declines it below)",
+    "",
+    row(["Rule", ...names.map((name) => `\`${name}\``)]),
+    row(["---", ...names.map(() => ":---:")]),
+    ...hitlContract.map((rule) =>
+      row([
+        // Non-breaking spaces keep each rule on one line; GitHub scrolls the table instead.
+        escape(rule.rule).replaceAll(" ", "\u00a0"),
+        ...entries.map((entry) => MATRIX_SYMBOLS[cellOf(entry, rule).kind]),
+      ]),
+    ),
+    "",
+    "## Broken",
+    "",
+    ...notes("broken").map(escape),
+    "",
+    "## Declined",
+    "",
+    ...notes("unsupported").map(escape),
+    "",
+  ].join("\n");
 }

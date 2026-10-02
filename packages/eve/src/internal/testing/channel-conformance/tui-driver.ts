@@ -88,6 +88,14 @@ export function tuiDriver(): ClientDriver {
           keyboard.enter();
         },
         replies: () => readReplies(screen.snapshot()),
+        // The TUI asks in a drawer rather than a posted message, so an answered
+        // prompt shows no options once its drawer closes.
+        shownPrompt: (prompt) => ({
+          id: prompt,
+          options:
+            focusedRow(screen, prompt) === undefined ? [] : readOptions(screen, keyboard, prompt),
+          text: screen.snapshot(),
+        }),
         describe,
         async close() {
           renderer.requestInterrupt();

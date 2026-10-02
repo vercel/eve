@@ -27,7 +27,7 @@ interface SlackOption {
 
 /** The HITL widgets eve renders: one button per option, or one single-click radio/select. */
 interface SlackElement {
-  readonly action_id: string;
+  readonly action_id?: string;
   readonly options?: readonly SlackOption[];
   readonly text?: SlackText;
   readonly type: string;
@@ -36,7 +36,15 @@ interface SlackElement {
 
 interface PressHandle {
   readonly action: Record<string, unknown>;
+  /** The pressed message's blocks, which Slack echoes in every `block_actions` payload. */
+  readonly blocks: readonly unknown[];
   readonly messageTs: string;
+}
+
+interface SlackMessageBody {
+  readonly blocks?: readonly unknown[];
+  readonly text?: string;
+  readonly ts?: string;
 }
 
 /** Drives the Slack channel through its Events API and interactivity webhooks in a DM. */
@@ -120,32 +128,35 @@ export function slackDriver(): ChannelDriver {
       );
     },
     findOptions(call, prompt) {
-      if (call.method !== "chat.postMessage" && call.method !== "chat.update") return undefined;
-      const body = call.body as { readonly blocks?: readonly unknown[] };
-      if (body.blocks === undefined || !JSON.stringify(body.blocks).includes(prompt))
-        return undefined;
-      const messageTs = (call.response as { readonly ts: string }).ts;
-      const optionsIn = (blocks: readonly unknown[]) =>
-        blocks.flatMap((block) =>
-          // Questions use `actions` blocks (`elements`); approval cards keep buttons in `actions`.
-          (
-            (block as { readonly elements?: readonly SlackElement[] }).elements ??
-            (block as { readonly actions?: readonly SlackElement[] }).actions ??
-            []
-          )
-            .filter((element) => element.action_id.startsWith(HITL_ACTION_PREFIX))
-            .flatMap((element) => renderedOptions(element, messageTs)),
-        );
+      const body = call.body as SlackMessageBody;
+      if (!isMessageWrite(call) || body.blocks === undefined) return undefined;
+      if (!JSON.stringify(body.blocks).includes(prompt)) return undefined;
+      const messageTs = messageTsOf(call);
       // A batch of approvals posts one card per request, each holding its own buttons.
-      const card = optionsIn(body.blocks.filter((block) => JSON.stringify(block).includes(prompt)));
-      return card.length > 0 ? card : optionsIn(body.blocks);
+      const card = hitlOptions(
+        body.blocks.filter((block) => JSON.stringify(block).includes(prompt)),
+        messageTs,
+        body.blocks,
+      );
+      return card.length > 0 ? card : hitlOptions(body.blocks, messageTs);
     },
+    shownMessage(call) {
+      if (!isMessageWrite(call)) return undefined;
+      const body = call.body as SlackMessageBody;
+      const id = messageTsOf(call);
+      return {
+        id,
+        options: hitlOptions(body.blocks ?? [], id),
+        text: [body.text ?? "", ...blockTexts(body.blocks ?? [])].join("\n"),
+      };
+    },
+    personShownAs: [`<@${PERSON}>`],
     press: (option) => {
-      const { action, messageTs } = option.handle as PressHandle;
+      const { action, blocks, messageTs } = option.handle as PressHandle;
       const payload = {
         actions: [action],
         channel: { id: CHANNEL },
-        message: { thread_ts: threadTs, ts: messageTs },
+        message: { blocks, thread_ts: threadTs, ts: messageTs },
         team: { id: TEAM },
         type: "block_actions",
         user: { id: PERSON, name: "alice", team_id: TEAM, username: "alice" },
@@ -169,7 +180,49 @@ export function slackDriver(): ChannelDriver {
   };
 }
 
-function renderedOptions(element: SlackElement, messageTs: string): RenderedOption[] {
+function isMessageWrite(call: PlatformCall): boolean {
+  return call.method === "chat.postMessage" || call.method === "chat.update";
+}
+
+/** A post's ts comes back from Slack; an update names the ts it rewrites. */
+function messageTsOf(call: PlatformCall): string {
+  return call.method === "chat.update"
+    ? (call.body as SlackMessageBody).ts!
+    : (call.response as { readonly ts: string }).ts;
+}
+
+/** HITL buttons in `blocks`, each pressed as part of the whole message `messageBlocks`. */
+function hitlOptions(
+  blocks: readonly unknown[],
+  messageTs: string,
+  messageBlocks: readonly unknown[] = blocks,
+): RenderedOption[] {
+  return blocks.flatMap((block) =>
+    // Questions use `actions` blocks (`elements`); approval cards keep buttons in `actions`.
+    (
+      (block as { readonly elements?: readonly SlackElement[] }).elements ??
+      (block as { readonly actions?: readonly SlackElement[] }).actions ??
+      []
+    )
+      .filter((element) => element.action_id?.startsWith(HITL_ACTION_PREFIX) === true)
+      .flatMap((element) => renderedOptions(element, messageBlocks, messageTs)),
+  );
+}
+
+/** Every `text` string in Block Kit, wherever a block nests it. */
+function blockTexts(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(blockTexts);
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, child]) =>
+    key === "text" && typeof child === "string" ? [child] : blockTexts(child),
+  );
+}
+
+function renderedOptions(
+  element: SlackElement,
+  blocks: readonly unknown[],
+  messageTs: string,
+): RenderedOption[] {
   if (element.type === "button" && element.text !== undefined) {
     const action = {
       action_id: element.action_id,
@@ -177,11 +230,14 @@ function renderedOptions(element: SlackElement, messageTs: string): RenderedOpti
       type: "button",
       value: element.value,
     };
-    return [{ handle: { action, messageTs } satisfies PressHandle, label: element.text.text }];
+    return [
+      { handle: { action, blocks, messageTs } satisfies PressHandle, label: element.text.text },
+    ];
   }
   return (element.options ?? []).map((option) => ({
     handle: {
       action: { action_id: element.action_id, selected_option: option, type: element.type },
+      blocks,
       messageTs,
     } satisfies PressHandle,
     label: option.text.text,

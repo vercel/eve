@@ -107,6 +107,47 @@ function expectAnsweredSaturday(output: unknown) {
   expectAnswered(output, "Saturday");
 }
 
+type Answer = "press" | "text";
+
+async function answerSaturday(conversation: ChannelConversation, by: Answer) {
+  const options = await askWhichDay(conversation);
+  if (by === "press") {
+    const saturday = options.find((option) => option.label === "Saturday");
+    expect(saturday, "a Saturday option to press").toBeDefined();
+    await conversation.press(saturday!);
+  } else {
+    await conversation.say("Saturday");
+  }
+  expectAnsweredSaturday(await conversation.waitForToolResult("ask_question"));
+}
+
+async function approveDeploy(conversation: ChannelConversation, by: Answer) {
+  const options = await askToDeploy(conversation);
+  if (by === "press") {
+    const approve = options.find((option) => APPROVE_LABELS.includes(option.label));
+    expect(approve, "an Approve option to press").toBeDefined();
+    await conversation.press(approve!);
+  } else {
+    await conversation.say("approve");
+  }
+  await expectDeployed(conversation);
+}
+
+/** Once answered, the prompt's message stops offering choices nobody can use anymore. */
+function expectButtonsCleared(conversation: ChannelConversation, prompt: string) {
+  const labels = conversation.shownPrompt(prompt).options.map((option) => option.label);
+  expect(labels, `the answered prompt still offers ${JSON.stringify(labels)}`).toEqual([]);
+}
+
+/** Once answered, the prompt's message shows everyone in the conversation who answered it. */
+function expectResponderNamed(conversation: ChannelConversation, prompt: string) {
+  const { text } = conversation.shownPrompt(prompt);
+  expect(
+    conversation.personShownAs.some((name) => text.includes(name)),
+    `the answered prompt never names who answered: ${JSON.stringify(text)}`,
+  ).toBe(true);
+}
+
 export const hitlContract = [
   {
     rule: "a rendered question shows every option a person can choose",
@@ -306,6 +347,78 @@ export const hitlContract = [
       await askToDeploy(conversation);
       await conversation.say("cancel");
       await expectNotDeployed(conversation);
+    },
+  },
+  {
+    rule: "pressing an option clears the question's buttons",
+    source: "#1 (Slack's answered question card)",
+    requires: ["buttons"],
+    async run(conversation) {
+      await answerSaturday(conversation, "press");
+      expectButtonsCleared(conversation, PROMPT);
+    },
+  },
+  {
+    rule: "answering a question by text clears its buttons",
+    source: "#1 (Slack's answered question card)",
+    requires: ["buttons", "text-replies"],
+    async run(conversation) {
+      await answerSaturday(conversation, "text");
+      expectButtonsCleared(conversation, PROMPT);
+    },
+  },
+  {
+    rule: "pressing an option names who answered on the question",
+    source: "#1 (Slack's answered question card)",
+    requires: ["buttons"],
+    async run(conversation) {
+      await answerSaturday(conversation, "press");
+      expectResponderNamed(conversation, PROMPT);
+    },
+  },
+  {
+    rule: "answering a question by text names who answered on the question",
+    source: "#1 (Slack's answered question card)",
+    requires: ["buttons", "text-replies"],
+    async run(conversation) {
+      await answerSaturday(conversation, "text");
+      expectResponderNamed(conversation, PROMPT);
+    },
+  },
+  {
+    rule: "pressing Approve clears the approval's buttons",
+    source: "#2212 (Slack's settled approval card)",
+    requires: ["buttons"],
+    async run(conversation) {
+      await approveDeploy(conversation, "press");
+      expectButtonsCleared(conversation, APPROVAL_PROMPT);
+    },
+  },
+  {
+    rule: "approving by text clears the approval's buttons",
+    source: "#2212 (Slack's settled approval card)",
+    requires: ["buttons", "text-replies"],
+    async run(conversation) {
+      await approveDeploy(conversation, "text");
+      expectButtonsCleared(conversation, APPROVAL_PROMPT);
+    },
+  },
+  {
+    rule: "pressing Approve names who approved on the approval",
+    source: "#2212 (Slack's settled approval card)",
+    requires: ["buttons"],
+    async run(conversation) {
+      await approveDeploy(conversation, "press");
+      expectResponderNamed(conversation, APPROVAL_PROMPT);
+    },
+  },
+  {
+    rule: "approving by text names who approved on the approval",
+    source: "#2212 (Slack's settled approval card)",
+    requires: ["buttons", "text-replies"],
+    async run(conversation) {
+      await approveDeploy(conversation, "text");
+      expectResponderNamed(conversation, APPROVAL_PROMPT);
     },
   },
 ] as const satisfies readonly ContractRule[];

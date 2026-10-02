@@ -9,6 +9,7 @@ import {
 } from "#internal/testing/channel-conformance/harness.js";
 
 let nextChannel = 0;
+const PERSON = { id: "U_CONFORMANCE", username: "alice" } as const;
 
 /** A message component eve renders for a choice: a button (type 2) or a select menu (type 3). */
 interface DiscordComponent {
@@ -41,6 +42,8 @@ export function discordDriver(): ChannelDriver {
   const { privateKey, publicKeyHex } = testKeys();
   let interactionId = 0;
   let messageId = 0;
+  /** The message each interaction token's `@original` response is, once known. */
+  const originals = new Map<string, string>();
 
   function signed(body: string): Request {
     const timestamp = String(Math.floor(Date.now() / 1000));
@@ -63,12 +66,32 @@ export function discordDriver(): ChannelDriver {
     if (path.endsWith("/typing")) {
       return { body, method: `POST ${path}`, response: {} };
     }
-    messageId += 1;
     return {
       body,
       method: `${request.method} ${path}`,
-      response: { channel_id: channelId, id: `M_CONFORMANCE_${messageId}` },
+      response: { channel_id: channelId, id: writtenMessageId(request.method, path) },
     };
+  }
+
+  /** Edits keep the id of the message they rewrite; everything else posts a new message. */
+  function writtenMessageId(method: string, path: string): string {
+    const original = /^\/api\/v\d+\/webhooks\/[^/]+\/([^/]+)\/messages\/@original$/u.exec(path);
+    if (original !== null) {
+      const token = original[1]!;
+      const known = originals.get(token);
+      if (known !== undefined) return known;
+      const created = newMessageId();
+      originals.set(token, created);
+      return created;
+    }
+    const edited = /\/messages\/([^/@]+)$/u.exec(path);
+    if (method === "PATCH" && edited !== null) return edited[1]!;
+    return newMessageId();
+  }
+
+  function newMessageId(): string {
+    messageId += 1;
+    return `M_CONFORMANCE_${messageId}`;
   }
 
   function nextInteraction(): string {
@@ -95,7 +118,7 @@ export function discordDriver(): ChannelDriver {
           id,
           token: `tok-${id}`,
           type: 2,
-          user: { id: "U_CONFORMANCE", username: "alice" },
+          user: PERSON,
           version: 1,
         }),
       );
@@ -107,14 +130,22 @@ export function discordDriver(): ChannelDriver {
         readonly content?: string;
       };
       if (body.content?.includes(prompt) !== true) return undefined;
-      const messageId = (call.response as { readonly id?: string }).id ?? "";
-      return (body.components ?? []).flatMap((row) =>
-        (row.components ?? []).flatMap((component) => visibleChoices(component, messageId)),
-      );
+      return choicesOf(call);
     },
+    shownMessage(call) {
+      if (!isMessageWrite(call)) return undefined;
+      return {
+        id: (call.response as { readonly id: string }).id,
+        options: choicesOf(call),
+        text: (call.body as { readonly content?: string }).content ?? "",
+      };
+    },
+    personShownAs: [`<@${PERSON.id}>`, PERSON.username],
     press(option) {
       const handle = option.handle as PressHandle;
       const id = nextInteraction();
+      // A component interaction's `@original` response is the message holding the component.
+      originals.set(`tok-${id}`, handle.messageId);
       return signed(
         JSON.stringify({
           application_id: "APP1",
@@ -127,7 +158,7 @@ export function discordDriver(): ChannelDriver {
           message: { id: handle.messageId },
           token: `tok-${id}`,
           type: 3,
-          user: { id: "U_CONFORMANCE", username: "alice" },
+          user: PERSON,
           version: 1,
         }),
       );
@@ -137,6 +168,16 @@ export function discordDriver(): ChannelDriver {
       return (call.body as { readonly content?: string }).content;
     },
   };
+}
+
+function choicesOf(call: PlatformCall): RenderedOption[] {
+  const body = call.body as {
+    readonly components?: readonly { readonly components?: readonly DiscordComponent[] }[];
+  };
+  const messageId = (call.response as { readonly id: string }).id;
+  return (body.components ?? []).flatMap((row) =>
+    (row.components ?? []).flatMap((component) => visibleChoices(component, messageId)),
+  );
 }
 
 function visibleChoices(component: DiscordComponent, messageId: string): RenderedOption[] {

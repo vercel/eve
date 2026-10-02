@@ -42,6 +42,16 @@ export function numberedOptions(text: string): RenderedOption[] {
     .map((label) => ({ handle: label, label }));
 }
 
+/** One platform message as a person sees it after an outbound call posts or edits it. */
+export interface ShownMessage {
+  /** The platform's id for the message, stable across edits. */
+  readonly id: string;
+  /** Every piece of text the message shows, joined. */
+  readonly text: string;
+  /** The choices the message still lets a person press. */
+  readonly options: readonly RenderedOption[];
+}
+
 /**
  * What a platform can do for a person, independent of eve. A rule that needs a
  * capability a driver lacks is skipped for that channel as "not supported".
@@ -82,6 +92,14 @@ export interface ChannelDriver {
   press(option: RenderedOption): Request;
   /** Text the bot posted in one outbound call, if any. */
   postedText(call: PlatformCall): string | undefined;
+  /**
+   * The message one outbound call posts or edits, as a person sees it
+   * afterward. Required with the `buttons` capability, since rules check how
+   * an answered prompt's message changes.
+   */
+  shownMessage?(call: PlatformCall): ShownMessage | undefined;
+  /** How the person driving the conversation appears in the platform's text, in any form. */
+  readonly personShownAs?: readonly string[];
 }
 
 /** What a person can do and see in one channel conversation. Contract rules use only this. */
@@ -115,6 +133,14 @@ export interface ChannelConversation {
   waitForRest(): Promise<void>;
   /** How many times a gated tool actually executed, as its side effect would show. */
   runsOf(tool: GatedTool): number;
+  /**
+   * The message that asked `prompt` as it stands now, after every edit so far.
+   * Rules read it once an answer has settled, by which point the bot has had
+   * every chance to update it.
+   */
+  shownPrompt(prompt: string): ShownMessage;
+  /** How the person appears in the platform's text, in any form. */
+  readonly personShownAs: readonly string[];
 }
 
 /**
@@ -145,6 +171,10 @@ export interface ClientView {
   press(option: RenderedOption): Promise<void>;
   /** The bot replies the client shows now. */
   replies(): readonly string[];
+  /** The message that asked `prompt` as it stands now; see {@link ChannelConversation.shownPrompt}. */
+  shownPrompt?(prompt: string): ShownMessage;
+  /** How the person appears in the client's text, in any form. */
+  readonly personShownAs?: readonly string[];
   /** What the client shows now, for timeout errors. */
   describe(): string;
   /** Stops the client and releases anything it holds, such as its event stream. */
@@ -292,6 +322,20 @@ function webhookView(
         describe,
       ),
     replies: () => calls.flatMap((call) => driver.postedText(call) ?? []),
+    shownPrompt(prompt) {
+      const read = driver.shownMessage?.bind(driver);
+      if (read === undefined) throw new Error(`${driver.name} cannot read shown messages.`);
+      const asked = calls.find((call) => (driver.findOptions(call, prompt)?.length ?? 0) > 0);
+      const id = asked === undefined ? undefined : read(asked)?.id;
+      if (id === undefined) throw new Error(`The question "${prompt}" was never asked.`);
+      return calls
+        .flatMap((call) => {
+          const shown = read(call);
+          return shown?.id === id ? [shown] : [];
+        })
+        .at(-1)!;
+    },
+    personShownAs: driver.personShownAs ?? [],
     describe,
     close: async () => {},
   };
@@ -488,6 +532,11 @@ async function converse(
         }),
       runsOf: (tool) => runs[tool],
       waitForRest: () => waitForRest([...sessions.values()], wait),
+      shownPrompt(prompt) {
+        if (view.shownPrompt === undefined) throw new Error(`${label} cannot read shown messages.`);
+        return view.shownPrompt(prompt);
+      },
+      personShownAs: view.personShownAs ?? [],
     };
 
     /**
