@@ -95,22 +95,88 @@ interface ConformanceChannel {
   readonly unsupported?: Partial<Record<HitlRule, string>>;
 }
 
+/** An off-topic reply to a budget prompt is queued, and every later message queues behind it. */
+const QUEUED_BUDGET_REPLY = {
+  "a reply that answers neither budget option keeps the prompt open": {
+    reason: "eve coalesces the queued reply with the later approve, which then matches no option",
+    symptom: /Timed out waiting for a reply on/u,
+  },
+} satisfies Partial<Record<HitlRule, BrokenCell>>;
+
+const SIGN_IN_NOT_SHOWN = /Timed out waiting for the bot to show/u;
+
+/** The channel has no default `authorization.required` renderer, so a sign-in shows nothing. */
+function noSignInRenderer(...rules: HitlRule[]): Partial<Record<HitlRule, BrokenCell>> {
+  return Object.fromEntries(
+    rules.map((rule) => [
+      rule,
+      { reason: "the channel has no default sign-in renderer", symptom: SIGN_IN_NOT_SHOWN },
+    ]),
+  );
+}
+
+/** Budget prompts in `rules` never show; see each caller for why. */
+function budgetPromptNotShown(
+  reason: string,
+  ...rules: HitlRule[]
+): Partial<Record<HitlRule, BrokenCell>> {
+  return Object.fromEntries(
+    rules.map((rule) => [
+      rule,
+      { reason, symptom: /Timed out waiting for one of the questions \["This session has hit/u },
+    ]),
+  );
+}
+
+/** Chat SDK's default sign-in, outside a DM, points the person at a DM it never sends. */
+const SIGN_IN_ONLY_IN_DMS = Object.fromEntries(
+  [
+    "a sign-in names the service and shows its sign-in link",
+    "a sign-in shows its confirmation code",
+    "a sign-in without a link shows its instructions",
+  ].map((rule) => [
+    rule,
+    {
+      reason: "outside a DM the bot says to continue in a direct message but never sends one",
+      symptom: SIGN_IN_NOT_SHOWN,
+    },
+  ]),
+) satisfies Partial<Record<HitlRule, BrokenCell>>;
+
 const UNNAMED_RESPONDER =
   "a resolved prompt doesn't say who answered; input.resolved carries no responder";
 
-const CHAT_SDK_BROKEN = unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
-  "approvalPress",
-  "approvalText",
-  "questionPress",
-  "questionText",
-]);
+const CHAT_SDK_BROKEN = {
+  ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
+    "approvalPress",
+    "approvalText",
+    "questionPress",
+    "questionText",
+  ]),
+  ...QUEUED_BUDGET_REPLY,
+};
 
-const DISCORD_BROKEN = unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
-  "approvalPress",
-  "questionPress",
-]);
+const DISCORD_BROKEN = {
+  ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
+  ...budgetPromptNotShown(
+    "a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws",
+    "an exhausted session budget asks to Approve or Stop",
+    "pressing Approve on a budget prompt finishes the held turn",
+  ),
+  ...noSignInRenderer(
+    "a sign-in names the service and shows its sign-in link",
+    "a sign-in shows its confirmation code",
+    "a sign-in without a link shows its instructions",
+    "completing a sign-in tells the person it succeeded",
+  ),
+};
 
 const SLACK_BROKEN = {
+  ...QUEUED_BUDGET_REPLY,
+  "a sign-in without a link shows its instructions": {
+    reason: "Slack sends the private sign-in prompt only for a challenge with a URL",
+    symptom: SIGN_IN_NOT_SHOWN,
+  },
   ...staleAnsweredPrompts(
     "only the button interaction handler edits a question; a typed answer leaves it",
     ["questionText"],
@@ -121,18 +187,36 @@ const SLACK_BROKEN = {
   },
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
-const TEAMS_BROKEN = unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
-  "approvalText",
-  "questionPress",
-  "questionText",
-]);
+const TEAMS_BROKEN = {
+  ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionPress", "questionText"]),
+  ...QUEUED_BUDGET_REPLY,
+  "a sign-in shows its confirmation code": {
+    reason: "the Teams sign-in card omits the challenge's user code",
+    symptom: SIGN_IN_NOT_SHOWN,
+  },
+  "a sign-in without a link shows its instructions": {
+    reason: "the Teams sign-in card omits the challenge's instructions",
+    symptom: SIGN_IN_NOT_SHOWN,
+  },
+} satisfies Partial<Record<HitlRule, BrokenCell>>;
 
-const TELEGRAM_BROKEN = unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
-  "approvalPress",
-  "approvalText",
-  "questionPress",
-  "questionText",
-]);
+/** The sign-in prompt, link included, goes to the whole thread. */
+const SIGN_IN_LINK_POSTED_TO_THREAD = {
+  "a sign-in keeps its link and code out of messages everyone can see": {
+    reason: "the sign-in prompt, link included, is posted to the whole thread",
+    symptom: /a message everyone sees carried the sign-in (link|code)/u,
+  },
+} satisfies Partial<Record<HitlRule, BrokenCell>>;
+
+const TELEGRAM_BROKEN = {
+  ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
+    "approvalPress",
+    "approvalText",
+    "questionPress",
+    "questionText",
+  ]),
+  ...QUEUED_BUDGET_REPLY,
+};
 
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
@@ -151,23 +235,62 @@ const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nob
  *   failure (such as harness breakage) both turn it red.
  */
 const hitlConformance = {
-  "chat-sdk": [{ driver: chatSdkDriver, broken: CHAT_SDK_BROKEN }, { driver: chatSdkTextDriver }],
+  "chat-sdk": [
+    { driver: chatSdkDriver, broken: { ...CHAT_SDK_BROKEN, ...SIGN_IN_ONLY_IN_DMS } },
+    { driver: chatSdkTextDriver, broken: QUEUED_BUDGET_REPLY },
+  ],
   "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [{ driver: discordDriver, broken: DISCORD_BROKEN }],
   "discord-dm": [{ dm: true, driver: () => discordDriver("private"), broken: DISCORD_BROKEN }],
-  github: [{ driver: githubDriver }],
-  linear: [{ driver: linearDriver }],
-  linq: [{ driver: linqDriver }],
-  "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
+  github: [
+    {
+      driver: githubDriver,
+      broken: {
+        ...QUEUED_BUDGET_REPLY,
+        ...noSignInRenderer(
+          "a sign-in without a link shows its instructions",
+          "completing a sign-in tells the person it succeeded",
+          "a cancelled sign-in tells the person it was cancelled",
+        ),
+      },
+    },
+  ],
+  linear: [
+    {
+      driver: linearDriver,
+      broken: {
+        ...QUEUED_BUDGET_REPLY,
+        "a sign-in keeps its link and code out of messages everyone can see": {
+          reason:
+            "the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified",
+          symptom: /a message everyone sees carried the sign-in (link|code)/u,
+        },
+      },
+    },
+  ],
+  linq: [{ driver: linqDriver, broken: { ...QUEUED_BUDGET_REPLY, ...SIGN_IN_ONLY_IN_DMS } }],
+  "linq-dm": [{ dm: true, driver: () => linqDriver("private"), broken: QUEUED_BUDGET_REPLY }],
   slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
-  teams: [{ driver: teamsDriver, broken: TEAMS_BROKEN }],
+  teams: [{ driver: teamsDriver, broken: { ...TEAMS_BROKEN, ...SIGN_IN_LINK_POSTED_TO_THREAD } }],
   "teams-dm": [{ dm: true, driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],
   telegram: [{ driver: telegramDriver, broken: TELEGRAM_BROKEN }],
   "telegram-dm": [{ dm: true, driver: () => telegramDriver("private"), broken: TELEGRAM_BROKEN }],
   tui: [
     {
       driver: tuiDriver,
+      broken: {
+        ...QUEUED_BUDGET_REPLY,
+        "a sign-in names the service and shows its sign-in link": {
+          reason: "the TUI labels a sign-in with the tool name, not the challenge's displayName",
+          symptom: /Timed out waiting for the bot to show Calendar/u,
+        },
+        ...budgetPromptNotShown(
+          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
+          "pressing Stop on a budget prompt ends the held turn and asks again next time",
+          "a text reply of stop on a budget prompt ends the held turn and asks again next time",
+        ),
+      },
       unsupported: {
         "pressing an option of an answered question sends it to the agent as new input":
           "an answered question's drawer closes, so nothing is left to press",
@@ -181,7 +304,21 @@ const hitlConformance = {
       },
     },
   ],
-  twilio: [{ driver: twilioDriver }],
+  twilio: [
+    {
+      driver: twilioDriver,
+      broken: {
+        ...QUEUED_BUDGET_REPLY,
+        ...noSignInRenderer(
+          "a sign-in names the service and shows its sign-in link",
+          "a sign-in shows its confirmation code",
+          "a sign-in without a link shows its instructions",
+          "completing a sign-in tells the person it succeeded",
+          "a cancelled sign-in tells the person it was cancelled",
+        ),
+      },
+    },
+  ],
 } satisfies Record<string, readonly ConformanceChannel[]>;
 
 /**
@@ -204,10 +341,12 @@ function cellOf(entry: ConformanceChannel, rule: (typeof hitlContract)[number]):
         "it doesn't vary between a shared thread and a DM, and the shared-thread column covers it",
     };
   }
-  const { capabilities } = entry.driver();
+  const { capabilities, surface } = entry.driver();
   if (!rule.requires.every((capability) => capabilities.includes(capability))) {
     return { kind: "unsupported" };
   }
+  const { surfaces } = rule as ContractRule;
+  if (surfaces !== undefined && !surfaces.includes(surface)) return { kind: "unsupported" };
   const declined = entry.unsupported?.[rule.rule];
   if (declined !== undefined) return { kind: "unsupported", reason: declined };
   const broken = entry.broken?.[rule.rule];
@@ -226,8 +365,9 @@ export function describeHitlConformance(channel: keyof typeof hitlConformance): 
     ({ entry }) => {
       for (const rule of hitlContract) {
         const cell = cellOf(entry, rule);
+        const { agent } = rule as ContractRule;
         const run = (options?: { readonly waitTimeoutMs: number }) =>
-          withChannelConversation(entry.driver(), (c) => rule.run(c), options);
+          withChannelConversation(entry.driver(), (c) => rule.run(c), { ...agent, ...options });
         if (cell.kind === "unsupported") {
           const why = cell.reason === undefined ? "" : `: ${cell.reason}`;
           it.skip(`${rule.rule} (not supported${why})`, () => {});

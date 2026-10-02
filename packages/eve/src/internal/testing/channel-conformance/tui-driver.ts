@@ -26,8 +26,8 @@ const FREEFORM_ROW = "Type your own answer…";
 export function tuiDriver(): ClientDriver {
   return {
     name: "tui",
-    capabilities: ["buttons", "text-replies"],
     // A local terminal shows only the person at it.
+    capabilities: ["buttons", "text-replies"],
     surface: "private",
     async open(host, wait) {
       // Wide enough that no reply wraps, so each one stays on one screen row.
@@ -98,6 +98,7 @@ export function tuiDriver(): ClientDriver {
             focusedRow(screen, prompt) === undefined ? [] : readOptions(screen, keyboard, prompt),
           text: screen.snapshot(),
         }),
+        shown: () => [{ onlyPerson: true, options: [], text: screen.snapshot() }],
         describe,
         async close() {
           renderer.requestInterrupt();

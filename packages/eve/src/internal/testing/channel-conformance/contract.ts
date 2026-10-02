@@ -3,9 +3,13 @@ import { expect } from "vitest";
 import {
   type ChannelCapability,
   type ChannelConversation,
+  type ConversationOptions,
   GATED_TOOL,
+  PLAIN_TOOL,
   type RenderedOption,
+  type Surface,
   SECOND_GATED_TOOL,
+  SIGN_IN_TOOLS,
   TWO_QUESTIONS_TOOL,
 } from "#internal/testing/channel-conformance/harness.js";
 import {
@@ -30,6 +34,10 @@ export interface ContractRule {
    * these; its shared-thread column covers the rest.
    */
   readonly variesByConversation?: boolean;
+  /** The surfaces the behavior is promised on; every surface when unset. */
+  readonly surfaces?: readonly Surface[];
+  /** How the test agent differs from the default for this rule. */
+  readonly agent?: Pick<ConversationOptions, "limits">;
   run(conversation: ChannelConversation): Promise<void>;
 }
 
@@ -153,6 +161,76 @@ function expectResponderNamed(conversation: ChannelConversation, prompt: string)
     conversation.personShownAs.some((name) => text.includes(name)),
     `the answered prompt never names who answered: ${JSON.stringify(text)}`,
   ).toBe(true);
+}
+
+/**
+ * A one-token input budget lets the model call that crosses it finish, so a
+ * turn that calls a tool is held before the model reads the tool's result.
+ */
+const ONE_TOKEN_BUDGET = { limits: { maxInputTokensPerSession: 1 } } as const;
+const BUDGET_PROMPT =
+  "This session has hit the input-token limit (1) per session. This is a guardrail against " +
+  "defective long-running sessions. If session activity looks fine, just approve to keep going.";
+const LOOK_UP_NOTES = `Use ${PLAIN_TOOL} to find Bob's review notes.`;
+const LATER_MESSAGE = "Carol wants the review by Friday.";
+
+/** Starts a turn that spends the budget on its first model call and is held after its tool runs. */
+async function exhaustBudget(conversation: ChannelConversation) {
+  await conversation.say(LOOK_UP_NOTES);
+  return await conversation.waitForQuestion(BUDGET_PROMPT);
+}
+
+/**
+ * The held turn replies once approved. A text answer's channel context (such
+ * as Telegram's message id) reaches the model after the tool result, and the
+ * test model answers that context instead of reporting the result, so this
+ * waits for any reply rather than the tool's.
+ */
+async function expectHeldTurnFinished(conversation: ChannelConversation) {
+  await conversation.waitForReply();
+}
+
+async function expectStoppedAndAskedAgain(conversation: ChannelConversation) {
+  await conversation.say(LATER_MESSAGE);
+  // Stopping keeps the session over budget, so the next message asks again.
+  const options = await conversation.waitForQuestion(BUDGET_PROMPT);
+  expect(options.map((option) => option.label).sort()).toEqual(["Approve", "Stop"]);
+  expect(conversation.replyCount(), "the bot replied after Stop").toBe(0);
+}
+
+const CALENDAR = SIGN_IN_TOOLS.read_calendar;
+const READ_CALENDAR = "Use read_calendar to check my week.";
+const MAIL = SIGN_IN_TOOLS.read_mail;
+const READ_MAIL = "Use read_mail to check my inbox.";
+const CHANGE_OF_PLANS = "Alice decided to check her week later.";
+
+async function expectSignInToolResult(conversation: ChannelConversation) {
+  const output = await conversation.waitForToolResult("read_calendar");
+  expect(output, `read_calendar returned ${JSON.stringify(output)}`).toEqual({ signedIn: true });
+  expect(conversation.runsOf("read_calendar")).toBe(1);
+}
+
+/**
+ * Asks for something that needs a sign-in, then opens the sign-in as a person
+ * would. In a group the bot may first post a status with a button that sends
+ * the sign-in to whoever asked, such as Telegram's Authorize.
+ */
+async function requestSignIn(conversation: ChannelConversation, message: string) {
+  await conversation.say(message);
+  await conversation.waitForSignIn();
+  const open = conversation.shownOptions().find((option) => SIGN_IN_OPENERS.test(option.label));
+  if (open !== undefined) await conversation.press(open);
+}
+
+const SIGN_IN_OPENERS = /^(?:authori[sz]e|sign in)$/iu;
+
+/** Starts a calendar sign-in, then moves on with a new message before finishing it. */
+async function abandonSignIn(conversation: ChannelConversation) {
+  await conversation.say(READ_CALENDAR);
+  await conversation.waitForSignIn();
+  // A person moves on once they've seen the sign-in, which in a group they reply to.
+  await conversation.waitForRest();
+  await conversation.say(CHANGE_OF_PLANS);
 }
 
 export const hitlContract = [
@@ -438,6 +516,191 @@ export const hitlContract = [
     async run(conversation) {
       await approveDeploy(conversation, "text");
       expectResponderNamed(conversation, APPROVAL_PROMPT);
+    },
+  },
+  {
+    rule: "an exhausted session budget asks to Approve or Stop",
+    source: "docs/agent-config.md#runtime-limits",
+    requires: [],
+    agent: ONE_TOKEN_BUDGET,
+    async run(conversation) {
+      const options = await exhaustBudget(conversation);
+      const labels = options.map((option) => option.label).sort();
+      expect(labels, `the budget prompt showed ${JSON.stringify(labels)}`).toEqual([
+        "Approve",
+        "Stop",
+      ]);
+      expect(conversation.replyCount(), "the held turn replied").toBe(0);
+    },
+  },
+  {
+    rule: "pressing Approve on a budget prompt finishes the held turn",
+    source: "docs/agent-config.md#runtime-limits",
+    requires: ["buttons"],
+    agent: ONE_TOKEN_BUDGET,
+    async run(conversation) {
+      const options = await exhaustBudget(conversation);
+      const approve = options.find((option) => option.label === "Approve");
+      expect(approve, "an Approve option to press").toBeDefined();
+      await conversation.press(approve!);
+      await expectHeldTurnFinished(conversation);
+    },
+  },
+  {
+    rule: "a text reply of approve on a budget prompt finishes the held turn",
+    source: "docs/agent-config.md#runtime-limits",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    agent: ONE_TOKEN_BUDGET,
+    async run(conversation) {
+      await exhaustBudget(conversation);
+      await conversation.say("approve");
+      await expectHeldTurnFinished(conversation);
+    },
+  },
+  {
+    rule: "pressing Stop on a budget prompt ends the held turn and asks again next time",
+    source: "docs/agent-config.md#runtime-limits",
+    requires: ["buttons", "text-replies"],
+    variesByConversation: true,
+    agent: ONE_TOKEN_BUDGET,
+    async run(conversation) {
+      const options = await exhaustBudget(conversation);
+      const stop = options.find((option) => option.label === "Stop");
+      expect(stop, "a Stop option to press").toBeDefined();
+      await conversation.press(stop!);
+      await expectStoppedAndAskedAgain(conversation);
+    },
+  },
+  {
+    rule: "a text reply of stop on a budget prompt ends the held turn and asks again next time",
+    source: "docs/agent-config.md#runtime-limits",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    agent: ONE_TOKEN_BUDGET,
+    async run(conversation) {
+      await exhaustBudget(conversation);
+      await conversation.say("stop");
+      await expectStoppedAndAskedAgain(conversation);
+    },
+  },
+  {
+    rule: "a reply that answers neither budget option keeps the prompt open",
+    source: "docs/agent-config.md#runtime-limits",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    agent: ONE_TOKEN_BUDGET,
+    async run(conversation) {
+      await exhaustBudget(conversation);
+      await conversation.say(LATER_MESSAGE);
+      // Had the reply closed or replaced the prompt, approve would be a new held message.
+      await conversation.say("approve");
+      await expectHeldTurnFinished(conversation);
+    },
+  },
+  {
+    rule: "a sign-in names the service and shows its sign-in link",
+    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    requires: [],
+    variesByConversation: true,
+    // A public surface has nowhere private to show a link.
+    surfaces: ["shared", "private"],
+    async run(conversation) {
+      await requestSignIn(conversation, READ_CALENDAR);
+      const shown = await conversation.waitForShown(CALENDAR.url);
+      // Slack names the service in the shared status and links privately, so accept either.
+      await conversation.waitForShown(CALENDAR.displayName);
+      expect(shown, "the sign-in link was shown").toContain(CALENDAR.url);
+    },
+  },
+  {
+    rule: "a sign-in shows its confirmation code",
+    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    requires: [],
+    variesByConversation: true,
+    surfaces: ["shared", "private"],
+    async run(conversation) {
+      await requestSignIn(conversation, READ_CALENDAR);
+      await conversation.waitForShown(CALENDAR.userCode);
+    },
+  },
+  {
+    rule: "a sign-in keeps its link and code out of messages everyone can see",
+    source:
+      "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
+    requires: [],
+    surfaces: ["public", "shared"],
+    async run(conversation) {
+      await requestSignIn(conversation, READ_CALENDAR);
+      await conversation.waitForRest();
+      const shared = conversation.sharedText();
+      expect(shared, "a message everyone sees carried the sign-in link").not.toContain(
+        CALENDAR.url,
+      );
+      expect(shared, "a message everyone sees carried the sign-in code").not.toContain(
+        CALENDAR.userCode,
+      );
+    },
+  },
+  {
+    rule: "a sign-in without a link shows its instructions",
+    source: "docs/connections/overview.mdx#self-hosted-interactive-oauth",
+    requires: [],
+    variesByConversation: true,
+    async run(conversation) {
+      await requestSignIn(conversation, READ_MAIL);
+      await conversation.waitForShown(MAIL.instructions);
+    },
+  },
+  {
+    rule: "completing a sign-in runs the tool that asked for it",
+    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    requires: [],
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      expect(conversation.runsOf("read_calendar"), "read_calendar ran before sign-in").toBe(0);
+      await conversation.completeSignIn();
+      await expectSignInToolResult(conversation);
+    },
+  },
+  {
+    rule: "completing a sign-in tells the person it succeeded",
+    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    requires: [],
+    variesByConversation: true,
+    async run(conversation) {
+      await conversation.say(READ_CALENDAR);
+      await conversation.waitForSignIn();
+      await conversation.completeSignIn();
+      await conversation.waitForShown(/\b(?:authorized|complete|connected)\b/iu);
+    },
+  },
+  {
+    rule: "a new message during a sign-in cancels it and gets an answer",
+    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      await abandonSignIn(conversation);
+      await conversation.waitForReplyTo(CHANGE_OF_PLANS);
+      // Finishing the abandoned sign-in afterwards must not run the tool.
+      await conversation.completeSignIn();
+      await conversation.waitForRest();
+      expect(
+        conversation.runsOf("read_calendar"),
+        "read_calendar ran after its sign-in was cancelled",
+      ).toBe(0);
+    },
+  },
+  {
+    rule: "a cancelled sign-in tells the person it was cancelled",
+    source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
+    requires: ["text-replies"],
+    variesByConversation: true,
+    async run(conversation) {
+      await abandonSignIn(conversation);
+      await conversation.waitForShown(/\b(?:cancel|declin)/iu);
     },
   },
 ] as const satisfies readonly ContractRule[];
