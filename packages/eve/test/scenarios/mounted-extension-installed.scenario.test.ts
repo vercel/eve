@@ -197,7 +197,9 @@ const EXT_TREE: Readonly<Record<string, string>> = {
  * is placed under the consumer's node_modules, so the consumer must discover
  * and normalize the emitted agent-shaped distribution.
  */
-async function buildInstalledExtensionFiles(): Promise<Record<string, string>> {
+async function buildInstalledExtensionFiles(
+  tree: Readonly<Record<string, string>> = EXT_TREE,
+): Promise<Record<string, string>> {
   const extRoot = await createScratchDirectory("eve-ext-src-");
   await writeFile(
     join(extRoot, "package.json"),
@@ -221,7 +223,7 @@ async function buildInstalledExtensionFiles(): Promise<Record<string, string>> {
     join(extRoot, "node_modules", "eve"),
     "dir",
   );
-  for (const [path, contents] of Object.entries(EXT_TREE)) {
+  for (const [path, contents] of Object.entries(tree)) {
     await mkdir(dirname(join(extRoot, path)), { recursive: true });
     await writeFile(join(extRoot, path), contents, "utf8");
   }
@@ -416,5 +418,72 @@ describe("mounted extension installed under node_modules", () => {
     expect(manifest.instructions.map((entry) => entry.content).join("\n")).toContain(
       "Prefer the CRM tools for account questions.",
     );
+  });
+
+  it("binds each mount's config in a shared chunk when mounted in the root and a subagent", async () => {
+    const tool = (description: string) =>
+      [
+        'import { defineTool } from "eve/tools";',
+        'import { apiKey } from "../../lib/api-key.js";',
+        "export default defineTool({",
+        `  description: "${description}",`,
+        '  inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+        "  async execute() { return { apiKey: apiKey() }; },",
+        "});",
+        "",
+      ].join("\n");
+    // A helper outside the extension source shared by two tools is emitted to `dist/_chunks`.
+    const extensionFiles = await buildInstalledExtensionFiles({
+      "extension/extension.ts": EXT_TREE["extension/extension.ts"]!,
+      "lib/api-key.ts": [
+        'import extension from "../extension/extension.js";',
+        "export const apiKey = () => extension.config.apiKey;",
+        "",
+      ].join("\n"),
+      "extension/tools/echo.ts": tool("Echo the configured API key."),
+      "extension/tools/shout.ts": tool("Shout the configured API key."),
+    });
+    expect(
+      Object.keys(extensionFiles).some((path) =>
+        path.startsWith(`node_modules/${PACKAGE_NAME}/dist/_chunks/`),
+      ),
+    ).toBe(true);
+    const app = await createAppRoot("eve-mounted-extension-chunks-", {
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "You are a precise assistant.\n",
+        "agent/extensions/crm.mjs": [
+          `import crm from "${PACKAGE_NAME}";`,
+          'export default crm({ apiKey: "sk-root" });',
+          "",
+        ].join("\n"),
+        "agent/subagents/manager/agent.mjs": [
+          "export default {",
+          '  model: "openai/gpt-5.4",',
+          '  description: "Manage CRM reviews.",',
+          "};",
+          "",
+        ].join("\n"),
+        "agent/subagents/manager/extensions/crm.mjs": [
+          `import crm from "${PACKAGE_NAME}";`,
+          'export default crm({ apiKey: "sk-manager" });',
+          "",
+        ].join("\n"),
+        ...extensionFiles,
+      },
+    });
+
+    const { graph } = await compileRuntimeGraph(app.appRoot);
+
+    const rootEcho = graph.root.agent.tools.find((entry) => entry.name === "crm__echo");
+    await expect(rootEcho?.execute?.({}, { messages: [], toolCallId: "call_1" })).resolves.toEqual({
+      apiKey: "sk-root",
+    });
+    const manager = graph.root.subagentRegistry.subagentsByName.get("manager");
+    const managerNode = graph.nodesByNodeId.get(manager!.definition.nodeId);
+    const managerShout = managerNode?.agent.tools.find((entry) => entry.name === "crm__shout");
+    await expect(
+      managerShout?.execute?.({}, { messages: [], toolCallId: "call_2" }),
+    ).resolves.toEqual({ apiKey: "sk-manager" });
   });
 });
