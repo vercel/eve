@@ -1,2 +1,2 @@
 /** Web search providers available through Vercel AI Gateway. */
-export type WebSearchProvider = "exa" | "parallel";
+export type WebSearchProvider = "exa" | "parallel" | "browserbase";

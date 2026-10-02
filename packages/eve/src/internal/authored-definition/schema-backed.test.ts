@@ -115,12 +115,15 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it("returns a configured entry for the provider-managed web search tool", () => {
-    expect(normalizeToolDefinition(webSearch({ provider: "exa" }), FAILURE_MESSAGE)).toEqual({
-      kind: "web-search-tool",
-      provider: "exa",
-    });
-  });
+  it.each(["exa", "parallel", "browserbase"] as const)(
+    "normalizes the %s web search provider",
+    (provider) => {
+      expect(normalizeToolDefinition(webSearch({ provider }), FAILURE_MESSAGE)).toEqual({
+        kind: "web-search-tool",
+        provider,
+      });
+    },
+  );
 
   it("rejects an unsupported web search provider", () => {
     expect(() =>

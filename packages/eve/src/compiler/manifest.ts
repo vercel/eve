@@ -832,7 +832,7 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
         z
           .object({
             kind: z.literal("provider-tool"),
-            provider: z.enum(["exa", "parallel"]),
+            provider: z.enum(["exa", "parallel", "browserbase"]),
           })
           .strict(),
         z
