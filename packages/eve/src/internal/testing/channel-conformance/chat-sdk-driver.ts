@@ -10,9 +10,11 @@ import {
   parseMarkdown,
   toPlainText,
 } from "#compiled/chat/index.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import {
   type ChannelDriver,
+  type Person,
   type PlatformCall,
   type Surface,
   numberedOptions,
@@ -21,13 +23,15 @@ import {
 
 const ADAPTER = "conformance";
 const PERSON = { fullName: "Alice", isBot: false, isMe: false, userId: "alice", userName: "alice" };
-/** The signed-in person a real integration would attach from its own user directory. */
-const PERSON_AUTH = {
-  attributes: {},
-  authenticator: "conformance",
-  principalId: "alice",
-  principalType: "user",
-};
+const PEOPLE = {
+  alice: PERSON,
+  bob: { fullName: "Bob", isBot: false, isMe: false, userId: "bob", userName: "bob" },
+} as const;
+
+/** The auth an app derives from a Chat SDK user, as the docs' `resolveInputAuth` example does. */
+function userAuth(userId: string): SessionAuthContext {
+  return { attributes: {}, authenticator: ADAPTER, principalId: userId, principalType: "user" };
+}
 let nextThread = 0;
 
 interface CardNode {
@@ -46,6 +50,7 @@ type Inbound =
       readonly actionId: string;
       /** The posted message holding the pressed button. */
       readonly messageId: string;
+      readonly person: Person;
       readonly value?: string;
     };
 
@@ -82,7 +87,10 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
   });
   return {
     ...driver,
-    capabilities: ["buttons", "text-replies"],
+    capabilities:
+      surface === "private"
+        ? ["buttons", "text-replies"]
+        : ["another-person", "buttons", "text-replies"],
     surface,
     findOptions(call, prompt) {
       if (!isPost(call)) return undefined;
@@ -101,12 +109,13 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
       };
     },
     personShownAs: [PERSON.fullName, PERSON.userName],
-    press(option) {
+    press(option, person: Person) {
       const { button, messageId } = option.handle as PressHandle;
       return driver.inbound({
         actionId: button.id!,
         kind: "action",
         messageId,
+        person,
         value: button.value,
       });
     },
@@ -179,6 +188,7 @@ function chatSdkDriverWith(input: {
       const bridge = chatSdkChannel({
         adapters: { [ADAPTER]: adapter },
         concurrency: "concurrent",
+        resolveInputAuth: (event) => userAuth(event.user.userId),
         routes: { [ADAPTER]: `/eve/v1/${ADAPTER}` },
         state: createMemoryState() as StateAdapter,
         streaming: false,
@@ -186,17 +196,29 @@ function chatSdkDriverWith(input: {
       });
       if (dm) {
         bridge.bot.onDirectMessage(async (thread, message) => {
-          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
+          await bridge.send(message.text, {
+            auth: userAuth(message.author.userId),
+            context: [],
+            thread,
+          });
         });
       } else {
         // The wiring docs/channels/chat-sdk.mdx shows: a mention starts the session, and
         // subscribing lets the rest of the thread continue it without one.
         bridge.bot.onNewMention(async (thread, message) => {
           await thread.subscribe();
-          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
+          await bridge.send(message.text, {
+            auth: userAuth(message.author.userId),
+            context: [],
+            thread,
+          });
         });
         bridge.bot.onSubscribedMessage(async (thread, message) => {
-          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
+          await bridge.send(message.text, {
+            auth: userAuth(message.author.userId),
+            context: [],
+            thread,
+          });
         });
       }
       return bridge.channel;
@@ -243,7 +265,7 @@ function fakeAdapter(
             messageId: body.messageId,
             raw: body,
             threadId,
-            user: PERSON,
+            user: PEOPLE[body.person],
             value: body.value,
           },
           options,

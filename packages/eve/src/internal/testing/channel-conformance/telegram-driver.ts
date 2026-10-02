@@ -1,6 +1,7 @@
 import { telegramChannel } from "#public/channels/telegram/index.js";
 import {
   type ChannelDriver,
+  type Person,
   type PlatformCall,
   type RenderedOption,
   type Surface,
@@ -67,6 +68,10 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
     ? { id: -nextChatId, title: "Release crew", type: "supergroup" }
     : { id: nextChatId, type: "private" };
   const PERSON = { first_name: "Alice", id: nextChatId, is_bot: false } as const;
+  const PEOPLE = {
+    alice: PERSON,
+    bob: { first_name: "Bob", id: nextChatId + 500_000, is_bot: false },
+  } as const;
   let updateId = 0;
   let messageId = 0;
   /** The bot's latest message, which a person in a group replies to so the bot hears them. */
@@ -113,7 +118,9 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
 
   return {
     name: group ? "telegram" : "telegram-dm",
-    capabilities: ["buttons", "text-replies"],
+    capabilities: !group
+      ? ["buttons", "text-replies"]
+      : ["another-person", "buttons", "text-replies"],
     surface,
     createChannel: (record) =>
       telegramChannel({
@@ -149,12 +156,12 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
       };
     },
     personShownAs: [PERSON.first_name],
-    press: (option) => {
+    press: (option, person: Person) => {
       const { data, messageId } = option.handle as PressHandle;
       return update({
         callback_query: {
           data,
-          from: PERSON,
+          from: PEOPLE[person],
           id: `callback-${updateId}`,
           message: { chat: CHAT, date: 0, message_id: messageId },
         },
