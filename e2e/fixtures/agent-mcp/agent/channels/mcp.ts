@@ -13,4 +13,7 @@ export default mcpChannel({
         }
       : null,
   tools: true,
+  // The loopback connection forwards the turn's user; only this service may.
+  trustedForwarders: (forwarder) =>
+    forwarder.authenticator === "e2e-fixture" && forwarder.principalId === SERVICE_ID,
 });

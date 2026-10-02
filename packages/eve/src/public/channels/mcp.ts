@@ -17,6 +17,12 @@ import type {
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createPublishedTools } from "#internal/mcp/published-tools.js";
+import {
+  resolveMcpRequestPrincipals,
+  type McpRequestPrincipals,
+} from "#internal/mcp/forwarded-principal-header.js";
+import type { TrustedForwarders } from "#channel/forwarded-principal.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
 import {
   createMcpStreamableHttpServer,
@@ -60,6 +66,16 @@ export interface McpChannelInput {
    * @default false
    */
   readonly tools?: boolean;
+  /**
+   * Lets a route-authenticated forwarder, such as another eve agent's
+   * `forwardPrincipal` connection, run the published tools as a user it names
+   * in the `eve-forwarded-principal` header. Receives the verified forwarder
+   * and what it asserts, as eveChannel's `trustedForwarders` does; match the
+   * forwarder precisely. Accepted principals carry the forwarder's id as the
+   * `eve:forwarded-by` attribute. `agent_*` tools still act as the route
+   * caller. Omit to refuse any request carrying the header with 403.
+   */
+  readonly trustedForwarders?: TrustedForwarders;
 }
 
 /** Public MCP channel publishing this agent's `agent_*` tools and, optionally, its own tools. */
@@ -85,23 +101,9 @@ export function mcpChannel(input: McpChannelInput): McpChannel {
   }
   const path = input.route ?? "/eve/v1/mcp";
   const oauth = readOAuthResourceOptions(input.auth);
-  const routes = [
-    GET(
-      path,
-      async (request, args) =>
-        await authenticateMcpRequest(request, args, input.auth, oauth, publish),
-    ),
-    POST(
-      path,
-      async (request, args) =>
-        await authenticateMcpRequest(request, args, input.auth, oauth, publish),
-    ),
-    DELETE(
-      path,
-      async (request, args) =>
-        await authenticateMcpRequest(request, args, input.auth, oauth, publish),
-    ),
-  ];
+  const handle = async (request: Request, args: RouteHandlerArgs) =>
+    await authenticateMcpRequest(request, args, input, oauth, publish);
+  const routes = [GET(path, handle), POST(path, handle), DELETE(path, handle)];
   if (oauth !== undefined) {
     routes.unshift(...protectedResourceMetadataRoutes(oauth, path));
   }
@@ -347,17 +349,19 @@ function readChallengeScheme(value: string): string | undefined {
 async function authenticateMcpRequest(
   request: Request,
   args: RouteHandlerArgs,
-  policy: AuthFn<Request> | readonly AuthFn<Request>[],
+  input: McpChannelInput,
   oauth: OAuthResourceOptions | undefined,
   publish: McpPublishOptions,
 ): Promise<Response> {
   const securityFailure = validateMcpHttpRequest(request);
   if (securityFailure !== undefined) return securityFailure;
-  const auth = await routeAuth(request, policy);
+  const auth = await routeAuth(request, input.auth);
   if (auth instanceof Response) {
     return oauth === undefined ? auth : addResourceChallenge(auth, request, oauth);
   }
-  return await handleMcpRequest(request, args, auth, publish);
+  const principals = await resolveMcpRequestPrincipals(request, auth, input.trustedForwarders);
+  if (principals instanceof Response) return principals;
+  return await handleMcpRequest(request, args, auth, principals, publish);
 }
 
 interface McpPublishOptions {
@@ -368,7 +372,8 @@ interface McpPublishOptions {
 async function handleMcpRequest(
   request: Request,
   args: RouteHandlerArgs,
-  auth: import("#channel/types.js").SessionAuthContext,
+  auth: SessionAuthContext,
+  principals: McpRequestPrincipals,
   publish: McpPublishOptions,
 ): Promise<Response> {
   const createSession = readRouteSessionCreator(args);
@@ -405,6 +410,7 @@ async function handleMcpRequest(
   const publishedTools = publish.tools
     ? createPublishedTools({
         invokeTool: args.invokeTool,
+        principals,
         reserved: new Set(agentTools.map((tool) => tool.name)),
         tools: (await args.describe()).tools,
       })
