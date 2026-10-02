@@ -9,6 +9,7 @@ import {
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import type { InvokeToolTraceOrigin } from "#tracing/invoke-tool-span.js";
 
 /**
  * Builds the route's `invokeTool`. The agent's static tools and sandbox load on
@@ -16,6 +17,8 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
  */
 export function createRouteInvokeTool(input: {
   readonly config: NitroArtifactsConfig;
+  /** The channel this route belongs to; trace policy classifies calls by it. */
+  readonly origin?: InvokeToolTraceOrigin;
   readonly requestUrl: string;
 }): InvokeToolFn {
   let runtime: Promise<InvokeToolRuntime> | undefined;
@@ -27,7 +30,13 @@ export function createRouteInvokeTool(input: {
       runtime = undefined;
       throw error;
     });
-    return await invokeTool(await runtime, name, toolInput, options);
+    const loaded = await runtime;
+    return await invokeTool(
+      input.origin === undefined ? loaded : { ...loaded, origin: input.origin },
+      name,
+      toolInput,
+      options,
+    );
   };
 }
 

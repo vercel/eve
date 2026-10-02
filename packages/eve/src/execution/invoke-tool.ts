@@ -32,6 +32,7 @@ import { toErrorMessage } from "#shared/errors.js";
 import { isObject } from "#shared/guards.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import { createUlid } from "#shared/ulid.js";
+import { type InvokeToolTraceOrigin, withInvokeToolSpan } from "#tracing/invoke-tool-span.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
@@ -47,6 +48,8 @@ export interface InvokeToolRuntime {
   /** The root node's compiled tools and source bindings, which decide invocability. */
   readonly manifest: InvokeToolManifest;
   readonly nodeId: string;
+  /** The channel the call arrived on, for trace policy and span attributes. */
+  readonly origin?: InvokeToolTraceOrigin;
   readonly sandboxRegistry: RuntimeSandboxRegistry;
   /** Static tools only: dynamic resolvers never run outside a turn. */
   readonly tools: HarnessToolMap;
@@ -99,13 +102,29 @@ export async function invokeTool(
     return failed(`Tool "${name}" cannot be invoked outside a conversation: ${ineligible}.`);
   }
 
-  const validated = await validateToolInput(definition, input);
+  const callId = `call_${createUlid()}`;
+  const sessionId = `call_session_${createUlid()}`;
+  return await withInvokeToolSpan(
+    { auth: options.auth, callId, origin: runtime.origin, sessionId, toolName: name },
+    () => runInvocation({ callId, definition, input, name, options, runtime, sessionId }),
+  );
+}
+
+async function runInvocation(input: {
+  readonly callId: string;
+  readonly definition: HarnessToolDefinition;
+  readonly input: unknown;
+  readonly name: string;
+  readonly options: InvokeToolOptions;
+  readonly runtime: InvokeToolRuntime;
+  readonly sessionId: string;
+}): Promise<InvokeToolResult> {
+  const { callId, definition, name, options, runtime, sessionId } = input;
+  const validated = await validateToolInput(definition, input.input);
   if (validated.kind === "threw")
     return failedFromError(validated.error, name, "input validation failed");
   if (validated.kind === "invalid") return { message: validated.message, status: "invalid-input" };
 
-  const callId = `call_${createUlid()}`;
-  const sessionId = `call_session_${createUlid()}`;
   const sandbox = await callSandbox(runtime, sessionId);
   const context = createCallContext({
     auth: options.auth,
