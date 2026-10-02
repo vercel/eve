@@ -116,7 +116,6 @@ import {
   renderPendingApprovalsSnippet,
 } from "#harness/hitl/approval-prompt.js";
 import {
-  createRuntimeToolResultFromToolError,
   createToolResultMessagePartFromToolError,
   isToolResultError,
 } from "#harness/action-result-helpers.js";
@@ -1226,7 +1225,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // The tools advertised to the latest model call; they decide which tool calls defer.
     let modelCallCoordinationTools = config.tools;
     let modelCallEndsTurnTools: EndsTurnTools = new Map();
-    let modelCallExecutableToolNames: ReadonlySet<string> = new Set();
     const createRequestMessages = () => {
       // Persist framework announcements before the new input, or after earlier
       // tool results on a continuation, so later requests retain the full prefix.
@@ -1433,11 +1431,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       modelCallEndsTurnTools = endsTurnTools;
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
-      modelCallExecutableToolNames = new Set(
-        Object.entries(effectiveTools).flatMap(([name, tool]) =>
-          tool.execute === undefined ? [] : [name],
-        ),
-      );
       for (const tool of Object.values(effectiveTools)) {
         // Whatever produced this tool, the AI SDK must only receive its own
         // schema type; see toModelSchema.
@@ -1644,13 +1637,28 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ) {
             throw new EmptyModelResponseError();
           }
-          await emitStepActions(emit, emissionState, stepResult, {
-            emittedActionCallIds,
-            excludedActionCallIds: invalidInputToolCallIds,
-            excludedActionToolNames,
-            handledInlineToolResultCallIds,
-            tools: presentationTools,
-          });
+          const skippedToolResults = answerSkippedToolCalls(stepResult, effectiveTools);
+          // Settle skipped calls with the step's other results, before step.completed.
+          await emitStepActions(
+            emit,
+            emissionState,
+            skippedToolResults.length === 0
+              ? stepResult
+              : withAccumulatedResponseMessages({
+                  responseMessages: appendMissingToolResultMessages({
+                    append: skippedToolResults,
+                    responseMessages: stepResult.response.messages,
+                  }),
+                  stepResult,
+                }),
+            {
+              emittedActionCallIds,
+              excludedActionCallIds: invalidInputToolCallIds,
+              excludedActionToolNames,
+              handledInlineToolResultCallIds,
+              tools: presentationTools,
+            },
+          );
           const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
           const toolResultsByCallId = new Map(
             existingToolResults.map((toolResult) => [toolResult.toolCallId, toolResult]),
@@ -1661,7 +1669,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           return withAccumulatedResponseMessages({
             invalidInputToolCallIds,
             responseMessages: appendMissingToolResultMessages({
-              append: trailingInlineToolResultParts,
+              append: [...trailingInlineToolResultParts, ...skippedToolResults],
               responseMessages: accumulatedResponseMessages,
             }),
             stepResult,
@@ -1687,7 +1695,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           throw new EmptyModelResponseError();
         }
         return withAccumulatedResponseMessages({
-          responseMessages: generateResult.responseMessages,
+          responseMessages: appendMissingToolResultMessages({
+            append: answerSkippedToolCalls(stepResult, effectiveTools),
+            responseMessages: generateResult.responseMessages,
+          }),
           stepResult,
         });
       };
@@ -1984,7 +1995,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         session,
         coordinationTools: modelCallCoordinationTools,
         endsTurnTools: modelCallEndsTurnTools,
-        executableToolNames: modelCallExecutableToolNames,
       });
     } catch (error) {
       throwIfTurnAborted(config.abortSignal);
@@ -2295,42 +2305,35 @@ function getInvalidToolCallInputErrors(input: {
  * Answer each with an error so the model can call the tool again. Calls the
  * SDK never runs (deferred tools, `final_output`) keep their usual handling.
  */
-function getUnexecutedToolCallErrors(input: {
-  readonly executableToolNames: ReadonlySet<string>;
-  readonly excludedCallIds: ReadonlySet<string>;
-  readonly result: HarnessStepResult;
-}): readonly TypedToolError<ToolSet>[] {
-  const { finishReason } = input.result;
+function answerSkippedToolCalls(step: HarnessStepResult, tools: ToolSet): ToolResultPart[] {
+  const { finishReason } = step;
   if (finishReason === "stop" || finishReason === "tool-calls") return [];
 
-  const answeredCallIds = extractToolResultCallIds(input.result.response.messages);
+  const answeredCallIds = extractToolResultCallIds(step.response.messages);
   const pendingApprovalCallIds = new Set(
-    (input.result.content ?? []).flatMap((part) =>
+    (step.content ?? []).flatMap((part) =>
       part.type === "tool-approval-request" && part.isAutomatic !== true
         ? [part.toolCall.toolCallId]
         : [],
     ),
   );
-  const error = `The tool did not run because the model response ended early (finish reason: ${finishReason}). Call the tool again if you still need its result.`;
-  return ((input.result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
+  const value = `The tool did not run because the model response ended early (finish reason: ${finishReason}). Call the tool again if you still need its result.`;
+  return ((step.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter(
       (toolCall) =>
-        input.executableToolNames.has(toolCall.toolName) &&
+        tools[toolCall.toolName]?.execute !== undefined &&
         toolCall.providerExecuted !== true &&
-        !input.excludedCallIds.has(toolCall.toolCallId) &&
+        !isInvalidToolCall(toolCall) &&
+        getInvalidToolCallInputError({ toolCall }) === undefined &&
         !answeredCallIds.has(toolCall.toolCallId) &&
         !pendingApprovalCallIds.has(toolCall.toolCallId),
     )
-    .map(
-      (toolCall) =>
-        ({
-          error,
-          input: toolCall.input,
-          toolCallId: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-          type: "tool-error",
-        }) as TypedToolError<ToolSet>,
-    );
+    .map((toolCall) => ({
+      output: { type: "error-text", value },
+      toolCallId: toolCall.toolCallId,
+      toolName: toolCall.toolName,
+      type: "tool-result",
+    }));
 }
 
 /**
@@ -2562,8 +2565,6 @@ async function handleStepResult(input: {
   readonly coordinationTools: HarnessToolMap;
   /** Tools that can end the turn in this step, with their `endsTurn` option. */
   readonly endsTurnTools: EndsTurnTools;
-  /** Tools the AI SDK executes itself in this step. */
-  readonly executableToolNames: ReadonlySet<string>;
   readonly session: HarnessSession;
 }): Promise<StepResult> {
   const { config, emit, promptMessages, result, runStep } = input;
@@ -2581,29 +2582,12 @@ async function handleStepResult(input: {
     ...result.toolCalls.filter(isInvalidToolCall).map((toolCall) => toolCall.toolCallId),
     ...invalidInputToolErrors.map((toolError) => toolError.toolCallId),
   ]);
-  const unexecutedToolErrors = getUnexecutedToolCallErrors({
-    executableToolNames: input.executableToolNames,
-    excludedCallIds: invalidInputToolCallIds,
-    result,
-  });
   const rawResponseMessages = appendMissingToolResultMessages({
-    append: [...invalidInputToolErrors, ...unexecutedToolErrors].map((toolError) =>
+    append: invalidInputToolErrors.map((toolError) =>
       createToolResultMessagePartFromToolError(toolError),
     ),
     responseMessages: result.response.messages,
   });
-  if (emit) {
-    for (const toolError of unexecutedToolErrors) {
-      await emit(
-        createActionResultEvent({
-          result: createRuntimeToolResultFromToolError(toolError),
-          sequence: emissionState.sequence,
-          stepIndex: emissionState.stepIndex,
-          turnId: emissionState.turnId,
-        }),
-      );
-    }
-  }
 
   const providerExecutedOutcomeIds = new Set<string>();
   for (const part of [...(result.content ?? []), ...(result.toolResults ?? [])]) {

@@ -1,5 +1,5 @@
 import { jsonSchema, type LanguageModel, type ModelMessage } from "ai";
-import { MockLanguageModelV4 } from "ai/test";
+import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { createToolLoopHarness } from "#harness/tool-loop.js";
@@ -198,5 +198,70 @@ describe("framework tool input validation (real AI SDK)", () => {
       expect(findToolResult(retryPrompt, call.toolCallId)).toBeDefined();
     }
     expect(nextStep.next).toBeNull();
+  });
+
+  it("settles a streamed call cut short at the output limit before the step completes", async () => {
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          {
+            input: JSON.stringify({ path: "notes/alice.md" }),
+            toolCallId: "read-skipped",
+            toolName: "read_note",
+            type: "tool-call",
+          },
+          { finishReason: { raw: undefined, unified: "length" }, type: "finish", usage },
+        ]),
+      }),
+      modelId: "output-limit-model",
+      provider: "eve-integration-mock",
+    });
+    const events: string[] = [];
+    const runStep = createToolLoopHarness({
+      handleEvent: async (event) => {
+        if (event.type === "action.result") {
+          events.push(
+            `action.result:${event.data.result.callId}:${String(event.data.result.isError)}`,
+          );
+        } else {
+          events.push(event.type);
+        }
+      },
+      resolveModel: async (): Promise<LanguageModel> => model,
+      tools: new Map([
+        [
+          "read_note",
+          {
+            name: "read_note",
+            description: "Read one of Alice's notes.",
+            execute: async () => ({ text: "Meeting moved to Friday." }),
+            inputSchema: jsonSchema({ type: "object" }),
+          },
+        ],
+      ]),
+    });
+
+    await runStep(
+      {
+        agent: {
+          modelReference: { id: "output-limit-model" },
+          system: "Help Alice with her notes.",
+          tools: [],
+        },
+        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        continuationToken: "task:output-limit-stream-session",
+        history: [],
+        sessionId: "output-limit-stream-session",
+      },
+      { message: "Read Alice's note." },
+    );
+
+    const stepEvents = events.slice(events.indexOf("step.started"));
+    expect(stepEvents.slice(0, 4)).toEqual([
+      "step.started",
+      "actions.requested",
+      "action.result:read-skipped:true",
+      "step.completed",
+    ]);
   });
 });
