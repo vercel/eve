@@ -7,12 +7,11 @@
  */
 
 import type { Block } from "./blocks.js";
-import { agentTaskLabel } from "./tool-presentation.js";
+import { agentTaskLabel, isSelfModificationAgent } from "./tool-presentation.js";
 import type { Theme } from "./theme.js";
 import { formatTurnDuration } from "./stream-format.js";
 import { renderTransientDrawer } from "./flow-drawer.js";
 import { truncate } from "./tool-format.js";
-import { isSelfModificationAgent } from "./tool-presentation.js";
 import { clipVisible, visibleLength } from "#cli/ui/terminal-text.js";
 
 export type TaskKind = "agent" | "tool";
@@ -40,62 +39,6 @@ export interface TaskEntry {
 
 /** Includes the heading and overflow summary, regardless of nesting. */
 const maxPanelRows = 15;
-
-export class TaskActivity {
-  readonly #entries = new Map<string, TaskEntry>();
-
-  start(input: {
-    readonly callId: string;
-    readonly kind: TaskKind;
-    readonly baseName: string;
-    readonly toolName: string;
-    readonly input: unknown;
-    readonly label: string | undefined;
-    readonly nowMs: number;
-  }): TaskEntry {
-    const entry: TaskEntry = {
-      callId: input.callId,
-      kind: input.kind,
-      name: this.#uniqueName(input.baseName),
-      toolName: input.toolName,
-      input: input.input,
-      label: input.label,
-      startedAtMs: input.nowMs,
-      childTools: new Map(),
-    };
-    this.#entries.set(input.callId, entry);
-    return entry;
-  }
-
-  get(callId: string): TaskEntry | undefined {
-    return this.#entries.get(callId);
-  }
-
-  /** Removes and returns a task that ended. */
-  finish(callId: string): TaskEntry | undefined {
-    const entry = this.#entries.get(callId);
-    this.#entries.delete(callId);
-    return entry;
-  }
-
-  working(): readonly TaskEntry[] {
-    return [...this.#entries.values()];
-  }
-
-  clear(): void {
-    this.#entries.clear();
-  }
-
-  /** Parallel calls to one agent read `researcher`, `researcher:2`, …; a name is never renamed. */
-  #uniqueName(baseName: string): string {
-    const taken = new Set([...this.#entries.values()].map((entry) => entry.name));
-    if (!taken.has(baseName)) return baseName;
-    for (let ordinal = 2; ; ordinal += 1) {
-      const candidate = `${baseName}:${String(ordinal)}`;
-      if (!taken.has(candidate)) return candidate;
-    }
-  }
-}
 
 /** Joins the working tasks' names for the turn bar: `Waiting for researcher and reviewer`. */
 export function waitingLabel(entries: readonly TaskEntry[]): string {
@@ -181,9 +124,12 @@ export function renderTaskPanelRows(
     [...attention, ...tasks.filter((task) => !attention.includes(task))].slice(0, capacity),
   );
   const shown = tasks.filter((task) => selected.has(task));
-  const rows: string[] = [];
+  // Each top-level task and its nested work form one group, so siblings don't run together.
+  const groups: string[][] = [];
   for (const { entry, path } of shown) {
     const nested = path.length > 0;
+    if (!nested || groups.length === 0) groups.push([]);
+    const rows = groups.at(-1)!;
     const lead = `  ${nested ? `${theme.glyph.corner} ` : ""}`;
     const parentShown = shown.some((task) => task.entry === path.at(-1));
     const owners = parentShown ? path.slice(1) : path;
@@ -202,6 +148,9 @@ export function renderTaskPanelRows(
     if (text.length > 0) rows.push(clipVisible(`${detailLead}${color(text)}`, width));
   }
   const hidden = total - shown.length;
+  const dense = groups.flat();
+  const spaced = groups.flatMap((group, index) => (index === 0 ? group : ["", ...group]));
+  const rows = spaced.length + (hidden > 0 ? 1 : 0) <= contentBudget ? spaced : dense;
   if (hidden > 0 && rows.length < contentBudget) {
     const summary = `${theme.glyph.ellipsis} ${omitted > 0 ? "at least " : ""}${hidden} more working${omittedAttention ? " · Approval needed" : ""}`;
     rows.push(clipVisible(`  ${omittedAttention ? c.yellow(summary) : c.dim(summary)}`, width));

@@ -317,7 +317,7 @@ export function agentTaskLabel(name: string): string {
   const readable = name
     .replace(/^self-modification__agent(?=:\d+$|$)/u, "agent editor")
     .replace(/__agent(?=:\d+$|$)/u, "");
-  return readable === "subagent" || readable.startsWith("agent editor")
+  return /^subagent(?::\d+)?$/u.test(readable) || readable.startsWith("agent editor")
     ? readable
     : `subagent(${readable})`;
 }
