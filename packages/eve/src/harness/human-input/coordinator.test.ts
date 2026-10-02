@@ -6,12 +6,12 @@ import { AuthKey, SessionKey } from "#context/keys.js";
 import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
-} from "#harness/approval-candidates.js";
+} from "#harness/human-input/candidates.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { settleDirectApprovalResponse } from "#harness/approval-candidates.js";
-import { coordinateApprovalDelivery } from "#harness/approval-delivery-coordinator.js";
+import { settleDirectApprovalResponse } from "#harness/human-input/candidates.js";
+import { coordinateApprovalDelivery } from "#harness/human-input/coordinator.js";
 import { selectApprovalReplayBatch } from "#harness/input-requests.js";
 import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";

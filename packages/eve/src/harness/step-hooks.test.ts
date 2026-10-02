@@ -4,15 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ConversationIdKey } from "#context/keys.js";
 import { buildStepHooks } from "#harness/step-hooks.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
 import type { HarnessSession } from "#harness/types.js";
-
-const emissionState: HarnessEmissionState = {
-  sequence: 0,
-  sessionStarted: true,
-  stepIndex: 0,
-  turnId: "turn_0",
-};
 
 function createSession(): HarnessSession {
   return {
@@ -29,14 +21,13 @@ function createSession(): HarnessSession {
 }
 
 describe("buildStepHooks", () => {
-  it("emits step.started from onStepStart, not prepareStep", async () => {
-    const emit = vi.fn(async () => {});
+  it("starts the step from onStepStart, not prepareStep", async () => {
+    const startStep = vi.fn(async () => {});
     const hooks = buildStepHooks({
       cachePath: { kind: "none" },
-      emit,
-      emissionState,
       marker: undefined,
       session: createSession(),
+      startStep,
     });
     const messages: ModelMessage[] = [{ content: "hello", role: "user" }];
 
@@ -53,17 +44,11 @@ describe("buildStepHooks", () => {
       stepNumber: 0,
       steps: [],
     });
-    expect(emit).not.toHaveBeenCalled();
+    expect(startStep).not.toHaveBeenCalled();
 
     await Reflect.apply(hooks.onStepStart, null, [{ messages }]);
 
-    expect(emit).toHaveBeenCalledWith(
-      {
-        data: { modelId: "test-model", sequence: 0, stepIndex: 0, turnId: "turn_0" },
-        type: "step.started",
-      },
-      messages,
-    );
+    expect(startStep).toHaveBeenCalledWith(messages);
   });
 
   it("sends the trace conversation ID to Gateway without changing direct-provider options", async () => {
@@ -84,7 +69,7 @@ describe("buildStepHooks", () => {
       model: LanguageModel,
       cachePath: Parameters<typeof buildStepHooks>[0]["cachePath"],
     ) =>
-      buildStepHooks({ emissionState, marker: undefined, cachePath, session }).prepareStep({
+      buildStepHooks({ marker: undefined, cachePath, session }).prepareStep({
         messages: [],
         model,
         instructions: undefined,
@@ -139,7 +124,6 @@ describe("buildStepHooks", () => {
   it("preserves an authored Gateway session ID", async () => {
     const hooks = buildStepHooks({
       cachePath: { kind: "none" },
-      emissionState,
       marker: undefined,
       session: {
         ...createSession(),

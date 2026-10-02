@@ -4,7 +4,7 @@ import {
   PENDING_APPROVALS_LABEL,
   renderPendingApprovalsInstruction,
   renderPendingApprovalsSnippet,
-} from "#harness/hitl/approval-prompt.js";
+} from "#harness/human-input/approval-prompt.js";
 import type { InputRequest } from "#shared/input.js";
 
 describe("renderPendingApprovalsSnippet", () => {

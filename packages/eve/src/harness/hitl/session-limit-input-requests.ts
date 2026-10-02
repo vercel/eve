@@ -18,7 +18,7 @@ import type {
 import {
   isSessionLimitContinuationRequest,
   resolveSessionLimitContinuation,
-} from "#harness/session-limit-continuation.js";
+} from "#harness/human-input/budget-request.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const SESSION_LIMIT_BATCH_INVARIANT_MESSAGE =

@@ -2,7 +2,7 @@ import type { ModelMessage, UserContent } from "ai";
 
 import { extractHistoricalInputRequests } from "#harness/input-extraction.js";
 import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
-import { isSessionLimitContinuationRequestId } from "#harness/session-limit-continuation.js";
+import { isSessionLimitContinuationRequestId } from "#harness/human-input/budget-request.js";
 import type { StepInput } from "#harness/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 

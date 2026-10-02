@@ -3,7 +3,7 @@ import { MockLanguageModelV3 } from "ai/test";
 
 import { markMockModel } from "#internal/mock-model-identity.js";
 import { TASK_RESULT_TAG, TASKS_NOTE_LABEL } from "#execution/tasks/render.js";
-import { isPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
+import { isPendingApprovalsSnippet } from "#harness/human-input/approval-prompt.js";
 
 type GenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 type GenerateResult = Awaited<ReturnType<MockLanguageModelV3["doGenerate"]>>;

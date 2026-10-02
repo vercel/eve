@@ -18,7 +18,6 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
   "compiler/manifest.ts",
   "evals/types.ts",
   // Lifecycle and stream emission share one ordered protocol boundary.
-  "harness/tool-loop.ts",
   "internal/nitro/host/create-application-nitro.ts",
   "protocol/message.ts",
   "public/channels/auth.ts",

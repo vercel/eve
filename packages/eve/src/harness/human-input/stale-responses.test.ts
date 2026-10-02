@@ -5,7 +5,7 @@ import type { ModelMessage } from "ai";
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
-} from "#harness/stale-input-responses.js";
+} from "#harness/human-input/stale-responses.js";
 
 const approvalHistory: ModelMessage[] = [
   {

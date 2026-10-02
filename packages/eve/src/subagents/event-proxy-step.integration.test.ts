@@ -13,7 +13,7 @@ import {
 } from "#context/keys.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { openSessionEventPublisher } from "#execution/publish-session-events.js";
-import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
+import { createSessionLimitContinuationRequest } from "#harness/human-input/budget-request.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { createAuthorizationRequiredEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { HookContext } from "#public/definitions/hook.js";

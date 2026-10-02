@@ -14,14 +14,15 @@ import {
 } from "#execution/session/state-delta.js";
 import { relayWithdrawnRequests } from "#execution/tools/workflow/withdraw-step.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
-import { declinedSignInEvents, withdrawHeldSignIns } from "#harness/held-requests.js";
 import {
   cancelApprovalInputBatches,
+  clearPendingSessionLimitPrompt,
+  declinedSignInEvents,
   getPendingApprovalRequests,
-} from "#harness/hitl/approval-input-requests.js";
+  withdrawHeldSignIns,
+} from "#harness/human-input/index.js";
 import { createInputResolvedEvent } from "#protocol/message.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
-import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import {

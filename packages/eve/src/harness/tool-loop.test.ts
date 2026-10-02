@@ -67,7 +67,8 @@ import { getPendingCoordinationBatch, pendingCoordinationCallIds } from "#harnes
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
-import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
+import { createToolLoopHarness } from "#harness/tool-loop.js";
+import { appendMissingToolResultMessages } from "#harness/model-call/response.js";
 import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import { createTask, writeTaskTable } from "#execution/tasks/table.js";
 import { SessionLimitDeclinedError, TurnCancelledError } from "#harness/turn-cancellation.js";

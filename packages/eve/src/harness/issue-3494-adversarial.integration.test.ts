@@ -5,7 +5,7 @@ import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
-} from "#harness/approval-candidates.js";
+} from "#harness/human-input/candidates.js";
 import { setPendingAuthorization } from "#harness/authorization.js";
 import { z } from "zod";
 import { ContextContainer, contextStorage } from "#context/container.js";

@@ -1,4 +1,4 @@
-import { finishApprovalCandidate, getApprovalAuditState } from "#harness/approval-candidates.js";
+import { finishApprovalCandidate, getApprovalAuditState } from "#harness/human-input/candidates.js";
 import { authorizationEventFields } from "#harness/authorization-event-fields.js";
 import {
   clearPendingAuthorization,
