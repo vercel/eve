@@ -207,7 +207,9 @@ export function createMcpStreamableHttpServer(
     if (preflightFailure !== undefined) return preflightFailure;
 
     // The client's trace context rides in `_meta`, not headers, so it is
-    // adopted here, before the SDK dispatches into a tool.
+    // adopted here, before the SDK dispatches into a tool. A valid
+    // `_meta.traceparent` replaces any parent extracted from the HTTP
+    // headers; anything else keeps it. `_meta.baggage` is never read.
     return await otelContext.with(
       withMcpRequestTraceContext(otelContext.active(), parsedBody),
       () => handler.fetch(request, { parsedBody }),
