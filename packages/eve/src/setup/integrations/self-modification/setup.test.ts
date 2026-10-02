@@ -23,7 +23,6 @@ function operations(config?: string): SelfModificationSetupOperations & {
 } {
   return {
     attachConnector: vi.fn(async () => {}),
-    detectChannelNames: vi.fn(async () => ["eve", "slack"]),
     detectGitRepository: vi.fn(async () => ({
       branch: "main",
       directory: "apps/support",
@@ -45,7 +44,7 @@ function applyDependencies(): SelfModificationApplyDependencies & {
   return {
     ensurePackageDependencies: vi.fn(async () => [
       {
-        dependencies: ["@vercel/connect", "microsandbox"],
+        dependencies: ["microsandbox"],
         devDependencies: [],
         path: "/project/package.json",
         scripts: [],
@@ -116,7 +115,6 @@ describe("self-modification integration setup", () => {
       kind: "local",
     });
     expect(effects.detectGitRepository).not.toHaveBeenCalled();
-    expect(effects.detectChannelNames).not.toHaveBeenCalled();
   });
 
   it("prepares deployed configuration before applying connector effects", async () => {
@@ -136,6 +134,11 @@ describe("self-modification integration setup", () => {
 
     const plan = await prepareSelfModificationSetup(ctx.prepare, effects);
     expect(effects.findOrCreateConnector).not.toHaveBeenCalled();
+    expect(ctx.note).toHaveBeenCalledWith(
+      expect.stringContaining("`authorize: () => true`"),
+      "Custom authorization recommended",
+      { tone: "warning" },
+    );
     await expect(applySelfModificationSetup(plan, ctx.apply, effects, deps)).resolves.toMatchObject(
       {
         deploymentRequired: true,
@@ -151,7 +154,7 @@ describe("self-modification integration setup", () => {
       projectId: "project",
     });
     expect(deps.ensurePackageDependencies).toHaveBeenCalledWith({
-      dependencies: { "@vercel/connect": "2.2.0", microsandbox: "0.5.5" },
+      dependencies: { microsandbox: "0.5.5" },
       projectRoot: "/project",
     });
     expect(deps.installScaffoldDependencies).toHaveBeenCalledWith(
@@ -161,22 +164,10 @@ describe("self-modification integration setup", () => {
       expect.stringContaining('import selfModification from "eve/self-modification/deployed"'),
     );
     expect(effects.writeConfig).toHaveBeenCalledWith(
-      expect.stringContaining('repository: "github.com/acme/agents"'),
-    );
-    expect(effects.writeConfig).toHaveBeenCalledWith(
-      expect.stringContaining('case "channel:slack"'),
-    );
-    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "http"'));
-    expect(effects.writeConfig).toHaveBeenCalledWith(
-      expect.stringContaining('import { getToken } from "@vercel/connect"'),
-    );
-    expect(effects.writeConfig).toHaveBeenCalledWith(
-      expect.stringContaining("async resolve({ capability, repository })"),
+      expect.stringContaining('repository: "acme/agents"'),
     );
     expect(ctx.note).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "After deployment, try self-modification by running `eve dev <deployment-url>`",
-      ),
+      expect.stringContaining("Replace the allow-all `authorize` policy"),
       "Next steps",
       { tone: "success" },
     );
@@ -197,7 +188,9 @@ describe("self-modification integration setup", () => {
     await applySelfModificationSetup(plan, ctx.apply, effects);
 
     expect(ctx.resolveVercelProject).toHaveBeenCalledWith("self-modification");
-    expect(effects.writeConfig).toHaveBeenCalledWith(expect.stringContaining('case "http"'));
+    expect(effects.writeConfig).toHaveBeenCalledWith(
+      expect.stringContaining('connector: "github/selfmod-acme-agents"'),
+    );
   });
 
   it("registers the production setup separately from local setup", () => {

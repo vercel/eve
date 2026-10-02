@@ -8,4 +8,5 @@ test("routes authenticated GitHub operations through the scoped gh tool", () => 
   assert.match(content, /GitHub credentials are not available to ordinary `bash`/u);
   assert.match(content, /Use the `gh` tool for every authenticated GitHub operation/u);
   assert.match(content, /sandbox process receives only a placeholder `GH_TOKEN`/u);
+  assert.match(content, /To create a new clone of a repository, use `gh repo clone owner\/name`/u);
 });

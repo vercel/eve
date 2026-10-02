@@ -14,14 +14,6 @@ import { getLocalDevCapability } from "eve/local-dev";
 import selfModification from "../../extension.js";
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "../../../config.js";
 import { isLocalSelfModificationEnabled } from "../../../mode.js";
-import {
-  followUpDelegation,
-  namedInstallationDelegation,
-  persistenceDelegation,
-  renderDescription,
-  repairDelegation,
-  sourceDelegation,
-} from "../../../subagent-guidance.js";
 
 /** Fallback model when neither the self-modification agent nor its parent configures one. */
 export const FALLBACK_SELF_MODIFICATION_MODEL = DEFAULT_AGENT_MODEL_ID;
@@ -37,6 +29,31 @@ export interface SelfModificationAgentOptions {
    */
   readonly reasoning?: AgentReasoningDefinition;
 }
+
+function renderDescription(sections: readonly string[]): string {
+  return sections.filter((section) => section.length > 0).join(" ");
+}
+
+const sourceDelegation =
+  "If the requested change references a tool or skill, include the exact identifier. " +
+  "Do not infer source paths; let the child resolve the appropriate file under /source. " +
+  "Delegate the requested change and existing constraints without adding unrequested features, implementation steps, or reporting requirements.";
+
+const persistenceDelegation =
+  "Treat requests for persistent changes to future behavior or capabilities as source-modification requests, even when the requester does not mention files or source code. " +
+  "Infer persistence from the request and conversation rather than waiting for phrases such as “modify your source.” " +
+  "For example, asking the agent to stop always doing something, add a capability, or change future responses calls for inspecting and editing the authored source instead of providing a one-turn workaround.";
+
+const namedInstallationDelegation =
+  "Treat questions phrased as whether you can install, add, enable, or connect to a named product or service as requests to extend this eve agent and delegate immediately. Do not assume they refer to device software, ask what kind of installation they mean, or deny them because you lack access to the user's device. The subagent determines whether the request maps to an integration, channel, connection, or other capability, then checks registry availability and any required setup.";
+
+const followUpDelegation =
+  "Resolve short follow-ups such as “yes” or “do it” against the preceding conversation. " +
+  "If whether the requested change should persist is genuinely ambiguous, ask one concise clarifying question.";
+
+const repairDelegation =
+  "If a tool or capability created or changed by this subagent later fails or behaves incorrectly, explain the observed problem and offer to delegate a repair. " +
+  "Do not start the repair until the user confirms. Treat that confirmation as a source-modification request and delegate it immediately, including the exact identifier, failing behavior, expected behavior, and existing constraints.";
 
 const localIntegrationDelegation =
   "Delegate questions about which integrations, channels, connections, or capabilities are available to add: the subagent searches the eve registry and reports exact item addresses instead of guessing them.";
