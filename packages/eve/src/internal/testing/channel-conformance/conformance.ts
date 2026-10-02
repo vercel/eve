@@ -287,16 +287,7 @@ const hitlConformance = {
   twilio: [
     {
       driver: twilioDriver,
-      broken: {
-        ...QUEUED_BUDGET_REPLY,
-        ...noSignInRenderer(
-          "a sign-in names the service and shows its sign-in link",
-          "a sign-in shows its confirmation code",
-          "a sign-in without a link shows its instructions",
-          "completing a sign-in tells the person it succeeded",
-          "message after ignored sign-in tells user it was cancelled",
-        ),
-      },
+      broken: QUEUED_BUDGET_REPLY,
     },
   ],
 } satisfies Record<string, readonly ConformanceChannel[]>;
