@@ -130,7 +130,10 @@ import { copyTextToClipboard } from "./clipboard.js";
 import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import { TraceViewerSession } from "./traces/trace-viewer-session.js";
 import { buildStatusLine, type DevBuildStatus } from "./status-line.js";
-import { nextLogDisplayMode } from "./log-display-mode.js";
+import { isLogVisible, nextLogDisplayMode } from "./log-display-mode.js";
+import { setConsoleRecordSubscriber, type ConsoleRecord } from "../console-records.js";
+import type { LogLevel } from "#internal/logging.js";
+import { format } from "node:util";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
 import {
   clipVisible,
@@ -146,11 +149,7 @@ import { groupToolBlocksForDisplay } from "./tool-block-groups.js";
 import { inputContextLabel, renderQuestionChoices, renderQuestionPanel } from "./question-panel.js";
 import { TurnClock } from "./turn-clock.js";
 import { MessageQueue, renderMessageQueueRows } from "./message-queue.js";
-import {
-  formatStoredDiagnostic,
-  presentDiagnostic,
-  splitWorkflowLogs,
-} from "./diagnostic-presentation.js";
+import { formatStoredDiagnostic, presentDiagnostic } from "./diagnostic-presentation.js";
 import { reduceSetupSelectInput, setupSelectionIntent } from "./setup-selection-input.js";
 import {
   isProgressPulseVisible,
@@ -474,7 +473,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #restoreLogCapture?: () => void;
   #stdoutLogBuffer = "";
   #stderrLogBuffer = "";
-  #stderrInWorkflowLog = false;
   #delayedDevBuildError?: string;
   /**
    * The in-place dev rebuild status line. While the dev server's rebuild log
@@ -562,7 +560,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#diagnostics = options?.diagnostics;
     this.#onExitRequest = options?.onExitRequest;
     this.#argumentSuggestions = options?.argumentSuggestions;
-    this.#logs = options?.logs ?? "none";
+    this.#logs = options?.logs ?? "error";
     this.#availablePromptCommands = options?.availablePromptCommands ?? PROMPT_COMMANDS;
   }
 
@@ -1127,6 +1125,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(request.context),
+        false,
+        "left",
       );
     this.#paint();
 
@@ -1233,6 +1233,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(question.context),
+        false,
+        "left",
       );
 
     const textPanel = (width: number) => {
@@ -1256,6 +1258,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
         this.#theme,
         width,
         this.#inputContextLabel(question.context),
+        false,
+        "left",
       );
     };
 
@@ -3145,17 +3149,20 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#taskEndGraceTimer = undefined;
   }
 
-  #taskPanelRows(width: number): string[] {
-    const working = this.#transcript.tasks;
-    if (working.length === 0) return [];
-    return renderTaskPanelRows(working, {
+  #taskPanelRows(width: number, maxRows = Math.max(8, Math.floor(this.#height() / 2))): string[] {
+    const tasks = this.#transcript.tasks;
+    if (tasks.length === 0) return [];
+    const working = this.#view?.working === true && this.#flowlessStatus === undefined;
+    const now = Date.now();
+    const activity =
+      working && this.#view !== undefined ? turnActivity(this.#view, tasks) : "Working";
+    return renderTaskPanelRows(tasks, {
       width,
       theme: this.#theme,
-      nowMs: Date.now(),
-      pulse: this.#progressPulseGlyph(
-        this.#activityPulseStartedAtMs,
-        this.#theme.unicode ? PROGRESS_PULSE_GLYPH : PROGRESS_PULSE_ASCII_GLYPH,
-      ),
+      nowMs: now,
+      maxRows,
+      activity: activity.startsWith("Waiting for ") ? "Waiting" : activity,
+      turnElapsedMs: working ? Math.max(0, now - (this.#turnClock.startedAtMs ?? now)) : undefined,
     });
   }
 
@@ -3437,7 +3444,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const body = this.#delayedDevBuildError;
     if (body === undefined) return;
     this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
+    this.#pushBlock({ kind: "log", title: "stderr", logLevel: "error", body, live: false });
     this.#paint();
   }
 
@@ -3539,11 +3546,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return [...drawer.rows, ...drawer.controls];
     }
 
-    // The HITL drawer opens one row below the transcript, then owns the
-    // footer down to its controls with no status line beneath it.
+    // The request keeps priority; activity uses the remaining height and shares its top rule.
     if (this.#hitlDrawer !== undefined) {
       const drawer = this.#hitlDrawer(width);
-      return [...rows, ...drawer.rows, ...drawer.controls];
+      const available = this.#height() - drawer.rows.length - drawer.controls.length - 1;
+      const activity = available >= 4 ? this.#taskPanelRows(width, available + 1) : [];
+      return [...activity.slice(0, -1), ...drawer.rows, ...drawer.controls];
     }
 
     const flow = this.#setupFlow;
@@ -3628,10 +3636,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     // The task panel is the one region that redraws in place while tasks
     // work, so it sits in the footer rather than the transcript.
+    const working = this.#view?.working === true && this.#flowlessStatus === undefined;
     const taskRows = this.#taskPanelRows(width);
     if (taskRows.length > 0) {
       rows.push(...taskRows);
-      if (this.#inputActive) rows.push("");
     }
 
     // Messages typed while the agent starts wait in a panel directly above
@@ -3645,9 +3653,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     // While work runs, the one live turn bar rides above the composer. The
     // `Done in … (↑ … ↓ …)` coda is this bar's settled form.
-    const working = this.#view?.working === true && this.#flowlessStatus === undefined;
     if (working) {
-      rows.push(this.#streamingTurnBar(width));
+      if (taskRows.length === 0) rows.push(this.#streamingTurnBar(width));
       if (this.#cancelRequested) {
         rows.push(
           clip(
@@ -3656,7 +3663,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           ),
         );
       }
-      rows.push("");
+      if (taskRows.length === 0 || this.#cancelRequested) rows.push("");
     }
 
     if (this.#inputActive) {
@@ -3720,7 +3727,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The composer is closed while a command or other surface runs. A kept
     // draft stays visible so keys typed in this gap have somewhere to land.
     if (working || this.#draft.text.length > 0) {
-      this.#pushDraftPrompt(rows, width, { inert: working });
+      this.#pushDraftPrompt(rows, width, { inert: working, adjacent: taskRows.length > 0 });
       this.#pushStatusLine(rows, width);
       return rows;
     }
@@ -3767,8 +3774,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   /** The kept draft as a prompt row, inert while work runs without the composer. */
-  #pushDraftPrompt(rows: string[], width: number, options: { inert: boolean }): void {
-    if (rows.at(-1) !== "") rows.push("");
+  #pushDraftPrompt(
+    rows: string[],
+    width: number,
+    options: { inert: boolean; adjacent?: boolean },
+  ): void {
+    if (!options.adjacent && rows.at(-1) !== "") rows.push("");
     const prompt: Parameters<typeof promptInputRows>[0] = {
       text: this.#draft.text,
       cursor: this.#draft.cursor,
@@ -3888,7 +3899,6 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     this.#stdoutLogBuffer = "";
     this.#stderrLogBuffer = "";
-    this.#stderrInWorkflowLog = false;
 
     const capture = (target: NodeJS.WriteStream, source: "stdout" | "stderr"): (() => void) => {
       const original = target.write.bind(target);
@@ -3908,6 +3918,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
       };
     };
 
+    const consoleMethods = ["error", "warn", "log", "info", "debug"] as const;
+    const originals = consoleMethods.map((method) => [method, console[method]] as const);
+    for (const method of consoleMethods) {
+      console[method] = (...args: unknown[]) =>
+        this.#displayConsoleRecord({
+          level: method === "log" ? "info" : method,
+          text: format(...args),
+        });
+    }
+    setConsoleRecordSubscriber((record) => this.#displayConsoleRecord(record));
     const restoreStdout = capture(process.stdout, "stdout");
     const restoreStderr = capture(process.stderr, "stderr");
     // The recorder takes ownership of eve's own structured log records for
@@ -3918,6 +3938,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#diagnostics?.subscribeLogRecords((record) => this.#displayLogRecord(record));
     this.#restoreLogCapture = () => {
       this.#diagnostics?.unsubscribeLogRecords();
+      setConsoleRecordSubscriber(undefined);
+      for (const [method, original] of originals) console[method] = original;
       restoreStdout();
       restoreStderr();
     };
@@ -3931,12 +3953,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     if (this.#stdoutLogBuffer.length > 0) {
       this.#diagnostics?.append({ source: "stdout", detail: this.#stdoutLogBuffer });
-      if (this.#shouldRenderLog("stdout")) process.stdout.write(`${this.#stdoutLogBuffer}\n`);
+      if (this.#shouldRenderLog()) process.stdout.write(`${this.#stdoutLogBuffer}\n`);
       this.#stdoutLogBuffer = "";
     }
     if (this.#stderrLogBuffer.length > 0) {
       this.#diagnostics?.append({ source: "stderr", detail: this.#stderrLogBuffer });
-      if (this.#shouldRenderLog("stderr")) process.stderr.write(`${this.#stderrLogBuffer}\n`);
+      if (this.#shouldRenderLog()) process.stderr.write(`${this.#stderrLogBuffer}\n`);
       this.#stderrLogBuffer = "";
     }
   }
@@ -3949,7 +3971,18 @@ export class TerminalRenderer implements AgentTUIRenderer {
    */
   #displayLogRecord(record: LogRecord): void {
     const fieldsText = record.fields === undefined ? "" : ` ${JSON.stringify(record.fields)}`;
-    this.#presentCapturedStderr(`[eve:${record.namespace}] ${record.message}${fieldsText}`);
+    this.#handleCapturedStderr(
+      `[eve:${record.namespace}] ${record.message}${fieldsText}`,
+      record.level,
+    );
+    this.#paint();
+  }
+
+  #displayConsoleRecord(record: ConsoleRecord): void {
+    const source = record.level === "error" || record.level === "warn" ? "stderr" : "stdout";
+    this.#diagnostics?.append({ source, level: record.level, detail: record.text });
+    if (source === "stderr") this.#handleCapturedStderr(stripAnsi(record.text), record.level);
+    else this.#handleCapturedStdout(stripAnsi(record.text), record.level);
     this.#paint();
   }
 
@@ -3999,21 +4032,21 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * Contiguous ordinary lines within one write stay one block, preserving the
    * single-block-per-write shape for plain output.
    */
-  #handleCapturedStdout(content: string): void {
+  #handleCapturedStdout(content: string, logLevel?: LogLevel): void {
     let pending: string[] = [];
     const flushPending = () => {
       if (pending.length === 0) return;
       const body = pending.join("\n");
       pending = [];
       if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stdout", body, live: true });
+      this.#pushBlock({ kind: "log", title: "stdout", logLevel, body, live: false });
     };
 
     for (const line of content.split("\n")) {
       const sandboxMessage = parseSandboxLogLine(line.trimEnd());
       if (sandboxMessage !== undefined) {
         flushPending();
-        this.#pushBlock({ kind: "sandbox", body: sandboxMessage, live: false });
+        this.#pushBlock({ kind: "sandbox", logLevel, body: sandboxMessage, live: false });
         continue;
       }
 
@@ -4028,64 +4061,49 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flushPending();
   }
 
-  /**
-   * Workflow SDK output is framework-internal and not actionable for users, so
-   * it shows only under `/loglevel all`; the diagnostic log keeps every line.
-   */
-  #handleCapturedStderr(content: string): void {
-    const segments = splitWorkflowLogs(content, this.#stderrInWorkflowLog);
-    this.#stderrInWorkflowLog = segments.at(-1)?.workflow ?? this.#stderrInWorkflowLog;
-    for (const segment of segments) {
-      if (segment.text.trim().length === 0) continue;
-      if (!segment.workflow) {
-        this.#presentCapturedStderr(segment.text);
-        continue;
-      }
-      this.#pushBlock({
-        kind: "log",
-        title: "stderr",
-        body: segment.text,
-        logVisibility: "all-only",
-        live: true,
-      });
-    }
-  }
-
-  #presentCapturedStderr(content: string): void {
+  #handleCapturedStderr(content: string, logLevel?: LogLevel): void {
     const lines = content.split("\n");
     const failedIndex = lines.findIndex((line) => {
       return parseDevRebuildLogLine(line.trimEnd())?.kind === "failed";
     });
     if (failedIndex === -1) {
       if (this.#diagnostics === undefined) {
-        this.#pushBlock({ kind: "log", title: "stderr", body: content, live: true });
+        this.#pushBlock({ kind: "log", title: "stderr", logLevel, body: content, live: false });
         return;
       }
       const presentation = presentDiagnostic(content, this.#diagnostics.displayPath);
       if (presentation.kind === "inline") {
-        this.#pushBlock({ kind: "log", title: "stderr", body: presentation.text, live: true });
+        this.#pushBlock({
+          kind: "log",
+          title: "stderr",
+          logLevel,
+          body: presentation.text,
+          live: false,
+        });
         return;
       }
       this.#pushBlock({
         kind: "log",
         title: "stderr",
         body: formatStoredDiagnostic(presentation),
-        logVisibility: "stderr-only",
-        live: true,
+        logVisibility: "summary",
+        logLevel,
+        live: false,
       });
       this.#pushBlock({
         kind: "log",
         title: "stderr",
         body: content,
         logVisibility: "all-only",
-        live: true,
+        logLevel,
+        live: false,
       });
       return;
     }
 
     const previous = lines.slice(0, failedIndex).join("\n");
     if (previous.trim().length > 0) {
-      this.#pushBlock({ kind: "log", title: "stderr", body: previous, live: true });
+      this.#pushBlock({ kind: "log", title: "stderr", logLevel, body: previous, live: false });
     }
     const failedBody = lines.slice(failedIndex).join("\n");
     this.#handleDevRebuildFailure(failedBody);
@@ -4095,7 +4113,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#clearDevBuildStatus();
     if (this.#logs === "all") {
       if (body.trim().length === 0) return;
-      this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
+      this.#pushBlock({ kind: "log", title: "stderr", logLevel: "error", body, live: false });
       return;
     }
     this.#delayedDevBuildError = body;
@@ -4146,7 +4164,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
     if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
-    this.#pushBlock({ kind: "log", title: "stdout", body: line, live: true });
+    this.#pushBlock({ kind: "log", title: "stdout", body: line, live: false });
   }
 
   #setDevBuildStatus(status: DevBuildStatus): void {
@@ -4196,26 +4214,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
     if (block !== undefined) block.live = false;
   }
 
-  #shouldRenderLog(source: "stdout" | "stderr" | "sandbox"): boolean {
-    switch (this.#logs) {
-      case "none":
-        return false;
-      case "stderr":
-        return source === "stderr";
-      case "sandbox":
-        return source === "sandbox";
-      case "all":
-        return true;
-    }
+  #shouldRenderLog(level?: LogLevel): boolean {
+    return isLogVisible(this.#logs, level);
   }
 
   /** True for a buffered log or sandbox block the current display mode filters out. */
   #isHiddenLog(block: Block): boolean {
-    if (block.kind === "sandbox") return !this.#shouldRenderLog("sandbox");
+    if (block.kind === "sandbox") return !this.#shouldRenderLog(block.logLevel);
     if (block.kind !== "log") return false;
-    if (block.logVisibility === "stderr-only") return this.#logs !== "stderr";
+    if (block.logVisibility === "summary" && this.#logs === "all") return true;
     if (block.logVisibility === "all-only") return this.#logs !== "all";
-    return !this.#shouldRenderLog(block.title === "stderr" ? "stderr" : "stdout");
+    return !this.#shouldRenderLog(block.logLevel);
   }
 }
 

@@ -72,6 +72,7 @@ async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSessionBase)
   const turn = getHarnessEmissionState(session.state);
   await emit(
     createTurnWaitingEvent({
+      on: "input",
       sequence: turn.sequence,
       turnId: turn.turnId,
       usage: getSessionUsage(session),

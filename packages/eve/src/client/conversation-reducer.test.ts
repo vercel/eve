@@ -172,7 +172,7 @@ describe("conversation reducer tasks and agent sessions", () => {
   it("marks a parked turn waiting until it resumes or ends", () => {
     const parked = reduce([
       createTurnStartedEvent({ sequence: 0, turnId: "t1" }),
-      createTurnWaitingEvent({ usage: TEST_USAGE, sequence: 0, turnId: "t1" }),
+      createTurnWaitingEvent({ on: "tasks", usage: TEST_USAGE, sequence: 0, turnId: "t1" }),
     ]);
     expect(parked.turns.t1).toEqual({ turnId: "t1", status: "active", waiting: true });
     expect(parked.activeTurnId).toBe("t1");
@@ -183,7 +183,7 @@ describe("conversation reducer tasks and agent sessions", () => {
     expect(resumed.turns.t1).toEqual({ turnId: "t1", status: "active" });
     const ended = reduce(
       [
-        createTurnWaitingEvent({ usage: TEST_USAGE, sequence: 0, turnId: "t1" }),
+        createTurnWaitingEvent({ on: "tasks", usage: TEST_USAGE, sequence: 0, turnId: "t1" }),
         createTurnCompletedEvent({ sequence: 0, turnId: "t1" }),
       ],
       resumed,

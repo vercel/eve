@@ -54,12 +54,18 @@ export type DurableStepResult = (
     }
   | { readonly action: "cancelled" | "steered" }
   /** The model ended the turn while tasks work; the turn waits for them. */
-  | { readonly action: "held"; readonly taskIds: readonly string[] }
+  | { readonly action: "held"; readonly hold: "tasks"; readonly taskIds: readonly string[] }
+  /** The turn waits on a sign-in or tool approval it raised. */
+  | {
+      readonly action: "held";
+      readonly authorizationAttemptIds: readonly string[];
+      readonly hasPendingInputBatch: boolean;
+      readonly hold: "request";
+      /** Pending input request ids an answer can resolve. */
+      readonly inputRequestIds: readonly string[];
+    }
   | {
       readonly action: "park";
-      readonly authorizationAttemptIds?: readonly string[];
-      readonly hasPendingAuthorization: boolean;
-      readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
       readonly pendingTaskToolCalls?: readonly TaskToolCall[];
       readonly settled?: SettledTurn;
@@ -86,7 +92,6 @@ export type TurnOutcome = {
       readonly usageDelta?: TokenUsage;
     }
   | {
-      readonly authorizationAttemptIds?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
       readonly settled?: SettledTurn;

@@ -247,7 +247,7 @@ describe("eve dev conversation", () => {
           taskId: "task_1",
           turnId: "turn_1",
         }),
-        createTurnWaitingEvent({ usage: TEST_USAGE, sequence: 1, turnId: "turn_1" }),
+        createTurnWaitingEvent({ on: "input", usage: TEST_USAGE, sequence: 1, turnId: "turn_1" }),
       ],
       "delivery_1",
     );
@@ -360,7 +360,7 @@ describe("eve dev conversation", () => {
           }),
         ]),
         approval("task_1"),
-        createTurnWaitingEvent({ usage: TEST_USAGE, sequence: 2, turnId: "turn_1" }),
+        createTurnWaitingEvent({ on: "input", usage: TEST_USAGE, sequence: 2, turnId: "turn_1" }),
       ],
       "delivery_1",
     );
@@ -369,7 +369,7 @@ describe("eve dev conversation", () => {
     server.emit(
       [
         approval("task_2"),
-        createTurnWaitingEvent({ usage: TEST_USAGE, sequence: 2, turnId: "turn_1" }),
+        createTurnWaitingEvent({ on: "input", usage: TEST_USAGE, sequence: 2, turnId: "turn_1" }),
       ],
       "delivery_1",
     );

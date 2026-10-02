@@ -43,8 +43,7 @@ export interface TurnSelection {
 
 export type SessionInputSelection =
   | TurnSelection
-  | { readonly control: SessionControl; readonly kind: "control" }
-  | { readonly kind: "authorization-resume"; readonly payloads: readonly DeliverPayload[] };
+  | { readonly control: SessionControl; readonly kind: "control" };
 
 /**
  * Ordered, admitted session input. Entries are private; callers receive typed
@@ -89,6 +88,25 @@ export class SessionInputQueue {
     }
   }
 
+  /**
+   * Removes and returns the queued callbacks for `attemptIds` once every one
+   * has arrived, so a turn holding several sign-ins resumes when all are done.
+   */
+  takeAuthorizations(attemptIds: ReadonlySet<string>): DeliverPayload[] | undefined {
+    const taken = this.entries.filter(
+      (entry): entry is QueuedAuthorization =>
+        entry.kind === "authorization" && attemptIds.has(entry.attemptId),
+    );
+    if (
+      taken.length === 0 ||
+      new Set(taken.map((entry) => entry.attemptId)).size < attemptIds.size
+    ) {
+      return undefined;
+    }
+    this.retain((entry) => !taken.includes(entry as QueuedAuthorization));
+    return taken.map((entry) => entry.payload);
+  }
+
   delivery(sequence: number): DeliverHookPayload | undefined {
     const entry = this.entries.find(
       (candidate): candidate is QueuedDelivery =>
@@ -109,12 +127,16 @@ export class SessionInputQueue {
     this.entries[index] = { delivery, kind: "delivery", sequence };
   }
 
-  takeSteering(admitted: ReadonlySet<number>, turn: SteeringTurn): TurnSelection | undefined {
+  takeSteering(
+    admitted: ReadonlySet<number>,
+    turn: SteeringTurn,
+    options?: SteeringOptions,
+  ): TurnSelection | undefined {
     const steering = this.entries.filter(
       (entry): entry is QueuedDelivery =>
         entry.kind === "delivery" &&
         admitted.has(entry.sequence) &&
-        isSteeringDelivery(entry.delivery, turn),
+        isSteeringDelivery(entry.delivery, turn, options),
     );
     if (steering.length === 0) return undefined;
     this.retain((entry) => entry.kind !== "delivery" || !steering.includes(entry));
@@ -126,53 +148,27 @@ export class SessionInputQueue {
     };
   }
 
+  /**
+   * Takes the next turn or control. Sign-ins end with the turn that raised
+   * them, so a callback still queued between turns is stale and dropped.
+   */
   takeNext(options?: {
-    /**
-     * Attempt ids of the open authorization challenge. Callbacks for other
-     * attempts are stale and dropped; once every expected attempt has
-     * reported, the collected payloads resume the challenge ahead of
-     * ordinary input.
-     */
-    readonly expectedAttemptIds?: ReadonlySet<string>;
     /** Sequence of a delivery admitted while nothing else was pending. */
     readonly freshSequence?: number;
   }): SessionInputSelection | undefined {
-    const expected = options?.expectedAttemptIds ?? new Set<string>();
-    this.retain((entry) => entry.kind !== "authorization" || expected.has(entry.attemptId));
-    if (expected.size > 0) {
-      const collected = new Map(
-        this.entries.flatMap((entry) =>
-          entry.kind === "authorization" ? [[entry.attemptId, entry.payload] as const] : [],
-        ),
-      );
-      if ([...expected].every((attemptId) => collected.has(attemptId))) {
-        this.retain((entry) => entry.kind !== "authorization");
-        return {
-          kind: "authorization-resume",
-          payloads: [...expected].map((attemptId) => collected.get(attemptId)!),
-        };
-      }
-    }
-    const index = this.entries.findIndex((entry) => entry.kind !== "authorization");
-    if (index < 0) return undefined;
-    return this.takeSelectionAt(index, options?.freshSequence);
-  }
-
-  private takeSelectionAt(index: number, freshSequence: number | undefined): SessionInputSelection {
-    const first = this.entries.splice(index, 1)[0]!;
+    this.retain((entry) => entry.kind !== "authorization");
+    const first = this.entries.shift() as QueuedDelivery | QueuedControl | undefined;
+    if (first === undefined) return undefined;
     if (first.kind === "control") return { control: first.control, kind: "control" };
-    if (first.kind === "authorization") {
-      return { kind: "authorization-resume", payloads: [first.payload] };
-    }
 
-    const turnEntries = [first, ...this.takeFollowingDeliveriesFrom(first, index)];
+    const turnEntries = [first, ...this.takeFollowingDeliveriesFrom(first)];
     const sequences = turnEntries.map(({ sequence }) => sequence);
     const combined = combine(turnEntries);
     return {
       delivery: combined,
       handoffEligible:
         sequences.length === 1 &&
-        sequences[0] === freshSequence &&
+        sequences[0] === options?.freshSequence &&
         combined.caller === undefined &&
         this.entries.length === 0,
       kind: "turn",
@@ -185,12 +181,12 @@ export class SessionInputQueue {
    * call share a turn, as they would steer it. Claims may change between
    * them; the turn runs with the latest.
    */
-  private takeFollowingDeliveriesFrom(first: QueuedDelivery, index: number): QueuedDelivery[] {
+  private takeFollowingDeliveriesFrom(first: QueuedDelivery): QueuedDelivery[] {
     const principal = principalOf(first.delivery.auth);
     const following: QueuedDelivery[] = [];
     let callId = first.delivery.caller?.callId;
-    while (this.entries.length > index) {
-      const next = this.entries[index];
+    while (true) {
+      const next = this.entries[0];
       if (
         next?.kind !== "delivery" ||
         principal === ANONYMOUS_PRINCIPAL ||
@@ -201,7 +197,8 @@ export class SessionInputQueue {
       ) {
         break;
       }
-      following.push(this.entries.splice(index, 1)[0] as QueuedDelivery);
+      following.push(next);
+      this.entries.shift();
       callId ??= next.delivery.caller?.callId;
     }
     return following;
@@ -220,14 +217,27 @@ export interface SteeringTurn {
   readonly principal: string;
 }
 
+export interface SteeringOptions {
+  /**
+   * The turn waits on its own person for a sign-in or approval. Their message
+   * steers even with `turnPolicy: "queue"`: queued, it would wait for a turn
+   * that cannot end until they act.
+   */
+  readonly heldOnPerson?: boolean;
+}
+
 /**
  * Only the turn's own principal steers it; another principal's message waits
  * for the turn to end. A delivery without auth acts as the session's current
  * identity, which is the turn's.
  */
-export function isSteeringDelivery(delivery: DeliverHookPayload, turn: SteeringTurn): boolean {
+export function isSteeringDelivery(
+  delivery: DeliverHookPayload,
+  turn: SteeringTurn,
+  options?: SteeringOptions,
+): boolean {
   return (
-    (delivery.turnPolicy ?? "steer") === "steer" &&
+    (options?.heldOnPerson === true || (delivery.turnPolicy ?? "steer") === "steer") &&
     (delivery.caller === undefined || delivery.caller.callId === turn.callerCallId) &&
     (delivery.auth === undefined || principalOf(delivery.auth) === turn.principal)
   );

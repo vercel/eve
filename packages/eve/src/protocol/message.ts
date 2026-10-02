@@ -609,6 +609,9 @@ export interface TurnCompletedStreamEvent {
   type: "turn.completed";
 }
 
+/** What an open turn waits on when it parks; see {@link TurnWaitingStreamEvent}. */
+export type TurnWaitingOn = "input" | "tasks";
+
 /**
  * Stream event emitted each time an open turn parks, such as when a call it is
  * running asks a question. The turn stays open: the next `step.started` with
@@ -617,6 +620,12 @@ export interface TurnCompletedStreamEvent {
  */
 export interface TurnWaitingStreamEvent {
   data: {
+    /**
+     * What the turn waits on. `"input"`: a person must act on a sign-in,
+     * approval, or question; clients stop reading here. `"tasks"`: work the
+     * turn started is still running, and the turn resumes on its own.
+     */
+    on: TurnWaitingOn;
     sequence: number;
     turnId: string;
     /**
@@ -1707,12 +1716,14 @@ export function createTurnCompletedEvent(input: {
  * Creates the `turn.waiting` event for one open turn that parked.
  */
 export function createTurnWaitingEvent(input: {
+  readonly on: TurnWaitingOn;
   readonly sequence: number;
   readonly turnId: string;
   readonly usage: TokenUsage | undefined;
 }): TurnWaitingStreamEvent {
   return {
     data: {
+      on: input.on,
       sequence: input.sequence,
       turnId: input.turnId,
       ...(input.usage !== undefined && { usage: input.usage }),

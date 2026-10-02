@@ -269,6 +269,7 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     expect(events.slice(1)).toEqual([
       {
         data: {
+          on: "input",
           sequence: 3,
           turnId: "turn_3",
           usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },

@@ -32,7 +32,7 @@ export function resolveDevUiMode(input: {
 /** Builds terminal-UI display options with the defaults used by `eve dev`. */
 export function resolveTuiDisplayOptions(options: DevelopmentTuiOptions): TuiDisplayOptions {
   const display: TuiDisplayOptions = {
-    logs: options.logs ?? "stderr",
+    logs: options.logs ?? "error",
     // Collapsed reasoning renders as the fixed thinking line; `--reasoning
     // full` restores the streaming transcript trace.
     reasoning: options.reasoning ?? "auto-collapsed",

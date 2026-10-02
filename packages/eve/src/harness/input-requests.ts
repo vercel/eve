@@ -105,10 +105,6 @@ export function selectApprovalReplayBatch(
  * requirement.
  */
 export function resolvePendingInput(input: {
-  /** The turn currently advancing through the harness tool loop. */
-  readonly activeTurnId?: string;
-  /** True while the harness has an open turn to continue. */
-  readonly internalStep?: boolean;
   readonly history?: readonly ModelMessage[];
   readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   readonly session: HarnessSession;
@@ -140,26 +136,6 @@ export function resolvePendingInput(input: {
       : resolveTextMessageInput(textResolutionBatch, input.stepInput);
   const responses = canonicalizeInputResponses(resolvedStepInput?.inputResponses ?? []);
 
-  if (
-    input.internalStep === true &&
-    canContinuePastHistoricalInput({
-      activeTurnId: input.activeTurnId,
-      batches,
-      responses,
-      route,
-    }) &&
-    resolvedStepInput?.message === undefined
-  ) {
-    return {
-      outcome: "continue",
-      messages: baseHistory,
-      session:
-        resolvedStepInput === undefined
-          ? input.session
-          : queueDeferredStepInput(input.session, compactStepInput(resolvedStepInput)),
-    };
-  }
-
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     const deferredInput = compactStepInput(resolvedStepInput);
     const session =
@@ -188,29 +164,6 @@ export function resolvePendingInput(input: {
         resolveApprovalKey: input.resolveApprovalKey,
       });
   }
-}
-
-/**
- * An internal tool-loop step must not be parked by input emitted by an older
- * turn. The current turn can still park on its own HITL request; session-limit
- * prompts remain a harness gate regardless of the turn that created them.
- */
-function canContinuePastHistoricalInput(input: {
-  readonly activeTurnId?: string;
-  readonly batches: readonly PendingInputBatch[];
-  readonly responses: readonly InputResponse[];
-  readonly route: PendingInputRoute;
-}): boolean {
-  if (input.activeTurnId === undefined || input.route.kind === "session-limit") return false;
-  if (
-    input.responses.length > 0 &&
-    findAnsweredApprovalBatches(input.batches, input.responses).length > 0
-  ) {
-    return false;
-  }
-  return input.batches.every(
-    (batch) => batch.event !== undefined && batch.event.turnId !== input.activeTurnId,
-  );
 }
 
 type PendingInputRoute =

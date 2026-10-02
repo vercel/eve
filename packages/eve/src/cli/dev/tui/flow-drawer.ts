@@ -28,9 +28,11 @@ export function renderTransientDrawer(
   theme: Theme,
   width: number,
   corner?: string,
+  compact = false,
+  labelSide: "left" | "right" = "right",
 ): FlowDrawer {
   return {
-    rows: frameDrawer(body, theme, width, corner),
+    rows: frameDrawer(body, theme, width, corner, compact, labelSide),
     controls: controls.map((control) => `  ${theme.colors.dim(control)}`),
   };
 }
@@ -40,19 +42,21 @@ function frameDrawer(
   theme: Theme,
   width: number,
   corner?: string,
+  compact = false,
+  labelSide: "left" | "right" = "right",
 ): string[] {
   const divider = theme.colors.dim(theme.glyph.dash.repeat(Math.max(1, width)));
   return [
-    corner === undefined ? divider : labeledRule(corner, theme, width),
-    "",
+    corner === undefined ? divider : labeledRule(corner, theme, width, labelSide),
+    ...(compact ? [] : [""]),
     ...body,
-    "",
+    ...(compact ? [] : [""]),
     divider,
   ];
 }
 
 /** Ends the label two cells from the edge, mirroring the body's two-space indent. */
-function labeledRule(label: string, theme: Theme, width: number): string {
+function labeledRule(label: string, theme: Theme, width: number, side: "left" | "right"): string {
   const dash = theme.glyph.dash;
   // Two dashes lead, two trail, and a space pads each side of the label.
   const room = width - 6;
@@ -62,5 +66,9 @@ function labeledRule(label: string, theme: Theme, width: number): string {
       ? label
       : `${sliceVisible(label, room - visibleLength(theme.glyph.ellipsis))}${theme.glyph.ellipsis}`;
   const lead = width - visibleLength(text) - 4;
-  return theme.colors.dim(`${dash.repeat(lead)} ${text} ${dash.repeat(2)}`);
+  return theme.colors.dim(
+    side === "left"
+      ? `${dash.repeat(2)} ${text} ${dash.repeat(lead)}`
+      : `${dash.repeat(lead)} ${text} ${dash.repeat(2)}`,
+  );
 }

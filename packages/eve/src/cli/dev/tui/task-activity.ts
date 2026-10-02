@@ -2,14 +2,15 @@
  * The tasks a turn has working: agents and tools that keep running while the
  * turn goes on. The transcript only ever grows at its end, so a task writes
  * one line when it starts and one when it ends; what it is doing in between
- * lives here and renders in the fixed task panel above the prompt, the one
- * region that redraws in place.
+ * lives here in the activity drawer above the prompt, keeping live updates
+ * out of immutable terminal scrollback.
  */
 
 import type { Block } from "./blocks.js";
+import { agentTaskLabel } from "./tool-presentation.js";
 import type { Theme } from "./theme.js";
 import { formatTurnDuration } from "./stream-format.js";
-import { TOOL_COLUMN_LEAD } from "./rail.js";
+import { renderTransientDrawer } from "./flow-drawer.js";
 import { truncate } from "./tool-format.js";
 import { isSelfModificationAgent } from "./tool-presentation.js";
 import { clipVisible, visibleLength } from "#cli/ui/terminal-text.js";
@@ -25,6 +26,10 @@ export interface TaskEntry {
   readonly input: unknown;
   readonly label: string | undefined;
   readonly startedAtMs: number;
+  readonly purpose?: string;
+  readonly children?: readonly TaskEntry[];
+  readonly omittedTasks?: number;
+  readonly omittedAttention?: boolean;
   /** An agent's latest words or thinking, one line. */
   step?: string;
   /** Settled, waiting only for the agent's own last events. */
@@ -33,8 +38,8 @@ export interface TaskEntry {
   readonly childTools: Map<string, Block>;
 }
 
-/** The panel shows this many tasks; the rest collapse into one counted row. */
-const maxPanelRows = 4;
+/** Includes the heading and overflow summary, regardless of nesting. */
+const maxPanelRows = 15;
 
 export class TaskActivity {
   readonly #entries = new Map<string, TaskEntry>();
@@ -81,12 +86,12 @@ export class TaskActivity {
     this.#entries.clear();
   }
 
-  /** Parallel calls to one agent read `researcher`, `researcher #2`, …; a name is never renamed. */
+  /** Parallel calls to one agent read `researcher`, `researcher:2`, …; a name is never renamed. */
   #uniqueName(baseName: string): string {
     const taken = new Set([...this.#entries.values()].map((entry) => entry.name));
     if (!taken.has(baseName)) return baseName;
     for (let ordinal = 2; ; ordinal += 1) {
-      const candidate = `${baseName} #${String(ordinal)}`;
+      const candidate = `${baseName}:${String(ordinal)}`;
       if (!taken.has(candidate)) return candidate;
     }
   }
@@ -97,7 +102,7 @@ export function waitingLabel(entries: readonly TaskEntry[]): string {
   if (entries.length === 1 && isSelfModificationAgent(entries[0]!.toolName)) {
     return "Modifying your agent";
   }
-  const names = entries.map((entry) => entry.name);
+  const names = entries.map(taskLabel);
   if (names.length === 1) return `Waiting for ${names[0]!}`;
   if (names.length === 2) return `Waiting for ${names[0]!} and ${names[1]!}`;
   return `Waiting for ${String(names.length)} tasks`;
@@ -121,51 +126,93 @@ function currentActivity(entry: TaskEntry): { text: string; attention: boolean }
   }
   const running = tools.findLast((tool) => tool.status === "running");
   if (running !== undefined) return { text: running.title ?? "Working", attention: false };
+  const latest = tools.at(-1);
+  if (latest?.title !== undefined) return { text: latest.title, attention: false };
   if (entry.step !== undefined) return { text: entry.step, attention: false };
-  return { text: entry.kind === "agent" ? "Starting" : "Working", attention: false };
+  return { text: "", attention: false };
 }
 
-/**
- * One row per working task — mark, name, current activity, elapsed time —
- * capped so a wide fan-out cannot push the prompt off screen.
- */
+/** Stable ownership order, with only one visible level of indentation. */
+function taskLabel(entry: TaskEntry): string {
+  if (entry.kind !== "agent") return entry.name;
+  return agentTaskLabel(entry.name);
+}
+
+function panelEntries(
+  entries: readonly TaskEntry[],
+): Array<{ entry: TaskEntry; path: TaskEntry[] }> {
+  const rows: Array<{ entry: TaskEntry; path: TaskEntry[] }> = [];
+  const visit = (tasks: readonly TaskEntry[], path: TaskEntry[]): void => {
+    for (const entry of tasks) {
+      rows.push({ entry, path });
+      visit(entry.children ?? [], [...path, entry]);
+    }
+  };
+  visit(entries, []);
+  return rows;
+}
+
 export function renderTaskPanelRows(
   entries: readonly TaskEntry[],
   options: {
     readonly width: number;
     readonly theme: Theme;
     readonly nowMs: number;
-    readonly pulse: string;
+    readonly activity?: string;
+    readonly turnElapsedMs?: number;
+    readonly maxRows?: number;
   },
 ): string[] {
+  if (entries.length === 0) return [];
   const { width, theme, nowMs } = options;
   const c = theme.colors;
-  const shown = entries.length > maxPanelRows ? entries.slice(0, maxPanelRows - 1) : entries;
-  const nameWidth = Math.min(24, Math.max(...shown.map((entry) => visibleLength(entry.name)), 0));
-  const rows = shown.map((entry) => {
-    const mark =
-      options.pulse.trim().length > 0
-        ? c.orange(theme.glyph.subagent)
-        : c.dim(theme.glyph.subagent);
-    const name = truncate(entry.name, nameWidth);
-    const padded = name + " ".repeat(Math.max(0, nameWidth - visibleLength(name)));
+  const tasks = panelEntries(entries);
+  const omitted = tasks.reduce((count, { entry }) => count + (entry.omittedTasks ?? 0), 0);
+  const omittedAttention = tasks.some(({ entry }) => entry.omittedAttention);
+  const total = tasks.length + omitted;
+  const budget = Math.max(2, Math.min(maxPanelRows, options.maxRows ?? maxPanelRows));
+  const padded = budget >= 5;
+  const contentBudget = Math.max(0, budget - (padded ? 4 : 2));
+  const overflow = omitted > 0 || tasks.length * 2 > contentBudget;
+  const capacity = Math.max(0, Math.floor((contentBudget - (overflow ? 1 : 0)) / 2));
+  // Approval requests must not disappear behind a busy branch's overflow summary.
+  const attention = tasks.filter(({ entry }) => currentActivity(entry).attention);
+  const selected = new Set(
+    [...attention, ...tasks.filter((task) => !attention.includes(task))].slice(0, capacity),
+  );
+  const shown = tasks.filter((task) => selected.has(task));
+  const rows: string[] = [];
+  for (const { entry, path } of shown) {
+    const nested = path.length > 0;
+    const lead = `  ${nested ? `${theme.glyph.corner} ` : ""}`;
+    const parentShown = shown.some((task) => task.entry === path.at(-1));
+    const owners = parentShown ? path.slice(1) : path;
+    const ownership =
+      owners.length > 0
+        ? `${owners.map(taskLabel).join(` ${theme.glyph.arrow} `)} ${theme.glyph.arrow} `
+        : "";
     const elapsed = formatTurnDuration(nowMs - entry.startedAtMs);
-    const lead = `${TOOL_COLUMN_LEAD}${mark} ${padded}  `;
-    const budget = width - visibleLength(lead) - elapsed.length - 2;
-    const activity = currentActivity(entry);
-    const text = budget >= 4 ? truncate(activity.text, budget) : "";
-    const color = activity.attention ? c.yellow : c.dim;
-    const gap = Math.max(1, width - visibleLength(lead) - visibleLength(text) - elapsed.length);
-    return clipVisible(`${lead}${color(text)}${" ".repeat(gap)}${c.dim(elapsed)}`, width);
-  });
-  const hidden = entries.length - shown.length;
-  if (hidden > 0) {
     rows.push(
-      clipVisible(
-        `${TOOL_COLUMN_LEAD}${c.dim(`${theme.glyph.ellipsis} ${String(hidden)} more working`)}`,
-        width,
-      ),
+      clipVisible(`${lead}${c.bold(`${ownership}${taskLabel(entry)}`)} ${c.dim(elapsed)}`, width),
     );
+    const activity = currentActivity(entry);
+    const detailLead = `    ${nested ? "  " : ""}${theme.glyph.elbow} `;
+    const text = truncate(activity.text, Math.max(0, width - visibleLength(detailLead)));
+    const color = activity.attention ? c.yellow : c.dim;
+    if (text.length > 0) rows.push(clipVisible(`${detailLead}${color(text)}`, width));
   }
-  return rows;
+  const hidden = total - shown.length;
+  if (hidden > 0 && rows.length < contentBudget) {
+    const summary = `${theme.glyph.ellipsis} ${omitted > 0 ? "at least " : ""}${hidden} more working${omittedAttention ? " · Approval needed" : ""}`;
+    rows.push(clipVisible(`  ${omittedAttention ? c.yellow(summary) : c.dim(summary)}`, width));
+  }
+  return renderTransientDrawer(
+    rows,
+    [],
+    theme,
+    width,
+    `${options.activity ?? "Working"} ${theme.glyph.dot} ${total}${omitted > 0 ? "+" : ""} ${total === 1 ? "task" : "tasks"}${options.turnElapsedMs === undefined ? "" : ` ${theme.glyph.dot} ${formatTurnDuration(options.turnElapsedMs)}`}`,
+    !padded,
+    "left",
+  ).rows;
 }

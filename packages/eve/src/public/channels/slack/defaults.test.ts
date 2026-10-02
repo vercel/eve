@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { defaultEvents, defaultInputRequestedHandler } from "#public/channels/slack/defaults.js";
+import { defaultInputRequestedHandler } from "#public/channels/slack/approval-cards.js";
+import { defaultEvents } from "#public/channels/slack/defaults.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 
@@ -241,6 +242,7 @@ describe("defaultInputRequestedHandler private input requests", () => {
 
   it("previews the triggering message and updates the routed DM card after settlement", async () => {
     const { channel, post, postDirectMessage, request } = buildChannelStub({
+      slackUsersByPrincipal: { "slack:T1:U_REVIEWER": "U_REVIEWER" },
       triggeringMessageTs: "111.333",
       triggeringUserId: "U_REVIEWER",
     });
@@ -296,11 +298,63 @@ describe("defaultInputRequestedHandler private input requests", () => {
       blocks?: unknown[];
     };
     expect(JSON.stringify(update.blocks)).not.toContain("eve_input:route:");
+    expect(JSON.stringify(update.blocks)).not.toContain("I've paused");
+    expect(request).toHaveBeenCalledWith("chat.delete", { channel: "D123", ts: "dm2" });
+    expect(request).toHaveBeenCalledWith("chat.update", {
+      channel: "C123",
+      text: "Approved by <@U_REVIEWER>.",
+      ts: "ts1",
+    });
+    expect(channel.state.pendingApprovalCards).toEqual({});
+  });
+
+  it("retires a thread approval that resolves without a click, even when Slack fails", async () => {
+    const logs = captureLogRecords();
+    const { channel, post, request } = buildChannelStub();
+    post
+      .mockResolvedValueOnce({ id: "details-ts", raw: { ok: true } })
+      .mockResolvedValueOnce({ id: "card-ts", raw: { ok: true } });
+
+    await defaultInputRequestedHandler()(
+      { requests: [approvalRequest()], sequence: 1, stepIndex: 0, turnId: "turn-1" },
+      channel,
+      sessionCtx,
+    );
+    expect(channel.state.pendingApprovalCards?.["approval-1"]).toMatchObject({
+      detailsMessageTs: "details-ts",
+      messageTs: "card-ts",
+    });
+
+    request.mockRejectedValueOnce(new Error("Slack unavailable"));
+    await defaultEvents["input.resolved"]!(
+      {
+        resolutions: [{ kind: "tool-approval", outcome: "ignored", requestId: "approval-1" }],
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-2",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(request).toHaveBeenCalledWith(
+      "chat.update",
+      expect.objectContaining({
+        channel: "C123",
+        text: "Answered: No longer needed",
+        ts: "card-ts",
+      }),
+    );
+    expect(request).toHaveBeenCalledWith("chat.delete", { channel: "C123", ts: "details-ts" });
+    expect(channel.state.pendingApprovalCards).toEqual({});
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "failed to retire approval message" }),
+    );
   });
 });
 
 describe("defaultEvents approval lifecycle", () => {
-  it("sends candidate progress privately", async () => {
+  it("posts no notice that would outlive a pending candidate", async () => {
     const { channel, postEphemeral } = buildChannelStub({
       slackUsersByPrincipal: { "slack:T1:U777": "U777" },
     });
@@ -325,13 +379,10 @@ describe("defaultEvents approval lifecycle", () => {
       ctx,
     );
 
-    expect(postEphemeral).toHaveBeenCalledWith(
-      "U777",
-      "Checking whether you can respond to this approval…",
-    );
+    expect(postEphemeral).not.toHaveBeenCalled();
   });
 
-  it("routes candidate progress from event identity instead of ambient auth", async () => {
+  it("routes candidate feedback from event identity instead of ambient auth", async () => {
     const { channel, postEphemeral } = buildChannelStub({
       slackUsersByPrincipal: { "slack:T1:U777": "U777" },
       teamId: "T1",
@@ -346,7 +397,8 @@ describe("defaultEvents approval lifecycle", () => {
     await defaultEvents["approval.candidate"]!(
       {
         candidateId: "candidate-1",
-        outcome: "pending",
+        outcome: "rejected",
+        reason: "GitHub write access is required.",
         requestId: "approval-1",
         responderPrincipalId: "slack:T1:U777",
         sequence: 1,
@@ -357,10 +409,7 @@ describe("defaultEvents approval lifecycle", () => {
       wrongAmbientUser,
     );
 
-    expect(postEphemeral).toHaveBeenCalledWith(
-      "U777",
-      "Checking whether you can respond to this approval…",
-    );
+    expect(postEphemeral).toHaveBeenCalledWith("U777", "GitHub write access is required.");
   });
 
   it("delivers an immediate rejection through the responder mapping", async () => {
@@ -526,12 +575,16 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Connect with Notion to continue");
+    expect(publicText).toBe("Paused: waiting for <@U777> to connect Notion…");
     expect(publicText).not.toContain("https://");
     expect(postEphemeral).toHaveBeenCalledTimes(1);
     expect(postEphemeral.mock.calls[0]?.[0]).toBe("U777");
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
     expect(message.text).toContain("https://connect.example.com/a/sca_1");
+    // The sign-in holds the turn, so the prompt can cancel it.
+    expect(JSON.stringify(message.blocks)).toContain(
+      JSON.stringify(JSON.stringify({ channelId: "C123", threadTs: "111.222", turnId: "turn_0" })),
+    );
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
   });
 
@@ -546,6 +599,8 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).not.toHaveBeenCalled();
     expect(postEphemeral).toHaveBeenCalledTimes(1);
+    // A responder's sign-in belongs to an approval, not a turn it could cancel.
+    expect(JSON.stringify(postEphemeral.mock.calls[0]?.[1])).not.toContain("eve_sign_in:cancel");
   });
 
   it("targets the event principal instead of the current caller or stale channel state", async () => {
@@ -608,7 +663,9 @@ describe("defaultEvents authorization.required", () => {
 
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string; blocks: unknown[] };
     expect(JSON.stringify(message.blocks)).toContain("OTB-DGO");
-    expect(message.text).toContain("(code: OTB-DGO)");
+    expect(message.text).toBe(
+      "Connect your Notion account to continue: https://connect.example.com/a/sca_1 If asked for a confirmation code, enter OTB-DGO.",
+    );
   });
 
   it("renders the challenge displayName instead of the title-cased connection name", async () => {
@@ -620,9 +677,11 @@ describe("defaultEvents authorization.required", () => {
       sessionCtx,
     );
 
-    expect(post.mock.calls[0]?.[0]).toBe("Connect with Notion Workspace to continue");
+    expect(post.mock.calls[0]?.[0]).toBe(
+      "Paused: waiting for <@U777> to connect Notion Workspace…",
+    );
     const message = postEphemeral.mock.calls[0]?.[1] as { text: string };
-    expect(message.text).toContain("Sign in with Notion Workspace");
+    expect(message.text).toContain("Connect your Notion Workspace account");
   });
 
   it("posts a link-free public status when the principal has no Slack user", async () => {
@@ -634,7 +693,7 @@ describe("defaultEvents authorization.required", () => {
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
     expect(publicText).toBe(
-      "Authorization required for Notion (couldn't send the sign-in link privately)",
+      "Notion needs to be connected to continue, but the sign-in link couldn't be sent privately.",
     );
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
@@ -649,7 +708,7 @@ describe("defaultEvents authorization.required", () => {
 
     expect(post).toHaveBeenCalledTimes(1);
     const publicText = post.mock.calls[0]?.[0] as string;
-    expect(publicText).toBe("Connect with Notion to continue");
+    expect(publicText).toBe("Paused: waiting for <@U777> to connect Notion…");
     expect(publicText).not.toContain("https://");
     expect(channel.state.pendingAuthMessageTs).toEqual({ notion: "ts1" });
     expect(logs.records).toContainEqual(

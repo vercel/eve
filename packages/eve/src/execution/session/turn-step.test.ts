@@ -1447,6 +1447,68 @@ describe("turnStep", () => {
     expect(observed).toEqual(expected);
   });
 
+  it("resumes a sign-in callback as the user who started it, not the last speaker", async () => {
+    const alice: SessionAuthContext = {
+      attributes: {},
+      authenticator: "slack-webhook",
+      issuer: "slack",
+      principalId: "slack:alice",
+      principalType: "user",
+    };
+    const bob: SessionAuthContext = { ...alice, principalId: "slack:bob" };
+    installSessionStoreMocks([
+      createStubSession({
+        state: setPendingAuthorization(undefined, {
+          challenges: [
+            {
+              attemptId: "attempt-linear",
+              challenge: { url: "https://idp.example/authorize" },
+              hookUrl: "https://agent.example/callback",
+              name: "linear",
+              principal: { id: "slack:alice", issuer: "slack", type: "user" },
+              principalId: "slack:alice",
+              requester: alice,
+            },
+          ],
+        }),
+      }),
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, bob);
+    ctx.set(BundleKey, createStubBundle());
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "http:shared-thread");
+    ctx.set(SessionIdKey, "session-1");
+
+    let observed: SessionAuthContext | null | undefined;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session): Promise<StepResult> => {
+        observed = loadContext().get(AuthKey);
+        return { next: null, session };
+      };
+    });
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [
+          {
+            authorizationCallback: {
+              attemptId: "attempt-linear",
+              callback: { method: "GET", params: { code: "oauth-code" } },
+              connectionName: "linear",
+            },
+          },
+        ],
+      },
+      sessionWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(observed).toEqual(alice);
+  });
+
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
     const announcement = "Available skills\n- policy: Tenant policy";
     const session = createStubSession({
@@ -2060,118 +2122,6 @@ describe("turnStep", () => {
     });
   });
 
-  it("carries a settled turn while an older input batch remains pending", async () => {
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-existing-input",
-            input: {},
-            kind: "tool-call",
-            toolName: "confirm",
-          },
-          kind: "question",
-          prompt: "Continue?",
-          requestId: "request-existing-input",
-        },
-      ],
-      responseMessages: [],
-      session: createStubSession(),
-    });
-    installSessionStoreMocks([session]);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => ({
-        next: null,
-        session: stepSession,
-        settledTurn: { output: "settled while approval remains open" },
-      });
-    });
-
-    const result = await turnStep({
-      input: {
-        kind: "deliver",
-        payloads: [{ message: "unrelated message" }],
-      },
-      sessionWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
-      sessionState: createStubSessionState(),
-    });
-
-    expect(result).toMatchObject({
-      action: "park",
-      hasPendingInputBatch: true,
-      settled: { output: "settled while approval remains open" },
-    });
-  });
-
-  it.each([
-    {
-      name: "authorization",
-      withPending: (session: HarnessSession): HarnessSession => ({
-        ...session,
-        state: setPendingAuthorization(session.state, {
-          challenges: [
-            {
-              attemptId: "attempt-statuspage",
-              challenge: {
-                instructions: "Sign in to continue",
-                url: "https://idp.example/authorize",
-              },
-              hookUrl: "https://app.example/callback",
-              name: "statuspage",
-              principal: { type: "app" },
-            },
-          ],
-        }),
-      }),
-    },
-    {
-      name: "input batch",
-      withPending: (session: HarnessSession): HarnessSession =>
-        appendPendingInputBatch({
-          requests: [
-            {
-              action: {
-                callId: "call-input",
-                input: {},
-                kind: "tool-call",
-                toolName: "confirm",
-              },
-              kind: "question",
-              prompt: "Continue?",
-              requestId: "request-input",
-            },
-          ],
-          responseMessages: [],
-          session,
-        }),
-    },
-  ])("does not infer settled output from a pending $name", async ({ withPending }) => {
-    const session = createStubSession();
-    installSessionStoreMocks([session]);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => ({
-        next: null,
-        session: withPending(stepSession),
-      });
-    });
-
-    const result = await turnStep({
-      input: {
-        kind: "deliver",
-        payloads: [{ message: "hello" }],
-      },
-      sessionWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
-      sessionState: createStubSessionState(),
-    });
-
-    expect(result.action).toBe("park");
-    if (result.action === "park") {
-      expect(result.settled).toBeUndefined();
-    }
-  });
-
   it("reads the durable session from normalized turn-step input", async () => {
     const session = createStubSession({
       continuationToken: "http:turn-step",
@@ -2699,13 +2649,7 @@ describe("turnStep", () => {
     expect(observedStepInput).toEqual(
       inputKind === "current" ? { message: `thread=unset; user=${turnInput.message}` } : undefined,
     );
-    expect(result).toMatchObject({
-      action: "park",
-      hasPendingAuthorization: false,
-    });
-    if (result.action === "park") {
-      expect(result.authorizationAttemptIds).toBeUndefined();
-    }
+    expect(result.action).toBe("park");
     const persistedSession = vi.mocked(createDurableSessionValues).mock.calls.at(-1)?.[0];
     expect(persistedSession?.state?.retained).toBe("yes");
     expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();

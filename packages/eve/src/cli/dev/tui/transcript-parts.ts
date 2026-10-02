@@ -1,5 +1,7 @@
 /** Pure pieces of the transcript projection: tool rows, task lines, and agent steps. */
 
+import { agentToolSession } from "#client/conversation-state.js";
+import type { TaskEntry } from "./task-activity.js";
 import type {
   ConversationState,
   ConversationTaskCall,
@@ -17,6 +19,8 @@ import { formatTurnDuration } from "./stream-format.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import { summarizeChildTools } from "./tool-block-groups.js";
 import {
+  agentDisplayName,
+  agentTaskLabel,
   presentPreparingTool,
   presentTool,
   type ToolPresentationContext,
@@ -36,9 +40,94 @@ export interface TaskRecord {
   readonly toolName: string;
   readonly input: unknown;
   readonly label: string | undefined;
+  readonly purpose?: string;
   readonly startedAtMs: number;
   settledAtMs?: number;
   ended: boolean;
+}
+
+export interface AgentActivity {
+  tools: Block[];
+  rows: Block[];
+  children?: TaskEntry[];
+  omittedTasks?: number;
+  omittedAttention?: boolean;
+  step?: string;
+  pending: boolean;
+}
+
+export function taskNeedsApproval(
+  conversation: ConversationState,
+  task: ConversationTask,
+): boolean {
+  if (
+    Object.values(conversation.inputs).some(
+      (input) =>
+        input.taskId === task.taskId &&
+        input.status === "open" &&
+        input.request.kind === "tool-approval",
+    )
+  )
+    return true;
+  const agent = agentToolSession(conversation, task);
+  const child =
+    agent?.observation.status === "not-followed" ? undefined : agent?.observation.conversation;
+  return (
+    child !== undefined &&
+    Object.values(child.inputs).some(
+      (input) => input.status === "open" && input.request.kind === "tool-approval",
+    )
+  );
+}
+
+export function uniqueTaskName(baseName: string, records: Iterable<TaskRecord>): string {
+  const taken = new Set(
+    [...records].filter((record) => !record.ended).map((record) => record.name),
+  );
+  if (!taken.has(baseName)) return baseName;
+  for (let ordinal = 2; ; ordinal += 1) {
+    const candidate = `${baseName}:${ordinal}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+export function startLine(record: TaskRecord): Block {
+  const presentation = presentTool(record.toolName, record.input, {
+    ...labelContext(record.label),
+    isSubagent: record.kind === "agent",
+  });
+  return {
+    kind: "task",
+    taskKind: record.kind,
+    title: record.kind === "agent" ? `Delegate ${agentTaskLabel(record.name)}` : record.name,
+    subtitle: stripTerminalControls(presentation.subtitle),
+    live: false,
+  };
+}
+
+export function nestedTaskRecord(
+  callId: string,
+  part: EveDynamicToolPart,
+  task: ConversationTask,
+  block: Block,
+): TaskRecord {
+  return {
+    callId,
+    kind: task.kind,
+    name:
+      task.kind === "agent"
+        ? agentDisplayName(stripTerminalControls(part.toolName))
+        : stripTerminalControls(part.toolName),
+    toolName: part.toolName,
+    input: part.input,
+    label: undefined,
+    purpose:
+      task.kind === "agent"
+        ? agentTaskSummary(part.input)
+        : block.subtitle || (block.title === part.toolName ? undefined : block.title),
+    startedAtMs: Date.now(),
+    ended: false,
+  };
 }
 
 export function toolState(
@@ -136,7 +225,7 @@ export function endLine(
     id: `task:${record.callId}:end`,
     kind: "task",
     taskKind: record.kind,
-    title: record.name,
+    title: record.kind === "agent" ? agentTaskLabel(record.name) : record.name,
     live: false,
   };
   switch (call.status) {

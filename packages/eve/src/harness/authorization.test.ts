@@ -8,6 +8,7 @@ import {
   consumeAuthorizationResult,
   getPendingAuthorization,
   getHookUrl,
+  getSupersededAuthorizationChallenges,
   PendingAuthorizationResultKey,
   resolveActiveAuthorizationChallenges,
   setPendingAuthorization,
@@ -205,6 +206,29 @@ describe("pending authorization attempts", () => {
         setPendingAuthorization(undefined, { challenges: [first, otherPrincipal, latest] }),
       )?.challenges,
     ).toEqual([otherPrincipal, latest]);
+  });
+
+  it("shows one sign-in per Vercel Connect grant across tools and connections", () => {
+    const alice = { id: "alice", issuer: "idp", type: "user" } as const;
+    const bob = { id: "bob", issuer: "idp", type: "user" } as const;
+    const grant = (name: string, attemptId: string, principal: ConnectionPrincipal = alice) => ({
+      ...challenge(name, attemptId, principal),
+      grant: "linear/myagent",
+    });
+    const pending = setPendingAuthorization(undefined, {
+      challenges: [grant("linear", "connection")],
+    });
+    const listTool = grant("list_issues__linear_myagent", "list-tool");
+    const createTool = grant("create_issue__linear_myagent", "create-tool");
+    const bobTool = grant("create_issue__linear_myagent", "bob-tool", bob);
+    const approval = { ...grant("candidate-1:linear", "approval"), candidateId: "candidate-1" };
+
+    expect(resolveActiveAuthorizationChallenges([listTool, createTool, bobTool, approval])).toEqual(
+      [createTool, bobTool, approval],
+    );
+    expect(getSupersededAuthorizationChallenges(pending, [createTool])).toEqual([
+      grant("linear", "connection"),
+    ]);
   });
 
   it("clears by exact attempt identity", () => {

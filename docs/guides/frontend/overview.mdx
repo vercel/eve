@@ -226,7 +226,7 @@ received attachment as a `file` part on the user message. The part includes `med
 
 ## Human-in-the-loop prompts
 
-Tools opt into approval with `approval`, and workflow tools such as the opt-in `ask_question` tool ask the user a question with `ctx.ask()` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event. The default projection keeps open requests in `data.inputs`, including requests introduced on earlier turns while unrelated work continues. Render from that ledger and answer through the same session with `respond()`. The request also appears on its originating `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest` for inline display:
+Tools opt into approval with `approval`, and workflow tools such as the opt-in `ask_question` tool ask the user a question with `ctx.ask()` — see [Human-in-the-loop](/docs/human-in-the-loop) for the server-side model. Either way the stream emits an `input.requested` event. The default projection keeps open requests in `data.inputs`, including a request that sits on an earlier message than the latest one. Render from that ledger and answer through the same session with `respond()`. The request also appears on its originating `dynamic-tool` part at `part.toolMetadata?.eve?.inputRequest` for inline display:
 
 ```tsx
 import { openConversationInputs } from "eve/react";

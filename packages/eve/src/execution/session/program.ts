@@ -211,13 +211,12 @@ async function runSessionLoop(
           sessionId: boot.sessionId,
         });
 
-  const nextParkedActivity = async (
-    expectedAttemptIds: ReadonlySet<string>,
-  ): Promise<Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>> => {
+  const nextParkedActivity = async (): Promise<
+    Exclude<NextTurnInstruction, { kind: "workflow" | "cancel-working-tasks" }>
+  > => {
     while (true) {
       const next = await nextTurnDelivery({
         cursor,
-        expectedAttemptIds,
         hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
         inbox,
         queue,
@@ -268,7 +267,7 @@ async function runSessionLoop(
   };
   const awaitPrewarmedAction = async (): Promise<SessionActionResult> => {
     while (true) {
-      const next = await nextParkedActivity(new Set());
+      const next = await nextParkedActivity();
       switch (next.kind) {
         case "expired":
         case "reset":
@@ -280,7 +279,6 @@ async function runSessionLoop(
         case "turn":
           return await runDeliveredTurn(next);
         case "cancel-turn":
-        case "authorization-resume":
           continue;
       }
     }
@@ -329,17 +327,9 @@ async function runSessionLoop(
         progress.caller = undefined;
       }
 
-      // An open authorization challenge must not wedge the session:
-      // ordinary deliveries keep starting normal turns while the challenge
-      // waits for its callback. The pending challenge survives intervening
-      // turns because every park re-derives `authorizationAttemptIds` from
-      // durable session state.
-      const next = await nextParkedActivity(new Set(action.authorizationAttemptIds ?? []));
+      const next = await nextParkedActivity();
 
       switch (next.kind) {
-        case "authorization-resume":
-          action = await runTurn({ delivery: { kind: "deliver", payloads: next.payloads } });
-          continue;
         case "expired":
         case "reset":
         case "closed":

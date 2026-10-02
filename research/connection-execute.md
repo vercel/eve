@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-09-30"
+last_updated: "2026-10-01"
 ---
 
 # Cache-stable connection tools
@@ -135,9 +135,11 @@ connection_execute({ connection, tool, input })   ← model-visible action
     `minimum`, `maximum`, and `pattern` as comments.
   - An output with no schema renders as `Promise<unknown>`.
   - The raw JSON Schema is not repeated, so each schema is paid for once.
-- **Connection failures.** A connection that needs sign-in starts
-  authorization, as today. A connection that fails is returned in
-  `unavailable` with its `error`.
+- **Connection failures.** A plain search never prompts. A connection that needs
+  sign-in is returned in `unavailable` with `requiresSignIn: true`.
+  `connection_search({ connection, signIn: true })` starts authorization for
+  that one connection and returns its tools once the user signs in. A connection
+  that fails is returned in `unavailable` with its `error`.
 - **Ranking.** Prefix word matching, weighted by field: tool name, then
   connection name, input property names, tool description, and last
   property descriptions and the connection description. The ranking can

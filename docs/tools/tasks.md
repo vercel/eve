@@ -233,8 +233,8 @@ continues once the person answers or signs in.
 In every session, `turn.completed` comes only when the turn really ends. The TypeScript client's
 `send(...).result()` and the MCP channel's `agent_get` read past `turn.waiting` and report the
 final reply rather than the text written before the wait. `result()` stops at `turn.waiting` only
-while a question is pending, and returns `status: "waiting"` with it; `respond()` then reads the
-same turn to its end. See [Aggregate a turn](/docs/guides/client/streaming#aggregate-a-turn).
+while a question is pending or the turn waits on a sign-in or approval, and returns
+`status: "waiting"`; `respond()` then reads the same turn to its end. See [Aggregate a turn](/docs/guides/client/streaming#aggregate-a-turn).
 Channels such as [Slack](/docs/channels/slack) post a root session's text before the wait as an
 ordinary reply, then post the reply after the results as another message. Slack also shows each
 turn's tasks in a live [task card](/docs/channels/slack#task-card).
@@ -263,12 +263,12 @@ same `taskId` continues where it left off. A `serve` body that doesn't return to
 
 ## Stream events
 
-| Event           | When                                                                     | Data                                                                                       |
-| --------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
-| `task.started`  | A call starts a task, or reaches a resumable task by its `taskId`        | `taskId`, `callId`, `turnId`, the tool `name`, and `kind`                                  |
-| `task.settled`  | A reply, return, failure, or cancel settles one call                     | `taskId`, `callId`, `turnId`, `name`, `kind`, `status`, and `output`, `error`, or `cancel` |
-| `agent.started` | A workflow run, including an agent tool's, opens a session with an agent | `callId`, `turnId`, `taskId`, `name`, `sessionId`, `streamPath`                            |
-| `turn.waiting`  | An open turn parks on its tasks, a `task_wait`, a question, or a sign-in | `turnId` and `sequence`                                                                    |
+| Event           | When                                                                                  | Data                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `task.started`  | A call starts a task, or reaches a resumable task by its `taskId`                     | `taskId`, `callId`, `turnId`, the tool `name`, and `kind`                                  |
+| `task.settled`  | A reply, return, failure, or cancel settles one call                                  | `taskId`, `callId`, `turnId`, `name`, `kind`, `status`, and `output`, `error`, or `cancel` |
+| `agent.started` | A workflow run, including an agent tool's, opens a session with an agent              | `callId`, `turnId`, `taskId`, `name`, `sessionId`, `streamPath`                            |
+| `turn.waiting`  | An open turn parks on its tasks, a `task_wait`, a question, a sign-in, or an approval | `turnId`, `sequence`, and `on`: `"input"` when a person must act, otherwise `"tasks"`      |
 
 `task.started` and `task.settled` come once each per call, and `(taskId, callId)` identifies the
 call. Both carry that call's `turnId`, which for a resumable task's later call can be a later turn

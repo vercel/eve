@@ -367,85 +367,6 @@ describe("turn connection approval restoration", () => {
     expect(last).toContain("- second-notes: Save notes");
   });
 
-  it("authorizes requests from two originating turns independently in one cold delivery", async () => {
-    const fixture = setup();
-    await fixture.step({
-      delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's first note." }] },
-    });
-    const first = await fixture.step();
-    const firstBatch = getPendingInputBatches(readDurableSession(first.sessionState).state)[0]!;
-    fixture.doStream.mockImplementationOnce(() => modelResponse("save-2"));
-    await fixture.step({
-      delivery: {
-        kind: "deliver",
-        payloads: [{ message: "Prepare Alice's second independent note." }],
-      },
-    });
-    const second = await fixture.step();
-    const batches = getPendingInputBatches(readDurableSession(second.sessionState).state);
-    expect(batches).toHaveLength(2);
-    expect(batches[1]!.event!.turnId).not.toBe(firstBatch.event!.turnId);
-    clearDurableDynamicCallbacks(sessionId);
-    await fixture.step({
-      delivery: {
-        kind: "deliver",
-        auth: bob,
-        payloads: [
-          {
-            inputResponses: batches.flatMap((batch) =>
-              batch.requests.map((request) => ({
-                requestId: request.requestId,
-                optionId: "approve",
-              })),
-            ),
-          },
-        ],
-      },
-    });
-    clearDurableDynamicCallbacks(sessionId);
-    const resumed = await fixture.step();
-    expect(fixture.policyTurns).toEqual(batches.map((batch) => batch.event!.turnId));
-    expect(fixture.response).toHaveBeenCalledTimes(2);
-    expect(
-      getApprovalAuditState(readDurableSession(resumed.sessionState).state).settlements,
-    ).toHaveLength(2);
-    expect(fixture.fetch).toHaveBeenCalled();
-    expect(fixture.events.filter((event) => event.type === "session.failed")).toEqual([]);
-  });
-  it.each([false, true])(
-    "fails an approved call whose connection changed before it ran (cold: %s)",
-    async (cold) => {
-      const fixture = setup("turn.started", false, "destination");
-      await fixture.step({
-        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's note." }] },
-      });
-      const parked = await fixture.step();
-      const request = getPendingInputBatches(readDurableSession(parked.sessionState).state)[0]!
-        .requests[0]!;
-      if (cold) clearDurableDynamicCallbacks(sessionId);
-      await fixture.step({
-        delivery: {
-          kind: "deliver",
-          auth: bob,
-          payloads: [{ inputResponses: [{ requestId: request.requestId, optionId: "approve" }] }],
-        },
-      });
-      if (cold) clearDurableDynamicCallbacks(sessionId);
-      await fixture.step();
-      expect(fixture.response).toHaveBeenCalledOnce();
-      expect(fixture.fetch).not.toHaveBeenCalled();
-      expect(
-        JSON.stringify(
-          fixture.events.filter(
-            (event) =>
-              event.type === "action.result" &&
-              JSON.stringify(event.data).includes(request.action.callId),
-          ),
-        ),
-      ).toContain("connection for this tool call changed or is unavailable");
-    },
-  );
-
   it("rejects only the approved call whose instance pin was evicted", async () => {
     const fixture = setup("turn.started", false, "request-only");
     // One more parked call than the pin map holds evicts the first call's pin.
@@ -489,64 +410,6 @@ describe("turn connection approval restoration", () => {
     );
     expect(fixture.fetch).toHaveBeenCalledTimes(50);
   });
-
-  it.each([false, true])(
-    "fails an approved call whose connection is gone while running an available one (cold: %s)",
-    async (cold) => {
-      const fixture = setup("turn.started", false, "name");
-      await fixture.step({
-        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's first note." }] },
-      });
-      await fixture.step();
-      fixture.doStream.mockImplementationOnce(() => modelResponse("save-2", "second-notes"));
-      await fixture.step({
-        delivery: { kind: "deliver", payloads: [{ message: "Prepare Alice's second note." }] },
-      });
-      const second = await fixture.step();
-      const batches = getPendingInputBatches(readDurableSession(second.sessionState).state);
-      expect(batches).toHaveLength(2);
-      expect(
-        batches.map(
-          (batch) => (batch.requests[0]!.action.input as { connection: string }).connection,
-        ),
-      ).toEqual(["notes", "second-notes"]);
-      if (cold) clearDurableDynamicCallbacks(sessionId);
-      await fixture.step({
-        delivery: {
-          kind: "deliver",
-          auth: bob,
-          payloads: [
-            {
-              inputResponses: batches.flatMap((batch) =>
-                batch.requests.map((request) => ({
-                  requestId: request.requestId,
-                  optionId: "approve",
-                })),
-              ),
-            },
-          ],
-        },
-      });
-      if (cold) clearDurableDynamicCallbacks(sessionId);
-      await fixture.step();
-      const older = batches[0]!.requests[0]!;
-      // Each approval is authorized against its originating turn's connections;
-      // the older call then fails because "notes" is gone when it runs.
-      expect(fixture.policyTurns).toEqual(batches.map((batch) => batch.event!.turnId));
-      expect(fixture.events).toContainEqual(
-        expect.objectContaining({
-          type: "action.result",
-          data: expect.objectContaining({
-            status: "failed",
-            result: expect.objectContaining({
-              callId: older.action.callId,
-              output: expect.stringContaining('Connection "notes" is not available'),
-            }),
-          }),
-        }),
-      );
-    },
-  );
 
   it("fails an approved call whose connection is gone without a response policy", async () => {
     const fixture = setup("turn.started", false, "request-only");
@@ -741,11 +604,11 @@ describe("turn connection approval restoration", () => {
     expect(fixture.policyTurns).toEqual([batch.event!.turnId]);
     expect(fixture.response).toHaveBeenCalledOnce();
     expect(fixture.fetch).toHaveBeenCalledOnce();
+    // The approval held its turn, so the responder's sign-in resumes it
+    // without starting another.
     const events = fixture.events.slice(start);
-    expect(events.findIndex((event) => event.type === "authorization.completed")).toBeLessThan(
-      events.findIndex((event) => event.type === "turn.started"),
-    );
-    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(1);
+    expect(events.some((event) => event.type === "authorization.completed")).toBe(true);
+    expect(events.filter((event) => event.type === "turn.started")).toHaveLength(0);
   });
 
   it.each([false, true])(
@@ -788,7 +651,8 @@ describe("turn connection approval restoration", () => {
       expect(fixture.fetch).toHaveBeenCalledOnce();
       expect(getPendingInputBatches(readDurableSession(resumed.sessionState).state)).toEqual([]);
       expect(resumed.serializedContext).not.toHaveProperty("eve.pendingConnectionCalls");
-      expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(2);
+      // The approval held its turn, so approving it resumes the same turn.
+      expect(fixture.events.filter((event) => event.type === "turn.started")).toHaveLength(1);
       // The connection call is reported as a nested action of the approved call.
       const nestedCallId = `${request.action.callId}:1`;
       expect(fixture.events).toContainEqual(

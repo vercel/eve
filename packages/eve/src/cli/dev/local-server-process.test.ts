@@ -8,6 +8,7 @@ import {
   DEV_SERVER_CLOSE_BUDGET_MS,
 } from "#cli/dev/local-server-process.js";
 import { FORCED_EXIT_BACKSTOP_MS } from "#cli/shutdown.js";
+import { CONSOLE_RECORD_PREFIX, setConsoleRecordSubscriber } from "./console-records.js";
 
 const mocks = vi.hoisted(() => ({ fork: vi.fn(), loadEnv: vi.fn() }));
 vi.mock("node:child_process", () => ({ fork: mocks.fork }));
@@ -105,6 +106,31 @@ describe("createDevelopmentServer", () => {
     } finally {
       stdout.mockRestore();
       stderr.mockRestore();
+    }
+  });
+
+  it("preloads severity capture and forwards child warning records without exposing transport framing", async () => {
+    const records: unknown[] = [];
+    setConsoleRecordSubscriber((record) => records.push(record));
+    const server = createDevelopmentServer("/tmp/app");
+    try {
+      const started = server.start();
+      await vi.waitFor(() => expect(mocks.fork).toHaveBeenCalled());
+      expect(mocks.fork.mock.calls.at(-1)?.[2].execArgv).toContain("--import");
+      child.stderr.write(
+        `${CONSOLE_RECORD_PREFIX}${JSON.stringify({ level: "warn", text: "contention\n  step abc" })}\n`,
+      );
+      child.emit("message", {
+        type: "started",
+        handle: { kind: "started", appRoot: "/tmp/app", url: "http://127.0.0.1:2000" },
+      });
+      await started;
+      expect(records).toEqual([{ level: "warn", text: "contention\n  step abc" }]);
+      const closing = server.close();
+      child.emit("exit", 0, null);
+      await closing;
+    } finally {
+      setConsoleRecordSubscriber(undefined);
     }
   });
 

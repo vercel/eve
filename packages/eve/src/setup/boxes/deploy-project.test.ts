@@ -112,7 +112,7 @@ describe("deployProject box", () => {
 
     expect(deps.runVercel).toHaveBeenNthCalledWith(
       1,
-      ["deploy", "--prod", "--yes", "--non-interactive"],
+      ["deploy", "--prod", "--yes", "--logs", "--non-interactive"],
       expect.objectContaining({ cwd: "/tmp/project", nonInteractive: true }),
     );
   });
@@ -128,7 +128,7 @@ describe("deployProject box", () => {
     // project.
     expect(deps.runVercel).toHaveBeenNthCalledWith(
       1,
-      ["deploy", "--prod", "--yes"],
+      ["deploy", "--prod", "--yes", "--logs"],
       expect.objectContaining({ cwd: "/tmp/project", nonInteractive: false }),
     );
   });
@@ -167,7 +167,7 @@ describe("deployProject box", () => {
     const installOrder = deps.runPackageManagerInstall.mock.invocationCallOrder[0]!;
     const deployOrder = deps.runVercel.mock.invocationCallOrder[1]!;
     expect(deps.runVercel.mock.calls[0]?.[0]).toEqual(["link"]);
-    expect(deps.runVercel.mock.calls[1]?.[0]).toEqual(["deploy", "--prod", "--yes"]);
+    expect(deps.runVercel.mock.calls[1]?.[0]).toEqual(["deploy", "--prod", "--yes", "--logs"]);
     expect(linkOrder).toBeLessThan(installOrder);
     expect(installOrder).toBeLessThan(deployOrder);
   });
@@ -242,7 +242,7 @@ describe("deployProject box", () => {
     const box = headlessBox({ deps, prompter });
 
     await expect(runHeadless([box], pendingState(), silentSink)).rejects.toThrow(
-      "Deployment failed after channel setup.",
+      "vercel inspect <deployment-url> --logs",
     );
 
     // The rail only flushes the captured `vercel deploy --prod` output on a
@@ -347,7 +347,7 @@ describe("deployProject box", () => {
     await runHeadless([box], state, silentSink);
 
     expect(deps.runVercel).toHaveBeenCalledWith(
-      ["deploy", "--prod", "--yes", "--non-interactive"],
+      ["deploy", "--prod", "--yes", "--logs", "--non-interactive"],
       expect.objectContaining({ cwd: "/tmp/project" }),
     );
   });

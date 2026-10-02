@@ -13,6 +13,20 @@ function render(block: DisplayBlock, width = 60): string[] {
 }
 
 describe("renderBlockLines", () => {
+  it("colors only classified failures red, warnings yellow, and raw stderr neutral", () => {
+    const colored = createTheme({ color: true, unicode: true });
+    const body = (logLevel?: "error" | "warn") =>
+      renderBlockLines(
+        { kind: "log", title: "stderr", body: "message", logLevel },
+        60,
+        colored,
+        ctx,
+      ).join("\n");
+    expect(body("error")).toContain(colored.colors.red("message"));
+    expect(body("warn")).toContain(colored.colors.yellow("message"));
+    expect(body()).toContain(colored.colors.gray("message"));
+    expect(body()).not.toContain(colored.colors.red("message"));
+  });
   it("renders a user message behind a left bar", () => {
     expect(render({ kind: "user", body: "hello there" })).toEqual(["│ hello there"]);
   });
@@ -265,7 +279,7 @@ describe("renderBlockLines", () => {
   it("writes a task's start and end as single lines", () => {
     const agent = { kind: "task", taskKind: "agent", title: "researcher", live: false } as const;
     expect(render({ ...agent, subtitle: "Find the Q3 revenue numbers" })).toEqual([
-      "  ※ researcher  Find the Q3 revenue numbers",
+      "  ▪ researcher  Find the Q3 revenue numbers",
     ]);
     expect(
       render({ ...agent, status: "done", body: "finished in 1min 12s · Read 3 files" }),

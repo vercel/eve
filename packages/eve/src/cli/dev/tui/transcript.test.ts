@@ -305,7 +305,9 @@ describe("ConversationTranscript", () => {
       taskStarted("call_1", "summarize"),
       toolResult("call_1", "summarize"),
       toolCall("wait_1", "task_wait"),
-      event(createTurnWaitingEvent({ usage: TEST_USAGE, sequence: 3, turnId: "turn_1" })),
+      event(
+        createTurnWaitingEvent({ on: "tasks", usage: TEST_USAGE, sequence: 3, turnId: "turn_1" }),
+      ),
     ]);
     const transcript = new ConversationTranscript();
     const working = view(state, true);
@@ -314,11 +316,11 @@ describe("ConversationTranscript", () => {
         id: "task:call_1:start",
         kind: "task",
         taskKind: "agent",
-        title: "summarize",
+        title: "Delegate subagent(summarize)",
         live: false,
       }),
     ]);
-    expect(turnActivity(working, transcript.tasks)).toBe("Waiting for summarize");
+    expect(turnActivity(working, transcript.tasks)).toBe("Waiting for subagent(summarize)");
     // A root approval in the same step ends the turn while the task keeps working.
     expect(transcript.project(view(state, false), options)).toHaveLength(1);
     expect(transcript.tasks.map((task) => task.name)).toEqual(["summarize"]);
@@ -356,7 +358,7 @@ describe("ConversationTranscript", () => {
     ]);
     const transcript = new ConversationTranscript();
     expect(summarize(transcript.project(view(called, true), options))).toEqual([
-      ["task", "research", undefined],
+      ["task", "Delegate subagent(research)", undefined],
       ["subagent-step", "research", "Bob's notes found."],
     ]);
     expect(transcript.tasks[0]).toMatchObject({ name: "research", step: "Bob's notes found." });
@@ -374,10 +376,10 @@ describe("ConversationTranscript", () => {
       reported,
     );
     expect(summarize(transcript.project(view(ended, true), options))).toEqual([
-      ["task", "research", undefined],
+      ["task", "Delegate subagent(research)", undefined],
       ["subagent-step", "research", "Bob's notes found."],
       ["assistant", undefined, "Bob found his notes."],
-      ["task", "research", "finished in 1min 12s"],
+      ["task", "subagent(research)", "finished in 1min 12s"],
     ]);
     expect(transcript.tasks).toEqual([]);
 
@@ -408,11 +410,164 @@ describe("ConversationTranscript", () => {
       ended,
     );
     expect(summarize(transcript.project(view(continued, true), options)).slice(3)).toEqual([
-      ["task", "research", "finished in 1min 12s"],
-      ["task", "research", undefined],
+      ["task", "subagent(research)", "finished in 1min 12s"],
+      ["task", "Delegate subagent(research)", undefined],
       ["subagent-step", "research", "Bob's summary is attached."],
-      ["task", "research", "failed · The agent's session ended."],
+      ["task", "subagent(research)", "failed · The agent's session ended."],
     ]);
+  });
+
+  it("follows nested background work without duplicating it as the owning agent's activity", () => {
+    vi.useFakeTimers({ now: 0 });
+    onTestFinished(() => void vi.useRealTimers());
+    const started = conversation([
+      turn,
+      toolCall("call_1", "research"),
+      taskStarted("call_1", "research"),
+      agentStarted("call_1"),
+      { type: "client.agent.following", data: { sessionId: "child_1" } },
+      ...observe([
+        createTurnStartedEvent({ sequence: 0, turnId: "child_turn" }),
+        createMessageReceivedEvent({
+          message: "Find Alice's notes",
+          sequence: 0,
+          turnId: "child_turn",
+        }),
+        createActionsRequestedEvent({
+          actions: [
+            {
+              callId: "download",
+              toolName: "download",
+              kind: "tool-call",
+              input: { file: "notes.md" },
+            },
+          ],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "child_turn",
+        }),
+        createTaskStartedEvent({
+          callId: "download",
+          taskId: "download_task",
+          name: "download",
+          kind: "tool",
+          turnId: "child_turn",
+        }),
+      ]),
+    ]);
+    const transcript = new ConversationTranscript();
+    transcript.project(view(started, true), options);
+    expect(transcript.tasks[0]).toMatchObject({
+      name: "research",
+      children: [{ name: "download", kind: "tool", startedAtMs: 0 }],
+    });
+    expect(transcript.tasks[0]!.childTools.size).toBe(0);
+    vi.setSystemTime(12_000);
+    transcript.project(view(started, true), options);
+    expect(transcript.tasks[0]!.children![0]!.startedAtMs).toBe(0);
+    const finished = conversation(
+      observe([
+        createTaskSettledEvent({
+          callId: "download",
+          taskId: "download_task",
+          turnId: "child_turn",
+          status: "completed",
+          output: "saved",
+        }),
+      ]),
+      started,
+    );
+    transcript.project(view(finished, true), options);
+    expect(transcript.tasks[0]!.children).toEqual([]);
+    expect([...transcript.tasks[0]!.childTools.values()]).toEqual([
+      expect.objectContaining({ status: "done" }),
+    ]);
+    transcript.project(view(started, true), { ...options, tools: "hidden" });
+    expect(transcript.tasks[0]!.children).toEqual([]);
+  });
+
+  it("shares one nested projection budget across roots and reports omitted work", () => {
+    const root = conversation([
+      turn,
+      toolCall("call_1", "research"),
+      taskStarted("call_1", "research"),
+      agentStarted("call_1"),
+      toolCall("call_2", "review"),
+      taskStarted("call_2", "review", "task_2"),
+      event(
+        createAgentStartedEvent({
+          callId: "call_2",
+          name: "review",
+          parentSessionId: "session_1",
+          sessionId: "child_2",
+          taskId: "task_2",
+          turnId: "turn_1",
+        }),
+      ),
+    ]);
+    const child = conversation([
+      turn,
+      event(
+        createMessageReceivedEvent({
+          message: "Process Alice's files",
+          sequence: 0,
+          turnId: "turn_1",
+        }),
+      ),
+      ...Array.from({ length: 80 }, (_, i) => [
+        toolCall(`call_${i}`, "download"),
+        event(
+          createTaskStartedEvent({
+            callId: `call_${i}`,
+            taskId: `task_${i}`,
+            kind: "tool",
+            name: "download",
+            turnId: "turn_1",
+          }),
+        ),
+      ]).flat(),
+    ]);
+    const withApproval = conversation(
+      [
+        event(
+          createInputRequestedEvent({
+            requests: [
+              {
+                requestId: "approve_download",
+                kind: "tool-approval",
+                prompt: "Approve download?",
+                action: { callId: "call_79", toolName: "download", input: {}, kind: "tool-call" },
+              },
+            ],
+            turnId: "turn_1",
+            sequence: 2,
+            stepIndex: 0,
+          }),
+        ),
+      ],
+      child,
+    );
+    const observed = {
+      ...withApproval,
+      inputs: {
+        ...withApproval.inputs,
+        approve_download: { ...withApproval.inputs.approve_download!, taskId: "task_79" },
+      },
+    };
+    const state: ConversationState = {
+      ...root,
+      agents: Object.fromEntries(
+        Object.entries(root.agents).map(([id, agent]) => [
+          id,
+          { ...agent, observation: { status: "following", conversation: observed } },
+        ]),
+      ),
+    };
+    const transcript = new ConversationTranscript();
+    transcript.project(view(state, true), options);
+    expect(transcript.tasks.map((task) => task.children?.length)).toEqual([80, 48]);
+    expect(transcript.tasks.map((task) => task.omittedTasks)).toEqual([0, 32]);
+    expect(transcript.tasks[1]!.omittedAttention).toBe(true);
   });
 
   it("names parallel calls apart, stops tasks a cancelled turn leaves working, and hides hidden ones", () => {
@@ -424,10 +579,14 @@ describe("ConversationTranscript", () => {
       taskStarted("call_2", "research", "task_2"),
     ]);
     const transcript = new ConversationTranscript();
-    transcript.project(view(state, true), options);
-    expect(transcript.tasks.map((task) => task.name)).toEqual(["research", "research #2"]);
+    const starts = transcript.project(view(state, true), options);
+    expect(starts.map((block) => block.title)).toEqual([
+      "Delegate subagent(research)",
+      "Delegate subagent(research:2)",
+    ]);
+    expect(transcript.tasks.map((task) => task.name)).toEqual(["research", "research:2"]);
     // An input request names the task that asked as its lines do.
-    expect(transcript.taskLabel(state, "task_2")).toBe("research #2");
+    expect(transcript.taskLabel(state, "task_2")).toBe("subagent(research:2)");
 
     const cancelled = conversation(
       [event(createTurnCancelledEvent({ sequence: 3, turnId: "turn_1" }))],
@@ -437,8 +596,8 @@ describe("ConversationTranscript", () => {
       .project(view(cancelled, false), options)
       .filter((block) => block.id?.endsWith(":end"));
     expect(ends.map((block) => [block.title, block.status, block.body])).toEqual([
-      ["research", "denied", "stopped"],
-      ["research #2", "denied", "stopped"],
+      ["subagent(research)", "denied", "stopped"],
+      ["subagent(research:2)", "denied", "stopped"],
     ]);
     expect(transcript.tasks).toEqual([]);
 

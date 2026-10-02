@@ -149,6 +149,7 @@ export type {
   TurnFailedStreamEvent,
   TurnStartedStreamEvent,
   TurnFailureStreamEvent,
+  TurnWaitingOn,
   TurnWaitingStreamEvent,
 } from "#protocol/message.js";
 

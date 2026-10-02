@@ -888,19 +888,19 @@ describe("eve remote connect", () => {
 });
 
 describe("eve dev --logs", () => {
-  it("accepts sandbox as the initial TUI log mode", async () => {
+  it("accepts warn as the initial TUI log mode", async () => {
     const runDevelopmentTui = await runInteractiveDev([
       "remote",
       "connect",
       "--url",
       "https://example.com",
       "--logs",
-      "sandbox",
+      "warn",
     ]);
 
     expect(runDevelopmentTui).toHaveBeenCalledWith(
       expect.objectContaining({
-        logs: "sandbox",
+        logs: "warn",
         target: {
           kind: "remote",
           serverUrl: "https://example.com/",
@@ -1234,7 +1234,7 @@ describe("resolveDevUiMode", () => {
 describe("resolveTuiDisplayOptions", () => {
   it("defaults tools and reasoning to auto-collapsed with stderr logs visible", () => {
     expect(resolveTuiDisplayOptions({})).toEqual({
-      logs: "stderr",
+      logs: "error",
       // Collapsed reasoning is the fixed thinking line; `--reasoning full`
       // restores the streaming transcript trace.
       reasoning: "auto-collapsed",
@@ -1251,7 +1251,7 @@ describe("resolveTuiDisplayOptions", () => {
         connectionAuth: "full",
         assistantResponseStats: "tokens",
         contextSize: 200_000,
-        logs: "stderr",
+        logs: "error",
       }),
     ).toEqual({
       tools: "hidden",
@@ -1260,7 +1260,7 @@ describe("resolveTuiDisplayOptions", () => {
       connectionAuth: "full",
       assistantResponseStats: "tokens",
       contextSize: 200_000,
-      logs: "stderr",
+      logs: "error",
     });
   });
 
@@ -1268,6 +1268,6 @@ describe("resolveTuiDisplayOptions", () => {
     const resolved = resolveTuiDisplayOptions({ tools: "full" });
     expect(resolved).not.toHaveProperty("subagents");
     expect(resolved).not.toHaveProperty("contextSize");
-    expect(resolved.logs).toBe("stderr");
+    expect(resolved.logs).toBe("error");
   });
 });

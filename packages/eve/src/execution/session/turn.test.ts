@@ -450,8 +450,6 @@ describe("SessionExecution checkpoints", () => {
         turnStepWork(async () => ({
           action: "park",
           pendingCoordinationCallIds: ["hold-call"],
-          hasPendingAuthorization: false,
-          hasPendingInputBatch: false,
           serializedContext: {},
           sessionState,
         })),
@@ -554,8 +552,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementationOnce(
         turnStepWork(async () => ({
           action: "park",
-          hasPendingAuthorization: false,
-          hasPendingInputBatch: false,
           pendingCoordinationCallIds: ["hold-call"],
           serializedContext: {},
           sessionState,
@@ -618,8 +614,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementation(
         turnStepWork(async (input) => ({
           action: "park",
-          hasPendingAuthorization: false,
-          hasPendingInputBatch: false,
           serializedContext: input.serializedContext,
           sessionState: input.sessionState,
           settled: { output: "Done." },
@@ -640,16 +634,16 @@ describe("SessionExecution checkpoints", () => {
   });
 
   it.each([
-    { capabilities: undefined, parks: false, serializedContext: {} },
-    { capabilities: { requestInput: true }, parks: true, serializedContext: {} },
+    { capabilities: undefined, holds: false, serializedContext: {} },
+    { capabilities: { requestInput: true }, holds: true, serializedContext: {} },
     {
       capabilities: undefined,
-      parks: true,
+      holds: true,
       serializedContext: { "eve.sessionCallback": { callId: "call_1", token: "parent" } },
     },
   ])(
-    "parks on pending input only when someone can answer it: %o",
-    async ({ capabilities, parks, serializedContext }) => {
+    "holds on pending input only when someone can answer it: %o",
+    async ({ capabilities, holds, serializedContext }) => {
       const inbox: SessionInbox = {
         claimedTokens: [],
         claimSessionHook: vi.fn(),
@@ -672,9 +666,11 @@ describe("SessionExecution checkpoints", () => {
         .mockReset()
         .mockImplementation(
           turnStepWork(async (input) => ({
-            action: "park",
-            hasPendingAuthorization: false,
+            action: "held",
+            authorizationAttemptIds: [],
             hasPendingInputBatch: true,
+            hold: "request",
+            inputRequestIds: ["request_1"],
             serializedContext: input.serializedContext,
             sessionState: input.sessionState,
           })),
@@ -683,8 +679,16 @@ describe("SessionExecution checkpoints", () => {
       const turn = execution.runTurn({
         delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
       });
-      if (parks) {
-        await expect(turn).resolves.toMatchObject({ kind: "park" });
+      if (holds) {
+        // Someone can answer, so the turn waits for them.
+        const outcome = await Promise.race([
+          turn.then(
+            () => "settled",
+            () => "rejected",
+          ),
+          new Promise((resolve) => setTimeout(() => resolve("waiting"), 20)),
+        ]);
+        expect(outcome).toBe("waiting");
       } else {
         await expect(turn).rejects.toThrow("cannot request human input");
       }
@@ -726,8 +730,6 @@ describe("SessionExecution checkpoints", () => {
           expect(input.abortSignal?.aborted).toBe(true);
           return {
             action: "park",
-            hasPendingAuthorization: false,
-            hasPendingInputBatch: false,
             serializedContext: input.serializedContext,
             sessionState: completedState,
             settled,
@@ -767,8 +769,6 @@ describe("SessionExecution checkpoints", () => {
     vi.mocked(turnStep).mockImplementation(
       turnStepWork(async () => ({
         action: "park",
-        hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
         pendingCoordinationCallIds: ["child-call"],
         serializedContext: {},
         sessionState,
@@ -844,8 +844,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementation(
         turnStepWork(async () => ({
           action: "park",
-          hasPendingAuthorization: false,
-          hasPendingInputBatch: false,
           pendingCoordinationCallIds: ["deploy-call"],
           serializedContext: {},
           sessionState,
@@ -929,8 +927,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementation(
         turnStepWork(async () => ({
           action: "park",
-          hasPendingAuthorization: false,
-          hasPendingInputBatch: false,
           pendingCoordinationCallIds: ["wait-call"],
           pendingTaskToolCalls: [{ callId: "wait-call", kind: "task_wait" }],
           serializedContext: {},
@@ -1013,8 +1009,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementation(
         turnStepWork(async () => ({
           action: "park",
-          hasPendingAuthorization: false,
-          hasPendingInputBatch: false,
           pendingCoordinationCallIds: ["hold-call"],
           serializedContext: {},
           sessionState,
@@ -1108,8 +1102,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementationOnce(
         turnStepWork(async () => ({
           action: "park",
-          hasPendingAuthorization: false,
-          hasPendingInputBatch: false,
           pendingCoordinationCallIds: tools.map((name) => `${name}-call`),
           serializedContext: {},
           sessionState,
@@ -1193,8 +1185,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementationOnce(
         turnStepWork(async () => ({
           action: "park",
-          hasPendingAuthorization: false,
-          hasPendingInputBatch: false,
           pendingCoordinationCallIds: ["wait-call"],
           pendingTaskToolCalls: [{ callId: "wait-call", kind: "task_wait" }],
           serializedContext: {},
@@ -1229,8 +1219,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementationOnce(
         turnStepWork(async (input) => ({
           action: "park",
-          hasPendingAuthorization: false,
-          hasPendingInputBatch: false,
           serializedContext: input.serializedContext,
           sessionState: input.sessionState,
           settled: { output: "Done." },
@@ -1293,8 +1281,6 @@ describe("SessionExecution checkpoints", () => {
         turnStepWork(async () => ({
           action: "park",
           pendingCoordinationCallIds: ["hold-call"],
-          hasPendingAuthorization: false,
-          hasPendingInputBatch: false,
           serializedContext: {},
           sessionState,
         })),

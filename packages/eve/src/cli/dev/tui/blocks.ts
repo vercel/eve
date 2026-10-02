@@ -16,7 +16,7 @@ import type { TaskKind } from "./task-activity.js";
 import type { Theme } from "./theme.js";
 import type { ToolGroupPresentation } from "./tool-presentation.js";
 import { isPromptControlCommand } from "./prompt-commands.js";
-import { renderTool } from "./tool-rows.js";
+import { renderTool, renderToolHeader } from "./tool-rows.js";
 import { truncate } from "./tool-format.js";
 import { elisionText, TOOL_COLUMN_LEAD } from "./rail.js";
 import {
@@ -98,7 +98,8 @@ export interface Block {
   /** When true, expand tool input/output instead of summarizing. */
   expanded?: boolean;
   /** Captured-log visibility used for concise-vs-raw diagnostic replay. */
-  logVisibility?: "stderr-only" | "all-only";
+  logVisibility?: "summary" | "all-only";
+  logLevel?: "error" | "warn" | "info" | "debug";
   /** Raw tool input / output for the expanded view. */
   toolInput?: unknown;
   toolOutput?: unknown;
@@ -516,10 +517,14 @@ function renderSandbox(
  * only ever sees visible blocks.
  */
 function renderLog(block: DisplayBlock, width: number, theme: Theme): string[] {
-  const isErr = block.title === "stderr";
-  const color = isErr ? theme.colors.red : theme.colors.gray;
+  const color =
+    block.logLevel === "error"
+      ? theme.colors.red
+      : block.logLevel === "warn"
+        ? theme.colors.yellow
+        : theme.colors.gray;
   const rule = theme.colors.dim(theme.glyph.rule);
-  const source = isErr ? "stderr" : "stdout";
+  const source = block.logLevel ?? block.title ?? "stdout";
 
   const rows = [`${theme.colors.dim(theme.glyph.reasoning)} ${theme.colors.dim(source)}`];
   if (block.elided !== undefined && block.elided > 0) {
@@ -549,7 +554,12 @@ function renderTurnStats(block: Block, width: number, theme: Theme): string[] {
  * as it ends. Each is written once; what the task does in between lives in
  * the task panel above the prompt.
  */
-function renderTask(block: Block, width: number, theme: Theme): string[] {
+function renderTask(block: DisplayBlock, width: number, theme: Theme): string[] {
+  if (block.status === undefined) {
+    return [
+      ` ${renderToolHeader(block.title ?? "task", block.subtitle ?? "", theme.colors.gray(theme.glyph.square), width - 1, theme)}`,
+    ];
+  }
   const c = theme.colors;
   const { mark, detail, color } = taskLineStyle(block, theme);
   const head = `${TOOL_COLUMN_LEAD}${mark} ${c.bold(truncate(block.title ?? "task", width - 4))}`;

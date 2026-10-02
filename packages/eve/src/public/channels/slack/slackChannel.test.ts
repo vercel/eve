@@ -1088,6 +1088,9 @@ describe("slackChannel() default event handlers", () => {
       THREAD_STATE,
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
+    fetchMock.mockImplementationOnce(async () =>
+      Response.json({ ok: true, ts: "1700000000.000900" }),
+    );
 
     await callEvent(
       adapter,
@@ -1208,6 +1211,7 @@ describe("slackChannel() default event handlers", () => {
     ]);
     expect(ctx.state.pendingApprovalCards).toEqual({
       approval_abc123: {
+        detailsMessageTs: "1700000000.000900",
         messageBlocks: controlsBody.blocks,
         messageTs: "1700000001.000001",
       },
@@ -4310,7 +4314,7 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("keeps interaction auth on the actor workspace and credentials on the installation", async () => {
+  it("gives a Slack Connect user one principal across messages and button clicks", async () => {
     const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
     fetchMock.mockImplementation(
       async () =>
@@ -4325,6 +4329,29 @@ describe("slackChannel() HITL interaction pipeline", () => {
         await ctx.slack.request("auth.test", {});
         await ctx.send("inspect result");
       },
+    });
+
+    const { send: mentionSend } = await firePost(
+      channel,
+      buildSignedRequest({
+        body: buildEventBody(
+          {
+            channel: "C01",
+            event_ts: "1700000000.000001",
+            text: "hello",
+            ts: "1700000000.000001",
+            type: "app_mention",
+            user: "U01",
+          },
+          {
+            authorizations: [{ is_bot: true, team_id: "T_INSTALLATION", user_id: "U_BOT" }],
+            teamId: "T_ACTOR",
+          },
+        ),
+      }),
+    );
+    expect(mentionSend.mock.calls[0]?.[1]).toMatchObject({
+      auth: { issuer: "slack:T_INSTALLATION", principalId: "slack:T_INSTALLATION:U01" },
     });
 
     const { send } = await firePost(
@@ -4345,9 +4372,46 @@ describe("slackChannel() HITL interaction pipeline", () => {
 
     expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
     expect(send.mock.calls[0]?.[1]).toMatchObject({
-      auth: { principalId: "slack:T_ACTOR:U01" },
+      auth: { issuer: "slack:T_INSTALLATION", principalId: "slack:T_INSTALLATION:U01" },
       state: { installationTeamId: "T_INSTALLATION", teamId: "T_ACTOR" },
     });
+  });
+
+  it("cancels the held turn and removes the private prompt from a sign-in Cancel click", async () => {
+    fetchMock.mockImplementation(async () => new Response("ok"));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    const { cancel, send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada", team_id: "T01" },
+        container: { type: "message", is_ephemeral: true, channel_id: "C01" },
+        response_url: "https://hooks.slack.com/actions/T01/1/abc",
+        actions: [
+          {
+            action_id: "eve_sign_in:cancel",
+            text: { type: "plain_text", text: "Cancel" },
+            value: JSON.stringify({
+              channelId: "C01",
+              threadTs: "1700000000.000001",
+              turnId: "turn_0",
+            }),
+          },
+        ],
+      }),
+    );
+
+    expect(cancel).toHaveBeenCalledWith({
+      continuationToken: "C01:1700000000.000001",
+      turnId: "turn_0",
+    });
+    expect(send).not.toHaveBeenCalled();
+    const removal = fetchMock.mock.calls.find(
+      ([url]) => String(url) === "https://hooks.slack.com/actions/T01/1/abc",
+    );
+    expect(JSON.parse(String(removal?.[1]?.body))).toEqual({ delete_original: true });
   });
 
   it("resets the interaction's Slack thread from onInteraction", async () => {
@@ -4432,8 +4496,8 @@ describe("slackChannel() HITL interaction pipeline", () => {
           user_name: "ada",
         },
         authenticator: "slack-webhook",
-        issuer: "slack:T_ACTOR",
-        principalId: "slack:T_ACTOR:U_APPROVER",
+        issuer: "slack:T_INSTALLATION",
+        principalId: "slack:T_INSTALLATION:U_APPROVER",
         principalType: "user",
       },
       inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
@@ -4738,19 +4802,6 @@ describe("slackChannel() HITL interaction pipeline", () => {
       adapter,
       makeEvent("approval.candidate", {
         candidateId: "candidate-1",
-        outcome: "pending",
-        requestId: "approval_abc123",
-        responderPrincipalId: "slack:T01:U_APPROVER",
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "turn-1",
-      }),
-      ctx,
-    );
-    await callEvent(
-      adapter,
-      makeEvent("approval.candidate", {
-        candidateId: "candidate-1",
         outcome: "rejected",
         reason: "Test policy: all approval responses are rejected.",
         requestId: "approval_abc123",
@@ -4768,16 +4819,11 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(ephemeralBodies).toEqual([
       expect.objectContaining({
         channel: "C01",
-        markdown_text: "Checking whether you can respond to this approval…",
-        user: "U_APPROVER",
-      }),
-      expect.objectContaining({
-        channel: "C01",
         markdown_text: "Test policy: all approval responses are rejected.",
         user: "U_APPROVER",
       }),
     ]);
-    expect(slackOperations(fetchMock)).toEqual(["chat.postEphemeral", "chat.postEphemeral"]);
+    expect(slackOperations(fetchMock)).toEqual(["chat.postEphemeral"]);
   });
 
   it("keeps HITL pending when the input-response hook rejects or throws", async () => {
@@ -5082,8 +5128,8 @@ describe("slackChannel() HITL interaction pipeline", () => {
           user_name: "grace",
         },
         authenticator: "slack-webhook",
-        issuer: "slack:T_ACTOR",
-        principalId: "slack:T_ACTOR:U_SUBMITTER",
+        issuer: "slack:T_INSTALLATION",
+        principalId: "slack:T_INSTALLATION:U_SUBMITTER",
         principalType: "user",
       },
       inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],

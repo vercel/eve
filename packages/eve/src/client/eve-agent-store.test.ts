@@ -456,7 +456,7 @@ describe("EveAgentStore held turns", () => {
         taskId: "task_1",
         turnId: "turn_1",
       }),
-      createTurnWaitingEvent({ usage: TEST_USAGE, sequence: 0, turnId: "turn_1" }),
+      createTurnWaitingEvent({ on: "input", usage: TEST_USAGE, sequence: 0, turnId: "turn_1" }),
     ]).map((event) => ({ ...event, meta: { ...event.meta, deliveryIds: ["delivery_1"] } }));
     for (const event of parked) live.emit(event);
     await sending;

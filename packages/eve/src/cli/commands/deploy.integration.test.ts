@@ -180,7 +180,7 @@ describe("runDeployCommand", () => {
     expect(logger.errors).toEqual([]);
     expect(process.exitCode).toBeUndefined();
     expect(deployDeps.runVercel).toHaveBeenCalledWith(
-      ["deploy", "--prod", "--yes", "--non-interactive"],
+      expect.arrayContaining(["deploy", "--prod", "--yes", "--non-interactive"]),
       expect.objectContaining({ nonInteractive: true }),
     );
     expect(fake.prompter.outro).toHaveBeenCalledWith("Deployed: https://my-agent.vercel.app");

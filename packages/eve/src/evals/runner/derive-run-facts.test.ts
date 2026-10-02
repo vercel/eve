@@ -495,7 +495,7 @@ describe("deriveRunFacts", () => {
     expect(
       derive([
         sessionWaiting(USAGE),
-        { type: "turn.waiting", data: { sequence: 2, turnId: "t2", usage: parked } },
+        { type: "turn.waiting", data: { on: "input", sequence: 2, turnId: "t2", usage: parked } },
       ]).usage,
     ).toEqual(parked);
   });

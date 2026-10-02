@@ -1232,7 +1232,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
-  it("coalesces a source's writes into one section showing the newest write", () => {
+  it("commits complete writes in arrival order across transcript boundaries", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
@@ -1251,15 +1251,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    // A stream is continuous: every stdout write — the notice interleaving
-    // included — merges into ONE section anchored at the newest write,
-    // showing only that write with the rest behind the elided count.
-    expect(countOccurrences(snapshot, "○ stdout")).toBe(1);
-    expect(snapshot).toContain("│ … (2 more)");
+    expect(snapshot).toContain("city: 'NY'");
+    expect(snapshot).toContain("city: 'LA'");
     expect(snapshot).toContain("│ post-turn line");
-    expect(snapshot).not.toContain("city: 'NY'");
-    // The section sits at the last write's position — after the notice.
-    expect(snapshot.indexOf("○ stdout")).toBeGreaterThan(snapshot.indexOf("turn boundary"));
+    expect(snapshot.indexOf("city: 'NY'")).toBeLessThan(snapshot.indexOf("city: 'LA'"));
+    expect(snapshot.indexOf("city: 'LA'")).toBeLessThan(snapshot.indexOf("turn boundary"));
+    expect(snapshot.indexOf("turn boundary")).toBeLessThan(snapshot.indexOf("post-turn line"));
   });
 
   it("retroactively hides and restores buffered logs when the level changes", () => {
@@ -1309,7 +1306,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "stderr",
+      logs: "error",
       unicode: true,
       diagnostics: stub.diagnostics,
     });
@@ -1322,9 +1319,9 @@ describe("TerminalRenderer (inline scrollback)", () => {
       "  at fourth",
     ].join("\n");
 
-    process.stderr.write(`${detail}\n`);
+    console.error(detail);
 
-    expect(append).toHaveBeenCalledWith({ source: "stderr", detail });
+    expect(append).toHaveBeenCalledWith({ source: "stderr", level: "error", detail });
     expect(screen.snapshot()).toContain("Error: request returned 403");
     expect(screen.snapshot()).toContain("details: .eve/logs/dev.log");
     expect(screen.snapshot()).not.toContain("at fourth");
@@ -1346,7 +1343,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "stderr",
+      logs: "error",
       unicode: true,
       diagnostics: stub.diagnostics,
     });
@@ -1363,6 +1360,37 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     renderer.shutdown();
     expect(stub.subscribed).toBe(false);
+  });
+
+  it("defaults to errors, buffers warnings, and preserves console severity", () => {
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const renderer = new TerminalRenderer({
+      input: new MockUserInput(),
+      output: screen,
+      captureForeignOutput: true,
+      unicode: true,
+    });
+    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+    console.warn("Step already running\n  run abc\n  step def");
+    console.error("Actual failure");
+    process.stderr.write("Unclassified stderr\n");
+    console.debug("Debug detail");
+    expect(screen.snapshot()).not.toContain("Step already running");
+    expect(screen.snapshot()).toContain("○ error");
+    expect(screen.snapshot()).toContain("Actual failure");
+    expect(screen.snapshot()).not.toContain("Unclassified stderr");
+    renderer.setLogDisplayMode("warn");
+    expect(screen.snapshot()).toContain("○ warn");
+    expect(screen.snapshot()).toContain("step def");
+    expect(screen.snapshot()).not.toContain("Debug detail");
+    renderer.setLogDisplayMode("debug");
+    expect(screen.snapshot()).toContain("Debug detail");
+    expect(screen.snapshot()).not.toContain("Unclassified stderr");
+    console.info('eve: built sandbox template "root" on backend "microsandbox".');
+    expect(screen.snapshot()).toContain('sandbox · built sandbox template "root"');
+    renderer.setLogDisplayMode("all");
+    expect(screen.snapshot()).toContain("Unclassified stderr");
+    renderer.shutdown();
   });
 
   it("records captured sandbox log lines in the diagnostic log", () => {
@@ -1405,7 +1433,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
           { event: "change", path: "/app/agent/instructions.md" },
         ])}\n`,
       );
-      expect(renderer.logDisplayMode()).toBe("none");
+      expect(renderer.logDisplayMode()).toBe("error");
       expect(screen.snapshot()).not.toContain("agent/instructions.md changed");
       expect(screen.snapshot()).not.toContain("○ stdout");
 
@@ -1445,7 +1473,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     process.stdout.write("captured while hidden\n");
     renderer.renderNotice("after the log");
-    expect(renderer.logDisplayMode()).toBe("none");
+    expect(renderer.logDisplayMode()).toBe("error");
     expect(screen.snapshot()).not.toContain("captured while hidden");
 
     renderer.setLogDisplayMode("all");
@@ -1468,17 +1496,16 @@ describe("TerminalRenderer (inline scrollback)", () => {
       output: screen,
       captureForeignOutput: true,
       unicode: true,
-      logs: "stderr",
+      logs: "error",
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
 
-    process.stderr.write("first stderr line\n");
+    console.error("first stderr line");
     process.stdout.write("interleaved stdout line\n");
-    process.stderr.write("second stderr line\n");
+    console.error("second stderr line");
 
-    // Both stderr writes merge into one stream section; the hidden stdout
-    // write contributes no section of its own.
-    expect(countOccurrences(screen.snapshot(), "○ stderr")).toBe(1);
+    expect(screen.snapshot()).toContain("first stderr line");
+    expect(screen.snapshot()).toContain("second stderr line");
     expect(screen.snapshot()).not.toContain("○ stdout");
 
     renderer.setLogDisplayMode("all");
@@ -1487,41 +1514,12 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Once visible, stdout gets its own section; the stderr stream stays
     // whole and ordered.
     const snapshot = screen.snapshot();
-    expect(countOccurrences(snapshot, "○ stderr")).toBe(1);
+    expect(countOccurrences(snapshot, "○ error")).toBe(1);
     expect(countOccurrences(snapshot, "○ stdout")).toBe(1);
     expect(snapshot.indexOf("first stderr line")).toBeLessThan(
       snapshot.indexOf("second stderr line"),
     );
     expect(snapshot).toContain("interleaved stdout line");
-  });
-
-  it("shows sandbox stdout lines and hides ordinary stdout under the sandbox log level", () => {
-    const screen = new MockScreen({ columns: 100, rows: 30 });
-    const input = new MockUserInput();
-    const renderer = new TerminalRenderer({
-      input,
-      output: screen,
-      captureForeignOutput: true,
-      logs: "sandbox",
-      unicode: true,
-    });
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-
-    process.stdout.write('eve: sandbox template "root" (microsandbox): checking cached snapshot\n');
-    process.stdout.write("eve: initializing 3 sandbox templates...\n");
-    process.stdout.write('eve: built sandbox template "root" on backend "microsandbox".\n');
-    process.stdout.write("ordinary stdout log\n");
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain(
-      'sandbox · built sandbox template "root" on backend "microsandbox".',
-    );
-    expect(snapshot).not.toContain("initializing 3 sandbox templates");
-    expect(snapshot).not.toContain("checking cached snapshot");
-    expect(snapshot).not.toContain("ordinary stdout log");
-    expect(snapshot).not.toContain("○ stdout");
-    expect(snapshot).not.toContain("○ stderr");
   });
 
   it("hides sandbox lines under the none log level", () => {
@@ -1567,14 +1565,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("ordinary stdout log");
   });
 
-  it("renders captured lazy preparation logs under the sandbox log level", () => {
+  it("renders captured lazy preparation logs under all", () => {
     const screen = new MockScreen({ columns: 100, rows: 30 });
     const input = new MockUserInput();
     const renderer = new TerminalRenderer({
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "sandbox",
+      logs: "all",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1587,10 +1585,10 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
     const snapshot = screen.snapshot();
     expect(snapshot).toContain('sandbox · built sandbox template "root" on backend "docker".');
-    expect(snapshot).not.toContain("initializing 3 sandbox templates");
-    expect(snapshot).not.toContain("checking Docker daemon");
-    expect(snapshot).not.toContain("ordinary stdout log");
-    expect(snapshot).not.toContain("○ stdout");
+    expect(snapshot).toContain("initializing 3 sandbox templates");
+    expect(snapshot).toContain("checking Docker daemon");
+    expect(snapshot).toContain("ordinary stdout log");
+    expect(snapshot).toContain("○ stdout");
   });
 
   it("cycles the log mode on Ctrl+L with a transient status hint that clears after 5s", () => {
@@ -1604,21 +1602,21 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
       // Ctrl+R only redraws — it must not cycle the mode or show the hint.
       input.type("\u0012");
-      expect(renderer.logDisplayMode()).toBe("none");
+      expect(renderer.logDisplayMode()).toBe("error");
       expect(screen.snapshot()).not.toContain("logs:");
 
-      input.type("\u000c"); // Ctrl+L: none → all
-      expect(renderer.logDisplayMode()).toBe("all");
-      expect(screen.snapshot()).toContain("logs: all");
+      input.type("\u000c"); // Ctrl+L: error → warn
+      expect(renderer.logDisplayMode()).toBe("warn");
+      expect(screen.snapshot()).toContain("logs: warn");
 
-      input.type("\u000c"); // Ctrl+L: all → stderr
-      expect(renderer.logDisplayMode()).toBe("stderr");
-      expect(screen.snapshot()).toContain("logs: stderr");
+      input.type("\u000c"); // Ctrl+L: warn → debug
+      expect(renderer.logDisplayMode()).toBe("debug");
+      expect(screen.snapshot()).toContain("logs: debug");
 
       // The hint clears after 5s of no further cycling; the mode itself stays.
       vi.advanceTimersByTime(5_000);
       expect(screen.snapshot()).not.toContain("logs:");
-      expect(renderer.logDisplayMode()).toBe("stderr");
+      expect(renderer.logDisplayMode()).toBe("debug");
 
       renderer.shutdown();
     } finally {
@@ -1755,7 +1753,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "stderr",
+      logs: "error",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1778,7 +1776,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "stderr",
+      logs: "error",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1802,7 +1800,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       input,
       output: screen,
       captureForeignOutput: true,
-      logs: "stderr",
+      logs: "error",
       unicode: true,
     });
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -1844,8 +1842,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("\n\n─");
-    expect(snapshot).toContain("Approve random_color?");
+    expect(snapshot).toMatch(/^─+\n\n  Approve random_color\?/);
+    expect(snapshot).toMatch(/No\n\n─+\n  y yes/);
     const yes = snapshot.split("\n").find((row) => row.includes("Yes"));
     expect(yes).toBe("     Yes");
     expect(snapshot).toContain("No");
@@ -1876,7 +1874,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     });
 
     expect(screen.snapshot()).toMatch(
-      /─ subagent\(number_picker:13\) · 2 of 10 ──\n\n\s+Approve random_number\?/,
+      /^── subagent\(number_picker:13\) · 2 of 10 ─+\n\n\s+Approve random_number\?/,
     );
     input.enter();
     await expect(approval).resolves.toEqual({ approved: true });
@@ -3800,9 +3798,12 @@ describe("TerminalRenderer conversation", () => {
   let sequence = 0;
   const stamped = (event: UnstampedMessageStreamEvent) => stampTestEvent(event, ++sequence);
 
-  it("writes a task's start and end lines and shows it in the panel while it works", async () => {
-    const { screen, renderer } = makeRenderer(100, 30);
-    const prompt = readPrompt(renderer);
+  it("keeps live tasks above approval with a shared divider and state in the header", async () => {
+    const { screen, input, renderer } = makeRenderer(100, 30);
+    const initialPrompt = readPrompt(renderer);
+    input.type("Pick a number for Alice.");
+    input.enter();
+    await initialPrompt;
     const call = {
       callId: "pick_1",
       kind: "agent" as const,
@@ -3836,14 +3837,39 @@ describe("TerminalRenderer conversation", () => {
           turnId: "turn_1",
         }),
       ),
-      stamped(createTurnWaitingEvent({ usage: TEST_USAGE, sequence: 3, turnId: "turn_1" })),
+      stamped(
+        createTurnWaitingEvent({ on: "tasks", usage: TEST_USAGE, sequence: 3, turnId: "turn_1" }),
+      ),
     ];
     renderer.renderConversation(conversationOf(working, { working: true }));
     const during = screen.snapshot();
-    expect(during).toContain("※ number_picker  Pick a number for Alice.");
-    expect(during).toMatch(/※ number_picker +Starting/);
-    expect(during).toContain("Waiting for number_picker");
+    expect(during).toContain("▪ Delegate subagent(number_picker)  Pick a number for Alice.");
+    expect(during).toMatch(/── Waiting · 1 task · \S+ ─+\n\n  subagent\(number_picker\) \S+/);
+    expect(during).toMatch(/subagent\(number_picker\) \S+\n\n─+\n❯/);
+    expect(during).not.toContain("Starting");
+    expect(countOccurrences(during, "Pick a number for Alice.")).toBe(1);
+    expect(during).not.toContain("Waiting for");
+    expect(during).not.toContain("↑");
+    expect(during).not.toContain("↓");
     expect(during).not.toContain("task_wait");
+
+    const approval = renderer.readToolApproval({
+      approvalId: "approval_1",
+      toolCallId: "child_tool",
+      toolName: "wait_random_number",
+      input: {},
+    });
+    expect(screen.snapshot()).toContain("Approve wait_random_number?");
+    expect(screen.snapshot()).toMatch(/── Waiting · 1 task/);
+    expect(screen.snapshot()).toMatch(
+      /subagent\(number_picker\) \S+\n\n─+\n\n  Approve wait_random_number\?/,
+    );
+    expect(countOccurrences(screen.snapshot(), "  subagent(number_picker)")).toBe(1);
+    input.enter();
+    await expect(approval).resolves.toEqual({ approved: true });
+    expect(screen.snapshot()).toContain("Waiting · 1 task");
+    const prompt = readPrompt(renderer);
+    expect(screen.snapshot()).toMatch(/subagent\(number_picker\) \S+\n\n─+\n❯/);
 
     renderer.renderConversation(
       conversationOf(
@@ -3855,8 +3881,8 @@ describe("TerminalRenderer conversation", () => {
       ),
     );
     const after = screen.snapshot();
-    expect(after).toMatch(/✓ number_picker +finished in/);
-    expect(after).not.toMatch(/※ number_picker +Starting/);
+    expect(after).toMatch(/✓ subagent\(number_picker\) +finished in/);
+    expect(after).not.toContain("Waiting · 1 task");
     renderer.requestInterrupt();
     await prompt.catch(() => {});
   });
@@ -3886,8 +3912,14 @@ describe("TerminalRenderer conversation", () => {
   const completed = (turnId: string, message: string) =>
     stamped(createMessageCompletedEvent({ message, sequence: 2, stepIndex: 0, turnId }));
 
-  it("streams prose in the live region and commits it whole once it settles", async () => {
-    const { screen, renderer } = makeRenderer(34, 8);
+  it("commits settled prose past hidden logs and reveals those logs without clipping", async () => {
+    const screen = new MockScreen({ columns: 34, rows: 8 });
+    const renderer = new TerminalRenderer({
+      input: new MockUserInput(),
+      output: screen,
+      captureForeignOutput: true,
+      unicode: true,
+    });
     const prompt = readPrompt(renderer);
     const words = Array.from(
       { length: 44 },
@@ -3895,7 +3927,11 @@ describe("TerminalRenderer conversation", () => {
     );
     const streaming = [turn("turn_1"), ...words.map((word) => appended("turn_1", `${word} `))];
 
+    console.warn("Workflow is awaiting settlement");
+    process.stdout.write("Raw progress\n");
+    process.stderr.write("Raw diagnostic\n");
     renderer.renderConversation(conversationOf(streaming, { working: true }));
+    expect(screen.snapshot()).not.toContain("Workflow is awaiting settlement");
     expect(screen.snapshot()).toContain("earlier rows hidden");
     expect(screen.snapshot()).not.toContain("word-01");
 
@@ -3906,6 +3942,14 @@ describe("TerminalRenderer conversation", () => {
     expect(countOccurrences(snapshot, "word-01")).toBe(1);
     expect(countOccurrences(snapshot, "word-44")).toBe(1);
     expect(snapshot).not.toContain("earlier rows hidden");
+    renderer.setLogDisplayMode("all");
+    const revealed = screen.snapshot();
+    expect(revealed).toContain("Workflow is awaiting settlement");
+    expect(revealed).toContain("Raw progress");
+    expect(revealed).toContain("Raw diagnostic");
+    expect(revealed).not.toContain("earlier rows hidden");
+    expect(countOccurrences(revealed, "word-01")).toBe(1);
+    expect(countOccurrences(revealed, "word-44")).toBe(1);
     renderer.requestInterrupt();
     await prompt.catch(() => {});
   });

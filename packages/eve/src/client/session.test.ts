@@ -1204,6 +1204,35 @@ describe("ClientSession", () => {
     expect(result.inputRequests.at(-1)?.requestId).toBe("request_2");
   });
 
+  it("stops at a turn.waiting on input when its request was read earlier", async () => {
+    const turn = { sequence: 0, stepIndex: 0, turnId: "turn_0" };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) =>
+      (init?.method ?? "GET") === "POST"
+        ? createAcceptedResponse()
+        : createStreamResponse([
+            {
+              type: "approval.candidate",
+              data: { ...turn, candidateId: "c1", outcome: "rejected", requestId: "request_1" },
+            },
+            {
+              type: "turn.waiting",
+              data: { on: "input", sequence: 0, turnId: "turn_0" },
+            },
+            { type: "turn.completed", data: { sequence: 0, turnId: "turn_0" } },
+          ]),
+    );
+
+    const result = await (
+      await createSession().respond([{ optionId: "approve", requestId: "request_1" }])
+    ).result();
+
+    expect(result.events.map((event) => event.type)).toEqual([
+      "approval.candidate",
+      "turn.waiting",
+    ]);
+    expect(result.status).toBe("waiting");
+  });
+
   it("honors an explicit idle reconnect limit for an active turn", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
       return (init?.method ?? "GET") === "POST"

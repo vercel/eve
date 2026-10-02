@@ -276,7 +276,7 @@ Starts a local development server and terminal UI. To connect the UI to an exist
 | `--connection-auth <mode>`          | enum   | `full`             | Connection-authorization rendering                              |
 | `--assistant-response-stats <mode>` | enum   | `tokensPerSecond`  | Assistant header statistic                                      |
 | `--context-size <tokens>`           | number | none               | Model context window size                                       |
-| `--logs <mode>`                     | enum   | `stderr`           | Server and agent logs to show                                   |
+| `--logs <mode>`                     | enum   | `error`            | Display `none`, `error`, `warn`, `debug`, or `all` logs         |
 
 Local development mounts bundled development extensions without adding files to your project. Pass `--no-default-extensions` to disable them. See [Self-Modification](../guides/self-modification) for details.
 

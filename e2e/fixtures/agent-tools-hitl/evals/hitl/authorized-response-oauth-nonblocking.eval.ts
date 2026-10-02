@@ -4,12 +4,13 @@ const MARKER = "authorized-response-oauth-nonblocking-K3T9";
 const TOOL_NAME = "oauth-authorized-gate";
 const REQUESTER = "oauth-nonblocking-requester";
 const RESPONDER = "oauth-nonblocking-responder";
+const BYSTANDER = "oauth-nonblocking-bystander";
 const as = (principalId: string) => ({ headers: { "x-eve-fixture-user": principalId } });
 
 export default defineEval({
   tags: ["real-model"],
   description:
-    "A message runs while candidate OAuth stays open, then OAuth settles the approval. The sign-in names the responder, not the requester who speaks while it waits.",
+    "Carol's message waits while the responder's OAuth holds the turn, then OAuth settles the approval as the responder, not the latest speaker, and Carol's message runs.",
   async test(t) {
     const { session: conversation } = await t.send(
       `Call the \`${TOOL_NAME}\` tool with marker "${MARKER}".`,
@@ -24,17 +25,16 @@ export default defineEval({
       as(RESPONDER),
     );
     const required = await approvalTurn.waitForEvent("authorization.required");
+    // The responder's sign-in holds the turn, so this read stops there.
+    const held = await approvalTurn.result();
+    const resumeIndex = held.session.state.streamIndex;
 
-    const message = await approvalTurn.session.send(
+    // Someone other than the requester speaks while the sign-in is open: the
+    // message waits for the held turn instead of steering it.
+    const queued = await held.session.start(
       "Do not call tools. Reply with exactly CANDIDATE-OAUTH-OPEN-OK.",
-      as(REQUESTER),
+      as(BYSTANDER),
     );
-    message.expectOk();
-    message.messageIncludes("CANDIDATE-OAUTH-OPEN-OK");
-    message.notEvent("approval.settled");
-    message.notEvent("action.result", {
-      data: { result: { kind: "tool-result", toolName: TOOL_NAME }, status: "completed" },
-    });
 
     if (
       required.type !== "authorization.required" ||
@@ -48,10 +48,7 @@ export default defineEval({
       );
     }
     const callbackUrl = new URL(required.data.authorization.url);
-    const callbackTurn = t.target.watchTurn(approvalTurn.sessionId, {
-      startIndex: conversation.state?.streamIndex,
-    });
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    const callbackTurn = t.target.watchTurn(held.sessionId, { startIndex: resumeIndex });
     const callback = await fetch(callbackUrl);
     if (!callback.ok)
       throw new Error(`Fixture OAuth callback failed (${String(callback.status)}).`);
@@ -70,6 +67,14 @@ export default defineEval({
         result: { kind: "tool-result", output: new RegExp(MARKER), toolName: TOOL_NAME },
         status: "completed",
       },
+    });
+    resumed.notEvent("message.received", { data: { message: /CANDIDATE-OAUTH-OPEN-OK/ } });
+
+    const message = await queued.result();
+    message.expectOk();
+    message.messageIncludes("CANDIDATE-OAUTH-OPEN-OK");
+    message.notEvent("action.result", {
+      data: { result: { kind: "tool-result", toolName: TOOL_NAME }, status: "completed" },
     });
     t.succeeded();
   },

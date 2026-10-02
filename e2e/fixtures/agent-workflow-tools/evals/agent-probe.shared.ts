@@ -83,8 +83,8 @@ async function waitForMarker(
 }
 
 /**
- * A sign-in inside a running call parks the turn without ending it, so read
- * one live turn: complete the sign-in when it is requested, then read the
+ * A sign-in inside a running call holds the turn: the response stops at its
+ * `turn.waiting` (`on: "input"`). Complete the sign-in, then read the same
  * turn to its end.
  */
 async function completeSignIn(
@@ -94,13 +94,18 @@ async function completeSignIn(
 ): Promise<{ readonly callbackUrl: URL; readonly turn: EveEvalTurn }> {
   const session = await t.session();
   const live = await session.start(message);
-  const required = await live.waitForEvent("authorization.required");
+  const held = await live.result();
+  const required = held.events.find((event) => event.type === "authorization.required");
+  if (required?.type !== "authorization.required") {
+    throw new Error("Expected the held turn to request a sign-in.");
+  }
   const callbackUrl = toCallbackUrl(required.data.authorization?.url);
+  const resumed = watchNext(t, live.session);
   const response = await fetch(callbackUrl);
   if (!response.ok) {
     throw new Error(`Authorization callback failed (${response.status}).`);
   }
-  return { callbackUrl, turn: await live.result() };
+  return { callbackUrl, turn: await resumed.result() };
 }
 
 function requireAuthorizationOutcome(

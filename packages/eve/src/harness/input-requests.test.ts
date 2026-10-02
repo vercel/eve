@@ -617,7 +617,7 @@ describe("resolvePendingInput", () => {
     ]);
   });
 
-  it("keeps a pending approval open while an unrelated follow-up message continues", () => {
+  it("steers past a pending approval when a follow-up message arrives instead of an answer", () => {
     const session = appendPendingInputBatch({
       event: { sequence: 7, stepIndex: 2, turnId: "turn_1" },
       requests: [
@@ -648,12 +648,15 @@ describe("resolvePendingInput", () => {
       session,
     });
 
-    // The message runs as an ordinary turn; the approval stays answerable.
-    expect(result.outcome).toBe("continue");
-    expect(result.rejectedActions).toBeUndefined();
-    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
+    // The message moves the turn on: the call never runs, and the model reads
+    // the message in the same step.
+    expect(result.outcome).toBe("resolved");
+    expect(result.resolvedInputs).toMatchObject([
+      { inputs: [{ outcome: "ignored", request: { requestId: "approval-1" } }] },
+    ]);
+    expect(result.rejectedActions?.[0]?.results).toMatchObject([{ callId: "approval-call" }]);
     expect(getDeferredStepInput(result.session)).toBeUndefined();
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
+    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set());
   });
 
   it("preserves context-only input while a pending batch stays open", () => {
@@ -1045,43 +1048,7 @@ describe("pending input batch collection", () => {
     expect(getPendingInputRequestIds(second.session.state)).toEqual(new Set(["approval-2"]));
   });
 
-  it("leaves every batch open when a message arrives with several batches pending", () => {
-    let session = appendPendingInputBatch({
-      requests: [approvalRequest("approval-1", "call-1")],
-      responseMessages: [batchOutput("call-1", "bash")],
-      session: createHarnessSession(),
-    });
-    session = appendPendingInputBatch({
-      requests: [approvalRequest("approval-2", "call-2")],
-      responseMessages: [batchOutput("call-2", "bash")],
-      session,
-    });
-
-    const result = resolvePendingInput({ session, stepInput: { message: "keep going" } });
-
-    expect(result.outcome).toBe("continue");
-    expect(result.messages).toEqual([{ content: "previous", kind: "user", role: "user" }]);
-    expect(getDeferredStepInput(result.session)).toBeUndefined();
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(
-      new Set(["approval-1", "approval-2"]),
-    );
-  });
-
-  it("continues an internal step past HITL emitted by an older turn", () => {
-    const session = appendPendingInputBatch({
-      event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
-      requests: [approvalRequest("approval-1", "call-1")],
-      responseMessages: [batchOutput("call-1", "bash")],
-      session: createHarnessSession(),
-    });
-
-    const result = resolvePendingInput({ activeTurnId: "turn_1", internalStep: true, session });
-
-    expect(result.outcome).toBe("continue");
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
-  });
-
-  it("parks when the current turn emitted the pending HITL", () => {
+  it("holds on a pending approval when the step brings no answer or message", () => {
     const session = appendPendingInputBatch({
       event: { sequence: 5, stepIndex: 1, turnId: "turn_1" },
       requests: [approvalRequest("approval-1", "call-1")],
@@ -1089,7 +1056,7 @@ describe("pending input batch collection", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({ activeTurnId: "turn_1", internalStep: true, session });
+    const result = resolvePendingInput({ session });
 
     expect(result.outcome).toBe("unresolved");
     expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
@@ -1293,13 +1260,8 @@ describe("clearPendingSessionLimitPrompt", () => {
     });
 
     const kept = clearPendingSessionLimitPrompt(session);
-    const result = resolvePendingInput({ session: kept, stepInput: { message: "and then this" } });
 
-    // The approval batch survives the limit-prompt sweep and stays
-    // answerable; the follow-up message continues as an ordinary turn.
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
-    expect(result.outcome).toBe("continue");
-    expect(getDeferredStepInput(result.session)).toBeUndefined();
+    expect(getPendingInputRequestIds(kept.state)).toEqual(new Set(["approval-1"]));
   });
 
   it("is a no-op without a pending batch", () => {

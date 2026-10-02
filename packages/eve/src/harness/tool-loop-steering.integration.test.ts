@@ -91,7 +91,7 @@ describe("generation steering with the real AI SDK", () => {
     }
   });
 
-  it.each(["input.requested", "turn.completed", "step.failed"] as const)(
+  it.each(["input.requested", "turn.waiting", "step.failed"] as const)(
     "finishes committing %s when a correction arrives during publication",
     async (boundary) => {
       const logs = captureLogRecords();
@@ -153,7 +153,14 @@ describe("generation steering with the real AI SDK", () => {
       expect(result.steered).toBeUndefined();
       expect(result.next).toBeNull();
       expect(events.filter((event) => event.type === boundary)).toHaveLength(1);
-      expect(events.filter((event) => event.type === "session.waiting")).toHaveLength(1);
+      // A failed step ends the turn; an approval holds it open.
+      const endsTurn = boundary === "step.failed";
+      expect(events.filter((event) => event.type === "session.waiting")).toHaveLength(
+        endsTurn ? 1 : 0,
+      );
+      expect(events.filter((event) => event.type === "turn.waiting")).toHaveLength(
+        endsTurn ? 0 : 1,
+      );
       expect(events.filter((event) => event.type === "message.appended")).toHaveLength(0);
       const parked = logs.records.filter(
         (record) => record.message === "model call failed — parking session for retry by the user",

@@ -90,6 +90,10 @@ export function createAuthorizationExecution(
 
   return {
     complete,
+    /** Whether this execution completed a sign-in for `scoped`. */
+    isJustAuthorized(scoped: ScopedAuthorization): boolean {
+      return justAuthorized.has(scoped.instanceId ?? scoped.scope);
+    },
     async getToken(scoped: ScopedAuthorization): Promise<TokenResult> {
       await complete(scoped);
       try {
@@ -325,8 +329,7 @@ async function startScopedAuthorization(
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const principal = resolveScopedPrincipal(input);
-  const principalId = (input.boundResponder ?? contextStorage.getStore()?.get(AuthKey))
-    ?.principalId;
+  const requester = input.boundResponder ?? contextStorage.getStore()?.get(AuthKey) ?? undefined;
   const callbackUrl = resolveAuthorizationCallbackUrl({
     authorization,
     callbackUrl: attempt.hookUrl,
@@ -340,11 +343,13 @@ async function startScopedAuthorization(
     {
       attemptId: attempt.attemptId,
       challenge: stampChallengeDisplayName(challenge, authorization),
+      grant: authorization.vercelConnect?.connector,
       hookUrl: callbackUrl,
       instanceId: input.instanceId,
       name: scope,
       principal,
-      principalId,
+      principalId: requester?.principalId,
+      requester,
       resume,
     },
   ]);

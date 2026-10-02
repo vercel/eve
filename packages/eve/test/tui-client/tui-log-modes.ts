@@ -10,14 +10,9 @@ import {
 import { theme } from "./lib/theme.ts";
 
 /**
- * End-to-end proof of the `--logs` modes. With capture forced on, a stdout
- * line from each source is emitted while the TUI sits at its prompt; what gets
- * rendered depends on the mode:
- *
- *   - `all`     → stdout, stderr, and sandbox render
- *   - `stderr`  → only stderr renders
- *   - `sandbox` → only sandbox renders
- *   - `none`    → none render (still buffered, never corrupt the frame)
+ * End-to-end proof of the `--logs` modes. With capture forced on, unclassified
+ * stdout, stderr, and sandbox lines are emitted while the TUI sits at its
+ * prompt. They appear only at `all`; `error` and `none` keep them hidden.
  *
  * Needs no agent server and no model credentials.
  */
@@ -27,7 +22,7 @@ const STDERR_MARK = "STDERR_LOG_MARK_9c1";
 const SANDBOX_MARK = "SANDBOX_LOG_MARK_6a2";
 process.env.EVE_TUI_UNICODE = "1";
 
-async function snapshotForMode(mode: "all" | "stderr" | "sandbox" | "none"): Promise<string> {
+async function snapshotForMode(mode: "all" | "error" | "none"): Promise<string> {
   const client = new Client({ host: UNREACHABLE_HOST });
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
@@ -70,22 +65,13 @@ void (async () => {
       throw new Error(`logs=all should show every source:\n${all}`);
     }
 
-    const stderrOnly = await snapshotForMode("stderr");
+    const errors = await snapshotForMode("error");
     if (
-      stderrOnly.includes(STDOUT_MARK) ||
-      !stderrOnly.includes(STDERR_MARK) ||
-      stderrOnly.includes(SANDBOX_MARK)
+      errors.includes(STDOUT_MARK) ||
+      errors.includes(STDERR_MARK) ||
+      errors.includes(SANDBOX_MARK)
     ) {
-      throw new Error(`logs=stderr should show only stderr:\n${stderrOnly}`);
-    }
-
-    const sandboxOnly = await snapshotForMode("sandbox");
-    if (
-      sandboxOnly.includes(STDOUT_MARK) ||
-      sandboxOnly.includes(STDERR_MARK) ||
-      !sandboxOnly.includes(SANDBOX_MARK)
-    ) {
-      throw new Error(`logs=sandbox should show only sandbox lines:\n${sandboxOnly}`);
+      throw new Error(`logs=error should hide unclassified output:\n${errors}`);
     }
 
     const none = await snapshotForMode("none");
@@ -93,9 +79,7 @@ void (async () => {
       throw new Error(`logs=none should hide every source:\n${none}`);
     }
 
-    process.stdout.write(
-      `${theme.muted("[tui-log-modes] all / stderr / sandbox / none modes verified")}\n`,
-    );
+    process.stdout.write(`${theme.muted("[tui-log-modes] all / error / none modes verified")}\n`);
   } catch (error) {
     process.stdout.write(
       `${theme.danger("\n[tui] tui-log-modes smoke test failed:")} ${String(error)}\n`,
