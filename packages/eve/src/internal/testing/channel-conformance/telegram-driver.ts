@@ -61,8 +61,9 @@ export function telegramDriver(): ChannelDriver {
         readonly text?: string;
       };
       if (call.method !== "sendMessage" || body.text?.includes(prompt) !== true) return undefined;
-      return body.reply_markup?.inline_keyboard
-        ?.flat()
+      // An open-ended question posts a ForceReply prompt with no keyboard.
+      return (body.reply_markup?.inline_keyboard ?? [])
+        .flat()
         .filter((button) => button.callback_data !== undefined)
         .map((button) => ({ handle: button.callback_data, label: button.text }));
     },

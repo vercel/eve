@@ -33,6 +33,12 @@ interface ConformanceChannel {
   readonly unsupported?: Partial<Record<HitlRule, string>>;
 }
 
+const DISCORD_ALIAS: BrokenCell = {
+  reason:
+    "a press finds the session by its message id, and only the first message the bot posts is aliased to the session",
+  symptom: /Timed out waiting for \w+ to (return|run or be denied) on discord/,
+};
+
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
 
@@ -50,17 +56,39 @@ const TUI_TYPED_APPROVAL =
  */
 const hitlConformance = {
   "chat-sdk": [{ driver: chatSdkDriver }, { driver: chatSdkTextDriver }],
-  discord: [{ driver: discordDriver }],
+  discord: [
+    {
+      driver: discordDriver,
+      broken: {
+        "pressing options of two pending questions answers each with its own option": DISCORD_ALIAS,
+        "pressing Approve on one of two pending approvals runs only that tool": DISCORD_ALIAS,
+        "answering an approval and a question pending together settles both": DISCORD_ALIAS,
+      },
+    },
+  ],
   github: [{ driver: githubDriver }],
   linear: [{ driver: linearDriver }],
   linq: [{ driver: linqDriver }],
   slack: [{ driver: slackDriver }],
   teams: [{ driver: teamsDriver }],
-  telegram: [{ driver: telegramDriver }],
+  telegram: [
+    {
+      driver: telegramDriver,
+      broken: {
+        "pressing an option of an answered question sends it to the agent as new input": {
+          reason:
+            "the first press consumes the button's callback id, so a later press is acknowledged and dropped",
+          symptom: /Timed out waiting for a reply to "Saturday" on telegram/,
+        },
+      },
+    },
+  ],
   tui: [
     {
       driver: tuiDriver,
       unsupported: {
+        "pressing an option of an answered question sends it to the agent as new input":
+          "an answered question's drawer closes, so nothing is left to press",
         "a text reply of approve runs the gated tool": TUI_TYPED_APPROVAL,
         "a text reply of cancel stops the gated tool without running it": TUI_TYPED_APPROVAL,
       },

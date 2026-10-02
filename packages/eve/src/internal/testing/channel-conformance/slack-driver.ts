@@ -125,17 +125,20 @@ export function slackDriver(): ChannelDriver {
       if (body.blocks === undefined || !JSON.stringify(body.blocks).includes(prompt))
         return undefined;
       const messageTs = (call.response as { readonly ts: string }).ts;
-      const options = body.blocks.flatMap((block) =>
-        // Questions use `actions` blocks (`elements`); approval cards keep buttons in `actions`.
-        (
-          (block as { readonly elements?: readonly SlackElement[] }).elements ??
-          (block as { readonly actions?: readonly SlackElement[] }).actions ??
-          []
-        )
-          .filter((element) => element.action_id.startsWith(HITL_ACTION_PREFIX))
-          .flatMap((element) => renderedOptions(element, messageTs)),
-      );
-      return options.length === 0 ? undefined : options;
+      const optionsIn = (blocks: readonly unknown[]) =>
+        blocks.flatMap((block) =>
+          // Questions use `actions` blocks (`elements`); approval cards keep buttons in `actions`.
+          (
+            (block as { readonly elements?: readonly SlackElement[] }).elements ??
+            (block as { readonly actions?: readonly SlackElement[] }).actions ??
+            []
+          )
+            .filter((element) => element.action_id.startsWith(HITL_ACTION_PREFIX))
+            .flatMap((element) => renderedOptions(element, messageTs)),
+        );
+      // A batch of approvals posts one card per request, each holding its own buttons.
+      const card = optionsIn(body.blocks.filter((block) => JSON.stringify(block).includes(prompt)));
+      return card.length > 0 ? card : optionsIn(body.blocks);
     },
     press: (option) => {
       const { action, messageTs } = option.handle as PressHandle;

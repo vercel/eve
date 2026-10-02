@@ -49,7 +49,7 @@ export function chatSdkDriver(): ChannelDriver {
       if (!isPost(call)) return undefined;
       const card = cardOf(call.body as AdapterPostableMessage);
       if (card === undefined || !texts(card).includes(prompt)) return undefined;
-      return nodes(card)
+      return nodes(requestSection(card, prompt))
         .filter((node) => node.type === "button" && node.id !== undefined)
         .map((button) => ({ handle: button, label: button.label ?? "" }));
     },
@@ -241,6 +241,20 @@ function cardOf(posted: AdapterPostableMessage): CardNode | undefined {
   if (typeof posted !== "object" || posted === null) return undefined;
   if ("card" in posted) return posted.card as CardNode;
   return (posted as CardNode).type === "card" ? (posted as CardNode) : undefined;
+}
+
+/**
+ * A card batching several requests lists each one's prompt text, then its
+ * actions. Returns the part of `card` that belongs to `prompt`.
+ */
+function requestSection(card: CardNode, prompt: string): CardNode {
+  const children = card.children ?? [];
+  const start = children.findIndex(
+    (child) => child.type === "text" && child.content?.includes(prompt),
+  );
+  if (start < 0) return card;
+  const next = children.findIndex((child, index) => index > start && child.type === "text");
+  return { ...card, children: children.slice(start, next < 0 ? undefined : next) };
 }
 
 function nodes(node: CardNode): CardNode[] {

@@ -14,6 +14,8 @@ import { z } from "#compiled/zod/index.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { askQuestion } from "#tools/provided/ask-question.js";
+import { defineWorkflowTool } from "#public/tools/index.js";
+import { askDayAndTimeWorkflow } from "#internal/testing/channel-conformance/two-questions-workflow.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 
 /** One outbound call a channel made to its platform API. */
@@ -88,14 +90,31 @@ export interface ChannelConversation {
   say(text: string): Promise<void>;
   /** Waits for the bot to post `prompt` with choices, returning them. */
   waitForQuestion(prompt: string): Promise<readonly RenderedOption[]>;
+  /**
+   * Answers each of `prompts` with the option `choose` picks, in whatever order
+   * the client shows them.
+   */
+  answerEach(
+    prompts: readonly string[],
+    choose: (prompt: string, options: readonly RenderedOption[]) => RenderedOption,
+  ): Promise<void>;
+  /**
+   * Waits until the turn holds for `prompt`, whether or not the client shows it
+   * yet. A client may show several pending requests one at a time.
+   */
+  waitForRequest(prompt: string): Promise<void>;
   /** The person presses one rendered choice. */
   press(option: RenderedOption): Promise<void>;
   /** Waits until `tool` returns, as visible in the bot's reply, and returns its output. */
   waitForToolResult(tool: string): Promise<unknown>;
+  /** Waits until the bot replies to input that carried `text`, however the channel framed it. */
+  waitForReplyTo(text: string): Promise<void>;
   /** Waits until the bot's reply shows `tool` ran or was denied. */
   waitForToolOutcome(tool: string): Promise<ToolOutcome>;
-  /** How many times {@link GATED_TOOL} actually executed, as its side effect would show. */
-  readonly gatedToolRuns: number;
+  /** Waits until every session has stopped working and waits only on a person. */
+  waitForRest(): Promise<void>;
+  /** How many times a gated tool actually executed, as its side effect would show. */
+  runsOf(tool: GatedTool): number;
 }
 
 /**
@@ -117,8 +136,11 @@ export interface ClientDriver {
 export interface ClientView {
   /** The person sends a plain-text message. */
   say(text: string): Promise<void>;
-  /** Waits for the client to show `prompt` with choices, returning them. */
-  waitForQuestion(prompt: string): Promise<readonly RenderedOption[]>;
+  /**
+   * Waits for the client to show one of `prompts`, returning which one and its
+   * choices. A client may show several pending requests one at a time.
+   */
+  waitForQuestion(prompts: readonly string[]): Promise<ShownQuestion>;
   /** The person presses one shown choice. */
   press(option: RenderedOption): Promise<void>;
   /** The bot replies the client shows now. */
@@ -127,6 +149,12 @@ export interface ClientView {
   describe(): string;
   /** Stops the client and releases anything it holds, such as its event stream. */
   close(): Promise<void>;
+}
+
+/** A question a client shows, with the choices it offers. */
+export interface ShownQuestion {
+  readonly options: readonly RenderedOption[];
+  readonly prompt: string;
 }
 
 /**
@@ -150,6 +178,14 @@ const CLIENT_HOST = "https://agent.example.com";
 
 /** The test agent's tool that always needs a person's approval before it runs. */
 export const GATED_TOOL = "deploy_release";
+
+/** A second always-gated tool, so two approvals can be pending at once. */
+export const SECOND_GATED_TOOL = "publish_notes";
+
+export type GatedTool = typeof GATED_TOOL | typeof SECOND_GATED_TOOL;
+
+/** The test agent's tool that asks {@link DAY_PROMPT} and {@link TIME_PROMPT} at once. */
+export const TWO_QUESTIONS_TOOL = "plan_review";
 
 /** What a person sees once a tool call settles. */
 export type ToolOutcome =
@@ -241,13 +277,15 @@ function webhookView(
   return {
     say: (text) => post(driver.message(text)),
     press: (option) => post(driver.press(option)),
-    waitForQuestion: (prompt) =>
+    waitForQuestion: (prompts) =>
       wait(
-        `the question "${prompt}"`,
+        `one of the questions ${JSON.stringify(prompts)}`,
         () => {
           for (const call of calls) {
-            const options = driver.findOptions(call, prompt);
-            if (options !== undefined) return options;
+            for (const prompt of prompts) {
+              const options = driver.findOptions(call, prompt);
+              if (options !== undefined) return { options, prompt };
+            }
           }
           return undefined;
         },
@@ -300,7 +338,7 @@ async function converse(
 ): Promise<void> {
   if (!isCompiledChannel(created)) throw new Error(`${label} is not a compiled channel.`);
   const channel: CompiledChannel = created;
-  let gatedToolRuns = 0;
+  const runs: Record<GatedTool, number> = { [GATED_TOOL]: 0, [SECOND_GATED_TOOL]: 0 };
 
   const runtime = await createTestRuntime({
     agent: { name: `${label}-hitl-conformance` },
@@ -309,17 +347,21 @@ async function converse(
         logicalPath: "tools/ask_question.ts",
         loadNamespace: async () => ({ default: askQuestion() }),
       },
+      gatedTool(GATED_TOOL, "Deploys a release.", () => {
+        runs[GATED_TOOL] += 1;
+        return { deployed: true };
+      }),
+      gatedTool(SECOND_GATED_TOOL, "Publishes release notes.", () => {
+        runs[SECOND_GATED_TOOL] += 1;
+        return { published: true };
+      }),
       {
-        logicalPath: `tools/${GATED_TOOL}.ts`,
+        logicalPath: `tools/${TWO_QUESTIONS_TOOL}.ts`,
         loadNamespace: async () => ({
-          default: defineTool({
-            approval: always(),
-            description: `Deploys a release. Only call when asked to use ${GATED_TOOL}.`,
-            async execute() {
-              gatedToolRuns += 1;
-              return { deployed: true };
-            },
-            inputSchema: z.object({ release: z.string().optional() }),
+          default: defineWorkflowTool({
+            description: `Plans a review. Only call when asked to use ${TWO_QUESTIONS_TOOL}.`,
+            execute: askDayAndTimeWorkflow,
+            inputSchema: z.object({}),
           }),
         }),
       },
@@ -400,8 +442,6 @@ async function converse(
       return { response, settled };
     };
 
-    /** How many times each session's turn has held for input, as of the last wait. */
-    const inputHolds = new Map<string, number>();
     const view = await open(dispatch);
     const replyWait = <T>(label: string, select: (reply: string) => T | undefined) =>
       wait(
@@ -420,21 +460,34 @@ async function converse(
       say: (text) => view.say(text),
       press: (option) => view.press(option),
       async waitForQuestion(prompt) {
-        const options = await view.waitForQuestion(prompt);
-        await holdForInput();
+        const { options } = await view.waitForQuestion([prompt]);
+        await holdForInput(prompt);
         return options;
       },
+      async answerEach(prompts, choose) {
+        const remaining = [...prompts];
+        while (remaining.length > 0) {
+          const { options, prompt } = await view.waitForQuestion(remaining);
+          await holdForInput(prompt);
+          await view.press(choose(prompt, options));
+          remaining.splice(remaining.indexOf(prompt), 1);
+        }
+      },
+      waitForRequest: (prompt) => holdForInput(prompt),
       waitForToolResult: (tool) =>
         replyWait(`${tool} to return`, (reply) => readMockToolReply(reply, tool)),
+      waitForReplyTo: (message) =>
+        replyWait(`a reply to "${message}"`, (reply) =>
+          isMockReplyTo(reply, message) ? true : undefined,
+        ).then(() => {}),
       waitForToolOutcome: (tool) =>
         replyWait(`${tool} to run or be denied`, (reply): ToolOutcome | undefined => {
           const output = readMockToolReply(reply, tool);
           if (output !== undefined) return { kind: "ran", output };
           return isMockDenialReply(reply) ? { kind: "denied" } : undefined;
         }),
-      get gatedToolRuns() {
-        return gatedToolRuns;
-      },
+      runsOf: (tool) => runs[tool],
+      waitForRest: () => waitForRest([...sessions.values()], wait),
     };
 
     /**
@@ -462,16 +515,12 @@ async function converse(
      * the question appears races the turn's own bookkeeping for it; see also
      * {@link waitForAddress}.
      */
-    function holdForInput(): Promise<true> {
-      return wait(
-        "the turn to hold for input",
+    async function holdForInput(prompt: string): Promise<void> {
+      await wait(
+        `the turn to hold for "${prompt}"`,
         async () => {
           for (const session of sessions.values()) {
-            const holds = await countInputHolds(session);
-            if (holds > (inputHolds.get(session.id) ?? 0)) {
-              inputHolds.set(session.id, holds);
-              return true;
-            }
+            if (await holdsFor(session, prompt)) return true;
           }
           return undefined;
         },
@@ -520,21 +569,90 @@ async function cancelUntilResting(session: Session): Promise<void> {
   throw new Error(`Timed out waiting for session ${session.id} to rest.`);
 }
 
-async function countInputHolds(session: Session): Promise<number> {
+/** How long a session's stream must stay unchanged to count as resting. */
+const REST_QUIET_MS = 250;
+
+/**
+ * Waits until each session's stream ends waiting on its next message or on a
+ * person, with no step running, and stays that way. A response just delivered
+ * may not have reached the stream yet, so one quiet read is not enough.
+ */
+async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<void> {
+  const world = await getWorld();
+  let quietSince: number | undefined;
+  let lastTails = "";
+  await wait(
+    "every session to rest",
+    async () => {
+      const states = await Promise.all(
+        sessions.map(async (session) => {
+          const tail = await session.getStreamTailIndex();
+          const reader = (await session.getEventStream({ startIndex: tail })).getReader();
+          const last = await reader.read().finally(() => reader.cancel());
+          const waiting =
+            last.value?.type === "session.waiting" ||
+            (last.value?.type === "turn.waiting" && last.value.data.on === "input");
+          const steps = await world.steps.list({ resolveData: "none", runId: session.id });
+          const idle = steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status));
+          return { resting: waiting && idle, tail };
+        }),
+      );
+      const tails = states.map((state) => state.tail).join(",");
+      const quiet = states.every((state) => state.resting) && tails === lastTails;
+      lastTails = tails;
+      if (!quiet) {
+        quietSince = undefined;
+        return undefined;
+      }
+      quietSince ??= Date.now();
+      return Date.now() - quietSince >= REST_QUIET_MS ? true : undefined;
+    },
+    () => "",
+  );
+}
+
+/**
+ * Whether the turn held for input after it last asked `prompt`. The turn emits
+ * `turn.waiting` after each request, or once after requests raised together.
+ */
+async function holdsFor(session: Session, prompt: string): Promise<boolean> {
   const tail = await session.getStreamTailIndex();
-  if (tail < 0) return 0;
+  if (tail < 0) return false;
   const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
-  let holds = 0;
+  let asked = false;
+  let held = false;
   try {
     for (let index = 0; index <= tail; index += 1) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (value.type === "turn.waiting" && value.data.on === "input") holds += 1;
+      if (
+        value.type === "input.requested" &&
+        value.data.requests.some((request) => request.prompt === prompt)
+      ) {
+        asked = true;
+        held = false;
+      } else if (asked && value.type === "turn.waiting" && value.data.on === "input") {
+        held = true;
+      }
     }
   } finally {
     await reader.cancel();
   }
-  return holds;
+  return held;
+}
+
+function gatedTool(name: GatedTool, description: string, execute: () => unknown) {
+  return {
+    logicalPath: `tools/${name}.ts`,
+    loadNamespace: async () => ({
+      default: defineTool({
+        approval: always(),
+        description: `${description} Only call when asked to use ${name}.`,
+        execute: async () => execute(),
+        inputSchema: z.object({ release: z.string().optional() }),
+      }),
+    }),
+  };
 }
 
 function findRoute(channel: CompiledChannel, request: Request) {
@@ -581,6 +699,14 @@ export function readMockToolReply(text: string, tool: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Without a tool to call, the test model replies `Bootstrap reply: <input>`,
+ * echoing the input with any context the channel wrapped around it.
+ */
+function isMockReplyTo(text: string, message: string): boolean {
+  return text.startsWith("Bootstrap reply") && text.includes(message);
 }
 
 /** The test model reports a denied call's `execution-denied` result in its reply. */
