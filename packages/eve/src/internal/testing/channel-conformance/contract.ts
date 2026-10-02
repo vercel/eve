@@ -28,8 +28,13 @@ async function askWhichDay(conversation: ChannelConversation) {
   return await conversation.waitForQuestion(PROMPT);
 }
 
+const OPEN_PROMPT = "What should the review cover?";
+const ASK_OPEN = `Use ask_question and set question to: "${OPEN_PROMPT}"`;
+const OWN_WORDS = "Mostly the billing migration";
+
 const DEPLOY = `Use ${GATED_TOOL} to ship the release.`;
 const APPROVAL_PROMPT = "Approve Deploy release?";
+const FOLLOW_UP = "Thanks, that is all for now.";
 
 async function askToDeploy(conversation: ChannelConversation) {
   await conversation.say(DEPLOY);
@@ -53,12 +58,16 @@ async function expectNotDeployed(conversation: ChannelConversation) {
   expect(conversation.gatedToolRuns).toBe(0);
 }
 
-function expectAnsweredSaturday(output: unknown) {
+function expectAnswered(output: unknown, answer: string) {
   // The message carries the real output so a broken cell's symptom can match it.
   expect(output, `ask_question returned ${JSON.stringify(output)}`).toEqual({
-    answer: "Saturday",
+    answer,
     status: "answered",
   });
+}
+
+function expectAnsweredSaturday(output: unknown) {
+  expectAnswered(output, "Saturday");
 }
 
 export const hitlContract = [
@@ -97,6 +106,41 @@ export const hitlContract = [
     },
   },
   {
+    rule: "a text reply that matches no option answers the question with the person's words",
+    source: "docs/tools/human-in-the-loop.md#questions",
+    requires: ["text-replies"],
+    async run(conversation) {
+      await askWhichDay(conversation);
+      await conversation.say(OWN_WORDS);
+      expectAnswered(await conversation.waitForToolResult("ask_question"), OWN_WORDS);
+    },
+  },
+  {
+    rule: "a text reply answers an open-ended question with the person's words",
+    source: "docs/tools/human-in-the-loop.md#questions",
+    requires: ["text-replies"],
+    async run(conversation) {
+      await conversation.say(ASK_OPEN);
+      await conversation.waitForQuestion(OPEN_PROMPT);
+      await conversation.say(OWN_WORDS);
+      expectAnswered(await conversation.waitForToolResult("ask_question"), OWN_WORDS);
+    },
+  },
+  {
+    rule: "pressing an option of an answered question sends it to the agent as new input",
+    source: "docs/tools/workflows.mdx#ask-a-human-ctxask",
+    requires: ["buttons"],
+    async run(conversation) {
+      const options = await askWhichDay(conversation);
+      const saturday = options.find((option) => option.label === "Saturday");
+      expect(saturday, "a Saturday option to press").toBeDefined();
+      await conversation.press(saturday!);
+      expectAnsweredSaturday(await conversation.waitForToolResult("ask_question"));
+      await conversation.press(saturday!);
+      await conversation.waitForReplyTo("Saturday");
+    },
+  },
+  {
     rule: "a tool approval shows Approve and Cancel",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: [],
@@ -119,6 +163,23 @@ export const hitlContract = [
       expect(approve, "an Approve option to press").toBeDefined();
       await conversation.press(approve!);
       await expectDeployed(conversation);
+    },
+  },
+  {
+    rule: "pressing Approve twice runs the gated tool once",
+    source: "docs/tools/human-in-the-loop.md#approvals",
+    requires: ["buttons"],
+    async run(conversation) {
+      const options = await askToDeploy(conversation);
+      const approve = options.find((option) => option.label === "Approve");
+      expect(approve, "an Approve option to press").toBeDefined();
+      await conversation.press(approve!);
+      await conversation.press(approve!);
+      await expectDeployed(conversation);
+      // A later reply shows the session has handled the second press, however it read it.
+      await conversation.say(FOLLOW_UP);
+      await conversation.waitForReplyTo(FOLLOW_UP);
+      expect(conversation.gatedToolRuns).toBe(1);
     },
   },
   {

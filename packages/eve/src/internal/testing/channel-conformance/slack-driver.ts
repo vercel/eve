@@ -135,7 +135,7 @@ export function slackDriver(): ChannelDriver {
           .filter((element) => element.action_id.startsWith(HITL_ACTION_PREFIX))
           .flatMap((element) => renderedOptions(element, messageTs)),
       );
-      return options.length === 0 ? undefined : options;
+      return options;
     },
     press: (option) => {
       const { action, messageTs } = option.handle as PressHandle;

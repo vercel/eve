@@ -88,6 +88,8 @@ export interface ChannelConversation {
   press(option: RenderedOption): Promise<void>;
   /** Waits until `tool` returns, as visible in the bot's reply, and returns its output. */
   waitForToolResult(tool: string): Promise<unknown>;
+  /** Waits until the bot replies to input that carried `text`, however the channel framed it. */
+  waitForReplyTo(text: string): Promise<void>;
   /** Waits until the bot's reply shows `tool` ran or was denied. */
   waitForToolOutcome(tool: string): Promise<ToolOutcome>;
   /** How many times {@link GATED_TOOL} actually executed, as its side effect would show. */
@@ -246,6 +248,11 @@ async function converse(
           const text = driver.postedText(call);
           return text === undefined ? undefined : readMockToolReply(text, tool);
         }),
+      waitForReplyTo: (message) =>
+        waitFor(`a reply to "${message}"`, (call) => {
+          const text = driver.postedText(call);
+          return text !== undefined && isMockReplyTo(text, message) ? true : undefined;
+        }).then(() => {}),
       waitForToolOutcome: (tool) =>
         waitFor(`${tool} to run or be denied`, (call): ToolOutcome | undefined => {
           const text = driver.postedText(call);
@@ -374,6 +381,14 @@ function readMockToolReply(text: string, tool: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Without a tool to call, the test model replies `Bootstrap reply: <input>`,
+ * echoing the input with any context the channel wrapped around it.
+ */
+function isMockReplyTo(text: string, message: string): boolean {
+  return text.startsWith("Bootstrap reply") && text.includes(message);
 }
 
 /** The test model reports a denied call's `execution-denied` result in its reply. */
