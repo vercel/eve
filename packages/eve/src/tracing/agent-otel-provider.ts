@@ -392,7 +392,12 @@ export function createAgentOtelInstrumentation(
     );
     if (recordInputs && event.input !== undefined) {
       const genAiMessages = genAiInputMessagesAttribute(event.input.messages);
-      if (genAiMessages !== undefined) span.setAttribute("gen_ai.input.messages", genAiMessages);
+      if (genAiMessages !== undefined) {
+        span.setAttribute("gen_ai.input.messages", genAiMessages.json);
+        if (genAiMessages.omitted > 0) {
+          span.setAttribute("agent.input.messages.omitted", genAiMessages.omitted);
+        }
+      }
       const genAiSystem = genAiSystemInstructionsAttribute(event.input.instructions);
       if (genAiSystem !== undefined) {
         span.setAttribute("gen_ai.system_instructions", genAiSystem);

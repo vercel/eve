@@ -401,7 +401,7 @@ Each root agent turn starts a new trace. With local caller trace context, that t
 
 Every span carries a real duration. A turn's root `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.
 
-Model, `execute_tool`, and memory spans retain their content by default. Set `EVE_TRACES_CONTENT=off` to omit system prompts, prompt messages, and response text for models; call arguments and results for tools; and recalled memory records. Each captured value is capped at 32 KB.
+Model, `execute_tool`, and memory spans retain their content by default. Set `EVE_TRACES_CONTENT=off` to omit system prompts, prompt messages, and response text for models; call arguments and results for tools; and recalled memory records. Each captured value is capped at 32 KB. When a model call's prompt messages exceed the cap, the oldest are dropped first and `agent.input.messages.omitted` records how many.
 
 Step spans carry token counts under `agent.usage.*`, and cost when Vercel AI Gateway served the call. Model spans also expose `gen_ai.usage.*` token counters. The CLI sums step-level counters only, so model and delegated-call totals are not counted twice.
 

@@ -24,8 +24,14 @@ export function contentAttribute(value: unknown): string | undefined {
   return textContentAttribute(json);
 }
 
+/** Capped GenAI input messages and how many of the oldest were dropped to fit. */
+export interface GenAiInputMessages {
+  readonly json: string;
+  readonly omitted: number;
+}
+
 /** Serializes model messages using the OpenTelemetry GenAI message schema. */
-export function genAiInputMessagesAttribute(messages: unknown): string | undefined {
+export function genAiInputMessagesAttribute(messages: unknown): GenAiInputMessages | undefined {
   if (!Array.isArray(messages)) return undefined;
   const formatted = messages.flatMap((message) => {
     if (!isRecord(message) || message.role === "system" || typeof message.role !== "string") {
@@ -41,9 +47,11 @@ export function genAiInputMessagesAttribute(messages: unknown): string | undefin
   });
   for (let start = 0; start < formatted.length; start += 1) {
     const json = semanticJsonAttribute(formatted.slice(start));
-    if (json !== undefined) return json;
+    if (json !== undefined) return { json, omitted: start };
   }
-  return truncateSingleSemanticMessage(formatted) ?? semanticJsonAttribute([]);
+  const newest = truncateSingleSemanticMessage(formatted);
+  if (newest !== undefined) return { json: newest, omitted: formatted.length - 1 };
+  return { json: "[]", omitted: formatted.length };
 }
 
 /** Serializes the system prompt using the OpenTelemetry GenAI instruction schema. */

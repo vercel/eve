@@ -43,7 +43,7 @@ describe("GenAI message attributes", () => {
             { type: "file", mediaType: "application/octet-stream", filename: "test.bin", data },
           ],
         },
-      ]);
+      ])?.json;
     } finally {
       spy.mockRestore();
     }
@@ -63,7 +63,7 @@ describe("GenAI message attributes", () => {
           kind: "execution.continuation",
           role: "user",
         },
-      ]),
+      ])?.json,
     ).toBe(
       '[{"kind":"user","parts":[{"content":"A real user message.","type":"text"}],"role":"user"},{"kind":"execution.continuation","parts":[{"content":"Continue the interrupted turn.","type":"text"}],"role":"user"}]',
     );
@@ -72,7 +72,7 @@ describe("GenAI message attributes", () => {
   it.each(FRAMEWORK_MESSAGE_KINDS)("preserves %s in the GenAI input attribute", (kind) => {
     const attribute = genAiInputMessagesAttribute([
       { content: "Framework message.", kind, role: "user" },
-    ]);
+    ])?.json;
 
     expect(JSON.parse(attribute!)).toEqual([
       {
@@ -84,7 +84,7 @@ describe("GenAI message attributes", () => {
   });
 
   it.each([
-    ["only", [{ content: "x".repeat(CONTENT_ATTRIBUTE_LIMIT + 1), role: "user" }], undefined],
+    ["only", [{ content: "x".repeat(CONTENT_ATTRIBUTE_LIMIT + 1), role: "user" }], undefined, 0],
     [
       "newest",
       [
@@ -96,21 +96,26 @@ describe("GenAI message attributes", () => {
         },
       ],
       "context.state",
+      1,
     ],
-  ] as const)("keeps a truncated %s message when it alone exceeds the cap", (_, messages, kind) => {
-    const attribute = genAiInputMessagesAttribute(messages);
+  ] as const)(
+    "keeps a truncated %s message when it alone exceeds the cap",
+    (_, messages, kind, omitted) => {
+      const result = genAiInputMessagesAttribute(messages);
 
-    expect(attribute).toBeDefined();
-    expect(attribute!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
-    const parsed = JSON.parse(attribute!) as Array<Record<string, unknown>>;
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0]).toMatchObject({
-      parts: [{ content: expect.stringMatching(/… \[truncated\]$/u), type: "text" }],
-      role: "user",
-    });
-    expect(parsed[0]?.kind).toBe(kind);
-    expect(attribute).not.toContain("older message");
-  });
+      expect(result).toBeDefined();
+      expect(result!.omitted).toBe(omitted);
+      expect(result!.json.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+      const parsed = JSON.parse(result!.json) as Array<Record<string, unknown>>;
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0]).toMatchObject({
+        parts: [{ content: expect.stringMatching(/… \[truncated\]$/u), type: "text" }],
+        role: "user",
+      });
+      expect(parsed[0]?.kind).toBe(kind);
+      expect(result!.json).not.toContain("older message");
+    },
+  );
 
   it("formats model input, output, and system instructions for inspectors", () => {
     expect(
@@ -127,7 +132,7 @@ describe("GenAI message attributes", () => {
           ],
           role: "assistant",
         },
-      ]),
+      ])?.json,
     ).toBe(
       '[{"kind":"user","parts":[{"content":"hello","type":"text"}],"role":"user"},{"parts":[{"arguments":{"message":"echo"},"id":"call-1","name":"delegate","type":"tool_call"}],"role":"assistant"}]',
     );
@@ -181,7 +186,7 @@ describe("GenAI message attributes", () => {
         ],
         role: "assistant",
       },
-    ]);
+    ])?.json;
 
     expect(attribute).toBeDefined();
     expect(attribute!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
