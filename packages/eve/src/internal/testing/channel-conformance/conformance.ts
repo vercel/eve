@@ -121,24 +121,6 @@ const SLACK_BROKEN = {
   },
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
-/**
- * In a channel thread a person mentions the bot, and the mention stays in the
- * typed answer, so it matches no option. An option answer comes back with the
- * mention attached; an approval or a budget prompt never resolves.
- */
-function typedAnswerKeepsMention(...rules: HitlRule[]): Partial<Record<HitlRule, BrokenCell>> {
-  return Object.fromEntries(
-    rules.map((rule) => [
-      rule,
-      {
-        reason:
-          "a typed answer keeps the bot mention a channel reply needs, so it matches no option",
-        symptom: /"answer":"[^"]*<@U_EVE>|Timed out waiting for/u,
-      },
-    ]),
-  );
-}
-
 const TEAMS_BROKEN = unnamedAnsweredPrompts(UNNAMED_RESPONDER, [
   "approvalText",
   "questionPress",
@@ -177,25 +159,7 @@ const hitlConformance = {
   linear: [{ driver: linearDriver }],
   linq: [{ driver: linqDriver }],
   "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
-  slack: [
-    {
-      driver: slackDriver,
-      broken: {
-        ...SLACK_BROKEN,
-        ...typedAnswerKeepsMention(
-          "a text reply matching an option answers the only pending question",
-          "a text reply that matches no option answers the question with the person's words",
-          "a text reply answers an open-ended question with the person's words",
-          "a text reply of approve runs the gated tool",
-          "a text reply of cancel stops the gated tool without running it",
-          "answering a question by text clears its buttons",
-          "answering a question by text names who answered on the question",
-          "approving by text clears the approval's buttons",
-          "approving by text names who approved on the approval",
-        ),
-      },
-    },
-  ],
+  slack: [{ driver: slackDriver, broken: SLACK_BROKEN }],
   "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
   teams: [{ driver: teamsDriver, broken: TEAMS_BROKEN }],
   "teams-dm": [{ dm: true, driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],

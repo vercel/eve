@@ -130,6 +130,11 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
             ts,
             user: PERSON,
           },
+          // Slack names the installation that received the event, which is how eve knows its
+          // own bot user, e.g. to strip that mention from a typed answer.
+          authorizations: [
+            { is_bot: true, is_enterprise_install: false, team_id: TEAM, user_id: BOT },
+          ],
           event_id: `Ev${ts}`,
           team_id: TEAM,
           type: "event_callback",
