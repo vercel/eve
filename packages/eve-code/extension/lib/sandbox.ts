@@ -15,7 +15,10 @@ import {
 
 type ToolingSandbox = Pick<SandboxSession, "resolvePath" | "run" | "writeTextFile">;
 
-/** Include in the consumer's sandbox `revalidationKey` so cached templates rebuild when the tooling changes. */
+/**
+ * Include in the sandbox environment configuration (for example as an `env` value) so cached
+ * templates rebuild when the tooling changes; template identity does not hash called functions.
+ */
 export const CODE_TOOLING_REVALIDATION_KEY = `eve-code-tooling:3:${GH_SIGNED_COMMIT_VERSION}:${TYPESCRIPT_VERSION}`;
 
 /** Install CLI wrappers, signed commits, and TypeScript diagnostics. */

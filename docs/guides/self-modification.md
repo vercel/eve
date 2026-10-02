@@ -43,7 +43,7 @@ Mounts that import `eve/self-modification` still work; that specifier is an alia
 
 ## Propose changes from a deployed agent
 
-`eve/self-modification/deployed` is a separate extension for deployed agents. It adds a subagent that checks out your repository in a sandbox, edits the authored source, and opens a draft pull request against a target branch. It never changes the running deployment. Changes take effect only after you review, merge, and redeploy.
+`eve/self-modification/deployed` is a separate extension for deployed agents. Outside `eve dev`, it delegates repository work to a coding subagent that proposes changes as draft pull requests. It never changes the running agent. Changes take effect only after you review, merge, and deploy them.
 
 Mount it under its own namespace so it does not replace the local extension:
 
@@ -52,29 +52,49 @@ Mount it under its own namespace so it does not replace the local extension:
 import selfModification from "eve/self-modification/deployed";
 
 export default selfModification({
-  source: {
-    git: {
-      repository: "github.com/acme/agents",
-      directory: "apps/support",
-    },
-  },
-  target: { branch: "main" },
-  credentials: { pat: true },
-  authorize: ({ channel, principal }) =>
-    channel.kind === "http" && principal?.principalId === "release-bot",
+  authorize: ({ principal }) => principal?.principalId === "trusted-editor",
+  github: { repository: "acme/agents", connector: "github/agent-author" },
+  directory: "apps/support",
+  baseBranch: "main",
 });
 ```
 
-| Option                  | Description                                                                                                                                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `source.git.repository` | GitHub repository in `github.com/owner/repo` form.                                                                                                                                                      |
-| `source.git.directory`  | Application directory relative to the repository root. Use `"."` for the root.                                                                                                                          |
-| `target.branch`         | Branch that is checked out and targeted by draft pull requests.                                                                                                                                         |
-| `authorize`             | Required. Receives the requesting `channel` and `principal` and returns whether that caller can use the subagent. The subagent is hidden when it returns `false` or throws.                             |
-| `credentials`           | Required. An object with a `resolve({ capability, repository })` function that returns a GitHub token, or `{ pat: true }` to read `EVE_SELF_MODIFICATION_GITHUB_TOKEN` from the deployment environment. |
-| `model`, `reasoning`    | Optional model and reasoning level for the deployed subagent. It defaults to the parent agent's model.                                                                                                  |
+This mount adds the `self-modification-deployed__agent` subagent. The extension accepts:
 
-The deployed subagent is never offered during `eve dev`. In a deployment, it needs a sandbox provider that supports runtime credential transforms: Vercel Sandbox on Vercel, or microsandbox on a supported self-hosted system. eve applies the GitHub token as a sandbox network credential only while it checks out or publishes, so commands in the sandbox cannot read it.
+- `authorize` (required): decides whether the current caller can delegate to the coding subagent.
+- `github.repository` (required): the repository to check out and open pull requests against, in `owner/repo` form.
+- `github.connector` (required): the GitHub Vercel Connect connector that provides repository credentials.
+- `directory`: the application directory relative to the repository root. Defaults to `"."`.
+- `baseBranch`: the branch pull requests target. Defaults to `"main"`.
+- `model` and `reasoning`: the coding subagent's model and reasoning level. The model defaults to the parent agent's model.
+
+The deployed subagent is never offered during `eve dev`, where the local extension handles source edits.
+
+### Authorize callers
+
+`authorize` receives the current authenticated `principal`, or `null` for anonymous callers, and the request's `channel` kind and metadata. Return `true` to offer the coding subagent. Returning `false` or throwing hides it, and eve logs the thrown error. The callback runs on session start and on each turn, including follow-ups.
+
+The principal ID in the example is illustrative. Check the identities your channel produces before you write a policy.
+
+### Connect GitHub
+
+Create a GitHub Vercel Connect connector, attach it to the deployed project, and install it on the configured repository. Grant the repository permissions needed to read source, push branches, and create pull requests. Use repository rules to require review on protected branches.
+
+### Sandbox and checkout
+
+The deployed subagent's sandbox runs on Vercel Sandbox, or on microsandbox for self-hosted deployments. On other hosts, delegation fails with an error naming the supported providers.
+
+The sandbox checks out the repository to `/workspace/repository`, which must contain the configured application and its `agent/` directory. The subagent installs dependencies when needed, using the repository's package manager and lockfile. The project `eve` CLI is available after installation; in a monorepo, it may live at the workspace root. Private packages need their own installation credentials because the sandbox does not inherit host credentials.
+
+### Request a change
+
+Ask for persistent changes in ordinary terms, such as “Replace your hardcoded weather tool with a live weather API.” The parent delegates the work to the coding subagent, which has its own checkout, so the source does not need to exist in the parent's sandbox.
+
+Questions, investigations, and design requests are read-only. An explicit implementation request authorizes the subagent to push a branch and open a draft PR. It may edit any file in the repository; the application directory gives it context.
+
+Follow-up turns continue the same subagent and reuse its checkout. Independent requests use a separate subagent. A draft PR does not change the running agent: review and merge it, then deploy.
+
+To add a registry capability, the subagent searches with `eve registry search "slack" --json` and installs source with `eve add channel/slack --non-interactive --skip-setup`. Complete OAuth, secret binding, and other external setup after you review and deploy the change. The subagent's handoff lists the PR URL, the checks it ran, and any remaining setup.
 
 ## Run without self-modification
 
