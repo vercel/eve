@@ -1,6 +1,7 @@
 import { telegramChannel } from "#public/channels/telegram/index.js";
 import {
   type ChannelDriver,
+  type Person,
   type PlatformCall,
   type RenderedOption,
   recordingFetch,
@@ -56,6 +57,10 @@ export function telegramDriver(): ChannelDriver {
   nextChatId += 1;
   const CHAT = { id: nextChatId, type: "private" } as const;
   const PERSON = { first_name: "Alice", id: nextChatId, is_bot: false } as const;
+  const PEOPLE = {
+    alice: PERSON,
+    bob: { first_name: "Bob", id: nextChatId + 500_000, is_bot: false },
+  } as const;
   let updateId = 0;
   let messageId = 0;
 
@@ -84,7 +89,7 @@ export function telegramDriver(): ChannelDriver {
 
   return {
     name: "telegram",
-    capabilities: ["buttons", "text-replies"],
+    capabilities: ["another-person", "buttons", "text-replies"],
     createChannel: (record) =>
       telegramChannel({
         api: { fetch: recordingFetch(record, decode) },
@@ -108,12 +113,12 @@ export function telegramDriver(): ChannelDriver {
       };
     },
     personShownAs: [PERSON.first_name],
-    press: (option) => {
+    press: (option, person: Person) => {
       const { data, messageId } = option.handle as PressHandle;
       return update({
         callback_query: {
           data,
-          from: PERSON,
+          from: PEOPLE[person],
           id: `callback-${updateId}`,
           message: { chat: CHAT, date: 0, message_id: messageId },
         },

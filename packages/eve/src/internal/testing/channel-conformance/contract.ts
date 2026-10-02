@@ -4,7 +4,9 @@ import {
   type ChannelCapability,
   type ChannelConversation,
   GATED_TOOL,
+  type GatedTool,
   type RenderedOption,
+  REQUESTER_GATED_TOOL,
   SECOND_GATED_TOOL,
   TWO_QUESTIONS_TOOL,
 } from "#internal/testing/channel-conformance/harness.js";
@@ -78,13 +80,38 @@ function option(
   return found!;
 }
 
-async function expectDeployed(conversation: ChannelConversation) {
-  const outcome = await conversation.waitForToolOutcome(GATED_TOOL);
-  expect(outcome, `${GATED_TOOL} settled as ${JSON.stringify(outcome)}`).toEqual({
+const HOTFIX = `Use ${REQUESTER_GATED_TOOL} to ship the fix.`;
+const HOTFIX_PROMPT = "Approve Release hotfix?";
+
+async function askToReleaseHotfix(conversation: ChannelConversation) {
+  await conversation.say(HOTFIX);
+  return await conversation.waitForQuestion(HOTFIX_PROMPT);
+}
+
+async function expectRan(conversation: ChannelConversation, tool: GatedTool, output: unknown) {
+  const outcome = await conversation.waitForToolOutcome(tool);
+  expect(outcome, `${tool} settled as ${JSON.stringify(outcome)}`).toEqual({
     kind: "ran",
-    output: { deployed: true },
+    output,
   });
-  expect(conversation.runsOf(GATED_TOOL)).toBe(1);
+  expect(conversation.runsOf(tool)).toBe(1);
+}
+
+async function expectDeployed(conversation: ChannelConversation) {
+  await expectRan(conversation, GATED_TOOL, { deployed: true });
+}
+
+async function expectReleased(conversation: ChannelConversation) {
+  await expectRan(conversation, REQUESTER_GATED_TOOL, { released: true });
+}
+
+/** Once the session settles after Bob's press, the requester-only approval is still pending. */
+async function expectStillPending(conversation: ChannelConversation) {
+  await conversation.waitForRest();
+  expect(
+    conversation.runsOf(REQUESTER_GATED_TOOL),
+    `${REQUESTER_GATED_TOOL} ran on Bob's press`,
+  ).toBe(0);
 }
 
 async function expectNotDeployed(conversation: ChannelConversation) {
@@ -137,6 +164,20 @@ async function approveDeploy(conversation: ChannelConversation, by: Answer) {
 function expectButtonsCleared(conversation: ChannelConversation, prompt: string) {
   const labels = conversation.shownPrompt(prompt).options.map((option) => option.label);
   expect(labels, `the answered prompt still offers ${JSON.stringify(labels)}`).toEqual([]);
+}
+
+/** A press an approval policy rejected leaves the prompt answerable by someone else. */
+function expectButtonsKept(conversation: ChannelConversation, prompt: string) {
+  const labels = conversation.shownPrompt(prompt).options.map((option) => option.label);
+  const message = `the rejected prompt offers ${JSON.stringify(labels)}`;
+  expect(
+    labels.some((label) => APPROVE_LABELS.includes(label)),
+    message,
+  ).toBe(true);
+  expect(
+    labels.some((label) => CANCEL_LABELS.includes(label)),
+    message,
+  ).toBe(true);
 }
 
 /** Once answered, the prompt's message shows everyone in the conversation who answered it. */
@@ -419,6 +460,63 @@ export const hitlContract = [
     async run(conversation) {
       await approveDeploy(conversation, "text");
       expectResponderNamed(conversation, APPROVAL_PROMPT);
+    },
+  },
+  {
+    rule: "the requester pressing Approve on a requester-only approval runs the tool",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["buttons"],
+    async run(conversation) {
+      const options = await askToReleaseHotfix(conversation);
+      await conversation.press(option(options, APPROVE_LABELS));
+      await expectReleased(conversation);
+    },
+  },
+  {
+    rule: "another person pressing Approve on a requester-only approval leaves it pending",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["another-person", "buttons"],
+    async run(conversation) {
+      const options = await askToReleaseHotfix(conversation);
+      const approve = option(options, APPROVE_LABELS);
+      await conversation.press(approve, "bob");
+      await expectStillPending(conversation);
+      await conversation.press(approve);
+      await expectReleased(conversation);
+    },
+  },
+  {
+    rule: "another person pressing Cancel on a requester-only approval leaves it pending",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["another-person", "buttons"],
+    async run(conversation) {
+      const options = await askToReleaseHotfix(conversation);
+      await conversation.press(option(options, CANCEL_LABELS), "bob");
+      await expectStillPending(conversation);
+      // A cancel that got through would settle the call as denied before this approval.
+      await conversation.press(option(options, APPROVE_LABELS));
+      await expectReleased(conversation);
+    },
+  },
+  {
+    rule: "another person's rejected press leaves the approval's buttons in place",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["another-person", "buttons"],
+    async run(conversation) {
+      const options = await askToReleaseHotfix(conversation);
+      await conversation.press(option(options, APPROVE_LABELS), "bob");
+      await expectStillPending(conversation);
+      expectButtonsKept(conversation, HOTFIX_PROMPT);
+    },
+  },
+  {
+    rule: "another person pressing Approve runs a tool with no response policy",
+    source: "docs/tools/human-in-the-loop.md#authorizing-approval-responses",
+    requires: ["another-person", "buttons"],
+    async run(conversation) {
+      const options = await askToDeploy(conversation);
+      await conversation.press(option(options, APPROVE_LABELS), "bob");
+      await expectDeployed(conversation);
     },
   },
 ] as const satisfies readonly ContractRule[];

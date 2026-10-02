@@ -79,6 +79,19 @@ function unnamedAnsweredPrompts(
   );
 }
 
+/** Presses reach a response policy without the presser's identity, so eve refuses them all. */
+function anonymousPresses(
+  reason: string,
+  rules: readonly HitlRule[],
+): Partial<Record<HitlRule, BrokenCell>> {
+  return Object.fromEntries(
+    rules.map((rule) => [
+      rule,
+      { reason, symptom: /Authentication is required to respond to this approval/ },
+    ]),
+  );
+}
+
 interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   readonly broken?: Partial<Record<HitlRule, BrokenCell>>;
@@ -116,10 +129,20 @@ const hitlConformance = {
   discord: [
     {
       driver: discordDriver,
-      broken: unnamedAnsweredPrompts(
-        "a resolved prompt doesn't say who answered; input.resolved carries no responder",
-        ["approvalPress", "questionPress"],
-      ),
+      broken: {
+        ...unnamedAnsweredPrompts(
+          "a resolved prompt doesn't say who answered; input.resolved carries no responder",
+          ["approvalPress", "questionPress"],
+        ),
+        ...anonymousPresses(
+          "a button press responds with `auth: null`, so no one can satisfy a response policy",
+          [
+            "the requester pressing Approve on a requester-only approval runs the tool",
+            "another person pressing Approve on a requester-only approval leaves it pending",
+            "another person pressing Cancel on a requester-only approval leaves it pending",
+          ],
+        ),
+      },
     },
   ],
   github: [{ driver: githubDriver }],

@@ -10,15 +10,26 @@ import {
   parseMarkdown,
   toPlainText,
 } from "#compiled/chat/index.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { createMemoryState } from "#compiled/@chat-adapter/state-memory/index.js";
 import {
   type ChannelDriver,
+  type Person,
   type PlatformCall,
   numberedOptions,
 } from "#internal/testing/channel-conformance/harness.js";
 
 const ADAPTER = "conformance";
 const PERSON = { fullName: "Alice", isBot: false, isMe: false, userId: "alice", userName: "alice" };
+const PEOPLE = {
+  alice: PERSON,
+  bob: { fullName: "Bob", isBot: false, isMe: false, userId: "bob", userName: "bob" },
+} as const;
+
+/** The auth an app derives from a Chat SDK user, as the docs' `resolveInputAuth` example does. */
+function userAuth(userId: string): SessionAuthContext {
+  return { attributes: {}, authenticator: ADAPTER, principalId: userId, principalType: "user" };
+}
 let nextThread = 0;
 
 interface CardNode {
@@ -37,6 +48,7 @@ type Inbound =
       readonly actionId: string;
       /** The posted message holding the pressed button. */
       readonly messageId: string;
+      readonly person: Person;
       readonly value?: string;
     };
 
@@ -69,7 +81,7 @@ export function chatSdkDriver(): ChannelDriver {
   const driver = chatSdkDriverWith({ name: "chat-sdk", render: (posted) => posted });
   return {
     ...driver,
-    capabilities: ["buttons", "text-replies"],
+    capabilities: ["another-person", "buttons", "text-replies"],
     findOptions(call, prompt) {
       if (!isPost(call)) return undefined;
       const card = cardOf(call.body as AdapterPostableMessage);
@@ -86,12 +98,13 @@ export function chatSdkDriver(): ChannelDriver {
       };
     },
     personShownAs: [PERSON.fullName, PERSON.userName],
-    press(option) {
+    press(option, person: Person) {
       const { button, messageId } = option.handle as PressHandle;
       return driver.inbound({
         actionId: button.id!,
         kind: "action",
         messageId,
+        person,
         value: button.value,
       });
     },
@@ -162,13 +175,18 @@ function chatSdkDriverWith(input: {
       const bridge = chatSdkChannel({
         adapters: { [ADAPTER]: adapter },
         concurrency: "concurrent",
+        resolveInputAuth: (event) => userAuth(event.user.userId),
         routes: { [ADAPTER]: `/eve/v1/${ADAPTER}` },
         state: createMemoryState() as StateAdapter,
         streaming: false,
         userName: "eve",
       });
       bridge.bot.onDirectMessage(async (thread, message) => {
-        await bridge.send(message.text, { auth: null, context: [], thread });
+        await bridge.send(message.text, {
+          auth: userAuth(message.author.userId),
+          context: [],
+          thread,
+        });
       });
       return bridge.channel;
     },
@@ -212,7 +230,7 @@ function fakeAdapter(
             messageId: body.messageId,
             raw: body,
             threadId,
-            user: PERSON,
+            user: PEOPLE[body.person],
             value: body.value,
           },
           options,

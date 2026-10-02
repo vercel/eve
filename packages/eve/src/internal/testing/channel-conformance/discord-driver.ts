@@ -3,6 +3,7 @@ import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { discordChannel } from "#public/channels/discord/index.js";
 import {
   type ChannelDriver,
+  type Person,
   type PlatformCall,
   type RenderedOption,
   recordingFetch,
@@ -10,6 +11,7 @@ import {
 
 let nextChannel = 0;
 const PERSON = { id: "U_CONFORMANCE", username: "alice" } as const;
+const PEOPLE = { alice: PERSON, bob: { id: "U_BOB", username: "bob" } } as const;
 
 /** A message component eve renders for a choice: a button (type 2) or a select menu (type 3). */
 interface DiscordComponent {
@@ -101,7 +103,7 @@ export function discordDriver(): ChannelDriver {
 
   return {
     name: "discord",
-    capabilities: ["buttons"],
+    capabilities: ["another-person", "buttons"],
     createChannel: (record) =>
       discordChannel({
         api: { fetch: recordingFetch(record, decode) },
@@ -141,7 +143,7 @@ export function discordDriver(): ChannelDriver {
       };
     },
     personShownAs: [`<@${PERSON.id}>`, PERSON.username],
-    press(option) {
+    press(option, person: Person) {
       const handle = option.handle as PressHandle;
       const id = nextInteraction();
       // A component interaction's `@original` response is the message holding the component.
@@ -158,7 +160,7 @@ export function discordDriver(): ChannelDriver {
           message: { id: handle.messageId },
           token: `tok-${id}`,
           type: 3,
-          user: PERSON,
+          user: PEOPLE[person],
           version: 1,
         }),
       );
