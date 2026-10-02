@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-The dev TUI now shows readable subagent names, such as `subagent(worker)` for the code extension's `code__worker` and `subagent(stock price)` for `stock-price`, using the same naming as the Slack status and task cards.
+The dev TUI now shows readable names for subagents and unlabeled tools, such as `subagent(worker)` for `code__worker` and `List issues` for `linear__list_issues`, using the same naming as the Slack status and task cards.

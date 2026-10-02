@@ -459,7 +459,7 @@ describe("ConversationTranscript", () => {
     transcript.project(view(started, true), options);
     expect(transcript.tasks[0]).toMatchObject({
       name: "research",
-      children: [{ name: "download", kind: "tool", startedAtMs: 0 }],
+      children: [{ name: "Download", kind: "tool", startedAtMs: 0 }],
     });
     expect(transcript.tasks[0]!.childTools.size).toBe(0);
     vi.setSystemTime(12_000);

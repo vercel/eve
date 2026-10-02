@@ -23,6 +23,7 @@ import {
   agentTaskLabel,
   presentPreparingTool,
   presentTool,
+  toolDisplayTitle,
   type ToolPresentationContext,
 } from "./tool-presentation.js";
 
@@ -132,22 +133,23 @@ export function nestedTaskRecord(
   task: ConversationTask,
   block: Block,
 ): TaskRecord {
+  const name =
+    task.kind === "agent"
+      ? agentDisplayName(stripTerminalControls(part.toolName))
+      : stripTerminalControls(toolDisplayTitle(part.toolName));
   return {
     callId,
     taskId: task.taskId,
     callIds: [part.toolCallId],
     kind: task.kind,
-    name:
-      task.kind === "agent"
-        ? agentDisplayName(stripTerminalControls(part.toolName))
-        : stripTerminalControls(part.toolName),
+    name,
     toolName: part.toolName,
     input: part.input,
     label: undefined,
     purpose:
       task.kind === "agent"
         ? agentTaskSummary(part.input)
-        : block.subtitle || (block.title === part.toolName ? undefined : block.title),
+        : block.subtitle || (block.title === name ? undefined : block.title),
     startedAtMs: Date.now(),
     ended: false,
   };

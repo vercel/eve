@@ -1,6 +1,6 @@
 import { diffWriteDetail, type ToolDetailLine } from "./line-diff.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
-import { displayName } from "#shared/display-name.js";
+import { displayName, displayTitle } from "#shared/display-name.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
 /** Renderer-ready copy derived from a tool call without owning its lifecycle. */
@@ -179,7 +179,7 @@ function presentWriteFileTool(
   const write = readWriteFileInput(toolName, input);
   if (write === undefined) {
     return {
-      title: toolName,
+      title: toolDisplayTitle(toolName),
       subtitle: summarizeToolArgs(input),
       summarizeResult: summarizeToolResult,
     };
@@ -286,10 +286,18 @@ export function presentTool(
   }
 
   return {
-    title: toolName,
+    title: toolDisplayTitle(toolName),
     subtitle: summarizeToolArgs(input),
     summarizeResult: summarizeToolResult,
   };
+}
+
+/**
+ * A person's name for a tool with no copy of its own: `linear__list_issues` →
+ * `List issues`.
+ */
+export function toolDisplayTitle(toolName: string): string {
+  return displayTitle(toolBaseName(toolName));
 }
 
 /**
@@ -358,7 +366,7 @@ export function presentPreparingTool(
   }
   const verb = baseName === "write_file" ? WRITE_FILE_VERB : BUILTIN_TOOL_COPY[baseName]?.verb;
   return {
-    title: `${verb ?? toolName} …`,
+    title: `${verb ?? toolDisplayTitle(toolName)} …`,
     subtitle: "",
     summarizeResult: () => undefined,
   };
