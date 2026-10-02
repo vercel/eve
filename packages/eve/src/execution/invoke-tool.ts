@@ -105,7 +105,7 @@ export async function invokeTool(
   const callId = `call_${createUlid()}`;
   const sessionId = `call_session_${createUlid()}`;
   return await withInvokeToolSpan(
-    { auth: options.auth, callId, origin: runtime.origin, sessionId, toolName: name },
+    { auth: options.auth, callId, input, origin: runtime.origin, sessionId, toolName: name },
     () => runInvocation({ callId, definition, input, name, options, runtime, sessionId }),
   );
 }
