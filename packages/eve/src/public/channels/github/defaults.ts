@@ -3,6 +3,7 @@ import type { SandboxSession } from "#shared/sandbox-session.js";
 type NetworkPolicySandboxSession = SandboxSession & {
   setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
 };
+import { renderTextInputRequest } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
@@ -143,20 +144,10 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
 }
 
 function renderInputRequest(request: InputRequest): string {
-  const lines = [request.prompt];
-  if (request.options !== undefined && request.options.length > 0) {
-    lines.push(
-      "",
-      ...request.options.map((option, index) => {
-        const description = option.description ? ` - ${option.description}` : "";
-        return `${index + 1}. ${option.label}${description}`;
-      }),
-    );
-  }
-  if (request.allowFreeform === true) {
-    lines.push("", "You can also reply with a custom answer.");
-  }
-  return lines.join("\n");
+  const body = renderTextInputRequest(request);
+  return request.allowFreeform === true
+    ? `${body}\n\nYou can also reply with a custom answer.`
+    : body;
 }
 
 // The default onComment hook only dispatches comments that @mention the bot,

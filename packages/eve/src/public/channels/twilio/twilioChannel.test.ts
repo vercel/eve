@@ -663,7 +663,7 @@ describe("twilioChannel() default event handlers", () => {
     });
   });
 
-  it("input.requested sends a tool approval as an SMS with numbered options", async () => {
+  it("input.requested sends a batch of approvals as one SMS, since one reply answers them all", async () => {
     const bodies: string[] = [];
     const fetchMock: typeof fetch = async (_input, init) => {
       bodies.push(new URLSearchParams(String(init?.body)).get("Body") ?? "");
@@ -698,6 +698,18 @@ describe("twilioChannel() default event handlers", () => {
             prompt: "Approve Deploy release?",
             requestId: "approval_1",
           },
+          {
+            action: { callId: "call_2", input: {}, kind: "tool-call", toolName: "rotate_keys" },
+            allowFreeform: false,
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Approve" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve Rotate keys?",
+            requestId: "approval_2",
+          },
         ],
         sequence: 0,
         stepIndex: 0,
@@ -707,7 +719,11 @@ describe("twilioChannel() default event handlers", () => {
     );
 
     expect(bodies).toEqual([
-      "Approve Deploy release?\n\n1. Approve\n2. Cancel\n\nReply with a number to choose.",
+      [
+        "Approve Deploy release?\n\n1. Approve\n2. Cancel",
+        "Approve Rotate keys?\n\n1. Approve\n2. Cancel",
+        "Reply with a number to choose. Your reply answers each of these.",
+      ].join("\n\n"),
     ]);
   });
 
