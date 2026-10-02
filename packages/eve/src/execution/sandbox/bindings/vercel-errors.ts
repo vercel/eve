@@ -2,6 +2,36 @@ export function isVercelSnapshotUnavailableError(error: unknown): boolean {
   return errorChainContainsStatus(error, 410);
 }
 
+/**
+ * A create that lost the race for a sandbox name. The Sandbox API answers a
+ * taken name with 400 `bad_request` "A sandbox with the name '…' already
+ * exists"; 409 is accepted too in case it moves to a proper Conflict.
+ */
+export function isVercelSandboxNameConflictError(error: unknown): boolean {
+  for (const candidate of walkErrorChain(error)) {
+    const status = readErrorStatus(candidate);
+    if (status === 409) return true;
+    if (
+      status === 400 &&
+      /\bsandbox with the name\b.*\balready exists\b/is.test(readErrorText(candidate))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The API error's message, falling back to its parsed JSON body.
+function readErrorText(value: unknown): string {
+  if (!isRecord(value)) return "";
+  const parts: string[] = [];
+  if (typeof value.message === "string") parts.push(value.message);
+  if (typeof value.text === "string") parts.push(value.text);
+  const body = isRecord(value.json) && isRecord(value.json.error) ? value.json.error : undefined;
+  if (body !== undefined && typeof body.message === "string") parts.push(body.message);
+  return parts.join("\n");
+}
+
 export function isVercelSandboxMissingError(error: unknown): boolean {
   return errorChainContainsStatus(error, 404);
 }

@@ -99,6 +99,38 @@ function addScheduleTaskVirtualHandler(
   appendScheduledTask(nitro, input.registration.cron, input.registration.taskName);
 }
 
+/** Weekly, Sundays 04:17 UTC. */
+const TOOL_SESSION_SANDBOX_SWEEP_CRON = "17 4 * * 0";
+const TOOL_SESSION_SANDBOX_SWEEP_TASK_NAME = "eve.tool-session-sandbox-sweep";
+
+/**
+ * Registers the framework's weekly task that deletes idle tool-session
+ * sandboxes, beside the authored schedules. `sweepModulePath` is the module
+ * exporting `runToolSessionSandboxSweepTask`.
+ */
+export function registerToolSessionSandboxSweepTask(
+  nitro: ScheduleTaskNitro,
+  input: { readonly artifactsConfig: NitroArtifactsConfig; readonly sweepModulePath: string },
+): void {
+  nitro.options.experimental.tasks = true;
+  const taskName = TOOL_SESSION_SANDBOX_SWEEP_TASK_NAME;
+  const virtualId = `${EVE_SCHEDULE_TASK_VIRTUAL_ID_PREFIX}${taskName}`;
+  const description = "Delete idle tool-session sandboxes.";
+  nitro.options.tasks[taskName] = { description, handler: virtualId };
+  // A plain task object, as for authored schedules: `nitro/task` is not deployed.
+  nitro.options.virtual[virtualId] = [
+    `import { runToolSessionSandboxSweepTask } from ${stringifyEsmImportSpecifier(input.sweepModulePath)};`,
+    `const config = ${JSON.stringify(input.artifactsConfig)};`,
+    `export default {`,
+    `  meta: { description: ${JSON.stringify(description)} },`,
+    `  async run() {`,
+    `    return { result: await runToolSessionSandboxSweepTask(config) };`,
+    `  },`,
+    `};`,
+  ].join("\n");
+  appendScheduledTask(nitro, TOOL_SESSION_SANDBOX_SWEEP_CRON, taskName);
+}
+
 function appendScheduledTask(nitro: ScheduleTaskNitro, cron: string, taskName: string): void {
   const existingScheduleTasks = nitro.options.scheduledTasks[cron];
 

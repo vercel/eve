@@ -5,6 +5,10 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { invokeTool, type InvokeToolRuntime } from "#execution/invoke-tool.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import {
+  sweepToolSessionSandboxes,
+  withToolSessionSandboxes,
+} from "#execution/tool-session/sandbox.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
@@ -90,6 +94,88 @@ function sandboxes(options: { readonly startGate?: Promise<void> } = {}) {
     },
   };
   return { deleted, registry, shutdown, started };
+}
+
+/**
+ * A provider whose `start` reopens a session's sandbox by session id, as
+ * Vercel Sandbox and just-bash do, opted into tool sessions with a sweeper.
+ */
+function keyedSandboxes(options: { readonly failSelector?: () => boolean } = {}) {
+  const live = new Map<
+    string,
+    { lastUsedAt: number; running: boolean; sandbox: ReturnType<typeof mockSandbox> }
+  >();
+  const starts: string[] = [];
+  const deleted = vi.fn((sessionId: string) => void live.delete(sessionId));
+  const reopen = (sessionId: string) => {
+    let entry = live.get(sessionId);
+    if (entry === undefined) {
+      starts.push(sessionId);
+      entry = { lastUsedAt: Date.now(), running: false, sandbox: mockSandbox() };
+      live.set(sessionId, entry);
+    }
+    return {
+      sandbox: entry.sandbox.session,
+      onRuntimeShutdown: async () => {},
+      onSessionDelete: async () => deleted(sessionId),
+      onSessionStop: async () => {},
+    };
+  };
+  const summary = (sessionId: string) => ({ ...live.get(sessionId)!, name: sessionId, sessionId });
+  const environment = defineSandboxProvider({
+    name: "keyed",
+    environment: () =>
+      withToolSessionSandboxes(
+        {
+          prepare: async () => null,
+          resume: async (context: { readonly session: { readonly id: string } }) =>
+            reopen(context.session.id),
+          start: async (context: { readonly session: { readonly id: string } }) => ({
+            handle: reopen(context.session.id),
+            state: {},
+          }),
+        },
+        {
+          list: async () => [...live.keys()].map(summary),
+          deleteUnless: async (_storage, name, keep) => {
+            if (!live.has(name) || keep(summary(name))) return false;
+            deleted(name);
+            return true;
+          },
+        },
+      ),
+  }).environment();
+  const registry: RuntimeSandboxRegistry = {
+    sandbox: {
+      definition: {
+        environment,
+        kind: "independent",
+        logicalPath: "sandbox.ts",
+        revisionHash: "hash",
+        selector: defineSandbox(async () => {
+          const sandbox = await environment.open();
+          if (options.failSelector?.() === true) throw new Error("selector failed");
+          return sandbox;
+        }),
+        sourceId: "sandbox",
+        sourceKind: "module",
+      },
+      workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+    },
+  };
+  return { deleted, live, registry, starts };
+}
+
+/** A tool that appends to a note in its sandbox and returns the note, after `gate` opens. */
+function noteTool(gate: Promise<void> = Promise.resolve()) {
+  return tool("note", async (input: { text: string }, ctx) => {
+    const sandbox = await ctx.getSandbox();
+    await gate;
+    const previous = await sandbox.readTextFile({ path: "/workspace/note.txt" });
+    const note = (previous ?? "") + input.text;
+    await sandbox.writeTextFile({ content: note, path: "/workspace/note.txt" });
+    return note;
+  });
 }
 
 function runtimeWith(
@@ -238,4 +324,91 @@ describe("invokeTool", () => {
     expect(started).toHaveLength(0);
     expect(deleted).not.toHaveBeenCalled();
   });
+
+  it("keeps one sandbox per caller and key across calls", async () => {
+    const { deleted, registry, starts } = keyedSandboxes();
+    const runtime = runtimeWith([noteTool()], registry);
+    const note = (text: string, auth: SessionAuthContext, key: string) =>
+      invokeTool(runtime, "note", { text }, { auth, key });
+
+    // Concurrent first calls converge on one sandbox; later calls reuse it.
+    const first = await Promise.all([note("a", alice, "desk"), note("b", alice, "desk")]);
+    expect(first.map((result) => result.status)).toEqual(["completed", "completed"]);
+    expect(starts).toHaveLength(1);
+    expect(await note("c", alice, "desk")).toMatchObject({
+      output: expect.stringMatching(/^[ab]{1,2}c$/u),
+    });
+    // Another key, or another caller with the same key, gets its own sandbox.
+    expect(await note("x", alice, "lobby")).toMatchObject({ output: "x" });
+    expect(await note("y", bob, "desk")).toMatchObject({ output: "y" });
+    expect(starts).toHaveLength(3);
+    expect(deleted).not.toHaveBeenCalled();
+  });
+
+  it("refuses a keyed sandbox on a provider that cannot keep it, and an empty key", async () => {
+    const runtime = runtimeWith([noteTool()], sandboxes().registry);
+    expect(await invokeTool(runtime, "note", { text: "a" }, { auth: alice, key: "desk" })).toEqual({
+      message: expect.stringContaining('Sandbox provider "memory" cannot keep a sandbox'),
+      status: "failed",
+    });
+    expect(await invokeTool(runtime, "note", { text: "a" }, { auth: alice, key: "" })).toEqual({
+      message: "The tool session key must not be empty.",
+      status: "invalid-input",
+    });
+  });
+
+  it("never deletes a keyed sandbox another call is using when its own start fails", async () => {
+    let failSelector = false;
+    const { deleted, live, registry } = keyedSandboxes({ failSelector: () => failSelector });
+    let openGate!: () => void;
+    const runtime = runtimeWith(
+      [noteTool(new Promise<void>((resolve) => (openGate = resolve)))],
+      registry,
+    );
+    const holding = invokeTool(runtime, "note", { text: "a" }, { auth: alice, key: "desk" });
+    await vi.waitFor(() => expect(live.size).toBe(1));
+
+    // The second call's `start` finds the first call's sandbox, then its selector fails.
+    failSelector = true;
+    expect(
+      await invokeTool(runtime, "note", { text: "b" }, { auth: alice, key: "desk" }),
+    ).toMatchObject({ status: "failed" });
+    openGate();
+    expect(await holding).toMatchObject({ output: "a", status: "completed" });
+    expect(deleted).not.toHaveBeenCalled();
+  });
+
+  it("sweeps only idle tool-session sandboxes no call holds", async () => {
+    const { live, registry } = keyedSandboxes();
+    let openGate!: () => void;
+    const held = runtimeWith(
+      [noteTool(new Promise<void>((resolve) => (openGate = resolve)))],
+      registry,
+    );
+    const idle = runtimeWith([noteTool()], registry);
+    await invokeTool(idle, "note", { text: "a" }, { auth: alice, key: "idle" });
+    await invokeTool(idle, "note", { text: "a" }, { auth: alice, key: "recent" });
+    await invokeTool(idle, "note", { text: "a" }, { auth: alice, key: "running" });
+    const holding = invokeTool(held, "note", { text: "a" }, { auth: alice, key: "leased" });
+    await vi.waitFor(() => expect(live.size).toBe(4));
+
+    const now = Date.now();
+    const [idleId, recentId, runningId, leasedId] = [...live.keys()];
+    for (const id of [idleId, runningId, leasedId]) live.get(id!)!.lastUsedAt = now - 31 * DAY_MS;
+    live.get(runningId!)!.running = true;
+    live.get(recentId!)!.lastUsedAt = now - DAY_MS;
+
+    const swept = await sweepToolSessionSandboxes({
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+      now,
+      registry,
+    });
+    expect(swept).toEqual({ deleted: [idleId], failed: [] });
+    openGate();
+    await holding;
+  });
 });
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const bob: SessionAuthContext = { ...alice, principalId: "bob" };

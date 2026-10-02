@@ -81,6 +81,19 @@ export class McpToolOperationError extends Error {
 /** Only `conflict` is retryable: the caller re-reads state and tries again. */
 const RETRYABLE_CODES: ReadonlySet<McpToolOperationErrorCode> = new Set(["conflict"]);
 
+/** What a tool handler sees of one `tools/call`. */
+export interface McpToolCallContext {
+  readonly auth: SessionAuthContext | null;
+  /**
+   * The capabilities a 2026-07-28 request declared in its envelope. 2025-era
+   * requests declare none per request, so they get `undefined`.
+   */
+  readonly clientCapabilities: unknown;
+  /** The request's `_meta`, without the reserved `io.modelcontextprotocol/*` keys. */
+  readonly meta: Readonly<Record<string, unknown>> | undefined;
+  readonly signal: AbortSignal;
+}
+
 export interface McpServerTool {
   readonly name: string;
   register(server: McpServer, auth: SessionAuthContext | null): void;
@@ -97,7 +110,7 @@ export function defineMcpTool<
   readonly definition: McpToolDefinition<TInputSchema>;
   call(
     value: InferSchemaOutput<TInputSchema>,
-    context: { readonly auth: SessionAuthContext | null; readonly signal: AbortSignal },
+    context: McpToolCallContext,
   ): Promise<McpCallToolResult<TStructured>>;
 }): McpServerTool {
   return {
@@ -118,12 +131,12 @@ export function defineMcpTool<
             : { outputSchema: input.definition.outputSchema }),
         },
         async (value, context) =>
-          await callTool(
-            input.call,
-            value as InferSchemaOutput<TInputSchema>,
-            context.mcpReq.signal,
+          await callTool(input.call, value as InferSchemaOutput<TInputSchema>, {
             auth,
-          ),
+            clientCapabilities: declaredClientCapabilities(context.mcpReq.envelope),
+            meta: context.mcpReq._meta,
+            signal: context.mcpReq.signal,
+          }),
       );
     },
   };
@@ -134,6 +147,8 @@ interface McpStreamableHttpServerOptions {
   readonly version: string;
   /** Server-level usage guidance returned from `initialize` and `server/discover`. */
   readonly instructions?: string;
+  /** Extensions the server advertises in its capabilities, keyed by identifier. */
+  readonly extensions?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
   readonly tools: readonly McpServerTool[];
   authenticate(request: Request): Promise<SessionAuthContext | null | Response>;
 }
@@ -349,13 +364,14 @@ function readJsonRpcRequestId(body: unknown): string | number | null {
 }
 
 function createServer(
-  options: Pick<McpStreamableHttpServerOptions, "instructions" | "name" | "version">,
+  options: Pick<McpStreamableHttpServerOptions, "extensions" | "instructions" | "name" | "version">,
   tools: ReadonlyMap<string, McpServerTool>,
   auth: SessionAuthContext | null,
 ): McpServer {
   const serverOptions: { capabilities: Record<string, unknown>; instructions?: string } = {
     capabilities: { tools: { listChanged: false } },
   };
+  if (options.extensions !== undefined) serverOptions.capabilities.extensions = options.extensions;
   if (options.instructions !== undefined) serverOptions.instructions = options.instructions;
   const server = new McpServer({ name: options.name, version: options.version }, serverOptions);
 
@@ -364,17 +380,23 @@ function createServer(
   return server;
 }
 
+/** The envelope's client capabilities, when the request is 2026-07-28's. */
+function declaredClientCapabilities(
+  envelope: Readonly<Record<string, unknown>> | undefined,
+): unknown {
+  if (envelope?.["io.modelcontextprotocol/protocolVersion"] !== MCP_PROTOCOL_VERSION) {
+    return undefined;
+  }
+  return envelope["io.modelcontextprotocol/clientCapabilities"];
+}
+
 async function callTool<TInput, TStructured>(
-  call: (
-    input: TInput,
-    context: { readonly auth: SessionAuthContext | null; readonly signal: AbortSignal },
-  ) => Promise<McpCallToolResult<TStructured>>,
+  call: (input: TInput, context: McpToolCallContext) => Promise<McpCallToolResult<TStructured>>,
   input: TInput,
-  signal: AbortSignal,
-  auth: SessionAuthContext | null,
+  context: McpToolCallContext,
 ): Promise<McpCallToolResult<TStructured>> {
   try {
-    return await call(input, { auth, signal });
+    return await call(input, context);
   } catch (error) {
     if (error instanceof McpToolOperationError) {
       return toolError({

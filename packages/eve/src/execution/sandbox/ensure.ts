@@ -35,6 +35,7 @@ import { SandboxTemplateNotProvisionedError } from "#shared/sandbox-template-err
 interface EnsureSandboxAccessInput {
   readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly nodeId: string;
+  /** `false` when the sandbox outlives this access: it may not delete it, even after a failed start. */
   readonly ownsSandbox?: boolean;
   readonly registry: RuntimeSandboxRegistry;
   readonly sessionId: string;
@@ -277,7 +278,9 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
         opened = undefined;
         opening = undefined;
         persisted = null;
-        if (failed !== undefined) {
+        // `start` may have found a sandbox an owner, or another call with the
+        // same tool-session key, is using; only an owning access discards it.
+        if (failed !== undefined && input.ownsSandbox !== false) {
           try {
             await failed.onSessionDelete();
           } catch (cleanupError) {

@@ -13,7 +13,10 @@ export const SERVICE_TOKEN = "agent-mcp-fixture-service-token";
 /** The connection the agent uses to reach its own MCP channel. */
 export const LOOPBACK_CONNECTION = "loopback";
 
-const MCP_PATH = "/eve/v1/mcp";
+export const MCP_PATH = "/eve/v1/mcp";
+
+/** Where the note tools keep the front-desk note in the sandbox. */
+export const NOTE_PATH = "/workspace/front-desk-note.txt";
 
 /** This deployment's MCP channel, the way `kennelUrl()` reaches its own kennel. */
 export function selfMcpUrl(): string {

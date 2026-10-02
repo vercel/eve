@@ -38,7 +38,10 @@ import {
   OPTIONAL_ENGINE_PACKAGES_BY_BACKEND_NAME,
 } from "#internal/nitro/host/optional-engine-dependency-plugin.js";
 import { addNitroRoutingImportSpecifierPlugin } from "#internal/nitro/host/nitro-routing-import-specifier-plugin.js";
-import { registerScheduleTaskHandlers } from "#internal/nitro/host/schedule-task-routes.js";
+import {
+  registerScheduleTaskHandlers,
+  registerToolSessionSandboxSweepTask,
+} from "#internal/nitro/host/schedule-task-routes.js";
 import type {
   PreparedApplicationHost,
   PreparedDevelopmentApplicationHost,
@@ -834,7 +837,9 @@ export async function createProductionApplicationNitro(
   configureSharedApplicationNitro(nitro, preparedHost);
   configureNitroStepPlugins(nitro, join(preparedHost.workflowBuildDir, "steps.mjs"));
 
-  if (preparedHost.scheduleRegistrations.length > 0) {
+  // Only Vercel Sandbox keeps tool-session sandboxes where a later instance can list them.
+  const sweepsToolSessions = preparedHost.compileResult.manifest.sandbox.providerName === "vercel";
+  if (preparedHost.scheduleRegistrations.length > 0 || sweepsToolSessions) {
     applyEveCronHandlerRoute(nitro);
     const artifactsConfig = createProductionNitroArtifactsConfig(preparedHost.appRoot);
     registerScheduleTaskHandlers(nitro, {
@@ -844,6 +849,14 @@ export async function createProductionApplicationNitro(
       ),
       registrations: preparedHost.scheduleRegistrations,
     });
+    if (sweepsToolSessions) {
+      registerToolSessionSandboxSweepTask(nitro, {
+        artifactsConfig,
+        sweepModulePath: resolvePackageSourceFilePath(
+          "src/internal/nitro/routes/tool-session-sandbox-sweep-task.ts",
+        ),
+      });
+    }
   }
 
   await configureProductionNitroRoutes(nitro, preparedHost);
