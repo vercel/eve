@@ -600,7 +600,18 @@ describe("mcpChannel tools", () => {
       ],
       ["note", completed("saved", "Saved."), { content: [{ text: "Saved.", type: "text" }] }],
       ["note", { message: "Bad id.", status: "invalid-input" }, { code: "invalid_input" }],
-      ["note", { reason: "Not today.", status: "denied" }, { code: "denied" }],
+      // The reason reaches the client verbatim, so an anonymous caller denied a
+      // tool session key learns why from `invokeTool`'s own message.
+      [
+        "note",
+        { reason: "Not today.", status: "denied" },
+        { code: "denied", message: "Not today." },
+      ],
+      [
+        "note",
+        { status: "denied" },
+        { code: "denied", message: expect.stringContaining("approval") },
+      ],
       ["note", { status: "approval-required" }, { code: "approval_required" }],
       [
         "note",

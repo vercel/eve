@@ -137,7 +137,7 @@ function keyedSandboxes(options: { readonly failSelector?: () => boolean } = {})
         },
         {
           list: async () => [...live.keys()].map(summary),
-          deleteUnless: async (_storage, name, keep) => {
+          deleteUnless: async (name, keep) => {
             if (!live.has(name) || keep(summary(name))) return false;
             deleted(name);
             return true;
@@ -345,6 +345,30 @@ describe("invokeTool", () => {
     expect(deleted).not.toHaveBeenCalled();
   });
 
+  it("denies an anonymous caller a key before deriving a session or opening a sandbox", async () => {
+    const { registry, starts } = keyedSandboxes();
+    const execute = vi.fn(() => "ran");
+    const runtime = runtimeWith([tool("note", execute)], registry);
+    const anonymous: SessionAuthContext = {
+      attributes: {},
+      authenticator: "none",
+      principalId: "anonymous",
+      principalType: "anonymous",
+    };
+
+    expect(await invokeTool(runtime, "note", {}, { auth: anonymous, key: "desk" })).toEqual({
+      reason: expect.stringContaining("anonymous caller cannot send a key"),
+      status: "denied",
+    });
+    expect(execute).not.toHaveBeenCalled();
+    expect(starts).toHaveLength(0);
+    // Without a key the anonymous caller still gets a one-off call.
+    expect(await invokeTool(runtime, "note", {}, { auth: anonymous })).toMatchObject({
+      output: "ran",
+      status: "completed",
+    });
+  });
+
   it("refuses a keyed sandbox on a provider that cannot keep it, and an empty key", async () => {
     const runtime = runtimeWith([noteTool()], sandboxes().registry);
     expect(await invokeTool(runtime, "note", { text: "a" }, { auth: alice, key: "desk" })).toEqual({
@@ -398,11 +422,7 @@ describe("invokeTool", () => {
     live.get(runningId!)!.running = true;
     live.get(recentId!)!.lastUsedAt = now - DAY_MS;
 
-    const swept = await sweepToolSessionSandboxes({
-      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      now,
-      registry,
-    });
+    const swept = await sweepToolSessionSandboxes({ now, registry });
     expect(swept).toEqual({ deleted: [idleId], failed: [] });
     openGate();
     await holding;

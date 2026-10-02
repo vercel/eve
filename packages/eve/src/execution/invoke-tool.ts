@@ -7,6 +7,7 @@ import {
   type CompiledToolBindings,
   isInvocableCompiledTool,
 } from "#channel/tool-eligibility.js";
+import { isAnonymousPrincipal } from "#channel/principal-identity.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { CompiledToolDefinition } from "#compiler/manifest.js";
 import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
@@ -99,7 +100,8 @@ function ineligibility(
  * without a key gets a fresh session id, so nothing it opens is shared with
  * another call. A keyed call derives its session id from the caller and key.
  * Either way the session's authored state is call-scoped: tool sessions keep
- * only their sandbox.
+ * only their sandbox. An anonymous caller is denied a keyed call: with one
+ * shared principal, the key alone would name the session.
  */
 export async function invokeTool(
   runtime: InvokeToolRuntime,
@@ -122,6 +124,14 @@ export async function invokeTool(
   const key = options.key;
   const keyProblem = key === undefined ? undefined : validateToolSessionKey(key);
   if (keyProblem !== undefined) return { message: keyProblem, status: "invalid-input" };
+  // `none()` gives every caller one principal, so a key would be a shared secret
+  // that opens the same sandbox to anyone who guesses it.
+  if (key !== undefined && isAnonymousPrincipal(options.auth)) {
+    return denied(
+      "Tool sessions need an authenticated caller: an anonymous caller cannot send a key. " +
+        "Call without a key for a one-off session.",
+    );
+  }
 
   const callId = `call_${createUlid()}`;
   const sessionId =

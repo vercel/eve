@@ -13,7 +13,8 @@ export interface InvokeToolOptions {
    * caller. Calls from the same `auth` principal with the same key share one
    * session id and one sandbox, which outlives the call. A different
    * principal using the same key gets a different session. Without a key,
-   * the call runs in a one-off session.
+   * the call runs in a one-off session. An anonymous `auth` (from `none()`)
+   * cannot send a key: the call is denied before anything runs.
    */
   readonly key?: string;
   readonly signal?: AbortSignal;
