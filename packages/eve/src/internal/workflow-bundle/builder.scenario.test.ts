@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -877,6 +877,90 @@ describe("WorkflowBundleBuilder", () => {
       await rm(tempRoot, { force: true, recursive: true });
     }
   });
+  // Regression for #3497: `eve/tools/approval` reaches model authentication
+  // through `auto()`, so a workflow tool that only wants a static helper used
+  // to pull `node:crypto`, `node:path`, `node:child_process`, and friends into
+  // the driver and fail the build. The driver never evaluates the tool
+  // definition, so nothing from its imports may reach the bundle.
+  it.each([["never"], ["once"], ["always"]] as const)(
+    "keeps model-auth out of the driver when a workflow tool imports %s()",
+    async (policy) => {
+      const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-approval-"));
+      const appRoot = join(tempRoot, "app");
+      const outDir = join(tempRoot, "workflow-build");
+      const flowFilePath = join(tempRoot, "flow.ts");
+      const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+      const toolPath = join(appRoot, "agent", "tools", "deploy.ts");
+
+      try {
+        await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
+        await mkdir(join(appRoot, "node_modules"), { recursive: true });
+        await symlink(resolvePackageRoot(), join(appRoot, "node_modules", "eve"), "junction");
+        await Promise.all([
+          writeFile(compiledArtifactsBootstrapPath, "export {};\n"),
+          writeFile(
+            flowFilePath,
+            ["export async function flow() {", '  "use workflow";', "  return 1;", "}", ""].join(
+              "\n",
+            ),
+          ),
+          writeFile(
+            join(appRoot, "package.json"),
+            `${JSON.stringify({ dependencies: { eve: "*" }, name: "authored-app", version: "0.0.0" })}\n`,
+          ),
+          writeFile(
+            toolPath,
+            [
+              'import { defineWorkflowTool } from "eve/tools";',
+              `import { ${policy} } from "eve/tools/approval";`,
+              "",
+              "export default defineWorkflowTool({",
+              '  description: "Deploy a service.",',
+              '  inputSchema: { type: "object", properties: { service: { type: "string" } } },',
+              `  approval: ${policy}(),`,
+              "  async execute({ service }: { service: string }) {",
+              '    "use workflow";',
+              "    return { service };",
+              "  },",
+              "});",
+              "",
+            ].join("\n"),
+          ),
+        ]);
+
+        const builder = new FixtureWorkflowBundleBuilder(
+          {
+            authoredWorkflowModules: {
+              directiveModules: [toolPath],
+              workflowModules: [toolPath],
+            },
+            agentName: "test-agent",
+            appRoot,
+            compiledArtifactsBootstrapPath,
+            outDir,
+            rootDir: resolvePackageRoot(),
+            watch: false,
+          },
+          [flowFilePath],
+        );
+
+        await expect(builder.build()).resolves.toBeUndefined();
+
+        const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+        const encodedChunksMatch = workflowsSource.match(
+          /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+        );
+        expect(encodedChunksMatch).not.toBeNull();
+
+        const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+        const workflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+        expect(workflowCode).toContain('"workflow//./agent/tools/deploy//execute"');
+        expect(workflowCode).not.toContain("model-auth");
+      } finally {
+        await rm(tempRoot, { force: true, recursive: true });
+      }
+    },
+  );
   it.each([
     { importer: "workflow code", specifier: "missing-workflow-package" },
     // Dependency warnings are otherwise filtered as non-actionable.
