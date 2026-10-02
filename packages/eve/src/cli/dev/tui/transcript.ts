@@ -19,12 +19,12 @@ import type { Block } from "./blocks.js";
 import type { AgentTUIConversationView, AgentTUIFailure, ToolLabels } from "./conversation-view.js";
 import { FileContentCache } from "./file-content-cache.js";
 import { signInLabel, waitingLabel, type TaskEntry } from "./task-activity.js";
+import { TaskRecords } from "./task-records.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import {
   agentDisplayName,
   agentTaskLabel,
   isPanelRoutedTool,
-  presentTool,
   readWriteFileInput,
   toolBaseName,
   type ToolPresentationContext,
@@ -32,9 +32,7 @@ import {
 import {
   activeToolSteps,
   taskNeedsApproval,
-  uniqueTaskName,
   type AgentActivity,
-  agentTaskSummary,
   authorizationTerminalMessage,
   childToolCallIds,
   endLine,
@@ -43,7 +41,6 @@ import {
   formatAuthorization,
   isActive,
   isToolCallRow,
-  labelContext,
   nestedTaskRecord,
   startLine,
   subagentSteps,
@@ -103,10 +100,7 @@ export class ConversationTranscript {
   readonly #aliases = new Map<string, string>();
   #optimistic = new Map<string, string>();
   readonly #confirmed = new Set<string>();
-  /** Records by the call that started them. */
-  readonly #tasks = new Map<string, TaskRecord>();
-  /** Records by every call they answer, including calls that joined a working task. */
-  readonly #taskByCall = new Map<string, TaskRecord>();
+  readonly #tasks = new TaskRecords();
   readonly #nestedTasks = new Map<string, TaskRecord>();
   #placed: PlacedBlock[] = [];
   readonly #placedIds = new Set<string>();
@@ -119,7 +113,6 @@ export class ConversationTranscript {
     this.#optimistic = new Map();
     this.#confirmed.clear();
     this.#tasks.clear();
-    this.#taskByCall.clear();
     this.#nestedTasks.clear();
     this.#placed = [];
     this.#placedIds.clear();
@@ -142,7 +135,7 @@ export class ConversationTranscript {
     if (task === undefined) return undefined;
     const calls = Object.values(task.calls);
     const call = calls.findLast((candidate) => candidate.status === "working") ?? calls.at(-1);
-    const record = call === undefined ? undefined : this.#taskByCall.get(call.callId);
+    const record = call === undefined ? undefined : this.#tasks.get(call.callId);
     if (record !== undefined)
       return record.kind === "agent" ? agentTaskLabel(record.name) : record.name;
     return task.kind === "agent"
@@ -259,7 +252,7 @@ export class ConversationTranscript {
     return placed;
   }
 
-  /** A call became a task: its row is now the task's start line, written once. */
+  /** A call became a task: its row is now the task's start line, or a message to a working one. */
   #taskStartLine(
     part: EveDynamicToolPart,
     task: ConversationTask,
@@ -270,60 +263,13 @@ export class ConversationTranscript {
     const visible =
       task.kind === "agent" ? options.subagents !== "hidden" : options.tools !== "hidden";
     if (!visible) return undefined;
-    const callId = part.toolCallId;
-    const label = labels[callId]?.start;
-    let record = this.#taskByCall.get(callId);
-    if (record === undefined) {
-      const working = this.#workingRecord(task);
-      if (working !== undefined) {
-        working.callIds.push(callId);
-        this.#taskByCall.set(callId, working);
-        record = working;
-      }
-    }
-    if (record !== undefined && record.callId !== callId) {
-      const joined = record;
-      return this.#memoize(`task:${callId}:message`, [joined], () =>
-        followUpLine(joined, part, label),
-      );
-    }
-    let summary = agentTaskSummary(part.input);
-    let baseName = agentDisplayName(stripTerminalControls(part.toolName));
-    if (task.kind === "tool") {
-      const presentation = presentTool(part.toolName, part.input, labelContext(label));
-      baseName = stripTerminalControls(presentation.title);
-      summary = stripTerminalControls(presentation.subtitle);
-    }
-    if (record === undefined) {
-      record = {
-        callId,
-        taskId: task.taskId,
-        callIds: [callId],
-        kind: task.kind,
-        name: uniqueTaskName(baseName, this.#tasks.values()),
-        toolName: part.toolName,
-        input: part.input,
-        label,
-        purpose: summary || label,
-        startedAtMs: now,
-        ended: false,
-      };
-      this.#tasks.set(callId, record);
-      this.#taskByCall.set(callId, record);
-    }
-    return this.#memoize(`task:${callId}:start`, [record], () => startLine(record));
-  }
-
-  /**
-   * The record a new call joins: its task's, while one of the record's calls still works. A call
-   * that reaches the task after it settled starts a new stretch with its own lines.
-   */
-  #workingRecord(task: ConversationTask): TaskRecord | undefined {
-    for (const record of this.#tasks.values()) {
-      if (record.ended || record.taskId !== task.taskId) continue;
-      if (record.callIds.some((id) => task.calls[id]?.status === "working")) return record;
-    }
-    return undefined;
+    const label = labels[part.toolCallId]?.start;
+    const record = this.#tasks.record(part, task, label, now);
+    return record.callId === part.toolCallId
+      ? this.#memoize(`task:${record.callId}:start`, [record], () => startLine(record))
+      : this.#memoize(`task:${part.toolCallId}:message`, [record], () =>
+          followUpLine(record, part, label),
+        );
   }
 
   /**

@@ -87,17 +87,6 @@ export function taskNeedsApproval(
   );
 }
 
-export function uniqueTaskName(baseName: string, records: Iterable<TaskRecord>): string {
-  const taken = new Set(
-    [...records].filter((record) => !record.ended).map((record) => record.name),
-  );
-  if (!taken.has(baseName)) return baseName;
-  for (let ordinal = 2; ; ordinal += 1) {
-    const candidate = `${baseName}:${ordinal}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
-
 export function startLine(record: TaskRecord): Block {
   const presentation = presentTool(record.toolName, record.input, {
     ...labelContext(record.label),
