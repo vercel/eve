@@ -36,11 +36,6 @@ interface ConformanceChannel {
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
 
-const TUI_APPROVAL_PROMPT: BrokenCell = {
-  reason: "the approval drawer titles the raw tool name instead of the request's prompt",
-  symptom: /Timed out waiting for the question "Approve Deploy release\?" on tui/,
-};
-
 /**
  * Every first-party channel's and client's place in the HITL contract, keyed by
  * the directory whose `hitl-conformance.integration.test.ts` runs it. Each cell is
@@ -96,11 +91,6 @@ const hitlConformance = {
   tui: [
     {
       driver: tuiDriver,
-      broken: {
-        "a tool approval shows a choice to approve and one to cancel": TUI_APPROVAL_PROMPT,
-        "pressing Approve runs the gated tool": TUI_APPROVAL_PROMPT,
-        "pressing Cancel stops the gated tool without running it": TUI_APPROVAL_PROMPT,
-      },
       unsupported: {
         "a text reply of approve runs the gated tool": TUI_TYPED_APPROVAL,
         "a text reply of cancel stops the gated tool without running it": TUI_TYPED_APPROVAL,

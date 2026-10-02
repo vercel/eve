@@ -144,7 +144,8 @@ export type AgentTUIToolApprovalRequest = {
   approvalId: string;
   toolCallId: string;
   toolName: string;
-  title?: string;
+  /** The server's question for this approval, such as `Approve Deploy release?`. */
+  prompt: string;
   input: unknown;
   context?: AgentTUIInputContext;
 };
@@ -1699,6 +1700,7 @@ function toAgentTUIToolApprovalRequest(
     approvalId: request.requestId,
     toolCallId: request.action.callId,
     toolName: request.action.toolName,
+    prompt: request.prompt,
     input: request.action.input,
   };
   if (context !== undefined) approval.context = context;

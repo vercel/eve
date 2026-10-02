@@ -1838,6 +1838,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       approvalId: "a1",
       toolCallId: "c1",
       toolName: "random_color",
+      prompt: "Approve random_color?",
       input: {},
     });
 
@@ -1869,6 +1870,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       approvalId: "a2",
       toolCallId: "c2",
       toolName: "random_number",
+      prompt: "Approve random_number?",
       input: {},
       context: { position: { index: 2, total: 10 }, requester: "subagent(number_picker:13)" },
     });
@@ -1887,6 +1889,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       approvalId: "a1",
       toolCallId: "c1",
       toolName: "random_color",
+      prompt: "Approve random_color?",
       input: {},
     });
     expect(screen.snapshot()).toContain("Approve random_color?");
@@ -1910,6 +1913,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         approvalId: "a1",
         toolCallId: "c1",
         toolName: "read_file",
+        prompt: "Approve read_file?",
         input: { path: "README.md" },
       });
       input.type("y");
@@ -1931,6 +1935,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         approvalId: "a2",
         toolCallId: "c2",
         toolName: "write_file",
+        prompt: "Approve write_file?",
         input: { path: "README.md" },
       });
       const approvalOutputLength = screen.rawOutput().length;
@@ -1950,6 +1955,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       approvalId: "a1",
       toolCallId: "c1",
       toolName: "delete_files",
+      prompt: "Approve delete_files?",
       input: { path: "/" },
     });
 
@@ -1968,6 +1974,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         approvalId: "a1",
         toolCallId: "c1",
         toolName: "delete_files",
+        prompt: "Approve delete_files?",
         input: { path: "/" },
       });
 
@@ -3857,6 +3864,7 @@ describe("TerminalRenderer conversation", () => {
       approvalId: "approval_1",
       toolCallId: "child_tool",
       toolName: "wait_random_number",
+      prompt: "Approve wait_random_number?",
       input: {},
     });
     expect(screen.snapshot()).toContain("Approve wait_random_number?");
