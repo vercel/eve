@@ -632,6 +632,7 @@ export const hitlContract = [
     source:
       "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
     requires: [],
+    variesByConversation: true,
     surfaces: ["public", "shared"],
     async run(conversation) {
       await requestSignIn(conversation, READ_CALENDAR);
