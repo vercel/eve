@@ -24,6 +24,7 @@ import { teamsDriver } from "#internal/testing/channel-conformance/teams-driver.
 import { telegramDriver } from "#internal/testing/channel-conformance/telegram-driver.js";
 import { tuiDriver } from "#internal/testing/channel-conformance/tui-driver.js";
 import { twilioDriver } from "#internal/testing/channel-conformance/twilio-driver.js";
+import { webChatDriver } from "#internal/testing/channel-conformance/web-chat-driver.js";
 
 export interface BrokenCell {
   readonly reason: string;
@@ -205,11 +206,13 @@ const TELEGRAM_BROKEN = {
 const TUI_TYPED_APPROVAL =
   "the approval drawer holds the keyboard; a person answers it with y or n";
 const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nobody else to tell";
+const WEB_CHAT_SINGLE_PERSON =
+  "one person answers in their own browser tab; there's nobody else to tell";
 
 /**
  * Every first-party channel's and client's place in the HITL contract, keyed by
- * the directory whose `hitl-conformance.integration.test.ts` runs it. Each cell is
- * one of:
+ * the directory whose `hitl-conformance.integration.test.ts` runs it (`web-chat`
+ * runs from `test/browser`, since it needs a browser). Each cell is one of:
  *
  * - must pass;
  * - not supported: the platform lacks a capability the rule requires, or the
@@ -288,6 +291,32 @@ const hitlConformance = {
     {
       driver: twilioDriver,
       broken: QUEUED_BUDGET_REPLY,
+    },
+  ],
+  "web-chat": [
+    {
+      driver: webChatDriver,
+      broken: {
+        ...QUEUED_BUDGET_REPLY,
+        ...budgetPromptNotShown(
+          "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
+          "pressing stop on budget prompt halts work, next message asks again",
+        ),
+        "pressing options of two pending questions answers each with its own option": {
+          reason:
+            "a tool call's message part holds one input request, so a second ctx.ask on the same call replaces the first",
+          symptom:
+            /Timed out waiting for (one of the questions \["Which (day|time)|plan_review to return)/u,
+        },
+      },
+      unsupported: {
+        "pressing an option of an answered question sends it to the agent as new input":
+          "an answered question disables its options, so nothing is left to press",
+        "pressing Approve names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
+        "approving by text names who approved on the approval": WEB_CHAT_SINGLE_PERSON,
+        "pressing an option names who answered on the question": WEB_CHAT_SINGLE_PERSON,
+        "answering a question by text names who answered on the question": WEB_CHAT_SINGLE_PERSON,
+      },
     },
   ],
 } satisfies Record<string, readonly ConformanceChannel[]>;
