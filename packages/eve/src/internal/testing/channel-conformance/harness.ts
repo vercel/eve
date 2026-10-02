@@ -1,6 +1,7 @@
 import { createChannelOperations } from "#channel/channel-operations.js";
 import { type CompiledChannel, isCompiledChannel } from "#channel/compiled-channel.js";
 import { type RouteHandlerArgs, isHttpRouteDefinition } from "#channel/routes.js";
+import { sessionInboxHookToken } from "#execution/session-inbox/address.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -367,7 +368,10 @@ async function converse(
             return {
               ...source,
               send: async (...sendArgs) => track(await source.send(...sendArgs)),
-              respond: async (...respondArgs) => track(await source.respond(...respondArgs)),
+              respond: async (...respondArgs) => {
+                await waitForAddress(address);
+                return track(await source.respond(...respondArgs));
+              },
             };
           },
           attachSession,
@@ -434,9 +438,29 @@ async function converse(
     };
 
     /**
+     * The turn emits `turn.waiting` inside the step that raised the request, but
+     * an address the channel aliased in that step (such as Discord's message id)
+     * is only claimed once the step commits. Answering through it before then
+     * finds no session.
+     */
+    async function waitForAddress(address: string): Promise<void> {
+      const world = await getWorld();
+      const token = sessionInboxHookToken(`${channelName}:${address}`);
+      await wait(
+        `the channel to claim the address "${address}"`,
+        () =>
+          world.hooks.getByToken(token).then(
+            () => true,
+            () => undefined,
+          ),
+        () => "",
+      );
+    }
+
+    /**
      * A person answers once the bot has finished asking. Answering the moment
-     * the question appears races the channel's own bookkeeping for it, such as
-     * Discord aliasing the session to the message it just posted.
+     * the question appears races the turn's own bookkeeping for it; see also
+     * {@link waitForAddress}.
      */
     function holdForInput(): Promise<true> {
       return wait(
