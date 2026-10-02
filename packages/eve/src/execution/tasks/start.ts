@@ -27,7 +27,7 @@ import {
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { HarnessSessionBase } from "#harness/types.js";
-import { createTaskStartedEvent, type TaskStartedStreamEvent } from "#protocol/message.js";
+import type { TaskStartedStreamEvent } from "#protocol/message.js";
 import { TOO_MANY_TASKS_CODE, UNKNOWN_TASK_CODE } from "#protocol/task-tools.js";
 import type { RuntimeToolResultActionResult, WorkflowToolRunEntry } from "#shared/action-types.js";
 
@@ -35,11 +35,11 @@ const log = createLogger("execution.tasks");
 
 type TaskDispatchInput = StartWorkflowTaskInput & { readonly taskId: string };
 
-/** The call's answer, and the `task.started` event the dispatch step publishes for it. */
+/** The call's answer, and the task start the dispatch step reports for it. */
 interface TaskDispatchResult {
   readonly result: RuntimeToolResultActionResult;
   readonly session: HarnessSessionBase;
-  readonly started?: TaskStartedStreamEvent;
+  readonly started?: TaskStartedStreamEvent["data"];
 }
 
 /** The entry of a run that does a task's work. */
@@ -156,14 +156,17 @@ function unknownTaskResult(input: TaskDispatchInput): RuntimeToolResultActionRes
   });
 }
 
-function taskStartedEvent(input: TaskDispatchInput, record: TaskRecord): TaskStartedStreamEvent {
-  return createTaskStartedEvent({
+function taskStartedEvent(
+  input: TaskDispatchInput,
+  record: TaskRecord,
+): TaskStartedStreamEvent["data"] {
+  return {
     callId: input.task.callId,
     kind: record.kind,
     name: input.task.toolName,
     taskId: input.taskId,
     turnId: input.batchEvent.turnId,
-  });
+  };
 }
 
 function startReceipt(input: TaskDispatchInput, resumable: boolean): RuntimeToolResultActionResult {

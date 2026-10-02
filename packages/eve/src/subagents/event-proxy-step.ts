@@ -13,8 +13,11 @@ import {
   withSessionStateDelta,
   type SessionStateTransition,
 } from "#execution/session/state-delta.js";
-import { emitProxiedAuthorizationEvent, emitProxiedInputRequest } from "#subagents/hitl-proxy.js";
-import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { relayedInputRoutes } from "#subagents/hitl-proxy.js";
+import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { currentProjection } from "#harness/session-machine/current.js";
+import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
+import { relay } from "#harness/session-machine/transitions.js";
 import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
 
 type SubagentEventHookPayload =
@@ -53,7 +56,7 @@ export async function emitProxiedSubagentEvent(
     readonly hookPayload: SubagentEventHookPayload;
   },
 ): Promise<PublishedSessionEvents> {
-  const { hookPayload, runId, workflowAsk } = input;
+  const { ctx, hookPayload, runId, workflowAsk } = input;
   const { published } = await publishFromSessionStep(input, {
     origin: "relayed",
     inputSource:
@@ -61,19 +64,40 @@ export async function emitProxiedSubagentEvent(
         ? JSON.stringify([hookPayload.childContinuationToken, hookPayload.inputSource ?? null])
         : undefined,
     async publish(emit, session) {
-      if (hookPayload.kind === "subagent-authorization-event") {
-        await emitProxiedAuthorizationEvent({ emit, hookPayload, session });
-        return undefined;
-      }
-      return await emitProxiedInputRequest({ emit, hookPayload, session });
+      const view = sessionView(currentProjection(ctx), session.state);
+      const routes =
+        hookPayload.kind === "subagent-input-request"
+          ? relayedInputRoutes(view.projection, hookPayload)
+          : undefined;
+      // A child's fresh batch replaces its prior one, whose routes stop working, so readers
+      // must stop offering what it held.
+      const incoming = new Set(routes?.map(([requestId]) => requestId));
+      const replaced =
+        hookPayload.kind !== "subagent-input-request"
+          ? []
+          : [...getProxyInputRequests(session.state)]
+              .filter(
+                ([requestId, route]) =>
+                  route.childContinuationToken === hookPayload.childContinuationToken &&
+                  route.inputSource === hookPayload.inputSource &&
+                  !incoming.has(requestId),
+              )
+              .map(([requestId]) => requestId);
+      // A relay changes no execution state, only what the session reports.
+      await applyTransition(
+        session,
+        relay(view, { payload: hookPayload, replacedRequestIds: replaced }),
+        emit,
+      );
+      return routes;
     },
-    updateSession(session, entries) {
-      if (entries === undefined || hookPayload.kind !== "subagent-input-request") {
+    updateSession(session, routes) {
+      if (routes === undefined || hookPayload.kind !== "subagent-input-request") {
         return { session };
       }
       return {
         session: upsertProxyInputRequests({
-          entries: entries.map(([requestId, route]) => [
+          entries: routes.map(([requestId, route]) => [
             requestId,
             {
               ...route,

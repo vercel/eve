@@ -281,6 +281,27 @@ function buildApprovalFn(
   };
 }
 
+/**
+ * Re-runs a tool's approval policy for a call a person approved, just before eve runs it, so the
+ * policy can still refuse it, as when the connection it was approved against changed.
+ */
+export async function recheckApprovedCall(
+  definition: HarnessToolDefinition,
+  call: { readonly callId: string; readonly input: unknown; readonly abortSignal?: AbortSignal },
+): Promise<{ readonly denied: boolean; readonly reason?: string }> {
+  const status = await buildApprovalFn(definition, {})(
+    call.input,
+    call.callId,
+    call.abortSignal,
+    true,
+  );
+  if (status === "denied") return { denied: true };
+  if (typeof status === "object" && status !== null && status.type === "denied") {
+    return { denied: true, reason: status.reason };
+  }
+  return { denied: false };
+}
+
 /** Builds the AI SDK 7 call-level approval policy for an assembled tool set. */
 export function buildToolApproval(
   tools: ToolSet,

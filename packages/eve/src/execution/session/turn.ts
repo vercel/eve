@@ -245,6 +245,7 @@ export class SessionExecution {
     // A child a run opened before the cancel appears before its task settles as cancelled.
     await this.handleBoundaryMessages(turn.takeBoundaryMessages("agent-started"));
     await cancelDescendantTurnsStep({
+      serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,
     });
     await cancelWorkingTasks(cursor, "turn_cancelled");

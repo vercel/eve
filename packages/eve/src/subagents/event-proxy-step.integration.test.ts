@@ -13,6 +13,8 @@ import {
 } from "#context/keys.js";
 import type { DurableSession } from "#execution/durable-session-store.js";
 import { openSessionEventPublisher } from "#execution/publish-session-events.js";
+import { enterSessionProjection } from "#harness/session-machine/current.js";
+import { positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
 import { createSessionLimitContinuationRequest } from "#harness/human-input/budget-request.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { createAuthorizationRequiredEvent, type MessageStreamEvent } from "#protocol/message.js";
@@ -76,15 +78,18 @@ function fixture() {
     agent: { system: "" },
     continuationToken: "http:parent",
     sessionId: "parent-session",
-    state: {
-      "eve.harness.emission": {
-        turnId: "parent-turn",
-        sequence: 1,
-        stepIndex: 0,
-        sessionStarted: true,
+    state: withOpenTurn(
+      {
+        agent: { dynamicModel: true, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100_000 },
+        continuationToken: "http:parent",
+        history: [],
+        sessionId: "parent-session",
       },
-    },
+      { sequence: 1, stepIndex: 0, turnId: "parent-turn" },
+    ).state,
   };
+  enterSessionProjection(ctx, durableSession.state);
   const request = createSessionLimitContinuationRequest({
     sessionId: "child-session",
     violation: { kind: "input", limit: 100, usedTokens: 101 },
@@ -147,7 +152,10 @@ describe("proxied stream hooks", () => {
     });
     expect(result.sessionState.continuationToken).toBe("http:parent-thread");
     expect(result.sessionState.hasProxyInputRequests).toBe(true);
-    expect(result.sessionState.emissionState).toMatchObject({ sequence: 1, turnId: "parent-turn" });
+    expect(positionOf(result.sessionState.snapshot.session)).toMatchObject({
+      sequence: 1,
+      turnId: "parent-turn",
+    });
     const routed = routeDeliverPayload({
       payload: { inputResponses: [{ requestId: f.request.requestId, optionId: "continue" }] },
       state: result.sessionState.snapshot.session.state,

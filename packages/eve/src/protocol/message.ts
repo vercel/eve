@@ -1961,6 +1961,10 @@ function normalizeActionResultOutcome(result: RuntimeActionResult): {
   readonly status: ActionResultStatus;
 } {
   const outputError = readActionResultOutputError(result.output);
+  // A policy's automatic denial is a denial, like a person's, not a failure.
+  if (outputError?.code === "TOOL_EXECUTION_DENIED") {
+    return { error: outputError, status: "rejected" };
+  }
   if (result.isError === true) {
     return {
       error: buildActionResultError(result),

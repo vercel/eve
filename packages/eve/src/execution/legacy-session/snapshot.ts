@@ -1,5 +1,6 @@
 import type { ModelMessage } from "ai";
-import { getHarnessEmissionState } from "#harness/emission.js";
+import { SESSION_PROJECTION_STATE_KEY } from "#harness/session-machine/view.js";
+import { initialSessionProjection, type SessionProjection } from "#protocol/session-projection.js";
 import { isUserMessageKind, validateHarnessModelMessages } from "#harness/messages.js";
 import {
   DURABLE_SESSION_VERSION,
@@ -11,8 +12,10 @@ import { isObject } from "#shared/guards.js";
 
 export type LegacySession = DurableSession & { readonly history: ModelMessage[] };
 
+const LEGACY_EMISSION_KEY = "eve.harness.emission";
+
 const PRESERVED_FRAMEWORK_STATE = new Set([
-  "eve.harness.emission",
+  LEGACY_EMISSION_KEY,
   "eve.harness.turnUsage",
   "eve.harness.reportedSessionUsage",
   "eve.harness.sessionRuntimeTokenLimit",
@@ -46,6 +49,7 @@ export function importConversation(session: LegacySession): {
       ([key]) => !key.startsWith("eve.") || PRESERVED_FRAMEWORK_STATE.has(key),
     ),
   );
+  const { [LEGACY_EMISSION_KEY]: _emission, ...imported } = state;
   return {
     history: normalizeHistory(history),
     sessionState: {
@@ -53,9 +57,31 @@ export function importConversation(session: LegacySession): {
       sessionId: session.sessionId,
       continuationToken: session.continuationToken,
       hasProxyInputRequests: false,
-      emissionState: getHarnessEmissionState(state),
-      snapshot: { session: { ...durable, state } },
+      snapshot: {
+        session: {
+          ...durable,
+          state: { ...imported, [SESSION_PROJECTION_STATE_KEY]: importProjection(session) },
+        },
+      },
     },
+  };
+}
+
+/** The turn position a legacy driver persisted, as the projection that replaces it. */
+export function importProjection(session: LegacySession): SessionProjection {
+  const raw = session.state?.[LEGACY_EMISSION_KEY];
+  const projection = initialSessionProjection();
+  if (!isObject(raw) || typeof raw.sequence !== "number") return projection;
+  const started = raw.sessionStarted === true ? { started: true as const } : {};
+  const turnId = typeof raw.turnId === "string" ? raw.turnId : "";
+  if (turnId === "") return { ...projection, ...started, nextSequence: raw.sequence };
+  const stepIndex = typeof raw.stepIndex === "number" ? raw.stepIndex : 0;
+  return {
+    ...projection,
+    ...started,
+    activeTurnId: turnId,
+    nextSequence: raw.sequence + 1,
+    turns: { [turnId]: { turnId, sequence: raw.sequence, status: "active", stepIndex } },
   };
 }
 

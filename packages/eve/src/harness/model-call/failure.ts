@@ -11,8 +11,7 @@ import { toErrorMessage } from "#shared/errors.js";
 import type { Step } from "#harness/step/context.js";
 import type { StepResult } from "#harness/types.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
-import { emitFailedStep, emitRecoverableFailedTurn } from "#harness/emission.js";
-import { getSessionUsage } from "#harness/turn-tag-state.js";
+import { fail } from "#harness/session-machine/transitions.js";
 import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 
 const log = createLogger("harness.tool-loop");
@@ -33,7 +32,7 @@ const log = createLogger("harness.tool-loop");
  * compact gateway diagnostics (`statusCode`, `upstreamMessage`,
  * `responseBodySnippet`, ...) always show up next to the message.
  */
-function buildModelCallFailureDetails(input: {
+export function buildModelCallFailureDetails(input: {
   readonly catalogSummary: SemanticErrorSummary | null;
   readonly error: unknown;
   readonly errorId: string;
@@ -75,7 +74,7 @@ function buildModelCallFailureDetails(input: {
  * Otherwise fall back to the raw error so unrecognized failures keep
  * their full stack in logs.
  */
-function buildModelCallFailureLogFields(input: {
+export function buildModelCallFailureLogFields(input: {
   readonly error: unknown;
   readonly errorId: string;
   readonly modelCallDetails: JsonObject;
@@ -104,9 +103,8 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
   // SDK's own span records only `error.stack`, without `cause`.
   step.instrumentation?.recordError(error);
   // Callers without an event handler (tests, task-only paths) get the raw error.
-  const { emit } = step;
-  if (emit === undefined) throw error;
-  const { continuationToken, sessionId } = step.session;
+  if (step.emit === undefined) throw error;
+  const { sessionId } = step.session;
   const { turnId } = step.position();
 
   const streamWriteDetails = extractWorkflowStreamWriteErrorDetails(error);
@@ -119,13 +117,11 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
       sessionId,
       turnId,
     });
-    step.moveTo(
-      await emitRecoverableFailedTurn(emit, step.position(), {
+    await step.apply(
+      fail(step.view(), {
         code: "WORKFLOW_STREAM_WRITE_FAILED",
-        continuationToken,
         details: { ...streamWriteDetails, errorId },
         message: toErrorMessage(error),
-        usage: getSessionUsage(step.session),
       }),
     );
     return { next: null, session: step.session };
@@ -169,13 +165,14 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
     } else {
       log.error(upstreamRejection?.message ?? "model call failed terminally", logFields);
     }
-    await emitFailedStep(emit, step.position(), {
-      code: "MODEL_CALL_FAILED",
-      details,
-      message: errorMessage,
-      sessionId,
-      usage: getSessionUsage(step.session),
-    });
+    await step.apply(
+      fail(step.view(), {
+        code: "MODEL_CALL_FAILED",
+        details,
+        message: errorMessage,
+        terminal: { sessionId },
+      }),
+    );
     // A delegated run's caller needs a failed result to report; a conversation already ended
     // with `session.failed`.
     return {
@@ -190,14 +187,8 @@ export async function reportModelCallFailure(step: Step, error: unknown): Promis
     upstreamRejection?.message ?? "model call failed — parking session for retry by the user",
     logFields,
   );
-  step.moveTo(
-    await emitRecoverableFailedTurn(emit, step.position(), {
-      code: "MODEL_CALL_FAILED",
-      continuationToken,
-      details,
-      message: errorMessage,
-      usage: getSessionUsage(step.session),
-    }),
+  await step.apply(
+    fail(step.view(), { code: "MODEL_CALL_FAILED", details, message: errorMessage }),
   );
   step.session = { ...step.session, outputSchema: undefined };
   return {

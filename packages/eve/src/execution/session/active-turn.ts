@@ -11,7 +11,8 @@ import type { SessionExecutionInput } from "#execution/session/turn.js";
 import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
+import { readDurableSession } from "#execution/durable-session-read.js";
+import { activeTurnId, storedProjection, turnPosition } from "#harness/session-machine/view.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
@@ -59,7 +60,9 @@ export class ActiveTurn {
     this.input = input;
     this.caller = owner.caller;
     this.identity = { callerCallId: owner.caller?.callId, principal: owner.principal };
-    this.expectedTurnId = activeTurnId(input.cursor.sessionState.emissionState);
+    this.expectedTurnId = activeTurnId(
+      turnPosition(storedProjection(readDurableSession(input.cursor.sessionState).state)),
+    );
     this.unsubscribe = input.inbox.onInterrupt((payload) => {
       if (this.cancelsThisTurn(payload)) this.abort();
     });

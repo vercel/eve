@@ -9,7 +9,7 @@ import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, SessionIdKey } from "#context/keys.js";
 import { emitProxiedSubagentEvent } from "#subagents/event-proxy-step.js";
 import { projectToDurableSession } from "#execution/session.js";
-import { setHarnessEmissionState } from "#harness/emission-state.js";
+import { positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
@@ -213,7 +213,7 @@ describe("subagent authorization proxy", () => {
   it("parks the parent's open turn on a sign-in without ending it", async () => {
     const parentSessionId = "parent-session";
     const openTurn = { sessionStarted: true, sequence: 3, stepIndex: 1, turnId: "parent-turn" };
-    const session = setHarnessEmissionState(createSession(parentSessionId), openTurn);
+    const session = withOpenTurn(createSession(parentSessionId), openTurn);
     const { bundle, ctx, hook } = buildContext({
       adapter: authorizationAdapter,
       sessionId: parentSessionId,
@@ -280,7 +280,7 @@ describe("subagent authorization proxy", () => {
       { data: { sequence: 3, turnId: "parent-turn" }, type: "turn.waiting" },
       completedEvent,
     ]);
-    expect(completed.sessionState.emissionState).toMatchObject(openTurn);
+    expect(positionOf(completed.sessionState.snapshot.session)).toMatchObject(openTurn);
     expect(hook.mock.calls.map(([event]) => event)).toEqual(chunks.map(decodeEvent));
     expect(hook.mock.calls.every(([, ctx]) => ctx.session.id === parentSessionId)).toBe(true);
   });

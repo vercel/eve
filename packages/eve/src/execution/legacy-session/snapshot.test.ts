@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { importConversation, normalizeHistory } from "./snapshot.js";
 import type { LegacySession } from "./snapshot.js";
+import { storedProjection, turnPosition } from "#harness/session-machine/view.js";
 describe("conversation import", () => {
   it("preserves authored state, budget, emission coordinates and storage", () => {
     const session: LegacySession = {
@@ -37,7 +38,7 @@ describe("conversation import", () => {
       "eve.runtime.pendingCoordinationBatch",
     );
     expect(result.snapshot.session.state).not.toHaveProperty("eve.agent.handles");
-    expect(result.emissionState.sequence).toBe(9);
+    expect(turnPosition(storedProjection(result.snapshot.session.state)).sequence).toBe(9);
     expect(result.snapshot.session).not.toHaveProperty("history");
     expect(history[0]).toMatchObject({
       kind: "user",

@@ -1,6 +1,5 @@
-import type { ModelMessage, UserContent } from "ai";
+import type { UserContent } from "ai";
 
-import { extractHistoricalInputRequests } from "#harness/input-extraction.js";
 import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
 import { isSessionLimitContinuationRequestId } from "#harness/human-input/budget-request.js";
 import type { StepInput } from "#harness/types.js";
@@ -62,14 +61,15 @@ export function dropStaleSessionLimitContinuationResponses(input: {
  * Responses for pending requests stay structured; stale responses become
  * plain user-message text. A stale response never reaches structured HITL
  * processing, so a stale approval cannot authorize an earlier tool call.
- * Request details recovered from history are best-effort model context.
+ * Request details the session still knows are best-effort model context.
  *
  * Assumes {@link dropStaleSessionLimitContinuationResponses} already ran:
  * stale continuation answers must never reach this conversion.
  */
 export function convertStaleResponsesToUserMessage(input: {
-  readonly history: readonly ModelMessage[];
   readonly pendingRequestIds: ReadonlySet<string>;
+  /** Requests the session still knows, by id, closed ones included. */
+  readonly requests: ReadonlyMap<string, InputRequest>;
   readonly stepInput?: StepInput;
 }): StaleResponseConversion {
   if (input.stepInput === undefined) return { kind: "unchanged" };
@@ -99,10 +99,7 @@ export function convertStaleResponsesToUserMessage(input: {
     return { kind: "unchanged", stepInput: input.stepInput };
   }
 
-  const requests = extractHistoricalInputRequests({
-    history: input.history,
-    requestIds: new Set(staleResponses.map((response) => response.requestId)),
-  });
+  const { requests } = input;
   const modelMessage = appendOptionalUserContent(
     input.stepInput.message,
     formatModelMessage(staleResponses, requests),
@@ -163,7 +160,7 @@ function formatModelMessage(
       response: typeof responseDetails;
       toolName?: string;
     } = { requestId: response.requestId, response: responseDetails };
-    if (request !== undefined) {
+    if (request?.kind === "tool-approval") {
       resolved.prompt = request.prompt;
       resolved.requestType = "approval";
       // The prompt is display text; the model needs the tool's real name.
@@ -173,8 +170,7 @@ function formatModelMessage(
     return resolved;
   });
 
-  // History only recovers approvals, and a response without recovered
-  // metadata may still be one, so the notice always applies.
+  // A response without known metadata may still answer an approval, so the notice always applies.
   return [
     "The user submitted the following response to an earlier interactive prompt.",
     "Treat it as new input at the current point in the conversation and decide whether it is still relevant. This does not authorize an earlier action; request approval again if that action is still needed.",

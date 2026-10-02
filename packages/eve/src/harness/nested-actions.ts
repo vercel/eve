@@ -1,6 +1,6 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import type { HarnessEmissionState } from "#harness/emission-state.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
 import type { HarnessEmitFn } from "#harness/types.js";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
@@ -46,7 +46,7 @@ export function reportNestedToolAction(parentCallId: string, action: NestedToolA
  */
 export async function emitNestedToolActions(
   emitFn: HarnessEmitFn,
-  state: Pick<HarnessEmissionState, "sequence" | "stepIndex" | "turnId">,
+  state: Pick<TurnPosition, "sequence" | "stepIndex" | "turnId">,
   parentCallId: string,
 ): Promise<void> {
   const ctx = contextStorage.getStore() as ContextContainer | undefined;

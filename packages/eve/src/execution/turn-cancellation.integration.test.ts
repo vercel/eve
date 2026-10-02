@@ -632,6 +632,20 @@ describe("turn cancellation integration", () => {
         ).toBe(true);
         expect(filterEventsByType(cancelledTurn, "turn.started")).toHaveLength(1);
         expect(filterEventsByType(cancelledTurn, "turn.cancelled")).toHaveLength(1);
+        // The cancel stops the running call and says so before the turn ends.
+        const stopped = filterEventsByType(cancelledTurn, "action.result");
+        expect(stopped).toEqual([
+          expect.objectContaining({
+            data: expect.objectContaining({
+              error: expect.objectContaining({ code: "TURN_CANCELLED" }),
+              status: "cancelled",
+              turnId: "turn_0",
+            }),
+          }),
+        ]);
+        expect(containsEventSequence(cancelledTurn, ["action.result", "turn.cancelled"])).toBe(
+          true,
+        );
         // The superseding step attempt settles before any model work, so
         // the cancelled turn streams exactly one step.
         expect(filterEventsByType(cancelledTurn, "step.started")).toHaveLength(1);

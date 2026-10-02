@@ -1,55 +1,40 @@
 import { expect, it } from "vitest";
 
-import type { ModelMessage } from "ai";
+import type { InputRequest } from "#shared/input.js";
 
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
 } from "#harness/human-input/stale-responses.js";
 
-const approvalHistory: ModelMessage[] = [
-  {
-    content: [
-      {
+/** Requests the session still knows, closed ones included. */
+const knownApproval = new Map<string, InputRequest>([
+  [
+    "approval-1",
+    {
+      action: {
+        callId: "call-1",
         input: { command: "deploy --force" },
-        toolCallId: "call-1",
+        kind: "tool-call",
         toolName: "bash",
-        type: "tool-call",
       },
-      {
-        approvalId: "approval-1",
-        toolCallId: "call-1",
-        type: "tool-approval-request",
-      },
-    ],
-    role: "assistant",
-  },
-];
+      kind: "tool-approval",
+      options: [
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
+      ],
+      prompt: "Approve tool call: bash",
+      requestId: "approval-1",
+    },
+  ],
+]);
 
-const unrecoverableHistory: ModelMessage[] = [
-  {
-    content: [
-      {
-        input: {
-          allowFreeform: true,
-          options: [
-            { id: "current", label: "Use current context" },
-            { id: "candidate", label: "Use the candidate" },
-          ],
-          prompt: "Which context should I use?",
-        },
-        toolCallId: "question-1",
-        toolName: "ask_question",
-        type: "tool-call",
-      },
-    ],
-    role: "assistant",
-  },
-];
+/** The session no longer knows the request a response answers. */
+const unknown = new Map<string, InputRequest>();
 
 it("converts a stale approval into a non-authorizing user message", () => {
   const result = convertStaleResponsesToUserMessage({
-    history: approvalHistory,
+    requests: knownApproval,
     pendingRequestIds: new Set(),
     stepInput: {
       inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
@@ -63,7 +48,9 @@ it("converts a stale approval into a non-authorizing user message", () => {
 
   expect(result.displayMessage).toBe("Approve");
   expect(result.stepInput.inputResponses).toBeUndefined();
-  expect(result.stepInput.message).toEqual(expect.stringContaining('"prompt": "Approve Bash?"'));
+  expect(result.stepInput.message).toEqual(
+    expect.stringContaining('"prompt": "Approve tool call: bash"'),
+  );
   expect(result.stepInput.message).toEqual(expect.stringContaining('"toolName": "bash"'));
   expect(result.stepInput.message).toEqual(expect.stringContaining('"label": "Approve"'));
   expect(result.stepInput.message).toEqual(
@@ -73,7 +60,7 @@ it("converts a stale approval into a non-authorizing user message", () => {
 
 it("converts an attributed stale approval using its option label", () => {
   const result = convertStaleResponsesToUserMessage({
-    history: approvalHistory,
+    requests: knownApproval,
     pendingRequestIds: new Set(),
     stepInput: {
       attributedInputResponses: [
@@ -102,7 +89,7 @@ it("converts an attributed stale approval using its option label", () => {
 
 it("keeps responses for pending requests structured while converting stale ones", () => {
   const result = convertStaleResponsesToUserMessage({
-    history: unrecoverableHistory,
+    requests: unknown,
     pendingRequestIds: new Set(["question-2"]),
     stepInput: {
       inputResponses: [
@@ -124,7 +111,7 @@ it("keeps responses for pending requests structured while converting stale ones"
 
 it("keeps the non-authorization notice when request metadata is missing", () => {
   const result = convertStaleResponsesToUserMessage({
-    history: [],
+    requests: unknown,
     pendingRequestIds: new Set(),
     stepInput: {
       inputResponses: [{ optionId: "approve", requestId: "approval-gone" }],
@@ -148,7 +135,7 @@ it("returns unchanged when every response matches the pending batch", () => {
     inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
   };
   const result = convertStaleResponsesToUserMessage({
-    history: approvalHistory,
+    requests: knownApproval,
     pendingRequestIds: new Set(["approval-1"]),
     stepInput,
   });
@@ -217,7 +204,7 @@ it("converts remaining stale responses after the drop pass", () => {
     },
   });
   const result = convertStaleResponsesToUserMessage({
-    history: unrecoverableHistory,
+    requests: unknown,
     pendingRequestIds,
     stepInput,
   });

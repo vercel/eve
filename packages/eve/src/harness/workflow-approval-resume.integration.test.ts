@@ -5,13 +5,13 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import { SessionIdKey, StepDynamicToolMetadataKey } from "#context/keys.js";
-import {
-  commitCancelledCoordinationBatch,
-  getPendingCoordinationBatch,
-} from "#harness/coordination.js";
-import { getHarnessEmissionState } from "#harness/emission.js";
+import { applyTransition, sessionView } from "#harness/session-machine/commit.js";
+import { cancel } from "#harness/session-machine/transitions.js";
+import { runtimeWait, storedProjection } from "#harness/session-machine/view.js";
+import { withPublished } from "#internal/testing/session-machine.js";
+import { openInputs } from "#protocol/session-projection.js";
+import { createProjectionRecorder } from "#internal/testing/session-projection-recorder.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -63,14 +63,21 @@ function setup(
     modelId: "approval-model",
     provider: "eve-integration-mock",
   });
+  const recorder = createProjectionRecorder();
+  const listen: NonNullable<ToolLoopHarnessConfig["handleEvent"]> =
+    overrides.handleEvent ??
+    (async (event) => {
+      events.push(event);
+    });
   const config: ToolLoopHarnessConfig = {
     capabilities: { requestInput: true },
-    handleEvent: async (event) => {
-      events.push(event);
-    },
     resolveModel: async () => model,
     tools: new Map(tools.map((tool) => [tool.name, tool])),
     ...overrides,
+    handleEvent: async (event, messages) => {
+      recorder.record(event);
+      await listen(event, messages);
+    },
   };
   const session: HarnessSession = {
     agent: {
@@ -87,14 +94,32 @@ function setup(
     session: HarnessSession,
     input?: Parameters<ReturnType<typeof createToolLoopHarness>>[1],
   ) =>
-    contextStorage.run(createApprovalContext(), () =>
+    contextStorage.run(recorder.enter(createApprovalContext()), () =>
       createToolLoopHarness(config)(session, input),
     );
-  return { events, config, model, step, session };
+  return { events, config, model, recorder, step, session };
 }
 
+/** What the session asks and still awaits. */
 function requests(session: HarnessSession) {
-  return getPendingInputBatches(session.state).flatMap((batch) => batch.requests);
+  return openInputs(storedProjection(session.state)).map((input) => input.request);
+}
+
+/** `session.cancel()`, through the machine's transition. */
+async function cancelTurn(
+  session: HarnessSession,
+  record: (event: UnstampedMessageStreamEvent) => void,
+): Promise<HarnessSession> {
+  const published: UnstampedMessageStreamEvent[] = [];
+  const cancelled = await applyTransition(
+    session,
+    cancel(sessionView(storedProjection(session.state), session.state)),
+    async (event) => {
+      published.push(event);
+      record(event);
+    },
+  );
+  return withPublished(cancelled, published);
 }
 
 function workflowResult(callId = "call-0") {
@@ -114,10 +139,10 @@ function resultCallIds(session: HarnessSession) {
 }
 
 describe("workflow approval resume (real AI SDK)", () => {
-  it("resumes the held turn before dispatch and replays accompanying input after completion", async () => {
+  it("resumes the held turn and retains accompanying input while the approved workflow runs", async () => {
     const fixture = setup([workflow("deploy", always())]);
     const initial = await fixture.step(fixture.session, { message: "Deploy Alice's release." });
-    expect(getPendingCoordinationBatch(initial.session.state)).toBeUndefined();
+    expect(runtimeWait(initial.session.state)).toBeUndefined();
     const [request] = requests(initial.session);
     expect(request).toBeDefined();
     const start = fixture.events.length;
@@ -125,26 +150,26 @@ describe("workflow approval resume (real AI SDK)", () => {
       inputResponses: [{ optionId: "approve", requestId: request!.requestId }],
       message: "Tell Alice when deployment finishes.",
     });
-    expect(
-      getPendingCoordinationBatch(approved.session.state)?.tasks.map((task) => task.callId),
-    ).toEqual(["call-0"]);
+    expect(runtimeWait(approved.session.state)?.tasks.map((task) => task.callId)).toEqual([
+      "call-0",
+    ]);
     // The approval held its turn, so answering it resumes that turn.
-    const resumedTurn = getHarnessEmissionState(approved.session.state).turnId;
-    expect(resumedTurn).toBe(getHarnessEmissionState(initial.session.state).turnId);
-    expect(resumedTurn).not.toBe("");
+    const resumedTurn = fixture.recorder.position.turnId;
+    expect(resumedTurn).toBe("turn_0");
     expect(
       fixture.events.slice(start).filter((event) => event.type === "turn.started"),
     ).toHaveLength(0);
     const completed = await fixture.step(approved.session, workflowResult());
     expect(resultCallIds(completed.session)).toEqual(["call-0"]);
     expect(fixture.model.doStreamCalls).toHaveLength(2);
+    // Dispatching the approved workflow calls no model; the turn's one step reads its result.
     expect(
       fixture.events.slice(start).filter((event) => event.type === "step.started"),
-    ).toMatchObject([{ data: { turnId: resumedTurn } }, { data: { turnId: resumedTurn } }]);
-    expect(JSON.stringify(fixture.model.doStreamCalls[1]!.prompt)).not.toContain("Tell Alice");
-    expect(typeof completed.next).toBe("function");
-    const followUp = await fixture.step(completed.session);
-    expect(JSON.stringify(followUp.session.history)).toContain(
+    ).toMatchObject([{ data: { turnId: resumedTurn } }]);
+    expect(JSON.stringify(fixture.model.doStreamCalls[1]!.prompt)).toContain(
+      "Tell Alice when deployment finishes.",
+    );
+    expect(JSON.stringify(completed.session.history)).toContain(
       "Tell Alice when deployment finishes.",
     );
     expect(fixture.events.filter((event) => event.type === "input.resolved")).toHaveLength(1);
@@ -182,7 +207,7 @@ describe("workflow approval resume (real AI SDK)", () => {
         requestId: request.requestId,
       })),
     });
-    expect(getPendingCoordinationBatch(approved.session.state)?.tasks).toHaveLength(1);
+    expect(runtimeWait(approved.session.state)?.tasks).toHaveLength(1);
     const completed = await fixture.step(approved.session, workflowResult());
     expect(resultCallIds(completed.session)).toEqual(["call-0"]);
     expect(JSON.stringify(fixture.model.doStreamCalls.at(-1)?.prompt)).toContain(
@@ -199,14 +224,14 @@ describe("workflow approval resume (real AI SDK)", () => {
         requestId: request.requestId,
       })),
     });
-    expect(getPendingCoordinationBatch(cancelled.session.state)).toBeUndefined();
+    expect(runtimeWait(cancelled.session.state)).toBeUndefined();
     expect(resultCallIds(cancelled.session)).toEqual(["call-0"]);
   });
 
   it("never dispatches an automatically denied workflow", async () => {
     const fixture = setup([workflow("deploy", () => "denied")]);
     const initial = await fixture.step(fixture.session, { message: "Review Alice's deployment." });
-    expect(getPendingCoordinationBatch(initial.session.state)).toBeUndefined();
+    expect(runtimeWait(initial.session.state)).toBeUndefined();
     expect(requests(initial.session)).toEqual([]);
     expect(resultCallIds(initial.session)).toEqual(["call-0"]);
   });
@@ -220,9 +245,9 @@ describe("workflow approval resume (real AI SDK)", () => {
     const initial = await fixture.step(fixture.session, {
       message: "Prepare Alice's release and check status.",
     });
-    expect(
-      getPendingCoordinationBatch(initial.session.state)?.tasks.map((task) => task.callId),
-    ).toEqual(["call-2"]);
+    expect(runtimeWait(initial.session.state)?.tasks.map((task) => task.callId)).toEqual([
+      "call-2",
+    ]);
     const ordinary = await fixture.step(initial.session, {
       runtimeActionResults: [
         { callId: "call-2", kind: "tool-result", output: "healthy", toolName: "status" },
@@ -234,15 +259,15 @@ describe("workflow approval resume (real AI SDK)", () => {
         requestId: request.requestId,
       })),
     });
-    expect(
-      getPendingCoordinationBatch(approved.session.state)?.tasks.map((task) => task.callId),
-    ).toEqual(["call-0"]);
+    expect(runtimeWait(approved.session.state)?.tasks.map((task) => task.callId)).toEqual([
+      "call-0",
+    ]);
     const completed = await fixture.step(approved.session, workflowResult());
     expect(resultCallIds(completed.session).sort()).toEqual(["call-0", "call-1", "call-2"]);
-    expect(getPendingCoordinationBatch(completed.session.state)).toBeUndefined();
+    expect(runtimeWait(completed.session.state)).toBeUndefined();
   });
 
-  it("restores an approved dynamic sibling on a cold workflow continuation", async () => {
+  it("executes an approved dynamic sibling once before a cold workflow continuation", async () => {
     const execute = vi.fn(async () => "notified");
     const preparedTurns: string[] = [];
     const fixture = setup(
@@ -290,22 +315,22 @@ describe("workflow approval resume (real AI SDK)", () => {
     const initial = await fixture.step(fixture.session, {
       message: "Deploy Alice's release and notify Bob.",
     });
-    const origin = getPendingInputBatches(initial.session.state)[0]!.event!.turnId;
+    const origin = openInputs(storedProjection(initial.session.state))[0]!.turnId;
     const approved = await fixture.step(initial.session, {
       inputResponses: requests(initial.session).map((request) => ({
         optionId: "approve",
         requestId: request.requestId,
       })),
     });
-    expect(execute).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledOnce();
     clearDurableDynamicCallbacks(initial.session.sessionId);
     const completed = await fixture.step(
       JSON.parse(JSON.stringify(approved.session)),
       workflowResult(),
     );
-    expect(preparedTurns).toEqual([origin, origin]);
+    expect(preparedTurns).toEqual([origin]);
     expect(execute).toHaveBeenCalledOnce();
-    expect(resultCallIds(completed.session)).toEqual(["call-0", "call-1"]);
+    expect(resultCallIds(completed.session).sort()).toEqual(["call-0", "call-1"]);
     expect(JSON.stringify(completed.session.history)).toContain("notified");
     expect(fixture.events.filter((event) => event.type === "input.resolved")).toHaveLength(1);
     clearDurableDynamicCallbacks(initial.session.sessionId);
@@ -336,9 +361,9 @@ describe("workflow approval resume (real AI SDK)", () => {
         requestId: request.requestId,
       })),
     });
-    expect(
-      getPendingCoordinationBatch(approved.session.state)?.tasks.map((task) => task.callId),
-    ).toEqual(["call-0"]);
+    expect(runtimeWait(approved.session.state)?.tasks.map((task) => task.callId)).toEqual([
+      "call-0",
+    ]);
     const limited = await fixture.step(approved.session, workflowResult());
     expect(resultCallIds(limited.session)).toEqual(["call-0"]);
     const [limit] = requests(limited.session);
@@ -351,7 +376,7 @@ describe("workflow approval resume (real AI SDK)", () => {
     expect(resultCallIds(continued.session)).toEqual(["call-0"]);
   });
 
-  it("settles approved siblings without executing them when workflow coordination is cancelled", async () => {
+  it("preserves completed approved siblings when workflow coordination is cancelled", async () => {
     const execute = vi.fn(async () => "notified");
     const fixture = setup([
       workflow("deploy", always()),
@@ -372,11 +397,12 @@ describe("workflow approval resume (real AI SDK)", () => {
         requestId: request.requestId,
       })),
     });
-    const cancelled = commitCancelledCoordinationBatch(approved.session);
+    const cancelled = await cancelTurn(approved.session, fixture.recorder.record);
     expect(resultCallIds(cancelled).sort()).toEqual(["call-0", "call-1"]);
     await fixture.step(cancelled, {
       message: "Alice cancelled the release. Summarize the status.",
     });
-    expect(execute).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledOnce();
+    expect(JSON.stringify(cancelled.history)).toContain("notified");
   });
 });

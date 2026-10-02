@@ -33,29 +33,23 @@ describe("validateSessionCheckpointStep", () => {
     expect(readDurableSessionMock).toHaveBeenCalledWith(checkpoint.sessionState);
   });
 
-  it("rejects an incompatible workflow tool run with the current checkpoint version", async () => {
+  it("rejects a checkpoint that still holds input it hasn't run", async () => {
     deserializeContextMock.mockResolvedValue({ require: vi.fn() });
     readDurableSessionMock.mockReturnValue({
       state: {
-        "eve.workflowTool": {
-          version: 4,
-          runs: [
-            {
-              callId: "call",
-              toolName: "research",
-              origin: { turnId: "turn", stepIndex: 0 },
-              address: { runId: "run", hookToken: 42 },
-            },
-          ],
+        "eve.harness.turnState": {
+          grants: [],
+          queued: { message: "Alice asks for a summary." },
+          suspended: [],
         },
       },
     });
     await expect(validateSessionCheckpointStep({ checkpoint: createCheckpoint() })).rejects.toThrow(
-      "Corrupt workflow tool run registry",
+      "pending work",
     );
   });
 
-  it.each([5, 6, 7, 8, 9, 10, 12])(
+  it.each([5, 6, 7, 8, 9, 10, 11, 13])(
     "reports checkpoint version %s as incompatible before reading nested state",
     async (version) => {
       const checkpoint = createCheckpoint();
@@ -91,7 +85,6 @@ function createCheckpoint(): SessionCheckpoint {
     serializedContext: {},
     sessionState: createTestSessionState({
       continuationToken: "channel:current",
-      emissionState: { sequence: 0, sessionStarted: true, stepIndex: 0, turnId: "turn_0" },
       hasProxyInputRequests: false,
       sessionId: "session-1",
     }),

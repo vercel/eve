@@ -1,19 +1,13 @@
 import type { ModelMessage, ToolSet, TypedToolCall, TypedToolError } from "ai";
 
-import { isTaskTool, workingTaskIds } from "#execution/tasks/model-step.js";
-import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
+import type { CompactionConfig, StepResult } from "#harness/types.js";
+import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
 import {
-  createToolResultMessagePartFromToolError,
-  isToolResultError,
-} from "#harness/action-result-helpers.js";
-import { getAdvertisedTools } from "#harness/advertised-tools.js";
-import { setPendingCoordinationBatch } from "#harness/coordination.js";
-import {
-  advanceStep,
-  emitRecoverableFailedTurn,
-  emitTurnEpilogue,
-  type HarnessEmissionState,
-} from "#harness/emission.js";
+  type HarnessModelMessage,
+  resolveAssistantStepText,
+  validateHarnessModelMessages,
+} from "#harness/messages.js";
+import type { HarnessStepResult } from "#harness/step-hooks.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   appendMissingToolResultMessages,
@@ -21,54 +15,67 @@ import {
 } from "#harness/model-call/response.js";
 import type { ModelResponse } from "#harness/model-call/run.js";
 import type { EndsTurnTools } from "#harness/model-call/tools.js";
-import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
+import type { JsonValue } from "#shared/json.js";
+import type { Step } from "#harness/step/context.js";
+import {
+  fail,
+  finishTurn,
+  hold,
+  suspendStep,
+  type ToolResultPart,
+} from "#harness/session-machine/transitions.js";
+import { clearTurnClientContextState } from "#harness/turn-client-context.js";
+import { collectDeferredCalls } from "#harness/coordination.js";
+import {
+  createToolResultMessagePartFromToolError,
+  isToolResultError,
+} from "#harness/action-result-helpers.js";
 import {
   extractToolApprovalInputRequests,
-  hasRunnableDeferredStepInput,
+  hasRunnableQueue,
   parkOnApprovals,
   stopForToolSignIn,
 } from "#harness/human-input/index.js";
-import {
-  type HarnessModelMessage,
-  resolveAssistantStepText,
-  validateHarnessModelMessages,
-} from "#harness/messages.js";
-import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
-import { setRequestEnvelopeTokens } from "#harness/request-envelope.js";
-import type { HarnessStepResult } from "#harness/step-hooks.js";
+import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import {
   getInvalidToolCallInputError,
   isInvalidToolCall,
 } from "#harness/tool-call-input-errors.js";
-import { clearTurnClientContextState } from "#harness/turn-client-context.js";
-import { getSessionUsage } from "#harness/turn-tag-state.js";
-import type { CompactionConfig, StepResult } from "#harness/types.js";
-import { collectDeferredCalls } from "#harness/workflow-dispatch.js";
+import { isTaskTool, workingTaskIds } from "#execution/tasks/model-step.js";
+import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
+import { renderFinalOutputWhileWorkingError } from "#execution/tasks/render.js";
+import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
+import { setRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { createLogger } from "#internal/logging.js";
-import { createResultCompletedEvent, createTurnWaitingEvent } from "#protocol/message.js";
-import type { JsonValue } from "#shared/json.js";
-import type { Step } from "./context.js";
 
 const log = createLogger("harness.tool-loop");
 
-type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
-type ToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
+function getInvalidToolCallInputErrors(input: {
+  readonly toolCalls: readonly TypedToolCall<ToolSet>[];
+}): readonly TypedToolError<ToolSet>[] {
+  const errors: TypedToolError<ToolSet>[] = [];
 
-/**
- * What the session does with a model step's response: parks it on the calls a person must approve
- * or the runtime must run, stops for a sign-in, calls the model again, holds the turn while its
- * tasks work, or ends the turn.
- */
+  for (const toolCall of input.toolCalls) {
+    if (toolCall.toolName === FINAL_OUTPUT_TOOL_NAME) {
+      continue;
+    }
+
+    const toolError = getInvalidToolCallInputError({ toolCall });
+    if (toolError !== undefined) {
+      errors.push(toolError);
+    }
+  }
+
+  return errors;
+}
+
 export async function handleStepResult(step: Step, input: ModelResponse): Promise<StepResult> {
   const { promptMessages, result } = input;
-  const position: HarnessEmissionState = input.outputStarted
-    ? { ...step.position(), assistantOutputStarted: true }
-    : step.position();
 
   const stepOutput = resolveAssistantStepText(result.response.messages, result.text);
-  const invalidInputToolErrors = getInvalidToolCallInputErrors(
-    result.toolCalls as TypedToolCall<ToolSet>[],
-  );
+  const invalidInputToolErrors = getInvalidToolCallInputErrors({
+    toolCalls: result.toolCalls as TypedToolCall<ToolSet>[],
+  });
   // Unions every invalid-input signal: SDK-marked invalid calls (which get
   // SDK-synthesized tool errors), non-object inputs caught by
   // getInvalidToolCallInputErrors, and ids the stream consumer observed.
@@ -97,7 +104,8 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     messages: rawResponseMessages,
     providerExecutedOutcomeIds,
   });
-  const responseMessages = normalizedProviderHistory.messages;
+  // eve runs approved calls itself, so the SDK's approval parts never reach history.
+  const responseMessages = withoutApprovalParts(normalizedProviderHistory.messages);
 
   step.session = setRequestEnvelopeTokens(
     {
@@ -145,45 +153,37 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
   // --- Park on approvals or runtime calls ----------------------------------
 
   if (deferredToolCalls.length > 0 || approvalRequests.length > 0) {
+    const { sequence, stepIndex, turnId } = step.position();
     const deferred = collectDeferredCalls({
       session: step.session,
       toolCalls: deferredToolCalls,
       tools: advertisedCoordinationTools,
-      turnId: position.turnId,
+      turnId,
     });
-    step.session = deferred.session;
-    const runtimeCalls = deferredToolCalls.length > 0 ? deferred.workflowRequests : undefined;
+    step.session = { ...deferred.session, history: validateHarnessModelMessages(promptMessages) };
+    const parked = {
+      event: { sequence, stepIndex, turnId },
+      messages: responseMessages,
+      tasks: deferred.workflowRequests,
+    };
     if (approvalRequests.length > 0) {
       return parkOnApprovals(step, {
-        position,
-        promptMessages,
+        ...parked,
         requests: approvalRequests,
-        responseMessages,
-        runtimeCalls,
+        waitsOnRuntime: deferredToolCalls.length > 0,
       });
     }
-    step.session = setPendingCoordinationBatch({
-      event: {
-        sequence: position.sequence,
-        stepIndex: position.stepIndex,
-        turnId: position.turnId,
-      },
-      responseMessages,
-      session: { ...step.session, history: validateHarnessModelMessages(promptMessages) },
-      tasks: deferred.workflowRequests,
-    });
-    step.moveTo(advanceStep(position));
+    await step.apply(suspendStep(step.view(), parked));
     return { next: null, session: step.session };
   }
 
   // --- Park on authorization request ------------------------------------------
 
-  const signIn = await stopForToolSignIn(step, {
+  const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
     messages: [...promptMessages, ...responseMessages],
-    position,
     toolResults: result.toolResults,
   });
-  if (signIn !== undefined) return signIn;
+  if (authorizationInterrupt) return stopForToolSignIn(step, authorizationInterrupt);
 
   // --- Continue or terminate ------------------------------------------------
 
@@ -217,42 +217,32 @@ export async function handleStepResult(step: Step, input: ModelResponse): Promis
     (!calledFinalOutput || finalOutputRejected) &&
     ((responseTail.at(-1)?.role === "tool" && !endsTurn) ||
       normalizedProviderHistory.outcomeEndsResponse ||
-      hasRunnableDeferredStepInput(step.session));
-  const holdsTurn = !continueLoop && workingTasks.length > 0;
-  if (continueLoop || holdsTurn) {
-    const next = advanceStep(position);
-    if (step.emit) step.moveTo(next);
-    if (!holdsTurn) return { next: step.runStep, session: step.session };
-    // The turn rule: no turn ends while its tasks work. The session waits for
-    // one to settle, then calls the model again in the same turn. The turn
-    // stays open, so it parks with `turn.waiting` rather than completing.
-    await step.emit?.(
-      createTurnWaitingEvent({
-        on: "tasks",
-        sequence: next.sequence,
-        turnId: next.turnId,
-        usage: getSessionUsage(step.session),
-      }),
-    );
+      hasRunnableQueue(step.view()));
+  if (continueLoop) return { next: step.runStep, session: step.session };
+  // The turn rule: no turn ends while its tasks work. The session waits for
+  // one to settle, then calls the model again in the same turn.
+  if (workingTasks.length > 0) {
+    await step.apply(hold(step.view(), { on: "tasks" }));
     return { held: { kind: "tasks", taskIds: workingTasks }, next: null, session: step.session };
   }
 
   return settleTurn(step, {
     history: promptMessages,
-    position,
     result,
     // Text written before an `endsTurn` call was narration, not the reply.
     stepOutput: endsTurn ? null : stepOutput,
   });
 }
 
-function getInvalidToolCallInputErrors(
-  toolCalls: readonly TypedToolCall<ToolSet>[],
-): readonly TypedToolError<ToolSet>[] {
-  return toolCalls.flatMap((toolCall) => {
-    if (toolCall.toolName === FINAL_OUTPUT_TOOL_NAME) return [];
-    const toolError = getInvalidToolCallInputError({ toolCall });
-    return toolError === undefined ? [] : [toolError];
+/** The SDK's approval parts: eve answers approvals itself, so history never holds them. */
+export function withoutApprovalParts(messages: readonly ModelMessage[]): ModelMessage[] {
+  return messages.flatMap((message): ModelMessage[] => {
+    if (message.role !== "assistant" && message.role !== "tool") return [message];
+    if (!Array.isArray(message.content)) return [message];
+    const content = message.content.filter(
+      (part) => part.type !== "tool-approval-request" && part.type !== "tool-approval-response",
+    );
+    return content.length === 0 ? [] : [{ ...message, content } as ModelMessage];
   });
 }
 
@@ -362,21 +352,16 @@ async function settleTurn(
   step: Step,
   input: {
     readonly history: readonly HarnessModelMessage[];
-    readonly position: HarnessEmissionState;
     readonly result: HarnessStepResult;
     readonly stepOutput: string | null;
   },
 ): Promise<StepResult> {
-  const { emit } = step;
-  const { history, position, result, stepOutput } = input;
+  const { history, result, stepOutput } = input;
   const schema = step.session.outputSchema;
   step.session = clearTurnClientContextState(step.session);
 
   if (schema === undefined) {
-    if (emit) {
-      const usage = getSessionUsage(step.session);
-      step.moveTo(await emitTurnEpilogue(emit, position, step.session.history, usage));
-    }
+    await step.apply(finishTurn(step.view()), step.session.history);
     return { next: null, session: step.session, settledTurn: { output: stepOutput ?? "" } };
   }
 
@@ -385,15 +370,7 @@ async function settleTurn(
   // omits outputSchema must not inherit its contract.
   if (structured === undefined) {
     step.session = { ...step.session, outputSchema: undefined };
-    if (emit) {
-      step.moveTo(
-        await emitRecoverableFailedTurn(emit, position, {
-          ...OUTPUT_SCHEMA_NOT_FULFILLED,
-          continuationToken: step.session.continuationToken,
-          usage: getSessionUsage(step.session),
-        }),
-      );
-    }
+    await step.apply(fail(step.view(), OUTPUT_SCHEMA_NOT_FULFILLED));
     return {
       next: null,
       session: step.session,
@@ -406,18 +383,7 @@ async function settleTurn(
     history: [...history, { content: JSON.stringify(structured), role: "assistant" }],
     outputSchema: undefined,
   };
-  if (emit) {
-    await emit(
-      createResultCompletedEvent({
-        result: structured,
-        sequence: position.sequence,
-        stepIndex: position.stepIndex,
-        turnId: position.turnId,
-      }),
-    );
-    const usage = getSessionUsage(step.session);
-    step.moveTo(await emitTurnEpilogue(emit, position, step.session.history, usage));
-  }
+  await step.apply(finishTurn(step.view(), { result: structured }), step.session.history);
   return { next: null, session: step.session, settledTurn: { output: structured } };
 }
 

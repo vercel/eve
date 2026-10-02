@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, ChannelInstrumentationKey } from "#context/keys.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
 import {
   buildTelemetryRuntimeContext,
   type BuildTelemetryRuntimeContextInput,
@@ -25,7 +25,7 @@ const session: HarnessSession = {
   sessionId: "test-session",
 };
 
-const emissionState: HarnessEmissionState = {
+const emissionState: TurnPosition = {
   sessionStarted: true,
   sequence: 2,
   stepIndex: 1,

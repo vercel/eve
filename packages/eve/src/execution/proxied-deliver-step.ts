@@ -27,13 +27,12 @@ import {
   sendWorkflowAskAnswers,
   toToolInputResponseResponder,
 } from "#execution/tools/workflow/answer.js";
-import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
+import type { StepCoordinates as PendingInputBatchEvent } from "#harness/session-machine/view.js";
 import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
-import {
-  createInputResolvedEvent,
-  type InputResolution,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import type { InputResolution } from "#protocol/message.js";
+import { sessionView } from "#harness/session-machine/commit.js";
+import { routeAnswer } from "#harness/session-machine/transitions.js";
+import { storedProjection } from "#harness/session-machine/view.js";
 import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
 
@@ -91,6 +90,7 @@ async function routeProxiedDeliver(
   // resolved by an earlier payload is hidden from later ones; its run takes
   // one answer, and later messages must reach the parent instead.
   const resolvedQuestions = new Set<string>();
+  const forwardedDeliveryIds: string[] = [];
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
     const routed = routeDeliverPayload({
@@ -136,6 +136,7 @@ async function routeProxiedDeliver(
         for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
           if (metadata.payloadIndex === sourcePayloadIndex) {
             child.metadata.push({ ...metadata, payloadIndex: childPayloadIndex });
+            forwardedDeliveryIds.push(metadata.deliveryId);
           }
         }
       }
@@ -144,7 +145,7 @@ async function routeProxiedDeliver(
   }
 
   let retired = false;
-  const resolvedEvents: UnstampedMessageStreamEvent[] = [];
+  const answered: { event: PendingInputBatchEvent; resolutions: InputResolution[] }[] = [];
   for (const child of children.values()) {
     if (child.workflowAsk !== undefined) {
       const responses = coalesceDeliverPayloads(child.payloads).inputResponses ?? [];
@@ -181,17 +182,14 @@ async function routeProxiedDeliver(
         );
       }
     }
-    if (child.resolutions.size > 0) {
-      resolvedEvents.push(
-        createInputResolvedEvent({ resolutions: [...child.resolutions.values()], ...child.event }),
-      );
-    }
+    answered.push({ event: child.event, resolutions: [...child.resolutions.values()] });
     // Successfully forwarded request IDs are retired so later deliveries
     // cannot route through stale entries.
     durableSession = retireProxyInputRequests(durableSession, [...child.resolutions.keys()]);
     retired = true;
   }
 
+  const view = sessionView(storedProjection(durableSession.state), durableSession.state);
   const context = await relaySessionEvents(
     {
       serializedContext,
@@ -200,7 +198,8 @@ async function routeProxiedDeliver(
         : input.sessionState,
       sessionWritable: input.sessionWritable,
     },
-    resolvedEvents,
+    routeAnswer(view, { children: answered, forwarded: forwardedDeliveryIds.length > 0 }).events,
+    { deliveryIds: forwardedDeliveryIds },
   );
   if (parentAction !== undefined) return { ...context, ...parentAction };
   const orderedParentPayloads = [...parentPayloads].sort(([a], [b]) => a - b);

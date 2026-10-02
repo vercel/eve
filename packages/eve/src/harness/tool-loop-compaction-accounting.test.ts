@@ -2,7 +2,7 @@ import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
 import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { withParkedStep } from "#internal/testing/session-machine.js";
 import { validateHarnessModelMessages } from "#harness/messages.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -330,7 +330,7 @@ describe("tool-loop structured compaction accounting", () => {
     });
   });
 
-  it("counts synthesized pending-input tool responses when checking for compaction", async () => {
+  it("counts an approved call's committed step when checking for compaction", async () => {
     vi.mocked(generateText).mockResolvedValue({
       text: "summary",
     } as Awaited<ReturnType<typeof generateText>>);
@@ -347,29 +347,23 @@ describe("tool-loop structured compaction accounting", () => {
       },
     ]);
 
-    const runStep = createToolLoopHarness(createTestConfig());
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-1",
-            input: { command: "pwd" },
-            kind: "tool-call",
-            toolName: "bash",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Yes" },
-            { id: "cancel", label: "No" },
+    const runStep = createToolLoopHarness(
+      createTestConfig({
+        tools: new Map([
+          [
+            "bash",
+            {
+              description: "Run shell commands",
+              execute: vi.fn().mockResolvedValue("/workspace"),
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "bash",
+            },
           ],
-          prompt: "Approve tool call: bash",
-          requestId: "approval-1",
-        },
-      ],
-      responseMessages: [],
-      session: createTestSession({
+        ]),
+      }),
+    );
+    const session = withParkedStep(
+      createTestSession({
         compaction: {
           lastKnownInputTokens: 100,
           lastKnownPromptMessageCount: 1,
@@ -378,7 +372,41 @@ describe("tool-loop structured compaction accounting", () => {
         },
         history: [{ content: "Previous exact prompt", kind: "user", role: "user" }],
       }),
-    });
+      {
+        messages: [
+          {
+            content: [
+              {
+                input: { command: "pwd" },
+                toolCallId: "call-1",
+                toolName: "bash",
+                type: "tool-call",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+        requests: [
+          {
+            action: {
+              callId: "call-1",
+              input: { command: "pwd" },
+              kind: "tool-call",
+              toolName: "bash",
+            },
+            allowFreeform: false,
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "cancel", label: "No" },
+            ],
+            prompt: "Approve tool call: bash",
+            requestId: "approval-1",
+          },
+        ],
+      },
+    );
 
     const result = await runStep(session, {
       inputResponses: [

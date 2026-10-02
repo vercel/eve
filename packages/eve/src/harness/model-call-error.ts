@@ -206,7 +206,7 @@ function readErrorMessage(error: unknown): string {
 }
 
 /**
- * A model call that produced no content. Raised by tool-loop.ts from
+ * A model call that produced no content. Raised by the model caller from
  * either of its two triggers: `isEmptyModelResponse` (a completed step
  * with finishReason 'other' and no output — AI Gateway HTTP 200 whose
  * stream carries no content, no usage, and no error) or
@@ -281,7 +281,7 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
   // Not "retry": the empty response already resolved the step hooks'
   // one-shot stepResult promise, so a same-hooks retry would read the
   // stale empty result. The harness reissues with fresh hooks instead
-  // (attemptEmptyResponseRecovery in tool-loop.ts).
+  // (`recoverModelCall` in model-call/recovery.ts).
   if (error instanceof EmptyModelResponseError) {
     return "recoverable";
   }

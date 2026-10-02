@@ -2,15 +2,19 @@ import {
   DURABLE_SESSION_VERSION,
   type DurableSessionState,
 } from "#execution/durable-session-store.js";
+import { positionState } from "#internal/testing/session-machine.js";
 
-/** Complete session checkpoint for tests that exercise workflow coordination. */
+/**
+ * Complete session checkpoint for tests that exercise workflow coordination. `position` seeds the
+ * projection: inside an open turn, or between turns when `turnId` is empty.
+ */
 export function createTestSessionState(
   overrides: Partial<DurableSessionState> = {},
+  position?: { readonly sequence: number; readonly stepIndex?: number; readonly turnId: string },
 ): DurableSessionState {
   return {
     continuationToken: overrides.continuationToken ?? "test-token",
     sessionId: overrides.sessionId ?? "test-session",
-    emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
     hasProxyInputRequests: false,
     version: DURABLE_SESSION_VERSION,
     snapshot: {
@@ -18,6 +22,7 @@ export function createTestSessionState(
         agent: { system: "" },
         continuationToken: overrides.continuationToken ?? "test-token",
         sessionId: overrides.sessionId ?? "test-session",
+        ...(position !== undefined && { state: positionState(position) }),
       },
     },
     ...overrides,

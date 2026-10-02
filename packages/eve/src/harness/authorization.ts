@@ -311,16 +311,25 @@ export function setPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
   value: PendingAuthorizationState,
 ): Record<string, unknown> {
-  const active = resolveActiveAuthorizationChallenges(value.challenges);
-  const pending = getPendingAuthorization(sessionState);
-  const previous = pending?.challenges ?? [];
-  const superseded = getSupersededAuthorizationChallenges(sessionState, active);
   return {
     ...sessionState,
     [PENDING_AUTHORIZATION_KEY]: {
-      challenges: [...previous.filter((challenge) => !superseded.includes(challenge)), ...active],
+      challenges: withSignIns(
+        getPendingAuthorization(sessionState)?.challenges ?? [],
+        value.challenges,
+      ),
     },
   };
+}
+
+/** The pending sign-ins once `challenges` are asked for: each replaces the attempt it supersedes. */
+export function withSignIns(
+  previous: readonly AuthorizationChallenge[],
+  challenges: readonly AuthorizationChallenge[],
+): readonly AuthorizationChallenge[] {
+  const active = resolveActiveAuthorizationChallenges(challenges);
+  const superseded = supersededChallenges(previous, active);
+  return [...previous.filter((challenge) => !superseded.includes(challenge)), ...active];
 }
 
 /** Keeps the last challenge for each sign-in and principal. */
@@ -333,12 +342,11 @@ export function resolveActiveAuthorizationChallenges(
   );
 }
 
-/** Existing attempts replaced by newer attempts for the same sign-in and principal. */
-export function getSupersededAuthorizationChallenges(
-  sessionState: Record<string, unknown> | undefined,
+/** The attempts in `previous` that `replacements` replace: the same sign-in and principal. */
+export function supersededChallenges(
+  previous: readonly AuthorizationChallenge[],
   replacements: readonly AuthorizationChallenge[],
 ): readonly AuthorizationChallenge[] {
-  const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
   return previous.filter((candidate) =>
     replacements.some((replacement) => sameSignIn(candidate, replacement)),
   );

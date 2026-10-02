@@ -24,7 +24,6 @@ interface ApprovalCandidateAuditRecord {
   readonly status: ApprovalCandidateStatus;
   readonly createdAt: number;
   readonly completedAt?: number;
-  readonly eventEmitted?: boolean;
   readonly expiresAt?: number;
   readonly reason?: string;
 }
@@ -42,7 +41,6 @@ export interface ApprovalSettlementAuditRecord {
   readonly requestId: string;
   readonly settledAt: number;
   readonly candidateId?: string;
-  readonly eventEmitted?: boolean;
 }
 
 export interface ActiveApprovalCandidate {
@@ -54,7 +52,6 @@ export interface ActiveApprovalCandidate {
   readonly createdAt: number;
   readonly expiresAt: number;
   readonly authorizationChallenges?: readonly AuthorizationChallenge[];
-  readonly pendingEventEmitted?: boolean;
 }
 
 interface DurableApprovalState {
@@ -127,59 +124,6 @@ export function createApprovalCandidate(input: {
     nextCandidateSequence: approvalState.nextCandidateSequence + 1,
   };
   return { changed: true, state: writeApprovalState(expiredState, next) };
-}
-
-/** Marks the pending candidate event as emitted. */
-export function markApprovalCandidatePendingEventEmitted(input: {
-  readonly candidateId: string;
-  readonly state: SessionStateMap | undefined;
-}): SessionStateMap | undefined {
-  const approvalState = readApprovalState(input.state);
-  const candidate = approvalState.activeCandidates[input.candidateId];
-  if (candidate === undefined || candidate.pendingEventEmitted === true) return input.state;
-  return writeApprovalState(input.state, {
-    ...approvalState,
-    activeCandidates: {
-      ...approvalState.activeCandidates,
-      [input.candidateId]: { ...candidate, pendingEventEmitted: true },
-    },
-  });
-}
-
-/** Marks a terminal candidate history event as emitted. */
-export function markApprovalCandidateHistoryEventEmitted(input: {
-  readonly candidateId: string;
-  readonly state: SessionStateMap | undefined;
-}): SessionStateMap | undefined {
-  const approvalState = readApprovalState(input.state);
-  let changed = false;
-  const candidateHistory = approvalState.candidateHistory.map((candidate) => {
-    if (candidate.candidateId !== input.candidateId || candidate.eventEmitted === true) {
-      return candidate;
-    }
-    changed = true;
-    return { ...candidate, eventEmitted: true };
-  });
-  return changed
-    ? writeApprovalState(input.state, { ...approvalState, candidateHistory })
-    : input.state;
-}
-
-/** Marks a terminal settlement event as emitted. */
-export function markApprovalSettlementEventEmitted(input: {
-  readonly requestId: string;
-  readonly state: SessionStateMap | undefined;
-}): SessionStateMap | undefined {
-  const approvalState = readApprovalState(input.state);
-  const settlement = approvalState.settlements[input.requestId];
-  if (settlement === undefined || settlement.eventEmitted === true) return input.state;
-  return writeApprovalState(input.state, {
-    ...approvalState,
-    settlements: {
-      ...approvalState.settlements,
-      [input.requestId]: { ...settlement, eventEmitted: true },
-    },
-  });
 }
 
 /** Marks a candidate as waiting on a private authorization challenge. */
@@ -467,4 +411,25 @@ function writeApprovalState(
   approvalState: DurableApprovalState,
 ): SessionStateMap {
   return { ...state, [APPROVAL_STATE_KEY]: approvalState };
+}
+
+/**
+ * The held turn moved on, steered or cancelled: the responders still checking one of its
+ * approvals stop, their candidates stale.
+ */
+export function retireActiveCandidates(
+  state: SessionStateMap | undefined,
+  input: { readonly completedAt: number; readonly reason: string },
+): SessionStateMap | undefined {
+  let next = state;
+  for (const candidate of getApprovalAuditState(next).activeCandidates) {
+    next = finishApprovalCandidate({
+      candidateId: candidate.candidateId,
+      completedAt: input.completedAt,
+      reason: input.reason,
+      state: next,
+      status: "stale",
+    });
+  }
+  return next;
 }

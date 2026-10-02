@@ -9,7 +9,6 @@ import { resolveAssistantStepText } from "#harness/messages.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 
 const log = createLogger("harness.tool-loop");
-
 /** How a recovery reissues the call. */
 type RecoveryCall = (options: {
   readonly disabledProviderTools?: ReadonlySet<string>;

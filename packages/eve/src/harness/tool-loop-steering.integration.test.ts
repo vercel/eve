@@ -2,7 +2,7 @@ import { jsonSchema } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
-import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission-state.js";
+import { foldingHandler, positionOf, withOpenTurn } from "#internal/testing/session-machine.js";
 import {
   createFrameworkUserMessage,
   createUserMessage,
@@ -136,10 +136,10 @@ describe("generation steering with the real AI SDK", () => {
           ],
         ]),
         resolveModel: async () => model,
-        handleEvent: async (event) => {
+        handleEvent: foldingHandler(async (event) => {
           events.push(event);
           if (event.type === boundary) steering.abort();
-        },
+        }),
       });
       const ctx = new ContextContainer();
       ctx.set(SessionKey, {
@@ -240,7 +240,7 @@ describe("generation steering with the real AI SDK", () => {
     const interrupted = await running;
     expect(providerSignal?.aborted).toBe(true);
     expect(interrupted.steered).toBe(true);
-    expect(getHarnessEmissionState(interrupted.session.state).turnId).toBe("turn_0");
+    expect(positionOf(interrupted.session).turnId).toBe("turn_0");
     // The provider ignores abort and finishes its obsolete request anyway.
     firstStream!.enqueue({
       type: "tool-call",
@@ -350,7 +350,7 @@ describe("generation steering with the real AI SDK", () => {
         },
       }),
     }));
-    const heldTurn = setHarnessEmissionState(
+    const heldTurn = withOpenTurn(
       {
         ...session(),
         history: [
@@ -373,7 +373,7 @@ describe("generation steering with the real AI SDK", () => {
           createFrameworkUserMessage("context.state", "Alice's reports are due Monday."),
         ],
       },
-      { sessionStarted: true, sequence: 0, stepIndex: 1, turnId: "turn_0" },
+      { sequence: 0, stepIndex: 1, turnId: "turn_0" },
     );
     await createToolLoopHarness({
       handleEvent: async () => {},

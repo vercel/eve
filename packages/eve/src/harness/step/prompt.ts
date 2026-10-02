@@ -27,13 +27,8 @@ export interface Prompt {
   clientContext: ClientContext | undefined;
 }
 
-/** `pending` is the transcript the step resumes, which follows the turn's preamble in history. */
-export async function buildPrompt(
-  step: Step,
-  turn: TurnInput,
-  pending: readonly HarnessModelMessage[],
-): Promise<Prompt> {
-  const messages = validateHarnessModelMessages([...step.session.history, ...pending]);
+export async function buildPrompt(step: Step, turn: TurnInput): Promise<Prompt> {
+  const messages = validateHarnessModelMessages([...step.session.history]);
   if (!hasUnansweredToolCall(messages)) {
     const taskContext = await appendTaskContext({
       messages,
@@ -45,6 +40,22 @@ export async function buildPrompt(
     messages.push(...taskContext.messages);
   }
 
+  const placed = placeTurnInput(step, messages, turn);
+  return {
+    clientContext: getTurnClientContextState(step.session.state, turn.turnId),
+    messages: placed,
+  };
+}
+
+/**
+ * The turn's input after `messages`, past a tool-result boundary when they end in tool results.
+ * The client's context takes its position here, and never joins the messages.
+ */
+export function placeTurnInput(
+  step: Step,
+  messages: readonly HarnessModelMessage[],
+  turn: TurnInput,
+): HarnessModelMessage[] {
   let clientContext = turn.storedClientContext;
   if (turn.clientContext !== undefined) {
     clientContext = {
@@ -56,13 +67,10 @@ export async function buildPrompt(
   if (clientContext !== undefined) {
     step.session = setTurnClientContextState(step.session, clientContext);
   }
-  return {
-    clientContext,
-    messages: [
-      ...messages,
-      ...(followsToolResults(messages) ? followingToolResults(turn) : turn.messages),
-    ],
-  };
+  return [
+    ...messages,
+    ...(followsToolResults(messages) ? followingToolResults(turn) : turn.messages),
+  ];
 }
 
 /** `messages`, the prompt's by default, with the client's context at its position. */

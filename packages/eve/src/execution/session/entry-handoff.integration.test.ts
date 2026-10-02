@@ -58,18 +58,13 @@ describe("workflowEntry integration", () => {
               candidateId = runId;
               const session = args[0].checkpoint.sessionState.snapshot.session;
               Object.assign(session, {
+                // Input the source still holds is pending work the target refuses.
                 state: {
                   ...session.state,
-                  "eve.workflowTool": {
-                    version: 4,
-                    runs: [
-                      {
-                        callId: "call",
-                        toolName: "research",
-                        origin: { turnId: "turn", stepIndex: 0 },
-                        address: { runId: "run", hookToken: 42 },
-                      },
-                    ],
+                  "eve.harness.turnState": {
+                    grants: [],
+                    queued: { message: "Alice asks for a summary." },
+                    suspended: [],
                   },
                 },
               });

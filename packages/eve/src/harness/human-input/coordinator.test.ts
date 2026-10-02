@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { jsonSchema } from "ai";
 import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, SessionKey } from "#context/keys.js";
+import { SessionKey } from "#context/keys.js";
 import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
@@ -12,8 +12,10 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { settleDirectApprovalResponse } from "#harness/human-input/candidates.js";
 import { coordinateApprovalDelivery } from "#harness/human-input/coordinator.js";
-import { selectApprovalReplayBatch } from "#harness/input-requests.js";
-import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
+import { approvingSteps } from "#harness/human-input/approvals.js";
+import { sessionView } from "#harness/session-machine/commit.js";
+import { storedProjection } from "#harness/session-machine/view.js";
+import { parkedSteps, withParkedStep } from "#internal/testing/session-machine.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -37,19 +39,17 @@ const responder: SessionAuthContext = {
   principalType: "user",
 };
 
-function parkedSession(): HarnessSession {
-  return appendPendingInputBatch({
-    requests: [request],
-    responseAuthRequiredRequestIds: [request.requestId],
-    responseMessages: [],
-    session: {
+function parkedSession(requester?: SessionAuthContext): HarnessSession {
+  return withParkedStep(
+    {
       agent: { modelReference: { id: "test" }, system: "", tools: [] },
       compaction: { recentWindowSize: 10, threshold: 0.8 },
       continuationToken: "test",
       history: [],
       sessionId: "session-1",
     },
-  });
+    { requester, requests: [request], responseAuthRequiredRequestIds: [request.requestId] },
+  );
 }
 
 describe("coordinateApprovalDelivery", () => {
@@ -90,9 +90,7 @@ describe("coordinateApprovalDelivery", () => {
   }
 
   function parkedBy(auth: SessionAuthContext): HarnessSession {
-    const ctx = new ContextContainer();
-    ctx.set(AuthKey, auth);
-    return contextStorage.run(ctx, parkedSession);
+    return parkedSession(auth);
   }
 
   it("passes the requester the batch parked with to the response policy", async () => {
@@ -124,7 +122,7 @@ describe("coordinateApprovalDelivery", () => {
     );
     expect(rejected.stepInput?.inputResponses ?? []).toEqual([]);
     expect(getApprovalAuditState(rejected.session.state).settlements).toEqual([]);
-    expect(getPendingInputBatches(rejected.session.state)).toHaveLength(1);
+    expect(parkedSteps(rejected.session)).toHaveLength(1);
 
     const requesterCancel = await coordinateApprovalDelivery({
       now: 102,
@@ -299,17 +297,16 @@ describe("coordinateApprovalDelivery", () => {
       prompt: "Approve tool call: gate-2",
       requestId: "approval-2",
     };
-    const parked = appendPendingInputBatch({
-      requests: [request, secondRequest],
-      responseMessages: [],
-      session: {
+    const parked = withParkedStep(
+      {
         agent: { modelReference: { id: "test" }, system: "", tools: [] },
         compaction: { recentWindowSize: 10, threshold: 0.8 },
         continuationToken: "test",
         history: [],
         sessionId: "session-1",
       },
-    });
+      { requests: [request, secondRequest] },
+    );
     const settled = settleDirectApprovalResponse({
       actor: responder,
       outcome: "allowed",
@@ -351,7 +348,7 @@ describe("coordinateApprovalDelivery", () => {
     expect(result.stepInput?.message).toBe("What else can you help with?");
     expect(result.stepInput?.messageAuth).toEqual(messageAuth);
     expect(
-      getPendingInputBatches(result.session.state).flatMap((batch) =>
+      parkedSteps(result.session).flatMap((batch) =>
         batch.requests.map((pending) => pending.requestId),
       ),
     ).toEqual([request.requestId]);
@@ -363,19 +360,18 @@ describe("text approval replay preparation", () => {
     session: HarnessSession;
     stepInput?: import("#harness/types.js").StepInput;
   }) {
-    return selectApprovalReplayBatch(input.session, input.stepInput) !== undefined;
+    const view = sessionView(storedProjection(input.session.state), input.session.state);
+    return approvingSteps(view, input.stepInput).length > 0;
   }
   function sessionWithRequests(
     requests: InputRequest[] = [request],
     responseAuthRequiredRequestIds?: string[],
   ) {
     const base = parkedSession();
-    return appendPendingInputBatch({
-      requests,
-      responseAuthRequiredRequestIds,
-      responseMessages: [],
-      session: { ...base, state: undefined },
-    });
+    return withParkedStep(
+      { ...base, state: undefined },
+      { requests, responseAuthRequiredRequestIds },
+    );
   }
 
   it.each(["approve", "APPROVE", "1"])("prepares a matching text approval: %s", (message) => {
@@ -409,10 +405,9 @@ describe("text approval replay preparation", () => {
   });
 
   it("does not interpret text when multiple batches are pending", () => {
-    const session = appendPendingInputBatch({
+    const session = withParkedStep(sessionWithRequests(), {
+      event: { sequence: 2, stepIndex: 0, turnId: "turn-2" },
       requests: [{ ...request, requestId: "approval-2" }],
-      responseMessages: [],
-      session: sessionWithRequests(),
     });
     expect(shouldPrepareApprovalReplayTools({ session, stepInput: { message: "approve" } })).toBe(
       false,

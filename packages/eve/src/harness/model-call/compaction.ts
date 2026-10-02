@@ -11,10 +11,10 @@ import {
 } from "#harness/types.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import type { HistoryViewProjector } from "#shared/history-view.js";
+import type { Publish } from "#harness/session-machine/commit.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { Step } from "#harness/step/context.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import { activeTurnId, type TurnPosition } from "#harness/session-machine/view.js";
 import {
   buildGatewayAttributionHeaders,
   resolveEffectiveRuntimeModel,
@@ -32,14 +32,18 @@ import {
   createCompactionRequestedEvent,
 } from "#protocol/message.js";
 import { drainMemoryCommit, prepareMemoryCompaction } from "#context/memory-lifecycle.js";
-import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
-import { createSessionWaitingEvent } from "#protocol/message.js";
-import { getSessionUsage } from "#harness/turn-tag-state.js";
+import { gatewayModelId } from "#harness/model-call/usage.js";
 import { getRequestEnvelopeTokens } from "#harness/request-envelope.js";
+import { idle } from "#harness/session-machine/transitions.js";
 import { resolveCallProviderOptions } from "#harness/provider-safety.js";
 import { resolveConversationId } from "#shared/conversation-identity.js";
 
 const log = createLogger("harness.tool-loop");
+/**
+ * Processes the step result: extracts input requests, decides whether to
+ * park, continue the tool loop, or terminate.
+ */
+/** What a step needs from the machine after its model call. */
 /** `session.compact()`: summarizes the history now, then the session waits. */
 export async function compactHistory(step: Step): Promise<StepResult> {
   const { config } = step;
@@ -60,7 +64,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
         historyProjector: config.historyProjector,
         messages: [...step.session.history],
         model: resolvedModel.model,
-        emit: step.emit,
+        publish: step.publish,
         requestEnvelopeTokens: getRequestEnvelopeTokens(step.session),
         resolveModel: config.resolveModel,
         runtimeIdentity: config.runtimeIdentity,
@@ -74,7 +78,7 @@ export async function compactHistory(step: Step): Promise<StepResult> {
       });
     }
   }
-  await step.emit?.(createSessionWaitingEvent(getSessionUsage(step.session)));
+  await step.apply(idle(step.view()));
   return { next: null, session: step.session };
 }
 
@@ -106,12 +110,12 @@ export function replaceSessionHistory(
 export async function maybeCompact(input: {
   readonly abortSignal?: AbortSignal;
   readonly auth: SessionAuthContext | null;
-  readonly emissionState: HarnessEmissionState;
-  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
+  readonly emissionState: TurnPosition;
   readonly force?: boolean;
   readonly historyProjector?: HistoryViewProjector;
   readonly messages: HarnessModelMessage[];
   readonly model: LanguageModel;
+  readonly publish: Publish;
   /** Model-visible prompt used only to decide whether durable history needs compaction. */
   readonly promptMessages?: readonly HarnessModelMessage[];
   readonly requestEnvelopeTokens?: number;
@@ -124,7 +128,7 @@ export async function maybeCompact(input: {
   readonly messages: HarnessModelMessage[];
   readonly session: HarnessSession;
 }> {
-  const { emissionState, emit } = input;
+  const { emissionState, publish } = input;
   let messages = input.messages;
   let session = input.session;
   const promptMessages = input.promptMessages ?? messages;
@@ -161,14 +165,14 @@ export async function maybeCompact(input: {
     providerOptions: compaction.providerOptions,
   }) as Parameters<typeof compactMessages>[3];
 
-  if (emit) {
+  {
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
       prepareMemoryCompaction(ctx, { history: messages, state: session.state });
     }
-    await emit(
+    await publish(
       createCompactionRequestedEvent({
-        modelId: formatLanguageModelGatewayId(compaction.model),
+        modelId: gatewayModelId(compaction.model) ?? "unknown",
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         stepIndex: emissionState.stepIndex,
@@ -227,14 +231,14 @@ export async function maybeCompact(input: {
     : [...ordinary];
   messages = validateHarnessModelMessages([...canonical.memory, ...compactedOrdinary]);
 
-  if (emit) {
+  {
     const ctx = contextStorage.getStore();
     if (ctx !== undefined) {
       prepareMemoryCompaction(ctx, { history: messages, state: session.state });
     }
-    await emit(
+    await publish(
       createCompactionCompletedEvent({
-        modelId: formatLanguageModelGatewayId(compaction.model),
+        modelId: gatewayModelId(compaction.model) ?? "unknown",
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         stepIndex: emissionState.stepIndex,

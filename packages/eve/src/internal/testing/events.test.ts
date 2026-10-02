@@ -115,7 +115,7 @@ describe("captureTurnEvents", () => {
     const encoder = new TextEncoder();
     const run = createStaticRun(
       encoder.encode(
-        JSON.stringify({ type: "turn.started" }) +
+        JSON.stringify({ type: "turn.started", data: { sequence: 0, turnId: "turn_0" } }) +
           "\n" +
           JSON.stringify({ type: "session.waiting", data: { nextTokens: [] } }) +
           "\n",

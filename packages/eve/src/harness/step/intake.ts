@@ -1,12 +1,5 @@
-import type { ModelMessage } from "ai";
-
-import { activeTurnId } from "#harness/active-turn-id.js";
 import { stageAttachmentsToSandbox } from "#harness/attachment-staging.js";
-import {
-  getPendingCoordinationBatch,
-  type PendingCoordinationBatch,
-  resolvePendingCoordination,
-} from "#harness/coordination.js";
+import { forgetFinishedRuns, runtimeResultCalls } from "#harness/coordination.js";
 import {
   createFrameworkUserMessage,
   createUserMessage,
@@ -16,51 +9,39 @@ import {
   TOOL_RESULT_BOUNDARY,
   type UserModelMessage,
 } from "#harness/messages.js";
-import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
+import { finishRun, settle } from "#harness/session-machine/transitions.js";
+import { activeTurnId, runtimeWait } from "#harness/session-machine/view.js";
 import { getTurnClientContextState } from "#harness/turn-client-context.js";
 import type { StepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
+import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { Step } from "./context.js";
 
-/** What the runtime delivered for a step parked on its calls, and the input the step runs. */
-export interface RuntimeWork {
-  /** The step's input, after input queued behind earlier work. */
-  readonly input: StepInput | undefined;
-  /** History, with the parked step's response and the results the runtime delivered for it. */
-  readonly messages: readonly ModelMessage[];
-  /** The parked step the delivered results resumed. */
-  readonly resumed: PendingCoordinationBatch | undefined;
-}
-
 /**
- * Settles the calls the runtime ran for a parked step. Returns `undefined` while some are still
- * running: input queued behind them waits until they have.
+ * Settles the calls the runtime ran for parked steps. Returns `undefined` while some are still
+ * running: input queued behind them waits until they have. Otherwise returns the step's input
+ * without the results it settled, and whether the step waited on any.
  */
 export async function settleRuntimeWork(
   step: Step,
   input: StepInput | undefined,
-): Promise<RuntimeWork | undefined> {
-  const parked = getPendingCoordinationBatch(step.session.state);
-  // Queued input waits for the parked step: coalescing would drop its runtime results, and input
-  // queued behind approved workflows must replay only after they finish.
-  if (parked === undefined) {
-    const queued = consumeDeferredStepInput({ input, session: step.session });
-    step.session = queued.session;
-    input = queued.input;
-  }
-  const settled = await resolvePendingCoordination({
-    emit: step.emit,
-    session: step.session,
-    stepInput: input,
-    tools: step.config.tools,
+): Promise<{ readonly input: StepInput | undefined; readonly waited: boolean } | undefined> {
+  const runtime = runtimeWait(step.session.state);
+  if (runtime === undefined) return { input, waited: false };
+  const ready = resolveRuntimeActionResultsForCallIds({
+    pendingCallIds: runtime.callIds,
+    results: input?.runtimeActionResults ?? [],
   });
-  if (settled.outcome === "unresolved") return undefined;
-  step.session = settled.session;
-  return {
-    input,
-    messages: settled.messages,
-    resumed: settled.outcome === "resolved" ? parked : undefined,
-  };
+  if (ready === undefined) return undefined;
+  const finished = forgetFinishedRuns(step.session, ready, runtime.event.turnId);
+  step.session = finished.session;
+  await step.apply(finishRun(step.view(), { requestIds: finished.requestIds }));
+  await step.apply(
+    settle(step.view(), { results: await runtimeResultCalls(ready, step.config.tools) }),
+  );
+  if (input === undefined) return { input, waited: true };
+  const { runtimeActionResults: _results, ...rest } = input;
+  return { input: rest, waited: true };
 }
 
 /** The turn's input as the model reads it. */
@@ -78,34 +59,27 @@ export interface TurnInput {
 
 /**
  * Prepares the turn's input: client and context entries, and the message with its attachments
- * staged to the sandbox. Input an approval defers to a later step, and a message a plain-text
- * answer consumed, never reach this step's model call.
+ * staged to the sandbox. A message a plain-text answer consumed never reaches the model.
  */
 export async function prepareTurnInput(
   step: Step,
   input: StepInput | undefined,
-  options: {
-    readonly consumedMessage: boolean;
-    readonly deferredContext: boolean;
-    readonly deferredMessage: boolean;
-  },
+  options: { readonly consumedMessage: boolean },
 ): Promise<TurnInput> {
   const turnId = activeTurnId(step.position());
   const storedClientContext = getTurnClientContextState(step.session.state, turnId);
-  const clientContext = options.deferredContext ? undefined : readClientContext(input);
+  const clientContext = readClientContext(input);
   const ephemeral =
     (clientContext ?? storedClientContext?.messages)?.map((content) =>
       createFrameworkUserMessage("context.instruction", content),
     ) ?? [];
-  const messages: UserModelMessage[] = options.deferredContext
-    ? []
-    : (input?.context ?? []).map((entry) =>
-        createFrameworkUserMessage("context.instruction", entry),
-      );
+  const messages: UserModelMessage[] = (input?.context ?? []).map((entry) =>
+    createFrameworkUserMessage("context.instruction", entry),
+  );
   const kind = frameworkMessageKindForStepInput(input);
   const content = normalizeUserContent(input?.message);
   const staged =
-    content !== undefined && !options.deferredMessage && !options.consumedMessage
+    content !== undefined && !options.consumedMessage
       ? await stageAttachmentsToSandbox(content)
       : undefined;
   if (staged !== undefined) {

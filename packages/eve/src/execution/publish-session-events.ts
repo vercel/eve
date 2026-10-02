@@ -2,7 +2,12 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapterContext } from "#channel/adapter.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
-import { ParentSessionKey, TurnDeliveryIdsKey } from "#context/keys.js";
+import {
+  AnswerDeliveryIdsKey,
+  ParentSessionKey,
+  PendingBoundaryDeliveryIdsKey,
+  TurnDeliveryIdsKey,
+} from "#context/keys.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -16,8 +21,19 @@ import {
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
-import { getHarnessEmissionState } from "#harness/emission.js";
+import { dropClosedRecords } from "#harness/session-machine/commit.js";
+import {
+  currentProjection,
+  enterSessionProjection,
+  recordPublishedEvent,
+  saveSessionProjection,
+} from "#harness/session-machine/current.js";
+import {
+  activeTurnId,
+  boundaryCompletesDeliveries,
+  owesDeliveryBoundary,
+  turnPosition,
+} from "#harness/session-machine/view.js";
 import { validateHarnessModelMessages, type HarnessModelMessage } from "#harness/messages.js";
 import type { HandleEventFn, HarnessSession, HarnessSessionBase } from "#harness/types.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
@@ -28,6 +44,7 @@ import {
   type MessageStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { type SessionProjection } from "#protocol/session-projection.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.publish-session-events");
@@ -80,19 +97,36 @@ export async function publishSessionEvents(
 export async function relaySessionEvents(
   target: SessionStepState,
   events: readonly UnstampedMessageStreamEvent[],
+  answers?: ForwardedAnswers,
 ): Promise<PublishedSessionEvents> {
-  return await publishEventsFromStep(target, "relayed", events);
+  return await publishEventsFromStep(target, "relayed", events, answers);
+}
+
+/**
+ * Answers this session forwarded to a child session or a workflow run. Their events carry the
+ * answers' deliveries, and their responses complete here: at once between turns, or at the open
+ * turn's next boundary.
+ */
+export interface ForwardedAnswers {
+  readonly deliveryIds: readonly string[];
 }
 
 async function publishEventsFromStep(
   target: SessionStepState,
   origin: SessionEventOrigin,
   events: readonly UnstampedMessageStreamEvent[],
+  answers?: ForwardedAnswers,
 ): Promise<PublishedSessionEvents> {
-  if (events.length === 0) {
+  const forwarded = answers?.deliveryIds ?? [];
+  if (events.length === 0 && forwarded.length === 0) {
     return { serializedContext: target.serializedContext, sessionState: target.sessionState };
   }
-  const { published } = await publishFromSessionStep(await restoreSessionStep(target), {
+  const restored = await restoreSessionStep(target);
+  if (forwarded.length > 0) {
+    restored.ctx.setVirtualContext(AnswerDeliveryIdsKey, forwarded);
+    acceptDeliveries(restored.ctx, forwarded);
+  }
+  const { published } = await publishFromSessionStep(restored, {
     origin,
     async publish(emit) {
       for (const event of events) await emit(event);
@@ -173,7 +207,12 @@ export async function publishFromSessionStep<T, R>(
   const update: SessionUpdate<R> = publication.updateSession?.(scoped.session, scoped.result) ?? {
     session: scoped.session,
   };
-  const session = reconcileSessionContinuationToken(ctx, update.session);
+  // The session saves the lifecycle it published, without the records whose owners it closed.
+  const projection = readSessionProjection(ctx);
+  const session = reconcileSessionContinuationToken(
+    ctx,
+    saveSessionProjection(dropClosedRecords(update.session, projection), ctx),
+  );
   return {
     published: {
       serializedContext: serializeContext(ctx),
@@ -194,6 +233,7 @@ async function publishInSessionScope<T>(
   publication: SessionStepPublication<T, unknown>,
 ): Promise<{ readonly result: T; readonly session: HarnessSessionBase }> {
   const { ctx } = step;
+  enterSessionProjection(ctx, step.durableSession.state);
   const effectiveAgent = resolveEffectiveAgentRuntime(ctx.require(BundleKey), ctx);
   const hydrated = hydrateDurableSession({
     compactionOverrides: { thresholdPercent: effectiveAgent.thresholdPercent },
@@ -225,7 +265,7 @@ async function publishInSessionScope<T>(
       const emit =
         instrumentation?.createHandleEvent({
           handleEvent: publisher.publish,
-          turnId: activeTurnId(getHarnessEmissionState(step.durableSession.state)),
+          turnId: activeTurnId(turnPosition(readSessionProjection(ctx))),
         }) ?? publisher.publish;
       return { result: await publication.publish(emit, enrichedSession), session: enrichedSession };
     });
@@ -295,11 +335,18 @@ export function openSessionEventPublisher(input: {
   // Opened after the dispatcher, so a context that cannot build one leaves the
   // stream unlocked for the terminal event's fallback write.
   const writer = openSessionEventWriter({
+    answerDeliveryIds: () => ctx.get(AnswerDeliveryIdsKey),
     deliveryIds: () => (origin === "own" ? ctx.get(TurnDeliveryIdsKey) : undefined),
     sessionWritable: input.sessionWritable,
   });
   const emit = async (event: UnstampedMessageStreamEvent): Promise<MessageStreamEvent> => {
-    return await writer.write(await dispatcher.deliver(event));
+    const stamped = await writer.write(
+      withProcessedDeliveries(ctx, await dispatcher.deliver(event)),
+    );
+    // The answers' response ends at the boundary that completes their deliveries.
+    if (completesDeliveries(stamped)) ctx.delete(AnswerDeliveryIdsKey);
+    recordPublishedEvent(ctx, stamped);
+    return stamped;
   };
   return {
     dispatcher,
@@ -352,6 +399,8 @@ function openSessionEventWriter(input: {
    * step records its delivery ids after it opens the stream.
    */
   readonly deliveryIds: () => readonly string[] | undefined;
+  /** The answer deliveries that caused each event, when answers rather than a message did. */
+  readonly answerDeliveryIds?: () => readonly string[] | undefined;
   readonly sessionWritable: WritableStream<Uint8Array>;
 }): StreamWriter {
   const streamWriter = input.sessionWritable.getWriter();
@@ -364,7 +413,11 @@ function openSessionEventWriter(input: {
   };
   return {
     async write(event) {
-      const stamped = stampMessageStreamEvent(event, input.deliveryIds());
+      const stamped = stampMessageStreamEvent(
+        event,
+        input.deliveryIds(),
+        input.answerDeliveryIds?.(),
+      );
       await streamWriter.write(encodeMessageStreamEvent(stamped));
       return stamped;
     },
@@ -374,6 +427,51 @@ function openSessionEventWriter(input: {
     },
     release,
   };
+}
+
+function completesDeliveries(event: MessageStreamEvent): boolean {
+  return (
+    (event.type === "session.waiting" || event.type === "turn.waiting") &&
+    (event.data.processedDeliveryIds?.length ?? 0) > 0
+  );
+}
+
+/** Lists on a boundary the accepted deliveries whose response it completes. */
+function withProcessedDeliveries(
+  ctx: ContextContainer,
+  event: UnstampedMessageStreamEvent,
+): UnstampedMessageStreamEvent {
+  if (event.type !== "session.waiting" && event.type !== "turn.waiting") return event;
+  const completes = boundaryCompletesDeliveries(readSessionProjection(ctx), event.type);
+  const pending = ctx.get(PendingBoundaryDeliveryIdsKey) ?? [];
+  if (completes) ctx.delete(PendingBoundaryDeliveryIdsKey);
+  return {
+    ...event,
+    data: { ...event.data, processedDeliveryIds: completes ? pending : [] },
+  } as UnstampedMessageStreamEvent;
+}
+
+/**
+ * Whether a step that ends between turns still owes accepted deliveries a boundary: it consumed
+ * them, an ignored message or an answer that left the session waiting, without publishing one.
+ */
+export function deliveriesAwaitBoundary(ctx: ContextContainer): boolean {
+  return (
+    (ctx.get(PendingBoundaryDeliveryIdsKey)?.length ?? 0) > 0 &&
+    owesDeliveryBoundary(readSessionProjection(ctx))
+  );
+}
+
+/** Adds accepted deliveries to those the next completing boundary lists. */
+export function acceptDeliveries(ctx: ContextContainer, deliveryIds: readonly string[]): void {
+  if (deliveryIds.length === 0) return;
+  const pending = ctx.get(PendingBoundaryDeliveryIdsKey) ?? [];
+  ctx.set(PendingBoundaryDeliveryIdsKey, [...new Set([...pending, ...deliveryIds])]);
+}
+
+/** The session's projection as of the last event it published. */
+export function readSessionProjection(ctx: ContextContainer): SessionProjection {
+  return currentProjection(ctx);
 }
 
 type TerminalSessionEvent = Extract<
@@ -406,6 +504,7 @@ export async function publishTerminalSessionEvent(input: {
   let publisher: SessionEventPublisher;
   try {
     ctx = await deserializeContext(input.serializedContext);
+    enterSessionProjection(ctx, undefined);
     publisher = openSessionEventPublisher({
       ctx,
       origin: "own",

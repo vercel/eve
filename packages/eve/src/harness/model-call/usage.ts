@@ -14,7 +14,7 @@ import { setEveAttributes } from "#runtime/attributes/emit.js";
  * The model's gateway id, or `undefined` for a model without a string `provider`, such as a
  * test double, so a missing field never throws into the tool loop.
  */
-function gatewayModelId(model: LanguageModel): string | undefined {
+export function gatewayModelId(model: LanguageModel): string | undefined {
   try {
     return formatLanguageModelGatewayId(model);
   } catch {

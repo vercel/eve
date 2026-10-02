@@ -1,18 +1,25 @@
 import { contextStorage } from "#context/container.js";
 import { ScheduleIdKey, StaticModelReferenceKey } from "#context/keys.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
-import { getHarnessEmissionState } from "#harness/emission.js";
 import { GenerationSteering } from "#harness/generation-steering.js";
-import { acceptHumanInput, runApprovedWork } from "#harness/human-input/index.js";
-import { hasStepInput } from "#harness/input-requests.js";
 import { compactHistory, replaceSessionHistory } from "#harness/model-call/compaction.js";
 import { runModelStep } from "#harness/model-call/run.js";
 import { handleStepResult } from "#harness/step/after-model.js";
+import type { Publish } from "#harness/session-machine/commit.js";
+import {
+  saveProjection,
+  stepProjection,
+  type StepProjection,
+} from "#harness/session-machine/current.js";
+import {
+  acceptHumanInput,
+  discardClearedHumanInput,
+  runApprovedWork,
+} from "#harness/human-input/index.js";
+import { clear } from "#harness/session-machine/transitions.js";
+import { activeTurnId, runtimeWait, turnPosition } from "#harness/session-machine/view.js";
 import { createStep, openTurn, type Step } from "#harness/step/context.js";
-import { prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
-import { getSessionUsage } from "#harness/turn-tag-state.js";
+import { followingToolResults, prepareTurnInput, settleRuntimeWork } from "#harness/step/intake.js";
 import type {
-  HarnessEmitFn,
   HarnessSession,
   StepFn,
   StepInput,
@@ -21,7 +28,6 @@ import type {
 } from "#harness/types.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { createContextClearedEvent, createSessionWaitingEvent } from "#protocol/message.js";
 import { createHistoryViewPreparer } from "#shared/history-view.js";
 import { clearMemorySessionState } from "#shared/memory-state.js";
 
@@ -31,9 +37,9 @@ const eveVersion = resolveInstalledPackageInfo().version;
 /**
  * Creates the harness step: one step of a session, backed by the AI SDK's `ToolLoopAgent`.
  *
- * A step settles what the runtime ran for a parked step and takes its delivery's answers, opens or
- * joins the turn, applies what those answers granted, then makes one model step and acts on its
- * response.
+ * A step settles what earlier steps parked and takes its delivery's answers, opens or joins the
+ * turn, runs the work those answers approved, then makes one model step and acts on its response.
+ * Every lifecycle change goes through the session machine (`Step.apply`).
  */
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   config.instrumentation?.installAiSdkWarningLogger();
@@ -44,13 +50,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   ): Promise<StepResult> {
     const executeStep = async (scope?: InstrumentationStepScope<HarnessSession>) => {
       const current = scope?.session ?? initialSession;
+      const live = stepProjection(contextStorage.getStore(), current.state);
       const generation = new GenerationSteering({
         abortSignal: config.abortSignal,
         steeringSignal: config.steeringSignal,
-        outputStarted: getHarnessEmissionState(current.state).assistantOutputStarted,
+        outputStarted: turnPosition(live.read()).assistantOutputStarted,
       });
       try {
-        return await executeStepBody(current, generation, input, scope);
+        const result = await executeStepBody(current, generation, live, input, scope);
+        // The step saves the lifecycle it published with the state that follows it.
+        return { ...result, session: saveProjection(result.session, live.read()) };
       } finally {
         generation.dispose();
       }
@@ -66,6 +75,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   async function executeStepBody(
     initialSession: HarnessSession,
     generation: GenerationSteering,
+    live: StepProjection,
     input: StepInput | undefined,
     instrumentation: InstrumentationStepScope<HarnessSession> | undefined,
   ): Promise<StepResult> {
@@ -84,25 +94,27 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       );
     }
     let attemptScope: InstrumentationAttempt | undefined;
-    const handleEvent =
+    const emit =
       instrumentation?.createHandleEvent({
         getAttemptScope: () => attemptScope,
         handleEvent: config.handleEvent,
-        turnId: activeTurnId(getHarnessEmissionState(initialSession.state)),
+        turnId: activeTurnId(turnPosition(live.read())),
       }) ?? config.handleEvent;
-    const emit: HarnessEmitFn | undefined =
-      handleEvent === undefined
-        ? undefined
-        : async (event, messages) => {
-            generation.beforeEvent(event);
-            await handleEvent(event, messages);
-          };
+    const publish: Publish = async (event, messages) => {
+      generation.beforeEvent(event);
+      // The publish sink folds what it publishes; without a sink, the step does, so lifecycle
+      // never depends on whether a caller listens.
+      if (emit !== undefined) await emit(event, messages);
+      if (emit === undefined || ctx === undefined) live.record(event);
+    };
     const step = createStep({
       config,
       ctx,
       emit,
       instrumentation,
+      live,
       prepareHistory,
+      publish,
       runStep,
       session: initialSession,
     });
@@ -112,27 +124,29 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     const runtime = await settleRuntimeWork(step, input);
     if (runtime === undefined) return { next: null, session: step.session };
-    const intake = await acceptHumanInput(step, input, runtime);
+    const intake = await acceptHumanInput(step, runtime.input, { takeQueued: !runtime.waited });
     if (intake.kind === "stop") return intake.result;
-    const turn = await prepareTurnInput(step, intake.input, intake);
+    const turn = await prepareTurnInput(step, intake.input, {
+      consumedMessage: intake.consumedMessage,
+    });
     if (intake.opensTurn) {
       const failed = await openTurn(step, {
         input: [...turn.ephemeral, ...turn.messages],
         message: intake.message,
-        pending: intake.pending,
       });
       if (failed !== undefined) return failed;
     }
-    runApprovedWork(step, intake.approved);
+    const approved = await runApprovedWork(step, intake.approved, followingToolResults(turn));
+    if (approved !== undefined) return approved;
+    // The turn waits on the runtime for the runs approved calls started.
+    if (runtimeWait(step.session.state) !== undefined) return { next: null, session: step.session };
 
     return runModelStep(step, {
       onResponse: (response) => handleStepResult(step, response),
-      approved: intake.approved,
       generation,
       // A child's caller and a schedule hear only the turn's real end, so a held turn's text
       // isn't posted as their reply. A person reads a root session.
       hidesHeldText: step.hasDelegatedCaller || ctx?.get(ScheduleIdKey) !== undefined,
-      pending: intake.pending,
       setAttemptScope: (scope) => {
         attemptScope = scope;
       },
@@ -143,20 +157,18 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   return runStep;
 }
 
-/** `session.clear()`: history and memory empty, and the session waits. */
+/** `session.clear()`: the machine withdraws what the cleared history asked, and history empties. */
 async function clearContext(step: Step): Promise<StepResult> {
-  const position = step.position();
-  step.session = replaceSessionHistory(
-    { ...step.session, state: clearMemorySessionState(step.session.state) },
-    [],
-  );
-  await step.emit?.(
-    createContextClearedEvent({
-      sequence: position.sequence,
-      sessionId: step.session.sessionId,
-      turnId: activeTurnId(position),
-    }),
-  );
-  await step.emit?.(createSessionWaitingEvent(getSessionUsage(step.session)));
-  return { next: null, session: step.session };
+  await step.apply(clear(step.view(), { sessionId: step.session.sessionId }));
+  const cleared = discardClearedHumanInput({
+    ...step.session,
+    state: clearMemorySessionState(step.session.state),
+  });
+  return { next: null, session: replaceSessionHistory(cleared, []) };
+}
+
+/** Whether the input carries user-facing turn input. */
+function hasStepInput(input: StepInput | undefined): boolean {
+  if (input === undefined) return false;
+  return input.message !== undefined || (input.inputResponses?.length ?? 0) > 0;
 }

@@ -11,7 +11,7 @@ import {
   StepDynamicToolMetadataKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { withParkedStep } from "#internal/testing/session-machine.js";
 import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
 import {
   bindInstrumentationRuntime,
@@ -488,50 +488,52 @@ describe("createExecutionNodeStep", () => {
         resolverSlug: "wired",
       } satisfies OldSourceOffsetDynamicToolMetadata,
     ]);
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-wired",
-            input: {},
-            kind: "tool-call",
-            toolName: "wired_dynamic_tool",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Approve" },
-            { id: "cancel", label: "Cancel" },
-          ],
-          prompt: "Approve dynamic tool",
-          requestId: "approval-wired",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: {},
-              toolCallId: "call-wired",
-              toolName: "wired_dynamic_tool",
-              type: "tool-call",
-            },
-            {
-              approvalId: "approval-wired",
-              toolCallId: "call-wired",
-              type: "tool-approval-request",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createSession({
+    const session = withParkedStep(
+      createSession({
         continuationToken: "test-dynamic",
         sessionId: "sess-dynamic",
         turnAgent: node.turnAgent,
       }),
-    });
+      {
+        messages: [
+          {
+            content: [
+              {
+                input: {},
+                toolCallId: "call-wired",
+                toolName: "wired_dynamic_tool",
+                type: "tool-call",
+              },
+              {
+                approvalId: "approval-wired",
+                toolCallId: "call-wired",
+                type: "tool-approval-request",
+              },
+            ],
+            role: "assistant",
+          },
+        ],
+        requests: [
+          {
+            action: {
+              callId: "call-wired",
+              input: {},
+              kind: "tool-call",
+              toolName: "wired_dynamic_tool",
+            },
+            allowFreeform: false,
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Approve" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve dynamic tool",
+            requestId: "approval-wired",
+          },
+        ],
+      },
+    );
 
     await contextStorage.run(ctx, () =>
       step(session, {

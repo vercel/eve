@@ -27,7 +27,7 @@ import {
   type AuthorizationChallenge,
 } from "#harness/authorization.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
-import { getPendingInputBatches, pendingInputRequester } from "#harness/pending-input-batches.js";
+import { suspendedSteps } from "#harness/session-machine/view.js";
 import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -88,7 +88,7 @@ export async function coordinateApprovalDelivery(input: {
     state: clearPendingAuthorization(expiredState, expiredChallengeIds),
   };
   const audit = getApprovalAuditState(session.state);
-  const batches = getPendingInputBatches(session.state);
+  const batches = suspendedSteps(session.state).filter((step) => step.requests.length > 0);
   const pendingRequestIds = new Set(
     batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
   );
@@ -309,7 +309,10 @@ async function authorizeCandidate(input: {
         request: {
           callId: input.request.action.callId,
           requestId: input.request.requestId,
-          principal: pendingInputRequester(session.state, input.request.requestId),
+          principal:
+            suspendedSteps(session.state).find((step) =>
+              step.requests.some((request) => request.requestId === input.request.requestId),
+            )?.requester ?? null,
           toolInput: input.request.action.input,
           toolName: input.request.action.toolName,
         },

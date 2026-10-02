@@ -1,16 +1,12 @@
 import type { LanguageModel, ModelMessage } from "ai";
 
 import { HistoryStateKey } from "#context/keys.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
-import { emitStepStarted } from "#harness/emission.js";
 import type { GenerationSteering } from "#harness/generation-steering.js";
-import {
-  type ApprovedWork,
-  dispatchApprovedWorkflows,
-  enforceBudget,
-  humanInputContext,
-} from "#harness/human-input/index.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
+import { enforceBudget, humanInputContext } from "#harness/human-input/index.js";
+import { stepStartedForResolvers } from "#harness/session-machine/resolver-events.js";
+import { startStep } from "#harness/session-machine/transitions.js";
+import { activeTurnId } from "#harness/session-machine/view.js";
 import { failBoundaryEvent, failModelSelection, type Step } from "#harness/step/context.js";
 import type { TurnInput } from "#harness/step/intake.js";
 import {
@@ -27,7 +23,6 @@ import {
   type StepResult,
 } from "#harness/types.js";
 import type { InstrumentationAttempt } from "#instrumentation/runtime.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { ModelCaller } from "./call.js";
 import type { EndsTurnTools } from "./tools.js";
 import { reportModelCallFailure } from "./failure.js";
@@ -42,8 +37,6 @@ export interface ModelResponse {
   readonly durableModelPromptMessageCount?: number;
   /** Tools that can end the turn in this step, with their `endsTurn` option. */
   readonly endsTurnTools: EndsTurnTools;
-  /** The model's output started streaming, so steering can no longer interrupt the turn. */
-  readonly outputStarted: boolean;
   readonly promptMessages: readonly HarnessModelMessage[];
   readonly requestEnvelopeTokens?: number;
   readonly result: HarnessStepResult;
@@ -58,9 +51,6 @@ export async function runModelStep(
   input: {
     readonly onResponse: (response: ModelResponse) => Promise<StepResult>;
     readonly turn: TurnInput;
-    /** The transcript the step resumes, after the turn's preamble. */
-    readonly pending: readonly HarnessModelMessage[];
-    readonly approved: ApprovedWork;
     readonly generation: GenerationSteering;
     /** A child's caller and a schedule hear only the turn's real end. */
     readonly hidesHeldText: boolean;
@@ -69,22 +59,22 @@ export async function runModelStep(
   },
 ): Promise<StepResult> {
   const { generation } = input;
-  const prompt = await buildPrompt(step, input.turn, input.pending);
+  const prompt = await buildPrompt(step, input.turn);
   const model = await selectModel(step, prompt);
   if (!("model" in model)) return model.failed;
 
-  const start = async (messages: readonly ModelMessage[]) => {
-    if (step.emit === undefined) return;
-    const modelId = requireSessionModelReference(step.session).id;
-    await emitStepStarted(step.emit, step.position(), modelId, messages);
-  };
+  const start = (messages: readonly ModelMessage[]) =>
+    step.apply(
+      startStep(step.view(), { modelId: requireSessionModelReference(step.session).id }),
+      messages,
+    );
   const projectedMessages = projectPrompt(step, prompt);
   try {
     await start(projectedMessages);
   } catch (error) {
     return failBoundaryEvent(step, error);
   }
-  const { approvedTools, pendingApprovalsNote } = humanInputContext(step, input.approved);
+  const { approvedTools, pendingApprovalsNote } = humanInputContext(step);
   const caller = new ModelCaller(step, prompt, {
     approvedTools,
     generation,
@@ -96,10 +86,8 @@ export async function runModelStep(
     startStep: start,
     turnMessages: input.turn.messages,
   });
-  const dispatched = dispatchApprovedWorkflows(step, input.approved, prompt.messages);
-  if (dispatched !== undefined) return dispatched;
-  // Over budget, no model call happens.
-  const overBudget = await enforceBudget(step, projectedMessages);
+  // Over budget, no model call happens: the step's messages park with the prompt.
+  const overBudget = await enforceBudget(step, prompt.messages);
   if (overBudget !== undefined) return overBudget;
 
   let result: HarnessStepResult;
@@ -136,7 +124,6 @@ export async function runModelStep(
           ? caller.modelMessages.length
           : undefined,
       endsTurnTools: caller.tools?.endsTurnTools ?? new Map(),
-      outputStarted: generation.outputStarted,
       promptMessages: caller.request.history,
       requestEnvelopeTokens: caller.requestEnvelopeTokens,
       result,
@@ -162,13 +149,15 @@ async function selectModel(
   const { config, ctx } = step;
   try {
     if (ctx !== undefined && config.dispatchDynamicModelEvent !== undefined) {
-      const { sequence, stepIndex } = step.position();
+      const position = step.position();
       await config.dispatchDynamicModelEvent({
         ctx,
-        event: {
-          data: { sequence, stepIndex, turnId: activeTurnId(step.position()) },
-          type: "step.started",
-        } as UnstampedMessageStreamEvent,
+        event: stepStartedForResolvers({
+          modelId: step.session.agent.modelReference?.id ?? "dynamic",
+          sequence: position.sequence,
+          stepIndex: position.stepIndex,
+          turnId: activeTurnId(position),
+        }),
         messages: validateHarnessModelMessages(step.projectHistory(withClientContext(prompt))),
       });
     }

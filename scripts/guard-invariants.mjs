@@ -125,6 +125,14 @@
  *             reached only through its `index.ts` and its request vocabulary
  *             (`approval-prompt`, `budget-request`), so replacing it changes
  *             one seam.
+ *   rule 50 — Only the session machine (`harness/session-machine/`) and the
+ *             human-in-the-loop lifecycle it delegates to
+ *             (`harness/human-input/`) build lifecycle events and read the
+ *             machine's private state. Every change to a turn, request,
+ *             sign-in, task, or call outcome is a transition that returns its
+ *             events, so nothing changes without readers hearing it. The model
+ *             step's streamed content (its calls and their inline results) is
+ *             built where it streams.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -245,6 +253,7 @@ function isTsLike(relPath) {
  *   rule47: Violation[];
  *   rule48: Violation[];
  *   rule49: Violation[];
+ *   rule50: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -279,6 +288,7 @@ async function scanRepo(state) {
     checkRule47(posix, lines, state.rule47);
     checkRule48(posix, lines, state.rule48);
     checkRule49(posix, lines, state.rule49);
+    checkRule50(posix, lines, state.rule50);
   }
 }
 
@@ -509,6 +519,58 @@ function checkRule49(posix, lines, violations) {
       message:
         "imports the human-in-the-loop lifecycle's internals. Reach it through `#harness/human-input/index.js`, the one seam the rest of eve meets it at.",
     });
+  });
+}
+
+// ---------- Rule 50: the session machine owns lifecycle ----------
+
+const SESSION_MACHINE_DIR = "packages/eve/src/harness/session-machine/";
+const LIFECYCLE_EVENT_BUILDER_RE =
+  /\bcreate(?:Session(?:Started|Waiting|Failed|Completed)|Turn(?:Started|Completed|Failed|Cancelled|Waiting)|MessageReceived|Step(?:Started|Failed)|Input(?:Requested|Resolved)|Authorization(?:Required|Completed)|Approval(?:Candidate|Settled)|Task(?:Started|Settled)|ContextCleared|ResultCompleted)Event\b/;
+const CALL_EVENT_BUILDER_RE = /\bcreateAction(?:Result|sRequested)Event\b/;
+/** Where the model step streams its calls, their inline results, and the calls they made. */
+const STREAM_CONTENT_FILES = new Set([
+  "packages/eve/src/harness/emission.ts",
+  "packages/eve/src/harness/nested-actions.ts",
+  "packages/eve/src/harness/step-hooks.ts",
+  "packages/eve/src/harness/stream-actions.ts",
+]);
+const MACHINE_PRIVATE_IMPORT_RE = /["']#harness\/session-machine\/(?:state|events)\.js["']/;
+
+/** @param {string} posix @param {string[]} lines @param {Violation[]} violations */
+function checkRule50(posix, lines, violations) {
+  if (
+    !posix.startsWith("packages/eve/src/") ||
+    posix.startsWith(SESSION_MACHINE_DIR) ||
+    posix.startsWith(HUMAN_INPUT_DIR) ||
+    posix.startsWith("packages/eve/src/protocol/") ||
+    posix.startsWith("packages/eve/src/internal/testing/") ||
+    posix.endsWith(".test.ts") ||
+    posix.includes("/test/")
+  )
+    return;
+  lines.forEach((line, idx) => {
+    const builder = LIFECYCLE_EVENT_BUILDER_RE.exec(line)?.[0];
+    const callBuilder = STREAM_CONTENT_FILES.has(posix)
+      ? undefined
+      : CALL_EVENT_BUILDER_RE.exec(line)?.[0];
+    if (builder !== undefined || callBuilder !== undefined) {
+      violations.push({
+        rule: 50,
+        file: posix,
+        line: idx + 1,
+        message: `uses ${builder ?? callBuilder} outside harness/session-machine/. Only the session machine builds lifecycle events: return them from a transition and publish what it returns with \`applyTransition\`.`,
+      });
+    }
+    if (MACHINE_PRIVATE_IMPORT_RE.test(line)) {
+      violations.push({
+        rule: 50,
+        file: posix,
+        line: idx + 1,
+        message:
+          "imports the session machine's private state or event builders. Read execution state through `#harness/session-machine/view.js`; change it with a transition.",
+      });
+    }
   });
 }
 
@@ -1577,6 +1639,7 @@ async function main() {
     rule47: /** @type {Violation[]} */ ([]),
     rule48: /** @type {Violation[]} */ ([]),
     rule49: /** @type {Violation[]} */ ([]),
+    rule50: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1692,6 +1755,7 @@ async function main() {
   violations.push(...state.rule47);
   violations.push(...state.rule48);
   violations.push(...state.rule49);
+  violations.push(...state.rule50);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

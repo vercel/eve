@@ -14,7 +14,7 @@ export default defineEval({
     denied.calledTool("gated_deploy", {
       count: 1,
       output: /Tool execution was denied/u,
-      status: "failed",
+      status: "rejected",
     });
 
     for (const decision of ["approve", "cancel"] as const) {

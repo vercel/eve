@@ -22,7 +22,7 @@ import {
   createRuntimeToolResultFromMessagePart,
   createRuntimeToolResultFromStepResult,
 } from "#harness/action-result-helpers.js";
-import type { HarnessEmissionState } from "#harness/emission.js";
+import type { TurnPosition } from "#harness/session-machine/view.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 import {
@@ -101,7 +101,7 @@ interface StepHooks {
   /**
    * `ToolLoopAgent` `onStepStart` callback.
    *
-   * Emits the `step.started` event from the prepared step input.
+   * Starts the step from the prepared step input.
    */
   readonly onStepStart: GenerateTextOnStepStartCallback<ToolSet>;
 
@@ -128,7 +128,7 @@ interface StepHooks {
    * have been emitted before proceeding to post-step handling.
    *
    * Resolves once per hooks instance: a retried model call must rebuild
-   * hooks via a fresh `ModelCaller` attempt (`model-call/call.ts`). Re-running a call against
+   * hooks via a fresh `ModelCaller.call` attempt. Re-running a call against
    * hooks whose `stepResult` already resolved reads the previous attempt's
    * result, not the retry's.
    *
@@ -236,7 +236,7 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
  */
 export async function emitStepActions(
   emitFn: HarnessEmitFn,
-  state: HarnessEmissionState,
+  state: TurnPosition,
   step: HarnessStepResult,
   options: {
     readonly emittedActionCallIds?: ReadonlySet<string>;

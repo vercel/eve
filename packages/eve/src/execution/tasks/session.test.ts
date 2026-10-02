@@ -13,10 +13,10 @@ import {
   writeTaskTable,
   type TaskTable,
 } from "#execution/tasks/table.js";
-import {
-  getProxyInputRequests,
-  upsertProxyInputRequestState,
-} from "#harness/proxy-input-requests.js";
+import { upsertProxyInputRequestState } from "#harness/proxy-input-requests.js";
+import type { HarnessSession } from "#harness/types.js";
+import { withPublished } from "#internal/testing/session-machine.js";
+import { createInputRequestedEvent } from "#protocol/message.js";
 import { createTestSessionState } from "#internal/testing/session-state.js";
 
 // No workflow runtime runs here: the run's cancel hook is a stub, and the
@@ -64,8 +64,7 @@ describe("answerTaskCancel", () => {
       taskId: research.taskId,
     });
 
-    const committed = cursor.sessionState.snapshot.session;
-    expect([...getProxyInputRequests(committed.state).keys()]).toEqual(["summarize-run-ask-1"]);
+    // Publishing drops the withdrawn question's route; here it only records what was published.
     expect(published).toEqual([
       {
         event: {
@@ -130,8 +129,7 @@ describe("applyTaskRunMessageStep", () => {
       }),
     );
 
-    const committed = cursor.sessionState.snapshot.session;
-    expect([...getProxyInputRequests(committed.state).keys()]).toEqual(["summarize-run-ask-1"]);
+    // Publishing drops the withdrawn question's route; here it only records what was published.
     expect(published).toEqual([
       {
         event: {
@@ -200,8 +198,23 @@ function startedTask(
   };
 }
 
+/** A question the task's run asked, relayed as the session relays it. */
 function withQuestion(session: DurableSession, runId: string): DurableSession {
   const requestId = `${runId}-ask-1`;
+  session = withPublished(session as HarnessSession, [
+    createInputRequestedEvent({
+      callId: `${runId.replace("-run", "")}-call`,
+      requests: [
+        {
+          action: { callId: requestId, input: {}, kind: "tool-call", toolName: "ask" },
+          kind: "question",
+          prompt: "Which region should Alice's report cover?",
+          requestId,
+        },
+      ],
+      ...REQUEST_EVENT,
+    }),
+  ]);
   const state = upsertProxyInputRequestState({
     entries: [
       [

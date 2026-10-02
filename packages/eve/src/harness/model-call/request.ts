@@ -84,7 +84,7 @@ export function withTrailingUserNote(
   return note ? [...messages, createFrameworkUserMessage("execution.retry", note)] : [...messages];
 }
 
-function mergeSystemInstructions(
+export function mergeSystemInstructions(
   instructions: readonly SystemModelMessage[],
 ): SystemModelMessage | undefined {
   if (instructions.length === 0) {

@@ -516,6 +516,25 @@ describe("message stream protocol", () => {
     });
   });
 
+  it("reports a policy's automatic denial as rejected, like a person's", () => {
+    const event = createActionResultEvent({
+      result: {
+        callId: "call_1",
+        isError: true,
+        kind: "tool-result",
+        output: { code: "TOOL_EXECUTION_DENIED", message: "Tool execution was denied." },
+        toolName: "deploy",
+      },
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "turn_0",
+    });
+    expect(event.data).toMatchObject({
+      error: { code: "TOOL_EXECUTION_DENIED" },
+      status: "rejected",
+    });
+  });
+
   it("marks denied action results as rejected", () => {
     const event = createActionResultEvent({
       rejected: true,

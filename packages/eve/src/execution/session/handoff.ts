@@ -21,7 +21,7 @@ import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.
  * Mount-owned state requires a new version so older readers reject it rather
  * than dropping unrecognized state keys during reverse handoff.
  */
-export const SESSION_CHECKPOINT_VERSION = 11;
+export const SESSION_CHECKPOINT_VERSION = 12;
 
 /** Everything a successor needs to continue an idle session. Hooks are derived from the state. */
 export interface SessionCheckpoint {

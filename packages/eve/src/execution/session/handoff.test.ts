@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { SessionHandoff, type SessionOwnerActivation } from "#execution/session/handoff.js";
+import {
+  SESSION_CHECKPOINT_VERSION,
+  SessionHandoff,
+  type SessionOwnerActivation,
+} from "#execution/session/handoff.js";
 import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
@@ -47,7 +51,7 @@ describe("SessionHandoff", () => {
       checkpoint: expect.objectContaining({
         history,
         sessionTimeoutMs: 60_000,
-        version: 11,
+        version: SESSION_CHECKPOINT_VERSION,
       }),
       delivery: trigger.delivery,
       targetDeploymentId: "deployment-b",
