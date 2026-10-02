@@ -275,7 +275,9 @@ async function deliverChannelInputResponses(
 
   // The hook sees this delivery's caller, as it does in the turn.
   if (input.delivery.auth !== undefined) ctx.set(AuthKey, input.delivery.auth ?? null);
-  const adapterCtx = buildAdapterContext(adapter, ctx);
+  // Each hook call edits its own copy of channel state, kept only when it maps
+  // to a routable request; a response put back as sent must stay resolvable.
+  let state = adapter.state ?? {};
   let mapped = false;
   const payloads: DeliverPayload[] = [];
   for (const payload of input.delivery.payloads) {
@@ -289,13 +291,19 @@ async function deliverChannelInputResponses(
         responses.push(response);
         continue;
       }
+      const adapterCtx = buildAdapterContext({ ...adapter, state: structuredClone(state) }, ctx);
       const result = await adapter.deliver(
         { ...payload, inputResponses: [response], message: undefined },
         adapterCtx,
       );
       const routed = result?.inputResponses?.filter(routable) ?? [];
-      mapped ||= routed.length > 0;
-      responses.push(...(routed.length > 0 ? routed : [response]));
+      if (routed.length === 0) {
+        responses.push(response);
+        continue;
+      }
+      mapped = true;
+      state = adapterCtx.state;
+      responses.push(...routed);
     }
     payloads.push({ ...payload, inputResponses: responses });
   }
@@ -304,7 +312,7 @@ async function deliverChannelInputResponses(
   // Only the channel state the mapping consumed carries over; the turn applies
   // the rest of this delivery, such as its caller, itself.
   const session = await deserializeContext(input.serializedContext);
-  setChannelContext(session, { ...adapter, state: { ...adapterCtx.state } });
+  setChannelContext(session, { ...adapter, state });
   return {
     delivery: { ...input.delivery, payloads },
     serializedContext: serializeContext(session),
