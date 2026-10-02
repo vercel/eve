@@ -516,12 +516,13 @@ describe("mcpChannel tools", () => {
   function serve(
     options: { readonly agent?: boolean; readonly tools?: boolean },
     invokeTool: InvokeToolFn = vi.fn(),
+    tools: readonly AgentToolDescription[] = [shadow, lookup, note],
   ) {
     const channel = mcpChannel({ auth: () => principal, ...options });
     const post = channel.routes[1]!;
     if (post.transport === "websocket") throw new Error("expected HTTP route");
     const args = routeArgs(vi.fn(), {
-      describe: async () => ({ name: "compiled-agent", tools: [shadow, lookup, note] }),
+      describe: async () => ({ name: "compiled-agent", tools }),
       invokeTool,
     });
     return async (method: string, params?: unknown) =>
@@ -562,6 +563,26 @@ describe("mcpChannel tools", () => {
     expect(() => mcpChannel({ agent: false, auth: none() })).toThrow(
       "mcpChannel publishes nothing with agent and tools both false. Enable one.",
     );
+  });
+
+  it("returns non-object output as structured content when the tool declares a schema", async () => {
+    const count: AgentToolDescription = {
+      approval: false,
+      description: "Counts orders.",
+      inputSchema: { type: "object" },
+      name: "count",
+      outputSchema: { type: "number" },
+    };
+    const invokeTool = vi.fn<InvokeToolFn>(async () => ({
+      modelOutput: { type: "json", value: 42 },
+      output: 42,
+      status: "completed",
+    }));
+    const rpc = serve({ agent: false, tools: true }, invokeTool, [count]);
+    const called = (await rpc("tools/call", { arguments: {}, name: "count" })).result!;
+    expect(called.isError).toBeUndefined();
+    // The SDK wraps a non-object as `{ result }` on 2025-era connections.
+    expect(called.structuredContent).toEqual({ result: 42 });
   });
 
   it("runs each call through invokeTool as the caller and maps its outcome", async () => {
