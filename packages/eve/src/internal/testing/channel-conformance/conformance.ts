@@ -19,6 +19,7 @@ import { teamsDriver } from "#internal/testing/channel-conformance/teams-driver.
 import { telegramDriver } from "#internal/testing/channel-conformance/telegram-driver.js";
 import { tuiDriver } from "#internal/testing/channel-conformance/tui-driver.js";
 import { twilioDriver } from "#internal/testing/channel-conformance/twilio-driver.js";
+import { webChatDriver } from "#internal/testing/channel-conformance/web-chat-driver.js";
 
 export interface BrokenCell {
   readonly reason: string;
@@ -38,8 +39,8 @@ const TUI_TYPED_APPROVAL =
 
 /**
  * Every first-party channel's and client's place in the HITL contract, keyed by
- * the directory whose `hitl-conformance.integration.test.ts` runs it. Each cell is
- * one of:
+ * the directory whose `hitl-conformance.integration.test.ts` runs it (`web-chat`
+ * runs from `test/browser`, since it needs a browser). Each cell is one of:
  *
  * - must pass;
  * - not supported: the platform lacks a capability the rule requires, or the
@@ -67,6 +68,7 @@ const hitlConformance = {
     },
   ],
   twilio: [{ driver: twilioDriver }],
+  "web-chat": [{ driver: webChatDriver }],
 } satisfies Record<string, readonly ConformanceChannel[]>;
 
 /**
