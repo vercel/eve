@@ -140,18 +140,24 @@ async function callSandbox(
     sessionId,
     state: null,
   });
-  let opened = false;
+  // The latest requested open, kept before it settles: `execute` can finish
+  // (say, by losing a race against cancellation) while the provider is still
+  // starting, and release must still delete what that start creates.
+  let requested: Promise<unknown> | undefined;
   return {
     access: {
       ...inner,
-      async get() {
-        const sandbox = await inner.get();
-        if (sandbox !== null) opened = true;
-        return sandbox;
+      get() {
+        const opening = inner.get();
+        requested = opening;
+        return opening;
       },
     },
     async release() {
-      if (opened) await inner.delete?.();
+      if (requested === undefined) return;
+      // A failed open left nothing behind; deleting would open one just to delete it.
+      const sandbox = await requested.catch(() => null);
+      if (sandbox !== null) await inner.delete?.();
     },
   };
 }
@@ -268,10 +274,11 @@ async function validateToolInput(
   | { readonly kind: "invalid"; readonly message: string }
   | { readonly kind: "threw"; readonly error: unknown }
 > {
-  const schema = asSchema(definition.inputSchema);
-  if (schema.validate === undefined) return { kind: "valid", value: input };
-  let result: Awaited<ReturnType<NonNullable<typeof schema.validate>>>;
+  let result: Awaited<ReturnType<NonNullable<ReturnType<typeof asSchema>["validate"]>>>;
   try {
+    // Inside the try: normalizing a malformed schema throws just like a validator.
+    const schema = asSchema(definition.inputSchema);
+    if (schema.validate === undefined) return { kind: "valid", value: input };
     result = await schema.validate(input);
   } catch (error) {
     // A validator that throws failed itself; its message is not a diagnostic of the input.
