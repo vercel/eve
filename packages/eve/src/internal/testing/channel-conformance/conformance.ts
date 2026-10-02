@@ -98,7 +98,7 @@ interface ConformanceChannel {
 
 /** A message sent during a budget prompt is queued, and every later message queues behind it. */
 const QUEUED_BUDGET_REPLY = {
-  "a message sent during a budget prompt is answered once the person approves": {
+  "query sent during budget prompt answered after budget approval": {
     reason: "eve coalesces the queued reply with the later approve, which then matches no option",
     symptom: /Timed out waiting for a reply to "Carol wants the review by Friday\."/u,
   },
@@ -161,8 +161,8 @@ const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
   ...budgetPromptNotShown(
     "a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws",
-    "running out of budget asks the person whether to keep going",
-    "pressing Approve on a budget prompt lets the agent pick up where it left off",
+    "running out of budget opens budget prompt",
+    "pressing approve on budget prompt allows agent to continue",
   ),
   ...noSignInRenderer(
     "a sign-in names the service and shows its sign-in link",
@@ -288,8 +288,8 @@ const hitlConformance = {
         },
         ...budgetPromptNotShown(
           "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
-          "pressing Stop on a budget prompt halts the work, and the next message asks again",
-          "a text reply of stop on a budget prompt halts the work, and the next message asks again",
+          "pressing stop on budget prompt halts work, next message asks again",
+          "reply of stop on budget prompt halts work, next message asks again",
         ),
       },
       unsupported: {

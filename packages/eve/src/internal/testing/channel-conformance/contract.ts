@@ -522,7 +522,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "running out of budget asks the person whether to keep going",
+    rule: "running out of budget opens budget prompt",
     source: "docs/agent-config.md#runtime-limits",
     requires: [],
     agent: ONE_TOKEN_BUDGET,
@@ -537,7 +537,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "pressing Approve on a budget prompt lets the agent pick up where it left off",
+    rule: "pressing approve on budget prompt allows agent to continue",
     source: "docs/agent-config.md#runtime-limits",
     requires: ["buttons"],
     agent: ONE_TOKEN_BUDGET,
@@ -550,7 +550,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "a text reply of approve on a budget prompt lets the agent pick up where it left off",
+    rule: "reply of approve on budget prompt allows agent to continue",
     source: "docs/agent-config.md#runtime-limits",
     requires: ["text-replies"],
     variesByConversation: true,
@@ -562,7 +562,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "pressing Stop on a budget prompt halts the work, and the next message asks again",
+    rule: "pressing stop on budget prompt halts work, next message asks again",
     source: "docs/agent-config.md#runtime-limits",
     requires: ["buttons", "text-replies"],
     variesByConversation: true,
@@ -576,7 +576,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "a text reply of stop on a budget prompt halts the work, and the next message asks again",
+    rule: "reply of stop on budget prompt halts work, next message asks again",
     source: "docs/agent-config.md#runtime-limits",
     requires: ["text-replies"],
     variesByConversation: true,
@@ -588,7 +588,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "a message sent during a budget prompt is answered once the person approves",
+    rule: "query sent during budget prompt answered after budget approval",
     source: "docs/agent-config.md#runtime-limits",
     requires: ["text-replies"],
     variesByConversation: true,
