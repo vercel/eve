@@ -381,6 +381,7 @@ function projectPreparedKernelEffects(
         });
         break;
       case "provider-tool":
+      case "provider-fetch-tool":
         effects.push({
           audience: [...behavior.availability],
           kind: "provider-tool",

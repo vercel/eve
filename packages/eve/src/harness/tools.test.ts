@@ -589,6 +589,86 @@ describe("buildToolSet", () => {
     expect(getOutputJsonSchema(result.web_search)).toEqual(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
   });
 
+  it.each([
+    { config: {}, expected: { format: "markdown" }, content: "Example Domain" },
+    { config: { format: "raw" }, expected: { format: "raw" }, content: "<h1>Example Domain</h1>" },
+    {
+      config: {
+        format: "json",
+        schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] },
+      },
+      expected: {
+        format: "json",
+        schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] },
+      },
+      content: { title: "Example Domain" },
+    },
+  ] as const)(
+    "injects Browserbase fetch with $expected.format output and lifecycle handling",
+    async ({ config, expected, content }) => {
+      const tools: HarnessToolMap = new Map([
+        [
+          "web_fetch",
+          {
+            behavior: {
+              availability: [],
+              handling: { kind: "provider-fetch-tool", provider: "browserbase", ...config },
+            },
+            description: "Fetch.",
+            inputSchema: jsonSchema({}),
+            name: "web_fetch",
+          },
+        ],
+      ]);
+      const result = await buildToolSetWithProviderTools({
+        modelReference: { id: "openai/gpt-5.4" },
+        tools,
+      });
+      expect(result.web_fetch).toMatchObject({
+        type: "provider",
+        id: "gateway.browserbase_fetch",
+        args: expected,
+      });
+      for (const tool of Object.values(result)) {
+        expect(tool.execute).toBeUndefined();
+        expect(tool.outputSchema).toBeDefined();
+        await expect(
+          asSchema(tool.outputSchema!).validate?.({ error: "rate_limit", message: "Try again." }),
+        ).resolves.toMatchObject({ success: true });
+      }
+      await expect(
+        asSchema(result.web_fetch!.outputSchema!).validate?.({
+          id: "fetch-1",
+          content,
+          contentType: typeof content === "object" ? "application/json" : "text/html",
+          encoding: "utf-8",
+          headers: {},
+          statusCode: 200,
+        }),
+      ).resolves.toMatchObject({ success: true });
+      const disabled = await buildToolSetWithProviderTools({
+        modelReference: { id: "openai/gpt-5.4" },
+        tools,
+        disabledProviderTools: new Set(["web_fetch"]),
+      });
+      expect(disabled.web_fetch).toBeUndefined();
+
+      const direct = await buildToolSetWithProviderTools({
+        modelReference: {
+          id: "openai.chat/gpt-5.4",
+          source: {
+            exportName: "model",
+            logicalPath: "agent.ts",
+            sourceId: "agent.ts",
+            sourceKind: "module",
+          },
+        },
+        tools,
+      });
+      expect(direct.web_fetch).toBeUndefined();
+    },
+  );
+
   it("omits provider-managed web_search when no provider backend is available", async () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [

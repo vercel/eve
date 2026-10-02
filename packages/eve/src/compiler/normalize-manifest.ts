@@ -604,7 +604,10 @@ class AgentGraphCompiler {
             dynamicTools.push(withExtensionNamespace(result.definition, candidate.owner));
             state.evaluation.requireRuntimeEntry(candidate.sourceId);
           } else {
-            assertNonExtensionSpecialTool(candidate as AgentModuleCandidate, "Web search");
+            assertNonExtensionSpecialTool(
+              candidate as AgentModuleCandidate,
+              "Provider-managed web tool",
+            );
             tools.push(result.definition);
           }
           break;

@@ -1,3 +1,4 @@
+import type { WebFetchProviderInput } from "#tools/provided/web-fetch-provider.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
 
@@ -8,6 +9,7 @@ export type ToolAvailabilityCondition = "root-session";
 export type CompiledToolHandling =
   | { readonly kind: "dispatch"; readonly action: "self-agent" }
   | { readonly kind: "provider-tool"; readonly provider: WebSearchProvider }
+  | ({ readonly kind: "provider-fetch-tool" } & WebFetchProviderInput)
   | {
       readonly kind: "workflow-tool";
       readonly entryPoint: WorkflowToolEntryPoint;
@@ -52,7 +54,7 @@ export type PreparedDispatchTarget =
 /** Runtime-prepared handling consumed by the harness and execution boundary. */
 export type PreparedToolHandling =
   | { readonly kind: "dispatch"; readonly target: PreparedDispatchTarget }
-  | Extract<CompiledToolHandling, { readonly kind: "provider-tool" }>;
+  | Extract<CompiledToolHandling, { readonly kind: "provider-tool" | "provider-fetch-tool" }>;
 
 /** Runtime-prepared behavior carried by one harness-visible tool. */
 export interface PreparedToolBehavior {

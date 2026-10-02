@@ -134,7 +134,7 @@ export default disableTool();
 
 ### `web_fetch`
 
-`web_fetch` fetches URLs from the app runtime. It follows up to ten redirects and checks every destination for SSRF safety. Non-success responses return plain text with the response body when available.
+By default, `web_fetch` fetches URLs from the app runtime. It follows up to ten redirects and checks every destination for SSRF safety. Non-success responses return plain text with the response body when available. The app-runtime fetch supports `markdown` (default), `text`, and `html` formats.
 
 ```sh
 eve add tool/web_fetch
@@ -144,7 +144,38 @@ eve add tool/web_fetch
 export { default } from "eve/tools/web_fetch";
 ```
 
-Override it:
+To use Browserbase Fetch through AI Gateway, replace the default with `webFetchProvider`:
+
+```ts title="agent/tools/web_fetch.ts"
+import { webFetchProvider } from "eve/tools/web_fetch";
+
+export default webFetchProvider({ provider: "browserbase" });
+```
+
+This configuration requires a [Gateway model ID](../agent-config#set-the-model). AI Gateway executes the fetch using the same `AI_GATEWAY_API_KEY` or Vercel project OIDC credentials as the model; no `BROWSERBASE_API_KEY` is needed. With a direct provider model, eve omits this provider-managed `web_fetch` from the model's tools. Keep the default export or the named `webFetch` definition to fetch from the app runtime with any model.
+
+`webFetchProvider` uses `format: "markdown"` by default. Set `format: "raw"` to return the upstream response body, or use `format: "json"` with a JSON Schema to extract a structured object:
+
+```ts title="agent/tools/web_fetch.ts"
+import { webFetchProvider } from "eve/tools/web_fetch";
+
+export default webFetchProvider({
+  provider: "browserbase",
+  format: "json",
+  schema: {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      summary: { type: "string" },
+    },
+    required: ["title", "summary"],
+  },
+});
+```
+
+The model supplies the URL. Configure `format` and `schema` in the tool definition; `schema` is required for `json` and is not accepted with `markdown` or `raw`. See [Browserbase Fetch on AI Gateway](https://vercel.com/docs/ai-gateway/models-and-providers/web-search#using-browserbase-fetch) for service behavior and pricing.
+
+Override the app-runtime fetch:
 
 ```ts title="agent/tools/web_fetch.ts"
 import { defineTool } from "eve/tools";

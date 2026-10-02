@@ -21,6 +21,12 @@ export {
   webSearch,
 } from "../../src/public/tools/web-search.ts";
 export {
+  WEB_FETCH_INPUT_SCHEMA,
+  WEB_FETCH_OUTPUT_SCHEMA,
+  webFetch,
+  webFetchProvider,
+} from "../../src/public/tools/web-fetch.ts";
+export {
   workflow,
   type WorkflowTool,
   type WorkflowToolInput,

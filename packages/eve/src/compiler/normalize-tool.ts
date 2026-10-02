@@ -20,7 +20,7 @@ export type CompiledToolEntry =
   | { readonly kind: "disabled"; readonly name: string }
   | {
       readonly definition: CompiledToolDefinition;
-      readonly kind: "web-search-tool";
+      readonly kind: "web-search-tool" | "web-fetch-tool";
     }
   | { readonly kind: "dynamic-tool"; readonly definition: CompiledDynamicToolDefinition };
 
@@ -64,20 +64,27 @@ export async function compileToolEntry(
     return { kind: "disabled", name: toolName };
   }
 
-  if (entry.kind === "web-search-tool") {
-    if (toolName !== "web_search") {
+  if (entry.kind === "web-search-tool" || entry.kind === "web-fetch-tool") {
+    const isSearch = entry.kind === "web-search-tool";
+    const expectedName = isSearch ? "web_search" : "web_fetch";
+    const factory = isSearch ? "webSearch" : "webFetchProvider";
+    if (toolName !== expectedName) {
       throw new Error(
-        `The webSearch() definition must be exported from "tools/web_search.ts", not "${source.logicalPath}".`,
+        `The ${factory}() definition must be exported from "tools/${expectedName}.ts", not "${source.logicalPath}".`,
       );
     }
     return {
       definition: {
         behavior: {
           availability: [],
-          handling: { kind: "provider-tool", provider: entry.provider },
+          handling:
+            entry.kind === "web-search-tool"
+              ? { kind: "provider-tool", provider: entry.provider }
+              : { ...entry, kind: "provider-fetch-tool" },
         },
-        description:
-          "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
+        description: isSearch
+          ? "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff."
+          : "Fetch a webpage through Browserbase using the configured output format.",
         exportName: source.exportName,
         hasExecute: false,
         hasModelOutputProjection: false,
@@ -88,7 +95,7 @@ export async function compileToolEntry(
         sourceKind: "module",
         requiresApproval: false,
       },
-      kind: "web-search-tool",
+      kind: entry.kind,
     };
   }
 

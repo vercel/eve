@@ -7,6 +7,7 @@ import { defineTool, disableTool } from "#tools/definition.js";
 import { once } from "#tools/approval/policies.js";
 import { webSearch } from "#tools/provided/web-search.js";
 import { defineWorkflowTool } from "#tools/workflow-definition.js";
+import { webFetchProvider } from "#tools/provided/web-fetch-provider.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
 const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.";
@@ -120,6 +121,44 @@ describe("normalizeToolDefinition", () => {
       kind: "web-search-tool",
       provider: "exa",
     });
+  });
+
+  it("normalizes Browserbase fetch and rejects unknown provider configuration", () => {
+    expect(
+      normalizeToolDefinition(webFetchProvider({ provider: "browserbase" }), FAILURE_MESSAGE),
+    ).toEqual({
+      kind: "web-fetch-tool",
+      provider: "browserbase",
+    });
+    expect(() =>
+      normalizeToolDefinition(
+        { kind: "eve:web-fetch-provider", provider: "other" },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Expected "provider" to be browserbase');
+    expect(() =>
+      normalizeToolDefinition(
+        { kind: "eve:web-fetch-provider", provider: "browserbase", apiKey: "unsupported" },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow();
+  });
+
+  it.each([
+    [{ format: "json" }, 'requires a "schema"'],
+    [{ schema: {} }, 'only valid with "format": "json"'],
+    [{ format: "raw", schema: {} }, 'only valid with "format": "json"'],
+    [{ format: "markdown", schema: {} }, 'only valid with "format": "json"'],
+    [{ format: "text" }, 'Expected "format"'],
+    [{ format: "json", schema: [] }, "JSON-serializable object"],
+    [{ format: "json", schema: { value: () => null } }, "JSON"],
+  ])("rejects invalid fetch configuration %j", (config, error) => {
+    expect(() =>
+      normalizeToolDefinition(
+        { kind: "eve:web-fetch-provider", provider: "browserbase", ...config },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(error);
   });
 
   it("rejects an unsupported web search provider", () => {

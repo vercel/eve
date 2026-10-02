@@ -4,7 +4,11 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import { isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
-import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
+import {
+  resolveWebSearchBackend,
+  resolveWebSearchProviderTool,
+  resolveWebFetchProviderTool,
+} from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { loadContext } from "#context/container.js";
@@ -240,6 +244,15 @@ export async function buildToolSetWithProviderTools(input: {
 
   for (const definition of input.tools.values()) {
     const handling = definition.behavior?.handling;
+    if (
+      handling?.kind === "provider-fetch-tool" &&
+      definition.execute === undefined &&
+      !disabled?.has(definition.name)
+    ) {
+      const providerTool = await resolveWebFetchProviderTool(input.modelReference, handling);
+      if (providerTool === null) delete tools[definition.name];
+      else tools[definition.name] = providerTool;
+    }
     if (
       handling?.kind === "provider-tool" &&
       definition.execute === undefined &&
