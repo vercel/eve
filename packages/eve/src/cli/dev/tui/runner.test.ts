@@ -133,11 +133,11 @@ describe("parsePromptCommand", () => {
     });
   });
 
-  it("recognizes /reset, /cancel, /new, /compact, /exit, and /quit", () => {
-    expect(parsePromptCommand("/reset")).toEqual({ type: "reset" });
-    expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
+  it("recognizes /new, /reset, /cancel, /clear, /compact, /exit, and /quit", () => {
     expect(parsePromptCommand("/new")).toEqual({ type: "new" });
-    expect(parsePromptCommand("/clear")).toBeNull();
+    expect(parsePromptCommand("/reset")).toEqual({ type: "new" });
+    expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
+    expect(parsePromptCommand("/clear")).toEqual({ type: "clear" });
     expect(parsePromptCommand("/compact")).toEqual({ type: "compact" });
     expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
     expect(parsePromptCommand("/quit")).toEqual({ type: "exit" });
@@ -387,8 +387,9 @@ describe("EveTUIRunner initial input", () => {
 
 describe("parsePromptCommand", () => {
   it.each([
-    ["/reset", { type: "reset" }],
     ["/new", { type: "new" }],
+    ["/reset", { type: "new" }],
+    ["/clear", { type: "clear" }],
     ["/exit", { type: "exit" }],
     ["/quit", { type: "exit" }],
     ["/deploy", { type: "extension", name: "deploy", argument: "" }],
@@ -1426,13 +1427,10 @@ describe("EveTUIRunner session commands", () => {
     const { outcomes, finishCommand } = results();
     await new EveTUIRunner({
       client: stubClient(),
-      renderer: turnTaking(["Hello.", "/compact", "/new", undefined], { finishCommand }).renderer,
+      renderer: turnTaking(["Hello.", "/compact", "/clear", undefined], { finishCommand }).renderer,
     }).run();
 
-    expect(outcomes).toEqual([
-      "Compaction requested",
-      "Started a new conversation. Earlier context was cleared.",
-    ]);
+    expect(outcomes).toEqual(["Compaction requested", "Session context cleared"]);
     expect(server.requestsTo("POST", "/session_1/compact")).toHaveLength(1);
     expect(server.requestsTo("POST", "/session_1/clear")).toHaveLength(1);
     expect(server.requestsTo("POST", "/session_1")).toHaveLength(0);

@@ -4,9 +4,9 @@ type PromptCommandTarget = "local" | "remote";
 
 /** The slash commands the prompt accepts. */
 export type PromptCommand =
-  | { type: "reset" }
-  | { type: "cancel" }
   | { type: "new" }
+  | { type: "cancel" }
+  | { type: "clear" }
   | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
@@ -60,21 +60,21 @@ const PROMPT_COMMAND_DEFINITIONS = [
     targets: ["local"],
   },
   {
-    name: "reset",
+    name: "new",
     history: "keep",
-    aliases: [],
+    aliases: ["reset"],
     description: "Start a fresh session",
     takesArgument: false,
-    build: () => ({ type: "reset" }),
+    build: () => ({ type: "new" }),
     targets: ["local", "remote"],
   },
   {
-    name: "new",
+    name: "clear",
     history: "keep",
     aliases: [],
-    description: "Start a new conversation with cleared context",
+    description: "Clear the session context and keep the session",
     takesArgument: false,
-    build: () => ({ type: "new" }),
+    build: () => ({ type: "clear" }),
     targets: ["local", "remote"],
   },
   {
@@ -186,7 +186,7 @@ export function promptCommandsFor(target: PromptCommandTarget): readonly PromptC
   const commands = PROMPT_COMMAND_DEFINITIONS.filter((definition) =>
     definition.targets.some((supportedTarget) => supportedTarget === target),
   );
-  // Remote sessions have no model picker, so keep bare `/` from defaulting to reset.
+  // Remote sessions have no model picker, so keep bare `/` from defaulting to /new.
   if (target === "remote") {
     return [
       ...commands.filter((command) => command.name === "help"),
@@ -207,9 +207,9 @@ export function isPromptCommandAvailableFor(
 }
 
 /**
- * Recognizes the slash commands the prompt accepts. `/reset` clears the
- * session and transcript; `/cancel` stops the running turn; `/new` clears
- * context; `/compact` queues context compaction; `/exit` (and
+ * Recognizes the slash commands the prompt accepts. `/new` (and `/reset`)
+ * starts a fresh session and transcript; `/cancel` stops the running turn;
+ * `/clear` clears context in place; `/compact` queues context compaction; `/exit` (and
  * `/quit`) terminate the TUI like Ctrl+C; extension commands are dispatched
  * outside the runner. Anything else — including unknown `/text` — is a normal
  * message.

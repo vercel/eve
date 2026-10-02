@@ -504,7 +504,7 @@ describe("eve dev conversation", () => {
     await run;
   });
 
-  it("retires the session on /reset before the next message", async () => {
+  it("retires the session on /new before the next message", async () => {
     const server = new FakeEveServer(reply("Done."));
     const reset = vi.fn();
     const tui = scriptedRenderer({ reset });
@@ -512,7 +512,7 @@ describe("eve dev conversation", () => {
 
     await tui.input({ type: "submit", text: "Hello." });
     await vi.waitFor(() => expect(tui.latest().working).toBe(false));
-    await tui.input({ type: "submit", text: "/reset" });
+    await tui.input({ type: "submit", text: "/new" });
     await vi.waitFor(() => expect(reset).toHaveBeenCalledOnce());
     expect(server.requestsTo("POST", "/session_1/reset")).toHaveLength(1);
 

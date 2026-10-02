@@ -3354,7 +3354,7 @@ describe("TerminalRenderer command typeahead", () => {
     expect(open).not.toMatch(/\b1\. \/model/);
     input.down();
     input.enter();
-    expect(await choice).toBe("/reset");
+    expect(await choice).toBe("/new");
     expect(screen.snapshot()).not.toContain("Choose a model, speed, and reasoning");
     renderer.shutdown();
   });
@@ -3474,9 +3474,9 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     input.down();
     input.enter();
-    // Down moved /model → /reset; history recall would have submitted the
+    // Down moved /model → /new; history recall would have submitted the
     // earlier prompt instead.
-    expect(await second).toBe("/reset");
+    expect(await second).toBe("/new");
     renderer.shutdown();
   });
 
