@@ -9,7 +9,7 @@ const SCOPED_APPROVAL_DIRECTIVE =
   /call the dynamic_scoped_approval tool exactly once with scope "([^"]+)"/iu;
 const REPLY_DIRECTIVE = /reply with exactly ([A-Z0-9-]+)/iu;
 const APPROVAL_FOLLOWUP_DIRECTIVE =
-  /call the (gate|read-status) tool exactly once with marker "([^"]+)"/iu;
+  /call the (gate|read-draft-status) tool exactly once with marker "([^"]+)"/iu;
 const ASK_QUESTION_DIRECTIVE = /call the ask_question tool exactly once with question "([^"]+)"/iu;
 
 /**

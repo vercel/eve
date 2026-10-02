@@ -4,15 +4,19 @@ import type { MockModelRequest } from "eve/evals";
 
 import { readStripeColors, STRIPE_COUNT } from "./lib/stripes";
 
-/** Stripe colors in the latest render-stripes image the prompt carries, if any. */
+const STAGED_IMAGE_PATH = /\/workspace\/\.eve\/attachments\/\S+\.png/u;
+
+/**
+ * Stripe colors in the latest tool-result image the prompt carries, whether
+ * `render-stripes` produced it or `read_file` reopened it.
+ */
 function promptStripeColors(request: MockModelRequest): string[] | undefined {
-  const result = [...request.toolResults]
-    .reverse()
-    .find((entry) => entry.name === "render-stripes");
-  if (!Array.isArray(result?.output)) return undefined;
-  for (const part of result.output as { type?: string; data?: { data?: unknown } }[]) {
-    if (part.type === "file" && typeof part.data?.data === "string") {
-      return readStripeColors(Buffer.from(part.data.data, "base64"), STRIPE_COUNT);
+  for (const result of [...request.toolResults].reverse()) {
+    if (!Array.isArray(result.output)) continue;
+    for (const part of result.output as { type?: string; data?: { data?: unknown } }[]) {
+      if (part.type === "file" && typeof part.data?.data === "string") {
+        return readStripeColors(Buffer.from(part.data.data, "base64"), STRIPE_COUNT);
+      }
     }
   }
   return undefined;
@@ -21,10 +25,16 @@ function promptStripeColors(request: MockModelRequest): string[] | undefined {
 const base = e2eAgentConfig({
   mock(request) {
     if (request.userMessages.some((message) => message.includes("`render-stripes`"))) {
+      // The compaction summarizer runs without tools and needs a text summary.
+      if (request.tools.length === 0) return "Alice asked for the colors of the rendered stripes.";
       const colors = promptStripeColors(request);
       if (colors !== undefined) return colors.join(", ");
       if (request.lastUserMessage?.includes("`render-stripes` exactly once")) {
         return { toolCalls: [{ name: "render-stripes", input: {} }] };
+      }
+      const stagedPath = request.lastUserMessage?.match(STAGED_IMAGE_PATH)?.[0];
+      if (stagedPath !== undefined) {
+        return { toolCalls: [{ name: "read_file", input: { filePath: stagedPath } }] };
       }
       // Every later turn answers from the image replayed out of history.
       throw new Error("The render-stripes image is missing from the replayed prompt.");
