@@ -34,7 +34,7 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
-// Content a tool sees or produces. It must never reach any exported span.
+// Content a tool sees or produces. It reaches a span only when content capture is on.
 const SENTINEL = "sentinel-7f3a-content";
 const CLIENT_TRACE_ID = "4bf92f3577b34da6a3ce929d0e0e4736";
 const CLIENT_SPAN_ID = "00f067aa0ba902b7";
@@ -107,14 +107,14 @@ const descriptions: AgentToolDescription[] = tools.map(({ name }) => ({
 let exporter: InMemorySpanExporter;
 let provider: BasicTracerProvider;
 
-function useTracing(tracePolicy?: TraceCapturePolicy): void {
+function useTracing(tracePolicy?: TraceCapturePolicy, capturesContent = false): void {
   registerInstrumentationRuntime({
     forceFlush: async () => undefined,
     hooks: createInstrumentationHooks([]),
     otelSettings: {
       functionId: undefined,
-      recordInputs: false,
-      recordOutputs: false,
+      recordInputs: capturesContent,
+      recordOutputs: capturesContent,
       traceChannelRequests: false,
       tracePolicy,
     },
@@ -324,7 +324,7 @@ describe("mcpChannel tool trace context", () => {
     for (const span of finished()) {
       expect(JSON.stringify(span.attributes)).not.toContain("attacker");
     }
-    // Even a policy that allows content capture gets none from a direct call.
+    // The policy allows content, but the declaration does not capture it.
     expectNoContent();
   });
 });
@@ -363,5 +363,81 @@ describe("invokeTool trace policy", () => {
     expect(result).toMatchObject({ status: "failed" });
     expect(finished().map((span) => span.name)).toEqual(["platform request"]);
     expectNoContent();
+  });
+});
+
+describe("invokeTool content capture", () => {
+  const record = { emit: true, recordInputs: true, recordOutputs: true } as const;
+  const noContent = { emit: true, recordInputs: false, recordOutputs: false } as const;
+
+  it("records the arguments and result when the content decision allows them", async () => {
+    useTracing(() => record, true);
+    const result = await invokeTool(runtime, "lookup", { text: SENTINEL }, { auth: alice });
+    expect(result).toMatchObject({ status: "completed" });
+
+    const span = toolSpan("lookup");
+    expect(JSON.parse(String(span.attributes["gen_ai.tool.call.arguments"]))).toEqual({
+      text: SENTINEL,
+    });
+    expect(JSON.parse(String(span.attributes["gen_ai.tool.call.result"]))).toEqual({
+      echoed: SENTINEL,
+      status: "ok",
+    });
+  });
+
+  it("records inputs and outputs independently", async () => {
+    useTracing(() => ({ emit: true, recordInputs: true, recordOutputs: false }), true);
+    await invokeTool(runtime, "lookup", { text: SENTINEL }, { auth: alice });
+    const inputsOnly = toolSpan("lookup");
+    expect(inputsOnly.attributes["gen_ai.tool.call.arguments"]).toBeDefined();
+    expect(inputsOnly.attributes["gen_ai.tool.call.result"]).toBeUndefined();
+
+    exporter.reset();
+    useTracing(() => ({ emit: true, recordInputs: false, recordOutputs: true }), true);
+    await invokeTool(runtime, "lookup", { text: SENTINEL }, { auth: alice });
+    const outputsOnly = toolSpan("lookup");
+    expect(outputsOnly.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
+    expect(outputsOnly.attributes["gen_ai.tool.call.result"]).toBeDefined();
+  });
+
+  it.each([
+    ["the trace policy", () => useTracing(() => noContent, true)],
+    ["the OpenTelemetry declaration", () => useTracing(() => record, false)],
+  ])("records neither when %s turns content off", async (_label, configure) => {
+    configure();
+    await invokeTool(runtime, "lookup", { text: SENTINEL }, { auth: alice });
+    const span = toolSpan("lookup");
+    expect(span.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
+    expect(span.attributes["gen_ai.tool.call.result"]).toBeUndefined();
+    expectNoContent();
+  });
+
+  it("records content over MCP too, still under the client's trace", async () => {
+    useTracing(() => record, true);
+    await call(callRequest("2026", "lookup"));
+    const span = toolSpan("lookup");
+    expect(span.spanContext().traceId).toBe(CLIENT_TRACE_ID);
+    expect(span.attributes["gen_ai.tool.call.arguments"]).toContain(SENTINEL);
+    expect(span.attributes["gen_ai.tool.call.result"]).toContain(SENTINEL);
+  });
+
+  it("keeps exception text off every span even when content capture is on", async () => {
+    useTracing(() => record, true);
+    const parent = apiTrace.getTracer("test.parent").startSpan("platform request");
+    const result = await apiContext.with(apiTrace.setSpan(apiContext.active(), parent), () =>
+      invokeTool(runtime, "explode", { text: SENTINEL }, { auth: alice }),
+    );
+    (parent as Span).end();
+    expect(result).toMatchObject({ status: "failed" });
+
+    const span = toolSpan("explode");
+    expect(span.status.code).toBe(SpanStatusCode.ERROR);
+    expect(span.attributes["gen_ai.tool.call.arguments"]).toContain(SENTINEL);
+    expect(span.attributes["gen_ai.tool.call.result"]).toBeUndefined();
+    for (const exportedSpan of finished()) {
+      const text = exported(exportedSpan);
+      expect(text).not.toContain(`thrown ${SENTINEL}`);
+      expect(text).not.toContain(`logged ${SENTINEL}`);
+    }
   });
 });
