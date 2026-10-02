@@ -339,8 +339,12 @@ const CAPABILITY_NAMES: Record<ChannelCapability, string> = {
   "text-replies": "plain-text replies",
 };
 
+function variesByConversation(rule: (typeof hitlContract)[number]): boolean {
+  return (rule as ContractRule).variesByConversation === true;
+}
+
 function cellOf(entry: ConformanceChannel, rule: (typeof hitlContract)[number]): Cell {
-  if (entry.dm === true && (rule as ContractRule).variesByConversation !== true) {
+  if (entry.dm === true && !variesByConversation(rule)) {
     return {
       kind: "unsupported",
       reason:
@@ -406,14 +410,26 @@ const MATRIX_SYMBOLS = { broken: "❌", pass: "✅", unsupported: "—" } as con
  * Renders every channel's and client's cell for every rule as Markdown. The
  * suite holds each cell to what this table says, so the rendered matrix is
  * current whenever the suite passes.
+ *
+ * The table is HTML so a rule a DM column doesn't run can span the channel's
+ * shared-thread and DM columns; Markdown tables can't merge cells.
  */
 export function renderHitlConformanceMatrix(): string {
-  const entries = Object.values(hitlConformance).flatMap(
+  const all = Object.values(hitlConformance).flatMap(
     (group): readonly ConformanceChannel[] => group,
   );
-  const names = entries.map((entry) => entry.driver().name);
-  const escape = (text: string) => text.replaceAll("|", "\\|");
-  const row = (cells: readonly string[]) => `| ${cells.join(" | ")} |`;
+  const nameOf = (entry: ConformanceChannel) => entry.driver().name;
+  // Each DM column sits right after its channel's shared-thread column.
+  const entries = all
+    .filter((entry) => entry.dm !== true)
+    .flatMap((entry) => [
+      entry,
+      ...all.filter((dm) => dm.dm === true && nameOf(dm) === `${nameOf(entry)}-dm`),
+    ]);
+  const html = (text: string) =>
+    text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  const td = (content: string, span = 1) =>
+    `<td align="center"${span > 1 ? ` colspan="${span}"` : ""}>${content}</td>`;
   // One note per distinct reason, numbered in reading order, so every cell
   // sharing a cause links to the same note. Plain anchors rather than Markdown
   // footnotes, which GitHub renders with links back up to every citing cell.
@@ -423,14 +439,18 @@ export function renderHitlConformanceMatrix(): string {
     const note = cell.kind === "broken" ? cell.broken.reason : cell.reason;
     if (!notes.has(note)) notes.set(note, notes.size + 1);
     const index = notes.get(note)!;
-    return `${MATRIX_SYMBOLS[cell.kind]}<sup>[${index}](#note-${index})</sup>`;
+    return `${MATRIX_SYMBOLS[cell.kind]}<sup><a href="#note-${index}">${index}</a></sup>`;
   };
-  const rows = hitlContract.map((rule) =>
-    row([
+  const cells = (rule: (typeof hitlContract)[number]) =>
+    entries.flatMap((entry, index) => {
+      if (entry.dm === true && !variesByConversation(rule)) return [];
+      const spansDm = entries[index + 1]?.dm === true && !variesByConversation(rule);
+      return [td(shown(cellOf(entry, rule)), spansDm ? 2 : 1)];
+    });
+  const rows = hitlContract.map(
+    (rule) =>
       // Non-breaking spaces keep each rule on one line; GitHub scrolls the table instead.
-      escape(rule.rule).replaceAll(" ", "\u00a0"),
-      ...entries.map((entry) => shown(cellOf(entry, rule))),
-    ]),
+      `<tr><td>${html(rule.rule).replaceAll(" ", "&nbsp;")}</td>${cells(rule).join("")}</tr>`,
   );
   return [
     "# HITL conformance matrix",
@@ -447,11 +467,13 @@ export function renderHitlConformanceMatrix(): string {
     "```",
     "",
     "✅ passes · ❌ broken · — not supported. A `-dm` column is the same channel in a",
-    "direct message instead of a shared thread.",
+    "direct message instead of a shared thread; a rule that doesn't vary between the",
+    "two runs only in the thread, in a cell spanning both.",
     "",
-    row(["Rule", ...names.map((name) => `\`${name}\``)]),
-    row(["---", ...names.map(() => ":---:")]),
+    "<table>",
+    `<tr><th>Rule</th>${entries.map((entry) => `<th><code>${nameOf(entry)}</code></th>`).join("")}</tr>`,
     ...rows,
+    "</table>",
     "",
     "## Notes",
     "",
