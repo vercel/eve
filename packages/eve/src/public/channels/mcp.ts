@@ -17,6 +17,7 @@ import type {
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createPublishedTools } from "#internal/mcp/published-tools.js";
+import { mcpRequestStateSource, type McpRequestState } from "#internal/mcp/request-state.js";
 import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
 import {
   createMcpStreamableHttpServer,
@@ -60,6 +61,12 @@ export interface McpChannelInput {
    * @default false
    */
   readonly tools?: boolean;
+  /**
+   * HMAC secret, at least 32 bytes and the same on every instance, that signs
+   * the `requestState` of a published tool's approval or sign-in round.
+   * @default process.env.EVE_MCP_REQUEST_STATE_SECRET
+   */
+  readonly requestStateSecret?: string;
 }
 
 /** Public MCP channel publishing this agent's `agent_*` tools and, optionally, its own tools. */
@@ -79,7 +86,11 @@ export function mcpChannel(input: McpChannelInput): McpChannel {
   if (input?.auth === undefined) {
     throw new Error("mcpChannel requires auth. Use none() for explicit public access.");
   }
-  const publish: McpPublishOptions = { agent: input.agent ?? true, tools: input.tools ?? false };
+  const publish: McpPublishOptions = {
+    agent: input.agent ?? true,
+    requestState: mcpRequestStateSource(input.requestStateSecret),
+    tools: input.tools ?? false,
+  };
   if (!publish.agent && !publish.tools) {
     throw new Error("mcpChannel publishes nothing with agent and tools both false. Enable one.");
   }
@@ -362,6 +373,7 @@ async function authenticateMcpRequest(
 
 interface McpPublishOptions {
   readonly agent: boolean;
+  readonly requestState: () => McpRequestState;
   readonly tools: boolean;
 }
 
@@ -402,9 +414,11 @@ async function handleMcpRequest(
         auth.authenticator === "none" && auth.principalType === "anonymous",
       )
     : [];
+  const requestState = publish.requestState();
   const publishedTools = publish.tools
     ? createPublishedTools({
         invokeTool: args.invokeTool,
+        requestState,
         reserved: new Set(agentTools.map((tool) => tool.name)),
         tools: (await args.describe()).tools,
       })
@@ -414,6 +428,7 @@ async function handleMcpRequest(
     instructions: publish.agent ? MCP_SERVER_INSTRUCTIONS : undefined,
     name: agentInfo.agent.name,
     tools: [...agentTools, ...publishedTools],
+    verifyRequestState: requestState.kind === "codec" ? requestState.verify : undefined,
     version: resolveInstalledPackageInfo().version,
   })(request);
 }

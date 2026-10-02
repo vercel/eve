@@ -29,7 +29,13 @@ import {
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import { getPendingInputBatches, pendingInputRequester } from "#harness/pending-input-batches.js";
 import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
-import type { InputRequest } from "#shared/input.js";
+import {
+  checkRemoteInputResponder,
+  getPendingRemoteInputs,
+  REMOTE_INPUT_FAILED_CLOSED_FEEDBACK,
+  REMOTE_INPUT_REFUSED_FEEDBACK,
+} from "#harness/remote-input.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
 const APPROVAL_AUTHORIZER_TIMEOUT_MS = 10_000;
@@ -66,6 +72,69 @@ interface ApprovalDeliveryResult {
  * commit before lifecycle events are projected by the next stack layer.
  */
 export async function coordinateApprovalDelivery(input: {
+  readonly now?: number;
+  readonly session: HarnessSession;
+  readonly stepInput?: StepInput;
+  readonly tools: HarnessToolMap;
+  readonly prepareTools?: (request: InputRequest) => Promise<HarnessToolMap>;
+}): Promise<ApprovalDeliveryResult> {
+  const screened = screenRemoteInputResponses(input.session.state, input.stepInput);
+  const result = await coordinateScreenedApprovalDelivery({
+    ...input,
+    stepInput: screened.stepInput,
+  });
+  return screened.feedback.length === 0
+    ? result
+    : { ...result, feedback: [...screened.feedback, ...result.feedback] };
+}
+
+/**
+ * Applies the remote input responder rules before any approval work: only
+ * the user the remote call ran for may answer it. Someone else's answer is
+ * dropped and the request stays pending; an answer that names nobody
+ * cancels the call (fails closed).
+ */
+function screenRemoteInputResponses(
+  state: HarnessSession["state"],
+  stepInput: StepInput | undefined,
+): { readonly feedback: readonly string[]; readonly stepInput: StepInput | undefined } {
+  if (stepInput === undefined || getPendingRemoteInputs(state).length === 0) {
+    return { feedback: [], stepInput };
+  }
+  const feedback = new Set<string>();
+  const context = contextStorage.getStore();
+  const turnResponder = context?.get(AuthKey) ?? context?.get(SessionKey)?.auth.current ?? null;
+  const screen = (
+    response: InputResponse,
+    responder: SessionAuthContext | null,
+  ): InputResponse | undefined => {
+    const rule = checkRemoteInputResponder(state, response.requestId, responder);
+    if (rule === undefined || rule === "accept") return response;
+    if (rule === "refuse") {
+      feedback.add(REMOTE_INPUT_REFUSED_FEEDBACK);
+      return undefined;
+    }
+    feedback.add(REMOTE_INPUT_FAILED_CLOSED_FEEDBACK);
+    return { ...response, optionId: "cancel" };
+  };
+  const attributed = (stepInput.attributedInputResponses ?? []).flatMap((entry) => {
+    const response = screen(entry.response, entry.auth);
+    return response === undefined ? [] : [{ ...entry, response }];
+  });
+  const plain = (stepInput.inputResponses ?? []).flatMap((entry) => {
+    const response = screen(entry, turnResponder);
+    return response === undefined ? [] : [response];
+  });
+  if (feedback.size === 0) return { feedback: [], stepInput };
+  const screened: { -readonly [K in keyof StepInput]: StepInput[K] } = { ...stepInput };
+  if (stepInput.attributedInputResponses !== undefined) {
+    screened.attributedInputResponses = attributed;
+  }
+  if (stepInput.inputResponses !== undefined) screened.inputResponses = plain;
+  return { feedback: [...feedback], stepInput: screened };
+}
+
+async function coordinateScreenedApprovalDelivery(input: {
   readonly now?: number;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;

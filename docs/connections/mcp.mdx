@@ -148,6 +148,26 @@ Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"
 
 [Human-in-the-loop](/docs/human-in-the-loop#approvals) covers the full set of statuses, how `approvedTools` and `session.auth` factor in, and how a gated call pauses and resumes durably.
 
+## Input the server asks for
+
+A server can answer a tool call with an MCP 2026-07-28 `input_required` result, asking for an approval or a sign-in before it runs the tool. eve relays two kinds to the user whose turn made the call, as an `input.requested` approval:
+
+- **Approval:** one form elicitation with a single boolean field. When the user approves, eve retries the call with that field set to `true`.
+- **Sign-in:** URL elicitations with `http` or `https` URLs. eve shows the links in one prompt. The user opens them, approves once done, and eve retries the call.
+
+The turn waits for the answer. Only that user's answer counts: an answer from anyone else is refused and the request stays open, and an answer that does not say who sent it cancels the call. When the user denies, eve sends nothing back and the call ends as denied. eve asks at most three times per call, and retries a round that carries only `requestState` at most three times.
+
+The retry sends the same arguments as the first round, with the user's answer and the server's `requestState`. eve keeps `requestState` and the resolved arguments in session state until the user answers. They never reach the model, telemetry, or action results.
+
+The call fails with an error, without asking, when:
+
+- the server asks for anything else: sampling, roots, another form shape, or several forms at once;
+- the session cannot ask anyone, such as a scheduled run;
+- the session is anonymous, so no answer could be attributed to a user;
+- the result is over the limits eve accepts from a server: a `requestState` over 64 KiB, more than 16 input requests, or a message or URL over 8 KiB.
+
+An eve agent's [MCP channel](../channels/mcp#approval-and-sign-in) sends these results for tools it publishes with `tools: true`.
+
 ## Control result size
 
 `connection_execute` returns an MCP tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).

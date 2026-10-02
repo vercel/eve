@@ -57,7 +57,7 @@ import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
-import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
+import { parkedToolResult } from "#harness/inline-tool-authorization.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import { emitNestedToolActions } from "#harness/nested-actions.js";
 import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
@@ -599,7 +599,7 @@ async function consumeStreamContent(
         }
 
         if (toolCallIdsSeenInStream.has(part.toolCallId)) {
-          if (isInlineAuthorizationToolResult(inlineToolResult)) {
+          if (parkedToolResult(inlineToolResult) !== undefined) {
             break;
           }
           if (emittedActionCallIds.has(part.toolCallId)) {
@@ -613,11 +613,10 @@ async function consumeStreamContent(
         // this step. Emit it before the message that consumes it.
         await providerActionBatch.flush();
         await flushCurrentMessage();
-        if (isInlineAuthorizationToolResult(inlineToolResult)) {
-          // Keep authorization output for the park detector instead of
-          // emitting a normal tool result.
+        const parked = parkedToolResult(inlineToolResult);
+        if (parked !== undefined) {
           handledInlineToolResultCallIds.add(part.toolCallId);
-          inlineAuthorizationResults.push(inlineToolResult);
+          if (parked === "authorization") inlineAuthorizationResults.push(inlineToolResult);
           break;
         }
         await emitActionResult(createRuntimeToolResultFromStepResult(inlineToolResult));
