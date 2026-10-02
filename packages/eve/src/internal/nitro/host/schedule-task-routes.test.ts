@@ -2,7 +2,10 @@ import type { Nitro } from "nitro/types";
 import { describe, expect, it } from "vitest";
 
 import { createScheduleRegistrations } from "#runtime/schedules/register.js";
-import { registerScheduleTaskHandlers } from "#internal/nitro/host/schedule-task-routes.js";
+import {
+  registerScheduleTaskHandlers,
+  registerToolSessionSandboxSweepTask,
+} from "#internal/nitro/host/schedule-task-routes.js";
 
 const DISPATCH_MODULE_PATH = "/framework/schedule-task.ts";
 
@@ -74,6 +77,61 @@ describe("schedule task routes", () => {
     expect(virtualSource).toContain("export default {");
     expect(virtualSource).toContain("async run(event)");
     expect(virtualSource).toContain("dispatchScheduleTask(event.name, config)");
+  });
+
+  it("registers the weekly tool-session sandbox sweep beside authored schedules", () => {
+    const nitro = createNitroStub();
+    registerScheduleTaskHandlers(nitro, {
+      artifactsConfig: ARTIFACTS_CONFIG,
+      dispatchModulePath: DISPATCH_MODULE_PATH,
+      registrations: createScheduleRegistrations([
+        {
+          cron: "17 4 * * 0",
+          hasRun: false,
+          name: "sunday-report",
+          logicalPath: "schedules/sunday-report.mjs",
+          markdown: "Report.",
+          sourceId: "schedules/sunday-report.mjs",
+          sourceKind: "module",
+        },
+      ]),
+    });
+    const [authoredTaskName] = Object.keys(nitro.options.tasks);
+
+    registerToolSessionSandboxSweepTask(nitro, {
+      artifactsConfig: ARTIFACTS_CONFIG,
+      sweepModulePath: "/framework/tool-session-sandbox-sweep-task.ts",
+    });
+
+    expect(nitro.options.experimental.tasks).toBe(true);
+    expect(nitro.options.tasks["eve.tool-session-sandbox-sweep"]).toEqual({
+      description: "Delete idle tool-session sandboxes.",
+      handler: "#eve-schedule-task/eve.tool-session-sandbox-sweep",
+    });
+    // Shares the cron slot with an authored schedule on the same expression.
+    expect(nitro.options.scheduledTasks).toEqual({
+      "17 4 * * 0": [authoredTaskName, "eve.tool-session-sandbox-sweep"],
+    });
+    const virtualSource =
+      nitro.options.virtual["#eve-schedule-task/eve.tool-session-sandbox-sweep"];
+    expect(virtualSource).not.toContain("nitro/task");
+    expect(virtualSource).toContain(
+      'import { runToolSessionSandboxSweepTask } from "/framework/tool-session-sandbox-sweep-task.ts";',
+    );
+    expect(virtualSource).toContain(`const config = ${JSON.stringify(ARTIFACTS_CONFIG)};`);
+    expect(virtualSource).toContain("runToolSessionSandboxSweepTask(config)");
+  });
+
+  it("registers the sweep alone when the agent has no schedules", () => {
+    const nitro = createNitroStub();
+    registerToolSessionSandboxSweepTask(nitro, {
+      artifactsConfig: ARTIFACTS_CONFIG,
+      sweepModulePath: "/framework/tool-session-sandbox-sweep-task.ts",
+    });
+    expect(nitro.options.experimental.tasks).toBe(true);
+    expect(nitro.options.scheduledTasks).toEqual({
+      "17 4 * * 0": "eve.tool-session-sandbox-sweep",
+    });
   });
 
   it("does nothing when there are no registrations", () => {

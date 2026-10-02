@@ -17,10 +17,7 @@ export async function runToolSessionSandboxSweepTask(
 ): Promise<ToolSessionSandboxSweepResult> {
   const compiledArtifactsSource = resolveNitroCompiledArtifactsSource(config);
   const bundle = await getCompiledRuntimeAgentBundle({ compiledArtifactsSource });
-  const result = await sweepToolSessionSandboxes({
-    compiledArtifactsSource,
-    registry: bundle.graph.root.sandboxRegistry,
-  });
+  const result = await sweepToolSessionSandboxes({ registry: bundle.graph.root.sandboxRegistry });
   log.info("swept tool-session sandboxes", {
     deleted: result.deleted.length,
     failed: result.failed.length,

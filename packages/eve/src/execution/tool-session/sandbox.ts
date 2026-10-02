@@ -1,13 +1,7 @@
-import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
-import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 import { createLogger } from "#internal/logging.js";
-import {
-  getRuntimeCompiledArtifactsSandboxAppRoot,
-  type RuntimeCompiledArtifactsSource,
-} from "#runtime/compiled-artifacts-source.js";
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { getSandboxEnvironmentRuntime } from "#shared/sandbox-environment.js";
-import type { SandboxProviderHost, SandboxProviderRuntime } from "#shared/sandbox-provider.js";
+import type { SandboxProviderRuntime } from "#shared/sandbox-provider.js";
 
 const log = createLogger("tool-session.sandbox");
 
@@ -23,12 +17,6 @@ export const TOOL_SESSION_SANDBOX_EXPIRY_MS = 30 * DAY_MS;
  * unchanged.
  */
 
-/** Where a provider keeps sandboxes it can reach outside any session. */
-export interface ToolSessionSandboxStorage {
-  readonly host: SandboxProviderHost;
-  readonly storagePath: string;
-}
-
 /** One tool-session sandbox, as the provider last saw it. */
 export interface ToolSessionSandboxSummary {
   /** Epoch milliseconds of its most recent use. */
@@ -38,9 +26,12 @@ export interface ToolSessionSandboxSummary {
   readonly sessionId: string | undefined;
 }
 
-/** How a provider lists and deletes tool-session sandboxes for the sweep. */
+/**
+ * How a provider lists and deletes tool-session sandboxes for the sweep. A
+ * sweeper closes over whatever it needs to reach them (credentials, SDK).
+ */
 export interface ToolSessionSandboxSweeper {
-  list(storage: ToolSessionSandboxStorage): Promise<readonly ToolSessionSandboxSummary[]>;
+  list(): Promise<readonly ToolSessionSandboxSummary[]>;
   /**
    * Deletes the named sandbox unless `keep` says otherwise. `keep` is asked
    * about the provider's last read, immediately before the delete request,
@@ -48,7 +39,6 @@ export interface ToolSessionSandboxSweeper {
    * deleted the sandbox.
    */
   deleteUnless(
-    storage: ToolSessionSandboxStorage,
     name: string,
     keep: (current: ToolSessionSandboxSummary) => boolean,
   ): Promise<boolean>;
@@ -128,7 +118,6 @@ export interface ToolSessionSandboxSweepResult {
  * as it would after expiry.
  */
 export async function sweepToolSessionSandboxes(input: {
-  readonly compiledArtifactsSource: RuntimeCompiledArtifactsSource;
   readonly expiryMs?: number;
   readonly now?: number;
   readonly registry: RuntimeSandboxRegistry;
@@ -145,12 +134,6 @@ export async function sweepToolSessionSandboxes(input: {
       skipped: `Sandbox provider "${provider.providerName}" cannot list tool-session sandboxes.`,
     };
   }
-  const appRoot =
-    getRuntimeCompiledArtifactsSandboxAppRoot(input.compiledArtifactsSource) ?? process.cwd();
-  const storage = {
-    host: createSandboxProviderHost(appRoot),
-    storagePath: resolveSandboxCacheDirectory(appRoot),
-  };
   const cutoff = (input.now ?? Date.now()) - (input.expiryMs ?? TOOL_SESSION_SANDBOX_EXPIRY_MS);
   const keep = (sandbox: ToolSessionSandboxSummary) =>
     sandbox.running ||
@@ -158,10 +141,10 @@ export async function sweepToolSessionSandboxes(input: {
     (sandbox.sessionId !== undefined && leases.has(sandbox.sessionId));
   const deleted: string[] = [];
   const failed: string[] = [];
-  for (const summary of await sweeper.list(storage)) {
+  for (const summary of await sweeper.list()) {
     if (keep(summary)) continue;
     try {
-      if (await sweeper.deleteUnless(storage, summary.name, keep)) deleted.push(summary.name);
+      if (await sweeper.deleteUnless(summary.name, keep)) deleted.push(summary.name);
     } catch (error) {
       failed.push(summary.name);
       log.warn("failed to delete an idle tool-session sandbox", {

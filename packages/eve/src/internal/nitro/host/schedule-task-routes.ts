@@ -72,31 +72,14 @@ function addScheduleTaskVirtualHandler(
     registration: ScheduleRegistration;
   },
 ): void {
-  const virtualId = `${EVE_SCHEDULE_TASK_VIRTUAL_ID_PREFIX}${input.registration.taskName}`;
-  const dispatchModulePath = stringifyEsmImportSpecifier(input.dispatchModulePath);
-
-  nitro.options.tasks[input.registration.taskName] = {
+  addVirtualScheduledTask(nitro, {
+    artifactsConfig: input.artifactsConfig,
+    cron: input.registration.cron,
     description: input.registration.description,
-    handler: virtualId,
-  };
-
-  // Nitro's `defineTask` is a passthrough that only installs a guard `run`
-  // when one is missing — we always provide one, so we skip the import and
-  // export the task object directly. Importing from `"nitro/task"` would
-  // fail at runtime on Vercel because `nitro` is a build-only dependency
-  // and is not included in the deployed function trace.
-  nitro.options.virtual[virtualId] = [
-    `import { dispatchScheduleTask } from ${dispatchModulePath};`,
-    `const config = ${JSON.stringify(input.artifactsConfig)};`,
-    `export default {`,
-    `  meta: { description: ${JSON.stringify(input.registration.description)} },`,
-    `  async run(event) {`,
-    `    return { result: await dispatchScheduleTask(event.name, config) };`,
-    `  },`,
-    `};`,
-  ].join("\n");
-
-  appendScheduledTask(nitro, input.registration.cron, input.registration.taskName);
+    importLine: `import { dispatchScheduleTask } from ${stringifyEsmImportSpecifier(input.dispatchModulePath)};`,
+    runExpression: "dispatchScheduleTask(event.name, config)",
+    taskName: input.registration.taskName,
+  });
 }
 
 /** Weekly, Sundays 04:17 UTC. */
@@ -113,22 +96,51 @@ export function registerToolSessionSandboxSweepTask(
   input: { readonly artifactsConfig: NitroArtifactsConfig; readonly sweepModulePath: string },
 ): void {
   nitro.options.experimental.tasks = true;
-  const taskName = TOOL_SESSION_SANDBOX_SWEEP_TASK_NAME;
-  const virtualId = `${EVE_SCHEDULE_TASK_VIRTUAL_ID_PREFIX}${taskName}`;
-  const description = "Delete idle tool-session sandboxes.";
-  nitro.options.tasks[taskName] = { description, handler: virtualId };
-  // A plain task object, as for authored schedules: `nitro/task` is not deployed.
+  addVirtualScheduledTask(nitro, {
+    artifactsConfig: input.artifactsConfig,
+    cron: TOOL_SESSION_SANDBOX_SWEEP_CRON,
+    description: "Delete idle tool-session sandboxes.",
+    importLine: `import { runToolSessionSandboxSweepTask } from ${stringifyEsmImportSpecifier(input.sweepModulePath)};`,
+    runExpression: "runToolSessionSandboxSweepTask(config)",
+    taskName: TOOL_SESSION_SANDBOX_SWEEP_TASK_NAME,
+  });
+}
+
+/**
+ * Adds one cron-triggered task whose handler is a virtual module: `importLine`
+ * brings in the function `runExpression` calls, with `config` (the artifacts
+ * config) and `event` in scope.
+ *
+ * The module exports a plain task object rather than using Nitro's
+ * `defineTask`, which is a passthrough that only installs a guard `run` when
+ * one is missing. Importing from `"nitro/task"` would fail at runtime on
+ * Vercel because `nitro` is a build-only dependency and is not included in
+ * the deployed function trace.
+ */
+function addVirtualScheduledTask(
+  nitro: ScheduleTaskNitro,
+  input: {
+    readonly artifactsConfig: NitroArtifactsConfig;
+    readonly cron: string;
+    readonly description: string;
+    readonly importLine: string;
+    readonly runExpression: string;
+    readonly taskName: string;
+  },
+): void {
+  const virtualId = `${EVE_SCHEDULE_TASK_VIRTUAL_ID_PREFIX}${input.taskName}`;
+  nitro.options.tasks[input.taskName] = { description: input.description, handler: virtualId };
   nitro.options.virtual[virtualId] = [
-    `import { runToolSessionSandboxSweepTask } from ${stringifyEsmImportSpecifier(input.sweepModulePath)};`,
+    input.importLine,
     `const config = ${JSON.stringify(input.artifactsConfig)};`,
     `export default {`,
-    `  meta: { description: ${JSON.stringify(description)} },`,
-    `  async run() {`,
-    `    return { result: await runToolSessionSandboxSweepTask(config) };`,
+    `  meta: { description: ${JSON.stringify(input.description)} },`,
+    `  async run(event) {`,
+    `    return { result: await ${input.runExpression} };`,
     `  },`,
     `};`,
   ].join("\n");
-  appendScheduledTask(nitro, TOOL_SESSION_SANDBOX_SWEEP_CRON, taskName);
+  appendScheduledTask(nitro, input.cron, input.taskName);
 }
 
 function appendScheduledTask(nitro: ScheduleTaskNitro, cron: string, taskName: string): void {

@@ -7,6 +7,7 @@ import type {
   VercelCreateOptions,
   VercelModule,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
+import { isToolSessionId } from "#execution/tool-session/id.js";
 import type {
   ToolSessionSandboxSummary,
   ToolSessionSandboxSweeper,
@@ -26,7 +27,13 @@ interface VercelSandboxRecord {
   readonly updatedAt: Date | number;
 }
 
-/** Lists tool-session sandboxes by name prefix and deletes them after a fresh read. */
+/**
+ * Lists tool-session sandboxes by name prefix and deletes them after a fresh
+ * read. The listing is project-wide, so a sandbox is only ever deleted when
+ * its `sessionId` tag, which this binding sets on every sandbox it creates,
+ * names a tool session: a stopped sandbox from elsewhere whose name happens
+ * to match is left alone.
+ */
 export function createVercelToolSessionSweeper(deps: {
   readonly createOptions: VercelCreateOptions;
   readonly loadSandboxModule: () => Promise<VercelModule>;
@@ -40,20 +47,29 @@ export function createVercelToolSessionSweeper(deps: {
         namePrefix: VERCEL_TOOL_SESSION_NAME_PREFIX,
       });
       const summaries: ToolSessionSandboxSummary[] = [];
-      for await (const sandbox of listed) summaries.push(summarize(sandbox));
+      for await (const sandbox of listed) {
+        if (isToolSessionSandbox(sandbox)) summaries.push(summarize(sandbox));
+      }
       return summaries;
     },
-    async deleteUnless(_storage, name, keep) {
+    async deleteUnless(name, keep) {
       const sandbox = await getNamedVercelSandbox({
         createOptions: deps.createOptions,
         sandboxModule: await deps.loadSandboxModule(),
         sandboxName: name,
       });
-      if (sandbox === null || keep(summarize(sandbox))) return false;
+      if (sandbox === null || !isToolSessionSandbox(sandbox) || keep(summarize(sandbox))) {
+        return false;
+      }
       await sandbox.delete({ deleteOrphanSnapshots: true });
       return true;
     },
   };
+}
+
+function isToolSessionSandbox(sandbox: VercelSandboxRecord): boolean {
+  const sessionId = sandbox.tags?.sessionId;
+  return sessionId !== undefined && isToolSessionId(sessionId);
 }
 
 function summarize(sandbox: VercelSandboxRecord): ToolSessionSandboxSummary {
