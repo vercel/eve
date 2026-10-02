@@ -3843,9 +3843,9 @@ describe("TerminalRenderer conversation", () => {
     ];
     renderer.renderConversation(conversationOf(working, { working: true }));
     const during = screen.snapshot();
-    expect(during).toContain("▪ Delegate subagent(number_picker)  Pick a number for Alice.");
-    expect(during).toMatch(/── Waiting · 1 task · \S+ ─+\n\n  subagent\(number_picker\) \S+/);
-    expect(during).toMatch(/subagent\(number_picker\) \S+\n\n─+\n❯/);
+    expect(during).toContain("▪ Delegate subagent(number picker)  Pick a number for Alice.");
+    expect(during).toMatch(/── Waiting · 1 task · \S+ ─+\n\n  subagent\(number picker\) \S+/);
+    expect(during).toMatch(/subagent\(number picker\) \S+\n\n─+\n❯/);
     expect(during).not.toContain("Starting");
     expect(countOccurrences(during, "Pick a number for Alice.")).toBe(1);
     expect(during).not.toContain("Waiting for");
@@ -3862,14 +3862,14 @@ describe("TerminalRenderer conversation", () => {
     expect(screen.snapshot()).toContain("Approve wait_random_number?");
     expect(screen.snapshot()).toMatch(/── Waiting · 1 task/);
     expect(screen.snapshot()).toMatch(
-      /subagent\(number_picker\) \S+\n\n─+\n\n  Approve wait_random_number\?/,
+      /subagent\(number picker\) \S+\n\n─+\n\n  Approve wait_random_number\?/,
     );
-    expect(countOccurrences(screen.snapshot(), "  subagent(number_picker)")).toBe(1);
+    expect(countOccurrences(screen.snapshot(), "  subagent(number picker)")).toBe(1);
     input.enter();
     await expect(approval).resolves.toEqual({ approved: true });
     expect(screen.snapshot()).toContain("Waiting · 1 task");
     const prompt = readPrompt(renderer);
-    expect(screen.snapshot()).toMatch(/subagent\(number_picker\) \S+\n\n─+\n❯/);
+    expect(screen.snapshot()).toMatch(/subagent\(number picker\) \S+\n\n─+\n❯/);
 
     renderer.renderConversation(
       conversationOf(
@@ -3881,7 +3881,7 @@ describe("TerminalRenderer conversation", () => {
       ),
     );
     const after = screen.snapshot();
-    expect(after).toMatch(/✓ subagent\(number_picker\) +finished in/);
+    expect(after).toMatch(/✓ subagent\(number picker\) +finished in/);
     expect(after).not.toContain("Waiting · 1 task");
     renderer.requestInterrupt();
     await prompt.catch(() => {});

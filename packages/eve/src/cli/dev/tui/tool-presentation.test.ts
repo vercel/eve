@@ -210,13 +210,20 @@ describe("presentTool", () => {
       { message: "Look up GOOG.\nDetails…" },
       { isSubagent: true },
     );
-    expect(parsed.title).toBe("Delegate subagent(stock-price)");
-    expect(parsed.doneTitle).toBe("Delegated subagent(stock-price)");
+    expect(parsed.title).toBe("Delegate subagent(stock price)");
+    expect(parsed.doneTitle).toBe("Delegated subagent(stock price)");
     expect(parsed.subtitle).toBe("Look up GOOG.");
 
     // The tool's name carries the target, so it shows before args parse.
     expect(presentPreparingTool("stock-price", { isSubagent: true }).title).toBe(
-      "Delegate subagent(stock-price) …",
+      "Delegate subagent(stock price) …",
+    );
+    // An extension's subagents go by their own name, and its `agent` by the extension's.
+    expect(presentTool("code__worker", {}, { isSubagent: true }).title).toBe(
+      "Delegate subagent(worker)",
+    );
+    expect(presentTool("code_review__agent", {}, { isSubagent: true }).title).toBe(
+      "Delegate subagent(code review)",
     );
     const selfModification = presentTool(
       "self-modification__agent",

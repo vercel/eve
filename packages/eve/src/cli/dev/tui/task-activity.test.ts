@@ -89,7 +89,7 @@ describe("live task panel", () => {
   });
 
   it("puts parent state and turn time in the header with breathing room around tasks", () => {
-    const rows = renderTaskPanelRows([task("self-modification__agent")], {
+    const rows = renderTaskPanelRows([task("agent editor")], {
       width: 80,
       maxRows: 6,
       theme,
