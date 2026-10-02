@@ -3,7 +3,7 @@ title: "MCP Channel"
 description: "Publish an eve agent as an MCP server with auth support."
 ---
 
-The MCP channel lets clients such as Claude Code delegate durable work to an eve agent through four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`. It can also publish the agent's own tools, so a client calls them directly; see [Publish the agent's tools](#publish-the-agents-tools).
+The MCP channel lets clients such as Claude Code delegate durable work to an eve agent through four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`. It can also publish the agent's own tools, so a client calls them directly, and its skills, so a client reads them; see [Publish the agent's tools](#publish-the-agents-tools) and [Publish the agent's skills](#publish-the-agents-skills).
 
 Use an [MCP connection](../connections/mcp) instead when your eve agent needs to call someone else's MCP server.
 
@@ -225,7 +225,7 @@ export default mcpChannel({
 });
 ```
 
-`tools/list` returns the `agent_*` tools first, then the agent's tools in name order with their input and output JSON schemas. Framework tools, workflow and provider tools, tools without `execute`, and tools added by dynamic resolvers or subagents are not published. While `agent` is on, an agent tool named `agent_start`, `agent_get`, `agent_update`, or `agent_cancel` is not published, and eve logs a warning. With `agent: false`, the channel sends no `agent_*` instructions. Turning off both `agent` and `tools` throws.
+`tools/list` returns the `agent_*` tools first, then the agent's tools in name order with their input and output JSON schemas. Framework tools, workflow and provider tools, tools without `execute`, and tools added by dynamic resolvers or subagents are not published. While `agent` is on, an agent tool named `agent_start`, `agent_get`, `agent_update`, or `agent_cancel` is not published, and eve logs a warning. With `agent: false`, the channel sends no `agent_*` instructions. Turning off `agent`, `tools`, and `skills` all at once throws, since the channel would publish nothing.
 
 Each `tools/call` checks the arguments against the tool's input schema, then runs the tool as the route-authenticated caller, with no model, turn, or workflow run. Every caller the channel's `auth` admits can call these tools, outside the agent's instructions, so review what becomes callable before you turn this on. Each call gets its own session:
 
@@ -248,6 +248,33 @@ A tool that cannot finish over MCP returns an error result with `isError: true` 
 MCP clients send W3C trace context in each request's `params._meta`, not in HTTP headers. When a request carries a valid `_meta.traceparent`, that span becomes the parent of everything the request runs, including a published tool's `execute_tool` span. It takes precedence over any parent your platform extracted from the HTTP request's headers. A missing, malformed, or all-zero `traceparent` leaves that parent in place. `_meta.tracestate` is kept only alongside a valid `_meta.traceparent` and only up to 512 characters; a longer value is dropped.
 
 `_meta.baggage` is never read. A caller cannot choose the trace audience, session lineage, or content capture: those come from the channel and your `tracePolicy`, as they do for conversations. The `execute_tool` span records the call's arguments and result only when that content decision allows it, and never records exception text.
+
+## Publish the agent's skills
+
+Set `skills: true` to serve the agent's skills as [SEP-2640](https://modelcontextprotocol.io/seps/2640) skills under `skill://`, so a client that calls the agent's tools can also read the workflow knowledge behind them:
+
+```ts title="agent/channels/mcp.ts"
+import { localDev } from "eve/channels/auth";
+import { mcpChannel } from "eve/channels/mcp";
+
+export default mcpChannel({
+  auth: localDev(),
+  skills: true,
+  tools: true,
+});
+```
+
+The channel declares the `io.modelcontextprotocol/skills` extension and serves `skills/list`, `skills/get`, `resources/list`, `resources/read`, and `resources/directory/read`. Every caller the channel's `auth` admits can read every served skill. Each skill's entry is `skill://<name>/SKILL.md`, and its `resources` list every file with its `size` in bytes and a `sha256:` digest. `resources/read` returns UTF-8 text as `text` and anything else, such as images or Latin-1 files, as a base64 `blob`, byte for byte. Skill lists and reads carry the same cache hint as `tools/list`: private, for 5 minutes.
+
+A skill is served whole or not at all. eve leaves a skill out of every method, and logs one warning naming the reason, when:
+
+- its `SKILL.md` frontmatter does not meet the Agent Skills format: a `name` of up to 64 lowercase letters, digits, and single hyphens, and a `description` of 1 to 1024 characters;
+- it has more than 512 files or more than 16 MiB in total;
+- any of its files is over 512 KiB, unreadable, or has a path that cannot be a `skill://` URI.
+
+A `SKILL.md` whose frontmatter already names the skill and has a `description` is served as authored. Otherwise, as for flat `.md` and module skills, eve serves it with frontmatter that carries the skill's name and description, and the digest describes that served document. Skills added by dynamic resolvers or subagents are not served.
+
+Production builds ship skill files as server assets, so they count toward the deployed function's size.
 
 ## Invocation ownership
 

@@ -186,7 +186,7 @@ async function call(request: Request): Promise<{ status: number; body: any }> {
   const base: RouteHandlerArgs = {
     ...mockAgentRouteArgs(),
     attachSession: unavailable,
-    describe: async () => ({ name: "compiled-agent", tools: descriptions }),
+    describe: async () => ({ name: "compiled-agent", skills: [], tools: descriptions }),
     from: unavailable,
     invokeTool: (name, input, options) => invokeTool(runtime, name, input, options),
     params: {},

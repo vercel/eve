@@ -43,6 +43,8 @@ export {
   type RouteDefinition,
   type RouteHandlerArgs,
   type AgentDescription,
+  type AgentSkillDescription,
+  type AgentSkillFileDescription,
   type AgentToolDescription,
   type InvokeToolFn,
   type InvokeToolOptions,

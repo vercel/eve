@@ -35,11 +35,20 @@ export interface RouteHandlerArgs<TState = undefined> {
   /** Best-effort client IP reported by the host, or `null` when unavailable. */
   requestIp: string | null;
   /**
-   * Describes the agent for callers: its name, description, and the compiled
-   * tools that can run outside a turn, sorted by name. Carries none of the
-   * inspection detail of `GET /eve/v1/info`.
+   * Describes the agent for callers: its name, description, the compiled
+   * tools that can run outside a turn, and its compiled skills with each
+   * file's path and size, sorted by name. Carries none of the inspection
+   * detail of `GET /eve/v1/info`.
    */
   describe(): Promise<AgentDescription>;
+  /**
+   * Reads one file of a compiled skill as raw bytes. `path` is relative to
+   * the skill root and defaults to its `SKILL.md`. Rejects paths that are
+   * absolute or contain `.`, `..`, or empty segments, files the skill does
+   * not list, and files over 512 KiB. Production builds ship skill files as
+   * server assets, so they count toward the deployed function's size.
+   */
+  readSkill(skill: string, path?: string): Promise<Uint8Array>;
   /** Runs one of the agent's tools as `auth`, outside any conversation. */
   readonly invokeTool: InvokeToolFn;
 }

@@ -2,6 +2,9 @@ import { context as otelContext } from "#compiled/@opentelemetry/api/index.js";
 import {
   createMcpHandler,
   McpServer,
+  type CacheHint,
+  type McpJsonObject,
+  type McpServerOptions,
   type McpToolAnnotations,
   type StandardSchemaWithJSON,
 } from "#compiled/@modelcontextprotocol/server/index.js";
@@ -18,6 +21,27 @@ export const MCP_PROTOCOL_VERSION = "2026-07-28";
  * largest legitimate payload is an `outputSchema`, itself capped at 64 KiB.
  */
 export const MCP_REQUEST_BODY_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Cache hint for the tool lists, skill lists, and skill reads eve serves.
+ * They are fixed per deployment, but clients cache per URL, and a production
+ * alias serves a new deployment under the same URL, so the TTL is how long a
+ * client may see the old lists after a deploy. `private`: route auth
+ * admitted this caller, and a shared cache cannot rerun it for the next one.
+ */
+export const MCP_LIST_CACHE_HINT = {
+  cacheScope: "private",
+  ttlMs: 5 * 60 * 1000,
+} as const satisfies CacheHint;
+
+/** The cacheable SDK-built results eve answers with {@link MCP_LIST_CACHE_HINT}. */
+const CACHE_HINTED_METHODS = [
+  "resources/list",
+  "resources/read",
+  "resources/templates/list",
+  "server/discover",
+  "tools/list",
+] as const;
 
 interface McpToolDefinition<TInputSchema extends StandardSchemaWithJSON = StandardSchemaWithJSON> {
   readonly name: string;
@@ -86,6 +110,17 @@ export interface McpServerTool {
   register(server: McpServer, auth: SessionAuthContext | null): void;
 }
 
+/**
+ * A set of MCP handlers beside the tools, such as skills. Every request
+ * builds a fresh server, so `register` runs once per request, after
+ * `capabilities` are merged one level deep into the server's own.
+ * Declaring a capability obliges `register` to set its handlers.
+ */
+export interface McpServerFeature {
+  readonly capabilities: McpJsonObject;
+  register(server: McpServer): void;
+}
+
 type InferSchemaOutput<TSchema> =
   TSchema extends StandardSchemaWithJSON<unknown, infer TOutput> ? TOutput : never;
 
@@ -134,7 +169,9 @@ interface McpStreamableHttpServerOptions {
   readonly version: string;
   /** Server-level usage guidance returned from `initialize` and `server/discover`. */
   readonly instructions?: string;
-  readonly tools: readonly McpServerTool[];
+  /** When set, the server declares `tools`, even for an empty list. */
+  readonly tools?: readonly McpServerTool[];
+  readonly features?: readonly McpServerFeature[];
   authenticate(request: Request): Promise<SessionAuthContext | null | Response>;
 }
 
@@ -147,8 +184,10 @@ interface McpStreamableHttpServerOptions {
 export function createMcpStreamableHttpServer(
   options: McpStreamableHttpServerOptions,
 ): (request: Request) => Promise<Response> {
-  const tools = new Map(options.tools.map((tool) => [tool.name, tool]));
-  if (tools.size !== options.tools.length) throw new Error("MCP tool names must be unique.");
+  const tools = new Map((options.tools ?? []).map((tool) => [tool.name, tool]));
+  if (tools.size !== (options.tools?.length ?? 0)) {
+    throw new Error("MCP tool names must be unique.");
+  }
 
   return async (request) => {
     const auth = await options.authenticate(request);
@@ -349,17 +388,31 @@ function readJsonRpcRequestId(body: unknown): string | number | null {
 }
 
 function createServer(
-  options: Pick<McpStreamableHttpServerOptions, "instructions" | "name" | "version">,
+  options: Pick<
+    McpStreamableHttpServerOptions,
+    "features" | "instructions" | "name" | "tools" | "version"
+  >,
   tools: ReadonlyMap<string, McpServerTool>,
   auth: SessionAuthContext | null,
 ): McpServer {
-  const serverOptions: { capabilities: Record<string, unknown>; instructions?: string } = {
-    capabilities: { tools: { listChanged: false } },
+  const capabilities: Record<string, McpJsonObject> =
+    options.tools === undefined ? {} : { tools: { listChanged: false } };
+  for (const feature of options.features ?? []) {
+    for (const [key, value] of Object.entries(feature.capabilities)) {
+      capabilities[key] = { ...capabilities[key], ...(value as McpJsonObject) };
+    }
+  }
+  const serverOptions: { -readonly [K in keyof McpServerOptions]: McpServerOptions[K] } = {
+    cacheHints: Object.fromEntries(
+      CACHE_HINTED_METHODS.map((method) => [method, MCP_LIST_CACHE_HINT]),
+    ),
+    capabilities,
   };
   if (options.instructions !== undefined) serverOptions.instructions = options.instructions;
   const server = new McpServer({ name: options.name, version: options.version }, serverOptions);
 
   for (const tool of tools.values()) tool.register(server, auth);
+  for (const feature of options.features ?? []) feature.register(server);
 
   return server;
 }

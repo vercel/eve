@@ -12,5 +12,6 @@ export default mcpChannel({
           principalType: "service",
         }
       : null,
+  skills: true,
   tools: true,
 });
