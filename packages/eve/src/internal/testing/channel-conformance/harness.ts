@@ -10,6 +10,8 @@ import { z } from "#compiled/zod/index.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { askQuestion } from "#tools/provided/ask-question.js";
+import { defineWorkflowTool } from "#public/tools/index.js";
+import { askDayAndTimeWorkflow } from "#internal/testing/channel-conformance/two-questions-workflow.js";
 import { getWorld } from "#internal/workflow/runtime.js";
 
 /** One outbound call a channel made to its platform API. */
@@ -84,6 +86,8 @@ export interface ChannelConversation {
   say(text: string): Promise<void>;
   /** Waits for the bot to post `prompt` with choices, returning them. */
   waitForQuestion(prompt: string): Promise<readonly RenderedOption[]>;
+  /** Waits for the bot to post every one of `prompts`, returning each one's choices in order. */
+  waitForQuestions(prompts: readonly string[]): Promise<readonly (readonly RenderedOption[])[]>;
   /** The person presses one rendered choice. */
   press(option: RenderedOption): Promise<void>;
   /** Waits until `tool` returns, as visible in the bot's reply, and returns its output. */
@@ -104,6 +108,9 @@ const WAIT_TIMEOUT_MS = 30_000;
 
 /** The test agent's tool that always needs a person's approval before it runs. */
 export const GATED_TOOL = "deploy_release";
+
+/** The test agent's tool that asks {@link DAY_PROMPT} and {@link TIME_PROMPT} at once. */
+export const TWO_QUESTIONS_TOOL = "plan_review";
 
 /** What a person sees once a tool call settles. */
 export type ToolOutcome =
@@ -176,6 +183,16 @@ async function converse(
         }),
       },
       {
+        logicalPath: `tools/${TWO_QUESTIONS_TOOL}.ts`,
+        loadNamespace: async () => ({
+          default: defineWorkflowTool({
+            description: `Plans a review. Only call when asked to use ${TWO_QUESTIONS_TOOL}.`,
+            execute: askDayAndTimeWorkflow,
+            inputSchema: z.object({}),
+          }),
+        }),
+      },
+      {
         logicalPath: `channels/${driver.name}.ts`,
         loadNamespace: async () => ({ default: channel }),
       },
@@ -237,9 +254,16 @@ async function converse(
       say: (text) => post(driver.message(text)),
       press: (option) => post(driver.press(option)),
       async waitForQuestion(prompt) {
-        const options = await waitFor(`the question "${prompt}"`, (call) =>
-          driver.findOptions(call, prompt),
-        );
+        const [options] = await this.waitForQuestions([prompt]);
+        return options!;
+      },
+      async waitForQuestions(prompts) {
+        const options = [];
+        for (const prompt of prompts) {
+          options.push(
+            await waitFor(`the question "${prompt}"`, (call) => driver.findOptions(call, prompt)),
+          );
+        }
         await waitForTurnToHoldForInput();
         return options;
       },

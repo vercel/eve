@@ -4,7 +4,12 @@ import {
   type ChannelCapability,
   type ChannelConversation,
   GATED_TOOL,
+  TWO_QUESTIONS_TOOL,
 } from "#internal/testing/channel-conformance/harness.js";
+import {
+  DAY_PROMPT,
+  TIME_PROMPT,
+} from "#internal/testing/channel-conformance/two-questions-workflow.js";
 
 /**
  * One behavior every first-party channel owes a person, stated once and run
@@ -21,7 +26,7 @@ export interface ContractRule {
 
 const ASK =
   'Use ask_question and set question to: "Which day works for the review?" with label "Saturday" and label "Sunday".';
-const PROMPT = "Which day works for the review?";
+const PROMPT = DAY_PROMPT;
 
 async function askWhichDay(conversation: ChannelConversation) {
   await conversation.say(ASK);
@@ -31,6 +36,11 @@ async function askWhichDay(conversation: ChannelConversation) {
 const OPEN_PROMPT = "What should the review cover?";
 const ASK_OPEN = `Use ask_question and set question to: "${OPEN_PROMPT}"`;
 const OWN_WORDS = "Mostly the billing migration";
+
+async function askDayAndTime(conversation: ChannelConversation) {
+  await conversation.say(`Use ${TWO_QUESTIONS_TOOL} to plan the review.`);
+  return await conversation.waitForQuestions([DAY_PROMPT, TIME_PROMPT]);
+}
 
 const DEPLOY = `Use ${GATED_TOOL} to ship the release.`;
 const APPROVAL_PROMPT = "Approve Deploy release?";
@@ -137,6 +147,36 @@ export const hitlContract = [
       await conversation.press(saturday!);
       expectAnsweredSaturday(await conversation.waitForToolResult("ask_question"));
       await conversation.press(saturday!);
+      await conversation.waitForReplyTo("Saturday");
+    },
+  },
+  {
+    rule: "pressing options of two pending questions answers each with its own option",
+    source: "docs/tools/workflows.mdx#ask-a-human-ctxask",
+    requires: ["buttons"],
+    async run(conversation) {
+      const [days, times] = await askDayAndTime(conversation);
+      const saturday = days!.find((option) => option.label === "Saturday");
+      const afternoon = times!.find((option) => option.label === "Afternoon");
+      expect(saturday, "a Saturday option to press").toBeDefined();
+      expect(afternoon, "an Afternoon option to press").toBeDefined();
+      await conversation.press(afternoon!);
+      await conversation.press(saturday!);
+      const output = await conversation.waitForToolResult(TWO_QUESTIONS_TOOL);
+      expect(output, `${TWO_QUESTIONS_TOOL} returned ${JSON.stringify(output)}`).toEqual({
+        day: "Saturday",
+        time: "Afternoon",
+      });
+    },
+  },
+  {
+    rule: "a text reply matching an option does not answer either of two pending questions",
+    source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
+    requires: ["text-replies"],
+    async run(conversation) {
+      await askDayAndTime(conversation);
+      await conversation.say("Saturday");
+      // Answering only the day question would leave the tool waiting, with no reply.
       await conversation.waitForReplyTo("Saturday");
     },
   },

@@ -42,7 +42,18 @@ interface ConformanceChannel {
  */
 const hitlConformance = {
   "chat-sdk": [{ driver: chatSdkDriver }, { driver: chatSdkTextDriver }],
-  discord: [{ driver: discordDriver }],
+  discord: [
+    {
+      driver: discordDriver,
+      broken: {
+        "pressing options of two pending questions answers each with its own option": {
+          reason:
+            "a press finds the session by its message id, and only the first message the bot posts is aliased to the session",
+          symptom: /Timed out waiting for plan_review to return on discord/,
+        },
+      },
+    },
+  ],
   github: [{ driver: githubDriver }],
   linear: [{ driver: linearDriver }],
   linq: [{ driver: linqDriver }],
