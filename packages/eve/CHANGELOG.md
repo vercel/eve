@@ -1,5 +1,18 @@
 # eve
 
+## 0.70.1
+
+### Patch Changes
+
+- dc50f62: Hosted builds bundle faster: eve no longer re-parses its largest output chunk while adding the Node ESM compatibility banner, and Nitro no longer gzips every output file just to annotate the build log. The repeated `MISSING_CODE_SPLITTING_GROUP_DEBUG_NAME` warning also no longer appears in build logs.
+  
+  eve no longer depends on `gray-matter`. Frontmatter and YAML files (skills, schedules, instructions, OpenAPI specs, and `loadYaml`) now parse with js-yaml 4, whose schema cannot evaluate code, and each deployed function is about 180 kB smaller. Frontmatter fences must be `---` or `---yaml`; other languages such as `---json` or `---js` now fail with an error instead of being parsed.
+- 528483f: Session turns, cancellations, and session endings run fewer durable workflow steps, so replies arrive sooner, especially for subagent sessions and sessions that do not start background work.
+- a53f280: Long-lived sessions now move to newer deployments after an eve upgrade: a deployment upgrades handoff checkpoints written by eve 0.66.0 and later instead of leaving the session on its old deployment, and stops idle subagent sessions those releases kept for reuse. Refused handoffs now log why on both deployments. Callbacks from remote agents to sessions created by eve 0.66–0.68 no longer fail with `Unsupported callback kind`.
+- 73242f0: In the dev TUI, `/new` now starts a fresh session, and `/reset` is an alias of `/new`. `/clear` still clears the session's model-message history in place, and now confirms with "Session context cleared" instead of disappearing without feedback.
+- 6ed6253: The dev TUI no longer shows a follow-up message to a working subagent as a second subagent: it reads `Message subagent` in the transcript, the task panel keeps one entry, and the task ends with a single line. Parallel `agent` tasks are now named `subagent:2` instead of `subagent(subagent:2)`, and sibling tasks in the panel get a blank row between them when there is room.
+- dd50d12: Fix three scaffolded web chat issues: links in user messages no longer blend into the chat bubble, approve/deny buttons for tool calls now show below the tool row instead of hiding inside its collapsed details, and typing in the composer or a question answer no longer zooms the page on iOS.
+
 ## 0.70.0
 
 ### Minor Changes
