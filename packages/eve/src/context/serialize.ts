@@ -88,9 +88,9 @@ export async function deserializeContext(
 
 /**
  * Admits a context written before mount-scoped state (eve 0.68 and earlier).
- * Extension state moves to its mount's key when exactly one mount uses its
- * package namespace. State that no mount could own was removed from this
- * deployment and is dropped as in the current layout; ambiguous state refuses.
+ * Extension state moves to the one mount that still defines it. State nothing
+ * defines was removed and is dropped as in the current layout; state that
+ * several mounts define refuses rather than guessing an owner.
  */
 async function adoptLegacyStateLayout(
   data: Record<string, unknown>,
@@ -111,21 +111,16 @@ async function adoptLegacyStateLayout(
     }
     const owners = mounts.flatMap((mount) => {
       const prefix = `${legacyPackageStateNamespace(mount.packageName)}.`;
-      return name.startsWith(prefix)
-        ? [mountedStateKeyName(mount.mountId, name.slice(prefix.length))]
-        : [];
+      if (!name.startsWith(prefix)) return [];
+      const mounted = mountedStateKeyName(mount.mountId, name.slice(prefix.length));
+      return resolveKey(mounted) === undefined ? [] : [mounted];
     });
     if (owners.length === 0) {
       adopted[name] = value;
       continue;
     }
     const [mounted] = owners;
-    if (
-      owners.length !== 1 ||
-      mounted === undefined ||
-      resolveKey(mounted) === undefined ||
-      data[mounted] !== undefined
-    ) {
+    if (owners.length !== 1 || mounted === undefined || data[mounted] !== undefined) {
       throw new IncompatibleStateLayoutError(name);
     }
     adopted[mounted] = value;
@@ -147,7 +142,7 @@ function legacyPackageStateNamespace(packageName: string): string {
 export class IncompatibleStateLayoutError extends Error {
   constructor(key?: string) {
     super(
-      `Incompatible context state layout${key === undefined ? "" : ` for key "${key}"`}. Restore this session with its original deployment or start a new session; state with no unambiguous owner in this deployment cannot be carried forward.`,
+      `Incompatible context state layout${key === undefined ? "" : ` for key "${key}"`}. This deployment cannot place the saved state without guessing its owner. Restore this session with its original deployment or start a new session.`,
     );
     this.name = "IncompatibleStateLayoutError";
   }

@@ -53,35 +53,45 @@ describe("state layout admission", () => {
     }
   });
 
-  it("moves legacy extension state to the one mount that owns its package", async () => {
+  it("moves legacy extension state to the one mount that still defines it", async () => {
     const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
-    const deserialize = vi.spyOn(BundleKey.codec!, "deserialize").mockImplementation(async () => {
-      defineMountedState("extensions/crm", "requests", () => 0);
-      return bundle;
-    });
     const mount = (mountId: string) =>
       ({ mountId, packageName: "@acme/crm" }) as (typeof manifest.extensionMounts)[number];
+    let mounts = [mount("extensions/crm")];
+    const deserialize = vi.spyOn(BundleKey.codec!, "deserialize").mockImplementation(async () => {
+      for (const { mountId } of mounts) defineMountedState(mountId, "requests", () => 0);
+      return bundle;
+    });
     const loadManifest = vi
       .spyOn(manifestLoader, "loadCompiledManifest")
-      .mockResolvedValue({ ...manifest, extensionMounts: [mount("extensions/crm")] });
+      .mockImplementation(async () => ({ ...manifest, extensionMounts: mounts }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       expect((await deserializeContext({ "eve.bundle": {} })).get(BundleKey)).toBe(bundle);
-      const restored = await deserializeContext({ "eve.bundle": {}, "acme-crm.requests": 4 });
-      expect(
-        [...restored.entries()].map(([key, value]) => [key.name, value]).filter(([, v]) => v === 4),
-      ).toEqual([["eve:mount.v1:extensions%2Fcrm:requests", 4]]);
-      // Two mounts of one package shared the legacy key, so neither can claim it.
-      loadManifest.mockResolvedValue({
-        ...manifest,
-        extensionMounts: [mount("extensions/crm"), mount("extensions/crm-eu")],
+      const restored = await deserializeContext({
+        "eve.bundle": {},
+        "acme-crm.history": 5,
+        "acme-crm.requests": 4,
       });
+      // The extension no longer defines `history`, so that value is dropped.
+      expect([...restored.entries()].map(([key, value]) => [key.name, value])).toEqual([
+        ["eve.bundle", bundle],
+        ["eve:mount.v1:extensions%2Fcrm:requests", 4],
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("dropping unknown context key"),
+        expect.objectContaining({ key: "acme-crm.history" }),
+      );
+      // Two mounts of one package define the legacy key, so neither can claim it.
+      mounts = [mount("extensions/crm"), mount("extensions/crm-eu")];
       await expect(
         deserializeContext({ "eve.bundle": {}, "acme-crm.requests": 4 }),
       ).rejects.toThrow('Incompatible context state layout for key "acme-crm.requests"');
     } finally {
       deserialize.mockRestore();
       loadManifest.mockRestore();
+      warn.mockRestore();
     }
   });
 
