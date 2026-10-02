@@ -727,7 +727,7 @@ describe("ConversationTranscript", () => {
       event(
         createAuthorizationRequiredEvent({
           attemptId,
-          authorization: { url: `https://idp.example.com/${attemptId}` },
+          authorization: { displayName: "Linear", url: `https://idp.example.com/${attemptId}` },
           description: "Connect Linear",
           name: "linear",
           sequence: 1,
@@ -752,8 +752,8 @@ describe("ConversationTranscript", () => {
       ),
     ]);
     expect(new ConversationTranscript().project(view(state, true), options)).toEqual([
-      expect.objectContaining({ title: "linear · authorization · authorized", live: false }),
-      expect.objectContaining({ title: "linear · authorization · required", live: true }),
+      expect.objectContaining({ title: "Linear · authorization · authorized", live: false }),
+      expect.objectContaining({ title: "Linear · authorization · required", live: true }),
     ]);
   });
 

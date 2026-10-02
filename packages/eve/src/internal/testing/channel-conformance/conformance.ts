@@ -159,11 +159,6 @@ const CHAT_SDK_BROKEN = {
 
 const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
-  ...budgetPromptNotShown(
-    "a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws",
-    "running out of budget opens budget prompt",
-    "pressing approve on budget prompt allows agent to continue",
-  ),
   ...noSignInRenderer(
     "a sign-in names the service and shows its sign-in link",
     "a sign-in shows its confirmation code",
@@ -174,10 +169,6 @@ const DISCORD_BROKEN = {
 
 const SLACK_BROKEN = {
   ...QUEUED_BUDGET_REPLY,
-  "a sign-in without a link shows its instructions": {
-    reason: "Slack sends the private sign-in prompt only for a challenge with a URL",
-    symptom: SIGN_IN_NOT_SHOWN,
-  },
   ...staleAnsweredPrompts(
     "only the button interaction handler edits a question; a typed answer leaves it",
     ["questionText"],
@@ -191,14 +182,6 @@ const SLACK_BROKEN = {
 const TEAMS_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalText", "questionPress", "questionText"]),
   ...QUEUED_BUDGET_REPLY,
-  "a sign-in shows its confirmation code": {
-    reason: "the Teams sign-in card omits the challenge's user code",
-    symptom: SIGN_IN_NOT_SHOWN,
-  },
-  "a sign-in without a link shows its instructions": {
-    reason: "the Teams sign-in card omits the challenge's instructions",
-    symptom: SIGN_IN_NOT_SHOWN,
-  },
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
 /** The sign-in prompt, link included, goes to the whole thread. */
@@ -282,10 +265,6 @@ const hitlConformance = {
       driver: tuiDriver,
       broken: {
         ...QUEUED_BUDGET_REPLY,
-        "a sign-in names the service and shows its sign-in link": {
-          reason: "the TUI labels a sign-in with the tool name, not the challenge's displayName",
-          symptom: /Timed out waiting for the bot to show Calendar/u,
-        },
         ...budgetPromptNotShown(
           "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
           "pressing stop on budget prompt halts work, next message asks again",
