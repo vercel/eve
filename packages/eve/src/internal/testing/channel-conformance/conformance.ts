@@ -29,7 +29,12 @@ export interface BrokenCell {
 interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   readonly broken?: Partial<Record<HitlRule, BrokenCell>>;
+  /** Rules this client deliberately doesn't offer, with why, beyond what its capabilities rule out. */
+  readonly unsupported?: Partial<Record<HitlRule, string>>;
 }
+
+const TUI_TYPED_APPROVAL =
+  "the approval drawer holds the keyboard; a person answers it with y or n";
 
 const TUI_APPROVAL_PROMPT: BrokenCell = {
   reason: "the approval drawer titles the raw tool name instead of the request's prompt",
@@ -42,7 +47,8 @@ const TUI_APPROVAL_PROMPT: BrokenCell = {
  * one of:
  *
  * - must pass;
- * - not supported: the platform lacks a capability the rule requires (skipped);
+ * - not supported: the platform lacks a capability the rule requires, or the
+ *   entry declines the rule as `unsupported` (skipped);
  * - broken: the channel should pass but doesn't yet. The cell passes only when
  *   the rule fails with the recorded `symptom`, so a fix or an unrelated
  *   failure (such as harness breakage) both turn it red.
@@ -63,8 +69,10 @@ const hitlConformance = {
         "a tool approval shows a choice to approve and one to cancel": TUI_APPROVAL_PROMPT,
         "pressing Approve runs the gated tool": TUI_APPROVAL_PROMPT,
         "pressing Cancel stops the gated tool without running it": TUI_APPROVAL_PROMPT,
-        "a text reply of approve runs the gated tool": TUI_APPROVAL_PROMPT,
-        "a text reply of cancel stops the gated tool without running it": TUI_APPROVAL_PROMPT,
+      },
+      unsupported: {
+        "a text reply of approve runs the gated tool": TUI_TYPED_APPROVAL,
+        "a text reply of cancel stops the gated tool without running it": TUI_TYPED_APPROVAL,
       },
     },
   ],
@@ -86,13 +94,16 @@ export function describeHitlConformance(channel: keyof typeof hitlConformance): 
   const entries: readonly ConformanceChannel[] = hitlConformance[channel];
   describe.each(entries.map((entry) => ({ ...entry, name: entry.driver().name })))(
     "$name HITL contract",
-    ({ driver, broken }) => {
+    ({ driver, broken, unsupported }) => {
       const { capabilities } = driver();
       for (const rule of hitlContract) {
         const supported = rule.requires.every((capability) => capabilities.includes(capability));
         const known = broken?.[rule.rule];
+        const declined = unsupported?.[rule.rule];
         if (!supported) {
           it.skip(`${rule.rule} (not supported)`, () => {});
+        } else if (declined !== undefined) {
+          it.skip(`${rule.rule} (not supported: ${declined})`, () => {});
         } else if (known === undefined) {
           it(rule.rule, () => withChannelConversation(driver(), (c) => rule.run(c)), 60_000);
         } else {
