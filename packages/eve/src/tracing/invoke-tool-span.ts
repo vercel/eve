@@ -13,8 +13,10 @@ import { buildConversationContext } from "#channel/conversation-context.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { recordAgentSpanError } from "#tracing/agent-span-error.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
@@ -37,15 +39,21 @@ export interface InvokeToolTraceOrigin {
  *
  * A direct call has no turn, so the conversation path's lifecycle hooks never
  * see it; this is its whole instrumentation. The span records identity and
- * outcome only. Arguments, results, and exception text are never captured,
- * on this span or on any span the call nests in or under: error content is
- * switched off for the whole call even when the policy drops the span, so a
- * failure logged inside the tool cannot land on an already-active parent.
+ * outcome, plus `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`
+ * when the content decision allows them, which is the same decision the
+ * conversation path's tool spans use: the OpenTelemetry declaration's content
+ * setting, the trace policy, and the channel audience ceiling. Exception
+ * text is never captured, on this span or on any span the call nests in or
+ * under: error content is switched off for the whole call even when the
+ * policy drops the span, so a failure logged inside the tool cannot land on
+ * an already-active parent.
  */
 export async function withInvokeToolSpan(
   input: {
     readonly auth: SessionAuthContext;
     readonly callId: string;
+    /** The caller's arguments, recorded only when the content decision allows inputs. */
+    readonly input: unknown;
     readonly origin: InvokeToolTraceOrigin | undefined;
     readonly sessionId: string;
     readonly toolName: string;
@@ -71,6 +79,18 @@ export async function withInvokeToolSpan(
     (error) => logError(log, "tracePolicy threw; dropping the tool call's trace", error),
   );
   if (decision.action === "drop") return await otelContext.with(suppressTracing(base), run);
+  const content = applyLiveDeliveryAudienceCeiling(
+    {
+      action: "record",
+      recordInputs: settings.recordInputs && decision.recordInputs,
+      recordOutputs: settings.recordOutputs && decision.recordOutputs,
+    },
+    conversation.audience,
+    undefined,
+    conversation.environment,
+  );
+  const recordInputs = content.action === "record" && content.recordInputs;
+  const recordOutputs = content.action === "record" && content.recordOutputs;
 
   const spanName = `execute_tool ${input.toolName}`;
   const parent = withChannelAudience(base, conversation.audience);
@@ -91,13 +111,18 @@ export async function withInvokeToolSpan(
     attributes["eve.channel.kind"] = conversation.channel.kind;
     attributes["eve.channel.name"] = input.origin.channelName;
   }
+  if (recordInputs) {
+    const args = contentAttribute(input.input);
+    if (args !== undefined) attributes["gen_ai.tool.call.arguments"] = args;
+  }
   const span = trace
     .getTracer("eve.agent")
     .startSpan(spanName, { attributes, kind: SpanKind.INTERNAL }, parent);
   const active = markAgentTraceContext(
     withAgentToolSpanContext(trace.setSpan(parent, span), {
-      recordInputs: false,
-      recordOutputs: false,
+      recordInputs,
+      recordOutputs,
+      // Status only, whatever the content decision: exception text stays out of the trace.
       recordError: (_error, errorType) => recordAgentSpanError(span, undefined, errorType),
       setAttributes: (attributes) => setDefined(span, attributes),
     }),
@@ -106,6 +131,10 @@ export async function withInvokeToolSpan(
   try {
     const result = await otelContext.with(active, run);
     span.setAttribute("eve.tool.outcome", result.status);
+    if (result.status === "completed" && recordOutputs) {
+      const output = contentAttribute(result.output);
+      if (output !== undefined) span.setAttribute("gen_ai.tool.call.result", output);
+    }
     if (result.status === "failed" || result.status === "invalid-input") {
       recordAgentSpanError(span, undefined, result.status);
     }
