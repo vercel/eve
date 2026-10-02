@@ -1,6 +1,7 @@
 import { type ReadFileInput, executeReadFileOnSandbox } from "#execution/sandbox/read-file.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
+import { toolOutput, toolOutputPart } from "#tools/model-output.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
 export interface ReadFileToolInput {
@@ -11,6 +12,8 @@ export interface ReadFileToolInput {
 
 export interface ReadFileToolOutput {
   content: string;
+  /** Base64 image the model sees when the file is a PNG, JPEG, GIF, or WebP image. */
+  image?: { data: string; mediaType: string };
   nextOffset?: number;
   path: string;
   totalLines: number;
@@ -49,6 +52,12 @@ export const READ_FILE_OUTPUT_SCHEMA = defineJsonSchema<ReadFileToolOutput>({
   type: "object",
   properties: {
     content: { type: "string" },
+    image: {
+      type: "object",
+      properties: { data: { type: "string" }, mediaType: { type: "string" } },
+      required: ["data", "mediaType"],
+      additionalProperties: false,
+    },
     nextOffset: { type: "integer", minimum: 1 },
     path: { type: "string" },
     totalLines: { type: "integer", minimum: 0 },
@@ -73,6 +82,7 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = d
     "- To read later sections, call this tool again with a larger offset.",
     '- Contents are returned with each line prefixed by its line number as `<line>: <content>`. For example, if a file has contents "foo\\n", you will receive "1: foo\\n".',
     "- Any line longer than 2000 characters is truncated.",
+    "- PNG, JPEG, GIF, and WebP files up to 3 MiB are shown to you as images, including files named in `Attached file <path>` references.",
     "- Call this tool in parallel when you know there are multiple files you want to read.",
     "- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.",
   ].join("\n"),
@@ -81,6 +91,13 @@ export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = d
   },
   inputSchema: READ_FILE_INPUT_SCHEMA,
   outputSchema: READ_FILE_OUTPUT_SCHEMA,
+  toModelOutput(output) {
+    if (output.image === undefined) return toolOutput.json(output);
+    return toolOutput.content([
+      toolOutputPart.text(output.content),
+      toolOutputPart.file(output.image.data, { mediaType: output.image.mediaType }),
+    ]);
+  },
 });
 
 export default readFile;

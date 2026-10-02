@@ -7,9 +7,10 @@ const TOOL_NAME = "render-stripes";
 // guessing; the eval stays self-contained by validating the reply against
 // the answer key the tool records on action.result. The pixels reach the
 // model exclusively through `toModelOutput` content parts. Color recognition
-// remains tracked rather than gated because live vision quality varies.
+// remains tracked rather than gated because live vision quality varies; the
+// fixture's mock model decodes the pixels and fails the turn when they are
+// missing, so world suites gate on the image reaching every call.
 export default defineEval({
-  tags: ["real-model"],
   description: "Static tools smoke: toModelOutput content parts deliver an image to the model.",
   async test(t) {
     const { session } = await t.send(
@@ -25,8 +26,8 @@ export default defineEval({
       return answer !== undefined && namesColorsInOrder(events, answer);
     }).soft();
 
-    // The content part is baked into persisted history, so a follow-up turn
-    // must answer from replay without re-running the tool.
+    // History keeps a sandbox ref to the image and every model call hydrates
+    // it, so a follow-up turn answers from replay without re-running the tool.
     await session.send(
       "Without calling any tool, repeat the stripe colors left to right, comma-separated.",
     );

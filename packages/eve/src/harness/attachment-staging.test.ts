@@ -1,11 +1,15 @@
-import type { FilePart, UserContent } from "ai";
+import type { FilePart, ModelMessage, UserContent } from "ai";
 import { describe, expect, it } from "vitest";
 
 import type { ChannelAdapterContext } from "#channel/adapter.js";
 import { ContextContainer } from "#context/container.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import { ATTACHMENTS_ROOT, stageAttachmentsForAdapter } from "#harness/attachment-staging.js";
+import {
+  ATTACHMENTS_ROOT,
+  moveToolResultFilesToUserMessages,
+  stageAttachmentsForAdapter,
+} from "#harness/attachment-staging.js";
 
 const UTF8 = new TextEncoder();
 const ATTACHMENTS_PATH_PATTERN = /^\/workspace\/attachments\/[0-9a-f]{16}\//;
@@ -362,5 +366,61 @@ describe("stageAttachmentsForAdapter", () => {
     const filePart = staged[0] as FilePart;
 
     expect(filePart.filename).toMatch(ATTACHMENTS_PATH_PATTERN);
+  });
+});
+
+describe("moveToolResultFilesToUserMessages", () => {
+  it("moves tool-result files into a user message after the tool results", () => {
+    const file = {
+      data: { data: "iVBORw0KGgo=", type: "data" as const },
+      filename: "chart.png",
+      mediaType: "image/png",
+      type: "file" as const,
+    };
+    const messages: ModelMessage[] = [
+      {
+        content: [{ input: {}, toolCallId: "call-1", toolName: "render", type: "tool-call" }],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: { type: "content", value: [{ text: "Rendered.", type: "text" }, file] },
+            toolCallId: "call-1",
+            toolName: "render",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      { content: "It is a chart.", role: "assistant" },
+    ];
+
+    const moved = moveToolResultFilesToUserMessages(messages);
+
+    expect(moved.map((message) => message.role)).toEqual([
+      "assistant",
+      "tool",
+      "user",
+      "assistant",
+    ]);
+    expect(moved[1]?.content).toEqual([
+      {
+        output: {
+          type: "content",
+          value: [
+            { text: "Rendered.", type: "text" },
+            { text: "Attached file chart.png (image/png) follows this tool result.", type: "text" },
+          ],
+        },
+        toolCallId: "call-1",
+        toolName: "render",
+        type: "tool-result",
+      },
+    ]);
+    expect(moved[2]?.content).toEqual([
+      { text: "Files returned by the preceding tool results:", type: "text" },
+      file,
+    ]);
   });
 });

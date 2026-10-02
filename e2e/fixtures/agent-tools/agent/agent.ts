@@ -1,8 +1,34 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
+import type { MockModelRequest } from "eve/evals";
+
+import { readStripeColors, STRIPE_COUNT } from "./lib/stripes";
+
+/** Stripe colors in the latest render-stripes image the prompt carries, if any. */
+function promptStripeColors(request: MockModelRequest): string[] | undefined {
+  const result = [...request.toolResults]
+    .reverse()
+    .find((entry) => entry.name === "render-stripes");
+  if (!Array.isArray(result?.output)) return undefined;
+  for (const part of result.output as { type?: string; data?: { data?: unknown } }[]) {
+    if (part.type === "file" && typeof part.data?.data === "string") {
+      return readStripeColors(Buffer.from(part.data.data, "base64"), STRIPE_COUNT);
+    }
+  }
+  return undefined;
+}
 
 const base = e2eAgentConfig({
   mock(request) {
+    if (request.userMessages.some((message) => message.includes("`render-stripes`"))) {
+      const colors = promptStripeColors(request);
+      if (colors !== undefined) return colors.join(", ");
+      if (request.lastUserMessage?.includes("`render-stripes` exactly once")) {
+        return { toolCalls: [{ name: "render-stripes", input: {} }] };
+      }
+      // Every later turn answers from the image replayed out of history.
+      throw new Error("The render-stripes image is missing from the replayed prompt.");
+    }
     if (request.lastUserMessage?.includes("`callback_identity`")) {
       const roles = request.messages.map((message) => message.role);
       if (roles.lastIndexOf("tool") <= roles.lastIndexOf("user")) {

@@ -149,6 +149,17 @@ interface SandboxProviderResourceTree {
 
 Docker and microsandbox mount the compiled trees read-only under `/eve/resources`, copy workspace seeds into writable `/workspace`, and expose skills read-only where possible. Vercel's snapshot environment writes workspace and skill contents before capturing its snapshot. Custom providers decide whether to upload, mount, or write each tree, but must expose the final target paths before authored preparation runs.
 
+## Inbound attachments
+
+eve writes byte-backed files that reach the agent into the sandbox under `/workspace/attachments/` and keeps only a reference in session history. This covers files attached to user messages and files that tools return to the model with `toolOutputPart.file` or as MCP image, audio, and blob content.
+
+Before every model call, eve reads the referenced files back from the sandbox:
+
+- An image up to 3 MiB or a PDF up to 20 MiB attached to a message reaches the model as a file. Larger files and other types reach the model as a text reference, such as `Attached file /workspace/attachments/<hash>/report.csv (text/csv)`, that the agent can open with `read_file` or `bash`.
+- A file returned by a tool always reaches the model as a file.
+
+Each call sends the same bytes for the same file, so the model still sees attachments from earlier turns and the provider's prompt cache stays valid. Compaction replaces files in older tool results with their text reference. The `read_file` tool shows PNG, JPEG, GIF, and WebP files up to 3 MiB to the model as images, so the agent can look at an image again after compaction.
+
 ## Custom providers
 
 Define a provider with `defineSandboxProvider()` from `eve/sandbox/provider`. The five generic parameters describe environment options, live options, the prepared artifact, minimal serialized session state, and the provider-specific sandbox session type:

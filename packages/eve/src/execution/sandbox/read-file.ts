@@ -16,6 +16,16 @@ import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-out
 const DEFAULT_OFFSET = 1;
 const DEFAULT_LIMIT = 2000;
 
+// Matches the inline cap for inbound image attachments.
+const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+const IMAGE_MEDIA_TYPES: Readonly<Record<string, string>> = {
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+};
+
 // ---------------------------------------------------------------------------
 // Input / result shapes
 // ---------------------------------------------------------------------------
@@ -34,6 +44,8 @@ export interface ReadFileInput {
  */
 export interface ReadFileResult {
   readonly content: string;
+  /** Base64 image the model sees when the file is a PNG, JPEG, GIF, or WebP image. */
+  readonly image?: { readonly data: string; readonly mediaType: string };
   readonly nextOffset?: number;
   readonly path: string;
   readonly totalLines: number;
@@ -47,7 +59,8 @@ export interface ReadFileResult {
 /**
  * Reads one text file from the sandbox, applies output shaping
  * (offset, limit, line numbering, truncation), and persists a full-file
- * stamp into durable read-file state for stale-write detection.
+ * stamp into durable read-file state for stale-write detection. Image
+ * files return their bytes for the model to view instead.
  *
  * Used by the framework `read_file` tool and authored wrappers around its
  * exported definition.
@@ -60,6 +73,11 @@ export async function executeReadFileOnSandbox(
 
   const resolvedPath = await resolveAbsoluteFilePath(sandbox, filePath);
   const normalizedPath = normalizeModelPath(resolvedPath);
+
+  const imageMediaType = IMAGE_MEDIA_TYPES[normalizedPath.split(".").pop()?.toLowerCase() ?? ""];
+  if (imageMediaType !== undefined) {
+    return await readImageFile(sandbox, resolvedPath, normalizedPath, imageMediaType);
+  }
 
   // ── Validate offset / limit ─────────────────────────────────────────
   const effectiveOffset = offset ?? DEFAULT_OFFSET;
@@ -176,6 +194,33 @@ export async function executeReadFileOnSandbox(
     content,
     path: normalizedPath,
     totalLines,
+    truncated: false,
+  };
+}
+
+async function readImageFile(
+  sandbox: SandboxSession,
+  resolvedPath: string,
+  path: string,
+  mediaType: string,
+): Promise<ReadFileResult> {
+  const bytes = await sandbox.readBinaryFile({ path: resolvedPath });
+  if (bytes === null) {
+    throw new Error(
+      `File not found: ${path}. Verify the path exists and is accessible in the sandbox.`,
+    );
+  }
+  if (bytes.byteLength > MAX_IMAGE_BYTES) {
+    throw new Error(
+      `Image "${path}" is ${bytes.byteLength} bytes; read_file shows images up to 3 MiB. ` +
+        "Resize or crop it in the sandbox first.",
+    );
+  }
+  return {
+    content: `Image ${path} (${mediaType}, ${bytes.byteLength} bytes).`,
+    image: { data: Buffer.from(bytes).toString("base64"), mediaType },
+    path,
+    totalLines: 0,
     truncated: false,
   };
 }

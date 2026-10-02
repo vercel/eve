@@ -75,7 +75,9 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   hydrateSandboxAttachments,
+  moveToolResultFilesToUserMessages,
   stageAttachmentsToSandbox,
+  stageToolResultMedia,
 } from "#harness/attachment-staging.js";
 import {
   compactMessages,
@@ -650,12 +652,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? consumeDeferredStepInput({ input, session })
         : { input, session };
     session = stepInput.session;
-    const resolvedCoordination = await resolvePendingCoordination({
+    const coordination = await resolvePendingCoordination({
       emit,
       session,
       stepInput: stepInput.input,
       tools: config.tools,
     });
+    // Workflow tool results join history here, so their files leave as refs too.
+    const resolvedCoordination =
+      coordination.outcome === "resolved"
+        ? { ...coordination, messages: await stageToolResultMedia(coordination.messages) }
+        : coordination;
     if (resolvedCoordination.outcome === "unresolved") {
       return { next: null, session: resolvedCoordination.session };
     }
@@ -1525,6 +1532,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       );
       generation.begin();
       modelMessages = await hydrateSandboxAttachments(currentMessages.nonSystemMessages);
+      if (sendsToolResultFilesAsText(model)) {
+        modelMessages = moveToolResultFilesToUserMessages(modelMessages);
+      }
       const { instructions, telemetryRuntimeContext = {} } = prepareModelCallInput(
         opts.extraSystemNote,
       );
@@ -2546,7 +2556,7 @@ async function handleStepResult(input: {
     messages: rawResponseMessages,
     providerExecutedOutcomeIds,
   });
-  const responseMessages = normalizedProviderHistory.messages;
+  const responseMessages = await stageToolResultMedia(normalizedProviderHistory.messages);
 
   const baseSession = setRequestEnvelopeTokens(
     {
@@ -3070,6 +3080,15 @@ async function finishTurn(input: {
   }
   const settledTurn = { output: structured } satisfies SettledTurn;
   return { next: null, session, settledTurn };
+}
+
+/** Chat Completions models receive `content` tool outputs as JSON text. */
+function sendsToolResultFilesAsText(model: LanguageModel): boolean {
+  return (
+    typeof model !== "string" &&
+    typeof model.provider === "string" &&
+    model.provider.endsWith(".chat")
+  );
 }
 
 function createNextCompactionConfig(
