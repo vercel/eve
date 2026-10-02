@@ -416,13 +416,19 @@ export function renderHitlConformanceMatrix(): string {
     (group): readonly ConformanceChannel[] => group,
   );
   const nameOf = (entry: ConformanceChannel) => entry.driver().name;
-  // Each DM column sits right after its channel's shared-thread column.
+  const dmOf = (entry: ConformanceChannel) =>
+    all.filter((dm) => dm.dm === true && nameOf(dm) === `${nameOf(entry)}-dm`);
+  // The TUI, then Chat SDK's bridges, then channels with a DM column, then the
+  // rest. Each DM column sits right after its channel's shared-thread column.
+  const group = (entry: ConformanceChannel) => {
+    if (nameOf(entry) === "tui") return 0;
+    if (nameOf(entry).startsWith("chat-sdk")) return 1;
+    return dmOf(entry).length > 0 ? 2 : 3;
+  };
   const entries = all
     .filter((entry) => entry.dm !== true)
-    .flatMap((entry) => [
-      entry,
-      ...all.filter((dm) => dm.dm === true && nameOf(dm) === `${nameOf(entry)}-dm`),
-    ]);
+    .toSorted((a, b) => group(a) - group(b))
+    .flatMap((entry) => [entry, ...dmOf(entry)]);
   const escape = (text: string) => text.replaceAll("|", "\\|");
   const row = (cells: readonly string[]) => `| ${cells.join(" | ")} |`;
   // One note per distinct reason, numbered in reading order, so every cell
