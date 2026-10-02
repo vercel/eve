@@ -206,9 +206,14 @@ export function deriveModalInputResponses(
   return [parseInputResponse({ requestId: payload.requestId, text })];
 }
 
+/**
+ * Encodes the payload as a raw JSON array, which leaves room for long request
+ * ids such as a session-limit prompt's `<sessionId>:limit:input:<tokens>`.
+ */
 function encodeHitlCustomId(prefix: string, payload: HitlCustomIdPayload): string {
-  const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  const customId = `${prefix}${encoded}`;
+  const fields =
+    payload.optionId === undefined ? [payload.requestId] : [payload.requestId, payload.optionId];
+  const customId = `${prefix}${JSON.stringify(fields)}`;
   if (customId.length > DISCORD_CUSTOM_ID_MAX_LENGTH) {
     throw new Error("discordChannel: HITL custom_id exceeded Discord's 100-character limit.");
   }
@@ -217,21 +222,17 @@ function encodeHitlCustomId(prefix: string, payload: HitlCustomIdPayload): strin
 
 function decodeHitlCustomId(customId: string, prefix: string): HitlCustomIdPayload | null {
   if (!customId.startsWith(prefix)) return null;
+  let fields: unknown;
   try {
-    const decoded = Buffer.from(customId.slice(prefix.length), "base64url").toString("utf8");
-    const parsed = JSON.parse(decoded) as {
-      optionId?: unknown;
-      requestId?: unknown;
-    };
-    if (typeof parsed.requestId !== "string" || parsed.requestId.length === 0) return null;
-    const result: HitlCustomIdPayload = { requestId: parsed.requestId };
-    if (typeof parsed.optionId === "string") {
-      return { ...result, optionId: parsed.optionId };
-    }
-    return result;
+    fields = JSON.parse(customId.slice(prefix.length));
   } catch {
     return null;
   }
+  if (!Array.isArray(fields) || fields.length < 1 || fields.length > 2) return null;
+  const [requestId, optionId] = fields as unknown[];
+  if (typeof requestId !== "string" || requestId.length === 0) return null;
+  if (optionId === undefined) return { requestId };
+  return typeof optionId === "string" ? { optionId, requestId } : null;
 }
 
 function toDiscordButtonStyle(style: InputOption["style"]): number {

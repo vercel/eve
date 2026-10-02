@@ -39,20 +39,20 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 | approving by text clears the approval's buttons | —<sup>[4](#note-4)</sup> | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
 | pressing Approve names who approved on the approval | —<sup>[6](#note-6)</sup> | ❌<sup>[7](#note-7)</sup> |  | —<sup>[1](#note-1)</sup> | ❌<sup>[7](#note-7)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ❌<sup>[7](#note-7)</sup> |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
 | approving by text names who approved on the approval | —<sup>[4](#note-4)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ❌<sup>[8](#note-8)</sup> | ❌<sup>[8](#note-8)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
-| running out of budget opens budget prompt | ✅ | ✅ |  | ✅ | ❌<sup>[9](#note-9)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ |
-| pressing approve on budget prompt allows agent to continue | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ❌<sup>[9](#note-9)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| running out of budget opens budget prompt | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ |
+| pressing approve on budget prompt allows agent to continue | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
 | reply of approve on budget prompt allows agent to continue | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| pressing stop on budget prompt halts work, next message asks again | ❌<sup>[10](#note-10)</sup> | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
-| reply of stop on budget prompt halts work, next message asks again | ❌<sup>[10](#note-10)</sup> | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| query sent during budget prompt answered after budget approval | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> |
-| a sign-in names the service and shows its sign-in link | ❌<sup>[12](#note-12)</sup> | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ❌<sup>[14](#note-14)</sup> | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[15](#note-15)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
-| a sign-in shows its confirmation code | ✅ | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ❌<sup>[14](#note-14)</sup> | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ✅ | ❌<sup>[16](#note-16)</sup> | ❌<sup>[16](#note-16)</sup> | ✅ | ✅ | —<sup>[15](#note-15)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
-| only the person signing in sees the sign-in link and code | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[17](#note-17)</sup> | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[17](#note-17)</sup> | ❌<sup>[18](#note-18)</sup> | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[17](#note-17)</sup> | ✅ | ❌<sup>[19](#note-19)</sup> | —<sup>[17](#note-17)</sup> |
-| a sign-in without a link shows its instructions | ✅ | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ❌<sup>[14](#note-14)</sup> | ❌<sup>[13](#note-13)</sup> | ✅ | ❌<sup>[20](#note-20)</sup> | ❌<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
+| pressing stop on budget prompt halts work, next message asks again | ❌<sup>[9](#note-9)</sup> | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| reply of stop on budget prompt halts work, next message asks again | ❌<sup>[9](#note-9)</sup> | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| query sent during budget prompt answered after budget approval | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> | ❌<sup>[10](#note-10)</sup> |
+| a sign-in names the service and shows its sign-in link | ✅ | ❌<sup>[11](#note-11)</sup> | ✅ | ✅ | ❌<sup>[12](#note-12)</sup> | ❌<sup>[12](#note-12)</sup> | ❌<sup>[11](#note-11)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[13](#note-13)</sup> | ✅ | ✅ |
+| a sign-in shows its confirmation code | ✅ | ❌<sup>[11](#note-11)</sup> | ✅ | ✅ | ❌<sup>[12](#note-12)</sup> | ❌<sup>[12](#note-12)</sup> | ❌<sup>[11](#note-11)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[13](#note-13)</sup> | ✅ | ✅ |
+| only the person signing in sees the sign-in link and code | —<sup>[14](#note-14)</sup> | ✅ | —<sup>[14](#note-14)</sup> | —<sup>[14](#note-14)</sup> | ✅ | —<sup>[14](#note-14)</sup> | ✅ | —<sup>[14](#note-14)</sup> | ✅ | —<sup>[14](#note-14)</sup> | ❌<sup>[15](#note-15)</sup> | —<sup>[14](#note-14)</sup> | ✅ | —<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[16](#note-16)</sup> | —<sup>[14](#note-14)</sup> |
+| a sign-in without a link shows its instructions | ✅ | ❌<sup>[11](#note-11)</sup> | ✅ | ✅ | ❌<sup>[12](#note-12)</sup> | ❌<sup>[12](#note-12)</sup> | ❌<sup>[11](#note-11)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[12](#note-12)</sup> | ✅ | ✅ |
 | after signing in, the agent carries on with the request | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ |
-| completing a sign-in tells the person it succeeded | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ❌<sup>[14](#note-14)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
+| completing a sign-in tells the person it succeeded | ✅ | ✅ | ✅ | ✅ | ❌<sup>[12](#note-12)</sup> | ❌<sup>[12](#note-12)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[12](#note-12)</sup> | ✅ | ✅ |
 | message after ignored sign-in gets an answer, signing in late doesn't run | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
+| message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[12](#note-12)</sup> | ✅ | ✅ |
 
 ## Notes
 
@@ -64,16 +64,11 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 6. <a id="note-6"></a>one person answers at their own terminal; there's nobody else to tell
 7. <a id="note-7"></a>a resolved prompt doesn't say who answered; input.resolved carries no responder
 8. <a id="note-8"></a>the card loses its buttons after a typed approval but doesn't say who approved
-9. <a id="note-9"></a>a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws
-10. <a id="note-10"></a>a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen
-11. <a id="note-11"></a>eve coalesces the queued reply with the later approve, which then matches no option
-12. <a id="note-12"></a>the TUI labels a sign-in with the tool name, not the challenge's displayName
-13. <a id="note-13"></a>outside a DM the bot says to continue in a direct message but never sends one
-14. <a id="note-14"></a>the channel has no default sign-in renderer
-15. <a id="note-15"></a>the rule applies only where the conversation is shared or private, and this one is public
-16. <a id="note-16"></a>the Teams sign-in card omits the challenge's user code
-17. <a id="note-17"></a>the rule applies only where the conversation is public or shared, and this one is private
-18. <a id="note-18"></a>the sign-in prompt, link included, is posted to the whole thread
-19. <a id="note-19"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
-20. <a id="note-20"></a>Slack sends the private sign-in prompt only for a challenge with a URL
-21. <a id="note-21"></a>the Teams sign-in card omits the challenge's instructions
+9. <a id="note-9"></a>a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen
+10. <a id="note-10"></a>eve coalesces the queued reply with the later approve, which then matches no option
+11. <a id="note-11"></a>outside a DM the bot says to continue in a direct message but never sends one
+12. <a id="note-12"></a>the channel has no default sign-in renderer
+13. <a id="note-13"></a>the rule applies only where the conversation is shared or private, and this one is public
+14. <a id="note-14"></a>the rule applies only where the conversation is public or shared, and this one is private
+15. <a id="note-15"></a>the sign-in prompt, link included, is posted to the whole thread
+16. <a id="note-16"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
