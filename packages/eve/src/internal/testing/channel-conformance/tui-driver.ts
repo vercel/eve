@@ -34,7 +34,20 @@ export function tuiDriver(): ClientDriver {
       });
       const run = new EveTUIRunner({ client: new Client({ host }), name: "tui", renderer }).run();
       const describe = () => `Screen:\n${screen.snapshot()}`;
-      await wait("the composer", () => (composerOpen(screen) ? true : undefined), describe);
+      try {
+        // Surfaces a runner that fails during startup instead of waiting out the timeout.
+        await Promise.race([
+          wait("the composer", () => (composerOpen(screen) ? true : undefined), describe),
+          run.then(() => {
+            throw new Error(`The TUI exited before its composer opened. ${describe()}`);
+          }),
+        ]);
+      } catch (error) {
+        // The caller only gets `close()` once `open()` resolves, so stop the runner here.
+        renderer.requestInterrupt();
+        await run.catch(() => {});
+        throw error;
+      }
 
       return {
         async say(text) {

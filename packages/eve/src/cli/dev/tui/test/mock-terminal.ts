@@ -334,12 +334,25 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     return startIndex + sequence.length;
   }
 
-  /** Tracks only intensity: 2 starts dim; 0, 1, and 22 end it. */
+  /**
+   * Tracks only intensity: 2 starts dim; 0 and 22 end it, as in a real terminal
+   * where bold (1) leaves faint on. Extended colors (38, 48, 58) carry a
+   * `5;n` or `2;r;g;b` payload whose numbers are not SGR codes.
+   */
   #applySgr(parameters: readonly string[]) {
-    for (const parameter of parameters.length === 0 ? ["0"] : parameters) {
-      const code = parameter === "" ? 0 : Number(parameter);
-      if (code === 2) this.#dim = true;
-      else if (code === 0 || code === 1 || code === 22) this.#dim = false;
+    const codes = (parameters.length === 0 ? [""] : parameters).map((parameter) =>
+      parameter === "" ? 0 : Number(parameter),
+    );
+    for (let index = 0; index < codes.length; index += 1) {
+      const code = codes[index];
+      if (code === 38 || code === 48 || code === 58) {
+        const mode = codes[index + 1];
+        index += mode === 5 ? 2 : mode === 2 ? 4 : 1;
+      } else if (code === 2) {
+        this.#dim = true;
+      } else if (code === 0 || code === 22) {
+        this.#dim = false;
+      }
     }
   }
 
