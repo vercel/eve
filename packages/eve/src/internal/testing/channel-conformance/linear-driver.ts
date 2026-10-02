@@ -3,6 +3,7 @@ import {
   type PlatformCall,
   type RenderedOption,
   recordingFetch,
+  linkTargets,
 } from "#internal/testing/channel-conformance/harness.js";
 import { linearChannel } from "#public/channels/linear/index.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
@@ -112,11 +113,31 @@ export function linearDriver(): ChannelDriver {
         .variables?.input;
       return input?.content?.type === "response" ? input.content.body : undefined;
     },
+    shownMessage(call) {
+      if (call.method !== "AgentActivityCreate") return undefined;
+      const input = (call.body as { readonly variables?: { readonly input?: LinearActivityInput } })
+        .variables?.input;
+      if (input?.content === undefined) return undefined;
+      const response = call.response as {
+        readonly data: {
+          readonly agentActivityCreate: { readonly agentActivity: { readonly id: string } };
+        };
+      };
+      return {
+        id: response.data.agentActivityCreate.agentActivity.id,
+        // An `auth` elicitation's sign-in link rides in its signal metadata.
+        links: linkTargets(input.signalMetadata),
+        // The driver can't press Linear's native select, so nothing here is pressable.
+        options: [],
+        text: input.content.body,
+      };
+    },
   };
 }
 
 interface LinearActivityInput {
   readonly content?: { readonly body: string; readonly type: string };
+  readonly signalMetadata?: unknown;
 }
 
 function parseVisibleOptions(body: string): RenderedOption[] {

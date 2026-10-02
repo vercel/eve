@@ -7,6 +7,7 @@ import {
   type RenderedOption,
   type Surface,
   recordingFetch,
+  linkTargets,
 } from "#internal/testing/channel-conformance/harness.js";
 
 let nextChannel = 0;
@@ -145,6 +146,7 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
       if (!isMessageWrite(call)) return undefined;
       return {
         id: (call.response as { readonly id: string }).id,
+        links: linkTargets((call.body as { readonly components?: unknown }).components),
         options: choicesOf(call),
         text: (call.body as { readonly content?: string }).content ?? "",
       };

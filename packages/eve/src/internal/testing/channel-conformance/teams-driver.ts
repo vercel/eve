@@ -5,6 +5,7 @@ import {
   type RenderedOption,
   type Surface,
   recordingFetch,
+  linkTargets,
 } from "#internal/testing/channel-conformance/harness.js";
 
 let nextConversation = 0;
@@ -132,6 +133,7 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
       );
       return {
         id: activityIdOf(call),
+        links: linkTargets(adaptiveCard(body)?.actions),
         options: cardOptions(call),
         text: [body.text ?? "", ...texts].join("\n"),
       };

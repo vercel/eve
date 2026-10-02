@@ -16,10 +16,18 @@ import {
   type PlatformCall,
   type Surface,
   numberedOptions,
+  linkTargets,
 } from "#internal/testing/channel-conformance/harness.js";
 
 const ADAPTER = "conformance";
 const PERSON = { fullName: "Alice", isBot: false, isMe: false, userId: "alice", userName: "alice" };
+/** The signed-in person a real integration would attach from its own user directory. */
+const PERSON_AUTH = {
+  attributes: {},
+  authenticator: "conformance",
+  principalId: "alice",
+  principalType: "user",
+};
 let nextThread = 0;
 
 interface CardNode {
@@ -87,6 +95,7 @@ export function chatSdkDriver(surface: Exclude<Surface, "public"> = "shared"): C
       const card = cardOf(call.body as AdapterPostableMessage);
       return {
         id: messageIdOf(call),
+        links: linkTargets(card),
         options: buttonsOf(call),
         text: card === undefined ? (driver.postedText(call) ?? "") : texts(card),
       };
@@ -179,17 +188,17 @@ function chatSdkDriverWith(input: {
       });
       if (dm) {
         bridge.bot.onDirectMessage(async (thread, message) => {
-          await bridge.send(message.text, { auth: null, context: [], thread });
+          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
         });
       } else {
         // The wiring docs/channels/chat-sdk.mdx shows: a mention starts the session, and
         // subscribing lets the rest of the thread continue it without one.
         bridge.bot.onNewMention(async (thread, message) => {
           await thread.subscribe();
-          await bridge.send(message.text, { auth: null, context: [], thread });
+          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
         });
         bridge.bot.onSubscribedMessage(async (thread, message) => {
-          await bridge.send(message.text, { auth: null, context: [], thread });
+          await bridge.send(message.text, { auth: PERSON_AUTH, context: [], thread });
         });
       }
       return bridge.channel;

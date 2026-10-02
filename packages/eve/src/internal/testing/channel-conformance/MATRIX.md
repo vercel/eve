@@ -11,143 +11,69 @@ recorded symptom. Regenerate it after changing either file:
 pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conformance/matrix -u
 ```
 
-✅ passes · ❌ broken · — not supported (the platform lacks a capability the rule
-needs, or the client declines it below)
+✅ passes · ❌ broken · — not supported
 
-| Rule | `chat-sdk` | `chat-sdk-text` | `chat-sdk-dm` | `discord` | `discord-dm` | `github` | `linear` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `tui` | `twilio` |
+| Rule | `tui` | `chat-sdk` | `chat-sdk-dm` | `chat-sdk-text` | `discord` | `discord-dm` | `linq` | `linq-dm` | `slack` | `slack-dm` | `teams` | `teams-dm` | `telegram` | `telegram-dm` | `github` | `linear` | `twilio` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| a rendered question shows every option a person can choose | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | ✅ | — | ✅ | ✅ |
-| pressing a rendered option answers the pending question with that option | ✅ | — | ✅ | ✅ | ✅ | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| a text reply matching an option answers the only pending question | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| a text reply that matches no option answers the question with the person's words | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| a text reply answers an open-ended question with the person's words | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| pressing an option of an answered question sends it to the agent as new input | ✅ | — | — | ✅ | — | — | — | — | — | ✅ | — | ✅ | — | ✅ | — | — | — |
-| pressing options of two pending questions answers each with its own option | ✅ | — | — | ✅ | — | — | — | — | — | ✅ | — | ✅ | — | ✅ | — | ✅ | — |
-| a text reply matching an option does not answer either of two pending questions | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| a tool approval shows a choice to approve and one to cancel | ✅ | ✅ | — | ✅ | — | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | ✅ | — | ✅ | ✅ |
-| pressing Approve runs the gated tool | ✅ | — | ✅ | ✅ | ✅ | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| pressing Approve twice runs the gated tool once | ✅ | — | — | ✅ | — | — | — | — | — | ✅ | — | ✅ | — | ✅ | — | ✅ | — |
-| pressing Approve on one of two pending approvals runs only that tool | ✅ | — | — | ✅ | — | — | — | — | — | ✅ | — | ✅ | — | ✅ | — | ✅ | — |
-| answering an approval and a question pending together settles both | ✅ | — | — | ✅ | — | — | — | — | — | ✅ | — | ✅ | — | ✅ | — | ✅ | — |
-| pressing Cancel stops the gated tool without running it | ✅ | — | — | ✅ | — | — | — | — | — | ✅ | — | ✅ | — | ✅ | — | ✅ | — |
-| a text reply of approve runs the gated tool | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
-| a text reply of cancel stops the gated tool without running it | ✅ | ✅ | ✅ | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
-| pressing an option clears the question's buttons | ✅ | — | — | ✅ | — | — | — | — | — | ✅ | — | ✅ | — | ✅ | — | ✅ | — |
-| answering a question by text clears its buttons | ✅ | — | ✅ | — | — | — | — | — | — | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | — |
-| pressing an option names who answered on the question | ❌ | — | — | ❌ | — | — | — | — | — | ✅ | — | ❌ | — | ❌ | — | — | — |
-| answering a question by text names who answered on the question | ❌ | — | ❌ | — | — | — | — | — | — | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | — |
-| pressing Approve clears the approval's buttons | ✅ | — | — | ✅ | — | — | — | — | — | ✅ | — | ✅ | — | ✅ | — | ✅ | — |
-| approving by text clears the approval's buttons | ✅ | — | ✅ | — | — | — | — | — | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | — |
-| pressing Approve names who approved on the approval | ❌ | — | — | ❌ | — | — | — | — | — | ✅ | — | ✅ | — | ❌ | — | — | — |
-| approving by text names who approved on the approval | ❌ | — | ❌ | — | — | — | — | — | — | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | — | — |
+| a rendered question shows every option a person can choose | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ |
+| pressing a rendered option answers the pending question with that option | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| a text reply matching an option answers the only pending question | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| a text reply that matches no option answers the question with the person's words | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| a text reply answers an open-ended question with the person's words | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| pressing an option of an answered question sends it to the agent as new input | —<sup>[3](#note-3)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| pressing options of two pending questions answers each with its own option | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| a text reply matching an option does not answer either of two pending questions | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| a tool approval shows a choice to approve and one to cancel | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ |
+| pressing Approve runs the gated tool | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| pressing Approve twice runs the gated tool once | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| pressing Approve on one of two pending approvals runs only that tool | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| answering an approval and a question pending together settles both | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| pressing Cancel stops the gated tool without running it | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| a text reply of approve runs the gated tool | —<sup>[4](#note-4)</sup> | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| a text reply of cancel stops the gated tool without running it | —<sup>[4](#note-4)</sup> | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| pressing an option clears the question's buttons | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| answering a question by text clears its buttons | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ❌<sup>[5](#note-5)</sup> | ❌<sup>[5](#note-5)</sup> | ✅ | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| pressing an option names who answered on the question | —<sup>[6](#note-6)</sup> | ❌<sup>[7](#note-7)</sup> |  | —<sup>[1](#note-1)</sup> | ❌<sup>[7](#note-7)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ❌<sup>[7](#note-7)</sup> |  | ❌<sup>[7](#note-7)</sup> |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| answering a question by text names who answered on the question | —<sup>[6](#note-6)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ❌<sup>[5](#note-5)</sup> | ❌<sup>[5](#note-5)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| pressing Approve clears the approval's buttons | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ✅ |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| approving by text clears the approval's buttons | —<sup>[4](#note-4)</sup> | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| pressing Approve names who approved on the approval | —<sup>[6](#note-6)</sup> | ❌<sup>[7](#note-7)</sup> |  | —<sup>[1](#note-1)</sup> | ❌<sup>[7](#note-7)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ❌<sup>[7](#note-7)</sup> |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| approving by text names who approved on the approval | —<sup>[4](#note-4)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ❌<sup>[8](#note-8)</sup> | ❌<sup>[8](#note-8)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | ❌<sup>[7](#note-7)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| running out of budget opens budget prompt | ✅ | ✅ |  | ✅ | ❌<sup>[9](#note-9)</sup> |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ |
+| pressing approve on budget prompt allows agent to continue | ✅ | ✅ |  | —<sup>[1](#note-1)</sup> | ❌<sup>[9](#note-9)</sup> |  | —<sup>[1](#note-1)</sup> |  | ✅ |  | ✅ |  | ✅ |  | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| reply of approve on budget prompt allows agent to continue | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| pressing stop on budget prompt halts work, next message asks again | ❌<sup>[10](#note-10)</sup> | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> | —<sup>[1](#note-1)</sup> |
+| reply of stop on budget prompt halts work, next message asks again | ❌<sup>[10](#note-10)</sup> | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| query sent during budget prompt answered after budget approval | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> | ❌<sup>[11](#note-11)</sup> |
+| a sign-in names the service and shows its sign-in link | ❌<sup>[12](#note-12)</sup> | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ❌<sup>[14](#note-14)</sup> | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | —<sup>[15](#note-15)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
+| a sign-in shows its confirmation code | ✅ | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ❌<sup>[14](#note-14)</sup> | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ✅ | ❌<sup>[16](#note-16)</sup> | ❌<sup>[16](#note-16)</sup> | ✅ | ✅ | —<sup>[15](#note-15)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
+| only the person signing in sees the sign-in link and code | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[17](#note-17)</sup> | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[17](#note-17)</sup> | ❌<sup>[18](#note-18)</sup> | —<sup>[17](#note-17)</sup> | ✅ | —<sup>[17](#note-17)</sup> | ✅ | ❌<sup>[19](#note-19)</sup> | —<sup>[17](#note-17)</sup> |
+| a sign-in without a link shows its instructions | ✅ | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ❌<sup>[14](#note-14)</sup> | ❌<sup>[13](#note-13)</sup> | ✅ | ❌<sup>[20](#note-20)</sup> | ❌<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
+| after signing in, the agent carries on with the request | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ |
+| completing a sign-in tells the person it succeeded | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ❌<sup>[14](#note-14)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
+| message after ignored sign-in gets an answer, signing in late doesn't run | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
 
-## Broken
+## Notes
 
-- **chat-sdk**, pressing an option names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **chat-sdk**, answering a question by text names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **chat-sdk**, pressing Approve names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **chat-sdk**, approving by text names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **chat-sdk-dm**, answering a question by text names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **chat-sdk-dm**, approving by text names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **discord**, pressing an option names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **discord**, pressing Approve names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **slack**, answering a question by text clears its buttons: only the button interaction handler edits a question; a typed answer leaves it
-- **slack**, answering a question by text names who answered on the question: only the button interaction handler edits a question; a typed answer leaves it
-- **slack**, approving by text names who approved on the approval: the card loses its buttons after a typed approval but doesn't say who approved
-- **slack-dm**, answering a question by text clears its buttons: only the button interaction handler edits a question; a typed answer leaves it
-- **slack-dm**, answering a question by text names who answered on the question: only the button interaction handler edits a question; a typed answer leaves it
-- **slack-dm**, approving by text names who approved on the approval: the card loses its buttons after a typed approval but doesn't say who approved
-- **teams**, pressing an option names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **teams**, answering a question by text names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **teams**, approving by text names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **teams-dm**, answering a question by text names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **teams-dm**, approving by text names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **telegram**, pressing an option names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **telegram**, answering a question by text names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **telegram**, pressing Approve names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **telegram**, approving by text names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **telegram-dm**, answering a question by text names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
-- **telegram-dm**, approving by text names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
-
-## Declined
-
-- **chat-sdk-dm**, a rendered question shows every option a person can choose: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, pressing an option of an answered question sends it to the agent as new input: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, pressing options of two pending questions answers each with its own option: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, a tool approval shows a choice to approve and one to cancel: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, pressing Approve twice runs the gated tool once: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, pressing Approve on one of two pending approvals runs only that tool: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, answering an approval and a question pending together settles both: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, pressing Cancel stops the gated tool without running it: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, pressing an option clears the question's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, pressing an option names who answered on the question: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, pressing Approve clears the approval's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **chat-sdk-dm**, pressing Approve names who approved on the approval: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, a rendered question shows every option a person can choose: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, pressing an option of an answered question sends it to the agent as new input: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, pressing options of two pending questions answers each with its own option: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, a tool approval shows a choice to approve and one to cancel: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, pressing Approve twice runs the gated tool once: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, pressing Approve on one of two pending approvals runs only that tool: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, answering an approval and a question pending together settles both: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, pressing Cancel stops the gated tool without running it: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, pressing an option clears the question's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, pressing an option names who answered on the question: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, pressing Approve clears the approval's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **discord-dm**, pressing Approve names who approved on the approval: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, a rendered question shows every option a person can choose: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, pressing an option of an answered question sends it to the agent as new input: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, pressing options of two pending questions answers each with its own option: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, a tool approval shows a choice to approve and one to cancel: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, pressing Approve twice runs the gated tool once: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, pressing Approve on one of two pending approvals runs only that tool: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, answering an approval and a question pending together settles both: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, pressing Cancel stops the gated tool without running it: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, pressing an option clears the question's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, pressing an option names who answered on the question: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, pressing Approve clears the approval's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **linq-dm**, pressing Approve names who approved on the approval: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, a rendered question shows every option a person can choose: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, pressing an option of an answered question sends it to the agent as new input: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, pressing options of two pending questions answers each with its own option: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, a tool approval shows a choice to approve and one to cancel: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, pressing Approve twice runs the gated tool once: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, pressing Approve on one of two pending approvals runs only that tool: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, answering an approval and a question pending together settles both: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, pressing Cancel stops the gated tool without running it: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, pressing an option clears the question's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, pressing an option names who answered on the question: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, pressing Approve clears the approval's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **slack-dm**, pressing Approve names who approved on the approval: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, a rendered question shows every option a person can choose: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, pressing an option of an answered question sends it to the agent as new input: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, pressing options of two pending questions answers each with its own option: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, a tool approval shows a choice to approve and one to cancel: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, pressing Approve twice runs the gated tool once: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, pressing Approve on one of two pending approvals runs only that tool: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, answering an approval and a question pending together settles both: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, pressing Cancel stops the gated tool without running it: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, pressing an option clears the question's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, pressing an option names who answered on the question: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, pressing Approve clears the approval's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **teams-dm**, pressing Approve names who approved on the approval: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, a rendered question shows every option a person can choose: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, pressing an option of an answered question sends it to the agent as new input: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, pressing options of two pending questions answers each with its own option: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, a tool approval shows a choice to approve and one to cancel: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, pressing Approve twice runs the gated tool once: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, pressing Approve on one of two pending approvals runs only that tool: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, answering an approval and a question pending together settles both: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, pressing Cancel stops the gated tool without running it: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, pressing an option clears the question's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, pressing an option names who answered on the question: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, pressing Approve clears the approval's buttons: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **telegram-dm**, pressing Approve names who approved on the approval: it doesn't vary between a shared thread and a DM, and the shared-thread column covers it
-- **tui**, pressing an option of an answered question sends it to the agent as new input: an answered question's drawer closes, so nothing is left to press
-- **tui**, a text reply of approve runs the gated tool: the approval drawer holds the keyboard; a person answers it with y or n
-- **tui**, a text reply of cancel stops the gated tool without running it: the approval drawer holds the keyboard; a person answers it with y or n
-- **tui**, pressing an option names who answered on the question: one person answers at their own terminal; there's nobody else to tell
-- **tui**, answering a question by text names who answered on the question: one person answers at their own terminal; there's nobody else to tell
-- **tui**, approving by text clears the approval's buttons: the approval drawer holds the keyboard; a person answers it with y or n
-- **tui**, pressing Approve names who approved on the approval: one person answers at their own terminal; there's nobody else to tell
-- **tui**, approving by text names who approved on the approval: the approval drawer holds the keyboard; a person answers it with y or n
+1. <a id="note-1"></a>the platform has no buttons a person can press
+2. <a id="note-2"></a>the platform has no plain-text replies
+3. <a id="note-3"></a>an answered question's drawer closes, so nothing is left to press
+4. <a id="note-4"></a>the approval drawer holds the keyboard; a person answers it with y or n
+5. <a id="note-5"></a>only the button interaction handler edits a question; a typed answer leaves it
+6. <a id="note-6"></a>one person answers at their own terminal; there's nobody else to tell
+7. <a id="note-7"></a>a resolved prompt doesn't say who answered; input.resolved carries no responder
+8. <a id="note-8"></a>the card loses its buttons after a typed approval but doesn't say who approved
+9. <a id="note-9"></a>a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws
+10. <a id="note-10"></a>a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen
+11. <a id="note-11"></a>eve coalesces the queued reply with the later approve, which then matches no option
+12. <a id="note-12"></a>the TUI labels a sign-in with the tool name, not the challenge's displayName
+13. <a id="note-13"></a>outside a DM the bot says to continue in a direct message but never sends one
+14. <a id="note-14"></a>the channel has no default sign-in renderer
+15. <a id="note-15"></a>the rule applies only where the conversation is shared or private, and this one is public
+16. <a id="note-16"></a>the Teams sign-in card omits the challenge's user code
+17. <a id="note-17"></a>the rule applies only where the conversation is public or shared, and this one is private
+18. <a id="note-18"></a>the sign-in prompt, link included, is posted to the whole thread
+19. <a id="note-19"></a>the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified
+20. <a id="note-20"></a>Slack sends the private sign-in prompt only for a challenge with a URL
+21. <a id="note-21"></a>the Teams sign-in card omits the challenge's instructions

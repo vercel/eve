@@ -8,6 +8,7 @@ import {
   type PlatformCall,
   type RenderedOption,
   recordingFetch,
+  linkTargets,
 } from "#internal/testing/channel-conformance/harness.js";
 import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 
@@ -45,6 +46,8 @@ interface PressHandle {
 
 interface SlackMessageBody {
   readonly blocks?: readonly unknown[];
+  /** Replies post Markdown here, with `text` as the plain fallback. */
+  readonly markdown_text?: string;
   readonly text?: string;
   readonly ts?: string;
 }
@@ -161,8 +164,10 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
       const id = messageTsOf(call);
       return {
         id,
+        links: linkTargets(body.blocks ?? []),
+        onlyPerson: call.method === "chat.postEphemeral",
         options: hitlOptions(body.blocks ?? [], id),
-        text: [body.text ?? "", ...blockTexts(body.blocks ?? [])].join("\n"),
+        text: [body.markdown_text ?? body.text ?? "", ...blockTexts(body.blocks ?? [])].join("\n"),
       };
     },
     personShownAs: [`<@${PERSON}>`],
@@ -195,8 +200,13 @@ export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
   };
 }
 
+/** A message write a person sees; an ephemeral one only they see, such as a private sign-in. */
 function isMessageWrite(call: PlatformCall): boolean {
-  return call.method === "chat.postMessage" || call.method === "chat.update";
+  return (
+    call.method === "chat.postMessage" ||
+    call.method === "chat.postEphemeral" ||
+    call.method === "chat.update"
+  );
 }
 
 /** A post's ts comes back from Slack; an update names the ts it rewrites. */

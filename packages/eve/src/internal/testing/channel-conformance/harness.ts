@@ -8,7 +8,6 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createAttachSessionFn, type Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
-import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
 import { z } from "#compiled/zod/index.js";
 import { always } from "#tools/approval/policies.js";
@@ -17,6 +16,15 @@ import { askQuestion } from "#tools/provided/ask-question.js";
 import { defineWorkflowTool } from "#public/tools/index.js";
 import { askDayAndTimeWorkflow } from "#internal/testing/channel-conformance/two-questions-workflow.js";
 import { getWorld } from "#internal/workflow/runtime.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
+import {
+  type ConnectionAuthorizationChallenge,
+  ConnectionAuthorizationRequiredError,
+} from "#connections/errors.js";
+import { handleConnectionCallbackRequest } from "#execution/connections/callback-route.js";
+import type { RouteContext } from "#public/definitions/channel.js";
+import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
+import { defineInteractiveAuthorization } from "#shared/connection-types.js";
 
 /** One outbound call a channel made to its platform API. */
 export interface PlatformCall {
@@ -50,6 +58,30 @@ export interface ShownMessage {
   readonly text: string;
   /** The choices the message still lets a person press. */
   readonly options: readonly RenderedOption[];
+  /** Where the message's link buttons lead, such as a sign-in URL. */
+  readonly links?: readonly string[];
+  /**
+   * Only the person sees it, though others can see the conversation, such as
+   * Slack's ephemeral messages.
+   */
+  readonly onlyPerson?: boolean;
+}
+
+/** What a client shows a person, and whether anyone else in the conversation sees it too. */
+export interface ShownText {
+  readonly text: string;
+  readonly onlyPerson: boolean;
+  /** The choices it lets a person press. */
+  readonly options: readonly RenderedOption[];
+}
+
+/** Every `url` string anywhere in a message payload: the targets of its link buttons. */
+export function linkTargets(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(linkTargets);
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, child]) =>
+    key === "url" && typeof child === "string" ? [child] : linkTargets(child),
+  );
 }
 
 /**
@@ -109,7 +141,8 @@ export interface ChannelDriver {
   /**
    * The message one outbound call posts or edits, as a person sees it
    * afterward. Required with the `buttons` capability, since rules check how
-   * an answered prompt's message changes.
+   * an answered prompt's message changes. Without it, what a person sees is
+   * {@link postedText}.
    */
   shownMessage?(call: PlatformCall): ShownMessage | undefined;
   /** How the person driving the conversation appears in the platform's text, in any form. */
@@ -141,6 +174,23 @@ export interface ChannelConversation {
   waitForToolResult(tool: string): Promise<unknown>;
   /** Waits until the bot replies to input that carried `text`, however the channel framed it. */
   waitForReplyTo(text: string): Promise<void>;
+  /** How many test-model replies, plain or reporting a tool result, the bot has shown. */
+  replyCount(): number;
+  /** Waits for the bot to show a test-model reply, plain or reporting a tool result. */
+  waitForReply(): Promise<void>;
+  /** Waits for the bot to show text matching `pattern`, returning the text that matched. */
+  waitForShown(pattern: string | RegExp): Promise<string>;
+  /** Everything the bot has shown that everyone in the conversation sees, joined. */
+  sharedText(): string;
+  /** Every choice the bot's messages let a person press now, newest message first. */
+  shownOptions(): readonly RenderedOption[];
+  /** Waits for the turn to hold for a sign-in, however the channel shows it. */
+  waitForSignIn(): Promise<void>;
+  /**
+   * Finishes the oldest unfinished sign-in as the provider would: by
+   * redirecting the person's browser to eve's callback URL with a code.
+   */
+  completeSignIn(): Promise<void>;
   /** Waits until the bot's reply shows `tool` ran or was denied. */
   waitForToolOutcome(tool: string): Promise<ToolOutcome>;
   /** Waits until every session has stopped working and waits only on a person. */
@@ -155,6 +205,7 @@ export interface ChannelConversation {
   shownPrompt(prompt: string): ShownMessage;
   /** How the person appears in the platform's text, in any form. */
   readonly personShownAs: readonly string[];
+  runsOf(tool: CountedTool): number;
 }
 
 /**
@@ -190,6 +241,8 @@ export interface ClientView {
   shownPrompt?(prompt: string): ShownMessage;
   /** How the person appears in the client's text, in any form. */
   readonly personShownAs?: readonly string[];
+  /** Everything the client shows now that a person can read or open, one entry per message. */
+  shown(): readonly ShownText[];
   /** What the client shows now, for timeout errors. */
   describe(): string;
   /** Stops the client and releases anything it holds, such as its event stream. */
@@ -229,6 +282,50 @@ export const SECOND_GATED_TOOL = "publish_notes";
 
 export type GatedTool = typeof GATED_TOOL | typeof SECOND_GATED_TOOL;
 
+/** The test agent's plain tool: it runs without asking anyone. */
+export const PLAIN_TOOL = "look_up_notes";
+
+/** The test agent's tools that need the person to sign in to a provider before they run. */
+export const SIGN_IN_TOOLS = {
+  /** A browser sign-in that also shows a confirmation code. */
+  read_calendar: {
+    displayName: "Calendar",
+    instructions: "Sign in to let the agent read your calendar.",
+    url: "https://idp.example/authorize?client_id=eve-conformance",
+    userCode: "WDJB-MJHT",
+  },
+  /** A sign-in confirmed out of band, with nothing to open. */
+  read_mail: {
+    displayName: "Mail",
+    instructions: "Approve the sign-in request in the Mail app on your phone.",
+  },
+} as const satisfies Record<string, ConnectionAuthorizationChallenge>;
+
+export type SignInTool = keyof typeof SIGN_IN_TOOLS;
+
+/** A tool whose runs a rule can count. */
+export type CountedTool = GatedTool | SignInTool | typeof PLAIN_TOOL;
+
+/** The code the fake provider hands back when a person finishes signing in. */
+const SIGN_IN_CODE = "conformance-code";
+
+/**
+ * The person a client driver's eve channel authenticates. Sign-ins are
+ * user-scoped, so the channel must map its caller to a user principal.
+ */
+const CLIENT_PERSON = {
+  attributes: {},
+  authenticator: "conformance",
+  principalId: "alice",
+  principalType: "user",
+} as const;
+
+export interface ConversationOptions {
+  /** The test agent's session usage limits. */
+  readonly limits?: AgentLimitsDefinition;
+  readonly waitTimeoutMs?: number;
+}
+
 /** The test agent's tool that asks {@link DAY_PROMPT} and {@link TIME_PROMPT} at once. */
 export const TWO_QUESTIONS_TOOL = "plan_review";
 
@@ -261,13 +358,14 @@ export function recordingFetch(
 export async function withChannelConversation(
   driver: ChannelDriver | ClientDriver,
   body: (conversation: ChannelConversation) => Promise<void>,
-  options: { readonly waitTimeoutMs?: number } = {},
+  options: ConversationOptions = {},
 ): Promise<void> {
   const waitTimeoutMs = options.waitTimeoutMs ?? WAIT_TIMEOUT_MS;
   const wait: Wait = (label, select, describe) =>
     poll(`${label} on ${driver.name}`, select, describe, waitTimeoutMs);
   if (isClientDriver(driver)) {
-    await converse(driver.name, "eve", eveChannel({ auth: none() }), body, wait, (dispatch) =>
+    const channel = eveChannel({ auth: () => CLIENT_PERSON });
+    await converse(driver.name, "eve", channel, body, options, wait, (dispatch) =>
       openClient(driver, dispatch, wait),
     );
     return;
@@ -275,7 +373,7 @@ export async function withChannelConversation(
   const calls: PlatformCall[] = [];
   try {
     const channel = driver.createChannel((call) => void calls.push(call));
-    await converse(driver.name, driver.name, channel, body, wait, async (dispatch) =>
+    await converse(driver.name, driver.name, channel, body, options, wait, async (dispatch) =>
       webhookView(driver, calls, dispatch, wait),
     );
   } finally {
@@ -318,6 +416,8 @@ function webhookView(
     if (!response.ok) throw new Error(`${driver.name} webhook answered ${response.status}.`);
   }
   const describe = () => `Platform calls:\n${JSON.stringify(calls, null, 2)}`;
+  /** Where each prompt may next appear: after the call it was last found in. */
+  const promptsFrom = new Map<string, number>();
 
   return {
     say: (text) => post(driver.message(text)),
@@ -326,10 +426,15 @@ function webhookView(
       wait(
         `one of the questions ${JSON.stringify(prompts)}`,
         () => {
-          for (const call of calls) {
+          for (const [index, call] of calls.entries()) {
             for (const prompt of prompts) {
+              if (index < (promptsFrom.get(prompt) ?? 0)) continue;
               const options = driver.findOptions(call, prompt);
-              if (options !== undefined) return { options, prompt };
+              if (options === undefined) continue;
+              // After a prompt is asked, an optionless match is an edit of the answered message.
+              if (promptsFrom.has(prompt) && options.length === 0) continue;
+              promptsFrom.set(prompt, index + 1);
+              return { options, prompt };
             }
           }
           return undefined;
@@ -351,6 +456,16 @@ function webhookView(
         .at(-1)!;
     },
     personShownAs: driver.personShownAs ?? [],
+    shown: () =>
+      calls.flatMap((call) => {
+        const shown = driver.shownMessage?.(call);
+        if (shown !== undefined) {
+          const text = [shown.text, ...(shown.links ?? [])].join("\n");
+          return [{ onlyPerson: shown.onlyPerson === true, options: shown.options, text }];
+        }
+        const text = driver.postedText(call);
+        return text === undefined ? [] : [{ onlyPerson: false, options: [], text }];
+      }),
     describe,
     close: async () => {},
   };
@@ -392,16 +507,73 @@ async function converse(
   channelName: string,
   created: unknown,
   body: (conversation: ChannelConversation) => Promise<void>,
+  options: ConversationOptions,
   wait: Wait,
   open: (dispatch: Dispatch) => Promise<ClientView>,
 ): Promise<void> {
   if (!isCompiledChannel(created)) throw new Error(`${label} is not a compiled channel.`);
   const channel: CompiledChannel = created;
-  const runs: Record<GatedTool, number> = { [GATED_TOOL]: 0, [SECOND_GATED_TOOL]: 0 };
+  const runs: Record<CountedTool, number> = {
+    [GATED_TOOL]: 0,
+    [SECOND_GATED_TOOL]: 0,
+    [PLAIN_TOOL]: 0,
+    read_calendar: 0,
+    read_mail: 0,
+  };
+  /** eve's callback URL for each sign-in started, as the provider received it. */
+  const signInCallbacks: string[] = [];
+
+  function signInTool(name: SignInTool) {
+    let token: string | undefined;
+    const auth = defineInteractiveAuthorization({
+      async getToken() {
+        if (token === undefined) throw new ConnectionAuthorizationRequiredError(name);
+        return { token };
+      },
+      async startAuthorization({ callbackUrl }) {
+        signInCallbacks.push(callbackUrl);
+        return { challenge: SIGN_IN_TOOLS[name] };
+      },
+      async completeAuthorization({ callback }) {
+        if (callback.params.code !== SIGN_IN_CODE) throw new Error("Unexpected sign-in code.");
+        token = `${name}-token`;
+        return { token };
+      },
+    });
+    return {
+      logicalPath: `tools/${name}.ts`,
+      loadNamespace: async () => ({
+        default: defineTool({
+          description: `Reads the person's ${SIGN_IN_TOOLS[name].displayName}. Only call when asked to use ${name}.`,
+          async execute(_input, ctx) {
+            await ctx.getToken(auth, { authKey: name });
+            runs[name] += 1;
+            return { signedIn: true };
+          },
+          inputSchema: z.object({}),
+        }),
+      }),
+    };
+  }
 
   const runtime = await createTestRuntime({
-    agent: { name: `${label}-hitl-conformance` },
+    agent: { limits: options.limits, name: `${label}-hitl-conformance` },
     modules: [
+      {
+        logicalPath: `tools/${PLAIN_TOOL}.ts`,
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: `Looks up meeting notes. Only call when asked to use ${PLAIN_TOOL}.`,
+            execute: async () => {
+              runs[PLAIN_TOOL] += 1;
+              return { notes: "Bob's review notes" };
+            },
+            inputSchema: z.object({}),
+          }),
+        }),
+      },
+      signInTool("read_calendar"),
+      signInTool("read_mail"),
       {
         logicalPath: "tools/ask_question.ts",
         loadNamespace: async () => ({ default: askQuestion() }),
@@ -514,6 +686,10 @@ async function converse(
         },
         view.describe,
       );
+    const replyCount = () =>
+      view.replies().filter((reply) => isMockReplyTo(reply, "") || reply.startsWith("Used "))
+        .length;
+    let signInsCompleted = 0;
 
     const conversation: ChannelConversation = {
       async say(text) {
@@ -548,6 +724,52 @@ async function converse(
           if (output !== undefined) return { kind: "ran", output };
           return isMockDenialReply(reply) ? { kind: "denied" } : undefined;
         }),
+      replyCount,
+      waitForReply: async () =>
+        void (await wait("a reply", () => (replyCount() > 0 ? true : undefined), view.describe)),
+      waitForShown: (pattern) =>
+        wait(
+          `the bot to show ${String(pattern)}`,
+          () =>
+            view
+              .shown()
+              .map(({ text }) => text)
+              .find((text) =>
+                typeof pattern === "string" ? text.includes(pattern) : pattern.test(text),
+              ),
+          view.describe,
+        ),
+      shownOptions: () =>
+        view
+          .shown()
+          .toReversed()
+          .flatMap(({ options }) => options),
+      sharedText: () =>
+        view
+          .shown()
+          .filter((shown) => !shown.onlyPerson)
+          .map(({ text }) => text)
+          .join("\n"),
+      waitForSignIn: async () =>
+        void (await wait(
+          "the turn to hold for a sign-in",
+          async () => {
+            for (const session of sessions.values()) {
+              if (await holdsFor(session, isSignIn)) return true;
+            }
+            return undefined;
+          },
+          () => "",
+        )),
+      async completeSignIn() {
+        const callbackUrl = await wait(
+          "a sign-in callback URL",
+          () => signInCallbacks.at(signInsCompleted),
+          () => "",
+        );
+        signInsCompleted += 1;
+        await deliverSignInCallback(callbackUrl);
+      },
       runsOf: (tool) => runs[tool],
       waitForRest: () => waitForRest([...sessions.values()], wait),
       shownPrompt(prompt) {
@@ -587,7 +809,7 @@ async function converse(
         `the turn to hold for "${prompt}"`,
         async () => {
           for (const session of sessions.values()) {
-            if (await holdsFor(session, prompt)) return true;
+            if (await holdsFor(session, asks(prompt))) return true;
           }
           return undefined;
         },
@@ -706,27 +928,41 @@ async function waitForRest(sessions: readonly Session[], wait: Wait): Promise<vo
   );
 }
 
+/** Whether an event asks the person `prompt`. */
+const asks = (prompt: string) => (event: MessageStreamEvent) =>
+  event.type === "input.requested" &&
+  event.data.requests.some((request) => request.prompt === prompt);
+
+/** Whether an event asks the person to sign in. */
+const isSignIn = (event: MessageStreamEvent) => event.type === "authorization.required";
+
 /**
- * Whether the turn held for input after it last asked `prompt`. The turn emits
- * `turn.waiting` after each request, or once after requests raised together.
+ * Whether the session held for the person after it last emitted an event
+ * `asked` matches. A question, approval, or sign-in parks the open turn
+ * (`turn.waiting`) after each request, or once after requests raised
+ * together; a session-limit prompt ends the turn (`session.waiting`).
  */
-async function holdsFor(session: Session, prompt: string): Promise<boolean> {
+async function holdsFor(
+  session: Session,
+  asked: (event: MessageStreamEvent) => boolean,
+): Promise<boolean> {
   const tail = await session.getStreamTailIndex();
   if (tail < 0) return false;
   const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
-  let asked = false;
+  let seen = false;
   let held = false;
   try {
     for (let index = 0; index <= tail; index += 1) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (
-        value.type === "input.requested" &&
-        value.data.requests.some((request) => request.prompt === prompt)
-      ) {
-        asked = true;
+      if (asked(value)) {
+        seen = true;
         held = false;
-      } else if (asked && value.type === "turn.waiting" && value.data.on === "input") {
+      } else if (
+        seen &&
+        ((value.type === "turn.waiting" && value.data.on === "input") ||
+          value.type === "session.waiting")
+      ) {
         held = true;
       }
     }
@@ -802,6 +1038,30 @@ export function readMockToolReply(text: string, tool: string): unknown {
  */
 function isMockReplyTo(text: string, message: string): boolean {
   return text.startsWith("Bootstrap reply") && text.includes(message);
+}
+
+/**
+ * Delivers the provider's redirect to eve's framework callback route. A
+ * callback for a sign-in eve no longer waits on is answered `404`, which a
+ * person would see as an error page; rules assert what follows instead.
+ */
+async function deliverSignInCallback(callbackUrl: string): Promise<void> {
+  const url = new URL(callbackUrl);
+  url.searchParams.set("code", SIGN_IN_CODE);
+  const segments = url.pathname.split("/");
+  const at = segments.lastIndexOf("callback");
+  const [name, attemptId, token] = [at - 1, at + 1, at + 2].map((index) =>
+    decodeURIComponent(segments[index] ?? ""),
+  );
+  const context: RouteContext = {
+    params: { attemptId, name, token } as Record<string, string>,
+    requestIp: null,
+    waitUntil: () => {},
+  };
+  const response = await handleConnectionCallbackRequest(new Request(url), context);
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`The sign-in callback answered ${response.status}.`);
+  }
 }
 
 /** The test model reports a denied call's `execution-denied` result in its reply. */

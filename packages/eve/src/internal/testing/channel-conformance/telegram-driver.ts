@@ -5,6 +5,7 @@ import {
   type RenderedOption,
   type Surface,
   recordingFetch,
+  linkTargets,
 } from "#internal/testing/channel-conformance/harness.js";
 
 const SECRET = "telegram-conformance-secret";
@@ -17,6 +18,8 @@ interface InlineButton {
 }
 
 interface MessageBody {
+  /** Shows the message to one member of a group only. */
+  readonly ephemeral_message_parameters?: unknown;
   readonly message_id?: number;
   readonly reply_markup?: { readonly inline_keyboard?: readonly InlineButton[][] };
   readonly text?: string;
@@ -138,6 +141,8 @@ export function telegramDriver(surface: Exclude<Surface, "public"> = "shared"): 
       if (!MESSAGE_WRITES.has(call.method)) return undefined;
       return {
         id: String(messageIdOf(call)),
+        links: linkTargets((call.body as { readonly reply_markup?: unknown }).reply_markup),
+        onlyPerson: (call.body as MessageBody).ephemeral_message_parameters !== undefined,
         // Telegram drops a message's inline keyboard when an edit omits `reply_markup`.
         options: inlineOptions(call),
         text: (call.body as MessageBody).text ?? "",
