@@ -51,8 +51,8 @@ pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conform
 | a sign-in without a link shows its instructions | ✅ | ❌<sup>[13](#note-13)</sup> | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ❌<sup>[14](#note-14)</sup> | ❌<sup>[13](#note-13)</sup> | ✅ | ❌<sup>[20](#note-20)</sup> | ❌<sup>[20](#note-20)</sup> | ❌<sup>[21](#note-21)</sup> | ❌<sup>[21](#note-21)</sup> | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
 | after signing in, the agent carries on with the request | ✅ | ✅ |  | ✅ | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ |  | ✅ | ✅ | ✅ |
 | completing a sign-in tells the person it succeeded | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ❌<sup>[14](#note-14)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
-| moving on from a sign-in gets an answer, and signing in late doesn't run the dropped request | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| moving on from a sign-in tells the person it was cancelled | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
+| message after ignored sign-in gets an answer, signing in late doesn't run | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| message after ignored sign-in tells user it was cancelled | ✅ | ✅ | ✅ | ✅ | —<sup>[2](#note-2)</sup> | —<sup>[2](#note-2)</sup> | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌<sup>[14](#note-14)</sup> | ✅ | ❌<sup>[14](#note-14)</sup> |
 
 ## Notes
 

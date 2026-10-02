@@ -680,7 +680,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "moving on from a sign-in gets an answer, and signing in late doesn't run the dropped request",
+    rule: "message after ignored sign-in gets an answer, signing in late doesn't run",
     source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
@@ -697,7 +697,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "moving on from a sign-in tells the person it was cancelled",
+    rule: "message after ignored sign-in tells user it was cancelled",
     source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,

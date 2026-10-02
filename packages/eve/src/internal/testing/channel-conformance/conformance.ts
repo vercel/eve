@@ -251,7 +251,7 @@ const hitlConformance = {
         ...noSignInRenderer(
           "a sign-in without a link shows its instructions",
           "completing a sign-in tells the person it succeeded",
-          "moving on from a sign-in tells the person it was cancelled",
+          "message after ignored sign-in tells user it was cancelled",
         ),
       },
     },
@@ -315,7 +315,7 @@ const hitlConformance = {
           "a sign-in shows its confirmation code",
           "a sign-in without a link shows its instructions",
           "completing a sign-in tells the person it succeeded",
-          "moving on from a sign-in tells the person it was cancelled",
+          "message after ignored sign-in tells user it was cancelled",
         ),
       },
     },
