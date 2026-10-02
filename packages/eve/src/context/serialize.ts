@@ -87,9 +87,10 @@ export async function deserializeContext(
 }
 
 /**
- * Admits a context written before mount-scoped state (eve 0.68 and earlier)
- * only when every value keeps an owner in this deployment. Extension state
- * moves to its mount's key when exactly one mount uses its package namespace.
+ * Admits a context written before mount-scoped state (eve 0.68 and earlier).
+ * Extension state moves to its mount's key when exactly one mount uses its
+ * package namespace. State that no mount could own was removed from this
+ * deployment and is dropped as in the current layout; ambiguous state refuses.
  */
 async function adoptLegacyStateLayout(
   data: Record<string, unknown>,
@@ -114,6 +115,10 @@ async function adoptLegacyStateLayout(
         ? [mountedStateKeyName(mount.mountId, name.slice(prefix.length))]
         : [];
     });
+    if (owners.length === 0) {
+      adopted[name] = value;
+      continue;
+    }
     const [mounted] = owners;
     if (
       owners.length !== 1 ||

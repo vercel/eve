@@ -35,17 +35,10 @@ describe("deserializeContext", () => {
 });
 
 describe("state layout admission", () => {
-  it("rejects unmarked legacy keys before dropping their values", async () => {
-    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+  it("rejects reserved mount names in an unmarked legacy context", async () => {
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
     const deserialize = vi.spyOn(BundleKey.codec!, "deserialize").mockResolvedValue(bundle);
-    const loadManifest = vi
-      .spyOn(manifestLoader, "loadCompiledManifest")
-      .mockResolvedValue(manifest);
     try {
-      await expect(
-        deserializeContext({ "eve.bundle": {}, "acme-crm.requests": 4 }),
-      ).rejects.toThrow("Incompatible context state layout");
       // Registration in a previous graph must not turn a reserved legacy authored name
       // into proof that it belongs to the new layout.
       new ContextKey("eve:mount.v1:extensions%2Fcrm:requests");
@@ -57,7 +50,6 @@ describe("state layout admission", () => {
       ).rejects.toThrow("Incompatible context state layout");
     } finally {
       deserialize.mockRestore();
-      loadManifest.mockRestore();
     }
   });
 
@@ -93,7 +85,7 @@ describe("state layout admission", () => {
     }
   });
 
-  it("preserves unchanged application state regardless of prior module registrations", async () => {
+  it("keeps declared legacy application state and drops state the deployment removed", async () => {
     const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
     const name = "test.legacy.app-owned";
@@ -104,17 +96,23 @@ describe("state layout admission", () => {
     const loadManifest = vi
       .spyOn(manifestLoader, "loadCompiledManifest")
       .mockResolvedValue(manifest);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const restored = await deserializeContext({ "eve.bundle": {}, [name]: 4 });
+      const restored = await deserializeContext({
+        "eve.bundle": {},
+        [name]: 4,
+        "test.legacy.removed": { phase: "none" },
+      });
       expect(restored.get(BundleKey)).toBe(bundle);
-      // The registered key is retained; an unregistered name still refuses the restore.
-      expect([...restored.entries()].map(([key]) => key.name)).toContain(name);
-      await expect(
-        deserializeContext({ "eve.bundle": {}, "test.legacy.unknown": 4 }),
-      ).rejects.toThrow("Incompatible context state layout");
+      expect([...restored.entries()].map(([key]) => key.name)).toEqual(["eve.bundle", name]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("dropping unknown context key"),
+        expect.objectContaining({ key: "test.legacy.removed" }),
+      );
     } finally {
       deserialize.mockRestore();
       loadManifest.mockRestore();
+      warn.mockRestore();
     }
   });
 
