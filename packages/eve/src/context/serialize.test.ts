@@ -4,7 +4,7 @@ import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import { compileFromMemory } from "#internal/testing/compile-from-memory.js";
 import { ContextContainer } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { defineState } from "#public/definitions/state.js";
+import { defineMountedState, defineState } from "#public/definitions/state.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
@@ -61,25 +61,32 @@ describe("state layout admission", () => {
     }
   });
 
-  it("admits an unmarked checkpoint only when its graph has no mounts", async () => {
+  it("moves legacy extension state to the one mount that owns its package", async () => {
     const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
-    const deserialize = vi.spyOn(BundleKey.codec!, "deserialize").mockResolvedValue(bundle);
+    const deserialize = vi.spyOn(BundleKey.codec!, "deserialize").mockImplementation(async () => {
+      defineMountedState("extensions/crm", "requests", () => 0);
+      return bundle;
+    });
+    const mount = (mountId: string) =>
+      ({ mountId, packageName: "@acme/crm" }) as (typeof manifest.extensionMounts)[number];
     const loadManifest = vi
       .spyOn(manifestLoader, "loadCompiledManifest")
-      .mockResolvedValue(manifest);
+      .mockResolvedValue({ ...manifest, extensionMounts: [mount("extensions/crm")] });
     try {
-      const restored = await deserializeContext({ "eve.bundle": {} });
-      expect(restored.get(BundleKey)).toBe(bundle);
+      expect((await deserializeContext({ "eve.bundle": {} })).get(BundleKey)).toBe(bundle);
+      const restored = await deserializeContext({ "eve.bundle": {}, "acme-crm.requests": 4 });
+      expect(
+        [...restored.entries()].map(([key, value]) => [key.name, value]).filter(([, v]) => v === 4),
+      ).toEqual([["eve:mount.v1:extensions%2Fcrm:requests", 4]]);
+      // Two mounts of one package shared the legacy key, so neither can claim it.
       loadManifest.mockResolvedValue({
         ...manifest,
-        extensionMounts: [
-          { mountId: "extensions/crm" } as (typeof manifest.extensionMounts)[number],
-        ],
+        extensionMounts: [mount("extensions/crm"), mount("extensions/crm-eu")],
       });
-      await expect(deserializeContext({ "eve.bundle": {} })).rejects.toThrow(
-        "Incompatible context state layout",
-      );
+      await expect(
+        deserializeContext({ "eve.bundle": {}, "acme-crm.requests": 4 }),
+      ).rejects.toThrow('Incompatible context state layout for key "acme-crm.requests"');
     } finally {
       deserialize.mockRestore();
       loadManifest.mockRestore();

@@ -11,15 +11,20 @@ import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 import { startSessionOwnerStep } from "#execution/workflow-runtime.js";
 import { sessionHandoffMarkerToken } from "#execution/session-inbox/address.js";
-import { isSessionIdleForHandoffStep } from "#execution/session/handoff-steps.js";
+import {
+  isSessionIdleForHandoffStep,
+  reportSessionHandoffRetainedStep,
+} from "#execution/session/handoff-steps.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
+import { isObject } from "#shared/guards.js";
 
 /**
  * Cross-deployment checkpoint contract. The successor may run a different eve
  * build than the owner that produced it; bump when any field changes shape so
- * an incompatible successor rejects the handoff instead of misreading state.
- * Mount-owned state requires a new version so older readers reject it rather
- * than dropping unrecognized state keys during reverse handoff.
+ * an older successor rejects the handoff instead of misreading state.
+ *
+ * A newer successor must always accept older checkpoints: every bump adds the
+ * upgrade from the previous version in `checkpoint-migrations.ts`.
  */
 export const SESSION_CHECKPOINT_VERSION = 11;
 
@@ -136,6 +141,10 @@ export class SessionHandoff {
       createHook<never>({ token: sessionHandoffMarkerToken(token) }),
     );
     await Promise.all(markers.map((marker) => claimHookOwnership(marker)));
+    let retained: {
+      readonly error?: unknown;
+      readonly reason: "activation-failed" | "checkpoint-incompatible";
+    };
     try {
       const acceptedDuringRelease = await inbox.release();
       if (acceptedDuringRelease.length > 0) {
@@ -150,20 +159,23 @@ export class SessionHandoff {
           targetDeploymentId,
         );
         if (activation.kind === "active") return { kind: "transferred" };
+        acceptedByFailedCandidate = activation.payloads;
         if (activation.kind === "incompatible") {
           this.incompatibleTargetDeploymentIds.add(targetDeploymentId);
-          await this.recover(tokens, activation.payloads);
-          return { kind: "retained", reason: "checkpoint-incompatible" };
+          retained = { reason: "checkpoint-incompatible" };
+        } else {
+          retained = { error: activation.error, reason: "activation-failed" };
         }
-        acceptedByFailedCandidate = activation.payloads;
-      } catch {
+      } catch (error) {
         // The current owner remains authoritative until activation.
+        retained = { error, reason: "activation-failed" };
       }
       await this.recover(tokens, acceptedByFailedCandidate);
-      return { kind: "retained", reason: "activation-failed" };
     } finally {
       await Promise.all(markers.map((marker) => disposeHook(marker)));
     }
+    await this.reportRetained(retained.reason, targetDeploymentId, retained.error);
+    return { kind: "retained", reason: retained.reason };
   }
 
   /** After a transfer, the original run parks until the final owner reports the session result. */
@@ -214,6 +226,22 @@ export class SessionHandoff {
   ): Promise<void> {
     await this.input.inbox.claimSessionHooks(tokens);
     this.input.inbox.restore(payloads);
+  }
+
+  private async reportRetained(
+    reason: "activation-failed" | "checkpoint-incompatible",
+    targetDeploymentId: string,
+    error?: unknown,
+  ): Promise<void> {
+    const message =
+      isObject(error) && typeof error.message === "string" ? error.message : undefined;
+    await reportSessionHandoffRetainedStep({
+      error: message,
+      reason,
+      sessionId: this.input.sessionId,
+      sourceDeploymentId: this.input.deploymentId,
+      targetDeploymentId,
+    });
   }
 
   private async ensureAnchor(): Promise<void> {

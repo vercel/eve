@@ -179,10 +179,15 @@ const DECLARATION_TRIVIA = String.raw`(?:\s|/\*(?:[^*]|\*(?!/))*\*/|//[^\r\n\u20
 // own banner templates are bundled into every dev host, so without the
 // lookbehind they would force a full parse of eve's largest chunk.
 const DECLARATION_START = String.raw`(?:(?<![\w$"'\x60])(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}`;
+// `\b` would accept bundler-deconflicted names such as `__filename$1`, which
+// force a full parse of eve's largest vendor chunk on every hosted build.
+const BINDING_END = String.raw`(?![\w$])`;
 const PATH_BINDING_DECLARATION = new RegExp(
-  String.raw`${DECLARATION_START}(?:__filename|__dirname)\b`,
+  String.raw`${DECLARATION_START}(?:__filename|__dirname)${BINDING_END}`,
 );
-const REQUIRE_BINDING_DECLARATION = new RegExp(String.raw`${DECLARATION_START}require\b`);
+const REQUIRE_BINDING_DECLARATION = new RegExp(
+  String.raw`${DECLARATION_START}require${BINDING_END}`,
+);
 const IDENTIFIER_ESCAPE = String.raw`\\u(?:[\da-fA-F]{4}|\{[\da-fA-F]+\})`;
 const ESCAPED_IDENTIFIER_DECLARATION = new RegExp(
   String.raw`${DECLARATION_START}([\w$]*(?:${IDENTIFIER_ESCAPE}[\w$]*)+)`,

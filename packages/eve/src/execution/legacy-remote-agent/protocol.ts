@@ -95,6 +95,23 @@ export async function forwardLegacySessionInput(
   return true;
 }
 
+/**
+ * Renames a `task.*` callback that a remote agent sends a protocol-1 caller to
+ * the payload kind the caller's session reads. The callback URL resolves to the
+ * caller's newest deployment, while the session waiting on it may still run on
+ * an eve 0.66–0.68 build; both read the renamed kinds. The caller still
+ * validates the result.
+ */
+export function renameLegacyTaskCallback(body: unknown): unknown {
+  if (!isObject(body)) return body;
+  const { taskId: _taskId, ...payload } = body;
+  if (body.kind === "task.input-requested") return { ...payload, kind: "subagent-input-request" };
+  if (body.kind === "task.authorization") {
+    return { ...payload, kind: "subagent-authorization-event" };
+  }
+  return body;
+}
+
 /** Route a protocol-1 caller posts its answers to a remote agent's question or approval. */
 export const legacyTaskInputRoute = {
   handler: handleLegacyTaskInputRequest,

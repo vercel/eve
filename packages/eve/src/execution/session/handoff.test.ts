@@ -7,11 +7,14 @@ import type { TurnSelection } from "#execution/session/input-queue.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
 const isSessionIdleForHandoffStepMock = vi.fn(async (..._args: unknown[]) => true);
+const reportSessionHandoffRetainedStepMock = vi.fn();
 const startSessionOwnerStepMock = vi.fn();
 const createHookMock = vi.fn();
 
 vi.mock("#execution/session/handoff-steps.js", () => ({
   isSessionIdleForHandoffStep: (...args: unknown[]) => isSessionIdleForHandoffStepMock(...args),
+  reportSessionHandoffRetainedStep: (...args: unknown[]) =>
+    reportSessionHandoffRetainedStepMock(...args),
 }));
 vi.mock("#execution/workflow-runtime.js", () => ({
   startSessionOwnerStep: (...args: unknown[]) => startSessionOwnerStepMock(...args),
@@ -173,6 +176,18 @@ describe("SessionHandoff", () => {
       reason: "known-incompatible",
     });
     expect(startSessionOwnerStepMock).toHaveBeenCalledTimes(2);
+    // Each refusing deployment is reported once; remembered skips stay quiet.
+    expect(reportSessionHandoffRetainedStepMock.mock.calls).toEqual(
+      ["deployment-b", "deployment-c"].map((targetDeploymentId) => [
+        {
+          error: undefined,
+          reason: "checkpoint-incompatible",
+          sessionId: "session-1",
+          sourceDeploymentId: "deployment-a",
+          targetDeploymentId,
+        },
+      ]),
+    );
   });
 
   it("attempts handoff on every turn when the owner only sees a generic activation failure", async () => {
@@ -189,6 +204,9 @@ describe("SessionHandoff", () => {
       reason: "activation-failed",
     });
     expect(startSessionOwnerStepMock).toHaveBeenCalledTimes(2);
+    expect(reportSessionHandoffRetainedStepMock).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "unsupported checkpoint", reason: "activation-failed" }),
+    );
   });
 
   it("abandons transfer when input was accepted during release", async () => {

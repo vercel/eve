@@ -20,6 +20,8 @@ import { createWorkflowRuntime, waitForCommandHookOwner } from "#execution/workf
 import { buildSerializedContext, handoffFollowUp } from "#internal/testing/entry-test-helpers.js";
 import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
 
+const HANDOFF_LOG = "[eve:execution.handoff]";
+
 describe("workflowEntry integration", () => {
   describe("deployment handoff", () => {
     it("recovers the original owner when target rejects nested state", async () => {
@@ -164,8 +166,15 @@ describe("workflowEntry integration", () => {
         expect.stringContaining(workflowSdkNotice.unpinnedDelivery),
       );
       expect(output.lines).toContainEqual(expect.stringContaining(workflowSdkNotice.maxRetries));
+      expect(output.lines).toContainEqual(
+        expect.stringContaining(`${HANDOFF_LOG} session handoff failed`),
+      );
       expect(
-        output.unexpected(workflowSdkNotice.unpinnedDelivery, workflowSdkNotice.maxRetries),
+        output.unexpected(
+          workflowSdkNotice.unpinnedDelivery,
+          workflowSdkNotice.maxRetries,
+          HANDOFF_LOG,
+        ),
       ).toEqual([]);
     });
 
@@ -192,10 +201,10 @@ describe("workflowEntry integration", () => {
         });
         const rewritten = new Map<string, Promise<unknown>>();
         const candidateIds = new Set<string>();
-        // Rewrites only the candidate checkpoint version. Owner and candidate both
-        // run this build, so the test covers successor validation and memoization
-        // on a current owner — not an owner workflow still on a pre-upgrade build.
-        const olderCheckpointInput = (runId: string, encoded: unknown): Promise<unknown> => {
+        // Rewrites only the candidate checkpoint version to one a newer eve build
+        // wrote, as after a rollback. Owner and candidate both run this build, so
+        // the test covers successor validation and memoization on a current owner.
+        const newerCheckpointInput = (runId: string, encoded: unknown): Promise<unknown> => {
           let pending = rewritten.get(runId);
           if (pending === undefined) {
             pending = (async () => {
@@ -204,7 +213,7 @@ describe("workflowEntry integration", () => {
               ];
               expect(args[0].kind).toBe("handoff");
               candidateIds.add(runId);
-              Object.assign(args[0].checkpoint, { version: SESSION_CHECKPOINT_VERSION - 1 });
+              Object.assign(args[0].checkpoint, { version: SESSION_CHECKPOINT_VERSION + 1 });
 
               const operations: Promise<void>[] = [];
               const result = await dehydrateWorkflowArguments(args, runId, undefined, operations);
@@ -220,7 +229,7 @@ describe("workflowEntry integration", () => {
           const [runId] = args;
           const event = args[1] as (typeof args)[1] | RunCreatedEventRequest;
           if (event.eventType === "run_created" && event.eventData.deploymentId === "dpl_b") {
-            event.eventData.input = await olderCheckpointInput(runId, event.eventData.input);
+            event.eventData.input = await newerCheckpointInput(runId, event.eventData.input);
           }
           return createEvent(...args);
         });
@@ -231,7 +240,7 @@ describe("workflowEntry integration", () => {
             runInput?: { deploymentId?: string; input: unknown };
           };
           if (message.runId !== undefined && message.runInput?.deploymentId === "dpl_b") {
-            message.runInput.input = await olderCheckpointInput(
+            message.runInput.input = await newerCheckpointInput(
               message.runId,
               message.runInput.input,
             );
@@ -339,7 +348,117 @@ describe("workflowEntry integration", () => {
       expect(output.lines).toContainEqual(
         expect.stringContaining(workflowSdkNotice.unpinnedDelivery),
       );
+      // Both sides explain the refusal once: the successor names the version it
+      // cannot read and the owner names the target it keeps the session from.
+      expect(
+        output.lines.filter((line) => line.startsWith(`${HANDOFF_LOG} session handoff refused`)),
+      ).toHaveLength(1);
+      expect(
+        output.lines.filter((line) => line.startsWith(`${HANDOFF_LOG} session handoff failed`)),
+      ).toHaveLength(1);
       // No validation retry: the SDK never reports an exhausted step.
+      expect(output.unexpected(workflowSdkNotice.unpinnedDelivery, HANDOFF_LOG)).toEqual([]);
+    });
+
+    it("continues an eve 0.66 checkpoint on a current successor and stops its idle children", async () => {
+      const output = captureConsoleOutput();
+      const runtime = await createTestRuntime({ agent: { name: "handoff-eve-066-owner" } });
+      await runtime.run(async () => {
+        const anchor = await start(workflowEntry, [
+          {
+            kind: "initial",
+            ownerDeploymentId: "dpl_a",
+            sessionTimeoutMs: false,
+            input: { message: "Alice opens a research session." },
+            serializedContext: buildSerializedContext({
+              acceptedDeploymentId: "dpl_a",
+              channelKind: "http",
+            }),
+          },
+        ]);
+        const stream = captureTurnEvents(anchor);
+        const world = await getWorld();
+        const workflowRuntime = createWorkflowRuntime({
+          compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+        });
+        const rewritten = new Map<string, Promise<unknown>>();
+        // The owner runs this build; only the candidate input changes to what an
+        // eve 0.66 owner sends, so the successor must upgrade the checkpoint.
+        const eve066Input = (runId: string, encoded: unknown): Promise<unknown> => {
+          let pending = rewritten.get(runId);
+          if (pending === undefined) {
+            pending = (async () => {
+              const args = (await hydrateWorkflowArguments(encoded, runId, undefined)) as [unknown];
+              args[0] = toEve066HandoffInput(args[0] as HandoffWorkflowEntryInput);
+              const operations: Promise<void>[] = [];
+              const result = await dehydrateWorkflowArguments(args, runId, undefined, operations);
+              await Promise.all(operations);
+              return result;
+            })();
+            rewritten.set(runId, pending);
+          }
+          return pending;
+        };
+        const createEvent = world.events.create.bind(world.events);
+        const created = vi.spyOn(world.events, "create").mockImplementation(async (...args) => {
+          const [runId] = args;
+          const event = args[1] as (typeof args)[1] | RunCreatedEventRequest;
+          if (event.eventType === "run_created" && event.eventData.deploymentId === "dpl_b") {
+            event.eventData.input = await eve066Input(runId, event.eventData.input);
+          }
+          return createEvent(...args);
+        });
+        const queue = world.queue.bind(world);
+        const queued = vi.spyOn(world, "queue").mockImplementation(async (...args) => {
+          const message = args[1] as {
+            runId?: string;
+            runInput?: { deploymentId?: string; input: unknown };
+          };
+          if (message.runId !== undefined && message.runInput?.deploymentId === "dpl_b") {
+            message.runInput.input = await eve066Input(message.runId, message.runInput.input);
+          }
+          return queue(...args);
+        });
+        try {
+          await stream.nextTurn();
+          await waitForParkedTurnStep(anchor.runId);
+
+          await workflowRuntime.dispatchSession({
+            command: handoffFollowUp("dpl_b", "Bob requests the next research step.", "eve-066"),
+            sessionId: anchor.runId,
+          });
+          expect((await stream.nextTurn()).at(-1)?.type).toBe("session.waiting");
+          const successor = await waitForCommandHookOwner(
+            sessionInboxHookToken(sessionCommandHookToken(anchor.runId)),
+          );
+          expect(rewritten.has(successor.runId)).toBe(true);
+          const successorSteps = await world.steps.list({ runId: successor.runId });
+          expect(
+            successorSteps.data.some((step) =>
+              step.stepName.endsWith("//stopUntrackedChildSessionsStep"),
+            ),
+          ).toBe(true);
+          await vi.waitFor(
+            async () => {
+              const [state] = await readTurnStepStates(successor.runId);
+              const userMessages = (state?.history ?? [])
+                .filter((message) => message.role === "user")
+                .map((message) => JSON.stringify(message.content));
+              // The successor's turn continues the history the old owner carried.
+              expect(userMessages).toEqual([
+                expect.stringContaining("Alice opens a research session."),
+                expect.stringContaining("Bob requests the next research step."),
+              ]);
+            },
+            { timeout: 5000 },
+          );
+        } finally {
+          created.mockRestore();
+          queued.mockRestore();
+          stream.dispose();
+          await anchor.cancel();
+        }
+      });
       expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
     });
 
@@ -603,3 +722,50 @@ describe("workflowEntry integration", () => {
     });
   });
 });
+
+/** The handoff input an eve 0.66 owner sends, per a captured checkpoint version 8. */
+function toEve066HandoffInput(input: HandoffWorkflowEntryInput): unknown {
+  const { checkpoint, handoffVersion: _handoffVersion, ...fields } = input;
+  const { history, serializedContext, sessionState, ...checkpointFields } = checkpoint;
+  const { "eve.stateLayout": _stateLayout, ...context } = serializedContext;
+  return {
+    ...fields,
+    checkpoint: {
+      ...checkpointFields,
+      mode: "conversation",
+      serializedContext: {
+        ...context,
+        "eve.mode": "conversation",
+        "eve.runtime.taskDeliveryPolicy": "auto",
+        "eve.turnTaskDelivery": "none",
+      },
+      sessionState: {
+        ...sessionState,
+        snapshot: {
+          session: {
+            ...sessionState.snapshot.session,
+            history,
+            state: {
+              ...sessionState.snapshot.session.state,
+              // A finished subagent the old owner kept resumable; its run no longer exists.
+              "eve.agent.handles": {
+                handles: [
+                  {
+                    address: {
+                      continuationToken: "child-token",
+                      kind: "agent/local",
+                      sessionId: "wrun_child_from_eve_066",
+                    },
+                    phase: "parked",
+                  },
+                ],
+              },
+            },
+          },
+        },
+        version: 1,
+      },
+      version: 8,
+    },
+  };
+}

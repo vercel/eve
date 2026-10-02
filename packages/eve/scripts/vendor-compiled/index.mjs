@@ -45,8 +45,8 @@ import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
 import eventsourceParserStream from "./eventsource-parser-stream.mjs";
 import envRunner from "./env-runner.mjs";
-import grayMatter from "./gray-matter.mjs";
 import jose from "./jose.mjs";
+import jsYaml from "./js-yaml.mjs";
 import jsoncParser from "./jsonc-parser.mjs";
 import jsonSchema from "./json-schema.mjs";
 import justSecrets from "./just-secrets.mjs";
@@ -74,8 +74,8 @@ export const MODULES = [
   envRunner,
   eveCatalog,
   google,
-  grayMatter,
   jose,
+  jsYaml,
   jsoncParser,
   jsonSchema,
   justSecrets,

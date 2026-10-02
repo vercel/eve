@@ -18,7 +18,7 @@ describe("parseSpecDocument", () => {
     const marker = "eve_openapi_spec_js_marker";
     const body = `---js\n(globalThis[${JSON.stringify(marker)}] = true)\n---\n`;
 
-    expect(() => parseSpecDocument(body)).toThrow(/JavaScript frontmatter is not supported/);
+    expect(() => parseSpecDocument(body)).toThrow('Frontmatter language "js" is not supported.');
     expect((globalThis as Record<string, unknown>)[marker]).toBeUndefined();
   });
 });

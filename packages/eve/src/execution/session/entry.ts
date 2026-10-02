@@ -21,8 +21,11 @@ import {
 } from "#execution/session-inbox/address.js";
 import {
   signalSessionOwnerActivationStep,
+  stopUntrackedChildSessionsStep,
   validateSessionCheckpointStep,
 } from "#execution/session/handoff-steps.js";
+import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
+import type { SessionCheckpoint } from "#execution/session/handoff.js";
 import type {
   HandoffWorkflowEntryInput,
   InitialWorkflowEntryInput,
@@ -160,19 +163,25 @@ async function bootInitialOwner(
 async function bootHandoffOwner(
   input: HandoffWorkflowEntryInput,
 ): Promise<BootOutcome | undefined> {
-  const { checkpoint, sessionId } = input;
-  const serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
+  const { sessionId } = input;
   const inbox = createSessionInbox(sessionId);
+  let checkpoint: SessionCheckpoint;
+  let childRunIdsToStop: readonly string[];
+  let serializedContext: Record<string, unknown>;
   try {
-    const validation = await validateSessionCheckpointStep({ checkpoint });
-    if (validation.kind === "incompatible") {
+    // The previous owner may run an older eve build; read its checkpoint in this build's shape.
+    const migration = migrateSessionCheckpoint(input.checkpoint);
+    const validation = await validateSessionCheckpointStep({ migration, sessionId });
+    if (migration.kind === "incompatible" || validation.kind === "incompatible") {
       const payloads = await inbox.release();
       await signalSessionOwnerActivationStep({
-        activation: { kind: "incompatible", payloads, reason: validation.reason },
+        activation: { kind: "incompatible", payloads, reason: "checkpoint-version" },
         token: input.activationToken,
       });
       return undefined;
     }
+    ({ checkpoint, childRunIdsToStop } = migration);
+    serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
     await inbox.claimSessionHooks(
       sessionHookTokens({ serializedContext, sessionState: checkpoint.sessionState }),
     );
@@ -187,6 +196,9 @@ async function bootHandoffOwner(
       token: input.activationToken,
     });
     return undefined;
+  }
+  if (childRunIdsToStop.length > 0) {
+    await stopUntrackedChildSessionsStep({ runIds: childRunIdsToStop, sessionId });
   }
   return {
     inbox,
