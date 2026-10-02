@@ -347,6 +347,21 @@ describe("invokeTool trace policy", () => {
     expectNoContent();
   });
 
+  it("keeps a throwing tracePolicy's text off an existing parent span", async () => {
+    useTracing(() => {
+      throw new Error(`policy ${SENTINEL}`);
+    });
+    const parent = apiTrace.getTracer("test.parent").startSpan("platform request");
+    const result = await apiContext.with(apiTrace.setSpan(apiContext.active(), parent), () =>
+      invokeTool(runtime, "lookup", { text: "plain" }, { auth: alice }),
+    );
+    (parent as Span).end();
+    expect(result).toMatchObject({ status: "completed" });
+    expect(finished().map((span) => span.name)).toEqual(["platform request"]);
+    expect(finished()[0]!.status.code).not.toBe(SpanStatusCode.ERROR);
+    expectNoContent();
+  });
+
   it("keeps a failing tool's text off an existing parent span with tracing undeclared", async () => {
     registerInstrumentationRuntime({
       forceFlush: async () => undefined,
