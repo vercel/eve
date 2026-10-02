@@ -429,9 +429,7 @@ export function renderHitlConformanceMatrix(): string {
   const html = (text: string) =>
     text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   const td = (content: string, span = 1) =>
-    span > 1
-      ? `<td align="left" colspan="${span}">${content}</td>`
-      : `<td align="center">${content}</td>`;
+    `<td${span > 1 ? ` colspan="${span}"` : ""}>${content}</td>`;
   // One note per distinct reason, numbered in reading order, so every cell
   // sharing a cause links to the same note. Plain anchors rather than Markdown
   // footnotes, which GitHub renders with links back up to every citing cell.
@@ -473,7 +471,7 @@ export function renderHitlConformanceMatrix(): string {
     "two runs only in the thread, in a cell spanning both.",
     "",
     "<table>",
-    `<tr><th>Rule</th>${entries.map((entry) => `<th><code>${nameOf(entry)}</code></th>`).join("")}</tr>`,
+    `<tr><th align="left">Rule</th>${entries.map((entry) => `<th align="left"><code>${nameOf(entry)}</code></th>`).join("")}</tr>`,
     ...rows,
     "</table>",
     "",
