@@ -5,7 +5,7 @@ interface DynamicToolMetadataBase {
   readonly availableInSubagents?: boolean;
   readonly name: string;
   readonly description: string;
-  readonly execution?: "background";
+  readonly endsTurn?: boolean;
   readonly inputSchema: JsonObject;
   readonly outputSchema?: JsonObject;
   readonly resolverSlug: string;
@@ -59,7 +59,7 @@ export function isCurrentDynamicToolMetadata(
   return metadata.callbacks !== undefined && !isOldSourceOffsetDynamicToolMetadata(metadata);
 }
 
-export function isOldStepFunctionDynamicToolMetadata(
+function isOldStepFunctionDynamicToolMetadata(
   metadata: PersistedDynamicToolMetadata,
 ): metadata is OldStepFunctionDynamicToolMetadata {
   return metadata.callbacks === undefined;

@@ -46,16 +46,33 @@ function context(target, signal = new AbortController().signal) {
   };
 }
 
-function completedTurn(sessionId, events = []) {
+/** Mirrors a recorded eval turn: idle turns end on session.waiting. */
+function completedTurn(sessionId, events = [], { input = {}, inputRequests = [] } = {}) {
+  const call = { input, status: "completed" };
   return {
     sessionId,
     events,
+    inputRequests,
+    status: "waiting",
     expectOk() {},
     calledSubagent() {},
-    requireToolCall() {
-      return { input: {} };
+    requireToolCall(name, { status = "completed" } = {}) {
+      if (call.status !== status) throw new Error(`${name} is ${call.status}, not ${status}.`);
+      return call;
     },
   };
+}
+
+/** The parent events of an agent call that starts task `taskId` and opens `childSessionId`. */
+function agentCallEvents(childSessionId, taskId = "agent-1") {
+  const name = "self-modification__agent";
+  return [
+    { type: "task.started", data: { callId: `call-${taskId}`, name, taskId, turnId: "turn-1" } },
+    {
+      type: "agent.started",
+      data: { callId: `call-${taskId}`, name, sessionId: childSessionId, taskId, turnId: "turn-1" },
+    },
+  ];
 }
 
 function liveTurn(sessionId, events = []) {
@@ -108,14 +125,30 @@ async function assertTreeRestored(root) {
   await assert.rejects(readFile(join(root, "unexpected.txt")));
 }
 
+test("close restores registry installer project files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "eve-selfmod-project-"));
+  await mkdir(join(root, "agent"));
+  await writeFile(join(root, ".env.example"), "EXISTING=original\n");
+  await writeFile(join(root, "package.json"), '{"name":"original"}\n');
+  const harness = await SelfModificationHarness.create(context(targetFor()), join(root, "agent"));
+  try {
+    await writeFile(join(root, ".env.example"), "EXISTING=changed\n");
+    await writeFile(join(root, ".env.local"), "BROWSER_USE_API_KEY=\n");
+    await writeFile(join(root, "package.json"), '{"name":"changed"}\n');
+    await harness.close();
+    assert.equal(await readFile(join(root, ".env.example"), "utf8"), "EXISTING=original\n");
+    assert.equal(await readFile(join(root, "package.json"), "utf8"), '{"name":"original"}\n');
+    await assert.rejects(readFile(join(root, ".env.local")), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("close retires every session before restoring the complete source tree", async () => {
   const child = liveTurn("child");
   const verification = liveTurn("verification");
-  const parentEvent = {
-    type: "subagent.called",
-    data: { name: "self-modification__agent", childSessionId: child.sessionId },
-  };
-  const parent = liveTurn("parent", [parentEvent]);
+  const parentEvents = agentCallEvents(child.sessionId);
+  const parent = liveTurn("parent", parentEvents);
 
   await withHarness(
     async ({ harness, root, calls, target, close }) => {
@@ -123,9 +156,8 @@ test("close retires every session before restoring the complete source tree", as
       parent.result = async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         parentFinished = true;
-        return completedTurn(parent.sessionId, [parentEvent]);
+        return completedTurn(parent.sessionId, parentEvents);
       };
-      parent.waitForEvent = async () => ({ data: parentEvent.data });
       target.watchTurn = () => {
         assert.equal(parentFinished, true);
         return child;
@@ -192,19 +224,13 @@ test("one reset failure still retires other sessions and leaves unsafe source un
     if (path.includes("bad/reset")) return new Response("no", { status: 500 });
     return response({ revision: "revision" });
   };
-  const parentEvent = {
-    type: "subagent.called",
-    data: { name: "self-modification__agent", childSessionId: "bad" },
-  };
+  const parentEvents = agentCallEvents("bad");
   // The public request path is used to populate both tracked sessions.
   const liveParent = {
     sessionId: "parent",
-    events: [parentEvent],
-    async waitForEvent() {
-      return { data: parentEvent.data };
-    },
+    events: parentEvents,
     async result() {
-      return completedTurn("parent", [parentEvent]);
+      return completedTurn("parent", parentEvents);
     },
   };
   target.watchTurn = () => ({
@@ -336,6 +362,25 @@ test("a failed eval restores source, releases its checkout lock, and preserves t
   await assert.rejects(readFile(join(root, ".eve-self-modification-eval.lock", "owner.json")));
 });
 
+test("waitForRebuild polls until the authored runtime revision changes", async () => {
+  await withHarness(async ({ harness, target, close }) => {
+    let reads = 0;
+    const fetch = target.fetch;
+    target.fetch = async (path, options) => {
+      if (path === "/eve/v1/dev/runtime-artifacts") {
+        reads += 1;
+        return response({ revision: reads < 3 ? "before" : "after" });
+      }
+      return fetch(path, options);
+    };
+
+    const previous = await harness.runtimeRevision();
+    assert.equal(await harness.waitForRebuild(previous), "after");
+    assert.equal(reads, 3);
+    await close();
+  });
+});
+
 test("apply rejects a rebuild response without a runtime revision", async () => {
   await withHarness(async ({ harness, target, close }) => {
     let apply = true;
@@ -351,98 +396,50 @@ test("apply rejects a rebuild response without a runtime revision", async () => 
   });
 });
 
-test("request falls back to a parent-boundary watch when the initial event is missed", async () => {
-  const root = await sourceTree();
-  const calls = [];
+test("request follows a continued agent task past stale child turns", async () => {
+  const initialParent = liveTurn("parent", agentCallEvents("child"));
+  const initialChild = liveTurn("child");
+  initialChild.session = { state: { streamIndex: 10 } };
+  const message = "Repair the existing inventory tool.";
   const continuation = {
-    sessionId: "parent",
-    events: [],
-    async waitForEvent() {
-      return { data: { name: "self-modification__agent", childSessionId: "child" } };
-    },
-    async result() {
-      return completedTurn("parent");
-    },
+    type: "task.started",
+    data: { callId: "call-2", name: "self-modification__agent", taskId: "agent-1" },
   };
-  const child = {
-    sessionId: "child",
-    events: [],
-    async result() {
-      return completedTurn("child");
-    },
-  };
-  const target = targetFor({ calls, turns: { parent: continuation, child } });
-  const parent = {
-    sessionId: "parent",
-    events: [],
-    session: { state: { streamIndex: 10 } },
-    async waitForEvent() {
-      throw new Error("stream boundary");
-    },
-    async result() {
-      return completedTurn("parent");
-    },
-  };
-  const t = context(target);
-  t.session = async () => ({ start: async () => parent });
-  const harness = await SelfModificationHarness.create(t, root);
-  await harness.request("make a change");
-  await harness.close();
-  await rm(root, { recursive: true, force: true });
-});
-
-for (const emitsCalled of [false, true]) {
-  test(`request follows a reused agent past stale turns (new called event: ${emitsCalled})`, async () => {
-    const called = {
-      type: "subagent.called",
-      data: { name: "self-modification__agent", agentId: "agent-1", childSessionId: "child" },
-    };
-    const initialParent = liveTurn("parent", [called]);
-    initialParent.waitForEvent = async () => called;
-    const initialChild = liveTurn("child");
-    initialChild.session = { state: { streamIndex: 10 } };
-    const message = "Repair the existing inventory tool.";
-    const repairParent = liveTurn("parent", emitsCalled ? [called] : []);
-    repairParent.waitForEvent = async () => {
-      throw new Error("Session reached session.waiting before the expected event.");
-    };
-    repairParent.result = async () => ({
-      ...completedTurn("parent"),
-      requireToolCall: () => ({ input: { agentId: "agent-1", message } }),
-    });
-    const diagnostic = liveTurn("child", [
-      { type: "message.received", data: { message: "Diagnose only." } },
-    ]);
-    diagnostic.session = { state: { streamIndex: 20 } };
-    diagnostic.result = async () => ({
-      ...completedTurn("child", diagnostic.events),
-      status: "waiting",
-    });
-    const repaired = liveTurn("child", [
-      ...diagnostic.events,
-      { type: "message.received", data: { message } },
-    ]);
-    repaired.session = { state: { streamIndex: 30 } };
-    const observed = [];
-    await withHarness(async ({ harness, target }) => {
-      const children = [initialChild, diagnostic, repaired];
-      target.watchTurn = (sessionId, options) => {
-        observed.push({ sessionId, ...options });
-        return children.shift();
-      };
-      await harness.request("Create the tool.", { start: async () => initialParent });
-      const result = await harness.request("Please repair it.", {
-        start: async () => repairParent,
-      });
-      assert.deepEqual(result.child.events, repaired.events);
-      assert.deepEqual(observed, [
-        { sessionId: "child", startIndex: 0 },
-        { sessionId: "child", startIndex: 10 },
-        { sessionId: "child", startIndex: 20 },
-      ]);
-    });
+  const repairParent = liveTurn("parent", [continuation]);
+  repairParent.result = async () =>
+    completedTurn("parent", [continuation], { input: { taskId: "agent-1", message } });
+  const diagnostic = liveTurn("child", [
+    { type: "message.received", data: { message: "Diagnose only." } },
+  ]);
+  diagnostic.session = { state: { streamIndex: 20 } };
+  diagnostic.result = async () => ({
+    ...completedTurn("child", diagnostic.events),
+    status: "waiting",
   });
-}
+  const repaired = liveTurn("child", [
+    ...diagnostic.events,
+    { type: "message.received", data: { message } },
+  ]);
+  repaired.session = { state: { streamIndex: 30 } };
+  const observed = [];
+  await withHarness(async ({ harness, target }) => {
+    const children = [initialChild, diagnostic, repaired];
+    target.watchTurn = (sessionId, options) => {
+      observed.push({ sessionId, ...options });
+      return children.shift();
+    };
+    await harness.request("Create the tool.", { start: async () => initialParent });
+    const result = await harness.request("Please repair it.", {
+      start: async () => repairParent,
+    });
+    assert.deepEqual(result.child.events, repaired.events);
+    assert.deepEqual(observed, [
+      { sessionId: "child", startIndex: 0 },
+      { sessionId: "child", startIndex: 10 },
+      { sessionId: "child", startIndex: 20 },
+    ]);
+  });
+});
 
 test("cleanup failure retains a lock that identifies the source backup", async (t) => {
   const root = await temporaryCheckout(t, "eve-selfmod-cleanup-failed-");

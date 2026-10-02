@@ -1,8 +1,7 @@
 /**
- * Skill authoring helpers and runtime accessors.
+ * Skill authoring helpers.
  */
 
-export type { SkillFile, SkillHandle } from "#shared/skill-types.js";
 export {
   defineSkill,
   type NamedSkillDefinition,

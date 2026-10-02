@@ -1,6 +1,6 @@
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 import { isForbiddenApiFailure } from "./vercel-api-failure.js";
 import type { VercelProjectOperationOptions } from "./project-resolution.js";
@@ -26,7 +26,7 @@ const VercelProjectListEntrySchema = z.object({
 export type VercelProjectListEntry = z.infer<typeof VercelProjectListEntrySchema>;
 
 /** One ranked Vercel project search page and its optional continuation cursor. */
-export interface VercelProjectSearchPage {
+interface VercelProjectSearchPage {
   readonly projects: VercelProjectListEntry[];
   readonly next?: number;
 }

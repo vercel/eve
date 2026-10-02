@@ -80,7 +80,7 @@ async function stopDevelopmentMicrosandboxResources(
 
   const sandboxes = await module.Sandbox.listWith({
     labels: {
-      "eve.backend": "microsandbox",
+      "eve.provider": "microsandbox",
       [EVE_DEVELOPMENT_SANDBOX_RUN_ID_TAG]: devRunId,
     },
   });

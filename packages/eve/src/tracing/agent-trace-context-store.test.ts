@@ -9,7 +9,6 @@ import {
   ContextAgentTraceStateStore,
   preserveSerializedAgentTraceState,
   readActionTraceContext,
-  readCurrentSessionTraceDecision,
   readTurnTraceContext,
 } from "#tracing/agent-trace-context-store.js";
 
@@ -23,6 +22,7 @@ describe("ContextAgentTraceStateStore", () => {
         channelType: "http",
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
       });
       store.setTurn("session-1", "turn-1", {
         channelDelivery: {
@@ -39,6 +39,7 @@ describe("ContextAgentTraceStateStore", () => {
         modelUsage: { inputTokens: 12, outputTokens: 4 },
         caller: { ...spanContext("4", "2"), isRemote: true },
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
@@ -116,11 +117,13 @@ describe("ContextAgentTraceStateStore", () => {
       store.setSession("session-1", {
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
         caller: spanContext("4", "2"),
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
       });
@@ -140,6 +143,7 @@ describe("ContextAgentTraceStateStore", () => {
         context: spanContext("1", "3"),
         caller: spanContext("4", "2"),
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
         sequence: 0,
         startTimeMs: 1_700_000_000_000,
       });
@@ -172,6 +176,7 @@ describe("ContextAgentTraceStateStore", () => {
       new ContextAgentTraceStateStore().setSession("session-1", {
         context: spanContext("1", "2"),
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
       });
     });
 
@@ -201,10 +206,12 @@ describe("readTurnTraceContext", () => {
         context: spanContext("1", "2"),
         decision: { action: "record", recordInputs: true, recordOutputs: false },
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
       });
       new ContextAgentTraceStateStore().setTurn("session-1", "turn-1", {
         context: spanContext("3", "4"),
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
         sequence: 0,
         startTimeMs: 1,
       });
@@ -231,10 +238,12 @@ describe("readTurnTraceContext", () => {
         context: spanContext("1", "2"),
         decision: { action: "record", recordInputs: false, recordOutputs: true },
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("3", "4"),
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
         sequence: 0,
         startTimeMs: 1,
       });
@@ -243,21 +252,6 @@ describe("readTurnTraceContext", () => {
     expect(readTurnTraceContext(await serializeContext(context), "session-1", "turn-1")).toEqual({
       ...spanContext("3", "4"),
       decision: { action: "record", recordInputs: false, recordOutputs: true },
-    });
-  });
-});
-
-describe("readCurrentSessionTraceDecision", () => {
-  it("reads the decision bound in the current worker context", async () => {
-    const context = new ContextContainer();
-    const decision = { action: "record", recordInputs: false, recordOutputs: true } as const;
-    await contextStorage.run(context, () => {
-      new ContextAgentTraceStateStore().setSession("session-1", {
-        context: spanContext("1", "2"),
-        decision,
-        rootSessionId: "session-1",
-      });
-      expect(readCurrentSessionTraceDecision("session-1")).toEqual(decision);
     });
   });
 });
@@ -283,6 +277,7 @@ describe("readActionTraceContext", () => {
         name: "researcher",
         parent: spanContext("1", "2"),
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
         sessionId: "session-1",
         spanId: "3".repeat(16),
         startTimeMs: 1_700_000_000_000,
@@ -314,6 +309,7 @@ describe("readActionTraceContext", () => {
         context: spanContext("1", "2"),
         decision: { action: "record", recordInputs: true, recordOutputs: false },
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
       });
       store.setAction("action:session-1:turn-1:call-1", {
         attemptIndex: 0,
@@ -322,6 +318,7 @@ describe("readActionTraceContext", () => {
         name: "researcher",
         parent: spanContext("1", "2"),
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
         sessionId: "session-1",
         spanId: "3".repeat(16),
         startTimeMs: 1_700_000_000_000,

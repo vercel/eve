@@ -19,7 +19,7 @@ interface SlackModelMessageInput {
  * model-visible message. Slack user ids are stable and require no profile
  * lookup, so they remain the canonical speaker identity.
  */
-export function formatSlackModelMessage(input: SlackModelMessageInput): string {
+function formatSlackModelMessage(input: SlackModelMessageInput): string {
   return [
     "<slack_message>",
     `sender_type: ${input.senderType}`,

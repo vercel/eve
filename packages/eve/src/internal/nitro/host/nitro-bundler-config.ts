@@ -1,68 +1,27 @@
+import {
+  type BundlerDefaultLogHandler,
+  onVendoredDependencyLog,
+} from "#internal/bundler/vendored-dependency-log.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
-interface BundlerLog {
-  readonly id?: string;
-  readonly ids?: readonly unknown[];
-  readonly loc?: {
-    readonly file?: string;
-  };
-}
-
-type BundlerDefaultLogHandler = (level: string, log: unknown) => void;
-
-function normalizePath(value: string): string {
-  return value.replaceAll("\\", "/");
-}
-
-function isNodeModulesPath(filePath: string): boolean {
-  return normalizePath(filePath).split("/").includes("node_modules");
-}
-
-function hasPathSegments(filePath: string, segments: readonly string[]): boolean {
-  const pathSegments = normalizePath(filePath).split("/").filter(Boolean);
-  return pathSegments.some((_, index) =>
-    segments.every((segment, offset) => pathSegments[index + offset] === segment),
-  );
-}
-
-function isCompiledVendorPath(filePath: string): boolean {
-  return (
-    hasPathSegments(filePath, [".generated", "compiled"]) ||
-    hasPathSegments(filePath, ["dist", "src", "compiled"])
-  );
-}
-
-function getLogFilePaths(log: unknown): string[] {
-  if (log === null || typeof log !== "object") {
-    return [];
-  }
-
-  const candidate = log as BundlerLog;
-  const ids = Array.isArray(candidate.ids) ? candidate.ids : [];
-
-  return [candidate.id, ...ids, candidate.loc?.file].filter(
-    (value): value is string => typeof value === "string",
-  );
-}
-
-function isVendoredDependencyWarning(log: unknown): boolean {
-  const filePaths = getLogFilePaths(log);
-  return (
-    filePaths.length > 0 &&
-    filePaths.every((filePath) => isNodeModulesPath(filePath) || isCompiledVendorPath(filePath))
-  );
-}
+// Nitro's default `codeSplitting` group names chunks with a function and no
+// `debugName`. Newer Rolldown releases warn about the missing timing label on
+// every build, while older releases in Nitro's range reject the key, so eve
+// cannot set it for Nitro.
+const MISSING_CODE_SPLITTING_GROUP_DEBUG_NAME = "MISSING_CODE_SPLITTING_GROUP_DEBUG_NAME";
 
 function onNitroBundlerLog(
   level: string,
   log: unknown,
   defaultHandler: BundlerDefaultLogHandler,
 ): void {
-  if (level === "warn" && isVendoredDependencyWarning(log)) {
+  if (
+    level === "warn" &&
+    (log as { code?: unknown } | null)?.code === MISSING_CODE_SPLITTING_GROUP_DEBUG_NAME
+  ) {
     return;
   }
-
-  defaultHandler(level, log);
+  onVendoredDependencyLog(level, log, defaultHandler);
 }
 
 /**

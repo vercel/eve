@@ -64,7 +64,7 @@ export type TerminalKey =
   | { type: "ignore" };
 
 /** One decoded key plus the UTF-16 code units it consumed from the input buffer. */
-export interface KeyToken {
+interface KeyToken {
   key?: TerminalKey;
   consumed: number;
   /** The buffer ends mid-sequence; wait for more bytes before decoding. */
@@ -334,7 +334,7 @@ export function parseKey(chunk: Buffer): TerminalKey {
   }
 }
 
-export interface AssistantResponseStats {
+interface AssistantResponseStats {
   totalTokens: number | undefined;
   outputTokens: number | undefined;
   tokensPerSecond: number | undefined;

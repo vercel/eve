@@ -45,7 +45,7 @@ export interface TraceViewerRenderer {
   open(options: TraceViewerOpenOptions): Promise<void>;
 }
 
-export interface TraceViewerSessionOptions extends TraceViewerOpenOptions {
+interface TraceViewerSessionOptions extends TraceViewerOpenOptions {
   readonly theme: Theme;
   readonly paint: (rows: readonly string[]) => void;
   readonly dimensions: () => { readonly width: number; readonly height: number };

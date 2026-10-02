@@ -169,7 +169,7 @@ function toolResultOutputToJsonValue(input: {
   );
 }
 
-function isToolResultError(output: ToolResultPart["output"]): boolean {
+export function isToolResultError(output: ToolResultPart["output"]): boolean {
   return (
     output.type === "error-json" ||
     output.type === "error-text" ||

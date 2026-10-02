@@ -11,7 +11,7 @@ export function createDynamicCapabilityTransformPlugin(
 ) {
   return {
     async transform(code: string, id: string) {
-      const normalizedId = id.replaceAll("\\", "/");
+      const normalizedId = id.split("?")[0]!.replaceAll("\\", "/");
       const transformDynamicTools = options.dynamicTools !== false;
       const transformDynamicRemoteAgents =
         options.dynamicRemoteAgents !== false && normalizedId.includes("/subagents/");
@@ -23,7 +23,7 @@ export function createDynamicCapabilityTransformPlugin(
       let changed = false;
       if (transformDynamicTools) {
         const result = await transformDynamicToolExecute(
-          id,
+          normalizedId,
           transformed,
           options.workflowFunctions?.(id),
         );
@@ -33,7 +33,7 @@ export function createDynamicCapabilityTransformPlugin(
         }
       }
       if (transformDynamicRemoteAgents) {
-        const result = await transformDynamicRemoteAgentCredentials(id, transformed);
+        const result = await transformDynamicRemoteAgentCredentials(normalizedId, transformed);
         if (result !== null) {
           transformed = result.code;
           changed = true;

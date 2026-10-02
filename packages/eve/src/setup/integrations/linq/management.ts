@@ -6,7 +6,7 @@ const PhoneNumbersSchema = z.object({
   phone_numbers: z.array(z.object({ phone_number: z.string().min(1) })),
 });
 
-export interface LinqManagementDeps {
+interface LinqManagementDeps {
   fetch: typeof fetch;
 }
 

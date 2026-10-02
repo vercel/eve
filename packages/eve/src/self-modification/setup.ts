@@ -14,12 +14,13 @@ import {
 import type { VercelProjectReference } from "#setup/project-resolution.js";
 
 import { SELF_MODIFICATION_CONFIG_PATH } from "./git-workspace.js";
+import { renderLocalSelfModificationExtension } from "./scaffold.js";
 
 const runFile = promisify(execFile);
 const GENERATED_MARKER = "// eve-self-modification: generated-v1";
 const LEGACY_LOCAL_CONFIG =
   'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n';
-const DEFAULT_EXTENSION = `import selfModification from "eve/self-modification";\n\nexport default selfModification({\n  // model: "provider/model",\n  // reasoning: "high",\n});\n`;
+const DEFAULT_EXTENSION = renderLocalSelfModificationExtension();
 
 export interface SelfModificationSetupValues {
   readonly branch: string;

@@ -17,11 +17,11 @@ type PropertyNode = AstNode & {
   readonly type: "Property";
 };
 
-export type AgentConfigStringPathPatch =
+type AgentConfigStringPathPatch =
   | { readonly kind: "set"; readonly value: string }
   | { readonly kind: "remove"; readonly removable?: (value: string) => boolean };
 
-export type AgentConfigStringPathEdit =
+type AgentConfigStringPathEdit =
   | { readonly kind: "applied"; readonly nextSource: string }
   | { readonly kind: "bail"; readonly reason: string; readonly line: number };
 

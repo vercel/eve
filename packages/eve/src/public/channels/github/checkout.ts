@@ -1,3 +1,8 @@
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+import type { SandboxSession } from "#shared/sandbox-session.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
 import {
   getGitHubPullRequest,
   getGitHubRepository,
@@ -10,7 +15,6 @@ import {
 } from "#public/channels/github/auth.js";
 import { gitHubGitBrokerNetworkPolicy, gitHubRemoteUrl, isFullGitSha } from "#shared/git.js";
 import { shellQuote } from "#shared/shell-quote.js";
-import type { SandboxSession } from "#shared/sandbox-session.js";
 
 const DEFAULT_CHECKOUT_PATH = "/workspace";
 const DEFAULT_CHECKOUT_DEPTH = 1;
@@ -18,7 +22,7 @@ const GITHUB_CHECKOUT_NETWORK_HINT =
   "Verify the GitHub App installation has access to this repository.";
 
 /** Options for cloning a GitHub repository ref into the active sandbox. */
-export interface GitHubCheckoutOptions {
+interface GitHubCheckoutOptions {
   readonly depth?: number;
   readonly includeBase?: boolean;
   readonly mode?: "full" | "shallow";
@@ -27,7 +31,7 @@ export interface GitHubCheckoutOptions {
 }
 
 /** Result returned after a GitHub checkout completes. */
-export interface GitHubCheckout {
+interface GitHubCheckout {
   readonly baseRef: string | null;
   readonly path: string;
   readonly ref: string;
@@ -35,7 +39,7 @@ export interface GitHubCheckout {
 }
 
 /** Internal descriptor used by channel-owned checkout paths. */
-export interface GitHubCheckoutInput extends GitHubCheckoutOptions {
+interface GitHubCheckoutInput extends GitHubCheckoutOptions {
   readonly api?: GitHubApiOptions;
   readonly baseRef?: string | null;
   readonly baseSha?: string | null;
@@ -65,7 +69,7 @@ export interface GitHubCheckoutInput extends GitHubCheckoutOptions {
  * Channel-internal; not part of the public GitHub channel API.
  */
 export async function checkoutGitHubRepository(
-  sandbox: SandboxSession,
+  sandbox: NetworkPolicySandboxSession,
   input: GitHubCheckoutInput,
 ): Promise<GitHubCheckout> {
   const descriptor = await resolveCheckoutDescriptor(input);

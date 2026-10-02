@@ -1,11 +1,18 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { existsSync, realpathSync } from "node:fs";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
 
+import { ensurePnpmOptionalDependencyDefaults } from "#setup/primitives/pm/pnpm-build-policy.js";
+
 import { EVE_DEV_ENV_FLAG, isEveDevEnvironment } from "#internal/application/dev-environment.js";
+import {
+  importInstalledEnginePackage,
+  resolveInstalledEnginePackageEntrypointHref,
+} from "#internal/application/optional-package-import.js";
+
+export { importInstalledEnginePackage } from "#internal/application/optional-package-import.js";
 
 export { EVE_DEV_ENV_FLAG, isEveDevEnvironment };
 
@@ -17,27 +24,40 @@ export type ProjectPackageManager = "bun" | "npm" | "pnpm" | "yarn";
  * manager. Defaults to npm when no lockfile is found.
  */
 export function detectProjectPackageManager(appRoot: string): ProjectPackageManager {
-  let current = appRoot;
+  return resolveProjectInstallation(appRoot).packageManager;
+}
+
+function resolveProjectInstallation(appRoot: string): {
+  readonly root: string;
+  readonly packageManager: ProjectPackageManager;
+} {
+  let current = resolve(appRoot);
+  try {
+    current = realpathSync.native(current);
+  } catch {
+    // A not-yet-materialized project still needs a stable absolute lock identity.
+  }
+  const projectRoot = current;
   for (;;) {
     if (
       existsSync(join(current, "pnpm-lock.yaml")) ||
       existsSync(join(current, "pnpm-workspace.yaml"))
     ) {
-      return "pnpm";
+      return { root: current, packageManager: "pnpm" };
     }
     if (existsSync(join(current, "yarn.lock"))) {
-      return "yarn";
+      return { root: current, packageManager: "yarn" };
     }
     if (existsSync(join(current, "bun.lock")) || existsSync(join(current, "bun.lockb"))) {
-      return "bun";
+      return { root: current, packageManager: "bun" };
     }
     if (existsSync(join(current, "package-lock.json"))) {
-      return "npm";
+      return { root: current, packageManager: "npm" };
     }
 
     const parent = dirname(current);
     if (parent === current) {
-      return "npm";
+      return { root: projectRoot, packageManager: "npm" };
     }
     current = parent;
   }
@@ -64,8 +84,12 @@ const pendingOptionalPackageInstalls = new Map<string, Promise<void>>();
 export async function installPackageIntoProject(input: {
   readonly appRoot: string;
   readonly packageName: string;
+  readonly ignoredOptionalDependencies?: readonly string[];
 }): Promise<void> {
   const packageManager = detectProjectPackageManager(input.appRoot);
+  if (packageManager === "pnpm" && input.ignoredOptionalDependencies?.length) {
+    await ensurePnpmOptionalDependencyDefaults(input.appRoot, input.ignoredOptionalDependencies);
+  }
   const args = [...INSTALL_ARGUMENTS[packageManager], input.packageName];
 
   console.info(
@@ -109,6 +133,8 @@ export async function loadOptionalEnginePackage<T>(input: {
   readonly autoInstall: boolean;
   readonly importInstalledModule?: () => Promise<T>;
   readonly importModule: () => Promise<T>;
+  readonly installPackageName?: string;
+  readonly ignoredOptionalDependencies?: readonly string[];
   readonly missingMessage: string;
   readonly packageName: string;
 }): Promise<T> {
@@ -146,7 +172,8 @@ export async function loadOptionalEnginePackage<T>(input: {
 
         await installPackageIntoProject({
           appRoot: input.appRoot,
-          packageName: input.packageName,
+          packageName: input.installPackageName ?? input.packageName,
+          ignoredOptionalDependencies: input.ignoredOptionalDependencies,
         });
       });
     } catch (installError) {
@@ -170,15 +197,6 @@ export async function loadOptionalEnginePackage<T>(input: {
   }
 }
 
-/** Imports an optional engine from the application without installing it. */
-export async function importInstalledEnginePackage<T>(input: {
-  readonly appRoot: string;
-  readonly packageName: string;
-}): Promise<T> {
-  const entrypointHref = await resolveInstalledEnginePackageEntrypointHref(input);
-  return (await import(entrypointHref)) as T;
-}
-
 async function isInstalledEnginePackageLoadable(input: {
   readonly appRoot: string;
   readonly packageName: string;
@@ -190,24 +208,6 @@ async function isInstalledEnginePackageLoadable(input: {
   } catch {
     return false;
   }
-}
-
-async function resolveInstalledEnginePackageEntrypointHref(input: {
-  readonly appRoot: string;
-  readonly packageName: string;
-}): Promise<string> {
-  const packageRoot = findInstalledPackageRoot(input);
-  const packageJsonPath = join(packageRoot, "package.json");
-  const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
-    readonly exports?: unknown;
-    readonly main?: unknown;
-    readonly module?: unknown;
-  };
-  const entry = resolvePackageEntryPoint(packageJson);
-  if (entry.startsWith("/")) {
-    throw new Error(`Invalid absolute entrypoint for optional package "${input.packageName}".`);
-  }
-  return pathToFileURL(join(packageRoot, entry)).href;
 }
 
 async function importEntrypointInWorker(entrypointHref: string): Promise<void> {
@@ -277,104 +277,32 @@ const { parentPort, workerData } = require("node:worker_threads");
   });
 }
 
-function findInstalledPackageRoot(input: {
-  readonly appRoot: string;
-  readonly packageName: string;
-}): string {
-  const packagePathSegments = input.packageName.split("/");
-  const checkedPaths: string[] = [];
-  let current = input.appRoot;
-
-  for (;;) {
-    const packageRoot = join(current, "node_modules", ...packagePathSegments);
-    checkedPaths.push(packageRoot);
-    if (existsSync(join(packageRoot, "package.json"))) {
-      return packageRoot;
-    }
-
-    const parent = dirname(current);
-    if (parent === current) {
-      throw new Error(
-        `Could not find installed optional dependency "${input.packageName}". Checked: ${checkedPaths.join(", ")}`,
-      );
-    }
-    current = parent;
-  }
-}
-
-function resolvePackageEntryPoint(packageJson: {
-  readonly exports?: unknown;
-  readonly main?: unknown;
-  readonly module?: unknown;
-}): string {
-  const dotExport = readDotExport(packageJson.exports);
-  if (dotExport !== undefined) {
-    return dotExport;
-  }
-  if (typeof packageJson.module === "string" && packageJson.module.length > 0) {
-    return packageJson.module;
-  }
-  if (typeof packageJson.main === "string" && packageJson.main.length > 0) {
-    return packageJson.main;
-  }
-  return "index.js";
-}
-
-function readDotExport(exportsValue: unknown): string | undefined {
-  if (typeof exportsValue === "string" && exportsValue.length > 0) {
-    return exportsValue;
-  }
-  if (typeof exportsValue !== "object" || exportsValue === null) {
-    return undefined;
-  }
-
-  const dotExport =
-    "." in exportsValue ? (exportsValue as { readonly ".": unknown })["."] : exportsValue;
-  if (typeof dotExport === "string" && dotExport.length > 0) {
-    return dotExport;
-  }
-  if (typeof dotExport !== "object" || dotExport === null) {
-    return undefined;
-  }
-
-  const conditional = dotExport as { readonly import?: unknown; readonly default?: unknown };
-  if (typeof conditional.import === "string" && conditional.import.length > 0) {
-    return conditional.import;
-  }
-  if (typeof conditional.default === "string" && conditional.default.length > 0) {
-    return conditional.default;
-  }
-  return undefined;
-}
-
 async function withOptionalPackageInstallLock(
   input: { readonly appRoot: string; readonly packageName: string },
   callback: () => Promise<void>,
 ): Promise<void> {
-  const lockKey = `${input.appRoot}:${input.packageName}`;
-  const pending = pendingOptionalPackageInstalls.get(lockKey);
-  if (pending !== undefined) {
-    await pending;
-    return;
+  const lockRoot = resolveProjectInstallation(input.appRoot).root;
+  const pending = pendingOptionalPackageInstalls.get(lockRoot) ?? Promise.resolve();
+  // Different packages and workspace members mutate the same dependency tree.
+  // Queue every callback so each caller rechecks its own package under the lock.
+  const promise = pending
+    .catch(() => {})
+    .then(() => withOptionalPackageInstallFileLock(lockRoot, callback));
+  pendingOptionalPackageInstalls.set(lockRoot, promise);
+  try {
+    await promise;
+  } finally {
+    if (pendingOptionalPackageInstalls.get(lockRoot) === promise) {
+      pendingOptionalPackageInstalls.delete(lockRoot);
+    }
   }
-
-  const promise = withOptionalPackageInstallFileLock(input, callback).finally(() => {
-    pendingOptionalPackageInstalls.delete(lockKey);
-  });
-  pendingOptionalPackageInstalls.set(lockKey, promise);
-  await promise;
 }
 
 async function withOptionalPackageInstallFileLock(
-  input: { readonly appRoot: string; readonly packageName: string },
+  lockRoot: string,
   callback: () => Promise<void>,
 ): Promise<void> {
-  const lockPath = join(
-    input.appRoot,
-    ".eve",
-    "optional-package-locks",
-    `${sanitizeLockName(input.packageName)}.lock`,
-  );
+  const lockPath = join(lockRoot, ".eve", "optional-package-install.lock");
   await acquireLock(lockPath);
   try {
     await callback();
@@ -426,10 +354,6 @@ async function waitForExistingLock(lockPath: string, startedAt: number): Promise
   }
 
   await new Promise((resolve) => setTimeout(resolve, OPTIONAL_PACKAGE_LOCK_POLL_MS));
-}
-
-function sanitizeLockName(value: string): string {
-  return value.replaceAll(/[^a-zA-Z0-9._-]+/g, "-");
 }
 
 /**

@@ -73,7 +73,7 @@ export interface ThemeGlyphs {
   cornerOpen: string;
   /** `⌝` — marks a provider endpoint authored in the agent's own code. */
   external: string;
-  /** `⏺` — the in-progress todo item (pulses while the turn runs). */
+  /** `⏺` — an active in-progress state, such as a cancelling turn. */
   dotActive: string;
   /** `✓` — a completed tool or success state. */
   success: string;
@@ -103,7 +103,7 @@ export interface ThemeGlyphs {
   elbow: string;
   /** `▔` — strong full-width rule opening the bottom question panel. */
   hrule: string;
-  /** `─` — light rule segment framing the end-of-turn stats line. */
+  /** `─` — light rule segment framing drawers and panel boundaries. */
   dash: string;
   /** `▏` — the synthetic input caret. */
   caret: string;
@@ -115,7 +115,7 @@ export interface ThemeGlyphs {
   arrowUp: string;
   /** `↓` — output (response) tokens in the token-flow segment. */
   arrowDown: string;
-  /** `↯` — Fast mode (Gateway priority tier) marker beside a model id. */
+  /** `⚡︎` — intrinsic speed or Fast mode (Gateway priority tier) marker. */
   fast: string;
   /** `↵` — the Enter affordance inside a selection badge. */
   enter: string;
@@ -152,7 +152,7 @@ const UNICODE_GLYPHS: ThemeGlyphs = {
   ellipsis: "…",
   arrowUp: "↑",
   arrowDown: "↓",
-  fast: "↯",
+  fast: "⚡︎",
   enter: "↵",
   validating: "▪",
 };
@@ -202,7 +202,7 @@ export interface Theme {
   readonly spinner: readonly string[];
 }
 
-export interface CreateThemeOptions {
+interface CreateThemeOptions {
   /** Whether to emit ANSI color. Defaults to `true`. */
   color?: boolean;
   /** Whether the terminal renders Unicode glyphs. Defaults to `true`. */

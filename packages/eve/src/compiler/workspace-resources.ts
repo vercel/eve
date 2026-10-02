@@ -70,6 +70,13 @@ export async function materializeWorkspaceResources(input: {
   };
 }
 
+// Node ids contain `:` and `/` (e.g. `manager::ext:crm:subagents/reviewer`).
+// Encoding keeps each node in one reversible, collision-free path segment
+// that Windows accepts.
+function resourceDirectoryName(nodeId: string): string {
+  return encodeURIComponent(nodeId);
+}
+
 function createResourceRoot(
   manifest: CompiledAgentResources,
   nodeId: string,
@@ -77,7 +84,7 @@ function createResourceRoot(
 ): CompiledWorkspaceResourceRoot {
   return {
     contentHash,
-    logicalPath: normalizeLogicalPath(join(RESOURCES_DIRECTORY, nodeId)),
+    logicalPath: normalizeLogicalPath(join(RESOURCES_DIRECTORY, resourceDirectoryName(nodeId))),
     rootEntries: deriveResourceRootEntries({
       sandboxWorkspaces: manifest.sandboxWorkspaces,
       skills: manifest.skills,
@@ -90,10 +97,14 @@ async function materializeNode<TManifest extends CompiledAgentResources>(input: 
   readonly nodeId: string;
   readonly resourcesRoot: string;
 }): Promise<TManifest> {
-  const nodeRoot = join(input.resourcesRoot, input.nodeId);
+  const nodeRoot = join(input.resourcesRoot, resourceDirectoryName(input.nodeId));
   await mkdir(nodeRoot, { recursive: true });
 
   const workspaceRoot = join(nodeRoot, RESOURCE_WORKSPACE_DIRECTORY);
+  await Promise.all([
+    mkdir(workspaceRoot, { recursive: true }),
+    mkdir(join(nodeRoot, RESOURCE_SKILLS_DIRECTORY), { recursive: true }),
+  ]);
   for (const workspace of input.manifest.sandboxWorkspaces) {
     await copyDirectoryContents({
       sourcePath: workspace.sourcePath,

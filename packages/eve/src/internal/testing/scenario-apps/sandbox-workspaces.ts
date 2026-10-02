@@ -7,9 +7,10 @@ import type { ScenarioAppDescriptor } from "#internal/testing/scenario-app.js";
  */
 export const SANDBOX_WORKSPACES_DESCRIPTOR: ScenarioAppDescriptor = {
   files: {
-    "agent/sandbox/sandbox.ts": `import { defineSandbox } from "eve/sandbox";
+    "agent/sandbox/sandbox.ts": `import { DefaultSandbox, defineSandbox } from "eve/sandbox";
 
-export default defineSandbox({});
+export const environment = DefaultSandbox.environment();
+export default defineSandbox(() => environment.open());
 `,
     "agent/sandbox/workspace/notes.md": `# repo-shell notes
 

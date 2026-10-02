@@ -12,32 +12,28 @@ Important naming note:
 
 ## Find the page for your task
 
-| To do this                                               | Read this                                                                                                                    |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Organize agents, subagents, and browser application code | [Project Structure](./concepts/project-structure.mdx)                                                                        |
-| Create a project and run your first agent                | [Getting Started](./getting-started.mdx)                                                                                     |
-| Look up agent files and discovery rules                  | [Agent Files](./reference/agent-files.md)                                                                                    |
-| Set the model, reasoning, or other agent-wide config     | [Agents](./agent-config.md)                                                                                                  |
-| Choose an agent model automatically for each request     | [Automatic Model Selection](./guides/evaluate.md)                                                                            |
-| Change what the agent does and how it behaves            | [Instructions](./instructions.mdx)                                                                                           |
-| Give the agent a typed capability it can call            | [Tools](./tools/overview.mdx)                                                                                                |
-| Require approval, or ask the user something mid-turn     | [Human in the Loop](./tools/human-in-the-loop.md)                                                                            |
-| Call an external HTTP API or MCP server                  | [Connections](./connections/overview.mdx)                                                                                    |
-| Add a messaging surface (Slack, Discord, iMessage, …)    | [Channels](./channels/overview.mdx)                                                                                          |
-| Expose your own HTTP route as a conversation surface     | [Custom Channels](./channels/custom.mdx)                                                                                     |
-| Package a procedure the agent loads only when it applies | [Skills](./skills.mdx)                                                                                                       |
-| Carry state across turns, or shape what the model sees   | [State](./concepts/state.md), [Context Control](./concepts/context-control.md)                                               |
-| Run commands or untrusted code in isolation              | [Sandboxes](./sandbox.mdx)                                                                                                   |
-| Delegate work to a specialist child agent                | [Subagents](./subagents/index.mdx)                                                                                           |
-| Run work on a recurring schedule                         | [Schedules](./schedules.mdx)                                                                                                 |
-| Install an existing integration instead of writing one   | [Add Integrations](./install-integrations.mdx)                                                                               |
-| Link a Vercel project and deploy to production           | [Deploy to Vercel](./guides/deployment/vercel.mdx)                                                                           |
-| Self-host, or compare hosting strategies                 | [Deployment](./guides/deployment/overview.md)                                                                                |
-| Authorize routes, sessions, and per-user access          | [Authentication](./guides/auth-and-route-protection.md)                                                                      |
-| Add a browser application                                | [Next.js](./guides/frontend/nextjs.mdx), [Nuxt](./guides/frontend/nuxt.mdx), or [SvelteKit](./guides/frontend/sveltekit.mdx) |
-| Build a custom web UI, or stream a session to a client   | [Client SDK](./guides/client/overview.mdx), [Frontend](./guides/frontend/overview.mdx)                                       |
-| Test the agent's behavior                                | [Evals](./evals/overview.mdx)                                                                                                |
-| Look up a CLI command or an exported type                | [CLI](./reference/cli.md), [TypeScript API](./reference/typescript-api.md)                                                   |
+| To do this                                               | Read this                                                                              |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Create a project, or understand the file layout          | [Getting Started](./getting-started.mdx)                                               |
+| Set the model, reasoning, or other agent-wide config     | [Agents](./agent-config.md)                                                            |
+| Change what the agent does and how it behaves            | [Instructions](./instructions.mdx)                                                     |
+| Give the agent a typed capability it can call            | [Tools](./tools/overview.mdx)                                                          |
+| Require approval, or ask the user something mid-turn     | [Human in the Loop](./tools/human-in-the-loop.md)                                      |
+| Call an external HTTP API or MCP server                  | [Connections](./connections/overview.mdx)                                              |
+| Add a messaging surface (Slack, Discord, iMessage, …)    | [Channels](./channels/overview.mdx)                                                    |
+| Expose your own HTTP route as a conversation surface     | [Custom Channels](./channels/custom.mdx)                                               |
+| Package a procedure the agent loads only when it applies | [Skills](./skills.mdx)                                                                 |
+| Carry state across turns, or shape what the model sees   | [State](./concepts/state.md), [Context Control](./concepts/context-control.md)         |
+| Run commands or untrusted code in isolation              | [Sandboxes](./sandbox/index.mdx)                                                       |
+| Delegate work to a specialist child agent                | [Subagents](./subagents/index.mdx)                                                     |
+| Run work on a recurring schedule                         | [Schedules](./schedules.mdx)                                                           |
+| Install an existing integration instead of writing one   | [Add Integrations](./install-integrations.mdx)                                         |
+| Link a Vercel project and deploy to production           | [Deploy to Vercel](./guides/deployment/vercel.mdx)                                     |
+| Self-host, or compare hosting strategies                 | [Deployment](./guides/deployment/overview.md)                                          |
+| Authorize routes, sessions, and per-user access          | [Authentication](./guides/auth-and-route-protection.md)                                |
+| Build a web UI, or stream a session to a client          | [Client SDK](./guides/client/overview.mdx), [Frontend](./guides/frontend/overview.mdx) |
+| Test the agent's behavior                                | [Evals](./evals/overview.mdx)                                                          |
+| Look up a CLI command or an exported type                | [CLI](./reference/cli.md), [TypeScript API](./reference/typescript-api.md)             |
 
 ## Legal and safeguards
 
@@ -58,25 +54,24 @@ Unless you configure stricter controls, eve agents may operate with permissive s
 For a full picture rather than a single task, read in this order:
 
 1. [Getting Started](./getting-started.mdx)
-2. [Project Structure](./concepts/project-structure.mdx)
-3. [Tutorial](./tutorial/first-agent.mdx)
-4. [Agents](./agent-config.md)
-5. [TypeScript API Reference](./reference/typescript-api.md)
-6. [Context Control](./concepts/context-control.md)
-7. [Skills](./skills.mdx)
-8. [Tools](./tools/overview.mdx)
-9. [Connections](./connections/overview.mdx)
-10. [Sandboxes](./sandbox.mdx)
-11. [Channels](./channels/overview.mdx)
-12. [Session Context](./guides/session-context.md)
-13. [Sessions and Streaming](./concepts/sessions-runs-and-streaming.md)
-14. [Client SDK](./guides/client/overview.mdx)
-15. [Subagents](./subagents/index.mdx)
-16. [Schedules](./schedules.mdx)
-17. [Evals](./evals/overview.mdx)
-18. [Authentication](./guides/auth-and-route-protection.md)
-19. [Deployment](./guides/deployment/overview.md)
-20. [CLI](./reference/cli.md)
+2. [Tutorial](./tutorial/first-agent.mdx)
+3. [Agents](./agent-config.md)
+4. [TypeScript API Reference](./reference/typescript-api.md)
+5. [Context Control](./concepts/context-control.md)
+6. [Skills](./skills.mdx)
+7. [Tools](./tools/overview.mdx)
+8. [Connections](./connections/overview.mdx)
+9. [Sandboxes](./sandbox/index.mdx)
+10. [Channels](./channels/overview.mdx)
+11. [Session Context](./guides/session-context.md)
+12. [Sessions and Streaming](./concepts/sessions-runs-and-streaming.md)
+13. [Client SDK](./guides/client/overview.mdx)
+14. [Subagents](./subagents/index.mdx)
+15. [Schedules](./schedules.mdx)
+16. [Evals](./evals/overview.mdx)
+17. [Authentication](./guides/auth-and-route-protection.md)
+18. [Deployment](./guides/deployment/overview.md)
+19. [CLI](./reference/cli.md)
 
 ## The public mental model
 
@@ -102,7 +97,7 @@ eve then gives you:
 - a reconnectable session stream
 - durable session state across turns
 - a per-agent sandbox with a shared runtime workspace
-- typed runtime helpers accessed through `ctx` (`ctx.session`, `ctx.getSandbox()`, `ctx.getSkill()`)
+- typed runtime helpers accessed through `ctx` (`ctx.session`, `ctx.getSandbox()`)
 
 ## The runtime shape
 

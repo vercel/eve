@@ -186,7 +186,7 @@ function logicalLineEnd(text: string, cursor: number): number {
 }
 
 /** Options for {@link applyLineEditorKey}. */
-export interface LineEditorOptions {
+interface LineEditorOptions {
   /** Single-line inputs flatten pasted newlines and ignore Shift+Enter. */
   readonly multiline?: boolean;
 }

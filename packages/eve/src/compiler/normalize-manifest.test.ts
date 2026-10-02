@@ -214,7 +214,7 @@ describe("compileAgentManifest source graph", () => {
 
     expect(compiled.config.defaultTools).toBe(false);
     expect(compiled.tools.map((tool) => tool.name).sort()).toEqual(["bash", "weather"]);
-    expect(compiled.dynamicTools.map((tool) => tool.slug)).toEqual(["connection_search"]);
+    expect(compiled.dynamicTools.map((tool) => tool.slug)).toEqual(["connection_tools"]);
     expect(compiled.tools.find((tool) => tool.name === "bash")?.description).toBe(
       "Application-owned shell replacement.",
     );
@@ -229,19 +229,21 @@ describe("compileAgentManifest source graph", () => {
     ).toEqual(["tools/bash.ts"]);
   });
 
-  it("rejects disabling required connection search", async () => {
+  it.each([
+    ["tools/connection_search.ts", disableTool()],
+    [
+      "tools/connection_execute.ts",
+      defineTool({ description: "Replacement.", execute: () => null, inputSchema: {} }),
+    ],
+    ["tools/connection_tools.ts", disableTool()],
+  ])("rejects authored %s because the connection tools are closed", async (logicalPath, entry) => {
     const sourceRegistry = registry([
-      {
-        logicalPath: "tools/connection_search.ts",
-        loadNamespace: async () => ({ default: disableTool() }),
-      },
+      { logicalPath, loadNamespace: async () => ({ default: entry }) },
     ]);
 
     await expect(
       compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      'The required "connection_search" tool cannot be disabled. Remove "agent/tools/connection_search.ts" or export a replacement tool from it.',
-    );
+    ).rejects.toThrow(`"agent/${logicalPath}" is reserved.`);
   });
 
   it("allows disableTool for the root agent tool", async () => {
@@ -265,14 +267,10 @@ describe("compileAgentManifest source graph", () => {
     );
   });
 
-  it("does not install task_update from the framework registry", async () => {
+  it("does not install ask_question from the framework registry", async () => {
     const compiled = await compileAgentManifest(manifest());
 
-    expect(compiled.tools.map((tool) => tool.name)).toContain("task_cancel");
-    expect(compiled.tools.map((tool) => tool.name)).not.toContain("task_update");
-    expect(Object.values(compiled.bindings).map((binding) => binding.logicalPath)).not.toContain(
-      "tools/task_update.ts",
-    );
+    expect(compiled.tools.map((tool) => tool.name)).not.toContain("ask_question");
   });
 
   it("allows an authored tool in the agent slot", async () => {
@@ -298,29 +296,7 @@ describe("compileAgentManifest source graph", () => {
       availableInSubagents: false,
       behavior: { availability: [] },
       description: "Route delegated work.",
-      execution: undefined,
     });
-  });
-
-  it.each(["task_cancel"])("rejects overriding closed framework tool %s", async (toolName) => {
-    const sourceRegistry = registry([
-      {
-        logicalPath: `tools/${toolName}.ts`,
-        loadNamespace: async () => ({
-          default: defineTool({
-            description: "Replacement tool.",
-            execute: async () => null,
-            inputSchema: {},
-          }),
-        }),
-      },
-    ]);
-
-    await expect(
-      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
-    ).rejects.toThrow(
-      `The framework "${toolName}" tool cannot be overridden. Re-export it from "eve/tools/${toolName}" or disable it with disableTool().`,
-    );
   });
 
   it("compiles a workflow tool with programmatic executor metadata", async () => {
@@ -346,10 +322,11 @@ describe("compileAgentManifest source graph", () => {
     expect(compiled.tools.find((tool) => tool.name === "durable")?.behavior).toEqual({
       availability: [],
       handling: {
+        entryPoint: "execute",
         kind: "workflow-tool",
         workflowId: "workflow//example/tool//execute",
       },
-      shape: { lifetime: "step", suspend: "workflow" },
+      shape: { suspend: "workflow" },
     });
   });
 
@@ -373,13 +350,6 @@ describe("compileAgentManifest source graph", () => {
     expect(serialized.tools.find((tool) => tool.name === "agent")).toMatchObject({
       hasExecute: true,
     });
-    expect(serialized.tools.find((tool) => tool.name === "ask_question")).toMatchObject({
-      behavior: {
-        availability: ["requires-request-input"],
-        handling: { kind: "request-input", request: "question" },
-      },
-      hasExecute: false,
-    });
     expect(serialized.tools.find((tool) => tool.name === "web_search")).toMatchObject({
       behavior: {
         availability: [],
@@ -388,11 +358,10 @@ describe("compileAgentManifest source graph", () => {
       hasExecute: false,
     });
     expect(graph.root.turnAgent.tools.find((tool) => tool.name === "agent")).toMatchObject({
-      rootOnly: true,
-      task: {
-        nodeId: "__root__",
-        workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
+      behavior: {
+        handling: { kind: "dispatch", target: { kind: "self-agent-call", nodeId: "__root__" } },
       },
+      rootOnly: true,
     });
     expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
       behavior: {
@@ -698,6 +667,14 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistries: [sourceRegistry],
     });
     const mount = compiled.extensionMounts[0]!;
+    expect(mount.mountId).toBe("extensions/crm");
+    expect(compiledAgentManifestSchema.safeParse(compiled).success).toBe(true);
+    expect(
+      compiledAgentManifestSchema.safeParse({
+        ...compiled,
+        extensionMounts: [{ ...mount, mountId: "" }],
+      }).success,
+    ).toBe(false);
 
     expect(compiled.bindings[mount.mountSourceId]?.usage).toEqual({
       compile: false,
@@ -726,6 +703,23 @@ describe("compileAgentManifest source graph", () => {
       compileAgentManifest(discovered, { sourceRegistries: [registry([])] }),
     ).rejects.toThrow(
       'Subagent "subagents/agent" uses the reserved name "agent". Rename its path; eve reserves "agent" for the built-in root-copy target.',
+    );
+  });
+
+  it("reserves the task tools' names", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/task_cancel.ts",
+        loadNamespace: async () => ({
+          default: defineTool({ description: "Cancel.", inputSchema: {}, execute: () => null }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'Tool "tools/task_cancel.ts" uses the reserved name "task_cancel". Rename its path; eve reserves "task_cancel" for its built-in task tool.',
     );
   });
 

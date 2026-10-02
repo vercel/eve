@@ -1,10 +1,13 @@
+import type { TokenUsage } from "#shared/token-usage.js";
 import type { Experimental_EvaluationModel as EvaluationModel } from "ai";
 
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type { ClientAgentSession } from "#client/agent-session.js";
 import type {
   RuntimeIdentity,
   RuntimeTraceContext,
   MessageStreamEvent,
+  AgentStartedStreamEvent,
 } from "#protocol/message.js";
 import type {
   CancelSessionResult,
@@ -15,7 +18,6 @@ import type {
 } from "#client/types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { TaskStatus } from "#tasks/types.js";
 import type { AgentModelOptionsDefinition } from "#shared/agent-definition.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
 import type {
@@ -49,22 +51,23 @@ export interface EveEvalToolCall {
 }
 
 /**
- * One subagent delegation extracted from the captured stream
- * (`subagent.called` / `subagent.started`, joined with `subagent.completed`).
+ * One call to an agent task extracted from the captured stream: its
+ * `task.started`, joined with its `task.settled` and the task's
+ * `agent.started`.
  */
 export interface EveEvalSubagentCall {
-  /** Runtime-action call id joining this delegation's lifecycle events, when observed. */
+  /** The agent tool call's id, as on its task events. */
   readonly callId?: string;
-  /** Durable child session id for local and remote workflow delegations. */
+  /** The agent's session id, shared by every call to one task; absent if it never opened. */
   readonly childSessionId?: string;
   /** Subagent name. */
   readonly name: string;
-  /** Remote agent URL for remote delegations (`subagent.called` remote metadata). */
+  /** Remote agent URL for remote delegations (`agent.started` remote metadata). */
   readonly remoteUrl?: string;
-  /** Output from the matching `subagent.completed` event; `undefined` when the call never completed. */
+  /** Output from the call's `task.settled`; `undefined` until the call completes. */
   readonly output?: JsonValue;
-  /** Task lifecycle status inferred from the captured delegation events. */
-  readonly status: TaskStatus;
+  /** The call's task status: `working` until its `task.settled` arrives. */
+  readonly status: "working" | "completed" | "failed" | "cancelled";
   /** Zero-based index of the turn the delegation happened in. */
   readonly turnIndex: number;
   /** Owning session id, when the runner knows it. */
@@ -85,6 +88,21 @@ export interface EveEvalDerivedFacts {
   readonly parked: boolean;
   readonly messageCount: number;
   readonly reasoningBlockCount: number;
+  /**
+   * Distinct ids of the models the steps started with (`step.started`): in first-use order for one
+   * session, and in session order for an eval. Covers only the sessions the eval created or
+   * attached: a delegated subagent runs in its own session, so its models appear only when the eval
+   * attaches that session. Compaction and `auto` routing calls are not included.
+   */
+  readonly models: readonly string[];
+  /**
+   * Token usage from the latest `session.waiting`, `turn.waiting`, `session.failed`, or
+   * `session.completed`: the
+   * session's own model calls plus what the agents it delegated to spent, so on a turn it is the
+   * session's total so far. For an eval, each captured session counts once, by its latest usage,
+   * except sessions another captured session opened. Absent when a counted session reported none.
+   */
+  readonly usage?: TokenUsage;
   readonly failureCode?: string;
 }
 
@@ -213,6 +231,8 @@ export interface AssertionResult {
   readonly severity: AssertionSeverity;
   readonly threshold?: number;
   readonly passed: boolean;
+  /** Whether the assertion failed because its scorer threw instead of producing a score. */
+  readonly errored: boolean;
   /** Human-readable failure detail, shown in console output and artifacts. */
   readonly message?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -290,7 +310,7 @@ export interface EveEvalLiveTurn {
 }
 
 /** Operations and state belonging to one accepted session. */
-export interface EveEvalSessionDriver {
+interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
   readonly events: readonly MessageStreamEvent[];
   /**
@@ -323,7 +343,19 @@ export interface EveEvalSessionDriver {
   start(message: string, options?: SendTurnOptions): Promise<EveEvalLiveTurn>;
   /** Send one text turn with a local file attached as a data URL. */
   sendFile(text: string, filePath: string, mediaType?: string): Promise<EveEvalTurn>;
+  /**
+   * The session an agent run opened, as this session's stream announced it with
+   * `agent.started`. Its `stream()` follows the child through this parent session
+   * with the eval client's credentials, and stops with the eval unless given a `signal`.
+   */
+  agent(started: AgentStartedStreamEvent): EveEvalAgentSession;
 }
+
+/** A session an agent run opened, reached through the parent eval session. */
+export type EveEvalAgentSession = Pick<
+  ClientAgentSession,
+  "name" | "sessionId" | "stream" | "taskId"
+>;
 
 /** One accepted session, exposed by `t.session()`, turns, and target attachment helpers. */
 export interface EveEvalSession

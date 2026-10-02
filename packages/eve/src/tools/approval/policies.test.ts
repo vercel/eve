@@ -13,7 +13,6 @@ function approvalContext(overrides: Partial<ApprovalContext> = {}): ApprovalCont
     approvedTools: new Set(),
     callId: "call-1",
     getSandbox: vi.fn(),
-    getSkill: vi.fn(),
     session: {
       auth: { current: null, initiator: null },
       id: "session-1",

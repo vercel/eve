@@ -18,6 +18,7 @@ docs, prompts, comments, and headings.
 
 - `packages/eve` — the framework and `eve` CLI (the main package)
 - `packages/eve-catalog` — internal, unpublished library
+- `packages/eve-code` — `@eve/code`, internal source of the `eve/extensions/code` extension shipped in `eve`
 - `apps/fixtures` — shared agent fixtures used by e2e, TUI smoke tests, and local dev
 - `apps/frameworks`, `apps/templates`, `apps/docs` — framework integrations, templates, docs site
 - `docs` — published documentation content
@@ -57,6 +58,7 @@ pnpm test               # unit + integration
 pnpm test:unit          # unit tests (<3s)
 pnpm test:integration   # integration tests (<10s)
 pnpm test:scenario      # scenario tests (2–5 min; requires pnpm build first)
+pnpm test:framework-fixtures # apps/frameworks smoke builds (requires pnpm build first)
 pnpm test:e2e           # fixture-owned eve eval suites (CI only)
 pnpm test:tui           # TUI smoke scripts (not e2e)
 ```
@@ -158,6 +160,9 @@ exhaustive task inventories. Use a compact diagram when it makes a lifecycle
 or ownership relationship materially clearer.
 
 ## Testing
+
+Use the [`test-audit`](./.agents/skills/test-audit/SKILL.md) skill when
+writing, reviewing, or pruning tests.
 
 Tests belong in one of four tiers. Pick the tightest tier that can express the
 assertion:

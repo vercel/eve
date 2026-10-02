@@ -2,6 +2,7 @@ import {
   ROOT_CONTEXT,
   SpanKind,
   type Context,
+  type Attributes,
   type Span,
   type SpanContext,
   type Tracer,
@@ -16,16 +17,18 @@ import type {
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
-import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
+import { withAgentToolSpanContext } from "#tracing/agent-tool-span-context.js";
 
 interface ToolSpanState {
   readonly actionKey: string;
   readonly attemptId: string;
-  readonly context: Context;
+  context: Context;
+  readonly additionalAttributes: Attributes;
   readonly event: InstrumentationToolCallStartedEvent;
   readonly fallbackParent: Context;
   readonly idempotencyKey: string;
@@ -34,9 +37,10 @@ interface ToolSpanState {
   finished?: true;
   span?: Span;
   terminal?: InstrumentationToolCallTerminalEvent;
+  pendingError?: { readonly error: unknown; readonly errorType?: string };
 }
 
-export interface AgentToolInstrumentation {
+interface AgentToolInstrumentation {
   actionStarted(event: InstrumentationActionStartedEvent): Promise<void>;
   contextFor(attemptId: string, idempotencyKey: string): Context | undefined;
   drain(attemptId: string, failure?: { readonly error: unknown }): void;
@@ -147,6 +151,7 @@ export function createAgentToolInstrumentation(input: {
     const state: ToolSpanState = {
       actionKey,
       attemptId: event.scope.attemptId,
+      additionalAttributes: {},
       context: withChannelAudience(
         contextFromSpanContext({
           isRemote: false,
@@ -162,6 +167,21 @@ export function createAgentToolInstrumentation(input: {
       spanId,
       startTimeMs: Date.now(),
     };
+    state.context = withAgentToolSpanContext(state.context, {
+      recordInputs: input.recordInputs,
+      recordOutputs: input.recordOutputs,
+      setAttributes(attributes) {
+        Object.assign(state.additionalAttributes, attributes);
+        if (state.span === undefined) return;
+        for (const [name, value] of Object.entries(attributes)) {
+          if (value !== undefined) state.span.setAttribute(name, value);
+        }
+      },
+      recordError(error, errorType) {
+        state.pendingError = { error, errorType };
+        if (state.span !== undefined) recordError(state.span, error, errorType);
+      },
+    });
     getAttemptStates(event.scope.attemptId).set(event.idempotencyKey, state);
     byAction.set(actionKey, state);
     return state;
@@ -173,13 +193,16 @@ export function createAgentToolInstrumentation(input: {
       input.tracer.startSpan(
         `execute_tool ${state.event.toolName}`,
         {
-          attributes: toolAttributes(state.event),
+          attributes: { ...toolAttributes(state.event), ...state.additionalAttributes },
           kind: SpanKind.INTERNAL,
           startTime: state.startTimeMs,
         },
         parent,
       ),
     );
+    if (state.pendingError !== undefined) {
+      recordError(state.span, state.pendingError.error, state.pendingError.errorType);
+    }
     if (input.recordInputs) {
       const args = contentAttribute(state.event.input);
       if (args !== undefined) state.span.setAttribute("gen_ai.tool.call.arguments", args);
@@ -228,6 +251,7 @@ function toolAttributes(
     ...agentSpanNamingAttributes(`execute_tool ${event.toolName}`, "execute_tool"),
     ...agentTraceIdentityAttributes({
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+      traceSessionId: traceSessionIdOf(event.scope),
       sessionId: event.scope.sessionId,
     }),
   };

@@ -3,28 +3,26 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 import { handoffNotes } from "../../release-findings";
-import { handoffReferences, releaseRecords, saveReleaseRecord } from "../../release-reports";
+import { HANDOFF_REFERENCE, releaseRecords, saveReleaseRecord } from "../../release-reports";
 
 const invocationCount = defineState("storefront.prepare-handoff", () => 0);
 
 export default defineTool({
   description: "Prepare a release handoff from a completed storefront review record.",
   inputSchema: z.object({
-    subject: z.enum(["repository", "checkout"]),
     reviewId: z.string().min(1),
   }),
   async execute(input) {
     const review = releaseRecords.get()[input.reviewId];
-    if (review?.status !== "completed" || review.subject !== input.subject) {
+    if (review?.status !== "completed") {
       throw new Error("Complete the requested review before preparing its release handoff.");
     }
     const attempt = invocationCount.get() + 1;
     invocationCount.update(() => attempt);
     const report = {
-      reportId: handoffReferences[input.subject],
-      subject: input.subject,
+      reportId: HANDOFF_REFERENCE,
       status: "completed" as const,
-      findings: handoffNotes[input.subject],
+      findings: handoffNotes,
     };
     saveReleaseRecord(report);
     return {

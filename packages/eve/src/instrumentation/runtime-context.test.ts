@@ -11,6 +11,7 @@ import {
 import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const session: HarnessSession = {
   agent: {
@@ -196,14 +197,22 @@ describe("buildTelemetryRuntimeContext", () => {
     });
 
     it("drops reserved eve.* keys from resolver results", () => {
+      const logs = captureLogRecords();
       const resolver: RuntimeContextResolver = () =>
         ({ "eve.session.id": "override", team: "platform" }) as never;
       const runtimeContext = build({ providerResolvers: [resolver] });
 
       expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, team: "platform" });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "ignoring reserved instrumentation runtime context key",
+        }),
+      );
     });
 
     it("continues when a resolver throws", () => {
+      const logs = captureLogRecords();
       const failing: RuntimeContextResolver = () => {
         throw new Error("boom");
       };
@@ -213,6 +222,12 @@ describe("buildTelemetryRuntimeContext", () => {
       });
 
       expect(runtimeContext).toEqual({ ...FRAMEWORK_KEYS, team: "platform" });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "ignoring instrumentation projection after projector failure",
+        }),
+      );
     });
 
     it("returns undefined when no resolvers are configured", () => {

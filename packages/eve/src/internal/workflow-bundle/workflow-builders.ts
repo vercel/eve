@@ -1,10 +1,9 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
-import { SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME } from "#runtime/subagents/workflow-reference.js";
+import { AGENT_TOOL_SERVE_WORKFLOW_NAME } from "#runtime/subagents/workflow-reference.js";
 import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
 import {
   findWorkflowDirectiveFunctions,
@@ -56,7 +55,7 @@ export async function applyWorkflowTransform(
   projectRoot?: string,
   stableWorkflowNames: ReadonlySet<string> = new Set([
     ...STABLE_WORKFLOW_NAMES,
-    SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME,
+    AGENT_TOOL_SERVE_WORKFLOW_NAME,
   ]),
 ): Promise<{
   code: string;
@@ -136,19 +135,6 @@ function toRealPath(path: string): string {
     return realpathSync(path);
   } catch {
     return resolve(path);
-  }
-}
-
-// Reads the manifest directly: applications need not declare a `version`,
-// which the package-specifier cache requires.
-export function isAuthoredApplicationRoot(appRoot: string): boolean {
-  const packageJsonPath = join(appRoot, "package.json");
-  if (!existsSync(packageJsonPath)) return false;
-  try {
-    const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: unknown };
-    return parsed.name !== EVE_PACKAGE_NAME;
-  } catch {
-    return false;
   }
 }
 
@@ -513,8 +499,4 @@ function isRootEntrypointFile(filePath: string, pkg: PackageInfo): boolean {
   );
 
   return rootCandidates.includes(relativeFilePath);
-}
-
-export async function readSourceFile(path: string): Promise<string> {
-  return await readFile(path, "utf8");
 }

@@ -17,18 +17,15 @@ import { theme } from "./lib/theme.ts";
  * landing under `stepIndex: 0` and collapsing into one box.
  *
  * Pass conditions:
- *   1. A `※ subagent(stock-price…)` region header exists.
- *   2. The child's `get_stock_price` tool row renders nested inside the
- *      subagent's `│` rule gutter (proves the child tool surfaces under
- *      the subagent flow).
+ *   1. A `Delegate subagent(stock-price)` start line exists.
+ *   2. The task panel asks for approval of the child's `get_stock_price`
+ *      call, and the approval prompt accepts it.
  *   3. NO parent-level `get_stock_price` tool row exists (proves the
  *      parent-tool suppression for child tool calls removes the stale
  *      block, not just blocks future renders).
- *   4. The price (178.92) appears inside the nested subagent region —
- *      or the section already settled to its `└ Done` footnote (a
- *      completed subagent collapses, so nested rows are transient).
+ *   4. The task ends on a `✓ stock-price` line.
  *   5. The parent's final assistant reply (a top-level `▲` section)
- *      also contains the price.
+ *      contains the price.
  */
 
 const TICKER = "GOOG";
@@ -72,17 +69,17 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   );
   input.enter();
 
-  // The subagent region header should appear once the parent delegates.
-  await waitForCondition(() => screen.snapshot().includes("※ subagent(stock-price"), {
+  // The task's start line appears once the parent delegates.
+  await waitForCondition(() => screen.snapshot().includes("Delegate subagent(stock-price)"), {
     timeoutMs: 120_000,
-    label: "subagent region header",
+    label: "task start line",
     onTimeout: () => screen.snapshot(),
   });
-  console.log(theme.muted("[tui-weather] subagent region header appeared"));
+  console.log(theme.muted("[tui-weather] task start line appeared"));
 
-  // Approve the get_stock_price tool when prompted. The TUI parks on a
-  // y/n approval prompt, match the question smoke's handshake delay
-  // so the server's resume hook is registered before we reply.
+  // The task panel names the approval the child waits on, and the TUI
+  // parks on a y/n prompt. Match the question smoke's handshake delay so
+  // the server's resume hook is registered before we reply.
   await waitForCondition(
     () =>
       screen.snapshot().includes("Approve get_stock_price?") ||
@@ -97,60 +94,15 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   input.emit("data", Buffer.from("y"));
   console.log(theme.muted("[tui-weather] approved get_stock_price"));
 
-  // Price should appear in the body once the child unblocks.
-  await waitForCondition(() => screen.snapshot().includes(PRICE), {
+  await waitForCondition(() => screen.snapshot().includes("✓ subagent(stock-price)"), {
     timeoutMs: 120_000,
-    label: `price ${PRICE} renders in the body`,
+    label: "task end line",
     onTimeout: () => screen.snapshot(),
   });
-  console.log(theme.muted(`[tui-weather] price ${PRICE} landed in body`));
-
-  // The child's tool row renders nested inside the subagent's `│` rule
-  // gutter — unless the section already settled and collapsed past it.
-  await waitForCondition(
-    () =>
-      /│.*get_stock_price/u.test(screen.snapshot()) ||
-      screen
-        .snapshot()
-        .split("\n")
-        .some((line) => line.includes("└") && line.includes("Done")),
-    {
-      timeoutMs: 60_000,
-      label: "nested subagent tool row (or the section settled)",
-      onTimeout: () => screen.snapshot(),
-    },
-  );
-  console.log(theme.muted("[tui-weather] nested subagent tool row rendered (or settled)"));
-
-  // The price renders inside the nested subagent region (tool result or
-  // post-tool message) while the child is still live — but a settled child
-  // collapses its section to the `└ Done…` footnote, so losing that race
-  // must not fail the smoke. Child-side delivery was already proven by the
-  // body wait above; the parent-echo wait below proves the full round trip.
-  await waitForCondition(
-    () =>
-      screen
-        .snapshot()
-        .split("\n")
-        .some(
-          // The nested price row can carry either rail glyph — the `└`
-          // corner when it is the section's last row (the rail closes on
-          // the newest child), `│` otherwise — and a fully settled
-          // section shows the `└ Done…` footnote instead.
-          (line) =>
-            ((line.includes("│") || line.includes("└")) && line.includes(PRICE)) ||
-            (line.includes("└") && line.includes("Done")),
-        ),
-    {
-      timeoutMs: 120_000,
-      label: `price ${PRICE} inside the nested subagent region (or the section settled)`,
-      onTimeout: () => screen.snapshot(),
-    },
-  );
-  console.log(theme.muted("[tui-weather] subagent region carried the price or settled to Done"));
+  console.log(theme.muted("[tui-weather] task end line appeared"));
 
   // Wait for the parent's follow-up assistant section (top-level `▲`
-  // prose, not nested under the rule gutter) to echo the price.
+  // prose) to echo the price.
   await waitForCondition(() => assistantSectionContains(screen.snapshot(), PRICE), {
     timeoutMs: 120_000,
     label: "parent assistant reply with price",
@@ -161,13 +113,13 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
 
   // No parent-level tool row for the child's call should remain: a tool
   // row at the parent level is a status glyph in the indented header cell
-  // (e.g. `  ▪ get_stock_price`), while the legitimate one is prefixed by
-  // the subagent's `│` rule. Assistant prose lines start with `▲ `, so
+  // (e.g. `  ▪ get_stock_price`). The child's own calls surface only in the
+  // task panel and its end line. Assistant prose lines start with `▲ `, so
   // they cannot false-positive here.
-  const parentToolRowRegex = /^ {0,2}[^\s│▲] get_stock_price/mu;
+  const parentToolRowRegex = /^ {0,2}[^\s▲] get_stock_price/mu;
   if (parentToolRowRegex.test(finalSnapshot)) {
     throw new Error(
-      `Final screen still contains a parent-level tool row for the child's get_stock_price call. The nested subagent region should be the only place it appears.\n\n${finalSnapshot}`,
+      `Final screen still contains a parent-level tool row for the child's get_stock_price call. The child's calls belong to its task, not the parent transcript.\n\n${finalSnapshot}`,
     );
   }
   console.log(theme.muted("[tui-weather] no stale parent-level get_stock_price tool row"));

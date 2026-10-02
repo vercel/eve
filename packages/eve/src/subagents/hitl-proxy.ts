@@ -1,19 +1,26 @@
 import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
-import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
-import {
-  emitTurnEpilogue,
-  getHarnessEmissionState,
-  setHarnessEmissionState,
-} from "#harness/emission.js";
+import { getSessionUsage } from "#harness/turn-tag-state.js";
+import type {
+  DeliverPayload,
+  SubagentAuthorizationEventHookPayload,
+  SubagentInputRequestHookPayload,
+} from "#channel/types.js";
+import { getHarnessEmissionState } from "#harness/emission.js";
+import { resolveInputOutcome } from "#harness/input-request-resolution.js";
+import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
 import {
   getProxyInputRequests,
   toProxyInputRequestEntries,
 } from "#harness/proxy-input-requests.js";
-import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
-import type { HarnessEmitFn, HarnessSession, SessionStateMap } from "#harness/types.js";
-import { createInputRequestedEvent } from "#protocol/message.js";
-import type { RunMode } from "#shared/run-mode.js";
+import type { WorkflowAskRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
+import type { HarnessEmitFn, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
+import {
+  createInputRequestedEvent,
+  createTurnWaitingEvent,
+  type InputResolution,
+} from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
+import { resolveTextToResponse } from "#channel/resolve-text.js";
 import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuation.js";
 
 // ---------------------------------------------------------------------------
@@ -21,40 +28,56 @@ import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuatio
 // ---------------------------------------------------------------------------
 
 /**
- * Runs the parent-side work for a `subagent-input-request`. Conversation
- * mode emits a waiting boundary on the parent stream; the returned proxy
- * entries route the eventual response back down to the child.
+ * Runs the parent-side work for a `subagent-input-request`: emits the request,
+ * then `turn.waiting` for the parent's open turn. The call that asked is still
+ * running, so the turn stays open until the answer lets that call settle. The
+ * returned proxy entries route the eventual response back down to the asker.
  */
 export async function emitProxiedInputRequest(input: {
   readonly emit: HarnessEmitFn;
   readonly hookPayload: SubagentInputRequestHookPayload;
-  readonly mode: RunMode;
-  readonly session: HarnessSession;
-}): Promise<{
-  readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
-  readonly session: HarnessSession;
-}> {
+  readonly session: HarnessSessionBase;
+}): Promise<readonly (readonly [requestId: string, route: ProxyInputRequest])[]> {
   await input.emit(
     createInputRequestedEvent({
       requests: input.hookPayload.event.requests,
       sequence: input.hookPayload.event.sequence,
       stepIndex: input.hookPayload.event.stepIndex,
+      taskId: input.hookPayload.event.taskId,
       turnId: input.hookPayload.event.turnId,
     }),
   );
+  await emitTurnWaiting(input.emit, input.session);
+  return toProxyInputRequestEntries(input.hookPayload);
+}
 
-  let nextSession = input.session;
-
-  if (input.mode === "conversation") {
-    const state = getHarnessEmissionState(input.session.state);
-    const nextState = await emitTurnEpilogue(input.emit, state, input.mode);
-    nextSession = setHarnessEmissionState(input.session, nextState);
+/**
+ * Runs the parent-side work for a `subagent-authorization-event`: re-emits the
+ * event, and after `authorization.required` parks the parent's open turn with
+ * `turn.waiting`. The sign-in completes on the asker's own callback while the
+ * call keeps running, so the parent's turn neither ends nor resets.
+ */
+export async function emitProxiedAuthorizationEvent(input: {
+  readonly emit: HarnessEmitFn;
+  readonly hookPayload: SubagentAuthorizationEventHookPayload;
+  readonly session: HarnessSessionBase;
+}): Promise<void> {
+  await input.emit(input.hookPayload.event);
+  if (input.hookPayload.event.type === "authorization.required") {
+    await emitTurnWaiting(input.emit, input.session);
   }
+}
 
-  return {
-    entries: toProxyInputRequestEntries(input.hookPayload),
-    session: nextSession,
-  };
+async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSessionBase): Promise<void> {
+  const turn = getHarnessEmissionState(session.state);
+  await emit(
+    createTurnWaitingEvent({
+      on: "input",
+      sequence: turn.sequence,
+      turnId: turn.turnId,
+      usage: getSessionUsage(session),
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -63,15 +86,25 @@ export async function emitProxiedInputRequest(input: {
 
 /** One proxied-child bucket of a routed deliver payload. */
 export interface RoutedChildDelivery {
-  readonly answerHook?: AnswerHookRoute;
+  readonly workflowAsk?: WorkflowAskRoute;
+  readonly remote?: ProxyInputRequest["remote"];
+  readonly inputSource?: string;
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  readonly childResponseUrl?: string;
   readonly payload: { readonly inputResponses: readonly InputResponse[] };
-  /** Parent-visible request IDs safe to retire once this bucket is forwarded. */
-  readonly retireRequestIds: readonly string[];
-  /** Present when the child is owned by a task run, which delivers on the parent's behalf. */
-  readonly taskId?: string;
+  /** What forwarding this bucket resolves on the routing session. */
+  readonly resolved: ProxiedInputResolutions;
+}
+
+/**
+ * The parent-visible requests one forwarded bucket resolves: those it answers,
+ * plus the rest of a batch those answers complete. Each retires from the proxy
+ * map, and the session announces them with one `input.resolved` at `event`,
+ * the coordinates of the child batch's `input.requested`.
+ */
+export interface ProxiedInputResolutions {
+  readonly event: PendingInputBatchEvent;
+  readonly resolutions: readonly InputResolution[];
 }
 
 /**
@@ -87,80 +120,107 @@ export interface RoutedDeliverPayload {
 
 /** In-progress accumulation for one `forChildren` bucket. */
 interface ChildResponseBucket {
-  readonly answerHook?: AnswerHookRoute;
+  readonly workflowAsk?: WorkflowAskRoute;
+  readonly remote?: ProxyInputRequest["remote"];
   readonly childContinuationToken: string;
   readonly childSessionInbox?: SessionInboxAddress;
-  readonly childResponseUrl?: string;
+  /** A child's routes all come from its latest batch, so they share coordinates. */
+  readonly event: PendingInputBatchEvent;
   /** Parent-visible request IDs answered in this bucket. */
   readonly parentRequestIds: string[];
   readonly responses: InputResponse[];
   readonly routes: ProxyInputRequest[];
-  readonly taskId?: string;
 }
 
-/** Splits a deliver payload into parent-local and proxied-child buckets. */
+/**
+ * Splits a deliver payload into parent-local and proxied-child buckets.
+ *
+ * With `resolveMessage`, a plain-text message is also resolved against pending
+ * `ctx.ask()` questions: when exactly one question is pending, a matching option or
+ * permitted free text answers it and consumes the message. Otherwise the
+ * message stays with the parent.
+ */
 export function routeDeliverPayload(input: {
   readonly allowRoute?: (requestId: string, route: ProxyInputRequest) => boolean;
   readonly payload: DeliverPayload;
+  readonly resolveMessage?: boolean;
   readonly state: SessionStateMap | undefined;
 }): RoutedDeliverPayload {
   const entries = getProxyInputRequests(input.state);
-  const inputResponses = input.payload.inputResponses ?? [];
+  const routable = (requestId: string, route: ProxyInputRequest | undefined) =>
+    route !== undefined && input.allowRoute?.(requestId, route) !== false;
+  const message = resolveMessageAgainstQuestions({
+    enabled: input.resolveMessage === true,
+    entries,
+    payload: input.payload,
+    routable,
+  });
+  const inputResponses = [...(input.payload.inputResponses ?? []), ...message.responses];
 
   const responsesByChild = new Map<string, ChildResponseBucket>();
   const unroutedResponses: InputResponse[] = [];
   let parentAction: RoutedDeliverPayload["parentAction"];
 
+  const bucketFor = (route: ProxyInputRequest): ChildResponseBucket => {
+    const bucketKey = JSON.stringify([
+      route.childContinuationToken,
+      route.childSessionInbox?.sessionId ?? "",
+      route.remote?.sessionId ?? "",
+      route.event.sequence,
+      route.event.stepIndex,
+      route.event.turnId,
+      route.inputSource ?? null,
+    ]);
+    const existing = responsesByChild.get(bucketKey);
+    if (existing !== undefined) return existing;
+    const bucket: ChildResponseBucket = {
+      childContinuationToken: route.childContinuationToken,
+      remote: route.remote,
+      event: route.event,
+      parentRequestIds: [],
+      responses: [],
+      routes: [],
+      ...(route.childSessionInbox !== undefined && {
+        childSessionInbox: route.childSessionInbox,
+      }),
+      ...(route.workflowAsk !== undefined && { workflowAsk: route.workflowAsk }),
+    };
+    responsesByChild.set(bucketKey, bucket);
+    return bucket;
+  };
+
+  const routedRequestIds = new Set<string>();
   for (const response of inputResponses) {
     const route = entries.get(response.requestId);
 
-    if (route === undefined || input.allowRoute?.(response.requestId, route) === false) {
+    if (route === undefined || !routable(response.requestId, route)) {
       unroutedResponses.push(response);
       continue;
     }
+    // A request takes one answer; the first one in the payload wins.
+    if (routedRequestIds.has(response.requestId)) continue;
+    routedRequestIds.add(response.requestId);
 
     if (route.kind === "session-limit" && response.optionId === SESSION_LIMIT_STOP_OPTION_ID) {
       parentAction = { kind: "cancel-turn" };
     }
 
-    const bucketKey = [
-      route.childContinuationToken,
-      route.childSessionInbox?.sessionId ?? "",
-      route.childResponseUrl ?? "local",
-      route.taskId ?? "",
-    ].join("\0");
-    const existing = responsesByChild.get(bucketKey);
-
-    if (existing === undefined) {
-      responsesByChild.set(bucketKey, {
-        childContinuationToken: route.childContinuationToken,
-        parentRequestIds: [response.requestId],
-        responses: [toChildInputResponse(response, route)],
-        routes: [route],
-        ...(route.childSessionInbox !== undefined && {
-          childSessionInbox: route.childSessionInbox,
-        }),
-        ...(route.answerHook !== undefined && { answerHook: route.answerHook }),
-        ...(route.childResponseUrl !== undefined && { childResponseUrl: route.childResponseUrl }),
-        ...(route.taskId !== undefined && { taskId: route.taskId }),
-      });
-    } else {
-      existing.parentRequestIds.push(response.requestId);
-      existing.responses.push(toChildInputResponse(response, route));
-      existing.routes.push(route);
-    }
+    const bucket = bucketFor(route);
+    bucket.parentRequestIds.push(response.requestId);
+    bucket.responses.push(response);
+    bucket.routes.push(route);
   }
 
   const forChildren = [...responsesByChild.values()].map(
     ({
-      answerHook,
+      workflowAsk,
+      remote,
       childContinuationToken,
       childSessionInbox,
-      childResponseUrl,
+      event,
       parentRequestIds,
       responses,
       routes,
-      taskId,
     }): RoutedChildDelivery => {
       const responseIds = new Set(parentRequestIds);
       const retireRequestIds = new Set(responseIds);
@@ -180,11 +240,14 @@ export function routeDeliverPayload(input: {
       return {
         childContinuationToken,
         payload: { inputResponses: responses },
-        retireRequestIds: [...retireRequestIds],
+        resolved: {
+          event,
+          resolutions: resolveRetiredRequests({ entries, responses, retireRequestIds }),
+        },
         ...(childSessionInbox !== undefined && { childSessionInbox }),
-        ...(answerHook !== undefined && { answerHook }),
-        ...(childResponseUrl !== undefined && { childResponseUrl }),
-        ...(taskId !== undefined && { taskId }),
+        ...(workflowAsk !== undefined && { workflowAsk }),
+        ...(remote !== undefined && { remote }),
+        ...(routes[0]?.inputSource !== undefined && { inputSource: routes[0].inputSource }),
       };
     },
   );
@@ -198,6 +261,7 @@ export function routeDeliverPayload(input: {
     if (key === "inputResponses" || value === undefined) {
       continue;
     }
+    if (key === "message" && message.consumed) continue;
 
     remainder[key] = value;
   }
@@ -209,6 +273,65 @@ export function routeDeliverPayload(input: {
   const forSelf = Object.keys(remainder).length > 0 ? (remainder as DeliverPayload) : undefined;
 
   return { forChildren, forSelf, parentAction };
+}
+
+function resolveRetiredRequests(input: {
+  readonly entries: ReadonlyMap<string, ProxyInputRequest>;
+  readonly responses: readonly InputResponse[];
+  readonly retireRequestIds: ReadonlySet<string>;
+}): InputResolution[] {
+  const responses = new Map(input.responses.map((response) => [response.requestId, response]));
+  const resolutions: InputResolution[] = [];
+  for (const requestId of input.retireRequestIds) {
+    const route = input.entries.get(requestId);
+    if (route === undefined) continue;
+    resolutions.push(toInputResolution(requestId, route, responses.get(requestId)));
+  }
+  return resolutions;
+}
+
+function toInputResolution(
+  requestId: string,
+  route: ProxyInputRequest,
+  response: InputResponse | undefined,
+): InputResolution {
+  const outcome = resolveInputOutcome(route.kind, response);
+  const resolution: InputResolution = { kind: route.kind, outcome, requestId };
+  return response === undefined ? resolution : { ...resolution, response };
+}
+
+function resolveMessageAgainstQuestions(input: {
+  readonly enabled: boolean;
+  readonly entries: ReadonlyMap<string, ProxyInputRequest>;
+  readonly payload: DeliverPayload;
+  readonly routable: (requestId: string, route: ProxyInputRequest) => boolean;
+}): {
+  readonly consumed: boolean;
+  readonly responses: readonly InputResponse[];
+} {
+  const none = { consumed: false, responses: [] };
+  // An explicit structured answer means the client already chose what to answer.
+  if (!input.enabled || (input.payload.inputResponses?.length ?? 0) > 0) return none;
+  if (input.payload.message === undefined) return none;
+
+  // Task and subagent questions carry no `ctx.ask()` metadata, so plain text
+  // cannot resolve them, but they still make the message ambiguous.
+  const pending = [...input.entries].filter(
+    ([requestId, route]) => route.kind === "question" && input.routable(requestId, route),
+  );
+  const questions = pending.flatMap(([requestId, route]) => {
+    const question = route.workflowAsk?.question ?? route.question;
+    return question !== undefined ? [{ requestId, ...question }] : [];
+  });
+  if (questions.length === 0) return none;
+
+  const [only] = questions;
+  const answer =
+    pending.length === 1 && only !== undefined && typeof input.payload.message === "string"
+      ? resolveTextToResponse(input.payload.message, only)
+      : undefined;
+  if (answer !== undefined) return { consumed: true, responses: [answer] };
+  return none;
 }
 
 function batchResolves(input: {
@@ -238,10 +361,4 @@ function sameBatch(
     route.batch?.requestIds.length === input.batch.requestIds.length &&
     route.batch.requestIds.every((requestId, index) => requestId === input.batch.requestIds[index])
   );
-}
-
-function toChildInputResponse(response: InputResponse, route: ProxyInputRequest): InputResponse {
-  return route.childRequestId === undefined
-    ? response
-    : { ...response, requestId: route.childRequestId };
 }

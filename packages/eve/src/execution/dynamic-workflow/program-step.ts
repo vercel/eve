@@ -1,5 +1,6 @@
 import { jsonSchema, type ToolSet } from "ai";
 
+import { FatalError } from "#compiled/@workflow/core/index.js";
 import {
   WORKFLOW_PROGRAM_BRIDGE_REQUEST_LIMIT,
   WORKFLOW_PROGRAM_CALL_INTERRUPT_KIND,
@@ -8,6 +9,7 @@ import {
   type WorkflowProgramCallInterrupt,
   type WorkflowProgramInput,
 } from "#execution/dynamic-workflow/schema.js";
+import { toErrorMessage } from "#shared/errors.js";
 import {
   continueWorkflowSandboxInterrupt,
   createParkingHostTool,
@@ -41,7 +43,6 @@ const agentBridgeSchema = jsonSchema({
     input: {
       additionalProperties: false,
       properties: {
-        agentId: { type: "string" },
         message: { type: "string" },
         outputSchema: { type: "object" },
       },
@@ -60,6 +61,17 @@ export async function runWorkflowProgramStep(
 ): Promise<WorkflowProgramStepOutcome> {
   "use step";
 
+  try {
+    return await runWorkflowProgram(input);
+  } catch (error) {
+    // The sandbox is deterministic, so a failed program fails the same way on every retry.
+    throw new FatalError(toErrorMessage(error));
+  }
+}
+
+async function runWorkflowProgram(
+  input: WorkflowProgramStepInput,
+): Promise<WorkflowProgramStepOutcome> {
   const tools = buildWorkflowProgramTools();
   const security = input.program.continuationSecurity as WorkflowSandboxContinuationSecurity;
   let raw: unknown;

@@ -7,7 +7,7 @@ import {
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
 /** Workflow-body handle that targets a durable deadline at the stable command inbox. */
-export interface SessionTimeoutControl {
+interface SessionTimeoutControl {
   dispose(): Promise<void>;
   start(): Promise<void>;
 }

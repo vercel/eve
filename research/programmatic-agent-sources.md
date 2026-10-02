@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2347
 status: implemented
-last_updated: "2026-08-31"
+last_updated: "2026-09-30"
 ---
 
 # Programmatic agent sources
@@ -577,24 +577,24 @@ compilation use the same composer and normalizers as production.
 After migration, the framework provides exactly these default identities
 through source composition:
 
-| Identity                     | Definition                             | Registered for   | Notes                                                                 |
-| ---------------------------- | -------------------------------------- | ---------------- | --------------------------------------------------------------------- |
-| `agent.ts`                   | `defineAgent`                          | every local node | default model config; phase-one composition                           |
-| `sandbox.ts`                 | `defineSandbox({})`                    | every local node | selects `defaultSandbox()`; stable semantic revision                  |
-| `tools/bash.ts`              | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/read_file.ts`         | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/write_file.ts`        | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/todo.ts`              | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/web_fetch.ts`         | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/load_skill.ts`        | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/connection_search.ts` | `defineDynamic`                        | every local node | discovers and qualifies connection tools                              |
-| `tools/ask_question.ts`      | internal native tool + `request-input` | every local node | visibility: `requires-request-input`                                  |
-| `tools/agent.ts`             | internal native tool + `dispatch`      | root node        | action: `subagent-call`; visibility: `root-session`                   |
-| `tools/task_update.ts`       | internal native tool + `dispatch`      | root node        | action: `task-update`; tasks mode; visibility: `delegated-task-child` |
-| `tools/task_cancel.ts`       | internal native tool + `dispatch`      | root node        | action: `task-cancel`; tasks mode; visibility: `root-session`         |
-| `tools/web_search.ts`        | `webSearch` sentinel + `provider-tool` | every local node | materialized at eligible model calls                                  |
-| `channels/eve.ts`            | `eveChannel` factory                   | root node        | complete `/eve/v1` surface: protocol, callbacks, health, info         |
-| `channels/home.ts`           | `defineChannel`                        | root node        | `GET` and `HEAD` at `/`                                               |
+| Identity                    | Definition                                | Registered for   | Notes                                                                 |
+| --------------------------- | ----------------------------------------- | ---------------- | --------------------------------------------------------------------- |
+| `agent.ts`                  | `defineAgent`                             | every local node | default model config; phase-one composition                           |
+| `sandbox.ts`                | `defineSandbox(() => environment.open())` | every local node | exports `DefaultSandbox.environment()`; stable semantic revision      |
+| `tools/bash.ts`             | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/read_file.ts`        | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/write_file.ts`       | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/todo.ts`             | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/web_fetch.ts`        | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/load_skill.ts`       | `defineTool`                              | every local node | ordinary executor                                                     |
+| `tools/connection_tools.ts` | `defineDynamic`                           | every local node | `connection_search` and `connection_execute` while connections exist  |
+| `tools/ask_question.ts`     | internal native tool + `request-input`    | every local node | visibility: `requires-request-input`                                  |
+| `tools/agent.ts`            | internal native tool + `dispatch`         | root node        | action: `subagent-call`; visibility: `root-session`                   |
+| `tools/task_update.ts`      | internal native tool + `dispatch`         | root node        | action: `task-update`; tasks mode; visibility: `delegated-task-child` |
+| `tools/task_cancel.ts`      | internal native tool + `dispatch`         | root node        | action: `task-cancel`; tasks mode; visibility: `root-session`         |
+| `tools/web_search.ts`       | `webSearch` sentinel + `provider-tool`    | every local node | materialized at eligible model calls                                  |
+| `channels/eve.ts`           | `eveChannel` factory                      | root node        | complete `/eve/v1` surface: protocol, callbacks, health, info         |
+| `channels/home.ts`          | `defineChannel`                           | root node        | `GET` and `HEAD` at `/`                                               |
 
 Every identity above is replaceable and disableable through ordinary slot
 composition. `glob` and `grep` are published at `eve/tools/glob` and
@@ -739,27 +739,21 @@ runtime world backing the agent's own execution and is not a tool identity.
 
 ### `connection_search`
 
-Register the existing public `defineDynamic` value at
-`tools/connection_search.ts` for all local nodes. It becomes an ordinary
-compiled resolver and retains the existing dynamic lifecycle for validation,
-qualification, atomic replacement, collisions, durable callbacks, and replay.
-
-`ConnectionSearchResultsKey` becomes the sole durable record of discovered
-connection tools. Delete message-history rescanning, context/history merging,
-the synthetic `connection` slug, the special graph append, and the separate
-framework dynamic registry. Existing sessions without the durable key search
-again; no compatibility fallback reconstructs results from history.
-
-Connection filtering, auth and approval behavior, partial/all-failure handling,
-long qualified names, and persisted callback identity remain unchanged.
+Superseded by [`connection-execute.md`](./connection-execute.md). This plan
+registered `tools/connection_search.ts`, which discovered connection tools into
+`ConnectionSearchResultsKey` and added each as a model tool. Both are removed.
+The framework module is now `tools/connection_tools.ts`, a `defineDynamic` value
+for all local nodes. It yields fixed `connection_search` and `connection_execute`
+definitions while the agent has connections, and it keeps no discovered-tool
+state.
 
 ### Default sandbox
 
-Register a public `defineSandbox({})` value at `sandbox.ts` for all local nodes.
-An authored `sandbox.ts` replaces it through normal source composition. The
-standard semantics of a selected sandbox definition with no explicit backend
-still choose `defaultSandbox()` for the current environment, but graph
-resolution never invents a framework sandbox. Every successfully compiled
+Register a public `defineSandbox(() => environment.open())` value and exported
+`DefaultSandbox.environment()` at `sandbox.ts` for all local nodes. An authored
+`sandbox.ts` replaces both through normal source composition. Provider selection
+belongs to the exported environment; graph resolution never invents a framework
+sandbox. Every successfully compiled
 local node contains exactly one selected sandbox with a source ID and binding;
 disabling the only candidate cannot be repaired by a runtime fallback.
 

@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 import { resolvePackageDependencyPath } from "#internal/application/package.js";
 import {
   createGenerationPackageBoundaryPlugin,
@@ -111,7 +112,7 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
     });
   });
 
-  it("resolves eve package imports through the published dist mapping", async () => {
+  it("binds eve package imports to the published dist modules", async () => {
     const plugin = createRuntimeLoaderPackageBoundaryPlugin({
       externalDependencies: [],
       packageRoot: PACKAGE_ROOT,
@@ -136,7 +137,8 @@ describe("createRuntimeLoaderPackageBoundaryPlugin", () => {
         { kind: "import-statement" },
       ),
     ).resolves.toEqual({
-      id: join(PACKAGE_ROOT, "dist/src/shared/git.js"),
+      external: true,
+      id: normalizeEsmImportSpecifier(join(PACKAGE_ROOT, "dist/src/shared/git.js")),
     });
   });
 

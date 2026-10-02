@@ -1,10 +1,15 @@
 import type { ModelMessage } from "ai";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { isUserMessageKind, validateHarnessModelMessages } from "#harness/messages.js";
-import type { DurableSession, DurableSessionState } from "#execution/durable-session-store.js";
+import {
+  DURABLE_SESSION_VERSION,
+  type DurableSession,
+  type DurableSessionState,
+} from "#execution/durable-session-store.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
 import { isObject } from "#shared/guards.js";
 
-export type LegacySession = Omit<DurableSession, "history"> & { readonly history: ModelMessage[] };
+export type LegacySession = DurableSession & { readonly history: ModelMessage[] };
 
 const PRESERVED_FRAMEWORK_STATE = new Set([
   "eve.harness.emission",
@@ -31,22 +36,26 @@ export function readLegacySnapshot(
 }
 
 /** Keep committed conversation data, but no pre-cutover execution registries. */
-export function importConversation(session: LegacySession): DurableSessionState {
+export function importConversation(session: LegacySession): {
+  readonly history: HarnessModelMessage[];
+  readonly sessionState: DurableSessionState;
+} {
+  const { history, ...durable } = session;
   const state = Object.fromEntries(
     Object.entries(session.state ?? {}).filter(
       ([key]) => !key.startsWith("eve.") || PRESERVED_FRAMEWORK_STATE.has(key),
     ),
   );
-  const history = normalizeHistory(session.history);
-  const emissionState = getHarnessEmissionState(state);
-  const imported = { ...session, history, state };
   return {
-    version: 1,
-    sessionId: session.sessionId,
-    continuationToken: session.continuationToken,
-    hasProxyInputRequests: false,
-    emissionState,
-    snapshot: { session: imported },
+    history: normalizeHistory(history),
+    sessionState: {
+      version: DURABLE_SESSION_VERSION,
+      sessionId: session.sessionId,
+      continuationToken: session.continuationToken,
+      hasProxyInputRequests: false,
+      emissionState: getHarnessEmissionState(state),
+      snapshot: { session: { ...durable, state } },
+    },
   };
 }
 

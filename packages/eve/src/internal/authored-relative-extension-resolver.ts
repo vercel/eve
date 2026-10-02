@@ -1,11 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-import {
-  CACHED_CHANNEL_PREFIX,
-  isNodeModulesPath,
-  isPathImport,
-} from "#internal/authored-package-boundary.js";
+import { isNodeModulesPath, isPathImport } from "#internal/authored-package-boundary.js";
 
 const PATH_IMPORT_FILTER = /^(?:\.|\/|[A-Za-z]:[\\/])/;
 
@@ -24,12 +20,7 @@ export function createAuthoredRelativeExtensionResolverPlugin(input: {
         id: PATH_IMPORT_FILTER,
       },
       handler(source: string, importer: string | undefined) {
-        if (
-          importer === undefined ||
-          importer.startsWith("\0") ||
-          importer.startsWith(CACHED_CHANNEL_PREFIX) ||
-          !isPathImport(source)
-        ) {
+        if (importer === undefined || importer.startsWith("\0") || !isPathImport(source)) {
           return undefined;
         }
 

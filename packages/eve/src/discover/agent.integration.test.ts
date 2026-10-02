@@ -55,6 +55,47 @@ const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
  * here against an in-memory {@link buildMemoryAgentProject} tree.
  */
 describe("discoverAgent (memory)", () => {
+  it.each(["agent", "extension"] as const)(
+    "excludes colocated tests from %s definitions and local subagents",
+    async (role) => {
+      const agentFiles: Record<string, string> = {
+        "instructions.md": "Help Alice check the weather.",
+        "tools/weather.ts": "export default {};",
+        "tools/nested/weather.mjs": "export default {};",
+        "subagents/researcher/agent.ts": "export default {};",
+        "subagents/researcher/tools/weather.ts": "export default {};",
+      };
+      const baseline = await discoverAgent({ ...buildMemoryAgentProject({ agentFiles }), role });
+      expect(baseline.diagnostics).toEqual([]);
+
+      for (const directory of [
+        "tools",
+        "hooks",
+        "channels",
+        "connections",
+        "skills",
+        "schedules",
+        "instructions",
+        "memory",
+        "lib",
+        "extensions",
+        "subagents",
+        "tools/nested",
+        "subagents/researcher/tools",
+      ]) {
+        for (const extension of ["ts", "mts", "cts", "js", "mjs", "cjs"]) {
+          agentFiles[`${directory}/weather.test.${extension}`] = "throw new Error('test module');";
+          agentFiles[`${directory}/weather.spec.${extension}`] = "throw new Error('spec module');";
+        }
+        agentFiles[`${directory}/__tests__/fixture.json`] = "{}";
+        agentFiles[`${directory}/__tests__/weather.ts`] = "throw new Error('test directory');";
+      }
+
+      const result = await discoverAgent({ ...buildMemoryAgentProject({ agentFiles }), role });
+      expect(result).toEqual(baseline);
+    },
+  );
+
   it("discovers flat and named memory slots with path-derived identities", async () => {
     const flat = buildMemoryAgentProject({
       agentFiles: { "instructions.md": "Remember.", "memory.ts": "export default {};" },
@@ -808,6 +849,7 @@ describe("discoverAgent (memory)", () => {
       externalDependencies: [],
       manifest: result.manifest,
       nodeId: "root",
+      nodePath: "",
     });
     const composed = composeAgentModuleCandidates(projected.candidates);
 
@@ -817,12 +859,22 @@ describe("discoverAgent (memory)", () => {
     expect(composed.selected.get("instructions/crm")).toMatchObject({
       layer: "extension-package",
       logicalPath: "instructions/crm.md",
-      owner: { kind: "extension", namespace: "crm", packageName: "@acme/crm" },
+      owner: {
+        kind: "extension",
+        mountId: "extensions/crm",
+        namespace: "crm",
+        packageName: "@acme/crm",
+      },
     });
     expect(composed.selected.get("instructions/gizmo")).toMatchObject({
       layer: "extension-package",
       logicalPath: "instructions/gizmo.md",
-      owner: { kind: "extension", namespace: "gizmo", packageName: "@acme/gizmo" },
+      owner: {
+        kind: "extension",
+        mountId: "extensions/gizmo",
+        namespace: "gizmo",
+        packageName: "@acme/gizmo",
+      },
     });
   });
 
@@ -1199,6 +1251,7 @@ describe("discoverAgent (memory)", () => {
       externalDependencies: [],
       manifest: result.manifest,
       nodeId: "root",
+      nodePath: "",
     });
     const composed = composeAgentModuleCandidates(projected.candidates);
     expect(composed.selected.get("tools/crm__search")).toMatchObject({
@@ -1380,6 +1433,7 @@ describe("discoverAgent (memory)", () => {
         externalDependencies: [],
         manifest: result.manifest,
         nodeId: "root",
+        nodePath: "",
       }),
     ).not.toThrow();
   });

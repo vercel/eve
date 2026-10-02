@@ -1,4 +1,3 @@
-import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
@@ -31,16 +30,24 @@ export function buildResolvedInputBatch(
     inputs: batch.requests.map((request) => {
       const response = responseMap.get(request.requestId);
       return {
-        outcome: isApprovalRequest(request)
-          ? resolveApprovalOutcome(response).status
-          : response === undefined
-            ? "ignored"
-            : "answered",
+        outcome: resolveInputOutcome(request.kind, response),
         request,
         response,
       };
     }),
   };
+}
+
+/**
+ * One request's terminal outcome once its batch resolves: an approval's
+ * decision, or whether a question received a response.
+ */
+export function resolveInputOutcome(
+  kind: InputRequest["kind"],
+  response: InputResponse | undefined,
+): "answered" | ApprovalTerminalStatus {
+  if (kind === "tool-approval") return resolveApprovalOutcome(response).status;
+  return response === undefined ? "ignored" : "answered";
 }
 
 export function resolveApprovalOutcome(response: InputResponse | undefined): {

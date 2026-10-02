@@ -32,11 +32,11 @@ const SYNC_END = `${ESC}[?2026l`;
 const BRACKETED_PASTE_ON = `${ESC}[?2004h`;
 const BRACKETED_PASTE_OFF = `${ESC}[?2004l`;
 
-export interface LiveRegionOutput {
+interface LiveRegionOutput {
   write(chunk: string): boolean;
 }
 
-export interface LiveRegionOptions {
+interface LiveRegionOptions {
   /** Wrap each paint in synchronized-update markers to avoid flicker. */
   synchronized?: boolean;
 }

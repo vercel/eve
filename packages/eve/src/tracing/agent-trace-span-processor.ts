@@ -16,7 +16,10 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   readonly #ownedTraceIds = new Set<string>();
   readonly #completedTraceIds = new Set<string>();
   readonly #rememberedTraceIds = new Set<string>();
-  readonly #traceConversations = new Map<string, string>();
+  readonly #traceOwnership = new Map<
+    string,
+    { readonly conversationId: string; readonly ownerRunId?: string }
+  >();
   constructor(children: readonly SpanProcessor[]) {
     this.#children = children;
   }
@@ -28,12 +31,21 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   onStart(span: unknown, parentContext: unknown): void {
     if (!isSpanLike(span)) return;
     const conversationId = span.attributes["gen_ai.conversation.id"];
+    const runId = span.attributes["agent.run.id"];
     if (typeof conversationId === "string") {
       const traceId = span.spanContext().traceId;
       const known = this.#ownedTraceIds.has(traceId) || this.#rememberedTraceIds.has(traceId);
       if (!known) {
         this.#ownedTraceIds.add(traceId);
-        this.#traceConversations.set(traceId, conversationId);
+        this.#traceOwnership.set(traceId, {
+          conversationId,
+          ownerRunId: typeof runId === "string" ? runId : undefined,
+        });
+      } else if (
+        this.#traceOwnership.get(traceId)?.ownerRunId === undefined &&
+        typeof runId === "string"
+      ) {
+        this.#traceOwnership.set(traceId, { conversationId, ownerRunId: runId });
       }
     }
     if (!this.#accepts(span)) return;
@@ -44,9 +56,11 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     if (!isSpanLike(span) || !this.#accepts(span)) return;
     for (const child of this.#children) child.onEnd(span);
     const traceId = span.spanContext().traceId;
+    const ownership = this.#traceOwnership.get(traceId);
     if (
       isAgentActivationSpan({ name: span.name ?? "", attributes: span.attributes }) &&
-      this.#traceConversations.get(traceId) === span.attributes["gen_ai.conversation.id"]
+      ownership?.ownerRunId === span.attributes["agent.run.id"] &&
+      ownership?.conversationId === span.attributes["gen_ai.conversation.id"]
     ) {
       this.#completedTraceIds.add(traceId);
     }
@@ -62,7 +76,7 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
     if (this.#completedTraceIds.size === 0) return false;
     for (const traceId of this.#completedTraceIds) {
       this.#ownedTraceIds.delete(traceId);
-      this.#traceConversations.delete(traceId);
+      this.#traceOwnership.delete(traceId);
       this.#rememberedTraceIds.add(traceId);
     }
     this.#completedTraceIds.clear();
@@ -76,12 +90,12 @@ export class AgentTraceSpanProcessor implements SpanProcessor {
   /** Releases only traces owned by this conversation. */
   releaseConversation(conversationId: string): boolean {
     let released = false;
-    for (const [traceId, traceConversationId] of this.#traceConversations) {
-      if (traceConversationId !== conversationId) continue;
+    for (const [traceId, ownership] of this.#traceOwnership) {
+      if (ownership.conversationId !== conversationId) continue;
       released = true;
       this.#ownedTraceIds.delete(traceId);
       this.#completedTraceIds.delete(traceId);
-      this.#traceConversations.delete(traceId);
+      this.#traceOwnership.delete(traceId);
     }
     return released;
   }

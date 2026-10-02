@@ -1,6 +1,6 @@
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { truncateTail } from "#execution/sandbox/truncate-output.js";
-import { isEveDevEnvironment } from "#internal/application/optional-package-install.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 
 const MAX_LOG_COMMAND_LENGTH = 240;
 
@@ -22,7 +22,7 @@ export interface BashInput {
 /**
  * Structured result returned from {@link executeBashOnSandbox}.
  */
-export interface BashResult {
+interface BashResult {
   readonly exitCode: number;
   readonly stderr: string;
   readonly stdout: string;

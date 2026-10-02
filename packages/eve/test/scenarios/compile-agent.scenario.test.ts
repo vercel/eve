@@ -47,7 +47,7 @@ const ROOT_TYPE_DEFINITIONS = fileURLToPath(
 const TSC_BIN_PATH = fileURLToPath(
   new URL("../../../../node_modules/typescript/bin/tsc", import.meta.url),
 );
-const DEFAULT_AGENT_MODEL_ID = "spacexai/grok-4.7";
+const DEFAULT_AGENT_MODEL_ID = "openai/gpt-6-luna-fast";
 
 function applicationOwnedEntries<TEntry extends { readonly sourceId: string }>(
   manifest: CompiledAgentManifest,
@@ -140,6 +140,7 @@ describe("compiler artifacts", () => {
         id: DEFAULT_AGENT_MODEL_ID,
       },
       name: "test-agent",
+      reasoning: "high",
     });
     expect(withoutConfig.manifest.config.source).toMatchObject({
       logicalPath: "agent.ts",
@@ -149,6 +150,14 @@ describe("compiler artifacts", () => {
     expect(
       withoutConfig.manifest.bindings[withoutConfig.manifest.config.source.sourceId]?.owner,
     ).toEqual({ feature: "eve:defaults", kind: "framework" });
+
+    await writeFile(
+      join(agentRoot, "agent.mjs"),
+      'export default { model: "openai/gpt-6-luna-fast" };\n',
+    );
+    const authoredConfig = await compileAgent({ startPath: appRoot });
+    expect(authoredConfig.manifest.config.model?.id).toBe("openai/gpt-6-luna-fast");
+    expect(authoredConfig.manifest.config.reasoning).toBeUndefined();
 
     await writeFile(join(agentRoot, "agent.mjs"), "export default {};\n");
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
@@ -176,10 +185,11 @@ describe("compiler artifacts", () => {
         behavior: {
           availability: [],
           handling: {
+            entryPoint: "execute",
             kind: "workflow-tool",
             workflowId: `workflow//${packageInfo.name}@${packageInfo.version}//executeSleepTool`,
           },
-          shape: { lifetime: "step", suspend: "workflow" },
+          shape: { suspend: "workflow" },
         },
         logicalPath: "tools/sleep.mjs",
         name: "sleep",
@@ -668,59 +678,6 @@ describe("compileAgent", () => {
     });
   });
 
-  it("composes a mounted extension's tools into the consuming agent", async () => {
-    const app = await scenarioApp({
-      name: "mounted-extension",
-      installDependencies: true,
-      files: {
-        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
-        "agent/instructions.md": "You are a precise assistant.\n",
-        "agent/extensions/crm.ts": 'export { default } from "@acme/crm";\n',
-        "node_modules/@acme/crm/package.json": `${JSON.stringify({
-          name: "@acme/crm",
-          type: "module",
-          eve: { extension: { source: "source", dist: "extension" } },
-          exports: { ".": "./extension/index.mjs" },
-        })}\n`,
-        "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
-          kind: "eve-extension",
-          formatVersion: 1,
-          builtWithEve: "0.0.0-test",
-          requires: { extension: 1, tool: 1, instructions: 1 },
-        }),
-        "node_modules/@acme/crm/extension/index.mjs": "export default {};\n",
-        "node_modules/@acme/crm/extension/instructions/policy.mjs":
-          'export default { markdown: "Prefer the CRM over guessing." };\n',
-        "node_modules/@acme/crm/extension/tools/crm_search.mjs": [
-          'import { defineTool } from "eve/tools";',
-          "",
-          "export default defineTool({",
-          '  description: "Search the CRM.",',
-          '  inputSchema: { type: "object", properties: {}, additionalProperties: false },',
-          "  async execute() {",
-          "    return { ok: true };",
-          "  },",
-          "});",
-          "",
-        ].join("\n"),
-      },
-    });
-
-    const result = await compileAgent({ startPath: app.appRoot });
-
-    expect(result.manifest.tools.map((tool) => tool.name)).toContain("crm__crm_search");
-    const composed = result.manifest.tools.find((tool) => tool.name === "crm__crm_search");
-    expect(composed?.sourceId).toBe("ext:crm:tools/crm_search.mjs");
-    expect(composed?.description).toBe("Search the CRM.");
-    expect(result.manifest.instructions.map((entry) => entry.content).join("\n")).toContain(
-      "Prefer the CRM over guessing.",
-    );
-
-    const moduleMapText = await readFile(result.paths.moduleMapPath, "utf8");
-    expect(moduleMapText).toContain("@acme/crm/extension/tools/crm_search.mjs");
-    expect(moduleMapText).toContain('"ext:crm:tools/crm_search.mjs"');
-  });
-
   it("compiles extension-variant authored modules from a fixture app", async () => {
     const app = await scenarioApp(EXTENSION_AGENT_DESCRIPTOR);
 
@@ -773,11 +730,12 @@ describe("compileAgent", () => {
       },
     ]);
     expect(result.manifest.sandbox).toEqual({
-      description: undefined,
+      providerName: expect.any(String),
+      environmentExportName: "environment",
       exportName: undefined,
+      inheritsParent: undefined,
       logicalPath: "sandbox/sandbox.cjs",
-      revalidationKey: undefined,
-      sourceHash: expect.any(String),
+      revisionHash: expect.any(String),
       sourceId: "sandbox/sandbox.cjs",
       sourceKind: "module",
     });
@@ -826,7 +784,7 @@ describe("compileAgent", () => {
         .sort(),
     ).toEqual(["tools/agent.ts", "tools/web_fetch.ts", "tools/web_search.ts"]);
 
-    // Both the wrapped bash and the replacement todo land in `tools` as
+    // Both the wrapped bash and the replacement write_file land in `tools` as
     // ordinary CompiledToolDefinitions. Disabled slots are absent from the
     // effective tool graph and retained only as composition diagnostics.
     const toolsByName = new Map(
@@ -836,7 +794,7 @@ describe("compileAgent", () => {
       ]),
     );
 
-    expect([...toolsByName.keys()].sort()).toEqual(["bash", "todo"]);
+    expect([...toolsByName.keys()].sort()).toEqual(["bash", "write_file"]);
 
     expect(toolsByName.get("bash")).toMatchObject({
       description: "Run a vetted shell command in the project sandbox.",
@@ -845,11 +803,11 @@ describe("compileAgent", () => {
       sourceId: "tools/bash.ts",
       sourceKind: "module",
     });
-    expect(toolsByName.get("todo")).toMatchObject({
+    expect(toolsByName.get("write_file")).toMatchObject({
       description: "Append a note or read the running list of notes.",
-      logicalPath: "tools/todo.ts",
-      name: "todo",
-      sourceId: "tools/todo.ts",
+      logicalPath: "tools/write_file.ts",
+      name: "write_file",
+      sourceId: "tools/write_file.ts",
       sourceKind: "module",
     });
     expect(result.diagnostics).toEqual([]);
@@ -1292,105 +1250,6 @@ describe("compileAgent", () => {
     );
   });
 
-  it("stores resolved sandbox bootstrap revalidation keys in compiled artifacts", async () => {
-    const { agentRoot, appRoot } = await createAppRoot(
-      "eve-compile-sandbox-revalidation-key-",
-      APP_ROOT_OPTIONS,
-    );
-
-    await mkdir(join(agentRoot, "sandbox"), {
-      recursive: true,
-    });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
-    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
-    await writeFile(
-      join(agentRoot, "sandbox", "sandbox.mjs"),
-      [
-        "export default {",
-        "  async revalidationKey() {",
-        '    return "bootstrap-revalidation-key-v1";',
-        "  },",
-        "  async bootstrap({ use }) {",
-        "    const sandbox = await use();",
-        '    await sandbox.run({ command: "echo bootstrap" });',
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
-    );
-
-    const result = await compileAgent({
-      startPath: appRoot,
-    });
-
-    expect(result.manifest.sandbox).toEqual({
-      description: undefined,
-      exportName: undefined,
-      logicalPath: "sandbox/sandbox.mjs",
-      revalidationKey: "bootstrap-revalidation-key-v1",
-      sourceHash: expect.any(String),
-      sourceId: "sandbox/sandbox.mjs",
-      sourceKind: "module",
-    });
-  });
-
-  it("compiles sandbox bootstrap without a revalidation key", async () => {
-    const { agentRoot, appRoot } = await createAppRoot(
-      "eve-compile-sandbox-without-revalidation-key-",
-      APP_ROOT_OPTIONS,
-    );
-
-    await mkdir(join(agentRoot, "sandbox"), {
-      recursive: true,
-    });
-    await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
-    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.");
-    await writeFile(
-      join(agentRoot, "sandbox", "sandbox.mjs"),
-      [
-        "export default {",
-        "  async bootstrap({ use }) {",
-        "    const sandbox = await use();",
-        '    await sandbox.run({ command: "echo bootstrap" });',
-        "  },",
-        "};",
-        "",
-      ].join("\n"),
-    );
-
-    const result = await compileAgent({
-      startPath: appRoot,
-    });
-
-    expect(result.manifest.sandbox).toEqual({
-      description: undefined,
-      exportName: undefined,
-      logicalPath: "sandbox/sandbox.mjs",
-      revalidationKey: undefined,
-      sourceHash: expect.any(String),
-      sourceId: "sandbox/sandbox.mjs",
-      sourceKind: "module",
-    });
-  });
-
-  it("rejects sandbox bootstrap revalidation keys that resolve to empty or non-string values", async () => {
-    const emptyKeyApp = await createSandboxRevalidationKeyValidationApp({
-      name: "empty",
-      revalidationKeyExpression: '() => ""',
-    });
-    const nonStringKeyApp = await createSandboxRevalidationKeyValidationApp({
-      name: "non-string",
-      revalidationKeyExpression: "() => 123",
-    });
-
-    await expect(compileAgent({ startPath: emptyKeyApp.appRoot })).rejects.toThrow(
-      /must return a non-empty string/,
-    );
-    await expect(compileAgent({ startPath: nonStringKeyApp.appRoot })).rejects.toThrow(
-      /must return a string/,
-    );
-  });
-
   it("compiles authored subagent sandboxes into child runtime nodes", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-compile-subagent-sandbox-",
@@ -1417,12 +1276,13 @@ describe("compileAgent", () => {
     await writeFile(
       join(subagentRoot, "sandbox", "sandbox.mjs"),
       [
-        "export default {",
-        "  async onSession({ use }) {",
-        "    const sandbox = await use();",
-        '    await sandbox.run({ command: "mkdir -p .research" });',
-        "  },",
-        "};",
+        'import { DefaultSandbox, defineSandbox } from "eve/sandbox";',
+        "export const environment = DefaultSandbox.environment();",
+        "export default defineSandbox(async () => {",
+        "  const sandbox = await environment.open();",
+        '  await sandbox.run({ command: "mkdir -p .research" });',
+        "  return sandbox;",
+        "});",
         "",
       ].join("\n"),
     );
@@ -1527,40 +1387,6 @@ describe("compileAgent", () => {
     expect(metadata.status).toBe("failed");
   });
 });
-
-async function createSandboxRevalidationKeyValidationApp(input: {
-  readonly name: string;
-  readonly revalidationKeyExpression: string;
-}): Promise<{ readonly agentRoot: string; readonly appRoot: string }> {
-  const app = await createAppRoot(
-    `eve-compile-sandbox-${input.name}-revalidation-key-`,
-    APP_ROOT_OPTIONS,
-  );
-
-  await mkdir(join(app.agentRoot, "sandbox"), {
-    recursive: true,
-  });
-  await writeFile(
-    join(app.agentRoot, "agent.mjs"),
-    'export default { model: "openai/gpt-5.4" };\n',
-  );
-  await writeFile(join(app.agentRoot, "instructions.md"), "You are a precise assistant.");
-  await writeFile(
-    join(app.agentRoot, "sandbox", "sandbox.mjs"),
-    [
-      "export default {",
-      `  revalidationKey: ${input.revalidationKeyExpression},`,
-      "  async bootstrap({ use }) {",
-      "    const sandbox = await use();",
-      '    await sandbox.run({ command: "echo bootstrap" });',
-      "  },",
-      "};",
-      "",
-    ].join("\n"),
-  );
-
-  return app;
-}
 
 async function expectTscToPass(
   args: readonly string[],

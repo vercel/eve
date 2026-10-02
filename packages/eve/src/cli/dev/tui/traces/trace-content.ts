@@ -128,7 +128,7 @@ function toolResponseText(response: unknown): string {
 }
 
 /** Pretty-prints a JSON value with two-space indents, wrapped to `width`. */
-export function prettyJson(value: unknown, width: number): string[] {
+function prettyJson(value: unknown, width: number): string[] {
   return JSON.stringify(value, null, 2)
     .split("\n")
     .flatMap((line) => wrapHanging(line, width, width));
@@ -174,7 +174,7 @@ function wrapHanging(text: string, width: number, firstWidth: number): string[] 
  * frame. Split them into real display lines; a trailing newline's empty tail
  * is dropped.
  */
-export function splitEmbeddedNewlines(lines: readonly string[]): string[] {
+function splitEmbeddedNewlines(lines: readonly string[]): string[] {
   const split = lines.flatMap((line) => line.split(/\r\n|\r|\n/));
   while (split.length > 1 && split[split.length - 1] === "") split.pop();
   return split;

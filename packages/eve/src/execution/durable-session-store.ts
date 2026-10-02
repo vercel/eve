@@ -1,13 +1,13 @@
 import { getHarnessEmissionState, type HarnessEmissionState } from "#harness/emission.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
 import { hasProxyInputRequests } from "#harness/proxy-input-requests.js";
-import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import type { HarnessSession, HarnessSessionBase, SessionStateMap } from "#harness/types.js";
 import { projectToDurableSession } from "#execution/session.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 
 /** Explicit checkpoint contract shared by deployment handoffs. */
-export const DURABLE_SESSION_VERSION = 1;
+export const DURABLE_SESSION_VERSION = 2;
 
 /**
  * Serializable handle to a durable session.
@@ -40,6 +40,8 @@ export interface DurableSessionState {
  * `agent.compactionModelReference`, and the `compaction` thresholds —
  * those are rebuilt every turn from `bundle.turnAgent` by
  * {@link import("#execution/session.js").hydrateDurableSession}.
+ * Omits `history` too: the session workflow carries it as its own value, so
+ * only the steps that read or change it receive it as input.
  * `agent.system` is the last applied prompt snapshot. Before each model step,
  * the execution layer replaces it from the current deployment's
  * `bundle.turnAgent`.
@@ -54,12 +56,10 @@ export interface DurableSession {
    */
   readonly rootSessionId?: string;
   readonly continuationToken: string;
-  readonly history: HarnessModelMessage[];
   readonly limits?: HarnessSession["limits"];
   readonly outputSchema?: JsonObject;
   readonly state?: SessionStateMap;
   readonly sandboxState?: SandboxState;
-  readonly taskId?: string;
   readonly agent: {
     readonly system: string;
   };
@@ -87,9 +87,17 @@ export function readDurableSession(state: DurableSessionState): DurableSession {
  * snapshot embedded in the Workflow step result.
  */
 export function createDurableSessionState(input: {
-  readonly session: HarnessSession;
+  readonly session: HarnessSessionBase;
 }): DurableSessionState {
   return projectDurableSessionState(projectToDurableSession(input.session));
+}
+
+/** The session state and history a step that ran with the history leaves. */
+export function createDurableSessionValues(session: HarnessSession): {
+  readonly history: HarnessModelMessage[];
+  readonly sessionState: DurableSessionState;
+} {
+  return { history: session.history, sessionState: createDurableSessionState({ session }) };
 }
 
 /** Replaces session program memory and refreshes its workflow projections. */

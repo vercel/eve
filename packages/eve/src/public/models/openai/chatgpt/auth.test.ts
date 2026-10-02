@@ -5,7 +5,7 @@ import {
   extractCodexAccountLabelFromToken,
   readCodexJwtExpirationMs,
 } from "./auth.js";
-import { createUnsignedJwt } from "./unsigned-jwt.js";
+import { createUnsignedJwt } from "#internal/testing/unsigned-jwt.js";
 
 describe("Codex token metadata", () => {
   it("reads JWT expiry without exposing token contents", () => {

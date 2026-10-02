@@ -16,7 +16,7 @@ const EVE_CONTEXT_STORAGE_KEY = Symbol.for("eve.context-storage");
  * the serialization layer.
  */
 export interface AlsContext extends ContextAccessor {
-  /** Verified local development provenance, inherited across durable execution contexts. */
+  /** Verified originating-client metadata, inherited only for the dev-TUI hint. */
   readonly localDevRequest?: LocalDevRequestProvenance;
   /** Removes a durable or step-local value from the context. */
   delete<T>(key: ContextKey<T>): boolean;
@@ -37,7 +37,10 @@ export class ContextContainer implements AlsContext {
   private readonly _virtualValues = new Map<string, unknown>();
 
   constructor(input?: { readonly localDevRequest?: LocalDevRequestProvenance }) {
-    const localDevRequest = input?.localDevRequest ?? contextStorage.getStore()?.localDevRequest;
+    const localDevRequest =
+      input !== undefined && Object.hasOwn(input, "localDevRequest")
+        ? input.localDevRequest
+        : contextStorage.getStore()?.localDevRequest;
     if (localDevRequest !== undefined) {
       this._durableValues.set(LocalDevRequestKey.name, localDevRequest);
     }

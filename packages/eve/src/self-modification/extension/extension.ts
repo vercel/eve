@@ -1,40 +1,12 @@
 import { defineExtension } from "eve/extension";
-import { z } from "zod";
 
-import { isAgentReasoningDefinition, isRuntimeLanguageModel } from "#internal/runtime-model.js";
-import type { AgentReasoningDefinition, AgentStaticModelDefinition } from "#public/index.js";
-import type { GitHubCredentialProvider, SelfModificationAuthorization } from "../config.js";
+import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import type { SelfModificationExtensionConfig } from "../config.js";
+import { selfModificationConfigSchema } from "./config-schema.js";
 
-export const selfModificationConfigSchema = z.object({
-  model: z
-    .custom<AgentStaticModelDefinition>(
-      (value) => typeof value === "string" || isRuntimeLanguageModel(value),
-    )
-    .optional(),
-  reasoning: z.custom<AgentReasoningDefinition>(isAgentReasoningDefinition).optional(),
-  local: z.object({ enabled: z.boolean().optional() }).optional(),
-  deployed: z
-    .object({
-      credentials: z
-        .union([
-          z.object({ pat: z.literal(true) }),
-          z.custom<GitHubCredentialProvider>(
-            (value) =>
-              typeof value === "object" &&
-              value !== null &&
-              "resolve" in value &&
-              typeof value.resolve === "function",
-          ),
-        ])
-        .optional(),
-      source: z.object({
-        git: z.object({ directory: z.string(), repository: z.string() }),
-      }),
-      target: z.object({ branch: z.string() }),
-      authorize: z.custom<SelfModificationAuthorization>((value) => typeof value === "function"),
-    })
-    .optional(),
-});
+// Typed as a Standard Schema so the public declaration names eve's own
+// config type instead of Zod's.
+const config: StandardSchemaV1<SelfModificationExtensionConfig> = selfModificationConfigSchema;
 
 /** Extension mount configured with the same policy as the agent and sandbox. */
-export default defineExtension({ config: selfModificationConfigSchema });
+export default defineExtension({ config });

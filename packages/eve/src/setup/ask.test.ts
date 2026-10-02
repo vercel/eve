@@ -60,6 +60,7 @@ function colorQuestion(
   extra: Partial<Pick<Question<Color>, "detected" | "recommended" | "required">> & {
     search?: boolean;
     placeholder?: string;
+    hintLayout?: "stacked" | "inline";
   } = {},
 ): Question<Color> {
   return select({ key: "color", message: "Pick a color", options: COLOR_OPTIONS, ...extra });
@@ -119,11 +120,22 @@ describe("interactiveAsker", () => {
     const { single, prompter } = selectPrompter(() => "red");
 
     await interactiveAsker(prompter).ask(
-      colorQuestion({ detected: BLUE, recommended: RED, search: true, placeholder: "filter" }),
+      colorQuestion({
+        detected: BLUE,
+        recommended: RED,
+        search: true,
+        placeholder: "filter",
+        hintLayout: "inline",
+      }),
     );
 
     expect(single).toHaveBeenCalledWith(
-      expect.objectContaining({ initialValue: "blue", search: true, placeholder: "filter" }),
+      expect.objectContaining({
+        initialValue: "blue",
+        search: true,
+        placeholder: "filter",
+        hintLayout: "inline",
+      }),
     );
   });
 

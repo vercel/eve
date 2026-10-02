@@ -39,6 +39,12 @@ vi.mock("./server.js", async (importOriginal) => {
 
 const { resolveEveDestinationPrefix } = await import("./server.js");
 
+vi.mock("#internal/nitro/host/workspace-extensions.js", () => ({
+  buildWorkspaceExtensions: vi.fn(async () => undefined),
+}));
+
+const { buildWorkspaceExtensions } = await import("#internal/nitro/host/workspace-extensions.js");
+
 import {
   EVE_NEXT_SERVICE_PREFIX,
   withEve,
@@ -60,7 +66,32 @@ describe("withEve", () => {
   afterEach(() => {
     vi.mocked(resolveEveDestinationPrefix).mockClear();
     vi.mocked(ensureEveVercelOutputConfig).mockClear();
+    vi.mocked(buildWorkspaceExtensions).mockClear();
     vi.unstubAllEnvs();
+  });
+
+  it("builds each agent's workspace extensions while Next.js is building", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    await withEve<TestConfig>(
+      {},
+      { agents: { billing: "./agents/billing", support: "./agents/support" } },
+    )("phase-production-build", { defaultConfig: {} });
+
+    expect(vi.mocked(buildWorkspaceExtensions).mock.calls).toEqual([
+      [expect.stringMatching(/\/agents\/billing$/)],
+      [expect.stringMatching(/\/agents\/support$/)],
+    ]);
+  });
+
+  it("does not build workspace extensions outside the Next.js build phase", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    await resolveConfig(withEve<TestConfig>({}));
+
+    expect(buildWorkspaceExtensions).not.toHaveBeenCalled();
   });
 
   it("does not add Next.js rewrites on Vercel", async () => {
@@ -416,9 +447,7 @@ describe("withEve", () => {
       withEve<TestConfig>(
         {},
         {
-          agents: {
-            support: "./agents/support",
-          },
+          agents: { support: "./agents/support" },
           eveRoot: "./agent",
         },
       ),

@@ -12,6 +12,7 @@ describe("assertion failure diagnostics", () => {
       message: [`prompt: ${"x".repeat(300)}`, "one", "two", "three", "four", "five"].join("\n"),
       name: "judge.boolean [citation]",
       passed: false,
+      errored: false,
       score: 0.42,
       severity: "soft",
       threshold: 0.8,

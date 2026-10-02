@@ -8,7 +8,6 @@ import { WizardCancelledError } from "#setup/step.js";
 
 import {
   runTuiSetupCommand,
-  SETUP_FLOW_CONFIG,
   type TuiSetupCommandInput,
   type TuiSetupCommandRenderer,
   type TuiSetupFlows,
@@ -26,7 +25,6 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
     readSelect: vi.fn(async () => []),
     readEditableSelect: vi.fn(async () => undefined),
     readProviderPicker: vi.fn(async () => undefined),
-    readModelPicker: vi.fn(async () => undefined),
     readText: vi.fn(async () => ""),
     readAcknowledge: vi.fn(async () => {}),
     readChoice: vi.fn(() => ({ choice: Promise.resolve(undefined), close: vi.fn() })),
@@ -52,7 +50,7 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
 function registryResult(overrides: Partial<RegistrySessionResult> = {}) {
   return {
     kind: "done" as const,
-    result: { items: [], failures: [], ...overrides },
+    result: { outcomes: [], ...overrides },
   };
 }
 
@@ -60,11 +58,6 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
   return {
     runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
       kind: "installed",
-    })),
-    runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-      kind: "done",
-      accessChanged: true,
-      modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
     })),
     runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => registryResult()),
     runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => ({
@@ -76,7 +69,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
 }
 
 function run(input: {
-  command: "model" | "add" | "deploy";
+  command: "add" | "deploy" | "login";
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
@@ -84,6 +77,8 @@ function run(input: {
   useDefaultPrompter?: boolean;
   upgradeChoice?: "upgrade" | "later";
   withExclusiveTerminal?: TuiSetupCommandInput["withExclusiveTerminal"];
+  initialRegistryAddress?: string;
+  initialLoginConnection?: TuiSetupCommandInput["initialLoginConnection"];
 }) {
   const { upgradeChoice } = input;
   const fake = createFakePrompter(
@@ -96,6 +91,12 @@ function run(input: {
     flows: input.flows,
   };
   if (input.agentRoot !== undefined) commandInput.agentRoot = input.agentRoot;
+  if (input.initialLoginConnection !== undefined) {
+    commandInput.initialLoginConnection = input.initialLoginConnection;
+  }
+  if (input.initialRegistryAddress !== undefined) {
+    commandInput.initialRegistryAddress = input.initialRegistryAddress;
+  }
   if (input.useDefaultPrompter !== true) commandInput.createPrompter = () => fake.prompter;
   if (input.initialModelStep !== undefined) {
     commandInput.initialModelStep = input.initialModelStep;
@@ -179,286 +180,64 @@ describe("runTuiSetupCommand", () => {
     expect(renderer.setStatus).toHaveBeenCalledWith("Adding Web Chat · 1 of 4");
   });
 
-  it("uses the build pulse for every setup command except deploy", () => {
-    expect(
-      Object.fromEntries(
-        Object.entries(SETUP_FLOW_CONFIG).map(([command, config]) => [command, config.indicator]),
-      ),
-    ).toEqual({
-      login: "pulse",
-      model: "pulse",
-      add: "pulse",
-      deploy: "spinner",
-    });
-  });
-
-  it("surfaces the model flow's apply line as the outcome", async () => {
-    const flows = fakeFlows();
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "Model changed to openai/gpt-5.5. Live on your next prompt.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-    expect(flows.runModelFlow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        appRoot: APP_ROOT,
-        deps: expect.objectContaining({ pickModelSettings: expect.any(Function) }),
-      }),
-    );
-  });
-
-  it("edits the selected workspace agent while configuring project-level provider access", async () => {
-    const flows = fakeFlows();
-
-    await run({
-      command: "model",
-      flows,
-      agentRoot: "/tmp/project/agents/researcher",
-    });
-
-    expect(flows.runModelFlow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        appRoot: "/tmp/project/agents/researcher",
-        environmentRoot: APP_ROOT,
-      }),
-    );
-  });
-
-  it("does not rebuild model access after a rejected edit", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: false,
-        modelMessage: "Couldn't confirm the id.",
-      })),
-    });
-
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "Couldn't confirm the id.",
-      preserveFlowDiagnostics: false,
-    });
-  });
-
-  it("keeps model setup attached to the TUI panel", async () => {
-    const renderer = fakePanelRenderer();
-    renderer.withInheritedStdio = vi.fn(async (task) => task());
-    const exclusiveCalls = vi.fn();
-    const withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
-      exclusiveCalls();
-      return task();
-    };
-    const flows = fakeFlows();
-
-    await run({ command: "model", flows, renderer, withExclusiveTerminal });
-
-    expect(flows.runModelFlow).toHaveBeenCalledWith(
-      expect.not.objectContaining({ withExclusiveTerminal: expect.anything() }),
-    );
-    expect(renderer.withInheritedStdio).not.toHaveBeenCalled();
-    expect(exclusiveCalls).not.toHaveBeenCalled();
-  });
-
-  it("forwards an automatic provider entry to the model flow", async () => {
-    const flows = fakeFlows();
-
-    await run({ command: "model", flows, initialModelStep: "provider" });
-
-    expect(flows.runModelFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ appRoot: APP_ROOT, initialStep: "provider" }),
-    );
-  });
-
-  it("stacks the model and provider selection lines when both menu actions ran", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: true,
-        modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
-        providerSelection: "ai-gateway-project",
-      })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message:
-        "Model changed to openai/gpt-5.5. Live on your next prompt.\n" +
-        "AI Gateway via Project selected.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-  });
-
-  it("reports a provider-only model session with the provider selection", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: true,
-        providerSelection: "ai-gateway-project",
-      })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "AI Gateway via Project selected.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-  });
-
-  it("reports the selected API-key provider without claiming a connection", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: true,
-        providerSelection: "ai-gateway-key",
-      })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "AI Gateway via API key selected.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-  });
-
-  it("reports the selected ChatGPT subscription", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
-        kind: "done",
-        accessChanged: true,
-        providerSelection: "chatgpt",
-      })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "ChatGPT subscription selected.",
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-  });
-
-  it("reports a cancelled model pick", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({ kind: "cancelled" })),
-    });
-    await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "",
-      cancelled: true,
-      preserveFlowDiagnostics: false,
-    });
-  });
-
-  it("prompts to upgrade an old Vercel CLI when setup reports it unsupported", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-cli-upgrade",
-          command: "vercel upgrade",
-          reason: "The installed Vercel CLI does not support the required team-list options.",
-        });
-      }),
-      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
-        kind: "installed",
-      })),
-    });
-
-    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
-      message: "Upgraded the Vercel CLI. Retry /model.",
-      tone: "error",
-      preserveFlowDiagnostics: false,
-    });
-    expect(flows.runInstallVercelCliFlow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        appRoot: APP_ROOT,
-        upgrade: true,
-      }),
-    );
-  });
-
-  it("gives the manual upgrade command when the old-CLI prompt is declined", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-cli-upgrade",
-          command: "vercel upgrade",
-          reason: "The installed Vercel CLI does not support the required team-list options.",
-        });
-      }),
-    });
-
-    await expect(run({ command: "model", flows, upgradeChoice: "later" })).resolves.toEqual({
-      message: "The Vercel CLI needs an update — run `vercel upgrade`, then retry /model.",
-      tone: "error",
-      preserveFlowDiagnostics: true,
-    });
-    expect(flows.runInstallVercelCliFlow).not.toHaveBeenCalled();
-  });
-
-  it("prints a thrown upgrade error with the manual command", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-cli-upgrade",
-          command: "vercel upgrade",
-          reason: "The installed Vercel CLI does not support the required team-list options.",
-        });
-      }),
-      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => {
-        throw new Error("package manager failed");
-      }),
-    });
-
-    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
-      message:
-        "Couldn't upgrade the Vercel CLI (package manager failed) — run `vercel upgrade`, then retry /model.",
-      tone: "error",
-      preserveFlowDiagnostics: true,
-    });
-  });
-
-  it("prints the native CLI failure reason with the manual command", async () => {
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-cli-upgrade",
-          command: "vercel upgrade",
-          reason: "The installed Vercel CLI does not support the required team-list options.",
-        });
-      }),
-      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
-        kind: "failed",
-        reason: "ERR_PNPM_NO_GLOBAL_BIN_DIR Unable to find the global bin directory",
-      })),
-    });
-
-    await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
-      message:
-        "Couldn't upgrade the Vercel CLI (ERR_PNPM_NO_GLOBAL_BIN_DIR Unable to find the global bin directory) — run `vercel upgrade`, then retry /model.",
-      tone: "error",
-      preserveFlowDiagnostics: true,
-    });
-  });
+  const installed = {
+    kind: "installed" as const,
+    title: "Agent Browser",
+    facts: [],
+    output: [],
+  };
 
   it.each([
     [
       "added",
-      registryResult({
-        items: [{ title: "Agent Browser", facts: [], output: [] }],
-      }),
-      "Added Agent Browser\n\n  ✓ Agent Browser\n    Installed.",
+      registryResult({ outcomes: [installed] }),
+      { message: "", preserveFlowDiagnostics: false },
     ],
-    ["empty", registryResult(), "No integrations selected."],
-    ["deployed", registryResult({ deployed: "production" }), "No integrations selected."],
-    ["cancelled", { kind: "cancelled" as const }, ""],
-  ] as const)("reports a %s registry flow", async (_case, result, message) => {
+    [
+      "deployed",
+      registryResult({ outcomes: [installed], deployed: "production" }),
+      { message: "", effect: { kind: "deployed" } },
+    ],
+    ["empty", registryResult(), { message: "", cancelled: true }],
+    ["cancelled", { kind: "cancelled" as const }, { message: "", cancelled: true }],
+  ] as const)("reports a %s registry flow", async (_case, result, expected) => {
     const runRegistryFlow = vi.fn(async () => result);
     const outcome = await run({ command: "add", flows: fakeFlows({ runRegistryFlow }) });
-    expect(outcome).toMatchObject({
-      message,
-      preserveFlowDiagnostics: result.kind !== "cancelled",
-    });
-    if (result.kind === "done" && result.result.items.length > 0)
-      expect(outcome.tone).toBe("success");
-    if (result.kind === "done" && result.result.deployed === "production") {
-      expect(outcome.effect).toEqual({ kind: "deployed" });
-    }
+    expect(outcome).toMatchObject(expected);
     expect(runRegistryFlow).toHaveBeenCalledWith(
       expect.objectContaining({ appRoot: APP_ROOT, installRoot: undefined }),
     );
+  });
+
+  it("keeps flow warnings only as notes on the add outcome", async () => {
+    const renderer = fakePanelRenderer();
+    const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async ({ prompter }) => {
+      prompter.log.warning("Wait for the Slack request to expire before retrying.");
+      return registryResult({
+        outcomes: [
+          {
+            kind: "incomplete",
+            title: "channel/slack",
+            resumeCommand: "eve add channel/slack --skip-install",
+          },
+        ],
+      });
+    });
+
+    await expect(
+      run({
+        command: "add",
+        flows: fakeFlows({ runRegistryFlow }),
+        renderer,
+        useDefaultPrompter: true,
+      }),
+    ).resolves.toEqual({
+      message:
+        "Finish with `eve add channel/slack --skip-install`\n" +
+        "⚠ Wait for the Slack request to expire before retrying.",
+      summary: "Added channel/slack · setup not finished",
+      preserveFlowDiagnostics: false,
+    });
   });
 
   it("keeps shared setup at the workspace root while installing into its agent", async () => {
@@ -477,59 +256,60 @@ describe("runTuiSetupCommand", () => {
     );
   });
 
-  it("reports completed items and skipped failures together", async () => {
+  it("reports a failed installation as an error without its flow logs", async () => {
     const flows = fakeFlows({
-      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
-        kind: "done",
-        result: {
-          items: [
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () =>
+        registryResult({
+          outcomes: [
             {
-              title: "Photon iMessage",
-              output: [],
-              facts: [{ label: "Agent phone number", value: "+15551234567" }],
-            },
-          ],
-          failures: [
-            {
-              title: "GitHub",
+              kind: "failed",
+              title: "connection/github",
               message: "Refusing to overwrite github.ts",
             },
           ],
-        },
-      })),
+        }),
+      ),
     });
 
-    await expect(run({ command: "add", flows })).resolves.toMatchObject({
-      message: expect.stringContaining("⨯ GitHub"),
-      preserveFlowDiagnostics: true,
+    await expect(run({ command: "add", flows })).resolves.toEqual({
+      message: "Refusing to overwrite github.ts",
+      summary: "Couldn't add connection/github",
+      failed: true,
+      preserveFlowDiagnostics: false,
     });
   });
 
-  it("headlines a completely failed registry batch", async () => {
+  it("summarizes a login with its connection", async () => {
     const flows = fakeFlows({
-      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
-        kind: "done",
-        result: {
-          items: [],
-          failures: [
-            { title: "Web Chat", message: "Dependency installation failed." },
-            { title: "Vercel", message: "Connector setup failed." },
-          ],
-        },
-      })),
+      runModelLogin: vi.fn(async () => ({ kind: "ready" as const, reload: false })),
     });
 
-    await expect(run({ command: "add", flows })).resolves.toMatchObject({
-      message: expect.stringMatching(/^\/add failed — 2 additions: 2 failed/),
-      tone: "error",
-      preserveFlowDiagnostics: true,
+    await expect(
+      run({ command: "login", flows, initialLoginConnection: "vercel" }),
+    ).resolves.toMatchObject({
+      message: "",
+      summary: "Connected with Vercel Account",
+    });
+  });
+
+  it("summarizes a cancelled login without the onboarding hint", async () => {
+    const flows = fakeFlows({
+      runModelLogin: vi.fn(async () => ({ kind: "cancelled" as const })),
+    });
+
+    await expect(run({ command: "login", flows })).resolves.toEqual({
+      message: "",
+      summary: "Login cancelled",
+      cancelled: true,
+      preserveFlowDiagnostics: false,
     });
   });
 
   it("reports the production URL after a deploy", async () => {
     const flows = fakeFlows();
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
-      message: "Deployed: https://my-agent.vercel.app",
+      message: "",
+      summary: "Deployed to https://my-agent.vercel.app",
       preserveFlowDiagnostics: true,
       effect: { kind: "deployed" },
     });
@@ -550,17 +330,7 @@ describe("runTuiSetupCommand", () => {
               }),
           ),
         ).rejects.toBeInstanceOf(WizardCancelledError);
-        return registryResult({
-          items: [
-            { title: "Web Chat", facts: [], output: [] },
-            { title: "Notion", facts: [], output: [] },
-          ],
-          outcomes: [
-            { kind: "installed", title: "Web Chat", facts: [], output: [] },
-            { kind: "cancelled", title: "Slack" },
-            { kind: "installed", title: "Notion", facts: [], output: [] },
-          ],
-        });
+        return registryResult({ outcomes: [{ kind: "cancelled", title: "channel/slack" }] });
       }),
     });
 
@@ -568,10 +338,27 @@ describe("runTuiSetupCommand", () => {
     renderer.fireInterrupt();
 
     await expect(result).resolves.toEqual({
-      message:
-        "3 additions: 2 added, 1 cancelled\n\n  ✓ Web Chat\n    Installed.\n\n" +
-        "  – Slack\n    Cancelled.\n\n  ✓ Notion\n    Installed.",
-      preserveFlowDiagnostics: true,
+      message: "",
+      summary: "channel/slack not added",
+      cancelled: true,
+      preserveFlowDiagnostics: false,
+    });
+  });
+
+  it("summarizes an addressed add that fails before any item settles", async () => {
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => {
+        throw new Error("Registry unavailable.");
+      }),
+    });
+
+    await expect(
+      run({ command: "add", flows, initialRegistryAddress: "connection/sentry" }),
+    ).resolves.toEqual({
+      message: "Registry unavailable.",
+      summary: "Couldn't add connection/sentry",
+      failed: true,
+      preserveFlowDiagnostics: false,
     });
   });
 
@@ -627,38 +414,6 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
-  it("preserves model access refreshes when provider setup is interrupted", async () => {
-    const renderer = fakePanelRenderer();
-    const flows = fakeFlows({
-      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(
-        ({ signal }) =>
-          new Promise((resolve) => {
-            signal?.addEventListener(
-              "abort",
-              () =>
-                resolve({
-                  kind: "done",
-                  accessChanged: true,
-                  providerSelection: "ai-gateway-key",
-                }),
-              { once: true },
-            );
-          }),
-      ),
-    });
-
-    const result = run({ command: "model", flows, renderer });
-    renderer.fireInterrupt();
-
-    await expect(result).resolves.toEqual({
-      message: "",
-      cancelled: true,
-      tone: undefined,
-      preserveFlowDiagnostics: false,
-      effect: { kind: "model-access-changed", reload: true },
-    });
-  });
-
   it("routes a vercel-login action error without dropping completed registry items", async () => {
     const cause = new HumanActionRequiredError({
       kind: "vercel-login",
@@ -668,16 +423,22 @@ describe("runTuiSetupCommand", () => {
     const flows = fakeFlows({
       runRegistryFlow: vi.fn(async () => {
         throw new RegistryFlowFailedError(cause, {
-          items: [{ title: "Web Chat", facts: [], output: [] }],
-          failures: [],
+          outcomes: [
+            {
+              kind: "installed",
+              title: "Web Chat",
+              facts: [{ label: "URL", value: "http://localhost:3000" }],
+              output: [],
+            },
+          ],
         });
       }),
     });
 
     await expect(run({ command: "add", flows })).resolves.toMatchObject({
-      message: expect.stringMatching(/^Added Web Chat[\s\S]*run \/deploy/),
+      message: expect.stringMatching(/^URL {2}http:\/\/localhost:3000\n[\s\S]*run \/deploy/),
       partial: true,
-      tone: "error",
+      failed: true,
     });
   });
 
@@ -694,7 +455,8 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message:
         "Vercel denied access to that team — check your team access and SSO, then retry /deploy.",
-      tone: "error",
+      summary: "Couldn't deploy",
+      failed: true,
       preserveFlowDiagnostics: true,
     });
   });
@@ -710,7 +472,9 @@ describe("runTuiSetupCommand", () => {
       }),
     });
     await expect(run({ command: "deploy", flows })).resolves.toMatchObject({
-      message: expect.stringMatching(/^\/deploy failed: /),
+      message:
+        "Human action required: `vercel link` — Deployment needs this directory linked to a Vercel project.",
+      failed: true,
     });
   });
 
@@ -726,7 +490,8 @@ describe("runTuiSetupCommand", () => {
     });
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message: "The Vercel CLI isn't installed — run /deploy to install it, then retry /deploy.",
-      tone: "error",
+      summary: "Couldn't deploy",
+      failed: true,
       preserveFlowDiagnostics: true,
     });
   });

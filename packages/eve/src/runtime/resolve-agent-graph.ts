@@ -174,7 +174,6 @@ async function resolveRuntimeAgentNode(
     toolRegistry,
     turnAgent: createResolvedRuntimeTurnAgent({
       agent,
-      dynamicSubagentsAvailable: subagentRegistry.dynamicResolvers.length > 0,
       id: input.agentId,
       nodeId,
       tools: [...toolRegistry.preparedTools, ...subagentRegistry.preparedTools],
@@ -305,7 +304,6 @@ async function resolveRuntimeRemoteAgent(input: {
     logicalPath: string;
     name: string;
     nodeId: string;
-    outputSchema?: ResolvedRuntimeRemoteAgentNode["outputSchema"];
     path: string;
     sourceId: string;
     sourceKind: "module";
@@ -317,7 +315,6 @@ async function resolveRuntimeRemoteAgent(input: {
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
     nodeId: toRuntimeNodeId(input.sourceRef.nodeId),
-    outputSchema: input.sourceRef.outputSchema,
     path: input.sourceRef.path,
     sourceId: input.sourceRef.sourceId,
     sourceKind: "module",
@@ -401,7 +398,7 @@ function attachInheritedSandboxWorkspaceResources(input: {
   );
 
   for (const [nodeId, node] of input.nodesByNodeId) {
-    if (node.sandboxRegistry.sandbox.definition.inheritsParent !== true) continue;
+    if (node.sandboxRegistry.sandbox.definition.kind !== "parent") continue;
     if (node.agent.dynamicSkillResolvers.length > 0) {
       throw new ResolveRuntimeAgentGraphError(
         `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" defines dynamic skills. Remove the child dynamic skills or give the child its own sandbox.`,
@@ -447,7 +444,7 @@ function resolveSandboxOwnerNode(input: {
       nodeId: input.nodeId,
     });
   }
-  if (node.sandboxRegistry.sandbox.definition.inheritsParent !== true) return node;
+  if (node.sandboxRegistry.sandbox.definition.kind !== "parent") return node;
 
   const parentNodeId = input.parentNodeIdByChildNodeId.get(input.nodeId);
   if (parentNodeId === undefined) {

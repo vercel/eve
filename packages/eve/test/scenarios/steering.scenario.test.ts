@@ -7,15 +7,13 @@ import { startEveDev } from "./dev-server-harness.js";
 const scenarioApp = useScenarioApp();
 
 describe("durable generation steering", () => {
-  it.each([undefined, "1"])(
-    "does not repeat a model step when background children wake the owner (lease %s)",
-    async (leaseSeconds) => {
-      const app = await scenarioApp({
-        name: "steering-background-wakes",
-        installDependencies: true,
-        files: {
-          "agent/instructions.md": "Delegate the five work items.\n",
-          "agent/agent.ts": `import { defineAgent } from "eve";
+  it("does not repeat a model step when subagent children wake the owner mid-lease", async () => {
+    const app = await scenarioApp({
+      name: "steering-child-wakes",
+      installDependencies: true,
+      files: {
+        "agent/instructions.md": "Delegate the five work items.\n",
+        "agent/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 export default defineAgent({
   model: mockModel(async ({ toolResults }) => {
@@ -27,49 +25,56 @@ export default defineAgent({
   }),
   modelContextWindowTokens: 32000,
 });`,
-          "agent/subagents/worker/instructions.md": "Complete the work item.\n",
-          "agent/subagents/worker/agent.ts": `import { defineAgent } from "eve";
+        "agent/subagents/worker/instructions.md": "Complete the work item.\n",
+        "agent/subagents/worker/agent.ts": `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
 export default defineAgent({
-  description: "Complete a work item in the background.",
+  description: "Complete a work item.",
   model: mockModel(async () => {
     await new Promise(resolve => setTimeout(resolve, 2000));
     return "Work complete";
   }),
   modelContextWindowTokens: 32000,
 });`,
-        },
-      });
-      const server = await startEveDev(app.appRoot, {
-        env: {
-          EVE_MOCK_AUTHORED_MODELS: "",
-          NODE_ENV: "production",
-          WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: leaseSeconds,
-        },
-      });
-      try {
-        const client = new Client({ host: server.url });
-        const { response } = await client.sessions.create({ message: "Start five work items." });
-        const result = await response.result();
-        const events = result.events;
-        const steps = events
-          .filter((event) => event.type === "step.started")
-          .map((event) => `${event.data.turnId}:${event.data.stepIndex}`);
-        expect(steps).toHaveLength(2);
-        expect(new Set(steps).size).toBe(steps.length);
-        expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
-        const contentionLog = "Step execution already in flight in this process";
-        if (leaseSeconds === undefined) {
-          expect(server.stderr()).not.toContain(contentionLog);
-        } else {
-          expect(server.stderr()).toContain(contentionLog);
-        }
-      } finally {
-        await server.stop();
-      }
-    },
-    360_000,
-  );
+      },
+    });
+    const server = await startEveDev(app.appRoot, {
+      env: {
+        EVE_MOCK_AUTHORED_MODELS: "",
+        NODE_ENV: "production",
+        // A one-second lease expires mid-step, so the ownership backstop
+        // races the child wakes into the single-flight guard.
+        WORKFLOW_INLINE_OWNERSHIP_LEASE_SECONDS: "1",
+        // Contention with a fresh claim logs at debug, which the Workflow SDK
+        // prints to stdout only for a matching namespace.
+        DEBUG: "workflow:runtime:debug",
+      },
+    });
+    try {
+      const client = new Client({ host: server.url });
+      const { response } = await client.sessions.create({ message: "Start five work items." });
+      const result = await response.result();
+      const events = result.events;
+      const steps = events
+        .filter((event) => event.type === "step.started")
+        .map((event) => `${event.data.turnId}:${event.data.stepIndex}`);
+      // The first step starts five worker tasks; later steps read their
+      // results as they arrive. No step may run twice.
+      expect(steps.length).toBeGreaterThan(2);
+      expect(new Set(steps).size).toBe(steps.length);
+      expect(
+        events.filter(
+          (event) => event.type === "task.settled" && event.data.status === "completed",
+        ),
+      ).toHaveLength(5);
+      expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+      expect(`${server.stdout()}${server.stderr()}`).toContain(
+        "Step execution already in flight in this process",
+      );
+    } finally {
+      await server.stop();
+    }
+  }, 360_000);
   it("interrupts a pending request through the public session API and keeps one turn", async () => {
     const app = await scenarioApp({
       name: "generation-steering",

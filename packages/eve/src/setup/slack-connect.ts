@@ -6,7 +6,7 @@
  * focused on flow and these stay trivially testable.
  */
 
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 interface VercelConnectListClient {
   uid?: unknown;
@@ -99,45 +99,6 @@ export function parseCreatedSlackConnector(stdout: string): SlackConnectorRef | 
     return undefined;
   }
   return parseSlackConnectorDetails(parsed)?.ref;
-}
-
-/**
- * Finds the expected connector, or the newest Slack connector already attached to this project.
- */
-export function pickSlackConnector(
-  listJson: unknown,
-  projectId: string | undefined,
-  expectedUid: string | undefined,
-): SlackConnectorRef | undefined {
-  if (projectId === undefined) return undefined;
-  if (typeof listJson !== "object" || listJson === null) return undefined;
-  const response = listJson as VercelConnectListResponse;
-  const connectors = response.connectors ?? response.clients;
-  if (!Array.isArray(connectors)) return undefined;
-
-  let matched: { ref: SlackConnectorRef; createdAt: number } | undefined;
-  for (const raw of connectors as VercelConnectListClient[]) {
-    if (raw.type !== "slack") continue;
-    if (typeof raw.uid !== "string" || typeof raw.id !== "string") continue;
-    if (!Array.isArray(raw.projects)) continue;
-    const matchesProject = raw.projects.some(
-      (project) =>
-        typeof project === "object" &&
-        project !== null &&
-        (project as { id?: unknown }).id === projectId,
-    );
-    if (!matchesProject) continue;
-
-    const ref: SlackConnectorRef = { uid: raw.uid, id: raw.id };
-    if (expectedUid !== undefined && ref.uid === expectedUid) {
-      return ref;
-    }
-    const createdAt = typeof raw.createdAt === "number" ? raw.createdAt : 0;
-    if (!matched || createdAt > matched.createdAt) {
-      matched = { ref, createdAt };
-    }
-  }
-  return matched?.ref;
 }
 
 /**

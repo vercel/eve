@@ -280,7 +280,7 @@ export const QuestionInput = ({
   return (
     <Textarea
       className={cn(
-        "min-h-16 resize-none rounded-lg text-sm shadow-none focus-visible:border-foreground!",
+        "min-h-16 resize-none rounded-lg text-base md:text-sm shadow-none focus-visible:border-foreground!",
         className,
       )}
       disabled={question.disabled || disabled}

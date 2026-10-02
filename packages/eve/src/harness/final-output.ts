@@ -1,6 +1,6 @@
 import type { Tool } from "ai";
 
-import { toInputSchema } from "#tools/schema.js";
+import { defineJsonSchema, toModelSchema } from "#tools/schema.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
@@ -20,10 +20,10 @@ const FINAL_OUTPUT_TOOL_DESCRIPTION =
  * to the schema during generation, exactly like every other eve tool input.
  */
 export function buildFinalOutputTool(schema: JsonObject): Tool {
-  const runtimeSchema = toInputSchema(schema);
+  const modelSchema = toModelSchema(defineJsonSchema(schema), "input");
   return {
     description: FINAL_OUTPUT_TOOL_DESCRIPTION,
-    inputSchema: runtimeSchema,
-    outputSchema: runtimeSchema,
+    inputSchema: modelSchema,
+    outputSchema: modelSchema,
   };
 }

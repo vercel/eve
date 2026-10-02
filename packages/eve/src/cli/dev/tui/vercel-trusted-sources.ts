@@ -1,13 +1,13 @@
 import {
   updateProjectTrustedSourcesFromJSON,
   type UpdateProjectTrustedSources,
-} from "@vercel/sdk/models/updateprojectblock.js";
-import { trustedSourcesToJSON } from "@vercel/sdk/models/updateprojectprojectsbranchmatcher.js";
+  trustedSourcesToJSON,
+} from "#compiled/@vercel/sdk/index.js";
 import { captureVercel } from "#setup/primitives/index.js";
 import type { Prompter } from "#setup/prompter.js";
 import { normalizeVercelApiResult } from "#setup/vercel-api-failure.js";
 import type { VerifiedVercelTarget } from "#setup/vercel-deployment.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 import {
   planTrustedSourceAccess,

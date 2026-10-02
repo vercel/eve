@@ -798,7 +798,7 @@ describe("OpenApiConnectionClient", () => {
     expect(properties.untyped).toEqual({ default: "false", example: "false" });
   });
 
-  it("keeps operations whose input schemas cannot be locally validated", async () => {
+  it("keeps operations whose input schemas cannot be validated locally", async () => {
     const spec: Record<string, unknown> = {
       openapi: "3.0.3",
       info: { title: "T", version: "1" },
@@ -822,14 +822,12 @@ describe("OpenApiConnectionClient", () => {
     };
     const client = new OpenApiConnectionClient(makeConnection({ spec }));
 
-    // Schemas outside the local validation subset degrade to passthrough
-    // validation instead of dropping the operation — the API validates.
+    // Schemas the local validator cannot evaluate stay advertised and pass
+    // values through instead of dropping the operation — the API validates.
     await expect(client.getToolMetadata()).resolves.toMatchObject([
       { name: "getValid" },
-      { name: "getInvalid" },
+      { name: "getInvalid", inputSchema: { properties: { state: { enum: "not-an-array" } } } },
     ]);
-    await expect(client.getTools()).resolves.toHaveProperty("getValid");
-    await expect(client.getTools()).resolves.toHaveProperty("getInvalid");
   });
 
   it("parses a YAML spec fetched from a URL", async () => {

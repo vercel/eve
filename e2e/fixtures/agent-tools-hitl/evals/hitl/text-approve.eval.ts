@@ -23,9 +23,12 @@ export default defineEval({
       data: { outcome: "rejected", requestId: approval.requestId },
     });
 
-    const approved = await rejectedTurn.session.respond([
-      { optionId: "approve", requestId: approval.requestId },
-    ]);
+    // Finish consuming the refusal boundary before opening the next response reader.
+    (await rejectedTurn.result()).expectOk();
+    const approved = await rejectedTurn.session.respond(
+      [{ optionId: "approve", requestId: approval.requestId }],
+      { headers: { "x-eve-fixture-user": "e2e-approval-responder" } },
+    );
     approved.expectOk();
     approved.event("approval.settled", {
       count: 1,

@@ -6,7 +6,7 @@ const STOP_SANDBOX_MARKER_PATH = "/workspace/stopped-by-hook.txt";
 
 // The first response activates an authored hook that writes a marker and
 // stops compute. Reading that marker on the next turn proves the configured
-// backend reopens the same durable sandbox state.
+// provider reopens the same durable sandbox state.
 export default defineEval({
   description: "Sandbox: an authored hook can stop compute and the next turn reopens it.",
   async test(t) {

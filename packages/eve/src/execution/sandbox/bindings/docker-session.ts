@@ -3,7 +3,7 @@ import { dirname as posixDirname } from "node:path/posix";
 
 import type { DockerCli } from "#execution/sandbox/bindings/docker-cli.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
-import { resolveWorkspacePath } from "#execution/sandbox/bindings/local-backend-utils.js";
+import { resolveWorkspacePath } from "#execution/sandbox/bindings/local-provider-utils.js";
 import { shellQuote } from "#execution/sandbox/shell-quote.js";
 import { bufferToStream, streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
@@ -51,7 +51,6 @@ const DOCKER_KILL_TREE_SCRIPT = [
 export function createDockerInternalSession(input: {
   readonly cli: DockerCli;
   readonly containerIdentity: string;
-  readonly id: string;
 }): InternalSandboxSession {
   const { cli, containerIdentity } = input;
 
@@ -72,7 +71,6 @@ export function createDockerInternalSession(input: {
   }
 
   return {
-    id: input.id,
     resolvePath: resolveWorkspacePath,
     async spawn(options: SandboxSpawnOptions) {
       const args = ["exec", "-w", resolveWorkspacePath(options.workingDirectory ?? WORKSPACE_ROOT)];

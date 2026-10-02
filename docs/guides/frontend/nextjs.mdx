@@ -80,13 +80,26 @@ Generated agent services build with `EVE_PUBLIC_ROUTE_PREFIX` set to the agent's
 
 All fields are optional.
 
-| Option               | Type                  | Default                  | Purpose                                                                                                                                                                                                                                          |
-| -------------------- | --------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `eveRoot`            | `string`              | Next.js app root         | Path to one unnamed eve app root, relative to `process.cwd()` unless absolute. Do not combine with `agents`.                                                                                                                                     |
-| `agents`             | `Record<string, ...>` | inferred for a workspace | Named eve agents to mount under `/eve/<name>/v1/*`. `withEve()` discovers project-level `agents/<name>/` members when neither `agents` nor `eveRoot` is set; otherwise each value is a root string or `{ root, buildCommand?, servicePrefix? }`. |
-| `eveBuildCommand`    | `string`              | generated                | Build command for generated eve Vercel services. In multi-agent mode this is the default for agents without their own `buildCommand`.                                                                                                            |
-| `servicePrefix`      | `string`              | `"/_eve_internal/eve"`   | Private route namespace for legacy manual Vercel service configs and non-Vercel production proxying. Named agents derive unique defaults from this prefix.                                                                                       |
-| `devServerTimeoutMs` | `number`              | `180000`                 | Maximum time to wait for each eve development server to become available.                                                                                                                                                                        |
+| Option               | Type                  | Default                  | Purpose                                                                                                                                                                                                                                     |
+| -------------------- | --------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eveRoot`            | `string`              | Next.js app root         | Eve project root, relative to the Next.js app root unless absolute. It may contain either one `agent/` or an `agents/` workspace. Do not combine with `agents`.                                                                             |
+| `agents`             | `Record<string, ...>` | inferred for a workspace | Named eve agents to mount under `/eve/<name>/v1/*`. `withEve()` discovers project-level `agents/<name>/` members when `agents` and `eveRoot` are unset; otherwise each value is a root string or `{ root, buildCommand?, servicePrefix? }`. |
+| `eveBuildCommand`    | `string`              | generated                | Build command for generated eve Vercel services. In multi-agent mode this is the default for agents without their own `buildCommand`.                                                                                                       |
+| `servicePrefix`      | `string`              | `"/_eve_internal/eve"`   | Private route namespace for legacy manual Vercel service configs and non-Vercel production proxying. Named agents derive unique defaults from this prefix.                                                                                  |
+| `devServerTimeoutMs` | `number`              | `180000`                 | Maximum time to wait for each eve development server to become available.                                                                                                                                                                   |
+
+When the Next.js app is a peer of an eve project, select its root without repeating every agent path. The root may contain either one `agent/` or an `agents/` workspace:
+
+```ts title="apps/web/next.config.ts"
+import type { NextConfig } from "next";
+import { withEve } from "eve/next";
+
+const nextConfig: NextConfig = {};
+
+export default withEve(nextConfig, {
+  eveRoot: "../..",
+});
+```
 
 For slow cold starts, increase the development timeout:
 

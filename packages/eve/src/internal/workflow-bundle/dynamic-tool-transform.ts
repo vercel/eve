@@ -7,8 +7,14 @@
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import {
+  collectPatternNames,
   collectReferencedIdentifierNames,
+  extractParamNames,
+  findEveImportAliases,
   findProperty,
+  isAstNode,
+  isFunction,
+  readDefinerName,
   type DynamicToolAstNode as AstNode,
   walkNode,
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
@@ -70,14 +76,14 @@ export async function transformDynamicToolExecute(
   if (!source.includes("defineTool") && !source.includes("defineWorkflowTool")) return null;
 
   const ast = (await parseWithNitroRolldownAst(filename, source)) as AstNode;
-  const defineToolAliases = findDefineToolAliases(ast);
+  const defineToolAliases = findEveImportAliases(ast, ["defineTool", "defineWorkflowTool"]);
   if (defineToolAliases.size === 0) return null;
 
   const callbacks: CallbackInfo[] = [];
   walkForCallbacks(source, ast, callbacks, [], {
     defineToolAliases,
     workflowFunctions,
-    durableSchemaAliases: findDefineToolAliases(ast, ["defineDurableSchema"]),
+    durableSchemaAliases: findEveImportAliases(ast, ["defineDurableSchema"]),
   });
   return callbacks.length === 0 ? null : applyTransform(source, callbacks);
 }
@@ -93,44 +99,6 @@ interface WalkContext {
    * callback, so it keeps its identity and is not stamped.
    */
   readonly workflowFunctions: ReadonlySet<string>;
-}
-
-// Keep the old export name for backward compatibility with the plugin.
-export { transformDynamicToolExecute as transformDynamicToolAwait };
-
-function findDefineToolAliases(
-  ast: AstNode,
-  names: readonly string[] = ["defineTool", "defineWorkflowTool"],
-): ReadonlySet<string> {
-  const aliases = new Set<string>();
-  walkNode(ast, (node) => {
-    if (node.type !== "ImportDeclaration") return true;
-    const source = node.source?.value;
-    if (typeof source !== "string" || (source !== "eve" && !source.startsWith("eve/"))) {
-      return false;
-    }
-    for (const specifier of node.specifiers ?? []) {
-      if (specifier.type === "ImportNamespaceSpecifier" && specifier.local?.name) {
-        for (const name of names) aliases.add(`${specifier.local.name}.${name}`);
-      }
-      if (
-        specifier.type === "ImportSpecifier" &&
-        names.includes(String(specifier.imported?.name ?? specifier.imported?.value)) &&
-        specifier.local?.name
-      ) {
-        aliases.add(specifier.local.name);
-      }
-    }
-    return false;
-  });
-  return aliases;
-}
-
-function readDefinerName(callee: AstNode | undefined): string | undefined {
-  if (callee?.type === "Identifier") return callee.name;
-  if (callee?.type !== "MemberExpression" || callee.object?.type !== "Identifier") return undefined;
-  const property = callee.computed ? callee.property?.value : callee.property?.name;
-  return typeof property === "string" ? `${callee.object.name}.${property}` : undefined;
 }
 
 function walkForCallbacks(
@@ -451,36 +419,6 @@ function collectScopeVarDeclarations(bodyNode: AstNode): string[] {
   return names;
 }
 
-function collectPatternNames(pattern: AstNode | null, names: string[]): void {
-  if (!pattern) return;
-  if (pattern.type === "Identifier" && pattern.name) {
-    names.push(pattern.name);
-    return;
-  }
-  if (pattern.type === "ObjectPattern") {
-    for (const property of pattern.properties ?? []) {
-      collectPatternNames(
-        property.type === "RestElement"
-          ? (property.argument as AstNode | null)
-          : (property.value as AstNode | null),
-        names,
-      );
-    }
-  }
-  if (pattern.type === "ArrayPattern") {
-    for (const element of pattern.elements ?? []) collectPatternNames(element, names);
-  }
-  if (pattern.type === "AssignmentPattern") {
-    collectPatternNames(pattern.left as AstNode | null, names);
-  }
-}
-
-function extractParamNames(fn: AstNode): string[] {
-  const names: string[] = [];
-  for (const parameter of fn.params ?? []) collectPatternNames(parameter, names);
-  return names;
-}
-
 function extractFnParams(source: string, fn: AstNode): string {
   if (!fn.params || fn.params.length === 0) return "";
   const first = fn.params[0]!;
@@ -543,16 +481,4 @@ function extractCallbackParamNames(params: string): Set<string> {
     else names.push(binding);
   }
   return new Set(names);
-}
-
-function isFunction(node: AstNode): boolean {
-  return (
-    node.type === "ArrowFunctionExpression" ||
-    node.type === "FunctionDeclaration" ||
-    node.type === "FunctionExpression"
-  );
-}
-
-function isAstNode(value: unknown): value is AstNode {
-  return value !== null && typeof value === "object" && typeof (value as AstNode).type === "string";
 }

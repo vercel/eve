@@ -73,29 +73,6 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  it("reports a task notification instead of re-calling the named tool", async () => {
-    const result = await generateWithPrompt(
-      [
-        {
-          content:
-            "Background task task_abc123 (conditional-marker) is completed.\n\nResult:\nDYNAMIC_SUBAGENT_ENABLED",
-          role: "user",
-        },
-      ],
-      [
-        {
-          inputSchema: { properties: { message: { type: "string" } }, type: "object" },
-          name: "conditional-marker",
-          type: "function",
-        },
-      ],
-    );
-
-    expect(result.content).toEqual([
-      expect.objectContaining({ text: expect.stringContaining("DYNAMIC_SUBAGENT_ENABLED") }),
-    ]);
-  });
-
   it("activates a matching skill when the available skill line includes a skill path", async () => {
     const result = await generateWithPrompt([
       {
@@ -296,14 +273,14 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  it("builds ask_question input from prompt text and option labels", async () => {
+  it("builds ask_question input from question text and option labels", async () => {
     const result = await generateWithPrompt(
       [
         {
           content: [
             "Use the ask_question tool exactly once.",
-            "Set prompt to: 'Pick a color.'",
-            'Provide exactly two options: - id "red", label "Red" - id "blue", label "Blue"',
+            "Set question to: 'Pick a color.'",
+            'Provide exactly two options: label "Red" and label "Blue".',
           ].join("\n"),
           role: "user",
         },
@@ -312,9 +289,8 @@ describe("createMockAuthoredRuntimeModel", () => {
         {
           inputSchema: {
             properties: {
-              allowFreeform: { type: "boolean" },
               options: { type: "array" },
-              prompt: { type: "string" },
+              question: { type: "string" },
             },
             type: "object",
           },
@@ -328,10 +304,10 @@ describe("createMockAuthoredRuntimeModel", () => {
     expect(result.content).toEqual([
       {
         input: JSON.stringify({
-          prompt: "Pick a color.",
+          question: "Pick a color.",
           options: [
-            { id: "red", label: "Red" },
-            { id: "blue", label: "Blue" },
+            { description: "Choose Red.", label: "Red" },
+            { description: "Choose Blue.", label: "Blue" },
           ],
         }),
         toolCallId: "call_ask_question",
@@ -722,12 +698,10 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
-  // Regression: the [Agents] announcement is user-role scaffolding injected
-  // after a subagent settles. Treating it as a turn boundary masked the tool
-  // result, and the adapter re-issued the same deterministic tool call — a
-  // duplicate start operation that fatally failed the parent session in the
-  // mock world suites.
-  it("replies to a tool result behind a framework [Agents] announcement instead of re-calling", async () => {
+  // Regression: the [Tasks] note is user-role scaffolding injected at a step
+  // boundary. Treating it as a turn boundary masked the tool result, and the
+  // adapter re-issued the same deterministic tool call.
+  it("replies to a tool result behind a framework [Tasks] note instead of re-calling", async () => {
     const result = await generateWithPrompt(
       [
         {
@@ -758,7 +732,7 @@ describe("createMockAuthoredRuntimeModel", () => {
         },
         {
           content:
-            '[Agents]\n<agents>\n<agent id="ag_conditional-marker:5ae9bfd35776" name="conditional-marker">DYNAMIC_SUBAGENT_ENABLED</agent>\n</agents>',
+            '[Tasks]\n<tasks>\n</tasks>\n<idle>\n<task id="conditional-marker-5ae9bf" tool="conditional-marker"/>\n</idle>',
           role: "user",
         },
       ],

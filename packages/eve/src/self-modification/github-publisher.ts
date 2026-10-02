@@ -25,7 +25,7 @@ export interface PublishedSelfModificationProposal {
   readonly deployed: false;
 }
 
-export interface GitHubDraftPublisherInput {
+interface GitHubDraftPublisherInput {
   readonly credentialProvider: GitHubCredentialProvider;
   readonly description: string;
   readonly fetch?: typeof fetch;

@@ -9,7 +9,6 @@ import {
   ParentTraceContextKey,
   type Session,
   type SessionAuthContext,
-  ActivityObserverKey,
   SessionIdKey,
   SessionKey,
   ScheduleIdKey,
@@ -165,7 +164,6 @@ describe("buildRunContext", () => {
           initiatorAuth,
           adapter: { kind: "http" },
           input: {},
-          mode: "conversation",
         },
       });
       expect(ctx.get(AuthKey)).toEqual(testAuth);
@@ -182,7 +180,6 @@ describe("buildRunContext", () => {
         adapter: { kind: "http" },
         continuationToken: "t",
         input: { message: "hi" },
-        mode: "conversation",
       },
     });
 
@@ -199,7 +196,6 @@ describe("buildRunContext", () => {
         adapter: { kind: "http" },
         continuationToken: "t",
         input: { message: "hi" },
-        mode: "conversation",
       },
     });
 
@@ -217,7 +213,6 @@ describe("buildRunContext", () => {
           auth: testAuth,
           adapter: { kind: "channel:slack" },
           input: { message: "run the scheduled task" },
-          mode: "conversation",
         },
       }),
     );
@@ -226,14 +221,35 @@ describe("buildRunContext", () => {
     expect(ctx.require(ScheduleIdKey)).toBe("dynamic-tasks");
   });
 
-  it("stores a title only for top-level sessions", () => {
+  it("inherits schedule provenance in child sessions", () => {
+    const scope = new ContextContainer();
+    scope.set(ScheduleIdKey, "automatic-reports");
+    const ctx = contextStorage.run(scope, () =>
+      buildRunContext({
+        bundle: createMinimalBundle(),
+        run: {
+          auth: testAuth,
+          adapter: { kind: "subagent" },
+          input: { message: "Prepare report A" },
+          parent: {
+            callId: "call-1",
+            rootSessionId: "root-session",
+            sessionId: "parent-session",
+            turn: { id: "turn-1", sequence: 0 },
+          },
+        },
+      }),
+    );
+    expect(ctx.require(ScheduleIdKey)).toBe("automatic-reports");
+  });
+
+  it("stores titles for root and remote-owned sessions, not local children", () => {
     const root = buildRunContext({
       bundle: createMinimalBundle(),
       run: {
         auth: null,
         adapter: { kind: "http" },
         input: { message: "Investigate the incident" },
-        mode: "conversation",
       },
     });
     const child = buildRunContext({
@@ -242,7 +258,6 @@ describe("buildRunContext", () => {
         auth: null,
         adapter: { kind: "subagent" },
         input: { message: "Delegated prompt" },
-        mode: "task",
         parent: {
           callId: "call-1",
           rootSessionId: "root-session",
@@ -254,6 +269,22 @@ describe("buildRunContext", () => {
 
     expect(root.get(SessionTitleKey)).toBe("Investigate the incident");
     expect(child.get(SessionTitleKey)).toBeUndefined();
+    const remote = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "eve" },
+        input: { message: "Remote task" },
+        traceRoot: { kind: "own" },
+        parent: {
+          callId: "call",
+          rootSessionId: "caller-root",
+          sessionId: "caller",
+          turn: { id: "turn_0", sequence: 0 },
+        },
+      },
+    });
+    expect(remote.get(SessionTitleKey)).toBe("Remote task");
   });
 
   it("does not invent a continuation for an ID-only run", () => {
@@ -263,7 +294,6 @@ describe("buildRunContext", () => {
         auth: null,
         adapter: { kind: "http" },
         input: { message: "hi" },
-        mode: "conversation",
       },
     });
 
@@ -280,7 +310,6 @@ describe("buildRunContext", () => {
           adapter: { kind: "http" },
           continuationToken: "t",
           input: { message: "hi" },
-          mode: "conversation",
         },
       }),
     ).not.toThrow();
@@ -294,37 +323,10 @@ describe("buildRunContext", () => {
         adapter: { kind: "http" },
         continuationToken: "t",
         input: { message: "hi" },
-        mode: "conversation",
       },
     });
 
     expect(ctx.get(SessionIdKey)).toBeUndefined();
-  });
-
-  it("seeds inherited private activity observer configuration", () => {
-    const sink = {
-      url: "https://root.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
-      version: 1 as const,
-    };
-    const workIdentity = {
-      id: "work:root:turn:call",
-      kind: "subagent" as const,
-      parentId: "work:root:turn",
-      rootSessionId: "root",
-      rootTurnId: "turn",
-    };
-    const ctx = buildRunContext({
-      bundle: createMinimalBundle(),
-      run: {
-        auth: null,
-        adapter: { kind: "subagent" },
-        input: { message: "hi" },
-        mode: "task",
-        activityObserver: { sink, workIdentity },
-      },
-    });
-
-    expect(ctx.get(ActivityObserverKey)).toEqual({ sink, workIdentity });
   });
 
   it("grafts parent custom metadata and inherits the conversation audience", () => {
@@ -336,7 +338,6 @@ describe("buildRunContext", () => {
       audience: "public" as const,
       channel: { kind: "channel:slack" as const, name: "slack" },
       environment: "production" as const,
-      mode: "conversation" as const,
       principalType: "user",
     };
     const ctx = buildRunContext({
@@ -348,7 +349,6 @@ describe("buildRunContext", () => {
         inheritedConversation,
         continuationToken: "t",
         input: { message: "hi" },
-        mode: "task",
       },
     });
 
@@ -358,7 +358,6 @@ describe("buildRunContext", () => {
     expect(ctx.get(ConversationContextKey)).toEqual({
       ...inheritedConversation,
       channel: { kind: "subagent", name: undefined },
-      mode: "task",
       principalType: "anonymous",
     });
 
@@ -374,7 +373,6 @@ describe("buildRunContext", () => {
         adapter: { kind: "http" },
         continuationToken: "t",
         input: { message: "hi" },
-        mode: "conversation",
       },
     });
 
@@ -396,7 +394,6 @@ describe("buildRunContext", () => {
         adapter: { kind: "eve" },
         channelMetadata: { kind: "eve", metadata: {} },
         input: { message: "hi" },
-        mode: "task",
         parentTraceContext: {
           forwardedTracePolicy,
           spanId: "1".repeat(16),

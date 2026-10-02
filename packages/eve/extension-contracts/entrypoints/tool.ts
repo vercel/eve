@@ -3,10 +3,12 @@ export {
   defineWorkflowTool,
   disableTool,
   isDisabledToolSentinel,
+  serializeModelInputSchema,
   toolOutput,
   toolOutputPart,
   toolResultFrom,
   type WorkflowStepToolContext,
+  type WorkflowToolDefinition,
 } from "../../src/public/tools/index.ts";
 export {
   agentRouter,

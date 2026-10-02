@@ -13,13 +13,16 @@ import type { PackageManagerStrategy } from "./types.js";
 export const PNPM_WORKSPACE_PATH = "pnpm-workspace.yaml";
 export const PNPM_WORKSPACE_MEMBERSHIP_ARGUMENTS = ["list", "--depth", "-1", "--json"] as const;
 
-const SHARP_BUILD_POLICY = "  sharp: false";
+const DEFAULT_BUILD_POLICIES = [
+  { name: "esbuild", line: "  esbuild: true" },
+  { name: "sharp", line: "  sharp: false" },
+] as const;
 
 export const PNPM_WORKSPACE_CONTENT = [
   "minimumReleaseAge: 0",
   "minimumReleaseAgeStrict: true",
   "allowBuilds:",
-  SHARP_BUILD_POLICY,
+  ...DEFAULT_BUILD_POLICIES.map(({ line }) => line),
   "",
 ].join("\n");
 
@@ -40,12 +43,15 @@ function withPnpmWorkspacePolicy(source: string): string {
 
   if (allowBuildsIndex < 0) {
     const prefix = normalized.trim().length === 0 ? "" : `${normalized}\n`;
-    return `${prefix}allowBuilds:\n${SHARP_BUILD_POLICY}\n`;
+    return `${prefix}allowBuilds:\n${DEFAULT_BUILD_POLICIES.map(({ line }) => line).join("\n")}\n`;
   }
 
   const blockEnd = findYamlBlockEnd(policyLines, allowBuildsIndex);
   const allowBuildsBlock = policyLines.slice(allowBuildsIndex + 1, blockEnd);
-  if (allowBuildsBlock.some((line) => /^\s+sharp:/.test(line))) {
+  const missingPolicies = DEFAULT_BUILD_POLICIES.filter(
+    ({ name }) => !allowBuildsBlock.some((line) => line.match(/^\s+([^:]+):/)?.[1] === name),
+  );
+  if (missingPolicies.length === 0) {
     return normalized;
   }
 
@@ -53,7 +59,7 @@ function withPnpmWorkspacePolicy(source: string): string {
   while (insertAt > allowBuildsIndex + 1 && policyLines[insertAt - 1] === "") {
     insertAt -= 1;
   }
-  policyLines.splice(insertAt, 0, SHARP_BUILD_POLICY);
+  policyLines.splice(insertAt, 0, ...missingPolicies.map(({ line }) => line));
   return policyLines.join("\n");
 }
 

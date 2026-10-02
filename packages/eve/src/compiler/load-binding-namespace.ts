@@ -5,16 +5,37 @@ import {
   memoizeModuleNamespaceFactories,
   type ProgrammaticModuleNamespace,
 } from "#compiler/source-graph.js";
-import { packageStateNamespace } from "#discover/extensions.js";
-import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
+import {
+  loadAuthoredModuleNamespace,
+  type AuthoredModuleLoadOptions,
+} from "#internal/authored-module-loader.js";
 
 export type CompiledBindingNamespaceLoader = (
   sourceId: string,
 ) => Promise<ProgrammaticModuleNamespace>;
 
+export interface ExtensionCompileMount {
+  readonly mountId: string;
+  readonly entry?: NonNullable<AuthoredModuleLoadOptions["extension"]>["entry"];
+}
+
+/**
+ * Filesystem mounts enclosing `mountId`, outermost first. Extension subagents live at
+ * `<mountId>/subagents/<id>`, so a nested mount id extends its enclosing mount ids.
+ */
+function ancestorMountEntries(mounts: ReadonlyMap<string, ExtensionCompileMount>, mountId: string) {
+  return [...mounts.values()]
+    .filter((mount) => mount.entry !== undefined && mountId.startsWith(`${mount.mountId}/`))
+    .sort((left, right) => left.mountId.length - right.mountId.length)
+    .map((mount) => ({ ...mount.entry!, mountId: mount.mountId }));
+}
+
 /** Loads one node's selected bindings with dependency ordering and per-phase caching. */
 export function createCompiledBindingNamespaceLoader(input: {
   readonly bindings?: Readonly<Record<string, AgentModuleBinding>>;
+  readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
+  readonly evaluationId?: string;
+  readonly mountSourceId?: (binding: AgentModuleBinding) => string | undefined;
   readonly onLoad?: (sourceId: string) => void;
   readonly registries: readonly AgentSourceRegistry[];
   readonly resolveBinding?: (sourceId: string) => AgentModuleBinding | undefined;
@@ -39,11 +60,19 @@ export function createCompiledBindingNamespaceLoader(input: {
     }
     input.onLoad?.(sourceId);
     const nextLineage = new Set(lineage).add(sourceId);
-    const loading = loadCompiledBindingNamespace({
-      binding,
-      loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
-      registries: input.registries,
-    }).then(memoizeModuleNamespaceFactories);
+    const mountSourceId = input.mountSourceId?.(binding);
+    const loading = (async () => {
+      if (mountSourceId !== undefined && mountSourceId !== sourceId) {
+        await load(mountSourceId, nextLineage);
+      }
+      return await loadCompiledBindingNamespace({
+        binding,
+        loadDependency: (dependencySourceId) => load(dependencySourceId, nextLineage),
+        registries: input.registries,
+        mounts: input.mounts,
+        evaluationId: input.evaluationId,
+      });
+    })().then(memoizeModuleNamespaceFactories);
     cache.set(sourceId, loading);
     return loading;
   };
@@ -54,12 +83,30 @@ export function createCompiledBindingNamespaceLoader(input: {
 async function loadCompiledBindingNamespace(input: {
   readonly binding: AgentModuleBinding;
   readonly loadDependency: CompiledBindingNamespaceLoader;
+  readonly mounts?: ReadonlyMap<string, ExtensionCompileMount>;
+  readonly evaluationId?: string;
   readonly registries: readonly AgentSourceRegistry[];
 }): Promise<ProgrammaticModuleNamespace> {
   if (input.binding.backing.kind === "filesystem") {
+    const mountId =
+      input.binding.owner.kind === "extension" ? input.binding.owner.mountId : undefined;
+    const mount = mountId === undefined ? undefined : input.mounts?.get(mountId);
+    if (mountId !== undefined && input.mounts !== undefined && mount === undefined) {
+      throw new Error(`Missing mount "${mountId}" for extension contribution.`);
+    }
+    const extension: AuthoredModuleLoadOptions["extension"] =
+      mountId === undefined
+        ? undefined
+        : {
+            mountId,
+            evaluationId: input.evaluationId,
+            entry: mount?.entry,
+            ancestors:
+              input.mounts === undefined ? undefined : ancestorMountEntries(input.mounts, mountId),
+          };
     return await loadAuthoredModuleNamespace(input.binding.backing.sourcePath, {
       externalDependencies: input.binding.backing.externalDependencies,
-      extensionScopeNamespace: resolveCompiledModuleExtensionScopeNamespace(input.binding),
+      extension,
     });
   }
   const dependencyNamespaces = Object.fromEntries(
@@ -76,11 +123,7 @@ async function loadCompiledBindingNamespace(input: {
   });
 }
 
-/** Derives the stable package-owned scope used while loading an extension module. */
-export function resolveCompiledModuleExtensionScopeNamespace(
-  binding: AgentModuleBinding,
-): string | undefined {
-  return binding.owner.kind === "extension"
-    ? packageStateNamespace(binding.owner.packageName)
-    : undefined;
+/** Derives the owning mount for state handles in an extension module. */
+export function resolveExtensionBindingMountId(binding: AgentModuleBinding): string | undefined {
+  return binding.owner.kind === "extension" ? binding.owner.mountId : undefined;
 }

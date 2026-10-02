@@ -50,7 +50,12 @@ describe("evaluation-backed judge runner", () => {
       t.judge("Answers the request").atLeast(0.9);
     });
     expect(factory).toHaveBeenCalledWith("typesafe-ai/jev");
-    expect(outcome.assertions[0]).toMatchObject({ score: 0.8, severity: "soft", passed: false });
+    expect(outcome.assertions[0]).toMatchObject({
+      score: 0.8,
+      severity: "soft",
+      passed: false,
+      errored: false,
+    });
     expect(computeEvalVerdict(outcome)).toBe("scored");
   });
 
@@ -117,7 +122,12 @@ describe("evaluation-backed judge runner", () => {
     expect(evaluator.doEvaluate).not.toHaveBeenCalled();
     expect(outcome.assertions).toHaveLength(batch ? 2 : 1);
     for (const assertion of outcome.assertions) {
-      expect(assertion).toMatchObject({ score: 0, severity: "gate", passed: false });
+      expect(assertion).toMatchObject({
+        score: 0,
+        severity: "gate",
+        passed: false,
+        errored: true,
+      });
       expect(assertion.message).toContain(
         "score criteria must contain at least two ordered levels",
       );
@@ -159,7 +169,9 @@ describe("evaluation-backed judge runner", () => {
       );
       expect(outcome.skipReason).toBeUndefined();
       expect(outcome.assertions).toHaveLength(2);
-      expect(outcome.assertions.every((a) => !a.passed && a.severity === "gate")).toBe(true);
+      expect(outcome.assertions.every((a) => !a.passed && a.severity === "gate" && a.errored)).toBe(
+        true,
+      );
       expect(computeEvalVerdict(outcome)).toBe("failed");
     },
   );

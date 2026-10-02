@@ -71,7 +71,7 @@ export function cameraAxisDepthRange(bounds: Bounds, forward: Vec3) {
   return { min: minDepth, max: maxDepth };
 }
 
-export function normalizePositionForGpu(position: Vec3, bounds: Bounds): Vec3 {
+function normalizePositionForGpu(position: Vec3, bounds: Bounds): Vec3 {
   const height = bounds.max[1] - bounds.min[1] || 1;
   const centerX = (bounds.min[0] + bounds.max[0]) * 0.5;
   const centerY = (bounds.min[1] + bounds.max[1]) * 0.5;

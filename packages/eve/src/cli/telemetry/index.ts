@@ -13,7 +13,7 @@ import {
   readOrCreateEveTelemetryIdentity,
 } from "#cli/telemetry/preference.js";
 
-export type EveCliTelemetryEvent = {
+type EveCliTelemetryEvent = {
   readonly id: string;
   readonly event_time: number;
   readonly key: string;
@@ -117,8 +117,6 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["acp", "acp"],
   ["add", "add"],
   ["build", "build"],
-  ["channels", "channels"],
-  ["channels:list", "channels:list"],
   ["deploy", "deploy"],
   ["dev", "dev"],
   ["eval", "eval"],
@@ -130,10 +128,13 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["integration", "integration"],
   ["integration:connect", "integration:connect"],
   ["integration:setup", "integration:setup"],
-  ["invoke", "invoke"],
+  ["remote", "remote"],
+  ["remote:connect", "remote:connect"],
+  ["remote:info", "remote:info"],
+  ["remote:invoke", "remote:invoke"],
   ["link", "link"],
   ["logs", "logs:show"],
-  ["logs:ls", "logs:ls"],
+  ["logs:list", "logs:list"],
   ["logs:show", "logs:show"],
   ["registry", "registry"],
   ["registry:add", "registry:add"],
@@ -141,13 +142,15 @@ const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
   ["registry:search", "registry:search"],
   ["registry:view", "registry:view"],
   ["set", "set"],
+  ["set:model", "set:model"],
   ["start", "start"],
   ["telemetry", "telemetry"],
   ["telemetry:disable", "telemetry:disable"],
   ["telemetry:enable", "telemetry:enable"],
   ["telemetry:status", "telemetry:status"],
-  ["traces", "traces:show"],
-  ["traces:ls", "traces:ls"],
+  ["traces", "traces"],
+  ["traces:list", "traces:list"],
+  ["traces:show", "traces:show"],
 ]);
 
 /** Explicit privacy allowlist for command values emitted by CLI telemetry. */
@@ -168,9 +171,11 @@ export function canonicalCommand(argv: readonly string[]): string {
 
   const nested = argv.slice(commandIndex + 1).find((argument) => !argument.startsWith("-"));
   if (nested !== undefined) {
-    const nestedCommand = CLI_TELEMETRY_COMMANDS.get(`${command}:${nested}`);
+    const normalizedNested = nested === "ls" ? "list" : nested;
+    const nestedCommand = CLI_TELEMETRY_COMMANDS.get(`${command}:${normalizedNested}`);
     if (nestedCommand !== undefined) return nestedCommand;
   }
+  if (command === "logs" || command === "traces") return `${command}:show`;
   return CLI_TELEMETRY_COMMANDS.get(command) ?? "unknown";
 }
 

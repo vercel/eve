@@ -22,7 +22,6 @@ function setConversation(
     audience,
     channel: { kind, name: "slack" },
     environment: "production",
-    mode: "conversation",
     principalType: "anonymous",
   });
 }
@@ -205,7 +204,6 @@ describe("channel delivery instrumentation", () => {
       audience: "public",
       channel: { kind: "channel:slack", name: "slack" },
       environment: "production",
-      mode: "conversation",
       principalType: "anonymous",
     });
   });

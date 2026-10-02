@@ -2,8 +2,6 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
   AgentActionTraceState,
-  AgentActionTraceTerminalState,
-  AgentInvocationTraceState,
   AgentSessionTraceState,
   AgentTurnTraceState,
 } from "#tracing/agent-trace-state.js";
@@ -15,38 +13,33 @@ import { isInstrumentationPrincipalType } from "#instrumentation/lifecycle.js";
 
 export const AGENT_TRACE_CONTEXT_KEY = "eve.harness.agentTrace";
 
+export function decodeTraceSessionId(state: {
+  readonly traceSessionId?: unknown;
+  readonly rootSessionId?: unknown;
+}): string {
+  // Persisted state from before trace-session identity uses the lineage root.
+  return typeof state.traceSessionId === "string"
+    ? state.traceSessionId
+    : typeof state.rootSessionId === "string"
+      ? state.rootSessionId
+      : "";
+}
+
 export interface AgentTraceContextState {
   readonly actionAnchors: Readonly<Record<string, AgentActionTraceState>>;
   readonly actions: Readonly<Record<string, AgentActionTraceState>>;
-  readonly invocations: Readonly<Record<string, AgentInvocationTraceState>>;
   readonly sessions: Readonly<Record<string, AgentSessionTraceState>>;
   readonly turns: Readonly<Record<string, AgentTurnTraceState>>;
 }
 
 export function emptyAgentTraceContextState(): AgentTraceContextState {
-  return { actionAnchors: {}, actions: {}, invocations: {}, sessions: {}, turns: {} };
+  return { actionAnchors: {}, actions: {}, sessions: {}, turns: {} };
 }
 
 export function serializeAgentTraceContextState(state: AgentTraceContextState): unknown {
   return {
     actionAnchors: state.actionAnchors,
     actions: state.actions,
-    invocations: Object.fromEntries(
-      Object.entries(state.invocations).map(([id, value]) => [
-        id,
-        {
-          ...value,
-          terminal:
-            value.terminal === undefined
-              ? undefined
-              : {
-                  ...value.terminal,
-                  error:
-                    value.recordOutputs === true ? serializeError(value.terminal.error) : undefined,
-                },
-        },
-      ]),
-    ),
     sessions: Object.fromEntries(
       Object.entries(state.sessions).map(([id, value]) => [
         id,
@@ -87,7 +80,6 @@ export function deserializeAgentTraceContextState(data: unknown): AgentTraceCont
   return {
     actionAnchors: deserializeRecord(data.actionAnchors, deserializeAction),
     actions: deserializeRecord(data.actions, deserializeAction),
-    invocations: deserializeRecord(data.invocations, deserializeInvocation),
     sessions: deserializeRecord(data.sessions, deserializeSession),
     turns: deserializeRecord(data.turns, deserializeTurn),
   };
@@ -104,6 +96,7 @@ function deserializeSession(value: unknown): AgentSessionTraceState | undefined 
     decision: readInstrumentationDecision(value.decision),
     parentLineage: deserializeParentLineage(value.parentLineage),
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
+    traceSessionId: decodeTraceSessionId(value),
     scheduleId: typeof value.scheduleId === "string" ? value.scheduleId : undefined,
     title: typeof value.title === "string" ? value.title : undefined,
   };
@@ -122,6 +115,7 @@ function deserializeTurn(value: unknown): AgentTurnTraceState | undefined {
     modelUsage: deserializeModelUsage(value.modelUsage),
     parentLineage: deserializeParentLineage(value.parentLineage),
     rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
+    traceSessionId: decodeTraceSessionId(value),
     sequence: typeof value.sequence === "number" ? value.sequence : 0,
     startTimeMs: value.startTimeMs,
     subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
@@ -180,57 +174,17 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     callId: value.callId,
     channelAudience: normalizeChannelAudience(value.channelAudience),
     inputAttribute: typeof value.inputAttribute === "string" ? value.inputAttribute : undefined,
-    isWorkflowTool: value.isWorkflowTool === true ? true : undefined,
     kind: value.kind,
     name: value.name,
     parent: value.parent,
     rootSessionId: value.rootSessionId,
+    traceSessionId: decodeTraceSessionId(value),
     sessionId: value.sessionId,
     spanId: value.spanId,
     startTimeMs: value.startTimeMs,
     stepIndex: value.stepIndex,
     turnId: value.turnId,
-    workflowName: typeof value.workflowName === "string" ? value.workflowName : undefined,
   };
-}
-
-function deserializeInvocation(value: unknown): AgentInvocationTraceState | undefined {
-  const action = deserializeAction(value);
-  if (
-    action === undefined ||
-    (action.kind !== "subagent-call" && action.kind !== "remote-agent-call") ||
-    !isRecord(value) ||
-    typeof value.parentActionCallId !== "string"
-  ) {
-    return undefined;
-  }
-  return {
-    attemptIndex: action.attemptIndex,
-    callId: action.callId,
-    channelAudience: action.channelAudience,
-    kind: action.kind,
-    name: action.name,
-    parent: action.parent,
-    parentActionCallId: value.parentActionCallId,
-    recordOutputs: value.recordOutputs === true,
-    rootSessionId: action.rootSessionId,
-    sessionId: action.sessionId,
-    spanId: action.spanId,
-    startTimeMs: action.startTimeMs,
-    stepIndex: action.stepIndex,
-    terminal: deserializeActionTerminal(value.terminal),
-    turnId: action.turnId,
-  };
-}
-
-function deserializeActionTerminal(value: unknown): AgentActionTraceTerminalState | undefined {
-  if (!isRecord(value) || !isActionOutcome(value.outcome)) return undefined;
-  return {
-    acceptedAtMs: typeof value.acceptedAtMs === "number" ? value.acceptedAtMs : undefined,
-    error: deserializeError(value.error),
-    outcome: value.outcome,
-    usage: isRecord(value.usage) ? value.usage : undefined,
-  } as AgentActionTraceTerminalState;
 }
 
 function deserializeModelUsage(
@@ -310,16 +264,6 @@ function isActionKind(value: unknown): value is AgentActionTraceState["kind"] {
     value === "remote-agent-call" ||
     value === "subagent-call" ||
     value === "tool-call"
-  );
-}
-
-function isActionOutcome(value: unknown): value is AgentActionTraceTerminalState["outcome"] {
-  return (
-    value === "abandoned" ||
-    value === "cancelled" ||
-    value === "completed" ||
-    value === "failed" ||
-    value === "rejected"
   );
 }
 

@@ -5,6 +5,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { compileAgent } from "#compiler/compile-agent.js";
+import { readDevelopmentGenerationAvailability } from "#internal/workflow/development-runtime-compatibility.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { loadCompiledModuleMapFromAuthoredSource } from "#internal/authored-module-map-loader.js";
 import { resolvePackageRoot } from "#internal/application/package.js";
@@ -292,13 +293,11 @@ describe("development generation artifacts", () => {
       }
 
       const sandbox = modules[child.agent.sandbox.sourceId] as {
-        defineSelfModificationSandbox(options: { backend: { name: string } }): {
-          backend(): { name: string };
-        };
+        defineSelfModificationSandbox(): Function;
       };
-      const backend = { name: "disabled-local-test" };
-      // Local mode ignores this backend and installs the writable host filesystem instead.
-      expect(sandbox.defineSelfModificationSandbox({ backend }).backend()).toBe(backend);
+      const selector = await sandbox.defineSelfModificationSandbox();
+      expect(selector).toBeTypeOf("function");
+      expect("backend" in selector).toBe(false);
     } finally {
       if (previousDev === undefined) delete process.env.EVE_DEV;
       else process.env.EVE_DEV = previousDev;
@@ -654,6 +653,9 @@ describe("development generation artifacts", () => {
     const compileResult = await compileAgent({ startPath: app.appRoot });
     const generation = await stageDevelopmentGeneration(compileResult);
     expect(generation.workflowSourceFingerprint).toEqual(expect.any(String));
+    await expect(
+      readDevelopmentGenerationAvailability(app.appRoot, basename(generation.snapshotRoot)),
+    ).resolves.toEqual({ kind: "ready", runtimeAppRoot: generation.runtimeAppRoot });
 
     const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
       compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
@@ -681,6 +683,9 @@ describe("development generation artifacts", () => {
       await compileAgent({ startPath: app.appRoot }),
     );
     expect(helperChanged.workflowSourceFingerprint).not.toBe(generation.workflowSourceFingerprint);
+    await expect(
+      readDevelopmentGenerationAvailability(app.appRoot, basename(generation.snapshotRoot)),
+    ).resolves.toEqual({ kind: "ready", runtimeAppRoot: generation.runtimeAppRoot });
 
     await writeFile(
       join(app.appRoot, "agent", "tools", "plain.mjs"),
@@ -690,7 +695,54 @@ describe("development generation artifacts", () => {
       await compileAgent({ startPath: app.appRoot }),
     );
     expect(plainChanged.workflowSourceFingerprint).toBe(helperChanged.workflowSourceFingerprint);
+    await expect(
+      readDevelopmentGenerationAvailability(app.appRoot, basename(helperChanged.snapshotRoot)),
+    ).resolves.toEqual({ kind: "ready", runtimeAppRoot: helperChanged.runtimeAppRoot });
     expect(plainChanged.fingerprint).not.toBe(helperChanged.fingerprint);
+  });
+
+  it("uses an app-relative workflow id for a workspace agent", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agents/assistant/agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agents/assistant/agent/instructions.md": "Use the mission plan tool.",
+        "agents/assistant/agent/tools/request_mission_plan.mjs": [
+          'import { defineWorkflowTool } from "eve/tools";',
+          "",
+          "export default defineWorkflowTool({",
+          '  description: "Run a mission plan.",',
+          "  inputSchema: {},",
+          "  async execute() {",
+          '    "use workflow";',
+          '    return { status: "complete" };',
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+        "agents/monitor/agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agents/monitor/agent/instructions.md": "Monitor events.",
+      },
+      installDependencies: true,
+      name: "workspace-workflow-tool-id",
+    });
+    const appRoot = join(app.appRoot, "agents", "assistant");
+    const compileResult = await compileAgent({ startPath: appRoot });
+    const generation = await stageDevelopmentGeneration(compileResult);
+    const moduleMap = await loadCompiledModuleMapFromAuthoredSource({
+      compiledArtifactsSource: createAuthoredSourceRuntimeCompiledArtifactsSource(
+        generation.runtimeAppRoot,
+      ),
+    });
+    const sourceId = compileResult.manifest.tools.find(
+      (tool) => tool.name === "request_mission_plan",
+    )?.sourceId;
+    const tool = moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules[sourceId!] as {
+      default: { execute: { workflowId?: string } };
+    };
+
+    expect(tool.default.execute.workflowId).toBe(
+      "workflow//./agent/tools/request_mission_plan//execute",
+    );
   });
 
   it("rejects module-level authored workflow directives", async () => {

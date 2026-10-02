@@ -55,6 +55,11 @@ describe("parsePromptCommand", () => {
       name: "add",
       argument: "",
     });
+    expect(parsePromptCommand("/login vercel-api-key")).toEqual({
+      type: "extension",
+      name: "login",
+      argument: "vercel-api-key",
+    });
   });
 
   it("parses /add with a trimmed registry address", () => {

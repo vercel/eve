@@ -18,7 +18,7 @@ import {
 /**
  * Emitted when a mount file cannot be resolved to an extension package.
  */
-export const DISCOVER_EXTENSION_MOUNT_UNRESOLVED = "discover/extension-mount-unresolved";
+const DISCOVER_EXTENSION_MOUNT_UNRESOLVED = "discover/extension-mount-unresolved";
 
 /**
  * Emitted when one namespace is claimed by both a file mount
@@ -44,7 +44,7 @@ export const DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED =
 /**
  * Emitted when a resolved package is not a valid eve extension.
  */
-export const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-invalid";
+const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-invalid";
 
 /**
  * Emitted when an extension distribution's compatibility manifest is missing
@@ -83,7 +83,7 @@ export const DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED =
 /**
  * Resolved on-disk location of one mounted extension package.
  */
-export interface ExtensionMountLocation {
+interface ExtensionMountLocation {
   /** Mount namespace derived from the mount filename (e.g. `crm`). */
   readonly namespace: string;
   /** Package specifier the mount imports (e.g. `@acme/crm`). */
@@ -103,7 +103,7 @@ export interface ExtensionMountLocation {
  * inspected. Development uses this to build a mounted workspace extension
  * before the consumer requires its dist tree to exist.
  */
-export interface ExtensionMountPackageLocation {
+interface ExtensionMountPackageLocation {
   /** Mount namespace derived from the mount filename. */
   readonly namespace: string;
   /** Package specifier read from the mount declaration. */
@@ -145,21 +145,6 @@ export function mountRefNamespace(logicalPath: string): string {
     return remainder.slice(0, slashIndex);
   }
   return mountNamespace(logicalPath);
-}
-
-/**
- * Derives the namespace that scopes an extension's durable state keys and config
- * binding from its package name. Unlike the mount namespace, this stays keyed to
- * the package (e.g. `@acme/crm` → `acme-crm`) so renaming the consumer's mount
- * file never orphans persisted state.
- */
-export function packageStateNamespace(packageName: string): string {
-  return (
-    packageName
-      .replace(/^@/, "")
-      .replace(/[^a-zA-Z0-9._-]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "extension"
-  );
 }
 
 /**

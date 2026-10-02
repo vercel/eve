@@ -8,7 +8,7 @@ import { defineEval } from "../../src/evals/define-eval.js";
 
 import { runCli } from "../../src/cli/run.js";
 import {
-  clearActiveSandboxHandlesForTest,
+  shutdownActiveSandboxHandles,
   trackActiveSandboxHandle,
 } from "../../src/execution/sandbox/active-handles.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
@@ -96,11 +96,11 @@ function clearDevelopmentEnvironment(): void {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   clearDevelopmentEnvironment();
   process.exitCode = undefined;
   vi.restoreAllMocks();
-  clearActiveSandboxHandlesForTest();
+  await shutdownActiveSandboxHandles();
   mockedEvalDependencies.createDevelopmentServer.mockReset();
   mockedEvalDependencies.discoverAndImportEvals.mockReset();
   mockedEvalDependencies.discoverEvalConfig.mockReset();
@@ -369,10 +369,10 @@ describe("eve eval environment loading", () => {
     };
     const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
     const close = vi.fn(async () => {});
-    const handle = { shutdown: vi.fn(async () => {}) };
+    const handle = { onRuntimeShutdown: vi.fn(async () => {}) };
     const evaluation = makeEvaluation("local");
 
-    trackActiveSandboxHandle({ backendName: "microsandbox", handle, sessionKey: "session-1" });
+    trackActiveSandboxHandle({ providerName: "microsandbox", handle, sessionId: "session-1" });
     process.chdir(fixtureRoot);
     mockedEvalDependencies.createDevelopmentServer.mockReturnValue({
       close,
@@ -401,7 +401,7 @@ describe("eve eval environment loading", () => {
     }
 
     expect(close).toHaveBeenCalledTimes(1);
-    expect(handle.shutdown).toHaveBeenCalledTimes(1);
+    expect(handle.onRuntimeShutdown).toHaveBeenCalledTimes(1);
     expect(process.env.EVE_EVALUATION).toBe("1");
     expect(process.env.EVE_EVALUATION_RUN_ID).toMatch(/^[0-9a-f-]{36}$/u);
     expect(exit).toHaveBeenCalledWith(0);
@@ -527,6 +527,7 @@ function makeEvalResult(id: string) {
         failureCode: undefined,
         inputRequests: [],
         messageCount: 1,
+        models: [],
         parked: false,
         reasoningBlockCount: 0,
         subagentCallCount: 0,

@@ -32,6 +32,8 @@ export interface RunningEveDev {
 }
 
 export interface StartEveDevOptions {
+  readonly defaultExtensions?: boolean;
+  readonly resume?: boolean;
   readonly env?: Readonly<Record<string, string | undefined>>;
   /** Runtime executing the CLI. Defaults to the current Node executable. */
   readonly runtime?: "bun" | "node";
@@ -220,7 +222,11 @@ function spawnEveDev(
   const eveBinPath = join(appRoot, "node_modules", "eve", "bin", "eve.js");
   const command = options.runtime === "bun" ? "bun" : process.execPath;
 
-  return spawn(command, [eveBinPath, "dev", "--no-ui", "--host", "127.0.0.1", "--port", "0"], {
+  const args = [eveBinPath, "dev", "--no-ui", "--host", "127.0.0.1", "--port", "0"];
+  if (options.defaultExtensions === false) args.push("--no-default-extensions");
+  if (options.resume) args.push("--resume");
+
+  return spawn(command, args, {
     cwd: appRoot,
     env: {
       ...process.env,

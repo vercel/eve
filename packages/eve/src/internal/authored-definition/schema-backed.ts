@@ -1,5 +1,12 @@
-import { isWorkflowToolDefinition } from "#tools/workflow-definition.js";
+import {
+  isWorkflowToolDefinition,
+  readWorkflowToolEntryPoints,
+  type WorkflowToolEntryPoint,
+} from "#tools/workflow-definition.js";
 import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { TASK_ID_INPUT, withTaskIdSchema } from "#execution/tasks/task-id-input.js";
+import { isObject } from "#shared/guards.js";
+import type { JsonObject } from "#shared/json.js";
 import { isDisabledToolSentinel } from "#tools/definition.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
@@ -17,8 +24,11 @@ import {
 } from "#tools/workflow-program-input.js";
 import {
   serializeInputSchema,
+  serializeModelInputSchema,
   serializeOutputSchema,
+  toInputSchema,
   type ToolSchemaSource,
+  UNSPECIFIED_INPUT_SCHEMA,
 } from "#tools/schema.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
@@ -41,9 +51,18 @@ type NormalizedAuthoredTool = Readonly<
     readonly hasApproval: boolean;
     readonly hasExecute: boolean;
     readonly hasModelOutputProjection: boolean;
+    /** The input schema as eve sends it to a model, from the live authored schema. */
+    readonly modelInputSchema: JsonObject;
+    readonly workflow?: CompiledWorkflowEntry;
     readonly workflowProgram?: WorkflowProgramOptions;
   }
 >;
+
+/** The compiled entry point of a `defineWorkflowTool()` definition. */
+interface CompiledWorkflowEntry {
+  readonly entryPoint: WorkflowToolEntryPoint;
+  readonly workflowId: string;
+}
 type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
@@ -95,32 +114,34 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
 
   const record = expectObjectRecord(value, message);
-  const workflowId = readWorkflowFunctionId(record.execute);
-  if (isWorkflowToolDefinition(value)) {
-    if (workflowId === undefined) {
-      throw new Error(
-        `${message} defineWorkflowTool() requires a compiled workflow executor. Start execute with "use workflow" and export defineWorkflowTool() as the default export of a static tool module.`,
-      );
-    }
-  } else if (workflowId !== undefined) {
+  const workflow = isWorkflowToolDefinition(value)
+    ? readCompiledWorkflowEntry(record, message)
+    : undefined;
+  if (workflow === undefined && readWorkflowFunctionId(record.execute) !== undefined) {
     throw new Error(
       `${message} Workflow executors require defineWorkflowTool() from "eve/tools". Replace defineTool() or the bare tool object with defineWorkflowTool().`,
+    );
+  }
+  if (workflow !== undefined && record.endsTurn !== undefined) {
+    throw new Error(
+      `${message} "endsTurn" is not supported on defineWorkflowTool(). Workflow tools resume the turn when they finish; use defineTool() for a tool that ends the turn.`,
     );
   }
   expectOnlyKnownKeys(
     record,
     [
       "availableInSubagents",
+      "endsTurn",
       "label",
       "auth",
       "description",
       "execute",
-      "execution",
       "inputSchema",
       "approval",
       "approvalKey",
       "outputSchema",
       "toModelOutput",
+      ...(workflow === undefined ? [] : [workflow.entryPoint]),
     ],
     message,
   );
@@ -128,15 +149,13 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     record.inputSchema === undefined
       ? null
       : serializeInputSchema(record.inputSchema as ToolSchemaSource);
+  if (workflow?.entryPoint === "serve") assertNoOwnTaskIdInput(inputSchema, message);
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const behavior = readToolBehavior(value);
   const workflowProgram = readWorkflowProgramOptions(value);
-  const hasExecute = record.execute !== undefined;
-  if (
-    !hasExecute &&
-    behavior?.handling?.kind !== "dispatch" &&
-    behavior?.handling?.kind !== "request-input"
-  ) {
+  // A workflow tool's entry point is its executor; the runtime loads the module for its hooks.
+  const hasExecute = workflow !== undefined || record.execute !== undefined;
+  if (!hasExecute && behavior?.handling?.kind !== "dispatch") {
     expectFunction(record.execute, message);
   }
   const definition: MutableNormalizedAuthoredTool = {
@@ -145,10 +164,21 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
         ? undefined
         : expectBoolean(record.availableInSubagents, message),
     description: expectString(record.description, message),
+    endsTurn:
+      record.endsTurn === undefined || typeof record.endsTurn === "boolean"
+        ? record.endsTurn
+        : (expectFunction(record.endsTurn, message) as (
+            output: unknown,
+          ) => boolean | Promise<boolean>),
     hasApproval: record.approval !== undefined,
     hasExecute,
     hasModelOutputProjection: record.toModelOutput !== undefined,
     inputSchema,
+    modelInputSchema: modelInputSchemaOf(
+      record.inputSchema,
+      // An agent dispatch runs as a `serve` task, as a `serve` workflow tool does.
+      workflow?.entryPoint === "serve" || behavior?.handling?.kind === "dispatch",
+    ),
   };
   if (behavior !== undefined) {
     definition.behavior = behavior;
@@ -156,18 +186,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   if (workflowProgram !== undefined) {
     definition.workflowProgram = workflowProgram;
   }
-  if (hasExecute) {
+  if (workflow !== undefined) {
+    definition.workflow = workflow;
+  } else if (hasExecute) {
     definition.execute = expectFunction(record.execute, message) as ToolExecuteFn;
-  }
-  if (record.execution !== undefined) {
-    if (!hasExecute) {
-      throw new Error(`${message} Execute-less native tools cannot use background execution.`);
-    }
-    const execution = expectString(record.execution, message);
-    if (execution !== "background") {
-      throw new Error(`${message} Expected "execution" to be "background".`);
-    }
-    definition.execution = execution;
   }
   if (outputSchema !== undefined) {
     definition.outputSchema = outputSchema;
@@ -208,4 +230,38 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     kind: "tool",
     definition,
   };
+}
+
+/** Reads the one entry point `defineWorkflowTool()` accepted, which the build compiled to a workflow. */
+function readCompiledWorkflowEntry(
+  record: Record<string, unknown>,
+  message: string,
+): CompiledWorkflowEntry {
+  const [entryPoint] = readWorkflowToolEntryPoints(record);
+  const workflowId =
+    entryPoint === undefined ? undefined : readWorkflowFunctionId(record[entryPoint]);
+  if (entryPoint === undefined || workflowId === undefined) {
+    throw new Error(
+      `${message} defineWorkflowTool() requires a compiled workflow executor. Start execute, task, or serve with "use workflow" and export defineWorkflowTool() as the default export of a static tool module.`,
+    );
+  }
+  return { entryPoint, workflowId };
+}
+
+/**
+ * Only the live authored schema tells whether eve closes its objects for the
+ * model, so the model-facing form is captured while the module is loaded.
+ */
+function modelInputSchemaOf(source: unknown, serve: boolean): JsonObject {
+  const schema = toInputSchema(source as ToolSchemaSource | undefined) ?? UNSPECIFIED_INPUT_SCHEMA;
+  return serializeModelInputSchema(serve ? withTaskIdSchema(schema) : schema);
+}
+
+/** eve adds `taskId` to a `serve` tool's model input, so the tool's own input can't use it. */
+function assertNoOwnTaskIdInput(inputSchema: JsonObject | null, message: string): void {
+  const properties = inputSchema?.properties;
+  if (!isObject(properties) || !(TASK_ID_INPUT in properties)) return;
+  throw new Error(
+    `${message} inputSchema declares "${TASK_ID_INPUT}", which eve adds to a serve tool's model input to send a call to a running task. Rename the field.`,
+  );
 }

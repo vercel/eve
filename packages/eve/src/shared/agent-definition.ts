@@ -1,5 +1,4 @@
 import type { CallSettings, LanguageModel } from "ai";
-import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
@@ -80,10 +79,6 @@ export type AgentModelResolver = (
 ) => PublicAgentDynamicModelResult | Promise<PublicAgentDynamicModelResult>;
 
 export type PublicAgentDynamicModelDefinition = DynamicSentinel<PublicAgentDynamicModelResult>;
-
-export interface PublicAgentDynamicModelDefinitionInput {
-  readonly events: DynamicSentinel<PublicAgentDynamicModelResult>["events"];
-}
 
 export function isDynamicModelDefinition(
   value: unknown,
@@ -208,13 +203,6 @@ export interface AgentLimitsDefinition {
  */
 export interface AgentExperimentalDefinition {
   /**
-   * Runs this agent's delegated subagent calls as durable background tasks.
-   * The originating tool call returns a task receipt immediately and the
-   * model manages the work through the `task_*` framework tools. Root agents
-   * only.
-   */
-  readonly tasks?: boolean;
-  /**
    * Durable Workflow runtime configuration.
    */
   readonly workflow?: AgentWorkflowDefinition;
@@ -319,7 +307,6 @@ export type InternalAgentDefinition = {
   defaultTools?: boolean;
   experimental?: AgentExperimentalDefinition;
   model: InternalAgentModelDefinition;
-  outputSchema?: JsonObject;
   reasoning?: AgentReasoningDefinition;
   source?: ModuleSourceRef;
   tool?: boolean;
@@ -370,13 +357,6 @@ type PublicAgentDefinitionBase = {
    * in workflow tools.
    */
   readonly tool?: boolean;
-  /**
-   * Optional structured return type used when this agent runs in task mode
-   * (for example as a subagent, schedule, or remote job). Interactive
-   * conversation turns ignore this field unless the client supplies a
-   * per-message output schema.
-   */
-  readonly outputSchema?: StandardJSONSchemaV1<unknown, unknown> | JsonObject;
 };
 
 /**

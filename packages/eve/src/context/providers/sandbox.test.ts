@@ -87,7 +87,7 @@ describe("sandboxProvider", () => {
     );
   });
 
-  it("tags sandbox backend resources with agent, channel, and session id", async () => {
+  it("passes the owning session identity to sandbox access", async () => {
     const ctx = new ContextContainer();
     const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
 
@@ -100,11 +100,7 @@ describe("sandboxProvider", () => {
     expect(ensureSandboxAccess).toHaveBeenCalledWith(
       expect.objectContaining({
         ownsSandbox: true,
-        tags: {
-          agent: "weather-agent",
-          channel: "slack",
-          sessionId: "session_1",
-        },
+        sessionId: "session_1",
       }),
     );
   });

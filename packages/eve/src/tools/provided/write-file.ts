@@ -1,29 +1,46 @@
-import { z } from "#compiled/zod/index.js";
-
 import { type WriteFileInput, executeWriteFileOnSandbox } from "#execution/sandbox/write-file.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
+import { defineJsonSchema } from "#tools/schema.js";
+
+export interface WriteFileToolInput {
+  content: string;
+  filePath: string;
+}
+
+export interface WriteFileToolOutput {
+  existed: boolean;
+  path: string;
+}
 
 /**
  * Input schema for the provided `write_file` tool.
  */
-export const WRITE_FILE_INPUT_SCHEMA = z.strictObject({
-  content: z.string().describe("Complete replacement file contents."),
-  filePath: z
-    .string()
-    .describe("The absolute path to the file to write. A leading $HOME is supported."),
+export const WRITE_FILE_INPUT_SCHEMA = defineJsonSchema<WriteFileToolInput>({
+  type: "object",
+  properties: {
+    content: { type: "string", description: "Complete replacement file contents." },
+    filePath: {
+      type: "string",
+      description: "The absolute path to the file to write. A leading $HOME is supported.",
+    },
+  },
+  required: ["content", "filePath"],
+  additionalProperties: false,
 });
 
 /**
  * Output schema for the provided `write_file` tool.
  */
-export const WRITE_FILE_OUTPUT_SCHEMA = z.strictObject({
-  existed: z.boolean(),
-  path: z.string(),
+export const WRITE_FILE_OUTPUT_SCHEMA = defineJsonSchema<WriteFileToolOutput>({
+  type: "object",
+  properties: {
+    existed: { type: "boolean" },
+    path: { type: "string" },
+  },
+  required: ["existed", "path"],
+  additionalProperties: false,
 });
-
-export type WriteFileToolInput = z.infer<typeof WRITE_FILE_INPUT_SCHEMA>;
-export type WriteFileToolOutput = z.infer<typeof WRITE_FILE_OUTPUT_SCHEMA>;
 
 /**
  * Framework-owned executor that delegates to the default sandbox.

@@ -1,7 +1,7 @@
 /** Pure borderless setup menus. Interaction and terminal lifecycle belong to the renderer. */
 
 import type { ChannelSetupAction, PromptOption } from "#setup/cli/index.js";
-import { renderOptionRow, renderCursorRow, resolveOptionRowState } from "#setup/cli/option-row.js";
+import { renderOptionRow, resolveOptionRowState } from "#setup/cli/option-row.js";
 import {
   filterOptions,
   submitRowIndex,
@@ -49,6 +49,8 @@ interface SetupSelectPanelBase extends SetupQuestionPanelBase {
   loadingFrame?: string;
   /** A dim-inverse affordance appended to the cursor row, e.g. ` ↵ change `. */
   cursorBadge?: string;
+  /** Blink state for the active searchable field. */
+  caretVisible?: boolean;
   footerHints?: readonly string[];
 }
 
@@ -114,7 +116,7 @@ interface SetupActionsPanelState {
 
 export type SetupSelectPanelState = SetupOptionSelectPanelState | SetupActionsPanelState;
 
-export interface SetupTextPanelState {
+interface SetupTextPanelState {
   message: string;
   editor: LineState;
   placeholder?: string;
@@ -124,7 +126,7 @@ export interface SetupTextPanelState {
   notices?: readonly SelectNotice[];
 }
 
-export interface SetupAcknowledgePanelState {
+interface SetupAcknowledgePanelState {
   message: string;
   lines: readonly string[];
 }
@@ -141,21 +143,16 @@ export interface FlowPanelLine {
   evidence?: boolean;
 }
 
-/** One already-resolved animation frame and its active color. */
+/** One already-resolved animation frame. */
 export interface FlowPanelIndicator {
   glyph: string;
-  color: "green" | "yellow";
 }
 
-/** One live flow status after its animation frame and visual intent are resolved. */
-export type FlowPanelStatus =
-  | { kind: "progress"; text: string; indicator: FlowPanelIndicator }
-  | {
-      kind: "external-action";
-      text: string;
-      emphasis: string;
-      indicator: FlowPanelIndicator;
-    };
+/** One live flow status after its animation frame is resolved. */
+export interface FlowPanelStatus {
+  text: string;
+  indicator: FlowPanelIndicator;
+}
 
 export type FlowPanelContent =
   | {
@@ -223,24 +220,11 @@ function toneGlyph(tone: FlowPanelLine["tone"], theme: Theme): string {
 }
 
 function renderIndicator(indicator: FlowPanelIndicator, theme: Theme): string {
-  return indicator.color === "green"
-    ? theme.colors.green(indicator.glyph)
-    : theme.colors.yellow(indicator.glyph);
-}
-
-function renderStatusText(status: FlowPanelStatus, theme: Theme): string {
-  if (status.kind === "progress") return theme.colors.dim(status.text);
-
-  const start = status.text.indexOf(status.emphasis);
-  if (start === -1) return theme.colors.dim(status.text);
-  const end = start + status.emphasis.length;
-  return `${theme.colors.dim(status.text.slice(0, start))}${theme.colors.yellow(
-    status.text.slice(start, end),
-  )}${theme.colors.dim(status.text.slice(end))}`;
+  return theme.colors.green(indicator.glyph);
 }
 
 function renderFlowPanelStatus(status: FlowPanelStatus, theme: Theme): string {
-  return `${renderIndicator(status.indicator, theme)} ${renderStatusText(status, theme)}`;
+  return `${renderIndicator(status.indicator, theme)} ${theme.colors.dim(status.text)}`;
 }
 
 export function flowMessageRows(lines: readonly FlowPanelLine[], theme: Theme): string[] {
@@ -331,7 +315,6 @@ function optionRow(input: {
   option: SetupPanelOption;
   isCursor: boolean;
   isChecked: boolean;
-  placeholder: boolean;
   /** Railed lists lead resting rows with the `▏` rail and drop the hint dot. */
   railed?: boolean;
   hintPadding?: number;
@@ -355,7 +338,8 @@ function optionRow(input: {
     accent: option.accent,
     isCursor: input.isCursor,
     state: resolveOptionRowState(option, input.isChecked),
-    placeholder: input.placeholder,
+    placeholder: false,
+    presentation: "minimal",
     hintPadding: input.hintPadding,
   });
 }
@@ -460,15 +444,28 @@ function searchFilter(
   filter: string,
   placeholder: string | undefined,
   loadingFrame: string | undefined,
+  caretVisible: boolean,
   theme: Theme,
   railed: boolean,
 ): string {
-  const caret = theme.colors.dim(theme.glyph.caret);
+  const caret = caretVisible ? theme.colors.dim(theme.glyph.caret) : " ";
   let input = caret;
   if (railed) {
-    // The railed list's filter line: `▏ query▏`, or the dim placeholder.
-    input = filter.length > 0 ? filter + caret : theme.colors.dim(placeholder ?? "type to filter");
-  } else if (filter.length > 0) {
+    input =
+      filter.length === 0
+        ? renderInputWithBlockCursor({
+            before: "",
+            under: "s",
+            after: "earch…",
+            visible: caretVisible,
+            inverse: theme.colors.inverse,
+            render: theme.colors.dim,
+          })
+        : `${filter}${caret}`;
+    if (loadingFrame !== undefined) input += ` ${theme.colors.yellow(loadingFrame)}`;
+    return input;
+  }
+  if (filter.length > 0) {
     input = filter + caret;
   } else if (placeholder !== undefined) {
     input = theme.colors.dim(`> ${placeholder}`);
@@ -478,9 +475,9 @@ function searchFilter(
 }
 
 /**
- * Whether a select renders as the railed searchable list — the one component
- * behind the model catalog, team, and project pickers: `▏`-railed rows, an
- * inverse cursor row trailed by the `↵` badge, and a rail-led filter line.
+ * Whether a select renders as the compact searchable list behind the model
+ * catalog, team, and project pickers. Its filter line leads the options and
+ * the focused row uses bold weight rather than a cursor marker.
  */
 function isRailedSearch(presentation: SelectPresentation): boolean {
   return (
@@ -599,20 +596,6 @@ function inlineEditOption(
   }
 }
 
-function optionUsesPlaceholder(
-  presentation: SelectPresentation,
-  isTrailingTaskAction: boolean,
-): boolean {
-  // A type-ahead list draws no placeholder dots — the filter row leads instead.
-  const isFiltered = presentation.filter !== undefined && presentation.layout !== "task-list";
-  // Checklists and the explicit menu layouts (stacked, task-list) present every
-  // row as a pickable option, so each carries the placeholder dot.
-  const isMultiSelect = presentation.selection === "multiple";
-  const isMenuLayout = presentation.layout !== "plain";
-
-  return !isFiltered && !isTrailingTaskAction && (isMultiSelect || isMenuLayout);
-}
-
 function appendSelectOptionRows(input: {
   rows: string[];
   state: SetupOptionSelectPanelState;
@@ -666,10 +649,9 @@ function appendSelectOptionRows(input: {
     };
     if (editingKey) rowOption.hint = undefined;
     const railed = isRailedSearch(presentation);
-    // Railed lists carry the Enter affordance on the cursor row by default;
-    // an explicit cursorBadge (the provider picker's `↵ change`) still wins.
-    const rowBadge =
-      state.cursorBadge ?? (railed && !isTrailingTaskAction ? enterBadge(theme) : undefined);
+    // Focused rows use bold weight; only an explicit badge such as the provider
+    // picker's `↵ change` adds another affordance.
+    const rowBadge = state.cursorBadge;
     const badge = isCursor && rowBadge !== undefined ? ` ${rowBadge}` : "";
     rows.push(
       `  ${optionRow({
@@ -679,7 +661,6 @@ function appendSelectOptionRows(input: {
           presentation.selection === "multiple"
             ? state.select.selected.has(option.value)
             : option.checked === true,
-        placeholder: railed || optionUsesPlaceholder(presentation, isTrailingTaskAction),
         railed,
         hintPadding: Math.max(0, visibleLabelWidth - rowOption.label.length),
         theme,
@@ -694,10 +675,8 @@ function appendSelectOptionRows(input: {
 function appendSubmitRow(rows: string[], cursor: number, submitIndex: number, theme: Theme): void {
   if (submitIndex < 0) return;
   const onSubmit = cursor === submitIndex;
-  const content = onSubmit
-    ? `${theme.glyph.selectedPointer} ${theme.colors.bold("Submit")}`
-    : "  Submit";
-  rows.push("", `  ${renderCursorRow(content, onSubmit, theme.colors)}`);
+  const content = onSubmit ? theme.colors.bold("Submit") : theme.colors.dim("Submit");
+  rows.push("", `     ${content}`);
 }
 
 function appendSelectNotices(
@@ -776,7 +755,6 @@ function renderActionQuestion(
         option: action,
         isCursor: index === state.cursor,
         isChecked: false,
-        placeholder: true,
         hintPadding: 0,
         theme,
       })}`,
@@ -842,17 +820,15 @@ export function renderSelectQuestion(
   }
 
   if (presentation.filter !== undefined) {
-    // The railed filter line indents one extra cell so its rail sits in the
-    // option rows' glyph column.
-    rows.push(
-      `  ${railed ? " " : ""}${searchFilter(
-        state.select.filter,
-        presentation.filter.placeholder,
-        state.loadingFrame,
-        theme,
-        railed,
-      )}`,
+    const filter = searchFilter(
+      state.select.filter,
+      presentation.filter.placeholder,
+      state.loadingFrame,
+      state.caretVisible ?? true,
+      theme,
+      railed,
     );
+    rows.push(`  ${railed ? " " : ""}${filter}`);
   }
 
   const viewSize = selectViewSize({

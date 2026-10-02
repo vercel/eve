@@ -8,7 +8,8 @@ import {
   type DynamicSubagentDefinition,
 } from "eve";
 
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import { DEFAULT_AGENT_MODEL_ID, DEFAULT_AGENT_REASONING } from "#shared/default-agent-model.js";
+import { getLocalDevCapability } from "eve/local-dev";
 
 import selfModification from "../../extension.js";
 import { resolveSelfModificationConfig, type SelfModificationConfig } from "../../../config.js";
@@ -75,12 +76,16 @@ export function defineSelfModificationAgent(
 ): DynamicSentinel<DynamicSubagentDefinition | null> {
   const resolve = async (_event: unknown, ctx: DynamicResolveContext) => {
     const bound = selfModification.config;
-    const reasoning = options.reasoning ?? bound.reasoning;
+    const configuredModel = options.model ?? bound.model ?? ctx.model?.id;
+    const reasoning =
+      options.reasoning ??
+      bound.reasoning ??
+      (configuredModel === undefined ? DEFAULT_AGENT_REASONING : undefined);
     const config = resolveSelfModificationConfig(options.config ?? bound);
     const mode = resolveSelfModificationMode(config);
-    const model = options.model ?? bound.model ?? ctx.model?.id ?? FALLBACK_SELF_MODIFICATION_MODEL;
+    const model = configuredModel ?? FALLBACK_SELF_MODIFICATION_MODEL;
     const description = renderDescription([
-      "Delegate here when the user asks to change this eve agent or its authored source.",
+      "Delegate here immediately when the user asks to change the self-modification subagent's model, reasoning, or configuration. Also delegate when the user asks to change this eve agent or its authored source.",
       sourceDelegation,
       persistenceDelegation,
       namedInstallationDelegation,
@@ -90,7 +95,10 @@ export function defineSelfModificationAgent(
       repairDelegation,
       mode === "local" ? localEffectiveEdits : deployedEffectiveEdits,
     ]);
-    if (mode === "local") return defineAgent({ description, model, reasoning });
+    if (mode === "local") {
+      if (getLocalDevCapability() === undefined) return null;
+      return defineAgent({ description, model, reasoning });
+    }
     if (mode !== "deployed" || config.deployed === undefined) return null;
     if (config.deployed.credentials.kind === "pat" && !hasGitHubCredential()) return null;
     try {

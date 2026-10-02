@@ -10,10 +10,9 @@ import {
   provisionSlackbot,
   reconcileSlackUid,
   type ProvisionSlackbotResult,
-  type SlackConnectorRef,
   type SlackConnectorSelection,
 } from "#setup/slackbot.js";
-import { slackMessageDeepLink } from "#setup/slack-connect.js";
+import { slackMessageDeepLink, type SlackConnectorRef } from "#setup/slack-connect.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import { installScaffoldDependencies, reportOverwrittenFiles } from "../shared/scaffold.js";

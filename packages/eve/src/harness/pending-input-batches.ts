@@ -1,7 +1,8 @@
 import type { ModelMessage } from "ai";
 
 import { contextStorage } from "#context/container.js";
-import { ActivityRootTurnIdKey } from "#context/keys.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { AuthKey, SessionKey } from "#context/keys.js";
 import type { InputRequest } from "#shared/input.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -29,15 +30,19 @@ export interface PendingInputBatchEvent {
  */
 export interface PendingInputBatch {
   readonly event?: PendingInputBatchEvent;
-  readonly activityRootTurnId?: string;
   readonly requests: readonly InputRequest[];
+  /**
+   * Auth of the caller whose turn parked the batch, captured when it parked;
+   * `null` when that caller was unauthenticated.
+   */
+  readonly requester?: SessionAuthContext | null;
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
 }
 
 /**
  * Returns true when the session holds at least one pending HITL batch
- * (tool approvals or `ask_question` prompts).
+ * (tool approvals or a session-limit continuation prompt).
  */
 export function hasPendingInputBatch(state: SessionStateMap | undefined): boolean {
   return getPendingInputBatches(state).length > 0;
@@ -136,7 +141,7 @@ function setPendingInputBatches(
   } else {
     state[PENDING_INPUT_BATCHES_KEY] = batches.map((batch) => ({
       event: batch.event,
-      activityRootTurnId: batch.activityRootTurnId,
+      requester: batch.requester,
       responseAuthRequiredRequestIds: batch.responseAuthRequiredRequestIds,
       requests: [...batch.requests],
       responseMessages: [...batch.responseMessages],
@@ -152,7 +157,6 @@ function setPendingInputBatches(
  */
 export function appendPendingInputBatch(input: {
   readonly event?: PendingInputBatchEvent;
-  readonly activityRootTurnId?: string;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
@@ -162,8 +166,7 @@ export function appendPendingInputBatch(input: {
     ...getPendingInputBatches(input.session.state),
     {
       event: input.event,
-      activityRootTurnId:
-        input.activityRootTurnId ?? contextStorage.getStore()?.get(ActivityRootTurnIdKey),
+      requester: currentRequester(),
       responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
       requests: input.requests,
       responseMessages: input.responseMessages,
@@ -171,24 +174,25 @@ export function appendPendingInputBatch(input: {
   ]);
 }
 
-export function activityRootTurnIdForInputResponses(
-  state: SessionStateMap | undefined,
-  requestIds: ReadonlySet<string>,
-): string | undefined {
-  return getPendingInputBatches(state).find((batch) =>
-    batch.requests.some((request) => requestIds.has(request.requestId)),
-  )?.activityRootTurnId;
+/**
+ * Every anonymous caller shares one synthetic identity, so an anonymous
+ * requester can't be told apart from another anonymous responder: record none.
+ */
+function currentRequester(): SessionAuthContext | null {
+  const context = contextStorage.getStore();
+  const auth = context?.get(AuthKey) ?? context?.get(SessionKey)?.auth.current ?? null;
+  return auth?.principalType === "anonymous" ? null : auth;
 }
 
-export function activityRequestIdsForRootTurn(
+/** The requester recorded on the pending batch that holds `requestId`. */
+export function pendingInputRequester(
   state: SessionStateMap | undefined,
-  rootTurnId: string,
-): readonly string[] {
-  return getPendingInputBatches(state).flatMap((batch) =>
-    batch.activityRootTurnId === rootTurnId
-      ? batch.requests.map((request) => request.requestId)
-      : [],
+  requestId: string,
+): SessionAuthContext | null {
+  const batch = getPendingInputBatches(state).find((candidate) =>
+    candidate.requests.some((request) => request.requestId === requestId),
   );
+  return batch?.requester ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -197,15 +201,13 @@ export function activityRequestIdsForRootTurn(
 
 /**
  * Merges any queued follow-up input into the current step input and clears it
- * from session state. When `preferCurrentInput` is set, fresh input is returned
- * alone and the queued input remains deferred.
+ * from session state.
  *
  * Used when the harness has to process a pending tool-approval response first
  * and defer the user's new message to the next internal model step.
  */
 export function consumeDeferredStepInput(input: {
   readonly input?: StepInput;
-  readonly preferCurrentInput?: boolean;
   readonly session: HarnessSession;
 }): {
   readonly input?: StepInput;
@@ -215,12 +217,6 @@ export function consumeDeferredStepInput(input: {
 
   if (deferredInput === undefined) {
     return input;
-  }
-
-  // A fresh task delivery may answer the request that caused the deferral.
-  // Resolve it alone, leaving the older turn input queued for the next step.
-  if (input.preferCurrentInput === true && input.input !== undefined) {
-    return { input: input.input, session: input.session };
   }
 
   const session = clearDeferredStepInput(input.session);
@@ -236,14 +232,6 @@ export function consumeDeferredStepInput(input: {
     input: coalesceTurnInputs(deferredInput, input.input),
     session,
   };
-}
-
-/**
- * Returns true when the session carries queued follow-up input for the next
- * internal harness step.
- */
-export function hasDeferredStepInput(session: HarnessSession): boolean {
-  return getDeferredStepInput(session) !== undefined;
 }
 
 export function getDeferredStepInput(session: HarnessSession): StepInput | undefined {

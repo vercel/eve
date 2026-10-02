@@ -11,7 +11,7 @@ import {
  * One entry per (protocol, auth mode) the connection supports. The detail
  * page renders these as a pair of switchers; `key` is `"<protocol>:<auth>"`.
  */
-export interface ConnectionSetup {
+interface ConnectionSetup {
   protocols: ConnectionProtocol[];
   authModes: AuthMode[];
   /** Generated quick-start markdown keyed by `"<protocol>:<auth>"`. */

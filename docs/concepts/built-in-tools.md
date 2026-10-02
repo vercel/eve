@@ -24,7 +24,7 @@ export default defineAgent({
 
 This turns off the optional defaults described below. Add back only the tools the agent needs with the command in each tool's section. Existing files under `agent/tools/` remain available, including same-name replacements such as `agent/tools/bash.ts`.
 
-`connection_search` stays available when the agent has connections because it provides access to their tools.
+`connection_search` and `connection_execute` stay available when the agent has connections because they provide access to connection tools.
 
 ### `bash`
 
@@ -213,75 +213,9 @@ import { disableTool } from "eve/tools";
 export default disableTool();
 ```
 
-### `todo`
-
-`todo` maintains a durable todo list for the session.
-
-```sh
-eve add tool/todo
-```
-
-```ts title="agent/tools/todo.ts"
-export { default } from "eve/tools/todo";
-```
-
-Override it. Spreading the definition preserves its durable state key:
-
-```ts title="agent/tools/todo.ts"
-import { defineTool } from "eve/tools";
-import { todo } from "eve/tools/todo";
-
-export default defineTool({
-  ...todo,
-  description: "Track the current implementation plan.",
-});
-```
-
-Disable it:
-
-```ts title="agent/tools/todo.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
-### `ask_question`
-
-`ask_question` asks the user for clarification or a choice, then parks the turn until they answer. It appears only when the session can request user input. See [Human-in-the-loop](/docs/human-in-the-loop).
-
-```sh
-eve add tool/ask_question
-```
-
-```ts title="agent/tools/ask_question.ts"
-export { default } from "eve/tools/ask_question";
-```
-
-Replace its request-input behavior with an ordinary authored tool:
-
-```ts title="agent/tools/ask_question.ts"
-import { defineTool } from "eve/tools";
-
-export default defineTool({
-  description: "Record a clarification request.",
-  inputSchema: { type: "object" },
-  async execute(input) {
-    return { recorded: input };
-  },
-});
-```
-
-Disable it:
-
-```ts title="agent/tools/ask_question.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
 ### `agent`
 
-`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, always runs in the background, and returns a task receipt immediately. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
+`agent` delegates a subtask to a fresh copy of the root agent. It is root-only, and each call is a [task](/docs/tools/tasks): the call returns a receipt, and the child's reply arrives later as the task's result. The child receives the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and [state](./state). See [Subagents](../subagents).
 
 ```sh
 eve add tool/agent
@@ -291,29 +225,9 @@ eve add tool/agent
 export { default } from "eve/tools/agent";
 ```
 
-An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot:
+An authored tool at `agent/tools/agent.ts` replaces the framework behavior. Re-export the definition above to restore direct root-copy delegation, export another tool such as `agentRouter()` to change the model-facing behavior, or disable the slot. `agentRouter()` runs each call as a [task](/docs/tools/workflows#run-calls-as-tasks-task), which adds `task_wait` and `task_cancel`:
 
 ```ts title="agent/tools/agent.ts"
-import { disableTool } from "eve/tools";
-
-export default disableTool();
-```
-
-### `task_cancel`
-
-`task_cancel` lets the root session cancel background tasks.
-
-```sh
-eve add tool/task_cancel
-```
-
-```ts title="agent/tools/task_cancel.ts"
-export { default } from "eve/tools/task_cancel";
-```
-
-The framework behavior cannot be overridden. Re-export the definition above to restore it, or disable it:
-
-```ts title="agent/tools/task_cancel.ts"
 import { disableTool } from "eve/tools";
 
 export default disableTool();
@@ -353,9 +267,22 @@ export default disableTool();
 
 ### `connection_search`
 
-`connection_search` discovers tools across declared [connections](../connections) and makes matches directly callable by qualified name, such as `linear__list_issues`. eve adds it automatically when connections exist, even when `defaultTools` is `false`, so there is no add command.
+`connection_search` and `connection_execute` give the model every tool from the agent's [connections](../connections) without adding each tool to the model's tool list. eve adds both when the agent has a static connection or a dynamic connection resolver, even when `defaultTools` is `false`, so there is no add command.
 
-An authored `agent/tools/connection_search.ts` replaces the framework behavior. Import the framework definition from `eve/tools/connection_search` when you need to reference it directly. Exporting `disableTool()` from this slot is an error because agents with connections require connection discovery.
+- `connection_search({ query?, connection?, signIn?, limit?, offset? })` returns matching tools with their connection, name, description, and a TypeScript signature rendered from the tool's schemas. Omit `query` to list every tool, or pair it with `connection` to list one connection's tools. A plain search never asks the user to sign in. For a connection the user has not signed in to, the result tells the model that sign-in is needed before its tools can be listed: the connection appears under `unavailable` with `requiresSignIn: true` and an error that points to `signIn: true`. Tools from the other connections are still returned.
+- `connection_search({ connection, signIn: true, query? })` asks the user to sign in to that one connection when they have not yet, then returns its matching tools. Without `connection` it fails, so the user is asked about one service at a time.
+- `connection_execute({ connection, tool, input })` checks `input` against the tool's input schema, calls the tool, and returns its result. When the connection needs the user's authorization, it also asks the user to sign in and the call parks until sign-in completes. The stream reports the call as a nested action named `<connection>__<tool>`, such as `linear__list_issues`, whose `parentCallId` is the `connection_execute` call id.
+
+The definitions of both tools never change during a session. eve lists connection names and descriptions in append-only context messages rather than in the system prompt, so finding a tool, signing in, or resolving a dynamic connection keeps the cached prompt prefix.
+
+The tools cannot be replaced or disabled. The compiler rejects an authored `agent/tools/connection_search.ts`, `agent/tools/connection_execute.ts`, or `agent/tools/connection_tools.ts`. An agent without connections has neither tool.
+
+### `task_wait` and `task_cancel`
+
+eve adds `task_wait` and `task_cancel` when the agent has a tool that runs its calls as [tasks](/docs/tools/tasks): any agent tool, including the built-in `agent` tool, declared subagents, and remote agents, or a tool such as `agentRouter()`, the `workflow` tool, or an authored workflow tool that defines `task(input, ctx)` or `serve(receive, ctx)`. There is no add command, and the tools are not workflow tools. Both names are reserved: the compiler rejects an authored `agent/tools/task_wait.ts` or `agent/tools/task_cancel.ts`.
+
+- `task_wait({ timeoutSeconds? })` parks the turn until any task has a result, a new message arrives, or `timeoutSeconds` pass, and returns at once when a result is already waiting. While it waits, the stream reports `turn.waiting` for the open turn. Results arrive in a `<task_result>` message right after it returns. Waiting never stops a task.
+- `task_cancel({ taskId })` stops a task's current work and says so, or says the task had no work to stop when it already finished or is an idle [resumable task](/docs/tools/workflows#resumable-tasks-serve). An id that names no task fails with `UNKNOWN_TASK`. A resumable task stays available after a cancel.
 
 Review these tools before production use. Disable, wrap, restrict, or require approval for any tool that can access the filesystem, network, shell, or sensitive data.
 
@@ -364,6 +291,22 @@ You can also add the opt-in framework tools described below.
 ## Opt-in framework tools
 
 These framework-provided tools are not added by default. Add only the ones the agent needs.
+
+### `ask_question`
+
+`ask_question` lets the model ask the user one question, then waits for the answer. The model can offer two or three options, each with a label and a short description, and the user can always type their own answer instead. Channels render the options as native UI, such as Slack select menus. Without the tool, the model can still ask in its reply text and the user answers with their next message. See [Human-in-the-loop](/docs/human-in-the-loop). Add it:
+
+```sh
+eve add tool/ask_question
+```
+
+```ts title="agent/tools/ask_question.ts"
+import { askQuestion } from "eve/tools/ask_question";
+
+export default askQuestion();
+```
+
+`ask_question` is a [workflow tool](/docs/tools/workflows) that calls `ctx.ask()`. The model receives `{ status: "answered", answer }`, where `answer` is the chosen option's label or the user's own words. A plain follow-up message answers the question too when it is the only pending question. When other questions are also pending, a message does not answer any of them: `ask_question` withdraws its question, resolves as `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, and the model reads the message next. In a session that cannot request input, such as a scheduled run, the result is `{ status: "unavailable" }` and the model continues on its own judgment. Remove the file to remove the tool.
 
 ### `glob`
 
@@ -417,9 +360,25 @@ export default defineTool({
 
 Remove the file to remove the tool. `disableTool()` is unnecessary because `grep` is not added by default.
 
+### `no_reply`
+
+`no_reply` ends the turn without a reply. Use it when a scheduled check finds nothing to report, or when an action the agent already took is the whole answer. The model calls it with an optional `{ reason }`, which stays in the session history and traces and is never sent. The turn completes without a final message, so channels and schedule sends post nothing, and later turns see that the agent chose to stay quiet. Add it:
+
+```sh
+eve add tool/no_reply
+```
+
+```ts title="agent/tools/no_reply.ts"
+import { noReply } from "eve/tools/no_reply";
+
+export default noReply();
+```
+
+`no_reply` is a `defineTool` tool with [`endsTurn: true`](/docs/tools#end-the-turn-after-a-tool-call), so the turn ends only when no other tool runs in the same step. Only root sessions receive it. Slack clears the thread status when the turn completes. Remove the file to remove the tool.
+
 ### `sleep`
 
-`sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. Add it:
+`sleep` pauses and durably resumes the current turn. The model calls it with `{ seconds }`; the wait does not hold an application runtime open. Concurrent calls run in parallel, and the turn resumes after the longest wait. A steering message, the default for a new message, ends the wait early: `sleep` returns `{ interrupted: true }`, which the model reads as `Stopped early because a new message arrived.`, followed by the message. Add it:
 
 ```sh
 eve add tool/sleep
@@ -450,4 +409,4 @@ Remove the file to remove the tool. `disableTool()` is unnecessary because `slee
 - [Tools](../tools): define your own tools, gate them on approval, and shape their output with `toModelOutput`
 - [Dynamic capabilities](../guides/dynamic-capabilities): generate the tool set per session with `defineDynamic`
 - [Sandbox](../sandbox): configure the sandbox used by shell and file tools
-- [Subagents](../subagents): declare specialists that the model can call as background tasks
+- [Subagents](../subagents): declare specialists that the model can delegate to

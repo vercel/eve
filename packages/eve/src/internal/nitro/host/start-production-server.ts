@@ -5,7 +5,6 @@ import { join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
-import { prewarmBuiltAppSandboxes } from "#execution/sandbox/prewarm.js";
 import type { ProductionServerHandle } from "#internal/nitro/host/types.js";
 
 const DEFAULT_PRODUCTION_SERVER_HOST = "0.0.0.0";
@@ -205,10 +204,6 @@ export async function startProductionServer(
   }
 
   await loadDevelopmentEnvironmentFiles(appRoot);
-  await prewarmBuiltAppSandboxes({
-    appRoot,
-    log: (message) => console.log(message),
-  });
 
   const host = options.host ?? DEFAULT_PRODUCTION_SERVER_HOST;
   const port = await resolveListenPort({

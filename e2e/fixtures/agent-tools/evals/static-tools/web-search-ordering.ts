@@ -67,7 +67,6 @@ function preToolNarrationExists(
       (event) =>
         event.type === "message.completed" &&
         event.data.finishReason === "tool-calls" &&
-        event.data.message !== null &&
         event.data.message.trim().length > 0,
     );
 }
@@ -79,9 +78,6 @@ function finalMessageFollowsResult(
   return events
     .slice(resultIndex + 1)
     .some(
-      (event) =>
-        event.type === "message.completed" &&
-        event.data.finishReason !== "tool-calls" &&
-        event.data.message !== null,
+      (event) => event.type === "message.completed" && event.data.finishReason !== "tool-calls",
     );
 }

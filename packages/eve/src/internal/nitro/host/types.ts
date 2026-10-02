@@ -3,9 +3,10 @@ import type { ScheduleRegistration } from "#runtime/schedules/register.js";
 import type { ResolvedScheduleDefinition } from "#runtime/types.js";
 import type { GeneratedCompiledArtifactsFiles } from "#internal/application/compiled-artifacts.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
+import type { DevelopmentExtensionSelection } from "#compiler/development-extensions.js";
 import type { DevelopmentGeneration } from "#internal/nitro/development-generation.js";
 import type { DevelopmentHostWorkspace } from "#internal/nitro/host/dev-host-workspace.js";
-import type { DevelopmentWorkspaceExtension } from "#internal/nitro/host/dev-workspace-extensions.js";
+import type { WorkspaceExtension } from "#internal/nitro/host/workspace-extensions.js";
 
 /** Options for one production application build. */
 export interface ApplicationBuildOptions {
@@ -20,7 +21,7 @@ export interface ApplicationBuildOptions {
    * command.
    */
   readonly publicRoutePrefix?: string;
-  readonly skipVercelSandboxPrewarm: boolean;
+  readonly skipSandboxPrewarm: boolean;
   /** Whether this build is for a member of a top-level `agents/` workspace. */
   readonly workspaceMember?: boolean;
   readonly vercelServiceOutput?: {
@@ -62,6 +63,10 @@ export interface DevelopmentServer<H extends DevelopmentServerHandle = Developme
 }
 
 export interface DevelopmentServerOptions {
+  /** Recover compatible unfinished runs from previous local dev invocations. Defaults to false. */
+  readonly resume?: boolean;
+  /** Development-only source extensions. Defaults to the framework catalog. */
+  readonly developmentExtensions?: DevelopmentExtensionSelection;
   readonly existing?: "attach-if-unconfigured" | "reject";
   readonly host?: string;
   readonly onBootProgress?: DevBootProgressReporter;
@@ -90,6 +95,6 @@ export interface PreparedApplicationHost {
 
 export interface PreparedDevelopmentApplicationHost extends PreparedApplicationHost {
   generation: DevelopmentGeneration;
-  workspaceExtensions: readonly DevelopmentWorkspaceExtension[];
+  workspaceExtensions: readonly WorkspaceExtension[];
   workspace: DevelopmentHostWorkspace;
 }

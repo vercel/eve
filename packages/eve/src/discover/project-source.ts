@@ -104,7 +104,7 @@ export function createDiskProjectSource(): ProjectSource {
  *
  * Keys are paths; values are UTF-8 text or `{ content }` records.
  */
-export interface MemoryProjectSourceInput {
+interface MemoryProjectSourceInput {
   /**
    * Optional root hint used only for diagnostics. The source itself accepts
    * reads against any path — unrelated absolute paths simply resolve as

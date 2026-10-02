@@ -255,7 +255,6 @@ export async function compactMessages(
       providerOptions,
       system: summaryPrompt.system,
       telemetry: telemetry ? { ...telemetry, functionId: "eve.compaction" } : undefined,
-      temperature: 0,
     });
 
     if (result.text.trim().length === 0) {

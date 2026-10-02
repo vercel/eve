@@ -371,7 +371,7 @@ function descriptionLine<T extends PromptValue>(
  * it does. Callers put a blank rail line above it to set it apart from the
  * options.
  */
-export function renderSubmitRow(
+function renderSubmitRow(
   isCursor: boolean,
   colors: PromptColors,
   label: string = "Submit",

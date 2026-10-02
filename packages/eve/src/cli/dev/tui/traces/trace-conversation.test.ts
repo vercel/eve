@@ -102,38 +102,6 @@ describe("buildConversationItems", () => {
     expect(items[2]?.result).toBe('{"temperatureF":72}');
   });
 
-  it.each([
-    { error: false, result: '{"deployed":true}', statusCode: 0 },
-    { error: true, result: undefined, statusCode: 2 },
-  ])("keeps $error workflow invocations as tool cards", ({ error, result, statusCode }) => {
-    const workflow = span(
-      "e".repeat(16),
-      "invoke_workflow deploy",
-      2500,
-      3250,
-      "b".repeat(16),
-      {
-        "agent.action.name": "deploy",
-        "gen_ai.operation.name": "invoke_workflow",
-        "gen_ai.tool.call.arguments": '{"service":"api"}',
-        "gen_ai.tool.call.result": result,
-        "gen_ai.workflow.name": "deploy",
-      },
-      statusCode,
-    );
-    const items = buildConversationItems(trace([...weatherTurn(), workflow]));
-    const item = items.find((candidate) => candidate.span.spanId === workflow.spanId);
-
-    expect(item).toMatchObject({
-      args: '{"service":"api"}',
-      durationMs: 750,
-      error,
-      kind: "tool",
-      name: "deploy",
-      result,
-    });
-  });
-
   it("renders provider-executed tool results as tool cards after the assistant", () => {
     // Provider-executed tools (e.g. web_search) never get an execute_tool
     // span; their outcomes live on the model span's tool_results attribute.
@@ -181,7 +149,14 @@ describe("buildConversationItems", () => {
   });
 
   it("marks turns dispatched by another turn as subagent items", () => {
-    const parent = weatherTurn();
+    const parent = weatherTurn().map((item) => ({
+      ...item,
+      attributes: {
+        ...item.attributes,
+        "agent.run.id": "parent-session",
+        "gen_ai.conversation.id": "conversation",
+      },
+    }));
     const parentAction = span("e".repeat(16), "agent.action", 5900, 6000, parent[0]!.spanId, {
       "agent.action.call_id": "call-7",
       "agent.action.kind": "subagent-call",
@@ -196,7 +171,9 @@ describe("buildConversationItems", () => {
       parentAction.spanId,
       {
         "agent.channel.delivery.input": JSON.stringify({ message: "delegated task" }),
-        "agent.turn.id": "turn_child",
+        "agent.turn.id": "turn_0",
+        "agent.run.id": "child-session",
+        "gen_ai.conversation.id": "conversation",
         "gen_ai.operation.name": "invoke_agent",
       },
     );
@@ -436,11 +413,12 @@ describe("renderConversationItem", () => {
     expect(lines[1]).not.toMatch(/\buser\b/);
   });
 
-  it("shows gateway cost right-aligned when the step span carries it", () => {
+  it.each([
+    [{ "gen_ai.usage.cost": 0.0031 }, 0.0031],
+    [{ "gen_ai.usage.cost": 0.5, "gen_ai.usage.gateway_cost": 0.0123 }, 0.0123],
+  ])("shows the same cost and precision as the trace tree for %o", (attributes, cost) => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
-    const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {
-      "gen_ai.usage.cost": 0.0031,
-    });
+    const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, attributes);
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 2000, step.spanId, {
       "gen_ai.request.model": "claude-test",
       "gen_ai.input.messages": JSON.stringify([
@@ -452,9 +430,9 @@ describe("renderConversationItem", () => {
     const assistant = buildConversationItems(trace([turn, step, model])).find(
       (item) => item.kind === "assistant",
     )!;
-    expect(assistant.costUsd).toBe(0.0031);
+    expect(assistant.costUsd).toBe(cost);
     const lines = renderConversationItem(assistant, 80, THEME, false, false).map(stripAnsi);
-    expect(lines[1]!.trimEnd()).toMatch(/\$0\.0031$/);
+    expect(lines[1]!.trimEnd().endsWith(`$${cost.toFixed(4)}`)).toBe(true);
   });
 
   it("renders tool calls as their own cards with args and result", () => {
@@ -474,7 +452,8 @@ describe("renderConversationItem", () => {
     const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, {});
     const step = span("b".repeat(16), "agent.step", 10, 100, turn.spanId, {});
     const model = span("c".repeat(16), "ai.streamText.doStream", 20, 50, step.spanId, {
-      "ai.prompt.system": "You are a test assistant. Be brief.",
+      "gen_ai.system_instructions":
+        '[{"content":"You are a test assistant. Be brief.","type":"text"}]',
       "gen_ai.input.messages": JSON.stringify([
         { parts: [{ content: "hi", type: "text" }], role: "user" },
       ]),

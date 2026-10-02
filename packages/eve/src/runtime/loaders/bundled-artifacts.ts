@@ -1,6 +1,7 @@
 import type { CompileMetadata } from "#compiler/artifacts.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import type { SandboxPreparedArtifactsManifest } from "#shared/sandbox-prepared-artifacts.js";
 import {
   createRuntimeSession,
   getActiveRuntimeSession,
@@ -16,6 +17,7 @@ export interface BundledCompiledArtifacts {
   manifest: CompiledAgentManifest;
   metadata?: CompileMetadata;
   moduleMap: CompiledModuleMap;
+  sandboxPreparedArtifacts?: SandboxPreparedArtifactsManifest;
 }
 
 /**
@@ -37,6 +39,7 @@ export function installBundledCompiledArtifacts(input: BundledCompiledArtifacts)
     manifest: input.manifest,
     metadata: input.metadata,
     moduleMap: input.moduleMap,
+    sandboxPreparedArtifacts: input.sandboxPreparedArtifacts,
   });
 }
 

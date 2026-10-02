@@ -5,11 +5,13 @@
  * cards directly; model response spans provide assistant cards.
  */
 
+import { formatCostUsd } from "#cli/commands/trace-detail.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
 import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
 import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local-trace-reader.js";
 import { agentTurnIdentity } from "#tracing/agent-span-contract.js";
+import { localTraceSpanCostUsd } from "#tracing/local-trace-summary.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";
@@ -68,19 +70,23 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
     if (turnId !== undefined && subagent !== undefined) subagents.set(turnId, subagent);
   }
   const entries: { readonly item: ConversationItem; readonly order: bigint }[] = [];
-  const firstSystemSpan = [...trace.spans]
-    .sort(compareLocalTraceSpans)
-    .find((span) => isModelSpan(span) && typeof span.attributes["ai.prompt.system"] === "string");
-  const systemText = firstSystemSpan?.attributes["ai.prompt.system"];
-  if (firstSystemSpan !== undefined && typeof systemText === "string" && systemText.length > 0) {
+  let system: { readonly span: LocalTraceSpan; readonly text: string } | undefined;
+  for (const span of [...trace.spans].sort(compareLocalTraceSpans)) {
+    const text = isModelSpan(span) ? systemInstructionsText(span.attributes) : undefined;
+    if (text !== undefined) {
+      system = { span, text };
+      break;
+    }
+  }
+  if (system !== undefined) {
     entries.push({
       item: {
         kind: "system",
         durationMs: 0,
         error: false,
-        span: firstSystemSpan,
-        subagent: subagentFor(firstSystemSpan, subagents, byId),
-        text: systemText,
+        span: system.span,
+        subagent: subagentFor(system.span, subagents, byId),
+        text: system.text,
       },
       order: 0n,
     });
@@ -159,21 +165,14 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
       }
       continue;
     }
-    if (
-      span.name === "agent.action" ||
-      stringAttribute(span, "gen_ai.operation.name") === "invoke_workflow"
-    ) {
+    if (span.name === "agent.action") {
       entries.push({
         item: {
           kind: "tool",
           args: stringAttribute(span, "gen_ai.tool.call.arguments"),
           durationMs: spanDurationMs(span),
           error: span.statusCode === 2,
-          name: stripTerminalControls(
-            stringAttribute(span, "agent.action.name") ??
-              stringAttribute(span, "gen_ai.workflow.name") ??
-              "action",
-          ),
+          name: stripTerminalControls(stringAttribute(span, "agent.action.name") ?? "action"),
           result: unwrapJsonString(stringAttribute(span, "gen_ai.tool.call.result")),
           span,
           subagent,
@@ -185,6 +184,32 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   return entries
     .sort((left, right) => (left.order === right.order ? 0 : left.order < right.order ? -1 : 1))
     .map((entry) => entry.item);
+}
+
+function systemInstructionsText(attributes: Readonly<Record<string, unknown>>): string | undefined {
+  const value = attributes["gen_ai.system_instructions"];
+  if (typeof value !== "string") return undefined;
+  try {
+    const instructions: unknown = JSON.parse(value);
+    if (!Array.isArray(instructions)) return undefined;
+    const text = instructions
+      .flatMap((instruction: unknown) => {
+        if (
+          typeof instruction !== "object" ||
+          instruction === null ||
+          !("type" in instruction) ||
+          instruction.type !== "text" ||
+          !("content" in instruction) ||
+          typeof instruction.content !== "string"
+        )
+          return [];
+        return [instruction.content];
+      })
+      .join("\n\n");
+    return text.length > 0 ? text : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function subagentFor(
@@ -443,14 +468,8 @@ function assistantMetrics(
     parts.push(`${glyph.arrowUp}${formatCompactTokenCount(item.inputTokens)}`);
   if (item.outputTokens !== undefined)
     parts.push(`${glyph.arrowDown}${formatCompactTokenCount(item.outputTokens)}`);
-  if (item.costUsd !== undefined) parts.push(formatCost(item.costUsd));
+  if (item.costUsd !== undefined) parts.push(formatCostUsd(item.costUsd));
   return parts.length === 0 ? "" : colors.dim(parts.join(" · "));
-}
-
-/** Formats a USD cost with enough precision for typical AI inference prices. */
-function formatCost(usd: number): string {
-  if (usd >= 0.01) return `$${usd.toFixed(2)}`;
-  return `$${usd.toFixed(4)}`;
 }
 
 /** Reads the gateway cost from the model span's ancestor step span. */
@@ -464,7 +483,7 @@ function stepCostUsd(
   while (span.parentSpanId !== undefined) {
     span = byId.get(span.parentSpanId);
     if (span === undefined) return undefined;
-    if (span.name === "agent.step") return numberAttribute(span, "gen_ai.usage.cost");
+    if (span.name === "agent.step") return localTraceSpanCostUsd(span);
   }
   return undefined;
 }

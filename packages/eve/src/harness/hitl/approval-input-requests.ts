@@ -26,13 +26,8 @@ import type {
   ResolvePendingInputResult,
   ToolResponsePart,
 } from "#harness/hitl/pending-input-resolution.js";
-import {
-  buildQuestionToolResponsePart,
-  findAnsweredQuestionBatches,
-  resolveQuestionBatches,
-} from "#harness/hitl/question-input-requests.js";
-import type { QuestionInputRequest } from "#harness/hitl/question-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
+import { validateHarnessModelMessages } from "#harness/messages.js";
 
 const APPROVED_TOOLS_KEY = "eve.runtime.hitl.approvedTools";
 const TOOL_EXECUTION_DENIED_CODE = "TOOL_EXECUTION_DENIED";
@@ -54,33 +49,18 @@ export function findAnsweredApprovalBatches(
 
 export function resolveApprovalInputBatches(
   input: InputDomainResolverInput & {
-    readonly approvalBatches: readonly PendingInputBatch[];
-    readonly questionBatches: readonly PendingInputBatch[];
     readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   },
 ): ResolvePendingInputResult {
-  const answeredApprovalBatches = new Set(
-    findAnsweredApprovalBatches(input.approvalBatches, input.responses),
-  );
-  const answeredQuestionBatches = new Set(
-    findAnsweredQuestionBatches(input.questionBatches, input.responses),
-  );
-  let resolvedBatches = input.batches.filter(
-    (batch) => answeredApprovalBatches.has(batch) || answeredQuestionBatches.has(batch),
-  );
-  const firstApprovalIndex = resolvedBatches.findIndex((batch) =>
-    batch.requests.some((request) => isApprovalRequest(request)),
-  );
-  if (firstApprovalIndex >= 0) {
-    // Anything after this batch would hide its approval response from AI
-    // SDK's tail-tool-message scan. Its responses replay on the next step.
-    resolvedBatches = resolvedBatches.slice(0, firstApprovalIndex + 1);
-  }
-
-  const openBatches = input.batches.filter((batch) => !resolvedBatches.includes(batch));
+  const answered = new Set(findAnsweredApprovalBatches(input.batches, input.responses));
+  // Only the first answered batch resolves: anything after it would hide its
+  // approval response from AI SDK's tail-tool-message scan. Later answers
+  // replay on the next step.
+  const approvalBatch = input.batches.find((batch) => answered.has(batch));
+  const openBatches = input.batches.filter((batch) => batch !== approvalBatch);
   const leftoverResponses = responsesForBatches(input.responses, openBatches);
 
-  if (resolvedBatches.length === 0) {
+  if (approvalBatch === undefined) {
     if (input.resolvedStepInput?.message === undefined) {
       return {
         outcome: "unresolved",
@@ -88,51 +68,97 @@ export function resolveApprovalInputBatches(
         session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
       };
     }
-
-    const session =
-      leftoverResponses.length === 0
-        ? input.session
-        : queueDeferredStepInput(input.session, { inputResponses: leftoverResponses });
-    return {
-      consumedMessage: input.resolvedStepInput.messageConsumed,
-      outcome: "continue",
-      messages: [...input.baseHistory],
-      session,
-    };
+    // A message instead of an answer steers the held turn past its approval.
+    return ignoreApprovalInputBatch(input);
   }
 
-  const approvalBatch = resolvedBatches.find((batch) =>
-    batch.requests.some((request) => isApprovalRequest(request)),
-  );
-  const questionBatches = resolvedBatches.filter((batch) => batch !== approvalBatch);
-  const questions = resolveQuestionBatches({
-    batches: questionBatches,
+  const approval = resolveApprovalBatch({
+    batch: approvalBatch,
     messages: [...input.baseHistory],
+    resolveApprovalKey: input.resolveApprovalKey,
     responses: input.responses,
+    session: input.session,
   });
-  const approval =
-    approvalBatch === undefined
-      ? { messages: questions, session: input.session }
-      : resolveApprovalBatch({
-          batch: approvalBatch,
-          messages: questions,
-          resolveApprovalKey: input.resolveApprovalKey,
-          responses: input.responses,
-          session: input.session,
-        });
+  const resolved = buildResolvedInputBatch(approvalBatch, input.responses);
 
   return finishResolvedInput({
-    deferTurnInput: approvalBatch !== undefined || input.deferTurnInput,
+    deferTurnInput: true,
     leftoverResponses,
     messages: approval.messages,
     rejectedActions: approval.rejectedActions,
-    resolvedInputs: resolvedBatches.flatMap((batch) => {
-      const resolved = buildResolvedInputBatch(batch, input.responses);
-      return resolved === undefined ? [] : [resolved];
-    }),
+    resolvedInputs: resolved === undefined ? [] : [resolved],
     resolvedStepInput: input.resolvedStepInput,
-    session: removePendingInputBatches(approval.session, resolvedBatches),
+    session: removePendingInputBatches(approval.session, [approvalBatch]),
   });
+}
+
+/**
+ * Resolves the first open approval batch when the person steered the held turn
+ * with a message instead of finishing it. Requests they already answered, as in
+ * a partial approval, keep that answer; the rest report `ignored`. Later
+ * batches stay open, as with answered batches.
+ */
+export function ignoreApprovalInputBatch(
+  input: InputDomainResolverInput & {
+    readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
+  },
+): ResolvePendingInputResult {
+  const batch = input.batches[0]!;
+  const answers = responsesForBatches(input.responses, [batch]);
+  const approval = resolveApprovalBatch({
+    batch,
+    messages: [...input.baseHistory],
+    resolveApprovalKey: input.resolveApprovalKey,
+    responses: answers,
+    session: input.session,
+  });
+  const resolved = buildResolvedInputBatch(batch, answers);
+  return finishResolvedInput({
+    // Calls that will not run already have their results, so the message joins
+    // this step. An approved call runs through AI SDK, which needs its approval
+    // response last, so the message replays after it.
+    deferTurnInput: answers.some((answer) => resolveApprovalOutcome(answer).approved),
+    leftoverResponses: responsesForBatches(input.responses, input.batches.slice(1)),
+    messages: approval.messages,
+    rejectedActions: approval.rejectedActions,
+    resolvedInputs: resolved === undefined ? [] : [resolved],
+    resolvedStepInput: input.resolvedStepInput,
+    session: removePendingInputBatches(approval.session, [batch]),
+  });
+}
+
+const CANCELLED_APPROVAL_REASON = "Cancelled before anyone answered.";
+
+/**
+ * Withdraws every pending tool approval when its turn is cancelled. Each held
+ * call goes into history with a not-run result, so no call is left without one.
+ */
+export function cancelApprovalInputBatches(session: HarnessSession): HarnessSession {
+  const batches = pendingApprovalBatches(session.state);
+  if (batches.length === 0) return session;
+  const messages: ModelMessage[] = [...session.history];
+  for (const batch of batches) {
+    appendResolvedBatchTranscript(
+      messages,
+      batch,
+      buildApprovalBatchToolResponseParts(batch, [], CANCELLED_APPROVAL_REASON),
+    );
+  }
+  return {
+    ...removePendingInputBatches(session, batches),
+    history: validateHarnessModelMessages(messages),
+  };
+}
+
+/** Tool approvals still waiting for an answer, which cancelling their turn withdraws. */
+export function getPendingApprovalRequests(
+  state: HarnessSession["state"],
+): readonly InputRequest[] {
+  return pendingApprovalBatches(state).flatMap((batch) => batch.requests);
+}
+
+function pendingApprovalBatches(state: HarnessSession["state"]): readonly PendingInputBatch[] {
+  return getPendingInputBatches(state).filter((batch) => batch.requests.every(isApprovalRequest));
 }
 
 /** Returns recorded approval keys that have no matching request still pending. */
@@ -241,6 +267,8 @@ function buildRejectedActionBatch(
 function buildApprovalBatchToolResponseParts(
   batch: PendingInputBatch,
   responses: readonly InputResponse[],
+  /** Why an unanswered request did not run, when not because the user moved on. */
+  unansweredReason?: string,
 ): ToolResponsePart[] {
   const responseMap = new Map(responses.map((response) => [response.requestId, response]));
   const parts: ToolResponsePart[] = [];
@@ -249,15 +277,17 @@ function buildApprovalBatchToolResponseParts(
     switch (request.kind) {
       case "tool-approval":
         parts.push(
-          ...buildApprovalToolResponseParts(request as ToolApprovalInputRequest, response),
+          ...buildApprovalToolResponseParts(
+            request as ToolApprovalInputRequest,
+            response,
+            unansweredReason,
+          ),
         );
         break;
       case "question":
-        parts.push(buildQuestionToolResponsePart(request as QuestionInputRequest, response));
-        break;
       case "session-limit":
         throw new TypeError(
-          "Session-limit pending input batches must contain only session-limit requests.",
+          `Approval pending input batches cannot contain a "${request.kind}" request.`,
         );
       default: {
         const unhandled: never = request.kind;
@@ -271,8 +301,11 @@ function buildApprovalBatchToolResponseParts(
 function buildApprovalToolResponseParts(
   request: ToolApprovalInputRequest,
   response: InputResponse | undefined,
+  unansweredReason: string | undefined,
 ): ToolResponsePart[] {
-  const { approved, reason } = resolveApprovalOutcome(response);
+  const outcome = resolveApprovalOutcome(response);
+  const approved = outcome.approved;
+  const reason = response === undefined ? (unansweredReason ?? outcome.reason) : outcome.reason;
   const parts: ToolResponsePart[] = [
     { approvalId: request.requestId, approved, reason, type: "tool-approval-response" },
   ];

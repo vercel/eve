@@ -22,7 +22,7 @@ import { createDiskProjectSource, type ProjectSource } from "#discover/project-s
 /**
  * Diagnostics emitted by skill discovery.
  */
-export const DISCOVER_SKILLS_DIRECTORY_INVALID = "discover/skills-directory-invalid";
+const DISCOVER_SKILLS_DIRECTORY_INVALID = "discover/skills-directory-invalid";
 export const DISCOVER_SKILL_COLLISION = "discover/skill-collision";
 export const DISCOVER_SKILL_ENTRY_NOT_DIRECTORY = "discover/skill-entry-not-directory";
 export const DISCOVER_SKILL_FRONTMATTER_INVALID = "discover/skill-frontmatter-invalid";

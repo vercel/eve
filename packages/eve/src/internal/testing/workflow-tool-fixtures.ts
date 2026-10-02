@@ -139,7 +139,22 @@ export async function* confirmDeployWorkflow(
     prompt: `Apply ${plan}?`,
   });
   yield "approval received";
-  return { approved: answer.optionId === "approve", service: input.service };
+  const approved = answer.status === "answered" && answer.optionId === "approve";
+  return { approved, service: input.service };
+}
+
+export async function answerWithResponderWorkflow(
+  _input: DeployInput,
+  ctx: WorkflowToolContext,
+): Promise<string> {
+  "use workflow";
+
+  const answer = await ctx.ask({
+    display: "confirmation",
+    options: [{ id: "approve", label: "Approve" }],
+    prompt: "Apply this change?",
+  });
+  return JSON.stringify({ answer, runStartPrincipal: ctx.session.auth.current?.principalId });
 }
 
 export async function failingDeployWorkflow(input: DeployInput): Promise<never> {
@@ -147,26 +162,6 @@ export async function failingDeployWorkflow(input: DeployInput): Promise<never> 
 
   await planDeployStep(input.service);
   throw new Error(`deploy of ${input.service} exploded`);
-}
-
-export async function subagentShapedDeployWorkflow(): Promise<{
-  readonly callId: string;
-  readonly isError: true;
-  readonly kind: "subagent-result";
-  readonly origin: "dispatch";
-  readonly output: string;
-  readonly subagentName: string;
-}> {
-  "use workflow";
-
-  return {
-    callId: "authored-call",
-    isError: true,
-    kind: "subagent-result",
-    origin: "dispatch",
-    output: "authored payload",
-    subagentName: "authored-name",
-  };
 }
 
 export async function* reportingDeployWorkflow(
@@ -179,32 +174,10 @@ export async function* reportingDeployWorkflow(
   return { plan };
 }
 
-export async function* backgroundDeployWorkflow(
-  input: DeployInput,
-  _ctx: WorkflowToolContext,
-): AsyncGenerator<string, { readonly plan: string }> {
-  "use workflow";
-
-  const plan = await planDeployStep(input.service);
-  yield `planned ${input.service}`;
-  yield `review ${plan}`;
-  return { plan };
-}
-
 async function planDeployStep(service: string): Promise<string> {
   "use step";
 
   return `plan:${service}`;
-}
-
-export async function stepThenRaceWorkflow(
-  input: DeployInput,
-): Promise<{ readonly decided: string; readonly service: string }> {
-  "use workflow";
-  const gate = createHook<{ readonly optionId: string }>();
-  await planDeployStep(input.service);
-  const answer = await Promise.race([gate, workflowSleep("50ms")]);
-  return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
 }
 
 /** Holds in a step until `ctx.abortSignal` fires, then cleans up in `finally`. */
@@ -262,4 +235,11 @@ export async function askThenRaceWorkflow(
   });
   const answer = await Promise.race([pending, workflowSleep("50ms")]);
   return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
+}
+
+/** Receives the actual delegated result over the durable parent hook. */
+export async function receiveDelegatedResultWorkflow(token: string): Promise<unknown> {
+  "use workflow";
+  using result = createHook<unknown>({ token });
+  return await result;
 }

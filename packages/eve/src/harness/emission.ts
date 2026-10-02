@@ -25,7 +25,6 @@ import {
   createMessageReceivedEvent,
   createReasoningAppendedEvent,
   createReasoningCompletedEvent,
-  createSessionCompletedEvent,
   createSessionFailedEvent,
   createSessionStartedEvent,
   createSessionWaitingEvent,
@@ -35,9 +34,8 @@ import {
   createTurnFailedEvent,
   createTurnStartedEvent,
 } from "#protocol/message.js";
-import type { RunMode } from "#shared/run-mode.js";
-import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import type { JsonObject } from "#shared/json.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromToolError,
@@ -61,9 +59,9 @@ import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
+import { emitNestedToolActions } from "#harness/nested-actions.js";
 import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
 import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
-import { frameworkMessageKindForStepInput } from "#harness/messages.js";
 
 export {
   getHarnessEmissionState,
@@ -101,10 +99,8 @@ export async function emitTurnPreamble(
   }
 
   if (input.message !== undefined) {
-    const kind = frameworkMessageKindForStepInput(input);
     await emitFn(
       createMessageReceivedEvent({
-        kind: kind === "execution.background_task" ? kind : undefined,
         message: input.message,
         sequence: state.sequence,
         turnId,
@@ -188,7 +184,7 @@ async function emitStepAndTurnFailed(
 export async function emitFailedStep(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
-  input: FailedStepPayload & { readonly sessionId: string },
+  input: FailedStepPayload & { readonly sessionId: string; readonly usage: TokenUsage },
 ): Promise<void> {
   await emitStepAndTurnFailed(emitFn, state, input);
   await emitFn(createSessionFailedEvent(input));
@@ -201,10 +197,10 @@ export async function emitFailedStep(
 export async function emitRecoverableFailedTurn(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
-  input: FailedStepPayload & { readonly continuationToken: string },
+  input: FailedStepPayload & { readonly continuationToken: string; readonly usage: TokenUsage },
 ): Promise<HarnessEmissionState> {
   await emitStepAndTurnFailed(emitFn, state, input);
-  await emitFn(createSessionWaitingEvent());
+  await emitFn(createSessionWaitingEvent(input.usage));
 
   return {
     sessionStarted: state.sessionStarted,
@@ -225,26 +221,23 @@ export function advanceStep(state: HarnessEmissionState): HarnessEmissionState {
 }
 
 /**
- * Emits `turn.completed` and either `session.waiting` or `session.completed`.
+ * Emits `turn.completed` and `session.waiting` with the session's `usage`.
  * Returns updated emission state with an incremented sequence.
  */
 export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
-  mode: RunMode,
+  messages: readonly ModelMessage[],
+  usage: TokenUsage,
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
       sequence: state.sequence,
       turnId: state.turnId,
     }),
+    messages,
   );
-
-  if (mode === "conversation") {
-    await emitFn(createSessionWaitingEvent());
-  } else {
-    await emitFn(createSessionCompletedEvent());
-  }
+  await emitFn(createSessionWaitingEvent(usage));
 
   return {
     sessionStarted: state.sessionStarted,
@@ -270,6 +263,12 @@ interface EmittedStreamContent {
 
 interface StreamActionEmissionOptions {
   readonly excludedActionToolNames: ReadonlySet<string>;
+  /**
+   * A child's or schedule's turn is held while its tasks work, so a text step
+   * can't end it: the step reports `"tool-calls"` and channels don't post it
+   * as the reply.
+   */
+  readonly hidesHeldText?: boolean;
   readonly tools: HarnessToolMap;
 }
 
@@ -307,6 +306,15 @@ export async function emitStreamContent(
       await orderedEmitter.closeAndDrain();
     }
   }
+}
+
+/** A hidden held turn's text step isn't its reply, so it reports `"tool-calls"` as channels expect. */
+function reportedFinishReason(
+  finishReason: AssistantStepFinishReason,
+  hidesHeldText: boolean,
+): AssistantStepFinishReason {
+  if (hidesHeldText && finishReason === "stop") return "tool-calls";
+  return finishReason;
 }
 
 async function consumeStreamContent(
@@ -365,9 +373,7 @@ async function consumeStreamContent(
 
   const emitActionRequest = async (projection: RuntimeActionRequestProjection): Promise<void> => {
     const { action } = projection;
-    if (emittedActionCallIds.has(action.callId)) {
-      return;
-    }
+    if (emittedActionCallIds.has(action.callId)) return;
 
     if (currentMessage.trim().length > 0) {
       await flushCurrentMessage();
@@ -391,13 +397,9 @@ async function consumeStreamContent(
     readonly toolCallId: string;
     readonly toolName: string;
   }): Promise<void> => {
-    if (providerToolCallIdsSeen.has(toolCall.toolCallId)) {
-      return;
-    }
+    if (providerToolCallIdsSeen.has(toolCall.toolCallId)) return;
     providerToolCallIdsSeen.add(toolCall.toolCallId);
-    if (emittedActionCallIds.has(toolCall.toolCallId)) {
-      return;
-    }
+    if (emittedActionCallIds.has(toolCall.toolCallId)) return;
     emittedActionCallIds.add(toolCall.toolCallId);
 
     if (currentMessage.trim().length > 0) {
@@ -420,10 +422,9 @@ async function consumeStreamContent(
   };
 
   const emitActionResult = async (result: RuntimeToolResultActionResult): Promise<void> => {
-    if (emittedActionResultCallIds.has(result.callId)) {
-      return;
-    }
+    if (emittedActionResultCallIds.has(result.callId)) return;
     emittedActionResultCallIds.add(result.callId);
+    await emitNestedToolActions(emitFn, state, result.callId);
     const resultPresentation =
       result.isError === true
         ? undefined
@@ -633,6 +634,10 @@ async function consumeStreamContent(
           await emitActionResult(createRuntimeToolResultFromToolError(toolError));
           handledInlineToolResultCallIds.add(toolError.toolCallId);
           trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
+        } else if (!toolCallIdsSeenInStream.has(toolError.toolCallId)) {
+          // An approved call from an earlier step failed; the SDK keeps its error in history.
+          await emitActionResult(createRuntimeToolResultFromToolError(toolError));
+          handledInlineToolResultCallIds.add(toolError.toolCallId);
         }
         break;
       }
@@ -662,7 +667,6 @@ async function consumeStreamContent(
     throw streamError;
   }
 
-  // Flush remaining reasoning.
   if (currentReasoning.trim().length > 0) {
     await emitFn(
       createReasoningCompletedEvent({
@@ -674,26 +678,10 @@ async function consumeStreamContent(
     );
   }
 
-  // Channel adapters deliver terminal completions, so the reserved marker
-  // becomes a null completion without delaying normal streaming deltas.
-  if (
-    finishReason !== "content-filter" &&
-    finishReason !== "tool-calls" &&
-    hasEmptyDeliverySentinel(currentMessage)
-  ) {
+  if (finishReason !== "content-filter" && currentMessage.trim().length > 0) {
     await emitFn(
       createMessageCompletedEvent({
-        finishReason,
-        message: null,
-        sequence: state.sequence,
-        stepIndex: state.stepIndex,
-        turnId: state.turnId,
-      }),
-    );
-  } else if (finishReason !== "content-filter" && currentMessage.trim().length > 0) {
-    await emitFn(
-      createMessageCompletedEvent({
-        finishReason,
+        finishReason: reportedFinishReason(finishReason, options?.hidesHeldText === true),
         message: currentMessage,
         sequence: state.sequence,
         stepIndex: state.stepIndex,

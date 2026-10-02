@@ -1,31 +1,33 @@
-import { contextStorage } from "#context/container.js";
-import { ConversationIdKey } from "#context/keys.js";
+import { createContextKey, type Context } from "#compiled/@opentelemetry/api/index.js";
 import { readBaggageMember, replaceBaggageMember } from "#protocol/baggage.js";
+import { readConversationId, resolveConversationId } from "#shared/conversation-identity.js";
 
 const BAGGAGE_KEY = "eve.conversation.id";
-const MAX_ID_BYTES = 1024;
-const encoder = new TextEncoder();
+const CONVERSATION_KEY = createContextKey("eve.trace.conversation.id");
 
-export function readConversationId(value: unknown): string | undefined {
-  if (
-    typeof value !== "string" ||
-    value.length === 0 ||
-    value.length > MAX_ID_BYTES ||
-    // oxlint-disable-next-line no-control-regex -- Indexed correlation IDs must not contain controls or line separators.
-    /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value) ||
-    encoder.encode(value).byteLength > MAX_ID_BYTES
-  )
-    return undefined;
-  try {
-    encodeURIComponent(value);
-    return value;
-  } catch {
-    return undefined;
-  }
+export function withConversationId(context: Context, conversationId: string): Context {
+  return context.setValue(CONVERSATION_KEY, conversationId);
 }
 
-export function resolveConversationId(fallback: string): string {
-  return readConversationId(contextStorage.getStore()?.get(ConversationIdKey)) ?? fallback;
+interface OperationConversation {
+  readonly rootSessionId?: string;
+  readonly sessionId: string;
+}
+
+export function operationConversationId(input: OperationConversation): string {
+  return resolveConversationId(input.rootSessionId ?? input.sessionId);
+}
+
+export function withOperationConversation(context: Context, input: OperationConversation): Context {
+  return withConversationId(context, operationConversationId(input));
+}
+
+export function conversationIdFromContext(context: unknown): string | undefined {
+  if (typeof context !== "object" || context === null) return undefined;
+  const getValue = Reflect.get(context, "getValue");
+  return typeof getValue === "function"
+    ? readConversationId(Reflect.apply(getValue, context, [CONVERSATION_KEY]))
+    : undefined;
 }
 
 export function readConversationBaggage(value: string | null): string | undefined {

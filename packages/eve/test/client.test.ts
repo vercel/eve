@@ -1,3 +1,4 @@
+import { TEST_USAGE } from "#internal/testing/events.js";
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import {
@@ -88,7 +89,7 @@ function createEagerStreamResponse(
 ): Response {
   let turnId = "turn_001";
   for (const event of events) {
-    if ("data" in event && "turnId" in event.data) {
+    if ("data" in event && event.data !== undefined && "turnId" in event.data) {
       turnId = event.data.turnId;
       break;
     }
@@ -134,7 +135,7 @@ function singleTurnEvents(input: {
       turnId: input.turnId,
     }),
     createTurnCompletedEvent({ sequence: input.sequence, turnId: input.turnId }),
-    createSessionWaitingEvent(),
+    createSessionWaitingEvent(TEST_USAGE),
   ];
 }
 
@@ -192,49 +193,6 @@ describe("Client.health", () => {
 
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
     expect(headers.get("authorization")).toBe("Bearer my-token");
-  });
-
-  it("resolves bearer auth via callback on each request", async () => {
-    let callCount = 0;
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(() =>
-        Promise.resolve(Response.json({ ok: true, status: "ready", workflowId: "wf_001" })),
-      );
-
-    const client = new Client({
-      auth: {
-        bearer: () => {
-          callCount += 1;
-          return `token_${callCount}`;
-        },
-      },
-      host: "http://localhost:3000",
-    });
-
-    await client.health();
-    await client.health();
-
-    const firstHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    const secondHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
-    expect(firstHeaders.get("authorization")).toBe("Bearer token_1");
-    expect(secondHeaders.get("authorization")).toBe("Bearer token_2");
-    expect(callCount).toBe(2);
-  });
-
-  it("sends basic auth header", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf_001" }));
-
-    const client = new Client({
-      auth: { basic: { password: "secret", username: "admin" } },
-      host: "http://localhost:3000",
-    });
-    await client.health();
-
-    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    expect(headers.get("authorization")).toBe(`Basic ${btoa("admin:secret")}`);
   });
 
   it("sends custom headers", async () => {
@@ -355,6 +313,7 @@ describe("Session.send (result)", () => {
     const events: UnstampedMessageStreamEvent[] = [
       createTurnStartedEvent({ sequence: 1, turnId: "turn_001" }),
       createSessionFailedEvent({
+        usage: TEST_USAGE,
         code: "internal_error",
         message: "Something went wrong",
         sessionId: "session_001",
@@ -383,7 +342,7 @@ describe("Session.send (result)", () => {
         turnId: "turn_001",
       }),
       createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }),
-      createSessionCompletedEvent(),
+      createSessionCompletedEvent(TEST_USAGE),
     ];
 
     vi.spyOn(globalThis, "fetch")
@@ -423,7 +382,7 @@ describe("Session.send (result)", () => {
         turnId: "turn_001",
       }),
       createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
 
     const fetchMock = vi
@@ -452,7 +411,7 @@ describe("Session.send (result)", () => {
         stepIndex: 0,
         turnId: "turn_001",
       }),
-      createSessionCompletedEvent(),
+      createSessionCompletedEvent(TEST_USAGE),
     ];
     const secondEvents = singleTurnEvents({
       message: "New conversation",
@@ -519,7 +478,7 @@ describe("Session.send (stream)", () => {
           turnId: "turn_001",
         }),
       );
-      stream.pushEvent(createSessionWaitingEvent());
+      stream.pushEvent(createSessionWaitingEvent(TEST_USAGE));
     }, 0);
 
     await iterationPromise;
@@ -543,7 +502,7 @@ describe("Session.send (stream)", () => {
     expect(res.sessionId).toBe("session_001");
 
     setTimeout(() => {
-      stream.pushEvent(createSessionWaitingEvent());
+      stream.pushEvent(createSessionWaitingEvent(TEST_USAGE));
     }, 0);
 
     for await (const _ of res) {
@@ -587,7 +546,7 @@ describe("Session.send (reconnection)", () => {
         turnId: "turn_001",
       }),
       createTurnCompletedEvent({ sequence: 1, turnId: "turn_001" }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
 
     const fetchMock = vi
@@ -757,7 +716,7 @@ describe("Session.stream", () => {
         stepIndex: 0,
         turnId: "turn_002",
       }),
-      createSessionWaitingEvent(),
+      createSessionWaitingEvent(TEST_USAGE),
     ];
 
     const fetchMock = vi

@@ -1,7 +1,7 @@
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
-import { selfModificationConfigSchema } from "./extension.js";
+import { selfModificationConfigSchema } from "./config-schema.js";
 
 class StatefulCredentialProvider {
   private readonly token: string;

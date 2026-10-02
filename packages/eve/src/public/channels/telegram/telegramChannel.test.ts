@@ -14,6 +14,7 @@ import {
   type TelegramChannelState,
 } from "#public/channels/telegram/index.js";
 import { isTelegramBotMentioned } from "#public/channels/telegram/defaults.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const SECRET = "telegram-secret";
 
@@ -159,7 +160,6 @@ describe("telegramChannel() inbound route", () => {
         caller: { type: "anonymous" },
         channel: { kind: "channel:telegram" },
         environment: "production",
-        mode: "conversation",
         state: adapter.state,
       }),
     ).toBe(audience);
@@ -277,6 +277,7 @@ describe("telegramChannel() inbound route", () => {
   });
 
   it("sends authorization privately after the requester taps its group callback", async () => {
+    const logs = captureLogRecords();
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response(JSON.stringify({ ok: true, result: true })));
@@ -337,9 +338,15 @@ describe("telegramChannel() inbound route", () => {
       callback_query_id: "cb-auth",
       text: "Sign-in prompt sent privately.",
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "Telegram authorization callback delivery failed",
+      }),
+    );
   });
 
-  it("keeps direct approval replies as fallback text for option prompts", async () => {
+  it("sends a reply to a bot prompt as a message carrying the replied-to id", async () => {
     const channel = telegramChannel({
       api: { fetch: fakeTelegramFetch() },
       credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
@@ -361,12 +368,14 @@ describe("telegramChannel() inbound route", () => {
 
     const [, input] = send.mock.calls[0]!;
     expect(input).toMatchObject({
-      inputResponses: [{ requestId: "telegram_reply:55", text: "approve" }],
       message: expect.stringContaining("approve"),
+      state: { replyToBotMessageId: "55" },
     });
+    expect(input).not.toHaveProperty("inputResponses");
   });
 
   it("rejects requests with invalid webhook verification", async () => {
+    const logs = captureLogRecords();
     const channel = telegramChannel({ credentials: { webhookSecretToken: SECRET } });
     const compiled = asCompiled(channel);
     const post = compiled.routes.find((route) => route.method === "POST");
@@ -393,6 +402,9 @@ describe("telegramChannel() inbound route", () => {
 
     expect(response.status).toBe(401);
     expect(send).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "telegram inbound verification failed" }),
+    );
   });
 });
 
@@ -410,19 +422,17 @@ describe("telegramChannel() deliver hook", () => {
 
     expect(
       await adapter.deliver!(
-        {
-          inputResponses: [
-            { optionId: "selected", requestId: "telegram_callback:eve:0" },
-            { requestId: "telegram_reply:55", text: "because" },
-          ],
-        },
+        { inputResponses: [{ optionId: "selected", requestId: "telegram_callback:eve:0" }] },
         ctx,
       ),
     ).toEqual({
-      inputResponses: [
-        { optionId: "approve", requestId: "call_1" },
-        { requestId: "call_2", text: "because" },
-      ],
+      inputResponses: [{ optionId: "approve", requestId: "call_1" }],
+      context: undefined,
+    });
+    expect(
+      await adapter.deliver!({ message: "because", state: { replyToBotMessageId: "55" } }, ctx),
+    ).toEqual({
+      inputResponses: [{ requestId: "call_2", text: "because" }],
       context: undefined,
     });
   });
@@ -432,13 +442,7 @@ describe("telegramChannel() deliver hook", () => {
     const ctx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as any);
 
     expect(
-      await adapter.deliver!(
-        {
-          inputResponses: [{ requestId: "telegram_reply:55", text: "hello" }],
-          message: "hello",
-        },
-        ctx,
-      ),
+      await adapter.deliver!({ message: "hello", state: { replyToBotMessageId: "55" } }, ctx),
     ).toEqual({ message: "hello", context: undefined });
   });
 });

@@ -69,7 +69,7 @@ function dotCount(glyph: string): number {
 /** Densest frame, shown as a static marker when the output cannot animate. */
 const SPINNER_STATIC = SPINNER_FRAMES.reduce((a, b) => (dotCount(b) > dotCount(a) ? b : a));
 /** Delay between spinner frames. ~8 fps reads as a calm pulse. */
-export const SPINNER_FRAME_MS = 120;
+const SPINNER_FRAME_MS = 120;
 
 /** A rail log whose current command detail can be cleared before the next prompt is drawn. */
 export interface RailLog extends ChannelSetupLog {

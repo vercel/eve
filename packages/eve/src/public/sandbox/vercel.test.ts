@@ -1,27 +1,23 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-
-import {
-  Drive,
-  vercel,
-  type VercelSandboxOptions,
-  type VercelSandboxSessionCreateOptions,
-} from "#public/sandbox/vercel.js";
-
-describe("vercel", () => {
-  it("exposes Drive and accepts session-scoped mounts", () => {
-    const options = {
-      sessionCreateOptions: ({ session }) => ({
-        mounts: {
-          "/workspace": { drive: `repo-${session.id}`, mode: "read-write" },
-        },
-      }),
-    } satisfies VercelSandboxOptions;
-
-    expect(vercel(options).name).toBe("vercel");
+import type { SessionContext } from "#context/session-context.js";
+import type { RuntimeSandboxSessionFor } from "#public/definitions/sandbox.js";
+import { Drive, VercelSandbox, type VercelSandboxSession } from "#public/sandbox/vercel.js";
+describe("VercelSandbox", () => {
+  it("creates environments", () => {
+    const environment = VercelSandbox.environment({ resources: { vcpus: 4 } });
+    expect(environment.provider).toBe("vercel");
+    expectTypeOf(environment.open).toBeFunction();
     expectTypeOf(Drive.getOrCreate).toBeFunction();
-    expectTypeOf(
-      options.sessionCreateOptions({ session: { id: "acme" } }),
-    ).toMatchTypeOf<VercelSandboxSessionCreateOptions>();
-    expectTypeOf<VercelSandboxOptions>().not.toHaveProperty("mounts");
+  });
+
+  it("preserves its session capabilities through getSandbox", () => {
+    const environment = VercelSandbox.environment({});
+    const assertTypes = (ctx: SessionContext) => {
+      expectTypeOf(ctx.getSandbox(environment)).toEqualTypeOf<
+        Promise<RuntimeSandboxSessionFor<VercelSandboxSession>>
+      >();
+    };
+
+    expectTypeOf(assertTypes).toBeFunction();
   });
 });

@@ -1,9 +1,9 @@
 import { defineEval } from "eve/evals";
+import { equals } from "eve/evals/expect";
 import {
   scriptedSession,
   expectChangeStillUnexecuted,
   expectReply,
-  expectResponseReply,
   expectToolResult,
   requestFrom,
   submitPartialApproval,
@@ -21,32 +21,25 @@ export default defineEval({
     const approvalB = requestFrom(parked, "change-b");
     const session = parked.session;
     await submitPartialApproval(t, session, approvalA);
-
-    // When the user asks to read the draft.
+    // When the user sends a message instead of answering B, which steers the held turn.
     const live = await session.start("Read the draft status.");
-
-    // Then the read gets a completed reply; the batch stays unexecuted until B is approved.
     await expectToolResult(t, live, "read-draft");
-    await expectReply(t, live, "Draft status: ready.");
-    expectChangeStillUnexecuted(session, "change-a");
-    expectChangeStillUnexecuted(session, "change-b");
-
-    const approved = await expectResponseReply(
-      t,
-      await session.startRespond([{ requestId: approvalB.requestId, optionId: "approve" }]),
-      "Both changes resolved.",
-      approvalB.requestId,
-    );
-    approved.event("input.resolved", {
+    const reply = await expectReply(t, live, "Draft status: ready.");
+    // Then A keeps its approval and runs once, B is cancelled, and the message gets its reply.
+    reply.event("input.resolved", {
       data: {
         resolutions: (items) =>
-          [approvalA.requestId, approvalB.requestId].every((id) =>
-            items.some((item) => item.requestId === id && item.outcome === "approved"),
+          items.some(
+            (item) => item.requestId === approvalA.requestId && item.outcome === "approved",
+          ) &&
+          items.some(
+            (item) => item.requestId === approvalB.requestId && item.outcome === "ignored",
           ),
       },
       count: 1,
     });
-    approved.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
-    approved.calledTool("change-b", { status: "completed", output: { executions: 1 }, count: 1 });
+    reply.calledTool("change-a", { status: "completed", output: { executions: 1 }, count: 1 });
+    expectChangeStillUnexecuted(session, "change-b");
+    t.check(session.pendingInputRequests.length, equals(0));
   },
 });

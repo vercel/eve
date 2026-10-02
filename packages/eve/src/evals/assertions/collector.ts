@@ -32,7 +32,7 @@ interface MutableEntry {
   message?: string;
   metadata?: Readonly<Record<string, unknown>>;
   /** A model/value assertion that threw — a hard failure regardless of severity. */
-  failed: boolean;
+  errored: boolean;
 }
 
 /**
@@ -66,7 +66,7 @@ export class AssertionCollector {
       spec,
       selectSubject,
       score: 0,
-      failed: false,
+      errored: false,
     };
     this.#entries.push(entry);
     return makeHandle(entry);
@@ -86,7 +86,7 @@ export class AssertionCollector {
       threshold: input.threshold,
       kind: "resolved",
       score: 0,
-      failed: false,
+      errored: false,
     };
     this.#entries.push(entry);
 
@@ -107,10 +107,10 @@ export class AssertionCollector {
       score: input.outcome.score,
       message: input.outcome.message,
       metadata: input.outcome.metadata,
-      failed: false,
+      errored: false,
     };
     this.#entries.push(entry);
-    return computePassed(entry.severity, entry.threshold, entry.score, entry.failed);
+    return computePassed(entry.severity, entry.threshold, entry.score, entry.errored);
   }
 
   /** Record and await a required value assertion, returning whether it passed. */
@@ -126,11 +126,11 @@ export class AssertionCollector {
       threshold: input.threshold,
       kind: "resolved",
       score: 0,
-      failed: false,
+      errored: false,
     };
     this.#entries.push(entry);
     await settleEntry(entry, input.score);
-    return computePassed(entry.severity, entry.threshold, entry.score, entry.failed);
+    return computePassed(entry.severity, entry.threshold, entry.score, entry.errored);
   }
 
   /**
@@ -153,7 +153,8 @@ export class AssertionCollector {
         score: entry.score,
         severity: entry.severity,
         threshold: entry.threshold,
-        passed: computePassed(entry.severity, entry.threshold, entry.score, entry.failed),
+        passed: computePassed(entry.severity, entry.threshold, entry.score, entry.errored),
+        errored: entry.errored,
         message: entry.message,
         metadata: entry.metadata,
       });
@@ -171,9 +172,9 @@ function computePassed(
   severity: AssertionSeverity,
   threshold: number | undefined,
   score: number,
-  failed: boolean,
+  errored: boolean,
 ): boolean {
-  if (failed) return false;
+  if (errored) return false;
   const min = threshold ?? (severity === "gate" ? 1 : undefined);
   return min === undefined || score >= min;
 }
@@ -194,7 +195,7 @@ async function settleEntry(
     entry.severity = "gate";
     entry.threshold = undefined;
     entry.message = toErrorMessage(error);
-    entry.failed = true;
+    entry.errored = true;
   }
 }
 

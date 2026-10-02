@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
-import { AuthKey, ChannelInstrumentationKey, ModeKey, SessionTraceSeedKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ChannelInstrumentationKey,
+  ParentTraceContextKey,
+  SessionTraceSeedKey,
+} from "#context/keys.js";
 import { initializeSessionInstrumentation } from "#instrumentation/session-init.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
@@ -29,6 +34,39 @@ function createRuntime(tracePolicy: TraceCapturePolicy): InstrumentationRuntime 
 }
 
 describe("initializeSessionInstrumentation", () => {
+  it("applies the receiver capture policy and allocates a separate remote trace", () => {
+    registerInstrumentationRuntime({
+      ...createRuntime(() => false),
+      idGenerator: new AgentSpanIdGenerator(),
+    });
+    const ctx = new ContextContainer();
+    ctx.set(ParentTraceContextKey, {
+      isRemote: true,
+      spanId: "a".repeat(16),
+      traceFlags: 1,
+      traceId: "b".repeat(32),
+    } as never);
+    initializeSessionInstrumentation({ agentName: "remote", ctx });
+    expect(ctx.get(SessionTraceSeedKey)?.traceId).not.toBe("b".repeat(32));
+    expect(ctx.get(SessionTraceSeedKey)?.decision).toEqual({ action: "drop" });
+    expect(ctx.get(SessionTraceSeedKey)?.traceFlags).toBe(0);
+  });
+  it.each([0, 1])(
+    "preserves the caller's trace and sampling flag %s at child creation",
+    (traceFlags) => {
+      const ctx = new ContextContainer();
+      const parent = { spanId: "a".repeat(16), traceFlags, traceId: "b".repeat(32) };
+      ctx.set(ParentTraceContextKey, parent);
+
+      initializeSessionInstrumentation({ agentName: "child", ctx });
+
+      const seed = ctx.get(SessionTraceSeedKey)!;
+      expect(seed.traceId).toBe(parent.traceId);
+      expect(seed.spanId).not.toBe(parent.spanId);
+      expect(seed.traceFlags).toBe(traceFlags);
+    },
+  );
+
   it("reconstructs a legacy conversation from session context", () => {
     vi.stubEnv("EVE_DEV", "1");
     registerInstrumentationRuntime({
@@ -47,7 +85,6 @@ describe("initializeSessionInstrumentation", () => {
       principalId: "service-1",
       principalType: "service",
     });
-    ctx.set(ModeKey, "task");
 
     initializeSessionInstrumentation({ agentName: "test-agent", ctx });
 

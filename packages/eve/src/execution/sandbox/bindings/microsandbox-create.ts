@@ -19,7 +19,9 @@ export async function createMicrosandboxWithProgress(input: {
   readonly log?: (message: string) => void;
   readonly source: string;
 }): Promise<MicrosandboxSandbox> {
-  const progress = { phase: "resolving the image" as MicrosandboxCreatePhase };
+  const progress: { phase: MicrosandboxCreatePhase } = {
+    phase: "resolving the image",
+  };
 
   try {
     const creation = await input.builder.createWithPullProgress();
@@ -163,11 +165,15 @@ function readMicrosandboxErrorCode(
     error instanceof Error &&
     "code" in error &&
     typeof error.code === "string" &&
-    Object.hasOwn(MICROSANDBOX_ERROR_HINTS, error.code)
+    isMicrosandboxErrorCodeWithHint(error.code)
   ) {
-    return error.code as MicrosandboxErrorCode;
+    return error.code;
   }
   return undefined;
+}
+
+function isMicrosandboxErrorCodeWithHint(value: string): value is MicrosandboxErrorCode {
+  return value === "database" || value === "imageNotFound" || value === "libkrunfwNotFound";
 }
 
 function microsandboxErrorHint(code: MicrosandboxErrorCode | undefined): string | undefined {

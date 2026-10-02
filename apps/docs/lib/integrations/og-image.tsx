@@ -64,6 +64,7 @@ const fitLogo = (node: ReactNode, maxWidth: number, maxHeight: number): ReactNod
 };
 
 interface RasterizedLogo {
+  darkSilhouette: boolean;
   height: number;
   inkCoverage: number;
   src: string;
@@ -111,6 +112,77 @@ const cropLogo = (image: PNG): PNG => {
   return cropped;
 };
 
+const contrastLogo = (node: ReactNode): ReactNode => {
+  if (!isValidElement(node)) return node;
+
+  const element = node as ReactElement<LogoElementProps>;
+  if (element.type === "mask") return element;
+
+  const liftDarkColor = (color: string | undefined): string | undefined => {
+    if (!color || color === "none" || color === "currentColor") return color;
+    if (color === "black") return "#b4b4b4";
+
+    const hex = color.startsWith("#") ? color.slice(1) : "";
+    const expanded = hex.length === 3 ? [...hex].map((digit) => digit.repeat(2)).join("") : hex;
+    if (!/^[\da-f]{6}$/iu.test(expanded)) return color;
+
+    const channels = [0, 2, 4].map((offset) =>
+      Number.parseInt(expanded.slice(offset, offset + 2), 16),
+    );
+    const [red, green, blue] = channels as [number, number, number];
+    const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    if (luminance >= 110) return color;
+
+    const lift = (180 - luminance) / (255 - luminance);
+    return `#${channels
+      .map((channel) =>
+        Math.round(channel + (255 - channel) * lift)
+          .toString(16)
+          .padStart(2, "0"),
+      )
+      .join("")}`;
+  };
+
+  const props = element.props;
+  return cloneElement(
+    element,
+    { ...props, fill: liftDarkColor(props.fill), stroke: liftDarkColor(props.stroke) },
+    Children.map(props.children, contrastLogo),
+  );
+};
+
+// A logo whose outer edge is dark disappears on the black OG canvas. Logos with
+// dark details inside their own colored shape are fine as drawn.
+const hasDarkSilhouette = (image: PNG): boolean => {
+  const alphaAt = (x: number, y: number): number =>
+    x < 0 || y < 0 || x >= image.width || y >= image.height
+      ? 0
+      : image.data[(y * image.width + x) * 4 + 3]!;
+  let edge = 0;
+  let darkEdge = 0;
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      if (alphaAt(x, y) < 200) continue;
+      if (
+        alphaAt(x - 1, y) > 50 &&
+        alphaAt(x + 1, y) > 50 &&
+        alphaAt(x, y - 1) > 50 &&
+        alphaAt(x, y + 1) > 50
+      ) {
+        continue;
+      }
+      edge += 1;
+      const offset = (y * image.width + x) * 4;
+      const luminance =
+        0.2126 * image.data[offset]! +
+        0.7152 * image.data[offset + 1]! +
+        0.0722 * image.data[offset + 2]!;
+      if (luminance < 60) darkEdge += 1;
+    }
+  }
+  return edge > 0 && darkEdge / edge > 0.5;
+};
+
 const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
   const response = new ImageResponse(
     <div
@@ -128,6 +200,7 @@ const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
     { height: 512, width: 512 },
   );
   const image = PNG.sync.read(Buffer.from(await response.arrayBuffer()));
+  const darkSilhouette = hasDarkSilhouette(image);
   const cropped = cropLogo(image);
   let ink = 0;
   for (let offset = 0; offset < cropped.data.length; offset += 4) {
@@ -135,61 +208,12 @@ const rasterizeLogo = async (logo: ReactNode): Promise<RasterizedLogo> => {
   }
 
   return {
+    darkSilhouette,
     height: cropped.height,
     inkCoverage: ink / (cropped.width * cropped.height),
     src: `data:image/png;base64,${PNG.sync.write(cropped).toString("base64")}`,
     width: cropped.width,
   };
-};
-
-const collectLogoColors = (node: ReactNode, colors = new Set<string>()): Set<string> => {
-  if (!isValidElement(node)) return colors;
-
-  const element = node as ReactElement<LogoElementProps>;
-  if (element.type === "mask") return colors;
-
-  const { children, fill, stroke } = element.props;
-  for (const color of [fill, stroke]) {
-    if (color && color !== "none" && color !== "currentColor") colors.add(color.toLowerCase());
-  }
-  Children.forEach(children, (child) => collectLogoColors(child, colors));
-  return colors;
-};
-
-const grayscaleColor = (color: string): string => {
-  const normalized = color.toLowerCase();
-  if (normalized === "currentcolor") return "white";
-  if (normalized === "white") return "black";
-  if (normalized === "black") return "white";
-
-  const hex = normalized.slice(1);
-  const expanded = hex.length === 3 ? [...hex].map((digit) => digit.repeat(2)).join("") : hex;
-  if (!/^[\da-f]{6}$/.test(expanded)) return "white";
-
-  const red = Number.parseInt(expanded.slice(0, 2), 16);
-  const green = Number.parseInt(expanded.slice(2, 4), 16);
-  const blue = Number.parseInt(expanded.slice(4, 6), 16);
-  const gray = 255 - Math.round(0.2126 * red + 0.7152 * green + 0.0722 * blue);
-  return `rgb(${gray}, ${gray}, ${gray})`;
-};
-
-const recolorLogo = (node: ReactNode, preserveTones: boolean): ReactNode => {
-  if (!isValidElement(node)) return node;
-
-  const element = node as ReactElement<LogoElementProps>;
-  if (element.type === "mask") return element;
-
-  const props = element.props;
-  const recolor = (color: string | undefined): string | undefined => {
-    if (!color || color === "none") return color;
-    return preserveTones ? grayscaleColor(color) : "white";
-  };
-
-  return cloneElement(
-    element,
-    { ...props, fill: recolor(props.fill), stroke: recolor(props.stroke) },
-    Children.map(props.children, (child) => recolorLogo(child, preserveTones)),
-  );
 };
 
 const balanceLogoWeight = (logo: RasterizedLogo, referenceCoverage: number): SizedLogo => {
@@ -225,8 +249,9 @@ const getRasterizedLogo = (integration: Integration): Promise<RasterizedLogo> =>
 
   const Logo = logos[integration.logo];
   const resolvedLogo = resolveLogo(<Logo aria-hidden />);
-  const recoloredLogo = recolorLogo(resolvedLogo, collectLogoColors(resolvedLogo).size > 1);
-  const rasterized = rasterizeLogo(recoloredLogo);
+  const rasterized = rasterizeLogo(resolvedLogo).then((logo) =>
+    logo.darkSilhouette ? rasterizeLogo(contrastLogo(resolvedLogo)) : logo,
+  );
   rasterizedLogos.set(integration.logo, rasterized);
   return rasterized;
 };

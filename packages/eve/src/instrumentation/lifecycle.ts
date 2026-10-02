@@ -12,6 +12,7 @@ import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-poli
  * protocol `step.*` events and the resolver hook fire once per step.
  */
 export interface InstrumentationAttemptScope {
+  readonly traceSessionId?: string;
   readonly channelAudience?: ChannelAudience;
   readonly attemptId: string;
   readonly attemptIndex: number;
@@ -36,6 +37,8 @@ export interface InstrumentationModelRef {
 
 /** Token usage for one model call. A field is absent when the provider omits it. */
 export interface InstrumentationUsage {
+  /** Provider-reported cost in US dollars. Absent when the provider omits pricing. */
+  readonly costUsd?: number;
   readonly inputTokenDetails?: {
     readonly cacheReadTokens?: number;
     readonly cacheWriteTokens?: number;
@@ -121,12 +124,13 @@ export function attemptIdempotencyKey(scope: InstrumentationAttemptScope): strin
   return `step:${scope.attemptId}`;
 }
 
-/** One model call occurs per AI SDK step within an eve attempt. */
+/** Identifies one provider call, including retries, within an AI SDK step. */
 export function modelCallIdempotencyKey(
   scope: InstrumentationAttemptScope,
   stepNumber: number,
+  callIndex: number,
 ): string {
-  return `model:${scope.attemptId}:${String(stepNumber)}`;
+  return `model:${scope.attemptId}:${String(stepNumber)}:${String(callIndex)}`;
 }
 
 export function toolCallIdempotencyKey(
@@ -163,6 +167,7 @@ export interface InstrumentationChannelDeliveryInput {
 }
 
 interface InstrumentationChannelDeliveryScope {
+  readonly traceSessionId?: string;
   readonly agentName?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;
   readonly idempotencyKey: string;
@@ -266,6 +271,7 @@ export interface InstrumentationStepAttemptStartedEvent {
 }
 
 export interface InstrumentationSessionStartedEvent {
+  readonly traceSessionId?: string;
   readonly type: "session.started";
   readonly agentName?: string;
   readonly channelKind?: string;
@@ -350,6 +356,7 @@ export type InstrumentationSessionTransitionEvent =
   | InstrumentationSessionFailedEvent;
 
 export interface InstrumentationTurnStartedEvent {
+  readonly traceSessionId?: string;
   readonly type: "turn.started";
   readonly agentName?: string;
   readonly currentPrincipal?: InstrumentationPrincipalSummary;
@@ -528,6 +535,7 @@ export interface InstrumentationActionFailedEvent {
   readonly idempotencyKey: string;
   readonly outcome: Exclude<InstrumentationActionOutcome, "completed">;
   readonly scope: InstrumentationAttemptScope;
+  readonly usage?: InstrumentationUsage;
 }
 
 export type InstrumentationActionTerminalEvent =

@@ -1,5 +1,6 @@
-import { type JSONSchema7, jsonSchema } from "ai";
+import { asSchema, type JSONSchema7, jsonSchema } from "ai";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, type Session } from "#context/keys.js";
@@ -16,7 +17,6 @@ import {
 } from "#harness/provider-tool-schemas.js";
 import type { JsonObject } from "#shared/json.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
-import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
@@ -24,6 +24,8 @@ import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import type { ApprovalContext } from "#approval/definition.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
+import { BASH_INPUT_SCHEMA, BASH_OUTPUT_SCHEMA } from "#tools/provided/bash.js";
+import { toInputSchema, UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 
 function getJsonSchema(tool: unknown): unknown {
   return (tool as { inputSchema: { jsonSchema: unknown } }).inputSchema.jsonSchema;
@@ -62,6 +64,7 @@ async function resolveApproval(
 
 async function executeSdkTool(input: {
   readonly abortSignal?: AbortSignal;
+  readonly messages?: ToolExecuteOptions["messages"];
   readonly tool: unknown;
   readonly toolCallId?: string;
   readonly toolInput?: unknown;
@@ -77,7 +80,7 @@ async function executeSdkTool(input: {
   expect(execute).toBeTypeOf("function");
   return await execute!(input.toolInput ?? {}, {
     abortSignal: input.abortSignal,
-    messages: [],
+    messages: input.messages ?? [],
     toolCallId: input.toolCallId ?? "call_1",
   });
 }
@@ -132,57 +135,6 @@ describe("buildToolSet", () => {
 
     expect(receivedOptions?.abortSignal).toBe(abortController.signal);
     expect(receivedOptions?.toolCallId).toBe("call_observe");
-  });
-
-  it("registers background calls at execution when input callbacks are skipped or repeated", async () => {
-    const observedBatches: string[][] = [];
-    const ctx = new ContextContainer();
-    ctx.set(BackgroundToolExecutorKey, {
-      async execute({ batch }) {
-        observedBatches.push(batch.calls.map((call) => call.callId));
-        return { status: "working" };
-      },
-    });
-    const tools: HarnessToolMap = new Map([
-      [
-        "background_work",
-        {
-          description: "Start background work.",
-          execute: async () => ({ status: "working" }),
-          execution: "background",
-          inputSchema: jsonSchema({ type: "object" }),
-          name: "background_work",
-          workflowId: "workflow//test//background_work",
-        },
-      ],
-    ]);
-
-    const result = buildToolSet({ tools });
-    const backgroundTool = result.background_work as typeof result.background_work & {
-      readonly onInputAvailable: (input: {
-        readonly input: unknown;
-        readonly toolCallId: string;
-      }) => void;
-    };
-    await contextStorage.run(ctx, async () => {
-      await executeSdkTool({
-        tool: backgroundTool,
-        toolCallId: "approved-call",
-        toolInput: { task: "resume" },
-      });
-
-      backgroundTool.onInputAvailable({
-        input: { task: "new" },
-        toolCallId: "new-call",
-      });
-      await executeSdkTool({
-        tool: backgroundTool,
-        toolCallId: "new-call",
-        toolInput: { task: "new" },
-      });
-    });
-
-    expect(observedBatches).toEqual([["approved-call"], ["approved-call", "new-call"]]);
   });
 
   it("passes the AI SDK abort signal to the authored tool context", async () => {
@@ -338,6 +290,44 @@ describe("buildToolSet", () => {
     expect(receivedCallId).toBe("call_observe");
   });
 
+  it("passes the AI SDK step messages to the authored tool context", async () => {
+    let receivedMessages: ToolContext["messages"] | undefined;
+    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
+      [
+        "observe_messages",
+        {
+          description: "Observe the step messages.",
+          execute: createToolExecuteWithAuth({
+            execute(_input, ctx) {
+              receivedMessages = (ctx as ToolContext).messages;
+              return { ok: true };
+            },
+            scope: "observe_messages",
+          }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "observe_messages",
+        },
+      ],
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "session-1",
+      turn: { id: "turn-1", sequence: 0 },
+    });
+    const messages: ToolExecuteOptions["messages"] = [
+      { content: "Can I talk to a person?", role: "user" },
+      { content: "Let me check.", role: "assistant" },
+    ];
+
+    const result = buildToolSet({ tools });
+    await contextStorage.run(ctx, () =>
+      executeSdkTool({ messages, tool: result.observe_messages }),
+    );
+
+    expect(receivedMessages).toEqual(messages);
+  });
+
   it("passes through the input schema to the SDK tool", () => {
     const schema = {
       properties: { city: { type: "string" } },
@@ -385,6 +375,70 @@ describe("buildToolSet", () => {
     expect(getOutputJsonSchema(result.summarize)).toEqual(outputSchema);
   });
 
+  it("hands the AI SDK only its own schema type, whatever produced the tool schema", async () => {
+    // The AI SDK converts and parses Zod-vendored schemas with the app's own
+    // Zod copy. Handing it anything but its own `Schema` lets a mismatched
+    // copy crash mid-stream, so every source is lowered first.
+    const remote = {
+      anyOf: [{ required: ["page_id"] }, { required: ["title"] }],
+      patternProperties: { "^x-": { type: "string" } },
+      properties: {
+        page_id: { format: "uuid", type: "string" },
+        target: {
+          allOf: [
+            { properties: { id: { type: "string" } }, type: "object" },
+            { properties: { kind: { enum: ["page", "database"] } }, type: "object" },
+          ],
+        },
+        title: { type: "string" },
+      },
+      type: "object",
+    };
+    const sources: Record<string, HarnessToolDefinition["inputSchema"]> = {
+      authored_zod: z
+        .object({ id: z.string() })
+        .and(z.object({ tags: z.record(z.string(), z.string()) })),
+      framework: BASH_INPUT_SCHEMA,
+      native: jsonSchema({ type: "object" }),
+      remote: toInputSchema(remote),
+      unspecified: UNSPECIFIED_INPUT_SCHEMA,
+    };
+    const tools: HarnessToolMap = new Map(
+      Object.entries(sources).map(([name, inputSchema]) => [
+        name,
+        {
+          description: name,
+          execute: async (input: unknown) => input,
+          inputSchema,
+          name,
+          outputSchema: name === "framework" ? BASH_OUTPUT_SCHEMA : undefined,
+        },
+      ]),
+    );
+
+    const result = buildToolSet({ tools });
+
+    for (const tool of Object.values(result)) {
+      for (const schema of [tool.inputSchema, tool.outputSchema]) {
+        if (schema === undefined) continue;
+        expect(Reflect.get(schema, Symbol.for("vercel.ai.schema"))).toBe(true);
+        expect(asSchema(schema)).toBe(schema);
+        expect("~standard" in schema).toBe(false);
+        expect("_zod" in schema).toBe(false);
+      }
+    }
+    expect(getJsonSchema(result.remote)).toEqual(remote);
+    await expect(
+      asSchema(result.remote!.inputSchema).validate?.({
+        page_id: "1f2e3d4c5b6a79881f2e3d4c5b6a7988",
+        target: { id: "db-1", kind: "database" },
+      }),
+    ).resolves.toMatchObject({ success: true });
+    await expect(asSchema(result.remote!.inputSchema).validate?.({})).resolves.toMatchObject({
+      success: false,
+    });
+  });
+
   it("supports client-side tools without server executors", () => {
     const schema = {
       properties: { prompt: { type: "string" } },
@@ -393,18 +447,18 @@ describe("buildToolSet", () => {
     } satisfies JSONSchema7;
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       [
-        "ask_question",
+        "pick_color",
         {
-          description: "Ask the user a question.",
+          description: "Let the client pick a color.",
           inputSchema: jsonSchema(schema),
-          name: "ask_question",
+          name: "pick_color",
         },
       ],
     ]);
 
-    const result = buildToolSet({ capabilities: { requestInput: true }, tools });
+    const result = buildToolSet({ tools });
 
-    expect(getJsonSchema(result.ask_question)).toEqual(schema);
+    expect(getJsonSchema(result.pick_color)).toEqual(schema);
   });
 
   it("omits tools whose name is in disabledProviderTools", () => {
@@ -565,32 +619,6 @@ describe("buildToolSet", () => {
     });
 
     expect(result.web_search).toBeUndefined();
-  });
-
-  it("omits ask_question when the session cannot request input", () => {
-    const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
-      [
-        "ask_question",
-        {
-          behavior: {
-            availability: ["requires-request-input"],
-            handling: { kind: "request-input", request: "question" },
-          },
-          description: "Ask the user a question.",
-          inputSchema: jsonSchema({}),
-          name: "ask_question",
-        },
-      ],
-    ]);
-
-    const withoutCapability = buildToolSet({ tools });
-    const withCapability = buildToolSet({
-      capabilities: { requestInput: true },
-      tools,
-    });
-
-    expect(withoutCapability.ask_question).toBeUndefined();
-    expect(withCapability.ask_question).toBeDefined();
   });
 
   it("defaults to no approval when no approval function is set", async () => {
@@ -1146,7 +1174,6 @@ describe("buildToolSet", () => {
       });
       expect(capturedCtx?.session.auth.current?.principalId).toBe("user_current");
       expect(capturedCtx?.getSandbox).toBeTypeOf("function");
-      expect(capturedCtx?.getSkill).toBeTypeOf("function");
     });
 
     it("uses the active principal for schedule approval", async () => {

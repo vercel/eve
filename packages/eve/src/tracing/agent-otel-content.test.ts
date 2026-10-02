@@ -14,7 +14,6 @@ const FRAMEWORK_MESSAGE_KINDS = [
   "context.state",
   "context.compaction",
   "memory.load",
-  "execution.background_task",
   "execution.continuation",
   "execution.retry",
 ] as const satisfies readonly FrameworkMessageKind[];
@@ -60,13 +59,13 @@ describe("GenAI message attributes", () => {
       genAiInputMessagesAttribute([
         { content: "A real user message.", kind: "user", role: "user" },
         {
-          content: "A background task completed.",
-          kind: "execution.background_task",
+          content: "Continue the interrupted turn.",
+          kind: "execution.continuation",
           role: "user",
         },
       ]),
     ).toBe(
-      '[{"kind":"user","parts":[{"content":"A real user message.","type":"text"}],"role":"user"},{"kind":"execution.background_task","parts":[{"content":"A background task completed.","type":"text"}],"role":"user"}]',
+      '[{"kind":"user","parts":[{"content":"A real user message.","type":"text"}],"role":"user"},{"kind":"execution.continuation","parts":[{"content":"Continue the interrupted turn.","type":"text"}],"role":"user"}]',
     );
   });
 
@@ -151,6 +150,48 @@ describe("GenAI message attributes", () => {
     ).toBe(
       '[{"finish_reason":"tool_call","parts":[{"content":"Working.","type":"text"},{"arguments":{"message":"echo"},"id":"call-1","name":"delegate","type":"tool_call"}],"role":"assistant"}]',
     );
+  });
+
+  it.each([
+    ["near the limit", "line of instructions\n".repeat(1500)],
+    ["over the limit", "x".repeat(CONTENT_ATTRIBUTE_LIMIT * 2)],
+    ["escape-heavy", "\\\n".repeat(9000)],
+  ])("keeps %s system instructions as valid capped JSON", (_, instructions) => {
+    const attribute = genAiSystemInstructionsAttribute(instructions);
+
+    expect(attribute).toBeDefined();
+    expect(attribute!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+    const parsed = JSON.parse(attribute!) as Array<Record<string, unknown>>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]).toMatchObject({ type: "text" });
+    expect(parsed[0]?.content).toEqual(expect.stringContaining("… [truncated]"));
+  });
+
+  it("marks a message truncated when oversized non-text parts are omitted", () => {
+    const attribute = genAiInputMessagesAttribute([
+      {
+        content: [
+          { text: "partial assistant answer", type: "text" },
+          {
+            input: { payload: "x".repeat(CONTENT_ATTRIBUTE_LIMIT) },
+            toolCallId: "call-1",
+            toolName: "delegate",
+            type: "tool-call",
+          },
+        ],
+        role: "assistant",
+      },
+    ]);
+
+    expect(attribute).toBeDefined();
+    expect(attribute!.length).toBeLessThanOrEqual(CONTENT_ATTRIBUTE_LIMIT);
+    const parsed = JSON.parse(attribute!) as Array<Record<string, unknown>>;
+    expect(parsed).toEqual([
+      {
+        parts: [{ content: "partial assistant answer… [truncated]", type: "text" }],
+        role: "assistant",
+      },
+    ]);
   });
 });
 

@@ -40,13 +40,13 @@ describe("coalesceDeliveries", () => {
   it("preserves the only caller in a delivery batch", () => {
     expect(
       coalesceDeliveries([
-        { kind: "deliver", payloads: [{ context: ["background"] }] },
+        { kind: "deliver", payloads: [{ context: ["earlier context"] }] },
         { caller, kind: "deliver", payloads: [{ message: "question" }] },
       ]),
     ).toEqual({
       caller,
       kind: "deliver",
-      payloads: [{ context: ["background"] }, { message: "question" }],
+      payloads: [{ context: ["earlier context"] }, { message: "question" }],
     });
   });
 
@@ -108,22 +108,19 @@ describe("coalesceTurnInputs", () => {
   it("preserves a framework kind only when all merged message content shares it", () => {
     expect(
       coalesceTurnInputs(
-        markFrameworkStepInput({ message: "first" }, "execution.background_task"),
-        markFrameworkStepInput({ message: "second" }, "execution.background_task"),
+        markFrameworkStepInput({ message: "first" }, "execution.continuation"),
+        markFrameworkStepInput({ message: "second" }, "execution.continuation"),
       ),
-    ).toEqual(markFrameworkStepInput({ message: "first\n\nsecond" }, "execution.background_task"));
+    ).toEqual(markFrameworkStepInput({ message: "first\n\nsecond" }, "execution.continuation"));
     expect(
-      coalesceTurnInputs(
-        markFrameworkStepInput({ message: "first" }, "execution.background_task"),
-        {
-          message: "second",
-        },
-      ),
+      coalesceTurnInputs(markFrameworkStepInput({ message: "first" }, "execution.continuation"), {
+        message: "second",
+      }),
     ).toEqual({ message: "first\n\nsecond" });
     expect(
       coalesceTurnInputs(
         markFrameworkStepInput({ message: "first" }, "context.instruction"),
-        markFrameworkStepInput({ message: "second" }, "execution.background_task"),
+        markFrameworkStepInput({ message: "second" }, "execution.continuation"),
       ),
     ).toEqual({ message: "first\n\nsecond" });
   });
@@ -294,7 +291,7 @@ describe("createFrameworkUserMessage", () => {
     "context.state",
     "context.compaction",
     "memory.load",
-    "execution.background_task",
+    "execution.continuation",
     "execution.continuation",
     "execution.retry",
   ] as const)("recognizes %s as a framework message kind", (kind) => {
@@ -303,13 +300,13 @@ describe("createFrameworkUserMessage", () => {
 
   it("brands framework-authored user-role messages", () => {
     const message = createFrameworkUserMessage(
-      "execution.background_task",
-      "Background task task_1 completed.",
+      "execution.continuation",
+      "Continue the interrupted turn.",
     );
 
     expect(message).toEqual({
-      content: "Background task task_1 completed.",
-      kind: "execution.background_task",
+      content: "Continue the interrupted turn.",
+      kind: "execution.continuation",
       role: "user",
     });
     expect(isFrameworkUserMessage(message)).toBe(true);

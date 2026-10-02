@@ -66,14 +66,14 @@ describe("createSession#cancel", () => {
     });
   });
 
-  it("forwards the turn guard and owned-task scope", async () => {
+  it("forwards the turn guard", async () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime);
 
-    await session.cancel({ tasks: true, turnId: "turn_2" });
+    await session.cancel({ turnId: "turn_2" });
 
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel", tasks: true, turnId: "turn_2" },
+      command: { kind: "cancel", turnId: "turn_2" },
       sessionId: "sess_1",
     });
   });

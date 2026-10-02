@@ -9,6 +9,7 @@ import type {
   MemoryToolsContext,
   MemoryTurnStartedContext,
 } from "#public/memory/index.js";
+import type { ToolSchema } from "#tools/schema.js";
 
 interface TestTool<TInput> {
   execute(input: TInput, context: never): unknown;
@@ -341,6 +342,39 @@ describe("fileMemory", () => {
   });
 });
 
+describe("fileMemory tool schemas", () => {
+  // Tool schemas reach the app's AI SDK, which would run a Zod schema through
+  // the app's own Zod copy, so these must be plain JSON Schema.
+  it("advertises plain JSON Schema and validates input against it", async () => {
+    const tools = await fileMemory({ backend: inMemory() }).tools?.(toolsContext());
+    const save = tools?.save_memory?.inputSchema as ToolSchema<{ text: string }>;
+    const remove = tools?.remove_memory?.inputSchema as ToolSchema<{ index: number }>;
+
+    expect(save).not.toHaveProperty("_zod");
+    expect(remove).not.toHaveProperty("_zod");
+    expect(save["~standard"].jsonSchema.input({ target: "draft-2020-12" })).toEqual({
+      type: "object",
+      properties: { text: { type: "string", minLength: 1 } },
+      required: ["text"],
+      additionalProperties: false,
+    });
+    expect(remove["~standard"].jsonSchema.input({ target: "draft-2020-12" })).toEqual({
+      type: "object",
+      properties: { index: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER } },
+      required: ["index"],
+      additionalProperties: false,
+    });
+
+    expect(await save["~standard"].validate({ text: "Likes tea." })).toEqual({
+      value: { text: "Likes tea." },
+    });
+    expect(await save["~standard"].validate({ text: "" })).toHaveProperty("issues");
+    expect(await remove["~standard"].validate({ index: 3 })).toEqual({ value: { index: 3 } });
+    expect(await remove["~standard"].validate({ index: 1.5 })).toHaveProperty("issues");
+    expect(await remove["~standard"].validate({ index: -1 })).toHaveProperty("issues");
+  });
+});
+
 async function resolveTools(provider: MemoryProvider) {
   const tools = await provider.tools?.(toolsContext());
   const saveMemory = tools?.save_memory;
@@ -405,9 +439,6 @@ function operationContext() {
   return {
     abortSignal: signal,
     getSandbox: async () => {
-      throw new Error("not available");
-    },
-    getSkill: () => {
       throw new Error("not available");
     },
     memory: {

@@ -142,7 +142,68 @@ describe("normalizeProviderToolHistory", () => {
     expect(normalized.outcomeEndsResponse).toBe(true);
   });
 
-  it("normalizes provider-owned results when the turn also calls a local tool", () => {
+  it("starts a new assistant message after native provider results so replay keeps the answer after them", () => {
+    const call = (toolCallId: string) =>
+      ({
+        type: "tool-call",
+        toolCallId,
+        toolName: "web_search",
+        input: { query: toolCallId },
+        providerExecuted: true,
+      }) as const;
+    const result = (toolCallId: string) =>
+      ({
+        type: "tool-result",
+        toolCallId,
+        toolName: "web_search",
+        output: { type: "json", value: { results: [toolCallId] } },
+      }) as const;
+    const reasoning = {
+      type: "reasoning",
+      text: "Search both.",
+      providerOptions: { anthropic: { signature: "sig" } },
+    } as const;
+    const messages: ModelMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          reasoning,
+          { type: "text", text: "I'll look both up." },
+          call("search-1"),
+          call("search-2"),
+          result("search-1"),
+          result("search-2"),
+          { type: "text", text: "The Knicks and the Hurricanes won." },
+        ],
+      },
+    ];
+
+    const normalized = normalizeProviderToolHistory({
+      messages,
+      providerExecutedOutcomeIds: new Set(["search-1", "search-2"]),
+    });
+
+    expect(normalized.messages).toEqual([
+      {
+        role: "assistant",
+        content: [
+          reasoning,
+          { type: "text", text: "I'll look both up." },
+          call("search-1"),
+          call("search-2"),
+          result("search-1"),
+          result("search-2"),
+        ],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "The Knicks and the Hurricanes won." }],
+      },
+    ]);
+    expect(normalized.outcomeEndsResponse).toBe(false);
+  });
+
+  it("keeps local tool calls next to their results around provider-owned results", () => {
     const messages: ModelMessage[] = [
       {
         role: "assistant",
@@ -162,9 +223,22 @@ describe("normalizeProviderToolHistory", () => {
           },
           {
             type: "tool-call",
-            toolCallId: "todo-1",
-            toolName: "todo",
-            input: { todos: [] },
+            toolCallId: "read-1",
+            toolName: "read_file",
+            input: { filePath: "/workspace/a.ts" },
+          },
+          {
+            type: "tool-call",
+            toolCallId: "search-2",
+            toolName: "web_search",
+            input: { query: "Follow-up result" },
+            providerExecuted: true,
+          },
+          {
+            type: "tool-result",
+            toolCallId: "search-2",
+            toolName: "web_search",
+            output: { type: "json", value: { results: [] } },
           },
         ],
       },
@@ -173,9 +247,9 @@ describe("normalizeProviderToolHistory", () => {
         content: [
           {
             type: "tool-result",
-            toolCallId: "todo-1",
-            toolName: "todo",
-            output: { type: "json", value: { todos: [] } },
+            toolCallId: "read-1",
+            toolName: "read_file",
+            output: { type: "json", value: { content: "" } },
           },
         ],
       },
@@ -183,7 +257,7 @@ describe("normalizeProviderToolHistory", () => {
 
     const normalized = normalizeProviderToolHistory({
       messages,
-      providerExecutedOutcomeIds: new Set(["search-1"]),
+      providerExecutedOutcomeIds: new Set(["search-1", "search-2"]),
     });
 
     expect(normalized.messages).toEqual([
@@ -215,9 +289,10 @@ describe("normalizeProviderToolHistory", () => {
         content: [
           {
             type: "tool-call",
-            toolCallId: "todo-1",
-            toolName: "todo",
-            input: { todos: [] },
+            toolCallId: "search-2",
+            toolName: "web_search",
+            input: { query: "Follow-up result" },
+            providerExecuted: false,
           },
         ],
       },
@@ -226,9 +301,31 @@ describe("normalizeProviderToolHistory", () => {
         content: [
           {
             type: "tool-result",
-            toolCallId: "todo-1",
-            toolName: "todo",
-            output: { type: "json", value: { todos: [] } },
+            toolCallId: "search-2",
+            toolName: "web_search",
+            output: { type: "json", value: { results: [] } },
+          },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "read-1",
+            toolName: "read_file",
+            input: { filePath: "/workspace/a.ts" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "read-1",
+            toolName: "read_file",
+            output: { type: "json", value: { content: "" } },
           },
         ],
       },

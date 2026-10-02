@@ -6,6 +6,7 @@ import {
   buildExtensionPackage,
   tryReadExtensionBuildConfig,
 } from "#internal/nitro/host/build-extension.js";
+import { withExtensionBuildLock } from "#internal/nitro/host/extension-build-lock.js";
 
 export interface ExtensionBuildCliLogger {
   error(message: string): void;
@@ -34,7 +35,10 @@ export async function runExtensionBuildCommand(
     packageName: config.packageName,
     sourceRoot: config.sourceRoot,
   });
-  const outputDir = await buildExtensionPackage(appRoot, config);
+  const outputDir = await withExtensionBuildLock(
+    appRoot,
+    async () => await buildExtensionPackage(appRoot, config),
+  );
   const theme = createCliTheme();
   logger.log(
     renderCliTaggedLine(theme, {

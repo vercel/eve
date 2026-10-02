@@ -54,7 +54,7 @@ function conversationSpans(): LocalTraceSpan[] {
     "gen_ai.input.messages": JSON.stringify([
       { parts: [{ content: "hi", type: "text" }], role: "user" },
     ]),
-    "ai.prompt.system": "You are a test assistant.",
+    "gen_ai.system_instructions": '[{"content":"You are a test assistant.","type":"text"}]',
     "ai.response.text": "reply",
   });
   const action = span("d".repeat(16), "agent.action", 2100, 2400, turn.spanId, {

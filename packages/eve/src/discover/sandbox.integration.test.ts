@@ -51,10 +51,31 @@ describe("discoverSandboxSource (memory)", () => {
     expect(result.sandboxWorkspace).toBeNull();
   });
 
+  it("accepts a Dockerfile without a sandbox module or workspace", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "sandbox/Dockerfile": "FROM ghcr.io/vercel/eve:latest\n",
+      },
+    });
+
+    const rootEntries = await readSortedDirectoryEntries(project.source, project.agentRoot);
+    const result = await discoverSandboxSource({
+      rootEntries,
+      rootPath: project.agentRoot,
+      source: project.source,
+    });
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.sandbox).toBeNull();
+    expect(result.sandboxWorkspace).toBeNull();
+  });
+
   it("discovers a workspace folder without a sandbox module", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {
         "sandbox/workspace/notes.md": "seed",
+        "sandbox/workspace/check.test.ts": "test resource",
+        "sandbox/workspace/__tests__/check.ts": "test resource",
       },
     });
 
@@ -69,7 +90,11 @@ describe("discoverSandboxSource (memory)", () => {
     expect(result.sandbox).toBeNull();
     expect(result.sandboxWorkspace).not.toBeNull();
     expect(result.sandboxWorkspace?.logicalPath).toBe("sandbox/workspace");
-    expect(result.sandboxWorkspace?.rootEntries).toEqual(["notes.md"]);
+    expect(result.sandboxWorkspace?.rootEntries).toEqual([
+      "__tests__/",
+      "check.test.ts",
+      "notes.md",
+    ]);
   });
 
   it("discovers both a sandbox module and a workspace folder", async () => {

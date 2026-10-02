@@ -45,6 +45,8 @@ describe("resolveInstrumentationLayout", () => {
   it("ignores files that are not instrumentation modules", () => {
     const otel = writeInstrumentationProvider("otel.ts");
     writeInstrumentationProvider("README.md");
+    writeInstrumentationProvider("otel.test.ts");
+    writeInstrumentationProvider("otel.spec.mts");
 
     expect(resolveInstrumentationLayout({ agentRoot }).modulePathsBySlot).toEqual({ otel });
   });

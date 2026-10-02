@@ -26,10 +26,9 @@ import type { EveEvalContext } from "eve/evals";
 //   t1' push a deployment update that adds a skill — skills materialize into
 //       the sandbox workspace resources, so the sandbox version hash rotates
 //       for anything executing the new code
-//   t3  session A no longer sees the file: its next request runs on the new
-//       deployment, whose changed sandbox resources rotate the sandbox key
-//   t4  a NEW session B adopts the new deployment: the added skill loads and
-//       shapes the reply
+//   t3  a new session B adopts the changed sandbox resources and does not see
+//       session A's file
+//   t4  session B loads the added skill and follows its instructions
 //
 // Requires EVE_E2E_REDEPLOY_ALIAS plus Vercel credentials and a linked
 // fixture directory (the e2e-vercel workflow provides all three); skips
@@ -40,6 +39,7 @@ const ALIAS_SETTLE_MATCHES = 5;
 
 const FILE_PATH = "/workspace/redeploy-note.txt";
 const FILE_TOKEN = "sandbox-redeploy-ok-K4W";
+const DYNAMIC_TURN_REPLAY_TOKEN = "dynamic-turn-replay-ok-V6N";
 
 const INSTRUCTIONS_PATH = resolve("agent", "instructions.md");
 const INSTRUCTIONS_MARKER = "redeploy-instructions-marker-T8B";
@@ -83,6 +83,18 @@ export default defineEval({
 
     const originalInstructions = await readFile(INSTRUCTIONS_PATH, "utf8");
     try {
+      // Resolve a turn-scoped dynamic tool, then park that same turn inside a
+      // workflow tool. Resuming after the deployment switch below must restore
+      // the dynamic callback in the new process before the model calls it.
+      const dynamicParked = await t.send("DYNAMIC-TURN-REPLAY-START");
+      const dynamicSession = dynamicParked.session;
+      dynamicSession.requireInputRequest({
+        display: "confirmation",
+        optionIds: ["approve", "cancel"],
+        toolName: "dynamic-turn-replay-gate",
+      });
+      dynamicParked.calledTool("dynamic-turn-replay-gate", { status: "pending", count: 1 });
+
       // t0: write a marker file into this session's sandbox workspace.
       const write = await t.send(
         `Run the bash command \`printf %s ${FILE_TOKEN} > ${FILE_PATH}\`. ` +
@@ -100,6 +112,14 @@ export default defineEval({
       await deployToAlias(t, alias, "instructions");
       await waitForAliasToServe(t, INSTRUCTIONS_MARKER);
 
+      const dynamicResumed = await dynamicSession.respondAll("approve");
+      dynamicResumed.expectOk();
+      dynamicResumed.calledTool("dynamic_turn_replay_probe", {
+        count: 1,
+        output: new RegExp(DYNAMIC_TURN_REPLAY_TOKEN),
+      });
+      dynamicResumed.messageIncludes(DYNAMIC_TURN_REPLAY_TOKEN);
+
       // t2: the same session reattaches to the same sandbox.
       const persist = await session.send(
         `Run the bash command \`cat ${FILE_PATH}\` and reply with the file contents verbatim.`,
@@ -114,9 +134,11 @@ export default defineEval({
       await deployToAlias(t, alias, "skill");
       await waitForAliasToServe(t, `"${SKILL_NAME}"`);
 
-      // t3: the next request is accepted by the new deployment. Its changed
-      // sandbox resources rotate the versioned key, so the old file is absent.
-      const probe = await session.send(
+      // Direct provider resume intentionally rejects session A because its
+      // immutable artifact generation no longer matches this deployment. A
+      // fresh session adopts the changed resources and starts clean.
+      const adopted = await t.session();
+      const probe = await adopted.send(
         `Run the bash command \`test -f ${FILE_PATH} && echo present || echo absent\` ` +
           "and reply with the command output verbatim.",
       );
@@ -124,9 +146,6 @@ export default defineEval({
       probe.calledTool("bash", { output: /absent/ });
       probe.messageIncludes("absent");
 
-      // t4: a fresh session adopts the new deployment — the added skill is
-      // advertised and usable.
-      const adopted = await t.session();
       const skill = await adopted.send(
         `Load the \`${SKILL_NAME}\` skill and follow its instructions exactly.`,
       );
@@ -164,33 +183,24 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
       ? []
       : ["--env", `EVE_SANDBOX_IMAGE_TAG=${process.env.EVE_SANDBOX_IMAGE_TAG}`]),
   ];
-  // vc alias does not infer the team from the project link the way deploy
+  // vercel alias does not infer the team from the project link the way deploy
   // does, so pass the scope explicitly.
   const scopeArgs =
     process.env.VERCEL_ORG_ID === undefined ? [] : ["--scope", process.env.VERCEL_ORG_ID];
   const deploy = await execFileAsync(
-    "pnpm",
-    [
-      "exec",
-      "vc",
-      "deploy",
-      "--prebuilt",
-      "--yes",
-      "--target=preview",
-      ...deploymentEnvArgs,
-      ...tokenArgs,
-    ],
+    "vercel",
+    ["deploy", "--prebuilt", "--yes", "--target=preview", ...deploymentEnvArgs, ...tokenArgs],
     EXEC_OPTIONS,
   );
   const deploymentUrl = deploy.stdout.trim().split("\n").at(-1)?.trim();
   if (deploymentUrl === undefined || !deploymentUrl.startsWith("https://")) {
-    throw new Error(`vc deploy did not print a deployment URL; got: ${deploy.stdout}`);
+    throw new Error(`vercel deploy did not print a deployment URL; got: ${deploy.stdout}`);
   }
   t.log(`deployed ${deploymentUrl} (${phase}); aliasing ${alias}`);
 
   await execFileAsync(
-    "pnpm",
-    ["exec", "vc", "alias", "set", deploymentUrl, alias, ...tokenArgs, ...scopeArgs],
+    "vercel",
+    ["alias", "set", deploymentUrl, alias, ...tokenArgs, ...scopeArgs],
     EXEC_OPTIONS,
   );
 }

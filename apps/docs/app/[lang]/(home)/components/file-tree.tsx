@@ -59,7 +59,8 @@ city in the world.`,
     code: `import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "spacexai/grok-4.7",
+  model: "openai/gpt-6-luna-fast",
+  reasoning: "high",
 });`,
   },
   {
@@ -111,16 +112,21 @@ export default defineTool({
     NavIcon: IconSandbox,
     description:
       "Every agent includes an isolated sandbox. Add sandbox/sandbox.ts to swap in any backend or customize its setup.",
-    code: `import { defineSandbox } from
-  "eve/sandbox";
+    code: `import { DefaultSandbox,
+  defineSandbox } from "eve/sandbox";
 
-export default defineSandbox({
-  async bootstrap({ sandbox }) {
-    await sandbox.run(
-      "git clone repo /workspace"
-    );
-  },
-});`,
+export const environment =
+  DefaultSandbox.environment({
+    prepare: async (sandbox) => {
+      await sandbox.run({
+        command: "git clone repo /workspace"
+      });
+    }
+  });
+
+export default defineSandbox(() =>
+  environment.open()
+);`,
   },
   {
     label: "Channels",
@@ -164,7 +170,8 @@ export default defineMcpClientConnection({
 
 export default defineAgent({
   description: "Investigate questions",
-  model: "spacexai/grok-4.7",
+  model: "openai/gpt-6-luna-fast",
+  reasoning: "high",
 });`,
   },
   {

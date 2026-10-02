@@ -61,7 +61,7 @@ Every authored directory has a typed helper. Import each from the matching subpa
 | `defineInstructions(...)`                                       | `eve/instructions`                    | `instructions.ts` (or `instructions.md`)         |
 | `defineTool(...)`, `defineDynamic(...)`, `disableTool(...)`     | `eve/tools`                           | `tools/<name>.ts`                                |
 | `bash`, `readFile`, `writeFile`, and other provided definitions | `eve/tools/<name>`                    | `tools/<name>.ts`                                |
-| `defineSkill(...)`, `getSkill(...)`                             | `eve/skills`                          | `skills/<name>.ts` (or `skills/<name>.md`)       |
+| `defineSkill(...)`                                              | `eve/skills`                          | `skills/<name>.ts` (or `skills/<name>.md`)       |
 | `defineHook(...)`                                               | `eve/hooks`                           | `hooks/<slug>.ts`                                |
 | `defineChannel(...)`, `POST`, `GET`                             | `eve/channels`                        | `channels/<name>.ts`                             |
 | `eveChannel(...)`, `slackChannel(...)`, `vercelOidc(...)`       | `eve/channels/eve`, `/slack`, `/auth` | reused from `channels/<name>.ts`                 |
@@ -73,7 +73,6 @@ Runtime accessors live on the subpath that owns the concern:
 
 - `getSession()` — current session, turn, auth, parent lineage (`eve/context`)
 - `getSandbox()` — live sandbox handle for the current agent (`eve/sandbox`)
-- `getSkill(identifier)` — handle for a named skill visible to the current agent (`eve/skills`)
 - `getContext(key)`, `requireContext(key)`, `hasContext(key)`, `setContext(key)`, `ensureContext(key, factory)` — unified context helpers (`eve/context`)
 
 The complete API reference, including types and lower-level runtime primitives, is in the [TypeScript API Reference](https://eve.dev/docs/reference/typescript-api).

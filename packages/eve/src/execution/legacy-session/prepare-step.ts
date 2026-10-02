@@ -11,7 +11,7 @@ export async function prepareLegacySessionStep(rawInput: unknown) {
   "use step";
   const input = readLegacyTurnInput(rawInput);
   const originalSession = readLegacySnapshot(input.sessionState);
-  const sessionState = importConversation(originalSession);
+  const { history, sessionState } = importConversation(originalSession);
   const world = await getWorld();
   const run = await world.runs.get(sessionState.sessionId);
   const args: unknown = await hydrateWorkflowArguments(
@@ -47,6 +47,7 @@ export async function prepareLegacySessionStep(rawInput: unknown) {
       ...input,
       retention: input.retention ?? (driverInput.retention as LegacyTurnInput["retention"]),
     },
+    history,
     originalSession,
     sessionState,
     serializedContext,

@@ -1,9 +1,7 @@
-import { BoundaryHookError } from "#shared/boundary-hook-error.js";
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   type FilePart,
   jsonSchema,
-  type LanguageModelCallEndEvent,
   type LanguageModel,
   type ModelMessage,
   ToolLoopAgent,
@@ -14,28 +12,22 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import { dispatchDynamicInstructionEvent } from "#context/dynamic-instruction-lifecycle.js";
-import { dispatchDynamicSkillEvent } from "#context/dynamic-skill-lifecycle.js";
-import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
-import { defineMemory } from "#public/memory/index.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
+  ConversationIdKey,
   HistoryStateKey,
-  InitiatorAuthKey,
   LiveStepDynamicModelSelectionKey,
   ParentSessionKey,
   SandboxKey,
-  ScheduleIdKey,
   SessionTraceSeedKey,
   SessionKey,
   SessionIdKey,
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
-  SessionDynamicSubagentSelectionsKey,
+  SessionDynamicToolMetadataKey,
   StepDynamicToolMetadataKey,
-  TurnTaskDeliveryKey,
 } from "#context/keys.js";
-import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { attachClientContext } from "#internal/client-context.js";
@@ -44,10 +36,8 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
-import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { registerDurableDynamicCallback } from "#tools/durable-callbacks.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import {
   ConversationContextKey,
@@ -59,7 +49,6 @@ import { compactMessages, shouldCompact } from "#harness/compaction.js";
 import {
   createFrameworkUserMessage,
   createUserMessage,
-  markFrameworkStepInput,
   type HarnessModelMessage,
 } from "#harness/messages.js";
 import {
@@ -72,22 +61,16 @@ import {
   modelFacingAuthorizationOutput,
   requestAuthorization,
 } from "#harness/authorization.js";
-import {
-  getPendingInputRequestIds,
-  hasDeferredStepInput,
-  hasPendingInputBatch,
-  appendPendingInputBatch,
-} from "#harness/input-requests.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
-import { registerWorkflowToolRun } from "#harness/workflow-tool-runs.js";
-import { getPendingCoordinationBatch } from "#harness/coordination.js";
-import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
-import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
+import { hasPendingInputBatch, appendPendingInputBatch } from "#harness/input-requests.js";
+import { getPendingInputBatches } from "#harness/pending-input-batches.js";
+import { getPendingCoordinationBatch, pendingCoordinationCallIds } from "#harness/coordination.js";
 import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
-import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
+import { countRunUsage } from "#execution/agent-sessions/usage.js";
+import { createTask, writeTaskTable } from "#execution/tasks/table.js";
+import { SessionLimitDeclinedError, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getSessionUsageLimitViolation,
   getSessionTokenUsage,
@@ -104,14 +87,11 @@ import {
   type SessionInstrumentation,
 } from "#instrumentation/runtime.js";
 import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
-import {
-  CONDITIONAL_DELIVERY_INSTRUCTION,
-  EMPTY_DELIVERY_SENTINEL,
-} from "#shared/empty-delivery.js";
-import {
-  TASK_DELIVERY_INITIATING_INSTRUCTION,
-  TASK_DELIVERY_SETTLED_INSTRUCTION,
-} from "#tasks/delivery-context.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
@@ -186,7 +166,6 @@ function setConversationContext(
     audience,
     channel: { kind, name: "test" },
     environment,
-    mode: "conversation",
     principalType: "anonymous",
   });
 }
@@ -297,33 +276,14 @@ function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession 
   };
 }
 
-const analysisTaskAnnouncement =
-  '[Task state]\n{"tasks":[{"name":"analysis","status":"pending","taskId":"analysis"}]}';
-
-function recordBackgroundTask(session: HarnessSession, taskId = "analysis"): HarnessSession {
-  return registerWorkflowToolRun(session, {
-    callId: taskId,
-    toolName: { kind: "report-probe", name: taskId }.name,
-    lifetime: "session" as const,
-    origin: { turnId: activeTurnId(getHarnessEmissionState(session.state)), stepIndex: 0 },
-    address: { runId: `run-${taskId}`, hookToken: `token-${taskId}` },
-    task: {
-      dispatchContext: { auth: { current: null, initiator: null } },
-      metadata: { kind: "report-probe", name: taskId },
-      taskId,
-    },
-  });
-}
-
 function createTestConfig(
-  mode: RunMode = "conversation",
   emit?: HarnessEmitFn,
   overrides?: Partial<ToolLoopHarnessConfig>,
 ): ToolLoopHarnessConfig {
   return {
+    capabilities: { requestInput: true },
     handleEvent: emit,
     instrumentation: declaredInstrumentation,
-    mode,
     resolveModel: vi.fn().mockResolvedValue({} as LanguageModel),
     tools: new Map([
       [
@@ -338,6 +298,65 @@ function createTestConfig(
     ]),
     ...overrides,
   };
+}
+
+function mockApprovalAlongsideWorkflowTask(): void {
+  const gateToolCall = {
+    input: { action: "run" },
+    toolCallId: "gate-1",
+    toolName: "add",
+    type: "tool-call" as const,
+  };
+  const delegateToolCall = {
+    input: { message: "probe" },
+    toolCallId: "delegate-1",
+    toolName: "delegate",
+    type: "tool-call" as const,
+  };
+  setupMockAgent({
+    content: [
+      gateToolCall,
+      { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
+      delegateToolCall,
+    ],
+    finishReason: "tool-calls",
+    response: {
+      messages: [
+        {
+          content: [
+            gateToolCall,
+            { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
+            delegateToolCall,
+          ],
+          role: "assistant",
+        },
+      ],
+    },
+    responseMessages: [
+      {
+        content: [
+          {
+            output: { type: "text", value: "/workspace" },
+            toolCallId: "call-1",
+            toolName: "bash",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      {
+        content: [
+          gateToolCall,
+          { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
+          delegateToolCall,
+        ],
+        role: "assistant",
+      },
+    ],
+    text: "",
+    toolCalls: [gateToolCall, delegateToolCall],
+    toolResults: [],
+  });
 }
 
 function createDelegationToolMap(): ToolLoopHarnessConfig["tools"] {
@@ -363,43 +382,27 @@ function createDelegationToolMap(): ToolLoopHarnessConfig["tools"] {
   ]);
 }
 
-function createQuestionToolMap(): ToolLoopHarnessConfig["tools"] {
+/** A `task` workflow tool, so the agent can start tasks and gets the task tools. */
+function createTaskToolMap(): ToolLoopHarnessConfig["tools"] {
+  const workflowId = "workflow//./agent/tools/research//task";
   return new Map([
     [
-      "ask_question",
+      "research",
       {
         behavior: {
-          availability: ["requires-request-input"],
-          handling: { kind: "request-input", request: "question" },
+          availability: [],
+          handling: {
+            kind: "dispatch",
+            target: { entryPoint: "task", kind: "workflow-tool-call", workflowId },
+          },
         },
-        description: "Ask the user a question.",
+        description: "Research in the background.",
         inputSchema: jsonSchema({ type: "object" }),
-        name: "ask_question",
+        name: "research",
+        workflowId,
       },
     ],
   ]);
-}
-
-function createScheduleContext(): ContextContainer {
-  const ctx = new ContextContainer();
-  ctx.set(AuthKey, SCHEDULE_APP_AUTH);
-  ctx.set(InitiatorAuthKey, SCHEDULE_APP_AUTH);
-  ctx.set(ScheduleIdKey, "test-schedule");
-  return ctx;
-}
-
-function createScheduledUserContext(): ContextContainer {
-  const auth = {
-    attributes: {},
-    authenticator: "fixture-user",
-    principalId: "scheduled-owner",
-    principalType: "user" as const,
-  };
-  const ctx = new ContextContainer();
-  ctx.set(AuthKey, auth);
-  ctx.set(InitiatorAuthKey, auth);
-  ctx.set(ScheduleIdKey, "dynamic-tasks");
-  return ctx;
 }
 
 function setDelegatedParent(ctx: ContextContainer): void {
@@ -409,6 +412,28 @@ function setDelegatedParent(ctx: ContextContainer): void {
     sessionId: "session-parent",
     turn: { id: "turn-parent", sequence: 0 },
   });
+}
+
+const DELEGATED_SPEND = {
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  costUsd: 0.25,
+  inputTokens: 100,
+  outputTokens: 20,
+};
+
+/** A session whose delegated agents already spent {@link DELEGATED_SPEND}. */
+function withDelegatedSpend(overrides?: Parameters<typeof createTestSession>[0]): HarnessSession {
+  return countRunUsage(createTestSession(overrides), DELEGATED_SPEND);
+}
+
+function lastSessionEvent<T extends "session.waiting" | "session.failed">(
+  events: readonly UnstampedMessageStreamEvent[],
+  type: T,
+): Extract<UnstampedMessageStreamEvent, { type: T }> | undefined {
+  return events.findLast(
+    (event): event is Extract<UnstampedMessageStreamEvent, { type: T }> => event.type === type,
+  );
 }
 
 function createEventCollector(): {
@@ -898,7 +923,7 @@ describe("createToolLoopHarness", () => {
     };
     const dynamicModelMessages: Array<readonly ModelMessage[]> = [];
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", handleEvent, {
+      createTestConfig(handleEvent, {
         dispatchDynamicModelEvent: async ({ messages }) => {
           dynamicModelMessages.push(messages);
         },
@@ -944,7 +969,7 @@ describe("createToolLoopHarness", () => {
     const handleEvent = vi.fn();
     const dispatchDynamicModelEvent = vi.fn();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", handleEvent, {
+      createTestConfig(handleEvent, {
         dispatchDynamicModelEvent,
         historyProjector: () => {
           throw new Error("projection failed");
@@ -960,6 +985,31 @@ describe("createToolLoopHarness", () => {
     expect(ToolLoopAgent).not.toHaveBeenCalled();
   });
 
+  it("emits settled prose history with turn.completed", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const completedHistory: Array<readonly ModelMessage[]> = [];
+    const handleEvent: HarnessEmitFn = async (event, messages) => {
+      if (event.type === "turn.completed") completedHistory.push(messages ?? []);
+    };
+
+    await createToolLoopHarness(createTestConfig(handleEvent))(createTestSession(), {
+      message: "Hi",
+    });
+
+    expect(completedHistory).toEqual([
+      [
+        { content: "Hi", kind: "user", role: "user" },
+        { content: "Hello!", role: "assistant" },
+      ],
+    ]);
+  });
+
   it("parks when model finishes with stop", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -969,7 +1019,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const config = createTestConfig("conversation");
+    const config = createTestConfig();
     const runStep = createToolLoopHarness(config);
     const session = createTestSession();
 
@@ -1012,7 +1062,7 @@ describe("createToolLoopHarness", () => {
       },
     ]);
     const { emit, events } = createEventCollector();
-    const config = createTestConfig("conversation", emit, {
+    const config = createTestConfig(emit, {
       tools: new Map([
         [
           "web_search",
@@ -1069,7 +1119,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const runStep = createToolLoopHarness(createTestConfig("conversation"));
+    const runStep = createToolLoopHarness(createTestConfig());
     const blankMessages: Array<string | UserContent> = [
       "",
       " \n\t",
@@ -1099,7 +1149,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const runStep = createToolLoopHarness(createTestConfig("conversation"));
+    const runStep = createToolLoopHarness(createTestConfig());
     await runStep(
       createTestSession({
         history: [
@@ -1125,84 +1175,6 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it.each([
-    ["literal", EMPTY_DELIVERY_SENTINEL],
-    ["HTML-escaped", "&lt;eve-empty-delivery/&gt;"],
-  ])(
-    "parks without delivery when a terminal response is only the %s sentinel",
-    async (_, sentinel) => {
-      const message = ` \n${sentinel}\t `;
-      setupMockAgent({
-        finishReason: "stop",
-        response: {
-          messages: [
-            {
-              content: message,
-              role: "assistant",
-            },
-          ],
-        },
-        text: message,
-        toolCalls: [],
-        toolResults: [],
-      });
-
-      const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
-
-      const result = await runStep(createTestSession(), { message: "Hi" });
-
-      expect(result.next).toBeNull();
-      expect(result.session.history).toEqual([
-        { content: "Hi", kind: "user" as const, role: "user" },
-      ]);
-      expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          data: expect.objectContaining({ message: null }),
-          type: "message.completed",
-        }),
-      );
-    },
-  );
-
-  it.each([EMPTY_DELIVERY_SENTINEL, "&lt;eve-empty-delivery/&gt;"])(
-    "delivers and persists explanations that quote %s",
-    async (sentinel) => {
-      const message = `The pending-task instruction requires \`${sentinel}\` and no other text.`;
-      setupMockAgent({
-        finishReason: "stop",
-        response: { messages: [{ content: message, role: "assistant" }] },
-        text: message,
-        toolCalls: [],
-        toolResults: [],
-      });
-
-      const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
-      const result = await runStep(createTestSession(), { message: "Hi" });
-
-      expect(result.next).toBeNull();
-      expect(result.session.history).toEqual([
-        { content: "Hi", kind: "user" as const, role: "user" },
-        { content: message, role: "assistant" },
-      ]);
-      expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          data: expect.objectContaining({ message }),
-          type: "message.completed",
-        }),
-      );
-      expect(events).not.toContainEqual(
-        expect.objectContaining({
-          data: expect.objectContaining({ message: null }),
-          type: "message.completed",
-        }),
-      );
-    },
-  );
-
   it("keeps executable tools directly available to the model", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -1212,7 +1184,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const config = createTestConfig("conversation");
+    const config = createTestConfig();
     const runStep = createToolLoopHarness(config);
     const session = createTestSession();
 
@@ -1222,291 +1194,6 @@ describe("createToolLoopHarness", () => {
     expect(agentCall).toBeDefined();
     expect(agentCall!.tools).toHaveProperty("add");
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
-  });
-
-  it("registers atomic background tool calls before AI SDK execution", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, {
-        tools: new Map([
-          [
-            "background_work",
-            {
-              description: "Start background work.",
-              execute: vi.fn(),
-              execution: "background" as const,
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "background_work",
-              workflowId: "workflow//test//background_work",
-            },
-          ],
-        ]),
-      }),
-    );
-    await runStep(createTestSession(), { message: "Hi" });
-
-    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as
-      | (ConstructorParameters<typeof ToolLoopAgent>[0] & {
-          onLanguageModelCallEnd?: (event: LanguageModelCallEndEvent) => Promise<void> | void;
-        })
-      | undefined;
-    const backgroundTool = agentCall?.tools?.background_work as
-      | {
-          execute?: (input: unknown, options: { toolCallId: string }) => Promise<unknown>;
-          onInputAvailable?: (input: {
-            input: unknown;
-            toolCallId: string;
-          }) => Promise<void> | void;
-        }
-      | undefined;
-    expect(agentCall?.onLanguageModelCallEnd).toBeTypeOf("function");
-    expect(backgroundTool?.onInputAvailable).toBeTypeOf("function");
-
-    await backgroundTool!.onInputAvailable!({ input: { value: 1 }, toolCallId: "call-a" });
-    await agentCall!.onLanguageModelCallEnd!({
-      content: [
-        {
-          input: { value: 1 },
-          toolCallId: "call-a",
-          toolName: "background_work",
-          type: "tool-call",
-        },
-        {
-          input: { value: 2 },
-          toolCallId: "call-b",
-          toolName: "background_work",
-          type: "tool-call",
-        },
-      ],
-    } as never);
-
-    let registeredCallIds: string[] = [];
-    const ctx = new ContextContainer();
-    ctx.set(BackgroundToolExecutorKey, {
-      async execute({ batch }) {
-        registeredCallIds = batch.calls.map((call) => call.callId);
-        return { ok: true };
-      },
-    });
-    await contextStorage.run(ctx, () => backgroundTool!.execute!({}, { toolCallId: "call-a" }));
-
-    expect(registeredCallIds).toEqual(["call-a", "call-b"]);
-  });
-
-  it("announces parked agents as user-role content before the user message, outside the system prompt", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, {
-        historyProjector: ({ messages }) => [...messages],
-        resolveModel: vi.fn().mockResolvedValue(
-          new MockLanguageModelV3({
-            modelId: "claude-sonnet-4-5",
-            provider: "anthropic.messages",
-          }),
-        ),
-      }),
-    );
-    const session = createTestSession({
-      state: {
-        [AGENT_HANDLES_STATE_KEY]: {
-          handles: [
-            {
-              address: {
-                continuationToken: "private-token",
-                kind: "agent/local",
-                sessionId: "child-session-123456789012",
-              },
-              identity: {
-                id: "ag_research:123456789012",
-                name: "research",
-                nodeId: "subagents/research",
-              },
-              lastStatus: "waiting",
-              phase: "parked",
-            },
-          ],
-        },
-      },
-    });
-
-    const result = await runStep(session, { message: "Hi" });
-
-    const { instructions } = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
-    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-      generate: ReturnType<typeof vi.fn>;
-    };
-    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
-    // The volatile listing stays out of the system prompt (prompt cache) and
-    // rides history as a labeled, framework-injected user message.
-    expect(instructions).toBe("You are a test assistant.");
-    expect(messages).toContainEqual({
-      content: expect.stringContaining(
-        '<agent id="ag_research:123456789012" name="research">waiting</agent>',
-      ),
-      kind: "context.state",
-      role: "user",
-    });
-    // The announcement precedes the turn's actual user message.
-    expect(messages.at(-1)).toEqual({ content: "Hi", kind: "user" as const, role: "user" });
-    expect(messages.at(-2)).toEqual({
-      content: expect.stringContaining("[Agents]"),
-      kind: "context.state",
-      role: "user",
-    });
-    expect(JSON.stringify({ instructions, messages })).not.toContain("private-token");
-    expect(result.session.history).toContainEqual({
-      content: expect.stringContaining('<agent id="ag_research:123456789012"'),
-      kind: "context.state",
-      role: "user",
-    });
-  });
-
-  it("skips the agents snippet when no handle is parked", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const runStep = createToolLoopHarness(createTestConfig("conversation"));
-    const session = createTestSession({
-      state: {
-        [AGENT_HANDLES_STATE_KEY]: {
-          handles: [
-            {
-              identity: {
-                id: "ag_research:123456789012",
-                name: "research",
-                nodeId: "subagents/research",
-              },
-              operation: {
-                callId: "call-1",
-                id: "op-1",
-                kind: "start",
-                parentTurnId: "turn-1",
-              },
-              phase: "starting",
-              target: { continuationToken: "private-token", kind: "agent/local" },
-            },
-          ],
-        },
-      },
-    });
-
-    await runStep(session, { message: "Hi" });
-
-    const call = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-      generate: ReturnType<typeof vi.fn>;
-    };
-    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
-    expect(JSON.stringify(call?.instructions ?? "")).not.toContain("<agents>");
-    expect(JSON.stringify(messages)).not.toContain("<agents>");
-  });
-
-  // Regression: a child settling used to append the updated <agents> listing
-  // to history as an assistant message. On a resume with no new user input the
-  // request then ended with `assistant`, which Anthropic rejects ("this model
-  // does not support assistant message prefill"). The announcement is
-  // user-role content, so on a no-input resume it trails the tool results
-  // and the request stays user-final.
-  it("keeps a no-input resume provider-valid when a parked handle is announced", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Done.", role: "assistant" }] },
-      text: "Done.",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const runStep = createToolLoopHarness(createTestConfig("conversation"));
-    const session = createTestSession({
-      history: [
-        { content: "Delegate this.", kind: "user" as const, role: "user" },
-        {
-          content: [
-            {
-              input: { message: "do it" },
-              toolCallId: "call-1",
-              toolName: "research",
-              type: "tool-call",
-            },
-          ],
-          role: "assistant",
-        },
-        {
-          content: [
-            {
-              output: { type: "text", value: "child answered" },
-              toolCallId: "call-1",
-              toolName: "research",
-              type: "tool-result",
-            },
-          ],
-          role: "tool",
-        },
-      ],
-      state: {
-        [AGENT_HANDLES_STATE_KEY]: {
-          handles: [
-            {
-              address: {
-                continuationToken: "private-token",
-                kind: "agent/local",
-                sessionId: "child-session-123456789012",
-              },
-              identity: {
-                id: "ag_research:123456789012",
-                name: "research",
-                nodeId: "subagents/research",
-              },
-              lastStatus: "child answered",
-              phase: "parked",
-            },
-          ],
-        },
-      },
-    });
-
-    const result = await runStep(session);
-
-    const { instructions } = vi.mocked(ToolLoopAgent).mock.calls[0]![0];
-    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
-      generate: ReturnType<typeof vi.fn>;
-    };
-    const messages = agent.generate.mock.calls[0]?.[0].messages as ModelMessage[];
-    // The request ends user-final: the announcement trails the tool results.
-    expect(messages.at(-1)).toEqual({
-      content: expect.stringContaining('<agent id="ag_research:123456789012"'),
-      kind: "context.state",
-      role: "user",
-    });
-    expect(messages.filter((message) => message.role === "assistant")).toHaveLength(1);
-    // The volatile listing never rides the system prompt (prompt cache).
-    expect(JSON.stringify(instructions ?? "")).not.toContain("<agents>");
-    // The announcement persists append-only so the next step's diff gate
-    // sees it and does not re-announce an unchanged listing.
-    expect(result.session.history.at(-2)).toEqual({
-      content: expect.stringContaining("[Agents]"),
-      kind: "context.state",
-      role: "user",
-    });
   });
 
   it.each([undefined, "low", "provider-default"] as const)(
@@ -1541,7 +1228,7 @@ describe("createToolLoopHarness", () => {
           },
         });
       });
-      const config = createTestConfig("conversation", undefined, {
+      const config = createTestConfig(undefined, {
         dispatchDynamicModelEvent,
         resolveModel,
       });
@@ -1569,7 +1256,7 @@ describe("createToolLoopHarness", () => {
       const prepared = await prepareStep({
         context: undefined,
         messages: [],
-        model: null,
+        model: selectedModel,
         stepNumber: 0,
         steps: [],
       });
@@ -1603,7 +1290,7 @@ describe("createToolLoopHarness", () => {
       });
       return "selected-model" as LanguageModel;
     });
-    const config = createTestConfig("conversation", undefined, {
+    const config = createTestConfig(undefined, {
       resolveModel,
     });
     const runStep = createToolLoopHarness(config);
@@ -1644,7 +1331,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const config = createTestConfig("conversation", undefined, {
+    const config = createTestConfig(undefined, {
       resolveModel: vi.fn().mockResolvedValue("selected-model" as LanguageModel),
     });
     const runStep = createToolLoopHarness(config);
@@ -1689,7 +1376,6 @@ describe("createToolLoopHarness", () => {
     const hidden = { content: "Hidden context", kind: "user" as const, role: "user" as const };
     const runStep = createToolLoopHarness(
       createTestConfig(
-        "conversation",
         async (event, messages) => {
           if (event.type === "turn.started") snapshots.push(messages);
         },
@@ -1714,8 +1400,9 @@ describe("createToolLoopHarness", () => {
   });
 
   it("emits a terminal failure when no dynamic model selection is active", async () => {
+    const logs = captureLogRecords();
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
     const session = createTestSession({
       agent: {
         dynamicModel: true,
@@ -1740,9 +1427,13 @@ describe("createToolLoopHarness", () => {
     const turnFailed = events.find((event) => event.type === "turn.failed");
     expect(turnFailed?.data.message).toContain("Dynamic model selection is required");
     expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "model selection failed terminally" }),
+    );
   });
 
   it("emits a terminal failure when a turn-scoped dynamic model resolver throws", async () => {
+    const logs = captureLogRecords();
     const events: UnstampedMessageStreamEvent[] = [];
     const emit: HarnessEmitFn = async (event) => {
       events.push(event);
@@ -1750,7 +1441,7 @@ describe("createToolLoopHarness", () => {
         throw new DynamicModelSelectionError(new Error("flag service unavailable"));
       }
     };
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const result = await runStep(createTestSession({ outputSchema: { type: "object" } }), {
       message: "Hi",
@@ -1767,6 +1458,9 @@ describe("createToolLoopHarness", () => {
     const turnFailed = events.find((event) => event.type === "turn.failed");
     expect(turnFailed?.data.message).toBe("flag service unavailable");
     expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "model selection failed terminally" }),
+    );
   });
 
   it("keeps declared subagent tools visible in delegated sessions", async () => {
@@ -1778,7 +1472,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const config = createTestConfig("conversation", undefined, {
+    const config = createTestConfig(undefined, {
       tools: createDelegationToolMap(),
     });
     const runStep = createToolLoopHarness(config);
@@ -1825,7 +1519,7 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
+      createTestConfig(emit, { tools: createDelegationToolMap() }),
     );
 
     const result = await runStep(createTestSession({ rootSessionId: "root-session" }), {
@@ -1850,133 +1544,32 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("does not park dynamic background subagent calls on the turn", async () => {
-    setupMockAgent({
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              {
-                input: { message: "investigate" },
-                toolCallId: "call-dynamic",
-                toolName: "researcher",
-                type: "tool-call",
-              },
-            ],
-            role: "assistant",
-          },
-        ],
-      },
-      text: "",
-      toolCalls: [
-        {
-          input: { message: "investigate" },
-          toolCallId: "call-dynamic",
-          toolName: "researcher",
-          type: "tool-call",
-        },
-      ],
-      toolResults: [],
+  it("records a response policy for an approval parked alongside a workflow task", async () => {
+    mockApprovalAlongsideWorkflowTask();
+    const delegation = createDelegationToolMap();
+    const tools = new Map(delegation);
+    tools.set("add", {
+      ...delegation.get("add")!,
+      approval: { request: () => "user-approval", response: () => ({ status: "allowed" }) },
     });
-    const ctx = new ContextContainer();
-    ctx.set(SessionDynamicSubagentSelectionsKey, {
-      "subagents/researcher": {
-        agentConfig: {
-          description: "Research the request.",
-          model: { id: "openai/gpt-5.5" },
-        },
-        kind: "subagent",
-        prepared: createPreparedRuntimeSubagentTool({
-          description: "Research the request.",
-          kind: "subagent",
-          logicalPath: "subagents/researcher",
-          name: "researcher",
-          nodeId: "subagents/researcher",
-          sourceId: "subagents/researcher",
-          sourceKind: "module",
-        }),
-      },
+    const runStep = createToolLoopHarness(createTestConfig(undefined, { tools }));
+
+    const parked = await runStep(createPendingBashApprovalSession(), {
+      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
     });
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
-    const result = await contextStorage.run(ctx, () =>
-      runStep(createTestSession(), { message: "Research this." }),
-    );
-
-    expect(events.find((event) => event.type === "actions.requested")?.data.actions).toEqual([
-      expect.objectContaining({
-        callId: "call-dynamic",
-        input: { message: "investigate" },
-        kind: "tool-call",
-        toolName: "researcher",
-      }),
+    expect(getPendingCoordinationBatch(parked.session.state)).toBeDefined();
+    expect(getPendingInputBatches(parked.session.state)).toEqual([
+      expect.objectContaining({ responseAuthRequiredRequestIds: ["approval-gate"] }),
     ]);
-    expect(getPendingCoordinationBatch(result.session.state)).toBeUndefined();
   });
 
   it("parks on both batches when one step carries a workflow task and an approval", async () => {
-    const gateToolCall = {
-      input: { action: "run" },
-      toolCallId: "gate-1",
-      toolName: "add",
-      type: "tool-call" as const,
-    };
-    const delegateToolCall = {
-      input: { message: "probe" },
-      toolCallId: "delegate-1",
-      toolName: "delegate",
-      type: "tool-call" as const,
-    };
-    setupMockAgent({
-      content: [
-        gateToolCall,
-        { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
-        delegateToolCall,
-      ],
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              gateToolCall,
-              { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
-              delegateToolCall,
-            ],
-            role: "assistant",
-          },
-        ],
-      },
-      responseMessages: [
-        {
-          content: [
-            {
-              output: { type: "text", value: "/workspace" },
-              toolCallId: "call-1",
-              toolName: "bash",
-              type: "tool-result",
-            },
-          ],
-          role: "tool",
-        },
-        {
-          content: [
-            gateToolCall,
-            { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
-            delegateToolCall,
-          ],
-          role: "assistant",
-        },
-      ],
-      text: "",
-      toolCalls: [gateToolCall, delegateToolCall],
-      toolResults: [],
-    });
+    mockApprovalAlongsideWorkflowTask();
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
+      createTestConfig(emit, { tools: createDelegationToolMap() }),
     );
 
     const parked = await runStep(createPendingBashApprovalSession(), {
@@ -1999,53 +1592,13 @@ describe("createToolLoopHarness", () => {
       ),
     ).toHaveLength(1);
 
-    const parkedWithRunningDelegate = {
-      ...parked.session,
-      state: {
-        ...parked.session.state,
-        [AGENT_HANDLES_STATE_KEY]: {
-          handles: [
-            {
-              address: {
-                continuationToken: "delegate-token",
-                kind: "agent/local",
-                sessionId: "delegate-session",
-              },
-              identity: {
-                id: "ag_delegate:delegate",
-                name: "delegate",
-                nodeId: "workers",
-              },
-              operation: {
-                callId: "delegate-1",
-                id: "delegate-operation",
-                kind: "start",
-                parentTurnId: "turn_0",
-              },
-              phase: "running",
-            },
-          ],
-        },
-      },
-    } satisfies HarnessSession;
-    const reparked = await runStep(parkedWithRunningDelegate, {
+    const reparked = await runStep(parked.session, {
       runtimeActionResults: [
         {
           callId: "delegate-1",
-          kind: "subagent-result",
-          origin: "child",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "delegated-done" },
-            usageDelta: {
-              cacheReadTokens: 0,
-              cacheWriteTokens: 0,
-              inputTokens: 0,
-              outputTokens: 0,
-            },
-          },
+          kind: "tool-result",
           output: "delegated-done",
-          subagentName: "delegate",
+          toolName: "delegate",
         },
       ],
     });
@@ -2055,8 +1608,73 @@ describe("createToolLoopHarness", () => {
     expect(hasPendingInputBatch(reparked.session.state)).toBe(true);
     const toolMessages = reparked.session.history.filter((message) => message.role === "tool");
     expect(JSON.stringify(toolMessages)).toContain("delegated-done");
-    expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(1);
-    expect(events.at(-1)?.type).toBe("session.waiting");
+    expect(reparked.held).toEqual({ kind: "request" });
+    expect(events.at(-1)?.type).toBe("turn.waiting");
+  });
+
+  it("waits on a task_wait parked beside an approval, but not on an invalid task_cancel", async () => {
+    const gateToolCall = {
+      input: { action: "run" },
+      toolCallId: "gate-1",
+      toolName: "add",
+      type: "tool-call" as const,
+    };
+    const waitToolCall = {
+      input: {},
+      toolCallId: "wait-1",
+      toolName: "task_wait",
+      type: "tool-call" as const,
+    };
+    const invalidCancelToolCall = {
+      input: "not an object",
+      toolCallId: "cancel-1",
+      toolName: "task_cancel",
+      type: "tool-call" as const,
+    };
+    const assistantContent = [
+      gateToolCall,
+      { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" as const },
+      waitToolCall,
+      invalidCancelToolCall,
+    ];
+    setupMockAgent({
+      content: assistantContent,
+      finishReason: "tool-calls",
+      response: { messages: [{ content: assistantContent, role: "assistant" }] },
+      responseMessages: [
+        {
+          content: [
+            {
+              output: { type: "text", value: "/workspace" },
+              toolCallId: "call-1",
+              toolName: "bash",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+        { content: assistantContent, role: "assistant" },
+      ],
+      text: "",
+      toolCalls: [gateToolCall, waitToolCall, invalidCancelToolCall],
+      toolResults: [],
+    });
+    const tools: ToolLoopHarnessConfig["tools"] = new Map([
+      ...createDelegationToolMap(),
+      ...createTaskToolMap(),
+    ]);
+
+    const { emit } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit, { tools }));
+    const parked = await runStep(createPendingBashApprovalSession(), {
+      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+    });
+
+    expect(parked.next).toBeNull();
+    expect(hasPendingInputBatch(parked.session.state)).toBe(true);
+    const batch = getPendingCoordinationBatch(parked.session.state);
+    expect(batch?.tasks).toEqual([]);
+    expect(pendingCoordinationCallIds(batch!)).toEqual(["wait-1"]);
   });
 
   it("forwards the agent reasoning effort to the model call", async () => {
@@ -2109,6 +1727,81 @@ describe("createToolLoopHarness", () => {
       outputTokens: 3,
       sawCost: true,
     });
+  });
+
+  it("reports the session's running usage, delegated spend included, when the turn ends", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      providerMetadata: { gateway: { cost: "0.125" } },
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: {
+        inputTokenDetails: { cacheReadTokens: 2, cacheWriteTokens: 1 },
+        inputTokens: 7,
+        outputTokens: 3,
+      },
+    });
+    const { emit, events } = createEventCollector();
+
+    await createToolLoopHarness(createTestConfig(emit))(withDelegatedSpend(), { message: "Hi" });
+
+    expect(lastSessionEvent(events, "session.waiting")?.data.usage).toEqual({
+      cacheReadTokens: 2,
+      cacheWriteTokens: 1,
+      costUsd: 0.375,
+      inputTokens: 107,
+      outputTokens: 23,
+    });
+  });
+
+  it("reports no session cost on session.waiting when no model call reported one", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 7, outputTokens: 3 },
+    });
+    const { emit, events } = createEventCollector();
+
+    await createToolLoopHarness(createTestConfig(emit))(createTestSession(), { message: "Hi" });
+
+    expect(lastSessionEvent(events, "session.waiting")?.data.usage).toEqual({
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: undefined,
+      inputTokens: 7,
+      outputTokens: 3,
+    });
+  });
+
+  it("reports the session's usage on session.waiting when a failed model call parks the turn", async () => {
+    setupMockAgentError(new Error("Model blew up"));
+    const { emit, events } = createEventCollector();
+
+    await createToolLoopHarness(createTestConfig(emit))(withDelegatedSpend(), { message: "Hi" });
+
+    expect(lastSessionEvent(events, "session.waiting")?.data.usage).toEqual(DELEGATED_SPEND);
+  });
+
+  it("reports the session's usage on session.failed when model selection fails", async () => {
+    const emit: HarnessEmitFn = async (event) => {
+      events.push(event);
+      if (event.type === "turn.started") {
+        throw new DynamicModelSelectionError(new Error("flag service unavailable"));
+      }
+    };
+    const events: UnstampedMessageStreamEvent[] = [];
+
+    await createToolLoopHarness(createTestConfig(emit))(
+      withDelegatedSpend({ outputSchema: { type: "object" } }),
+      { message: "Hi" },
+    );
+
+    expect(lastSessionEvent(events, "session.failed")?.data.usage).toEqual(DELEGATED_SPEND);
   });
 
   it.each([
@@ -2184,7 +1877,7 @@ describe("createToolLoopHarness", () => {
     "fails fast after the $tokenKind limit when the session cannot request input",
     async (testCase) => {
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("task", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit, { capabilities: undefined }));
       const session = setTurnUsageState(createTestSession({ limits: testCase.limits }), {
         turnId: "turn_previous",
         ...testCase.usage,
@@ -2194,7 +1887,7 @@ describe("createToolLoopHarness", () => {
       const result = await runStep(session, { message: "Hi again" });
 
       expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-      expect(result.next).toEqual({ done: true, isError: true, output: testCase.message });
+      expect(result.next).toEqual({ done: true, output: "" });
       expect(events.map((event) => event.type)).toEqual([
         "session.started",
         "turn.started",
@@ -2233,123 +1926,9 @@ describe("createToolLoopHarness", () => {
 
   const LIMIT_REQUEST_ID = "test-session:limit:input:12";
 
-  it.each([false, true])(
-    "passes deferred input and history to turn resolvers while a session limit is open (memory: %s)",
-    async (withMemory) => {
-      const ctx = new ContextContainer();
-      ctx.set(SandboxKey, mockSandbox().access);
-      ctx.set(SessionIdKey, "test-session");
-      ctx.set(SessionKey, {
-        sessionId: "test-session",
-        auth: { current: null, initiator: null },
-        turn: { id: "turn_0", sequence: 0 },
-      });
-      const hidden = { content: "Hidden history", kind: "user" as const, role: "user" as const };
-      const snapshots: (readonly ModelMessage[])[] = [];
-      const recall = vi.fn(async () => ({
-        messages: [{ content: "Remembered context", id: "item" }],
-      }));
-      const memories = withMemory
-        ? [
-            {
-              ...defineMemory({
-                namespace: "test",
-                scope: "alice",
-                provider: { recall: { "turn.started": recall } },
-              }),
-              logicalPath: "memory/profile.ts",
-              slot: "profile",
-              sourceId: "memory/profile.ts",
-              sourceKind: "module" as const,
-              visibility: "scope" as const,
-            },
-          ]
-        : [];
-      const runStep = createToolLoopHarness(
-        createTestConfig(
-          "conversation",
-          async (event, messages) => {
-            const lifecycleMessages = await dispatchMemoryLifecycleEvent({
-              appRoot: "/app",
-              ctx,
-              event,
-              memories,
-              messages,
-              nodeId: "__root__",
-            });
-            await dispatchDynamicSkillEvent({
-              ctx,
-              event,
-              messages: lifecycleMessages,
-              resolvers: [
-                {
-                  eventNames: ["turn.started"],
-                  events: {
-                    "turn.started": (_event, context) => {
-                      snapshots.push((context as DynamicResolveContext).messages);
-                      return null;
-                    },
-                  },
-                  logicalPath: "skills/context.ts",
-                  slug: "context",
-                  sourceId: "skills/context.ts",
-                  sourceKind: "module",
-                },
-              ],
-            });
-          },
-          { historyProjector: ({ messages }) => messages.filter((message) => message !== hidden) },
-        ),
-      );
-      const first = await contextStorage.run(ctx, () =>
-        runStep({ ...createLimitReachedSession(), history: [hidden] }, { message: "Hi again" }),
-      );
-      const second = await contextStorage.run(ctx, () =>
-        runStep(
-          first.session,
-          attachClientContext(
-            {
-              context: ["Current context"],
-              message: "Alice has a follow-up question.",
-            },
-            ["Current page"],
-          ),
-        ),
-      );
-
-      expect(snapshots).toHaveLength(2);
-      expect(snapshots[1]).toContainEqual({ content: "Hi again", kind: "user", role: "user" });
-      expect(snapshots[1]).not.toContain(hidden);
-      expect(snapshots[1]?.slice(-3)).toEqual([
-        { content: "Current page", kind: "context.instruction", role: "user" },
-        { content: "Current context", kind: "context.instruction", role: "user" },
-        { content: "Alice has a follow-up question.", kind: "user", role: "user" },
-      ]);
-      expect(
-        second.session.history.some(
-          (message) => message.content === "Alice has a follow-up question.",
-        ),
-      ).toBe(false);
-      expect(second.next).toBeNull();
-      expect(ToolLoopAgent).not.toHaveBeenCalled();
-      if (withMemory) {
-        expect(recall).toHaveBeenCalledTimes(2);
-        expect(snapshots[1]).toContainEqual({
-          content: "Remembered context",
-          kind: "memory.load",
-          role: "user",
-        });
-        expect(
-          second.session.history.some((message) => message.content === "Remembered context"),
-        ).toBe(true);
-        expect(second.session.state?.["eve.memory"]).toBeDefined();
-      }
-    },
-  );
-
   it("parks on a deterministic continuation prompt when the session reaches its token limit", async () => {
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const result = await runStep(createLimitReachedSession(), { message: "Hi again" });
 
@@ -2402,7 +1981,7 @@ describe("createToolLoopHarness", () => {
       { turnId: "turn_previous", ...usage, session: usage },
     );
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const parked = await runStep(reached, { message: "Hi again" });
     expect(events.find((event) => event.type === "input.requested")?.data).toMatchObject({
@@ -2442,7 +2021,7 @@ describe("createToolLoopHarness", () => {
       usage: { inputTokens: 7, outputTokens: 3 },
     });
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
@@ -2490,7 +2069,7 @@ describe("createToolLoopHarness", () => {
       usage: { inputTokens: 7, outputTokens: 3 },
     });
     const { emit } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
 
@@ -2505,7 +2084,7 @@ describe("createToolLoopHarness", () => {
 
   it("cancels the turn when the user declines the limit continuation prompt", async () => {
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
     const declined = runStep(parked.session, {
@@ -2517,48 +2096,21 @@ describe("createToolLoopHarness", () => {
     // execution layer settles as `turn.cancelled` → `session.waiting` (and,
     // for delegated sessions, escalates to a root-turn cancel). No failure
     // or completion events are emitted here.
-    await expect(declined).rejects.toSatisfy((error) => isSessionLimitDecline(error));
+    await expect(declined).rejects.toBeInstanceOf(SessionLimitDeclinedError);
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
     expect(events.some((event) => event.type === "session.completed")).toBe(false);
   });
 
-  it("declines with the same cancellation when the prompt was proxied to a task session", async () => {
+  it("fails a zero-budget session instead of raising a continuation that cannot grant tokens", async () => {
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
-      createTestConfig("task", emit, { capabilities: { requestInput: true } }),
-    );
-
-    const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
-    expect(parked.next).toBeNull();
-
-    const declined = runStep(parked.session, {
-      inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
-    });
-
-    // The delegating parent must never receive an error result it could
-    // retry against a fresh budget share: task-mode declines throw the same
-    // decline-flavored cancellation instead of failing the step.
-    await expect(declined).rejects.toSatisfy((error) => isSessionLimitDecline(error));
-    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-    expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
-  });
-
-  it("fails a zero-budget task instead of raising a continuation that cannot grant tokens", async () => {
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
-      createTestConfig("task", emit, { capabilities: { requestInput: true } }),
-    );
+    const runStep = createToolLoopHarness(createTestConfig(emit));
     const session = createTestSession({ limits: { maxInputTokensPerSession: 0 } });
 
     const result = await runStep(session, { message: "Hi again" });
 
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-    expect(result.next).toEqual({
-      done: true,
-      isError: true,
-      output: "The session reached its configured input token limit.",
-    });
+    expect(result.next).toEqual({ done: true, output: "" });
     expect(events.some((event) => event.type === "input.requested")).toBe(false);
   });
 
@@ -2572,7 +2124,7 @@ describe("createToolLoopHarness", () => {
       usage: { inputTokens: 7, outputTokens: 3 },
     });
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
     const reparked = await runStep(parked.session, { message: "also do this other thing" });
@@ -2649,13 +2201,14 @@ describe("createToolLoopHarness", () => {
       },
     ]);
 
-    const config = createTestConfig("conversation");
+    const config = createTestConfig();
     const runStep = createToolLoopHarness(config);
     await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
 
     const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as
       | {
           toolApproval?: (options: {
+            messages: readonly unknown[];
             toolCall: { input: unknown; toolCallId: string; toolName: string };
           }) => Promise<unknown>;
         }
@@ -2664,6 +2217,7 @@ describe("createToolLoopHarness", () => {
     await expect(
       contextStorage.run(ctx, () =>
         agentCall!.toolApproval?.({
+          messages: [],
           toolCall: {
             input: { line: "victoria" },
             toolCallId: "call_1",
@@ -2709,7 +2263,6 @@ describe("createToolLoopHarness", () => {
       },
     });
     const config: ToolLoopHarnessConfig = {
-      mode: "conversation",
       resolveModel: vi.fn().mockResolvedValue({} as LanguageModel),
       tools: new Map([
         [
@@ -2744,48 +2297,6 @@ describe("createToolLoopHarness", () => {
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
-  it("returns done when task mode finishes with stop", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const config = createTestConfig("task");
-    const runStep = createToolLoopHarness(config);
-    const session = createTestSession();
-
-    const result = await runStep(session, { message: "Hi" });
-
-    expect(result.next).toEqual({ done: true, output: "Hello!" });
-  });
-
-  it("returns an empty successful result when a task chooses not to deliver", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: EMPTY_DELIVERY_SENTINEL, role: "assistant" }] },
-      text: EMPTY_DELIVERY_SENTINEL,
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("task", emit));
-
-    const result = await runStep(createTestSession(), { message: "Check for alerts." });
-
-    expect(result.next).toEqual({ done: true, output: "" });
-    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({ message: null }),
-        type: "message.completed",
-      }),
-    );
-  });
-
   it("emits result.completed when a run output schema is requested", async () => {
     const schema = {
       properties: { title: { type: "string" } },
@@ -2795,7 +2306,7 @@ describe("createToolLoopHarness", () => {
     setupMockAgent(finalOutputResult("Here is the summary.", { title: "Done" }));
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
     const session = createTestSession({ outputSchema: schema });
 
     const result = await runStep(session, { message: "Hi" });
@@ -2829,68 +2340,6 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("produces structured task output when a schema is in effect", async () => {
-    const schema = {
-      properties: { summary: { type: "string" } },
-      required: ["summary"],
-      type: "object",
-    } as const;
-    setupMockAgent(finalOutputResult("Done.", { summary: "Done" }));
-
-    const config = createTestConfig("task");
-    const runStep = createToolLoopHarness(config);
-    const session = createTestSession({ outputSchema: schema });
-
-    const result = await runStep(session, { message: "Hi" });
-
-    expect(result.next).toEqual({ done: true, output: { summary: "Done" } });
-  });
-
-  it("parks a scheduled task turn while its launched background task is pending", async () => {
-    const schema = {
-      properties: { summary: { type: "string" } },
-      required: ["summary"],
-      type: "object",
-    } as const;
-    setupMockAgent(finalOutputResult("Starting.", { summary: "Pending" }));
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("task", emit));
-    const ctx = new ContextContainer();
-    ctx.set(ScheduleIdKey, "scheduled-report");
-    ctx.set(BackgroundToolExecutorKey, {
-      execute: vi.fn(),
-      hasPendingTasks: () => true,
-    });
-
-    const result = await contextStorage.run(ctx, () =>
-      runStep(createTestSession({ outputSchema: schema }), { message: "Run the report" }),
-    );
-
-    expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ output: { summary: "Pending" } });
-    expect(result.session.outputSchema).toBe(schema);
-    expect(events.some((event) => event.type === "result.completed")).toBe(false);
-    expect(events.at(-1)?.type).toBe("session.waiting");
-  });
-
-  it("fails a task turn as an error when structured output is not produced", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Plain prose, no tool call.", role: "assistant" }] },
-      text: "Plain prose, no tool call.",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const config = createTestConfig("task");
-    const runStep = createToolLoopHarness(config);
-    const session = createTestSession({ outputSchema: { type: "object" } });
-
-    const result = await runStep(session, { message: "Hi" });
-
-    expect(result.next).toMatchObject({ done: true, isError: true });
-  });
-
   it("does not offer final_output when no schema is in effect", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -2900,7 +2349,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const config = createTestConfig("conversation");
+    const config = createTestConfig();
     const runStep = createToolLoopHarness(config);
     const session = createTestSession();
 
@@ -2951,13 +2400,14 @@ describe("createToolLoopHarness", () => {
       toolResults: [{ toolCallId: "add-1", toolName: "add", output: "42" }],
     });
 
-    const config = createTestConfig("task");
+    const config = createTestConfig();
     const runStep = createToolLoopHarness(config);
     const session = createTestSession({ outputSchema: schema });
 
     const result = await runStep(session, { message: "Hi" });
 
-    expect(result.next).toEqual({ done: true, output: { title: "Done" } });
+    expect(result.next).toBeNull();
+    expect(result.settledTurn).toEqual({ output: { title: "Done" } });
     // The un-executed final_output call is never persisted, so no dangling
     // tool_use survives into history.
     expect(result.session.history).toEqual([
@@ -2965,6 +2415,197 @@ describe("createToolLoopHarness", () => {
       { content: '{"title":"Done"}', role: "assistant" },
     ]);
     expect(result.session.outputSchema).toBeUndefined();
+  });
+
+  describe("endsTurn tools", () => {
+    const reacted = { type: "text", value: "reacted" } as const;
+    const tools = new Map([
+      ...createTestConfig().tools,
+      [
+        "react",
+        {
+          description: "Reacts to the message.",
+          endsTurn: true,
+          execute: vi.fn().mockResolvedValue("reacted"),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "react",
+        },
+      ],
+    ]);
+
+    function stepCalling(
+      calls: readonly {
+        readonly executeOutput?: unknown;
+        readonly name: string;
+        readonly output: { readonly type: "error-text" | "text"; readonly value: string };
+      }[],
+    ): Record<string, unknown> {
+      const toolCalls = calls.map((call, index) => ({
+        input: {},
+        toolCallId: `call-${index}`,
+        toolName: call.name,
+      }));
+      return {
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            {
+              content: [
+                { text: "Reacting now.", type: "text" },
+                ...toolCalls.map((toolCall) => ({ ...toolCall, type: "tool-call" })),
+              ],
+              role: "assistant",
+            },
+            {
+              content: calls.map((call, index) => ({
+                output: call.output,
+                toolCallId: `call-${index}`,
+                toolName: call.name,
+                type: "tool-result",
+              })),
+              role: "tool",
+            },
+          ],
+        },
+        text: "Reacting now.",
+        toolCalls,
+        toolResults: calls.flatMap((call, index) =>
+          call.output.type === "error-text"
+            ? []
+            : [
+                {
+                  input: {},
+                  output: call.executeOutput ?? call.output.value,
+                  toolCallId: `call-${index}`,
+                  toolName: call.name,
+                },
+              ],
+        ),
+      };
+    }
+
+    function toolsWithReactEndsTurn(endsTurn: (output: unknown) => boolean | Promise<boolean>) {
+      return new Map([...tools, ["react", { ...tools.get("react")!, endsTurn }]]);
+    }
+
+    it("ends the turn without a reply when every call in the step ends the turn", async () => {
+      setupMockAgent(stepCalling([{ name: "react", output: reacted }]));
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig(emit, { tools }));
+
+      const result = await runStep(createTestSession(), { message: "Thanks, that fixed it!" });
+
+      expect(result.next).toBeNull();
+      expect(result.settledTurn).toEqual({ output: "" });
+      // The narration before the call stays interim, so no channel posts it.
+      expect(
+        events.flatMap((event) =>
+          event.type === "message.completed" ? [event.data.finishReason] : [],
+        ),
+      ).toEqual(["tool-calls"]);
+      expect(getCompatibilityEventTypes(events).slice(-2)).toEqual([
+        "turn.completed",
+        "session.waiting",
+      ]);
+      expect(result.session.history.at(-1)).toMatchObject({ role: "tool" });
+    });
+
+    it.each([
+      {
+        calls: [{ name: "react", output: { type: "error-text", value: "Reaction rejected." } }],
+        case: "the call fails",
+      },
+      {
+        calls: [
+          { name: "react", output: reacted },
+          { name: "add", output: { type: "text", value: "42" } },
+        ],
+        case: "another tool shares the step",
+      },
+      {
+        calls: [{ name: "react", output: reacted }],
+        case: "the session is delegated",
+        delegated: true,
+      },
+      {
+        calls: [{ name: "react", output: reacted }],
+        case: "the turn requests structured output",
+        outputSchema: { properties: {}, type: "object" },
+      },
+    ] as const)("continues the turn when $case", async ({ calls, ...options }) => {
+      setupMockAgent(stepCalling(calls));
+      const runStep = createToolLoopHarness(createTestConfig(undefined, { tools }));
+      const ctx = new ContextContainer();
+      if ("delegated" in options) setDelegatedParent(ctx);
+      const outputSchema = "outputSchema" in options ? options.outputSchema : undefined;
+
+      const result = await contextStorage.run(ctx, () =>
+        runStep(createTestSession({ outputSchema }), { message: "Thanks, that fixed it!" }),
+      );
+
+      expect(result.next).toBe(runStep);
+      expect(result.settledTurn).toBeUndefined();
+    });
+
+    it.each([
+      {
+        case: "a root session",
+        description:
+          "Reacts to the message.\n\nCalling this tool ends your turn once it succeeds: do not write a reply or call other tools in the same step. If it fails, you will see the error and can continue.",
+      },
+      { case: "a delegated session", delegated: true, description: "Reacts to the message." },
+      {
+        case: "a structured-output turn",
+        description: "Reacts to the message.",
+        outputSchema: { properties: {}, type: "object" },
+      },
+      { case: "an endsTurn function", description: "Reacts to the message.", endsTurnFn: true },
+    ] as const)("appends the turn-ending note only for endsTurn: true: $case", async (row) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Glad it helped!", role: "assistant" }] },
+        text: "Glad it helped!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const runStep = createToolLoopHarness(
+        createTestConfig(undefined, {
+          tools: "endsTurnFn" in row ? toolsWithReactEndsTurn(() => true) : tools,
+        }),
+      );
+      const ctx = new ContextContainer();
+      if ("delegated" in row) setDelegatedParent(ctx);
+      const outputSchema = "outputSchema" in row ? row.outputSchema : undefined;
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession({ outputSchema }), { message: "Thanks, that fixed it!" }),
+      );
+
+      const agentTools = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]?.tools;
+      expect(agentTools?.react?.description).toBe(row.description);
+      expect(agentTools?.add?.description).toBe("Adds numbers");
+    });
+
+    it.each([true, false, "throws"] as const)(
+      "passes the execute output to an endsTurn function, which %s",
+      async (decision) => {
+        const endsTurn = vi.fn(async () => {
+          if (decision === "throws") throw new Error("lookup failed");
+          return decision;
+        });
+        setupMockAgent(
+          stepCalling([{ executeOutput: { emoji: "tada" }, name: "react", output: reacted }]),
+        );
+        const runStep = createToolLoopHarness(
+          createTestConfig(undefined, { tools: toolsWithReactEndsTurn(endsTurn) }),
+        );
+
+        const result = await runStep(createTestSession(), { message: "Thanks, that fixed it!" });
+
+        expect(endsTurn).toHaveBeenCalledExactlyOnceWith({ emoji: "tada" });
+        expect(result.next).toBe(decision === true ? null : runStep);
+      },
+    );
   });
 
   it("parks a conversation when requested structured output is not fulfilled", async () => {
@@ -2977,7 +2618,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
     const session = createTestSession({ outputSchema: { type: "object" } });
 
     const result = await runStep(session, { message: "Hi" });
@@ -3005,76 +2646,6 @@ describe("createToolLoopHarness", () => {
       }),
     );
     expect(result.session.outputSchema).toBeUndefined();
-  });
-
-  it("returns only the final assistant reply when a completed task step includes tool work", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: {
-        messages: [
-          {
-            content: [
-              { text: "I'll look that up.", type: "text" },
-              {
-                input: { query: "weather in ny" },
-                toolCallId: "call-1",
-                toolName: "web_search",
-                type: "tool-call",
-              },
-            ],
-            role: "assistant",
-          },
-          {
-            content: [
-              {
-                output: { temperature: "41 F" },
-                toolCallId: "call-1",
-                toolName: "web_search",
-                type: "tool-result",
-              },
-            ],
-            role: "tool",
-          },
-          { content: "It is 41 F in New York right now.", role: "assistant" },
-        ],
-      },
-      text: "It is 41 F in New York right now.",
-      toolCalls: [
-        {
-          input: { query: "weather in ny" },
-          toolCallId: "call-1",
-          toolName: "web_search",
-          type: "tool-call",
-        },
-      ],
-      toolResults: [
-        {
-          input: { query: "weather in ny" },
-          output: { temperature: "41 F" },
-          toolCallId: "call-1",
-          toolName: "web_search",
-          type: "tool-result",
-        },
-      ],
-    });
-
-    const config = createTestConfig("task", undefined, {
-      tools: new Map(),
-    });
-    const runStep = createToolLoopHarness(config);
-    const session = createTestSession({
-      agent: {
-        modelReference: { id: "openai/gpt-5.4" },
-        system: "You are a test assistant.",
-        tools: [
-          { description: "Search the web", name: "web_search", inputSchema: { type: "object" } },
-        ],
-      },
-    });
-
-    const result = await runStep(session, { message: "What's the weather in NY?" });
-
-    expect(result.next).toEqual({ done: true, output: "It is 41 F in New York right now." });
   });
 
   it("returns next: runStep (continue) when model makes tool calls", async () => {
@@ -3110,7 +2681,7 @@ describe("createToolLoopHarness", () => {
       ],
     });
 
-    const config = createTestConfig("conversation");
+    const config = createTestConfig();
     const runStep = createToolLoopHarness(config);
     const session = createTestSession();
 
@@ -3171,7 +2742,7 @@ describe("createToolLoopHarness", () => {
       ],
     });
 
-    const config = createTestConfig("conversation", undefined, {
+    const config = createTestConfig(undefined, {
       tools: new Map([
         [
           "web_search",
@@ -3197,7 +2768,9 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "What's the weather in NY?" });
 
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ output: "It is 41 F in New York right now." });
+    expect(result.settledTurn).toEqual({
+      output: "It is 41 F in New York right now.",
+    });
     expect(result.session.history).toEqual([
       { content: "What's the weather in NY?", kind: "user" as const, role: "user" },
       {
@@ -3275,7 +2848,7 @@ describe("createToolLoopHarness", () => {
       ],
     });
 
-    const config = createTestConfig("conversation", undefined, {
+    const config = createTestConfig(undefined, {
       tools: new Map([
         [
           "web_search",
@@ -3366,7 +2939,7 @@ describe("createToolLoopHarness", () => {
       ],
     });
 
-    const config = createTestConfig("conversation");
+    const config = createTestConfig();
     const runStep = createToolLoopHarness(config);
     const session = createTestSession();
 
@@ -3396,7 +2969,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const config = createTestConfig("conversation");
+    const config = createTestConfig();
     const runStep = createToolLoopHarness(config);
     const session = createTestSession({
       history: [{ content: "prior message", kind: "user" as const, role: "user" }],
@@ -3421,7 +2994,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const config = createTestConfig("conversation");
+    const config = createTestConfig();
     const runStep = createToolLoopHarness(config);
     const session = createTestSession();
 
@@ -3440,7 +3013,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     await runStep(createTestSession(), { message: "Hi" });
 
@@ -3466,7 +3039,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     await runStep(
       createTestSession({ history: [{ content: "prior", kind: "user" as const, role: "user" }] }),
@@ -3515,7 +3088,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const config = createTestConfig("conversation", emit, {
+    const config = createTestConfig(emit, {
       tools: new Map([
         [
           "add",
@@ -3619,7 +3192,7 @@ describe("createToolLoopHarness", () => {
               { id: "approve", label: "Approve" },
               { id: "cancel", label: "Cancel" },
             ],
-            prompt: "Approve tool call: bash",
+            prompt: "Approve Bash?",
             requestId: "approval-1",
           },
         ],
@@ -3629,23 +3202,21 @@ describe("createToolLoopHarness", () => {
       },
       type: "input.requested",
     });
-    expect(events.filter((event) => event.type === "turn.completed").at(-1)).toEqual({
+    expect(events.filter((event) => event.type === "turn.waiting").at(-1)).toMatchObject({
       data: {
+        on: "input",
         sequence: 0,
         turnId: "turn_0",
       },
-      type: "turn.completed",
+      type: "turn.waiting",
     });
+    expect(events.some((event) => event.type === "turn.completed")).toBe(false);
   });
 
-  it.each([
-    ["conversation", ""],
-    ["conversation", "Alice's inventory list is"],
-    ["task", ""],
-    ["task", "Alice's inventory list is"],
-  ] as const)(
-    "reports content-filter without retrying in %s mode (text: %j)",
-    async (mode, text) => {
+  it.each(["", "Alice's inventory list is"])(
+    "reports content-filter without retrying (text: %j)",
+    async (text) => {
+      const logs = captureLogRecords();
       setupMockAgent({
         finishReason: "content-filter",
         providerMetadata: {
@@ -3657,10 +3228,9 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
       const { emit, events } = createEventCollector();
-      const result = await createToolLoopHarness(createTestConfig(mode, emit))(
-        createTestSession(),
-        { message: "Help Alice prepare Bob's inventory list." },
-      );
+      const result = await createToolLoopHarness(createTestConfig(emit))(createTestSession(), {
+        message: "Help Alice prepare Bob's inventory list.",
+      });
 
       expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
       expect(events.find((event) => event.type === "step.failed")).toMatchObject({
@@ -3685,16 +3255,14 @@ describe("createToolLoopHarness", () => {
       expect(JSON.stringify(events.filter((event) => event.type === "step.failed"))).not.toContain(
         "not-for-clients",
       );
-      if (mode === "task") {
-        expect(result.next).toMatchObject({
-          done: true,
-          isError: true,
-          output: expect.stringContaining("filtered this response"),
-        });
-      } else {
-        expect(result.next).toBeNull();
-        expect(events.some((event) => event.type === "session.waiting")).toBe(true);
-      }
+      expect(result.next).toBeNull();
+      expect(events.some((event) => event.type === "session.waiting")).toBe(true);
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     },
   );
 
@@ -3717,32 +3285,6 @@ describe("createToolLoopHarness", () => {
       generationId: "gen_filtered",
     });
     expect(ToolLoopAgent).toHaveBeenCalledTimes(1);
-  });
-
-  it("emits session.completed instead of session.waiting in task mode", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "done", role: "assistant" }] },
-      text: "done",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("task", emit));
-
-    await runStep(createTestSession(), { message: "run task" });
-
-    expect(getCompatibilityEventTypes(events)).toEqual([
-      "session.started",
-      "turn.started",
-      "message.received",
-      "step.started",
-      "message.completed",
-      "step.completed",
-      "turn.completed",
-      "session.completed",
-    ]);
   });
 
   it("emits actions.requested and action.result on tool call step", async () => {
@@ -3779,7 +3321,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     await runStep(createTestSession(), { message: "Add 1 and 2" });
 
@@ -3822,6 +3364,166 @@ describe("createToolLoopHarness", () => {
       stepIndex: 0,
       status: "completed",
       turnId: "turn_0",
+    });
+  });
+
+  it("projects label presentation for session-scoped dynamic tools", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [{ input: {}, toolCallId: "call-1", toolName: "lookup", type: "tool-call" }],
+            role: "assistant",
+          },
+          {
+            content: [
+              {
+                output: { ok: true },
+                toolCallId: "call-1",
+                toolName: "lookup",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "lookup", type: "tool-call" }],
+      toolResults: [
+        {
+          input: {},
+          output: { ok: true },
+          toolCallId: "call-1",
+          toolName: "lookup",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "test-session");
+    const owner = {
+      sessionId: "test-session",
+      scope: "session" as const,
+      resolverSlug: "lookup",
+      entryKey: "lookup",
+      name: "lookup",
+    };
+    registerDurableDynamicCallback({ callback: () => ({ ok: true }), phase: "execute", owner });
+    registerDurableDynamicCallback({
+      callback: () => "Looking it up",
+      phase: "labelStart",
+      owner,
+    });
+    registerDurableDynamicCallback({ callback: () => "Done", phase: "labelComplete", owner });
+    ctx.set(SessionDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          execute: { closure: {} },
+          label: { complete: { closure: {} }, start: { closure: {} } },
+        },
+        description: "Look something up.",
+        entryKey: "lookup",
+        inputSchema: { type: "object" },
+        name: "lookup",
+        resolverSlug: "lookup",
+      },
+    ]);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+    await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Look it up" }));
+
+    expect(events.find((e) => e.type === "actions.requested")?.data.presentation).toEqual({
+      "call-1": { label: "Looking it up" },
+    });
+    expect(events.find((e) => e.type === "action.result")?.data.presentation).toEqual({
+      "call-1": { label: "Done" },
+    });
+  });
+
+  it("projects the step-scoped label when a step tool overrides a same-named session tool", async () => {
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          {
+            content: [{ input: {}, toolCallId: "call-1", toolName: "lookup", type: "tool-call" }],
+            role: "assistant",
+          },
+          {
+            content: [
+              {
+                output: { ok: true },
+                toolCallId: "call-1",
+                toolName: "lookup",
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [{ input: {}, toolCallId: "call-1", toolName: "lookup", type: "tool-call" }],
+      toolResults: [
+        {
+          input: {},
+          output: { ok: true },
+          toolCallId: "call-1",
+          toolName: "lookup",
+          type: "tool-result",
+        },
+      ],
+    });
+
+    const ctx = new ContextContainer();
+    ctx.set(SessionIdKey, "test-session");
+    const metadata = {
+      callbacks: {
+        execute: { closure: {} },
+        label: { complete: { closure: {} }, start: { closure: {} } },
+      },
+      description: "Look something up.",
+      entryKey: "lookup",
+      inputSchema: { type: "object" },
+      name: "lookup",
+      resolverSlug: "lookup",
+    };
+    for (const scope of ["step", "session"] as const) {
+      const owner = {
+        sessionId: "test-session",
+        scope,
+        resolverSlug: "lookup",
+        entryKey: "lookup",
+        name: "lookup",
+      };
+      registerDurableDynamicCallback({ callback: () => ({ ok: true }), phase: "execute", owner });
+      registerDurableDynamicCallback({
+        callback: () => `${scope} start`,
+        phase: "labelStart",
+        owner,
+      });
+      registerDurableDynamicCallback({
+        callback: () => `${scope} complete`,
+        phase: "labelComplete",
+        owner,
+      });
+    }
+    ctx.set(StepDynamicToolMetadataKey, [metadata]);
+    ctx.set(SessionDynamicToolMetadataKey, [metadata]);
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+    await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Look it up" }));
+
+    expect(events.find((e) => e.type === "actions.requested")?.data.presentation).toEqual({
+      "call-1": { label: "step start" },
+    });
+    expect(events.find((e) => e.type === "action.result")?.data.presentation).toEqual({
+      "call-1": { label: "step complete" },
     });
   });
 
@@ -3869,7 +3571,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     // Must not throw.
     await expect(runStep(createTestSession(), { message: "Do it" })).resolves.toBeDefined();
@@ -3885,87 +3587,6 @@ describe("createToolLoopHarness", () => {
     expect(events.find((event) => event.type === "step.completed")?.data).toMatchObject({
       finishReason: "tool-calls",
     });
-  });
-
-  it("does not park an invalid ask_question call and continues with its tool error", async () => {
-    setupMockAgent({
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              {
-                input: { prompt: 42 },
-                toolCallId: "question-invalid",
-                toolName: "ask_question",
-                type: "tool-call",
-              },
-            ],
-            role: "assistant",
-          },
-          {
-            content: [
-              {
-                output: { type: "error-text", value: "Expected string, received number" },
-                toolCallId: "question-invalid",
-                toolName: "ask_question",
-                type: "tool-result",
-              },
-            ],
-            role: "tool",
-          },
-        ],
-      },
-      toolCalls: [
-        {
-          dynamic: true,
-          error: new Error("Expected string, received number"),
-          input: { prompt: 42 },
-          invalid: true,
-          toolCallId: "question-invalid",
-          toolName: "ask_question",
-          type: "tool-call",
-        },
-      ],
-      toolResults: [],
-    });
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
-        capabilities: { requestInput: true },
-        tools: new Map([
-          [
-            "ask_question",
-            {
-              description: "Ask the user a question.",
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "ask_question",
-            },
-          ],
-        ]),
-      }),
-    );
-    const session = createTestSession({
-      agent: {
-        modelReference: { id: "test-model" },
-        system: "You are a test assistant.",
-        tools: [
-          {
-            description: "Ask the user a question.",
-            inputSchema: { type: "object" },
-            name: "ask_question",
-          },
-        ],
-      },
-    });
-
-    const result = await runStep(session, { message: "Ask me a question." });
-
-    expect(typeof result.next).toBe("function");
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
-    expect(events.some((event) => event.type === "input.requested")).toBe(false);
-    expect(result.session.history.at(-1)?.role).toBe("tool");
   });
 
   it("feeds non-object tool call input back to the model as a failed tool result", async () => {
@@ -4002,7 +3623,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
     const firstStep = await runStep(createTestSession(), { message: "Add these" });
 
     expect(firstStep.next).toBe(runStep);
@@ -4112,7 +3733,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     await runStep(createTestSession(), { message: "Add 1 and 2" });
 
@@ -4166,7 +3787,7 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const session = createTestSession();
-    const config = createTestConfig("conversation", emit, {
+    const config = createTestConfig(emit, {
       tools: new Map([
         [
           "delegate",
@@ -4222,7 +3843,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit } = createEventCollector();
-    const config = createTestConfig("conversation", emit, {
+    const config = createTestConfig(emit, {
       tools: new Map([
         [
           "delegate",
@@ -4308,7 +3929,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     await runStep(createTestSession(), { message: "Weather in Vienna" });
 
@@ -4388,7 +4009,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const config = createTestConfig("conversation", emit, {
+    const config = createTestConfig(emit, {
       tools: new Map([
         [
           "load_skill",
@@ -4531,7 +4152,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     await runStep(createTestSession(), { message: "Weather in Vienna" });
 
@@ -4586,7 +4207,7 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, { abortSignal: abortController.signal }),
+      createTestConfig(emit, { abortSignal: abortController.signal }),
     );
 
     await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toBe(abortReason);
@@ -4612,7 +4233,7 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, { abortSignal: abortController.signal }),
+      createTestConfig(emit, { abortSignal: abortController.signal }),
     );
 
     await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toBe(cancellation);
@@ -4625,6 +4246,7 @@ describe("createToolLoopHarness", () => {
   });
 
   it("retries a model call after an undici body timeout", async () => {
+    const logs = captureLogRecords();
     vi.useFakeTimers();
     const timeout = new TypeError("terminated", {
       cause: Object.assign(new Error("Body Timeout Error"), {
@@ -4681,6 +4303,12 @@ describe("createToolLoopHarness", () => {
     } finally {
       vi.useRealTimers();
     }
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "model call failed transiently — retrying",
+      }),
+    );
   });
 
   it("feeds malformed provider web search input back to the model", async () => {
@@ -4737,7 +4365,7 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         tools: new Map(),
       }),
     );
@@ -4819,7 +4447,7 @@ describe("createToolLoopHarness", () => {
 
     const { emit } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, { abortSignal: abortController.signal }),
+      createTestConfig(emit, { abortSignal: abortController.signal }),
     );
 
     await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toBe(cancellation);
@@ -4827,10 +4455,11 @@ describe("createToolLoopHarness", () => {
   });
 
   it("emits a recoverable failure cascade and parks the session on a non-terminal model-call error", async () => {
+    const logs = captureLogRecords();
     setupMockAgentError(new Error("Model blew up"));
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const result = await runStep(createTestSession(), { message: "Hi" });
 
@@ -4838,7 +4467,10 @@ describe("createToolLoopHarness", () => {
     // session parks (`next: null`) so the user can follow up in the
     // same thread rather than the whole run being torn down.
     expect(result.next).toBeNull();
-    expect(result.settledTurn).toEqual({ isError: true, output: "Model blew up" });
+    expect(result.settledTurn).toEqual({
+      isError: true,
+      output: "Model blew up",
+    });
     expect(result.session.outputSchema).toBeUndefined();
 
     const types = events.map((e) => e.type);
@@ -4857,6 +4489,12 @@ describe("createToolLoopHarness", () => {
       message: "Model blew up",
     });
     expect((stepFailed!.data as { details?: { errorId?: string } }).details?.errorId).toBeDefined();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "model call failed — parking session for retry by the user",
+      }),
+    );
   });
 
   it.each([
@@ -4875,6 +4513,7 @@ describe("createToolLoopHarness", () => {
   ])(
     "parks the session for the recoverable AI Gateway error: $message",
     async ({ message, hint }) => {
+      const logs = captureLogRecords();
       setupMockAgentError(
         Object.assign(new Error(message), {
           name: "GatewayInvalidRequestError",
@@ -4884,7 +4523,7 @@ describe("createToolLoopHarness", () => {
       );
 
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
 
       const result = await runStep(createTestSession(), { message: "Hi" });
 
@@ -4895,27 +4534,17 @@ describe("createToolLoopHarness", () => {
       });
       expect(events.map((event) => event.type)).toContain("session.waiting");
       expect(events.map((event) => event.type)).not.toContain("session.failed");
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     },
   );
 
-  it("rethrows a recoverable task-mode model error for durable step retry", async () => {
-    setupMockAgentError(new Error("Model blew up"));
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("task", emit));
-
-    await expect(runStep(createTestSession(), { message: "Delegated task" })).rejects.toThrow(
-      "Model blew up",
-    );
-
-    const types = events.map((event) => event.type);
-    expect(types).not.toContain("step.failed");
-    expect(types).not.toContain("turn.failed");
-    expect(types).not.toContain("session.failed");
-    expect(types).not.toContain("session.waiting");
-  });
-
   it("parks the session on an ambiguous GatewayInternalServerError 400 model-call error", async () => {
+    const logs = captureLogRecords();
     setupMockAgentError(
       createGatewayModelCallError({
         gatewayName: "GatewayInternalServerError",
@@ -4925,7 +4554,7 @@ describe("createToolLoopHarness", () => {
     );
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const result = await runStep(createTestSession(), { message: "Hi" });
 
@@ -4956,9 +4585,16 @@ describe("createToolLoopHarness", () => {
     expect(JSON.stringify((stepFailed!.data as { details?: unknown }).details)).not.toContain(
       "large schema",
     );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "AI Gateway rejected the model request before the agent produced a response.",
+      }),
+    );
   });
 
   it("emits the full terminal failure cascade on a structural 4xx model-call error", async () => {
+    const logs = captureLogRecords();
     // 400/401/403/404 responses are classified as terminal — the
     // session is torn down because retrying would hit the same wall.
     const error = Object.assign(new Error("invalid api key"), {
@@ -4968,7 +4604,7 @@ describe("createToolLoopHarness", () => {
     setupMockAgentError(error);
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const result = await runStep(createTestSession(), { message: "Hi" });
 
@@ -4979,42 +4615,13 @@ describe("createToolLoopHarness", () => {
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.failed");
     expect(types).not.toContain("session.waiting");
-  });
-
-  it("surfaces a terminal model-call error to the parent as a failed task result", async () => {
-    // Regression test for https://github.com/vercel/eve/issues/412 — a
-    // delegated task-mode child whose model id does not resolve (terminal 404)
-    // must report an error to its parent, not a successful empty output.
-    const error = Object.assign(new Error("No endpoints found for anthropic/claude-3.5-haiku"), {
-      name: "AI_APICallError",
-      statusCode: 404,
-    });
-    setupMockAgentError(error);
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("task", emit));
-    const ctx = new ContextContainer();
-    setDelegatedParent(ctx);
-
-    const result = await contextStorage.run(ctx, () =>
-      runStep(createTestSession(), { message: "Delegated task" }),
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "invalid api key" }),
     );
-
-    // The terminal result must be marked as an error with the failure
-    // message as output, matching the non-terminal task-mode failure shape.
-    expect(result.next).toMatchObject({
-      done: true,
-      isError: true,
-      output: expect.stringContaining("No endpoints found for anthropic/claude-3.5-haiku"),
-    });
-
-    const types = events.map((e) => e.type);
-    expect(types).toContain("step.failed");
-    expect(types).toContain("turn.failed");
-    expect(types).toContain("session.failed");
   });
 
   it("surfaces a terminal model-call error to a delegated conversation caller", async () => {
+    const logs = captureLogRecords();
     const error = Object.assign(new Error("No endpoints found for anthropic/claude-3.5-haiku"), {
       name: "AI_APICallError",
       statusCode: 404,
@@ -5022,7 +4629,7 @@ describe("createToolLoopHarness", () => {
     setupMockAgentError(error);
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
     const ctx = new ContextContainer();
     setDelegatedParent(ctx);
 
@@ -5040,9 +4647,93 @@ describe("createToolLoopHarness", () => {
     expect(types).toContain("step.failed");
     expect(types).toContain("turn.failed");
     expect(types).toContain("session.failed");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "No endpoints found for anthropic/claude-3.5-haiku",
+      }),
+    );
   });
 
+  it("parks a delegated turn held by its working tasks with turn.waiting and the session's usage", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Checking now.", role: "assistant" }] },
+      text: "Checking now.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+    const ctx = new ContextContainer();
+    setDelegatedParent(ctx);
+    const { table } = createTask(
+      { tasks: [] },
+      { callId: "call-task", kind: "tool", name: "research", resumable: false, turnId: "turn_0" },
+    );
+
+    const result = await contextStorage.run(ctx, () =>
+      runStep(writeTaskTable(withDelegatedSpend(), table), { message: "Delegated turn" }),
+    );
+
+    expect(result.held).toBeDefined();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ finishReason: "tool-calls", message: "Checking now." }),
+        type: "message.completed",
+      }),
+    );
+    expect(events.at(-1)).toEqual({
+      data: { on: "tasks", sequence: 0, turnId: "turn_0", usage: DELEGATED_SPEND },
+      type: "turn.waiting",
+    });
+    expect(events.map((event) => event.type)).not.toContain("session.waiting");
+  });
+
+  const REPLY_BEFORE_RESULT = "If the person should hear from you now";
+  const WAIT_INSTEAD_OF_REPLYING = "Only your final reply reaches your caller.";
+
+  it.each([
+    {
+      absent: WAIT_INSTEAD_OF_REPLYING,
+      delegated: false,
+      guidance: REPLY_BEFORE_RESULT,
+      session: "a root session, where a person reads each reply",
+    },
+    {
+      absent: REPLY_BEFORE_RESULT,
+      delegated: true,
+      guidance: WAIT_INSTEAD_OF_REPLYING,
+      session: "a delegated session, whose caller reads only the final reply",
+    },
+  ])(
+    "tells the model how to wait on tasks in $session",
+    async ({ absent, delegated, guidance }) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Done.", role: "assistant" }] },
+        text: "Done.",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const runStep = createToolLoopHarness(
+        createTestConfig(undefined, { tools: createTaskToolMap() }),
+      );
+      const ctx = new ContextContainer();
+      if (delegated) setDelegatedParent(ctx);
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Research this." }),
+      );
+
+      const instructions = JSON.stringify(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].instructions);
+      expect(instructions).toContain(guidance);
+      expect(instructions).not.toContain(absent);
+    },
+  );
+
   it("emits the full terminal failure cascade on an explicit Gateway invalid-request error", async () => {
+    const logs = captureLogRecords();
     setupMockAgentError(
       createGatewayModelCallError({
         gatewayName: "GatewayInvalidRequestError",
@@ -5052,7 +4743,7 @@ describe("createToolLoopHarness", () => {
     );
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     const result = await runStep(createTestSession(), { message: "Hi" });
 
@@ -5076,6 +4767,12 @@ describe("createToolLoopHarness", () => {
     });
     expect(JSON.stringify((stepFailed!.data as { details?: unknown }).details)).not.toContain(
       "large schema",
+    );
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "AI Gateway rejected the model request before the agent produced a response.",
+      }),
     );
   });
 
@@ -5270,7 +4967,6 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
           [
@@ -5352,7 +5048,6 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
           [
@@ -5422,7 +5117,6 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
           [
@@ -5456,6 +5150,7 @@ describe("createToolLoopHarness", () => {
     });
 
     it("retries with the offending tool dropped and a one-shot system note", async () => {
+      const logs = captureLogRecords();
       const resolveRuntimeContext = vi.fn((input: InstrumentationStepStartedEventInput) => ({
         "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
       }));
@@ -5489,7 +5184,6 @@ describe("createToolLoopHarness", () => {
       });
       const config: ToolLoopHarnessConfig = {
         instrumentation: declaredInstrumentation,
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
           [
@@ -5558,9 +5252,16 @@ describe("createToolLoopHarness", () => {
       expect(resolveRuntimeContext.mock.calls[1]?.[0].modelInput.instructions).toEqual(
         retryInstructions,
       );
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "disabling unsupported provider tool(s); retrying step once",
+        }),
+      );
     });
 
     it("falls through to terminal cascade when recovery retry also fails", async () => {
+      const logs = captureLogRecords();
       // Both attempts fail with the same unsupported-tool error. The
       // existing terminal/recoverable handling runs on the second
       // failure so the session is torn down.
@@ -5577,7 +5278,6 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
           [
@@ -5605,13 +5305,26 @@ describe("createToolLoopHarness", () => {
       expect(types).toContain("step.failed");
       expect(types).toContain("turn.failed");
       expect(types).toContain("session.failed");
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "disabling unsupported provider tool(s); retrying step once",
+        }),
+      );
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "AI Gateway rejected the model request before the agent produced a response.",
+        }),
+      );
     });
 
     it("does not retry when the error is unrelated to unsupported provider tools", async () => {
+      const logs = captureLogRecords();
       setupMockAgentError(new Error("Model blew up"));
 
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
       await runStep(createTestSession(), { message: "Hi" });
 
       // Exactly one agent construction — no recovery retry was attempted.
@@ -5621,6 +5334,12 @@ describe("createToolLoopHarness", () => {
       // The unrelated error still flows through the recoverable cascade
       // (plain Error defaults to recoverable classification).
       expect(types).toContain("session.waiting");
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     });
   });
 
@@ -5699,7 +5418,7 @@ describe("createToolLoopHarness", () => {
       setupFirstThenAgent(emptyResult, successResult);
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
 
       try {
         const result = await runStep(createTestSession(), { message: "Hi" });
@@ -5744,7 +5463,6 @@ describe("createToolLoopHarness", () => {
           kind: "execution.retry",
           role: "user",
         });
-        expect(reissueMessages.at(-1)?.content).not.toContain(EMPTY_DELIVERY_SENTINEL);
         expect(
           result.session.history.some(
             (message) =>
@@ -5756,117 +5474,171 @@ describe("createToolLoopHarness", () => {
       }
     });
 
-    it("offers conditional delivery on an empty-response retry for a scheduled turn", async () => {
+    it("permits fresh reads in the empty-response retry instruction", async () => {
+      const staleReadCall = {
+        input: { resource: "report" },
+        toolCallId: "stale-read-1",
+        toolName: "read_report",
+        type: "tool-call" as const,
+      };
+      const staleReadResult = {
+        ...staleReadCall,
+        output: { type: "json" as const, value: { rows: 1 } },
+        type: "tool-result" as const,
+      };
+      const tools = new Map([
+        [
+          "read_report",
+          {
+            description: "Read the report.",
+            execute: vi.fn().mockResolvedValue({ rows: 2 }),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "read_report",
+          },
+        ],
+        [
+          "write_report",
+          {
+            description: "Write the report.",
+            execute: vi.fn().mockResolvedValue({ saved: true }),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "write_report",
+          },
+        ],
+      ]);
+      const session = createTestSession({
+        agent: {
+          modelReference: { id: "test-model" },
+          system: "You are a test assistant.",
+          tools: [
+            {
+              description: "Read the report.",
+              inputSchema: { type: "object" },
+              name: "read_report",
+            },
+            {
+              description: "Write the report.",
+              inputSchema: { type: "object" },
+              name: "write_report",
+            },
+          ],
+        },
+        history: [
+          { content: "Read the report.", kind: "user", role: "user" },
+          { content: [staleReadCall], role: "assistant" },
+          { content: [staleReadResult], role: "tool" },
+        ],
+      });
+      const refreshRequest = "Read the report again and tell me how many rows it has now.";
+
       setupFirstThenAgent(emptyResult, successResult);
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const { emit } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit, { tools }));
 
       try {
-        await contextStorage.run(createScheduleContext(), () =>
-          runStep(createTestSession(), { message: "Check for alerts." }),
-        );
+        await runStep(session, { message: refreshRequest });
 
-        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+        const retryCall = vi.mocked(ToolLoopAgent).mock.calls[1]?.[0];
+        const retryAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
           stream: ReturnType<typeof vi.fn>;
         };
-        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+        const retryMessages = retryAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
           content: unknown;
           role: string;
         }>;
-        expect(reissueMessages.at(-1)).toMatchObject({
-          content: expect.stringContaining(EMPTY_DELIVERY_SENTINEL),
+
+        expect(retryCall?.tools).toMatchObject({
+          read_report: expect.anything(),
+          write_report: expect.anything(),
+        });
+        expect(retryMessages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ content: refreshRequest, role: "user" }),
+            expect.objectContaining({ content: [staleReadCall], role: "assistant" }),
+            expect.objectContaining({ content: [staleReadResult], role: "tool" }),
+          ]),
+        );
+        expect(retryMessages.at(-1)).toMatchObject({
+          content: expect.stringContaining("use the appropriate read tools to get fresh results"),
           kind: "execution.retry",
           role: "user",
         });
+        expect(retryMessages.at(-1)?.content).not.toMatch(/do not re-run tools/i);
       } finally {
         warnSpy.mockRestore();
       }
     });
 
-    it("does not offer silent delivery on an initiating-task retry", async () => {
-      setupFirstThenAgent(emptyResult, successResult);
+    it("warns the model not to repeat a completed write", async () => {
+      const writeCall = {
+        input: { report: "updated" },
+        toolCallId: "write-1",
+        toolName: "write_report",
+        type: "tool-call" as const,
+      };
+      const writeResult = {
+        ...writeCall,
+        output: { type: "json" as const, value: { saved: true } },
+        type: "tool-result" as const,
+      };
+      const completedWrite = {
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            { content: [writeCall], role: "assistant" },
+            { content: [writeResult], role: "tool" },
+          ],
+        },
+        text: "",
+        toolCalls: [writeCall],
+        toolResults: [writeResult],
+      };
+      const tools = new Map([
+        [
+          "write_report",
+          {
+            description: "Write the report.",
+            execute: vi.fn().mockResolvedValue({ saved: true }),
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "write_report",
+          },
+        ],
+      ]);
+
+      setupMockAgentSequence([completedWrite, emptyResult, successResult]);
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const { emit } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
-      const ctx = new ContextContainer();
-      ctx.set(TurnTaskDeliveryKey, "initiating");
+      const runStep = createToolLoopHarness(createTestConfig(emit, { tools }));
 
       try {
-        await contextStorage.run(ctx, () =>
-          runStep(createTestSession(), { message: "[Task state]" }),
-        );
+        const first = await runStep(createTestSession(), { message: "Update the report." });
+        expect(typeof first.next).toBe("function");
+        if (typeof first.next !== "function") throw new Error("Expected a tool continuation.");
 
-        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+        await first.next(first.session);
+
+        expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(3);
+        const retryAgent = vi.mocked(ToolLoopAgent).mock.results[2]?.value as {
           stream: ReturnType<typeof vi.fn>;
         };
-        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+        const retryMessages = retryAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
           content: unknown;
           role: string;
         }>;
-        expect(reissueMessages.at(-1)).toMatchObject({
-          content: expect.stringContaining("was not delivered"),
+        expect(retryMessages).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ content: [writeCall], role: "assistant" }),
+            expect.objectContaining({ content: [writeResult], role: "tool" }),
+          ]),
+        );
+        expect(retryMessages.at(-1)).toMatchObject({
+          content: expect.stringContaining(
+            "Do not repeat writes or other side effects that already completed.",
+          ),
           kind: "execution.retry",
           role: "user",
         });
-        expect(reissueMessages.at(-1)?.content).not.toContain(EMPTY_DELIVERY_SENTINEL);
-      } finally {
-        warnSpy.mockRestore();
-      }
-    });
-
-    it("offers silent delivery on a user-auth scheduled initiating retry", async () => {
-      setupFirstThenAgent(emptyResult, successResult);
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const { emit } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
-      const ctx = createScheduledUserContext();
-      ctx.set(TurnTaskDeliveryKey, "initiating");
-
-      try {
-        await contextStorage.run(ctx, () =>
-          runStep(createTestSession(), { message: "[Task state]" }),
-        );
-
-        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
-          stream: ReturnType<typeof vi.fn>;
-        };
-        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
-          content: unknown;
-          role: string;
-        }>;
-        expect(reissueMessages.at(-1)?.content).toContain(EMPTY_DELIVERY_SENTINEL);
-      } finally {
-        warnSpy.mockRestore();
-      }
-    });
-
-    it("does not offer conditional delivery on a scheduled retry with an output schema", async () => {
-      setupFirstThenAgent(emptyResult, finalOutputResult("Done.", { status: "ok" }));
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const { emit } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("task", emit));
-
-      try {
-        await contextStorage.run(createScheduleContext(), () =>
-          runStep(createTestSession({ outputSchema: { type: "object" } }), {
-            message: "Check for alerts.",
-          }),
-        );
-
-        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
-          stream: ReturnType<typeof vi.fn>;
-        };
-        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
-          content: unknown;
-          role: string;
-        }>;
-        expect(reissueMessages.at(-1)).toMatchObject({
-          content: expect.stringContaining("was not delivered"),
-          kind: "execution.retry",
-          role: "user",
-        });
-        expect(reissueMessages.at(-1)?.content).not.toContain(EMPTY_DELIVERY_SENTINEL);
       } finally {
         warnSpy.mockRestore();
       }
@@ -5875,7 +5647,7 @@ describe("createToolLoopHarness", () => {
     it("reissues a blank 'stop' response instead of treating it as intentional silence", async () => {
       setupFirstThenAgent(emptyStopResult, successResult);
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
 
       try {
         const result = await runStep(createTestSession(), { message: "Hi" });
@@ -5895,7 +5667,7 @@ describe("createToolLoopHarness", () => {
       setupFirstThenAgent(noOutputStreamResult, successResult);
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
 
       try {
         const result = await runStep(createTestSession(), { message: "Hi" });
@@ -5946,7 +5718,7 @@ describe("createToolLoopHarness", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
 
       try {
         const result = await runStep(createTestSession(), { message: "Hi" });
@@ -5976,7 +5748,7 @@ describe("createToolLoopHarness", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
 
       try {
         const result = await runStep(createTestSession(), { message: "Hi" });
@@ -5993,36 +5765,6 @@ describe("createToolLoopHarness", () => {
         expect((stepFailed!.data as { message: string }).message).toContain(
           "did not return a response",
         );
-      } finally {
-        warnSpy.mockRestore();
-        errorSpy.mockRestore();
-      }
-    });
-
-    it("fails a task run terminally when the reissue also comes back empty", async () => {
-      setupMockAgent(emptyResult);
-      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-      const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("task", emit));
-
-      try {
-        const result = await runStep(createTestSession(), { message: "Hi" });
-
-        expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(2);
-        // A task cannot park for a user retry; the failure is the task's
-        // terminal result instead of a `next: null` park that turnWorkflow
-        // would reject.
-        expect(result.next).toEqual({
-          done: true,
-          isError: true,
-          output: expect.stringContaining("did not return a response"),
-        });
-
-        const types = events.map((event) => event.type);
-        expect(types).not.toContain("session.waiting");
-        expect(types).toContain("step.failed");
-        expect(types).toContain("session.failed");
       } finally {
         warnSpy.mockRestore();
         errorSpy.mockRestore();
@@ -6046,7 +5788,6 @@ describe("createToolLoopHarness", () => {
       },
     });
     const config: ToolLoopHarnessConfig = {
-      mode: "conversation",
       resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
       tools: new Map([
         [
@@ -6070,10 +5811,12 @@ describe("createToolLoopHarness", () => {
       messages: [],
       stepNumber: 0,
       steps: [],
-      model: null,
+      model: agentCall?.model,
       context: undefined,
     });
-    expect(stepResult.providerOptions).toEqual({ gateway: { caching: "auto" } });
+    expect(stepResult.providerOptions).toEqual({
+      gateway: { caching: "auto", sessionId: "test-session" },
+    });
   });
 
   it("emits assistant/tool events in response order when a step completes after tool work", async () => {
@@ -6133,7 +5876,7 @@ describe("createToolLoopHarness", () => {
       },
     });
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         tools: new Map(),
       }),
     );
@@ -6294,7 +6037,7 @@ describe("createToolLoopHarness", () => {
       },
     });
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         tools: new Map(),
       }),
     );
@@ -6389,7 +6132,7 @@ describe("createToolLoopHarness", () => {
       },
     });
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         tools: new Map(),
       }),
     );
@@ -6455,7 +6198,7 @@ describe("createToolLoopHarness", () => {
       },
     });
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         tools: new Map(),
       }),
     );
@@ -6566,7 +6309,7 @@ describe("createToolLoopHarness", () => {
 
       const { emit, events } = createEventCollector();
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", emit, {
+        createTestConfig(emit, {
           tools: new Map([
             [
               "protected_action",
@@ -6651,6 +6394,30 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("dispatches model selection with the active turn ID when a continuation has no turn input", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Done", role: "assistant" }] },
+      text: "Done",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const dispatchDynamicModelEvent = vi.fn();
+    const { emit } = createEventCollector();
+    const harness = createToolLoopHarness(
+      createTestConfig(emit, { dispatchDynamicModelEvent, tools: new Map() }),
+    );
+
+    await contextStorage.run(new ContextContainer(), () => harness(createTestSession()));
+
+    expect(dispatchDynamicModelEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ data: expect.objectContaining({ turnId: "turn_0" }) }),
+      }),
+    );
+  });
+
   it("persists the SDK's accumulated approval-resume messages into session history", async () => {
     /*
      * The real AI SDK contract is covered in
@@ -6703,7 +6470,7 @@ describe("createToolLoopHarness", () => {
     };
 
     const harness = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
         tools: new Map(),
       }),
@@ -6772,9 +6539,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const harness = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { tools: new Map() }),
-    );
+    const harness = createToolLoopHarness(createTestConfig(undefined, { tools: new Map() }));
     const result = await harness(createPendingBashApprovalSession(), {
       inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
     });
@@ -6804,67 +6569,6 @@ describe("createToolLoopHarness", () => {
       result.session.history.at(-1)?.role,
     ]).toEqual(["assistant", "tool-call", "tool-result", "assistant"]);
     expect(toolResult).toEqual(resumedToolResultMessage.content[0]);
-  });
-
-  it("defers an agents announcement until an approved sibling tool has produced its result", async () => {
-    const toolResultMessage = {
-      content: [
-        {
-          output: { type: "text", value: "ok" },
-          toolCallId: "call-1",
-          toolName: "bash",
-          type: "tool-result",
-        },
-      ],
-      role: "tool",
-    };
-    setupMockAgent({
-      content: [],
-      finishReason: "stop",
-      response: { messages: [{ content: "Done.", role: "assistant" }] },
-      responseMessages: [toolResultMessage, { content: "Done.", role: "assistant" }],
-      text: "Done.",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const pending = createPendingBashApprovalSession();
-    const session = {
-      ...pending,
-      state: {
-        ...pending.state,
-        [AGENT_HANDLES_STATE_KEY]: {
-          handles: [
-            {
-              address: {
-                continuationToken: "private-token",
-                kind: "agent/local" as const,
-                sessionId: "child-session-123456789012",
-              },
-              identity: {
-                id: "ag_research:123456789012",
-                name: "research",
-                nodeId: "subagents/research",
-              },
-              lastStatus: "waiting",
-              phase: "parked" as const,
-            },
-          ],
-        },
-      },
-    };
-    const harness = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { tools: new Map() }),
-    );
-
-    await harness(session, {
-      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
-    });
-
-    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
-    if (agent === undefined) throw new Error("ToolLoopAgent mock did not return an instance.");
-    const messages = vi.mocked(agent.generate).mock.calls[0]?.[0].messages as ModelMessage[];
-    expect(JSON.stringify(messages)).not.toContain("[Agents]");
   });
 
   it("does not persist provider-executed deferred tool-results as generic tool messages", async () => {
@@ -6956,9 +6660,7 @@ describe("createToolLoopHarness", () => {
       ],
     });
 
-    const harness = createToolLoopHarness(
-      createTestConfig("conversation", emit, { tools: new Map() }),
-    );
+    const harness = createToolLoopHarness(createTestConfig(emit, { tools: new Map() }));
 
     const result = await harness(session, { message: "continue" });
 
@@ -7085,9 +6787,7 @@ describe("createToolLoopHarness", () => {
         tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
       },
     });
-    const harness = createToolLoopHarness(
-      createTestConfig("conversation", emit, { tools: new Map() }),
-    );
+    const harness = createToolLoopHarness(createTestConfig(emit, { tools: new Map() }));
 
     const result = await harness(session, { message: "Use web_search." });
 
@@ -7208,9 +6908,7 @@ describe("createToolLoopHarness", () => {
       ],
     });
 
-    const harness = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { tools: new Map() }),
-    );
+    const harness = createToolLoopHarness(createTestConfig(undefined, { tools: new Map() }));
     const result = await harness(
       createTestSession({
         agent: {
@@ -7252,12 +6950,14 @@ describe("createToolLoopHarness", () => {
   });
 
   it("normalizes provider history before parking on an input request", async () => {
-    const searchCallId = "parallel_search_before_question";
-    const questionCallId = "question-after-search";
+    const searchCallId = "parallel_search_before_gate";
+    const gateCallId = "gate-after-search";
     const webSearchOutput = { results: [], searchId: "search-1" };
-    const questionInput = {
-      options: [{ id: "one", label: "One" }],
-      prompt: "Choose one.",
+    const gateInput = { action: "run" };
+    const approvalRequest = {
+      approvalId: "approval-after-search",
+      toolCallId: gateCallId,
+      type: "tool-approval-request" as const,
     };
     setupMockAgent({
       content: [
@@ -7275,11 +6975,12 @@ describe("createToolLoopHarness", () => {
           type: "tool-result",
         },
         {
-          input: questionInput,
-          toolCallId: questionCallId,
-          toolName: "ask_question",
+          input: gateInput,
+          toolCallId: gateCallId,
+          toolName: "add",
           type: "tool-call",
         },
+        approvalRequest,
       ],
       finishReason: "tool-calls",
       response: {
@@ -7300,11 +7001,12 @@ describe("createToolLoopHarness", () => {
                 type: "tool-result",
               },
               {
-                input: questionInput,
-                toolCallId: questionCallId,
-                toolName: "ask_question",
+                input: gateInput,
+                toolCallId: gateCallId,
+                toolName: "add",
                 type: "tool-call",
               },
+              approvalRequest,
             ],
             role: "assistant",
           },
@@ -7319,9 +7021,9 @@ describe("createToolLoopHarness", () => {
           type: "tool-call",
         },
         {
-          input: questionInput,
-          toolCallId: questionCallId,
-          toolName: "ask_question",
+          input: gateInput,
+          toolCallId: gateCallId,
+          toolName: "add",
           type: "tool-call",
         },
       ],
@@ -7337,9 +7039,8 @@ describe("createToolLoopHarness", () => {
     });
 
     const harness = createToolLoopHarness(
-      createTestConfig("conversation", undefined, {
+      createTestConfig(undefined, {
         capabilities: { requestInput: true },
-        tools: createQuestionToolMap(),
       }),
     );
     const result = await harness(
@@ -7347,17 +7048,10 @@ describe("createToolLoopHarness", () => {
         agent: {
           modelReference: { id: "anthropic/claude-sonnet-5" },
           system: "You are a test assistant.",
-          tools: [
-            { description: "Search the web", name: "web_search", inputSchema: null },
-            {
-              description: "Ask the user a question.",
-              name: "ask_question",
-              inputSchema: { type: "object" },
-            },
-          ],
+          tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
         },
       }),
-      { message: "Search, then ask me a question." },
+      { message: "Search, then run the gated tool." },
     );
 
     const pendingResponseMessages = (
@@ -7395,11 +7089,12 @@ describe("createToolLoopHarness", () => {
       {
         content: [
           {
-            input: questionInput,
-            toolCallId: questionCallId,
-            toolName: "ask_question",
+            input: gateInput,
+            toolCallId: gateCallId,
+            toolName: "add",
             type: "tool-call",
           },
+          approvalRequest,
         ],
         role: "assistant",
       },
@@ -7454,9 +7149,7 @@ describe("createToolLoopHarness", () => {
       ],
     });
 
-    const harness = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { tools: new Map() }),
-    );
+    const harness = createToolLoopHarness(createTestConfig(undefined, { tools: new Map() }));
     const result = await harness(
       createTestSession({
         agent: {
@@ -7536,9 +7229,7 @@ describe("createToolLoopHarness", () => {
       ],
     });
 
-    const harness = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { tools: new Map() }),
-    );
+    const harness = createToolLoopHarness(createTestConfig(undefined, { tools: new Map() }));
     const result = await harness(
       createTestSession({
         agent: {
@@ -7657,9 +7348,7 @@ describe("createToolLoopHarness", () => {
         tools: [{ description: "Search the web", name: "web_search", inputSchema: null }],
       },
     });
-    const harness = createToolLoopHarness(
-      createTestConfig("conversation", emit, { tools: new Map() }),
-    );
+    const harness = createToolLoopHarness(createTestConfig(emit, { tools: new Map() }));
 
     const result = await harness(session, { message: "Use web_search." });
 
@@ -7794,9 +7483,7 @@ describe("createToolLoopHarness", () => {
     const { emit } = createEventCollector();
     const session = createPendingBashApprovalSession();
 
-    const harness = createToolLoopHarness(
-      createTestConfig("conversation", emit, { tools: new Map() }),
-    );
+    const harness = createToolLoopHarness(createTestConfig(emit, { tools: new Map() }));
     const result = await harness(session, {
       inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
     });
@@ -7930,7 +7617,7 @@ describe("createToolLoopHarness", () => {
       },
     });
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         tools: new Map(),
       }),
     );
@@ -8052,7 +7739,7 @@ describe("createToolLoopHarness", () => {
       },
     });
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         tools: new Map(),
       }),
     );
@@ -8088,7 +7775,7 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         tools: new Map([
           [
             "bash",
@@ -8137,8 +7824,7 @@ describe("createToolLoopHarness", () => {
       "actions.requested",
       "step.completed",
       "input.requested",
-      "turn.completed",
-      "session.waiting",
+      "turn.waiting",
     ]);
     expect(events.find((event) => event.type === "actions.requested")).toEqual({
       data: {
@@ -8173,7 +7859,7 @@ describe("createToolLoopHarness", () => {
               { id: "approve", label: "Approve" },
               { id: "cancel", label: "Cancel" },
             ],
-            prompt: "Approve tool call: bash",
+            prompt: "Approve Bash?",
             requestId: "approval-1",
           },
         ],
@@ -8260,7 +7946,7 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         tools: new Map([
           [
             "bash",
@@ -8294,592 +7980,6 @@ describe("createToolLoopHarness", () => {
     expect(events.filter((event) => event.type === "input.requested")).toEqual([]);
     expect(events.filter((event) => event.type === "actions.requested")).toHaveLength(1);
     expect(events.filter((event) => event.type === "action.result")).toHaveLength(1);
-  });
-
-  it("keeps one pending approval across many follow-up questions", async () => {
-    const isPendingApprovalProjection = (message: ModelMessage) => {
-      const content = JSON.stringify(message.content);
-      return (
-        message.role === "user" &&
-        /pending/iu.test(content) &&
-        content.includes("approval-1") &&
-        content.includes("bash")
-      );
-    };
-    const pendingApprovalInstructions = (index: number): string =>
-      JSON.stringify(vi.mocked(ToolLoopAgent).mock.calls[index]?.[0].instructions);
-    const followupQuestions = [
-      "What is the current status of my request?",
-      "Has the requested action executed yet?",
-      "What are you waiting for before continuing?",
-      "Can you summarize what remains blocked?",
-      "What will happen after I approve the request?",
-    ];
-    const agentResults = [
-      pendingBashApprovalResult(),
-      ...followupQuestions.map((_, index) => ({
-        finishReason: "stop",
-        response: {
-          messages: [{ content: `Follow-up ${String(index + 1)} answered.`, role: "assistant" }],
-        },
-        text: `Follow-up ${String(index + 1)} answered.`,
-        toolCalls: [],
-        toolResults: [],
-      })),
-      {
-        finishReason: "stop",
-        response: {
-          messages: [{ content: "Okay, I will not run that command.", role: "assistant" }],
-        },
-        text: "Okay, I will not run that command.",
-        toolCalls: [],
-        toolResults: [],
-      },
-    ] satisfies Record<string, unknown>[];
-    setupMockAgentSequence(agentResults);
-
-    const readGenerateMessages = (index: number): ModelMessage[] => {
-      const agent = vi.mocked(ToolLoopAgent).mock.results[index]?.value;
-      const call = agent === undefined ? undefined : vi.mocked(agent.generate).mock.calls[0]?.[0];
-      if (call === undefined) {
-        throw new Error(`ToolLoopAgent instance ${String(index)} did not generate.`);
-      }
-      return call.messages;
-    };
-
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, {
-        tools: new Map([
-          [
-            "bash",
-            {
-              description: "Run shell commands",
-              execute: vi.fn().mockResolvedValue("ok"),
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "bash",
-            },
-          ],
-        ]),
-      }),
-    );
-    const initialSession = createTestSession({
-      agent: {
-        modelReference: { id: "test-model" },
-        system: "You are a test assistant.",
-        tools: [
-          { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
-        ],
-      },
-    });
-    const parked = await runStep(initialSession, {
-      message: "Delete the temp directory.",
-    });
-
-    expect(parked.next).toBeNull();
-    expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].toolChoice).not.toBe("none");
-    expect(parked.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
-    expect(hasPendingInputBatch(parked.session.state)).toBe(true);
-
-    // Every follow-up runs as an ordinary turn with tools available while the
-    // original approval remains unresolved.
-    let pendingSession = parked.session;
-    for (const [index, question] of followupQuestions.entries()) {
-      const followup = await runStep(pendingSession, {
-        message: question,
-      });
-      const callIndex = index + 1;
-      const messages = readGenerateMessages(callIndex);
-
-      expect(followup.next).toBeNull();
-      expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(callIndex + 1);
-      const settings = vi.mocked(ToolLoopAgent).mock.calls[callIndex]?.[0];
-      expect(settings?.toolChoice).not.toBe("none");
-      expect(settings?.tools).toHaveProperty("bash");
-      expect(messages.at(-1)).toEqual({ content: question, kind: "user" as const, role: "user" });
-      expect(messages.every((message) => message.role !== "tool")).toBe(true);
-      expect(messages.filter(isPendingApprovalProjection)).toHaveLength(1);
-      expect(messages.findIndex(isPendingApprovalProjection)).toBe(1);
-      expect(pendingApprovalInstructions(callIndex)).toContain("Trusted eve runtime state");
-      expect(pendingApprovalInstructions(callIndex)).toContain("approval-1");
-      expect(pendingApprovalInstructions(callIndex)).toContain("bash");
-      expect(pendingApprovalInstructions(callIndex)).not.toContain("rm -rf /tmp/demo");
-      expect(followup.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
-      expect(hasDeferredStepInput(followup.session)).toBe(false);
-      expect(hasPendingInputBatch(followup.session.state)).toBe(true);
-      pendingSession = followup.session;
-    }
-
-    // The late denial still restores the withheld batch behind the
-    // intervening exchange and resolves it.
-    const deniedResult = await runStep(pendingSession, {
-      inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
-    });
-
-    const denialIndex = followupQuestions.length + 1;
-    const denialMessages = readGenerateMessages(denialIndex);
-    const denialSettings = vi.mocked(ToolLoopAgent).mock.calls[denialIndex]?.[0];
-    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(denialIndex + 1);
-    expect(denialSettings?.toolChoice).not.toBe("none");
-    expect(denialSettings?.tools).toHaveProperty("bash");
-    expect(denialMessages.slice(-2)).toEqual([
-      {
-        content: [
-          { text: "Need approval first.", type: "text" },
-          {
-            input: { command: "rm -rf /tmp/demo" },
-            toolCallId: "call-1",
-            toolName: "bash",
-            type: "tool-call",
-          },
-          {
-            approvalId: "approval-1",
-            toolCallId: "call-1",
-            type: "tool-approval-request",
-          },
-        ],
-        role: "assistant",
-      },
-      {
-        content: [
-          {
-            approvalId: "approval-1",
-            approved: false,
-            reason: "Tool execution was denied.",
-            type: "tool-approval-response",
-          },
-          {
-            output: {
-              type: "execution-denied",
-              reason: "Tool execution was denied.",
-            },
-            toolCallId: "call-1",
-            toolName: "bash",
-            type: "tool-result",
-          },
-        ],
-        role: "tool",
-      },
-    ]);
-    expect(denialMessages[0]).toEqual({
-      content: "Delete the temp directory.",
-      kind: "user" as const,
-      role: "user",
-    });
-    expect(hasPendingInputBatch(deniedResult.session.state)).toBe(false);
-    expect(deniedResult.session.history.at(-1)).toEqual({
-      content: "Okay, I will not run that command.",
-      role: "assistant",
-    });
-  });
-
-  it("executes an unrelated tool while an earlier approval stays open", async () => {
-    const bashExecute = vi.fn().mockResolvedValue("deleted");
-    const statusExecute = vi.fn().mockResolvedValue("ready");
-
-    vi.mocked(ToolLoopAgent).mockImplementation(function (
-      this: MockAgentInstance,
-      settings: MockAgentSettings & {
-        tools?: Record<
-          string,
-          {
-            execute?: (
-              input: unknown,
-              options: { toolCallId: string },
-            ) => Promise<unknown> | unknown;
-          }
-        >;
-      },
-    ) {
-      const { onStepEnd, prepareStep } = settings;
-      const executeStatus = settings.tools?.["status"]?.execute;
-      if (executeStatus === undefined) {
-        throw new Error("status tool was not executable.");
-      }
-
-      this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
-        if (prepareStep) {
-          await prepareStep({
-            context: undefined,
-            messages: options.messages,
-            model: {},
-            stepNumber: 0,
-            steps: [],
-          });
-        }
-
-        const toolCall = {
-          input: {},
-          toolCallId: "status-call",
-          toolName: "status",
-          type: "tool-call" as const,
-        };
-        const output = await executeStatus(toolCall.input, {
-          toolCallId: toolCall.toolCallId,
-        });
-        const toolResult = {
-          input: toolCall.input,
-          output,
-          toolCallId: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-          type: "tool-result" as const,
-        };
-        const result = {
-          finishReason: "tool-calls",
-          response: {
-            messages: [
-              { content: [toolCall], role: "assistant" as const },
-              { content: [toolResult], role: "tool" as const },
-            ],
-          },
-          text: "",
-          toolCalls: [toolCall],
-          toolResults: [toolResult],
-        };
-        if (onStepEnd) await onStepEnd(result);
-        return createMockGenerateResult(result);
-      });
-      return this;
-    } as MockAgentConstructor);
-
-    const pendingSession = createPendingBashApprovalSession();
-    const session = {
-      ...pendingSession,
-      agent: {
-        ...pendingSession.agent,
-        tools: [
-          ...pendingSession.agent.tools,
-          { description: "Read status", name: "status", inputSchema: { type: "object" } },
-        ],
-      },
-    };
-    const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
-        [
-          "bash",
-          {
-            description: "Run shell commands",
-            execute: bashExecute,
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "bash",
-          },
-        ],
-        [
-          "status",
-          {
-            description: "Read status",
-            execute: statusExecute,
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "status",
-          },
-        ],
-      ]),
-    });
-
-    const result = await createToolLoopHarness(config)(session, {
-      message: "Check the status while that waits.",
-    });
-
-    expect(statusExecute).toHaveBeenCalledOnce();
-    expect(bashExecute).not.toHaveBeenCalled();
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
-  });
-
-  it("parks a second input batch while an earlier approval stays open", async () => {
-    const generateCalls: Array<Array<{ role: string; content: unknown }>> = [];
-    const agentResults = [
-      {
-        finishReason: "tool-calls",
-        response: {
-          messages: [
-            {
-              content: [
-                { text: "Which color?", type: "text" },
-                {
-                  input: {
-                    options: [
-                      { id: "red", label: "Red" },
-                      { id: "blue", label: "Blue" },
-                    ],
-                    prompt: "Pick a color.",
-                  },
-                  toolCallId: "question-call",
-                  toolName: "ask_question",
-                  type: "tool-call",
-                },
-              ],
-              role: "assistant",
-            },
-          ],
-        },
-        text: "",
-        toolCalls: [
-          {
-            input: {
-              options: [
-                { id: "red", label: "Red" },
-                { id: "blue", label: "Blue" },
-              ],
-              prompt: "Pick a color.",
-            },
-            toolCallId: "question-call",
-            toolName: "ask_question",
-            type: "tool-call",
-          },
-        ],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: { messages: [{ content: "Red it is.", role: "assistant" }] },
-        text: "Red it is.",
-        toolCalls: [],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: {
-          messages: [{ content: "Understood, not running it.", role: "assistant" }],
-        },
-        text: "Understood, not running it.",
-        toolCalls: [],
-        toolResults: [],
-      },
-    ] satisfies Record<string, unknown>[];
-    let instanceIndex = 0;
-
-    vi.mocked(ToolLoopAgent).mockImplementation(function (
-      this: MockAgentInstance,
-      settings: MockAgentSettings,
-    ) {
-      const result = agentResults[instanceIndex];
-      instanceIndex += 1;
-      if (result === undefined) {
-        throw new Error("ToolLoopAgent mock exhausted its scripted results.");
-      }
-      const { onStepEnd, prepareStep } = settings;
-      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
-        if (prepareStep) {
-          await prepareStep({
-            messages: input.messages,
-            steps: [],
-            stepNumber: 0,
-            model: {},
-            context: undefined,
-          });
-        }
-        generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
-        if (onStepEnd) await onStepEnd(result);
-        return createMockGenerateResult(result);
-      });
-      return this;
-    } as MockAgentConstructor);
-
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-1",
-            input: { command: "rm -rf /tmp/demo" },
-            kind: "tool-call",
-            toolName: "bash",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Yes" },
-            { id: "cancel", label: "No" },
-          ],
-          prompt: "Approve tool call: bash",
-          requestId: "approval-1",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: { command: "rm -rf /tmp/demo" },
-              toolCallId: "call-1",
-              toolName: "bash",
-              type: "tool-call",
-            },
-            {
-              approvalId: "approval-1",
-              toolCallId: "call-1",
-              type: "tool-approval-request",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createTestSession({
-        agent: {
-          modelReference: { id: "test-model" },
-          system: "You are a test assistant.",
-          tools: [
-            { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
-            {
-              description: "Ask the user a question.",
-              name: "ask_question",
-              inputSchema: { type: "object" },
-            },
-          ],
-        },
-      }),
-    });
-    const config = createTestConfig("conversation", undefined, {
-      capabilities: { requestInput: true },
-      tools: new Map([
-        [
-          "bash",
-          {
-            description: "Run shell commands",
-            execute: vi.fn().mockResolvedValue("ok"),
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "bash",
-          },
-        ],
-        ...createQuestionToolMap(),
-      ]),
-    });
-
-    // The intervening turn raises its own question batch; the approval batch
-    // must survive it instead of being overwritten.
-    const questionTurn = await createToolLoopHarness(config)(session, {
-      message: "Ask me which color to use.",
-    });
-    expect(questionTurn.next).toBeNull();
-    const questionSettings = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-    expect(questionSettings?.toolChoice).not.toBe("none");
-    expect(questionSettings?.tools).toHaveProperty("bash");
-    expect(getPendingInputRequestIds(questionTurn.session.state)).toEqual(
-      new Set(["approval-1", "question-call"]),
-    );
-
-    // Answering the question closes only its own batch.
-    const answered = await createToolLoopHarness(config)(questionTurn.session, {
-      inputResponses: [{ requestId: "question-call", optionId: "red" }],
-    });
-    expect(getPendingInputRequestIds(answered.session.state)).toEqual(new Set(["approval-1"]));
-    const answeredPrompt = generateCalls[1] ?? [];
-    expect(
-      answeredPrompt.some((message) => JSON.stringify(message.content).includes("question-call")),
-    ).toBe(true);
-    expect(
-      answeredPrompt.some((message) => JSON.stringify(message.content).includes("call-1")),
-    ).toBe(false);
-
-    // The original approval still resolves afterwards.
-    const denied = await createToolLoopHarness(config)(answered.session, {
-      inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
-    });
-    expect(hasPendingInputBatch(denied.session.state)).toBe(false);
-    expect(denied.session.history.at(-1)).toEqual({
-      content: "Understood, not running it.",
-      role: "assistant",
-    });
-  });
-
-  it("releases a message wedged behind an approval by an earlier version", async () => {
-    const generateCalls: Array<Array<{ role: string; content: unknown }>> = [];
-    const stillHere = {
-      finishReason: "stop",
-      response: { messages: [{ content: "Still here!", role: "assistant" }] },
-      text: "Still here!",
-      toolCalls: [],
-      toolResults: [],
-    };
-    vi.mocked(ToolLoopAgent).mockImplementation(function (
-      this: MockAgentInstance,
-      settings: MockAgentSettings,
-    ) {
-      const { onStepEnd, prepareStep } = settings;
-      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
-        if (prepareStep) {
-          await prepareStep({
-            messages: input.messages,
-            steps: [],
-            stepNumber: 0,
-            model: {},
-            context: undefined,
-          });
-        }
-        generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
-        if (onStepEnd) await onStepEnd(stillHere);
-        return createMockGenerateResult(stillHere);
-      });
-      return this;
-    } as MockAgentConstructor);
-
-    // A session wedged by the pre-collection deferral: the singleton batch
-    // key plus a message swallowed into the deferred step input.
-    const session = createTestSession({
-      agent: {
-        modelReference: { id: "test-model" },
-        system: "You are a test assistant.",
-        tools: [
-          { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
-        ],
-      },
-    });
-    const wedged = {
-      ...session,
-      state: {
-        "eve.runtime.deferredStepInput": { message: "Wedged hello." },
-        "eve.runtime.pendingInputBatch": {
-          requests: [
-            {
-              action: {
-                callId: "call-1",
-                input: { command: "rm -rf /tmp/demo" },
-                kind: "tool-call",
-                toolName: "bash",
-              },
-              allowFreeform: false,
-              display: "confirmation",
-              kind: "tool-approval",
-              options: [
-                { id: "approve", label: "Yes" },
-                { id: "cancel", label: "No" },
-              ],
-              prompt: "Approve tool call: bash",
-              requestId: "approval-1",
-            },
-          ],
-          responseMessages: [
-            {
-              content: [
-                {
-                  input: { command: "rm -rf /tmp/demo" },
-                  toolCallId: "call-1",
-                  toolName: "bash",
-                  type: "tool-call",
-                },
-                {
-                  approvalId: "approval-1",
-                  toolCallId: "call-1",
-                  type: "tool-approval-request",
-                },
-              ],
-              role: "assistant",
-            },
-          ],
-        },
-      },
-    };
-
-    const result = await createToolLoopHarness(createTestConfig("conversation"))(wedged, {
-      message: "Are you there?",
-    });
-
-    // The wedged message finally runs as an ordinary turn; the approval
-    // stays open and answerable.
-    expect(generateCalls).toHaveLength(1);
-    const lastMessages = (generateCalls[0] ?? []).filter((message) => message.role === "user");
-    expect(JSON.stringify(lastMessages)).toContain("Wedged hello.");
-    expect(JSON.stringify(lastMessages)).toContain("Are you there?");
-    expect(hasDeferredStepInput(result.session)).toBe(false);
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
   it("consumes text approval shortcuts without appending them as user messages", async () => {
@@ -8969,7 +8069,7 @@ describe("createToolLoopHarness", () => {
       }),
     });
 
-    const config = createTestConfig("conversation", undefined, {
+    const config = createTestConfig(undefined, {
       tools: new Map([
         [
           "guarded_echo",
@@ -9049,14 +8149,14 @@ describe("createToolLoopHarness", () => {
       const prepared = await prepareStep({
         context: undefined,
         messages,
-        model: undefined,
+        model: settings.model,
         stepNumber: 0,
         steps: [],
       });
       return prepared.messages ?? [];
     };
 
-    const config = createTestConfig("conversation", undefined, {
+    const config = createTestConfig(undefined, {
       resolveModel: vi.fn().mockResolvedValue(
         new MockLanguageModelV3({
           modelId: "claude-sonnet-4-5",
@@ -9134,726 +8234,6 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  it("follow-up message precedes a late approval denial in committed history", async () => {
-    // Step 1: pending approval + user sends a follow-up message. The message
-    // runs as an ordinary turn while the approval stays open. Step 2: the
-    // user denies the approval; the withheld batch is restored behind the
-    // intervening exchange and resolves as denied.
-    const generateCalls: Array<Array<{ role: string; content: unknown }>> = [];
-    const agentResults = [
-      {
-        finishReason: "stop",
-        response: { messages: [{ content: "Sure, here you go.", role: "assistant" }] },
-        text: "Sure, here you go.",
-        toolCalls: [],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: {
-          messages: [{ content: "I will not run that command.", role: "assistant" }],
-        },
-        text: "I will not run that command.",
-        toolCalls: [],
-        toolResults: [],
-      },
-    ] satisfies Record<string, unknown>[];
-    let instanceIndex = 0;
-
-    vi.mocked(ToolLoopAgent).mockImplementation(function (
-      this: Record<string, unknown>,
-      settings: MockAgentSettings,
-    ) {
-      const result = agentResults[instanceIndex];
-      instanceIndex += 1;
-      if (result === undefined) {
-        throw new Error("ToolLoopAgent mock exhausted its scripted results.");
-      }
-      const { onStepEnd, prepareStep } = settings;
-      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
-        if (prepareStep) {
-          await prepareStep({
-            messages: input.messages,
-            steps: [],
-            stepNumber: 0,
-            model: {},
-            context: undefined,
-          });
-        }
-        generateCalls.push(input.messages as Array<{ role: string; content: unknown }>);
-        if (onStepEnd) await onStepEnd(result);
-        return createMockGenerateResult(result);
-      });
-      return this as unknown as ToolLoopAgent;
-    } as unknown as ConstructorParameters<typeof ToolLoopAgent> extends [infer S]
-      ? (settings: S) => ToolLoopAgent
-      : never);
-
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-1",
-            input: { command: "deploy --force" },
-            kind: "tool-call",
-            toolName: "bash",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Approve" },
-            { id: "cancel", label: "Cancel" },
-          ],
-          prompt: "Approve tool call: bash",
-          requestId: "approval-1",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: { command: "deploy --force" },
-              toolCallId: "call-1",
-              toolName: "bash",
-              type: "tool-call",
-            },
-            {
-              approvalId: "approval-1",
-              toolCallId: "call-1",
-              type: "tool-approval-request",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createTestSession({
-        agent: {
-          modelReference: { id: "test-model" },
-          system: "You are a test assistant.",
-          tools: [
-            { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
-          ],
-        },
-      }),
-    });
-
-    const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
-        [
-          "bash",
-          {
-            description: "Run shell commands",
-            execute: vi.fn().mockResolvedValue("ok"),
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "bash",
-          },
-        ],
-      ]),
-    });
-
-    // Step 1: the follow-up message runs immediately; the approval stays open.
-    const firstResult = await createToolLoopHarness(config)(session, {
-      message: "Do something else",
-    });
-    expect(firstResult.next).toBeNull();
-    expect(generateCalls).toHaveLength(1);
-    expect(generateCalls[0]?.at(-1)).toEqual({
-      content: "Do something else",
-      kind: "user" as const,
-      role: "user",
-    });
-    expect(hasPendingInputBatch(firstResult.session.state)).toBe(true);
-
-    // Step 2: the late denial restores the withheld batch behind the
-    // intervening exchange; the model sees the denial as the tail.
-    const deniedResult = await createToolLoopHarness(config)(firstResult.session, {
-      inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
-    });
-    expect(generateCalls).toHaveLength(2);
-    expect(generateCalls[1]?.at(-1)?.role).toBe("tool");
-
-    // Committed history keeps the intervening exchange before the batch.
-    const history = deniedResult.session.history;
-    expect(history[0]).toEqual({
-      content: "Do something else",
-      kind: "user" as const,
-      role: "user",
-    });
-    expect(history[1]).toEqual({ content: "Sure, here you go.", role: "assistant" });
-    expect(history.at(-1)).toEqual({
-      content: "I will not run that command.",
-      role: "assistant",
-    });
-    expect(hasPendingInputBatch(deniedResult.session.state)).toBe(false);
-  });
-
-  it.each([
-    { delegated: false, label: "task" },
-    { delegated: true, label: "delegated task" },
-  ])(
-    "defers an unrelated message behind an open approval in $label mode",
-    async ({ delegated }) => {
-      const { emit, events } = createEventCollector();
-      const config = createTestConfig("task", emit, {
-        capabilities: { requestInput: true },
-        tools: new Map([
-          [
-            "bash",
-            {
-              description: "Run shell commands",
-              execute: vi.fn().mockResolvedValue("ok"),
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "bash",
-            },
-          ],
-        ]),
-      });
-      const run = () =>
-        createToolLoopHarness(config)(createPendingBashApprovalSession(), {
-          message: "Do something unrelated.",
-        });
-
-      let result: Awaited<ReturnType<typeof run>>;
-      if (delegated) {
-        const ctx = new ContextContainer();
-        setDelegatedParent(ctx);
-        result = await contextStorage.run(ctx, run);
-      } else {
-        result = await run();
-      }
-
-      expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
-      expect(result.next).toBeNull();
-      expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
-      expect(hasDeferredStepInput(result.session)).toBe(true);
-      expect(events.some((event) => event.type === "session.completed")).toBe(false);
-    },
-  );
-
-  it.each([
-    { approved: true, reply: "approve" },
-    { approved: false, reply: "cancel" },
-  ])(
-    "resolves text $reply before replaying a deferred task message",
-    async ({ approved, reply }) => {
-      const generateCalls: Array<Array<{ content: unknown; role: string }>> = [];
-      const agentResults = [
-        {
-          finishReason: "stop",
-          response: { messages: [{ content: "Approval resolved.", role: "assistant" }] },
-          text: "Approval resolved.",
-          toolCalls: [],
-          toolResults: [],
-        },
-        {
-          finishReason: "stop",
-          response: { messages: [{ content: "Task complete.", role: "assistant" }] },
-          text: "Task complete.",
-          toolCalls: [],
-          toolResults: [],
-        },
-      ] satisfies Record<string, unknown>[];
-      let resultIndex = 0;
-      vi.mocked(ToolLoopAgent).mockImplementation(function (
-        this: MockAgentInstance,
-        settings: MockAgentSettings,
-      ) {
-        const result = agentResults[resultIndex++];
-        if (result === undefined) throw new Error("ToolLoopAgent mock exhausted its results.");
-        const { onStepEnd, prepareStep } = settings;
-        this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
-          if (prepareStep) {
-            await prepareStep({
-              context: undefined,
-              messages: input.messages,
-              model: {},
-              stepNumber: 0,
-              steps: [],
-            });
-          }
-          generateCalls.push(input.messages as Array<{ content: unknown; role: string }>);
-          if (onStepEnd) await onStepEnd(result);
-          return createMockGenerateResult(result);
-        });
-        return this;
-      } as MockAgentConstructor);
-
-      const config = createTestConfig("task", undefined, {
-        capabilities: { requestInput: true },
-        tools: new Map([
-          [
-            "bash",
-            {
-              description: "Run shell commands",
-              execute: vi.fn().mockResolvedValue("ok"),
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "bash",
-            },
-          ],
-        ]),
-      });
-      const harness = createToolLoopHarness(config);
-      const deferred = await harness(createPendingBashApprovalSession(), {
-        message: "Do something unrelated.",
-      });
-
-      const resolved = await harness(deferred.session, { message: reply });
-
-      expect(generateCalls).toHaveLength(1);
-      const approvalMessage = generateCalls[0]?.at(-1);
-      expect(approvalMessage?.role).toBe("tool");
-      expect(approvalMessage?.content).toEqual(
-        expect.arrayContaining([expect.objectContaining({ approvalId: "approval-1", approved })]),
-      );
-      expect(hasPendingInputBatch(resolved.session.state)).toBe(false);
-      expect(hasDeferredStepInput(resolved.session)).toBe(true);
-      expect(typeof resolved.next).toBe("function");
-      if (typeof resolved.next !== "function") throw new Error("Expected deferred replay step.");
-
-      const completed = await resolved.next(resolved.session);
-
-      expect(generateCalls).toHaveLength(2);
-      expect(generateCalls[1]?.at(-1)).toEqual({
-        content: "Do something unrelated.",
-        kind: "user" as const,
-        role: "user",
-      });
-      expect(completed.next).toEqual({ done: true, output: "Task complete." });
-    },
-  );
-
-  it("continues deferred input when approval resolution raises another request", async () => {
-    setupMockAgentSequence([
-      {
-        finishReason: "tool-calls",
-        response: {
-          messages: [
-            {
-              content: [
-                {
-                  input: { prompt: "Which color?" },
-                  toolCallId: "question-1",
-                  toolName: "ask_question",
-                  type: "tool-call",
-                },
-              ],
-              role: "assistant",
-            },
-          ],
-        },
-        text: "",
-        toolCalls: [
-          {
-            input: { prompt: "Which color?" },
-            toolCallId: "question-1",
-            toolName: "ask_question",
-            type: "tool-call",
-          },
-        ],
-        toolResults: [],
-      },
-      {
-        finishReason: "stop",
-        response: { messages: [{ content: "Handled the deferred message.", role: "assistant" }] },
-        text: "Handled the deferred message.",
-        toolCalls: [],
-        toolResults: [],
-      },
-    ]);
-
-    const base = createPendingBashApprovalSession();
-    const session = {
-      ...base,
-      agent: {
-        ...base.agent,
-        tools: [
-          ...base.agent.tools,
-          {
-            description: "Ask the user a question.",
-            inputSchema: { type: "object" },
-            name: "ask_question",
-          },
-        ],
-      },
-    };
-    const config = createTestConfig("conversation", undefined, {
-      capabilities: { requestInput: true },
-      tools: new Map([
-        [
-          "bash",
-          {
-            description: "Run shell commands",
-            execute: vi.fn().mockResolvedValue("ok"),
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "bash",
-          },
-        ],
-        [
-          "ask_question",
-          {
-            behavior: {
-              availability: ["requires-request-input"],
-              handling: { kind: "request-input", request: "question" },
-            },
-            description: "Ask the user a question.",
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "ask_question",
-          },
-        ],
-      ]),
-    });
-    const runStep = createToolLoopHarness(config);
-
-    const first = await runStep(session, {
-      inputResponses: [{ optionId: "cancel", requestId: "approval-1" }],
-      message: "Use this instead.",
-    });
-
-    expect(typeof first.next).toBe("function");
-    expect(getPendingInputRequestIds(first.session.state)).toEqual(new Set(["question-1"]));
-    if (typeof first.next !== "function") {
-      throw new TypeError("Expected deferred input to continue after the new question.");
-    }
-    const result = await first.next(first.session);
-
-    expect(result.next).toBeNull();
-    expect(hasDeferredStepInput(result.session)).toBe(false);
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
-    expect(JSON.stringify(result.session.history)).toContain("Use this instead.");
-  });
-
-  it("emits input.requested for ask_question and does not emit actions.requested", async () => {
-    setupMockAgent({
-      content: [],
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              { text: "I need a choice.", type: "text" },
-              {
-                input: {
-                  options: [{ id: "one", label: "One" }],
-                  prompt: "Choose one.",
-                },
-                toolCallId: "question-1",
-                toolName: "ask_question",
-                type: "tool-call",
-              },
-            ],
-            role: "assistant",
-          },
-        ],
-      },
-      text: "",
-      toolCalls: [
-        {
-          input: {
-            options: [{ id: "one", label: "One" }],
-            prompt: "Choose one.",
-          },
-          toolCallId: "question-1",
-          toolName: "ask_question",
-          type: "tool-call",
-        },
-      ],
-      toolResults: [],
-    });
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
-        capabilities: { requestInput: true },
-        tools: createQuestionToolMap(),
-      }),
-    );
-    const session = createTestSession({
-      agent: {
-        modelReference: { id: "test-model" },
-        system: "You are a test assistant.",
-        tools: [
-          {
-            description: "Ask the user a question.",
-            name: "ask_question",
-            inputSchema: { type: "object" },
-          },
-        ],
-      },
-    });
-
-    const result = await runStep(session, { message: "Choose for me." });
-
-    expect(result.next).toBeNull();
-    expect(events.some((event) => event.type === "actions.requested")).toBe(false);
-    expect(events.find((event) => event.type === "input.requested")).toEqual({
-      data: {
-        requests: [
-          {
-            action: {
-              callId: "question-1",
-              input: {
-                options: [{ id: "one", label: "One" }],
-                prompt: "Choose one.",
-              },
-              kind: "tool-call",
-              toolName: "ask_question",
-            },
-            display: "select",
-            kind: "question",
-            options: [{ id: "one", label: "One" }],
-            prompt: "Choose one.",
-            requestId: "question-1",
-          },
-        ],
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_0",
-      },
-      type: "input.requested",
-    });
-  });
-
-  it("delivers a stale ask_question selection as a new user turn while another question is pending", async () => {
-    const nextQuestionInput = {
-      allowFreeform: false,
-      options: [
-        { id: "alpha", label: "Use alpha" },
-        { id: "beta", label: "Use beta" },
-      ],
-      prompt: "Which new context should I use?",
-    };
-    setupMockAgent({
-      content: [],
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              {
-                input: nextQuestionInput,
-                toolCallId: "question-2",
-                toolName: "ask_question",
-                type: "tool-call",
-              },
-            ],
-            role: "assistant",
-          },
-        ],
-      },
-      text: "",
-      toolCalls: [
-        {
-          input: nextQuestionInput,
-          toolCallId: "question-2",
-          toolName: "ask_question",
-          type: "tool-call",
-        },
-      ],
-      toolResults: [],
-    });
-    const nextQuestionImplementation = vi.mocked(ToolLoopAgent).getMockImplementation();
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "I will use the candidate.", role: "assistant" }] },
-      text: "I will use the candidate.",
-      toolCalls: [],
-      toolResults: [],
-    });
-    vi.mocked(ToolLoopAgent).mockImplementationOnce(nextQuestionImplementation!);
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
-        capabilities: { requestInput: true },
-        tools: createQuestionToolMap(),
-      }),
-    );
-    const questionInput = {
-      allowFreeform: true,
-      options: [
-        {
-          description: "Use the current conversation context.",
-          id: "current",
-          label: "Use current context",
-        },
-        {
-          description: "Use the candidate from the earlier question.",
-          id: "candidate",
-          label: "Use STALE-CANDIDATE-7Q4M",
-        },
-      ],
-      prompt: "Which context should I use?",
-    };
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "question-1",
-            input: questionInput,
-            kind: "tool-call",
-            toolName: "ask_question",
-          },
-          allowFreeform: true,
-          display: "select",
-          kind: "question",
-          options: questionInput.options,
-          prompt: questionInput.prompt,
-          requestId: "question-1",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: questionInput,
-              toolCallId: "question-1",
-              toolName: "ask_question",
-              type: "tool-call",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createTestSession({
-        history: [{ content: "Help me choose.", kind: "user" as const, role: "user" }],
-      }),
-    });
-
-    const followupResult = await runStep(session, {
-      message: "Use current context instead.",
-    });
-
-    expect(followupResult.next).toBeNull();
-    expect(hasPendingInputBatch(followupResult.session.state)).toBe(true);
-
-    const secondTurnEventIndex = events.length;
-    const result = await runStep(followupResult.session, {
-      inputResponses: [{ requestId: "question-1", optionId: "candidate" }],
-    });
-
-    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
-    if (agent === undefined) {
-      throw new Error("ToolLoopAgent mock did not return an instance.");
-    }
-    const modelMessages = vi.mocked(agent.stream).mock.calls[0]?.[0].messages;
-
-    expect(result.next).toBeNull();
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
-    expect(modelMessages?.at(-1)).toEqual({
-      content: expect.stringContaining("STALE-CANDIDATE-7Q4M"),
-      kind: "user" as const,
-      role: "user",
-    });
-    expect(
-      events.slice(secondTurnEventIndex).find((event) => event.type === "message.received"),
-    ).toMatchObject({
-      data: {
-        message: "Use STALE-CANDIDATE-7Q4M",
-      },
-    });
-  });
-
-  it("delivers a stale ask_question selection as a new user turn when nothing is pending", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Understood.", role: "assistant" }] },
-      text: "Understood.",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
-        capabilities: { requestInput: true },
-        tools: createQuestionToolMap(),
-      }),
-    );
-    const questionInput = {
-      allowFreeform: true,
-      options: [
-        { id: "current", label: "Use current context" },
-        { id: "candidate", label: "Use STALE-CANDIDATE-7Q4M" },
-      ],
-      prompt: "Which context should I use?",
-    };
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "question-1",
-            input: questionInput,
-            kind: "tool-call",
-            toolName: "ask_question",
-          },
-          allowFreeform: true,
-          display: "select",
-          kind: "question",
-          options: questionInput.options,
-          prompt: questionInput.prompt,
-          requestId: "question-1",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
-            {
-              input: questionInput,
-              toolCallId: "question-1",
-              toolName: "ask_question",
-              type: "tool-call",
-            },
-          ],
-          role: "assistant",
-        },
-      ],
-      session: createTestSession({
-        history: [{ content: "Help me choose.", kind: "user" as const, role: "user" }],
-      }),
-    });
-
-    // The follow-up resolves question-1 as freeform; the turn completes with
-    // nothing pending.
-    const followupResult = await runStep(session, {
-      message: "Use current context instead.",
-    });
-
-    expect(followupResult.next).toBeNull();
-    expect(hasPendingInputBatch(followupResult.session.state)).toBe(false);
-
-    const secondTurnEventIndex = events.length;
-    const result = await runStep(followupResult.session, {
-      inputResponses: [{ requestId: "question-1", optionId: "candidate" }],
-    });
-
-    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
-    if (agent === undefined) {
-      throw new Error("ToolLoopAgent mock did not return an instance.");
-    }
-    const modelMessages = vi.mocked(agent.stream).mock.calls[0]?.[0].messages;
-
-    expect(result.next).toBeNull();
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
-    expect(modelMessages?.at(-1)).toEqual({
-      content: expect.stringContaining("STALE-CANDIDATE-7Q4M"),
-      kind: "user" as const,
-      role: "user",
-    });
-    // The stale selection must not append a second tool result for
-    // question-1: only the freeform answer from the follow-up turn exists.
-    expect(modelMessages?.filter((message: ModelMessage) => message.role === "tool")).toHaveLength(
-      1,
-    );
-    expect(
-      events.slice(secondTurnEventIndex).find((event) => event.type === "message.received"),
-    ).toMatchObject({
-      data: {
-        message: "Use STALE-CANDIDATE-7Q4M",
-      },
-    });
-  });
-
   it("emits compaction.requested and compaction.completed when compaction triggers", async () => {
     vi.mocked(shouldCompact).mockReturnValue(true);
     vi.mocked(compactMessages).mockResolvedValue([
@@ -9872,7 +8252,7 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         resolveModel: vi
           .fn()
           .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
@@ -9920,6 +8300,7 @@ describe("createToolLoopHarness", () => {
       modelId: "openai/gpt-4",
       sequence: 0,
       sessionId: "test-session",
+      stepIndex: 0,
       turnId: "turn_0",
       usageInputTokens: 5000,
     });
@@ -9928,6 +8309,7 @@ describe("createToolLoopHarness", () => {
       modelId: "openai/gpt-4",
       sequence: 0,
       sessionId: "test-session",
+      stepIndex: 0,
       turnId: "turn_0",
     });
     expect(vi.mocked(compactMessages).mock.calls[0]?.[3]).toEqual({
@@ -9935,6 +8317,34 @@ describe("createToolLoopHarness", () => {
         safetyIdentifier: invocationOwnerKey(auth),
         store: false,
       },
+    });
+  });
+
+  it("groups Gateway compaction under the forwarded trace conversation", async () => {
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    vi.mocked(compactMessages).mockResolvedValue([
+      createFrameworkUserMessage("context.compaction", "Summary"),
+      { content: "summary", role: "assistant" },
+    ]);
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "ok", role: "assistant" }] },
+      text: "ok",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const { emit } = createEventCollector();
+    const config = createTestConfig(emit, {
+      resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
+    });
+    const session = createTestSession({ rootSessionId: "root-session" });
+    const ctx = new ContextContainer();
+    ctx.set(ConversationIdKey, "forwarded-conversation");
+
+    await contextStorage.run(ctx, () => createToolLoopHarness(config)(session, { message: "Hi" }));
+
+    expect(vi.mocked(compactMessages).mock.calls[0]?.[3]).toEqual({
+      gateway: { sessionId: "forwarded-conversation" },
     });
   });
 
@@ -9965,7 +8375,7 @@ describe("createToolLoopHarness", () => {
       if (event.type === "step.started") stepViews.push(messages ?? []);
     };
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         dispatchDynamicModelEvent: async ({ messages }) => {
           preCompactionModelViews.push(messages);
         },
@@ -10001,7 +8411,7 @@ describe("createToolLoopHarness", () => {
     const { emit, events } = createEventCollector();
     const resolveModel = vi.fn();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         clearOnly: true,
         resolveModel,
       }),
@@ -10058,17 +8468,15 @@ describe("createToolLoopHarness", () => {
     vi.mocked(compactMessages).mockResolvedValue(compactedHistory);
 
     const { emit, events } = createEventCollector();
-    const onCompaction = vi.fn(() => []);
     const hidden = {
       content: "Hidden internal context.",
       kind: "user" as const,
       role: "user" as const,
     };
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         compactOnly: true,
         historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
-        onCompaction,
         resolveModel: vi
           .fn()
           .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
@@ -10101,7 +8509,6 @@ describe("createToolLoopHarness", () => {
       { content: "Dynamic user instructions.", kind: "user" as const, role: "user" },
       { content: "old reply", role: "assistant" },
     ]);
-    expect(onCompaction).toHaveBeenCalledOnce();
     expect(ToolLoopAgent).not.toHaveBeenCalled();
     expect(getCompatibilityEventTypes(events)).toEqual([
       "compaction.requested",
@@ -10113,7 +8520,7 @@ describe("createToolLoopHarness", () => {
   it("returns an empty session to its waiting boundary after manual compaction", async () => {
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         compactOnly: true,
       }),
     );
@@ -10129,11 +8536,12 @@ describe("createToolLoopHarness", () => {
   });
 
   it("returns a failed manual compaction to its waiting boundary", async () => {
+    const logs = captureLogRecords();
     vi.mocked(compactMessages).mockRejectedValueOnce(new Error("summary failed"));
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         compactOnly: true,
         resolveModel: vi
           .fn()
@@ -10144,20 +8552,24 @@ describe("createToolLoopHarness", () => {
       history: [{ content: "old message", kind: "user" as const, role: "user" }],
     });
     const ctx = new ContextContainer();
-    ctx.set(HistoryStateKey, { taskState: "old message" });
+    ctx.set(HistoryStateKey, { availableSkills: "old message" });
     const result = await contextStorage.run(ctx, () => runStep(session));
 
     expect(result.next).toBeNull();
     expect(result.session).toBe(session);
-    expect(ctx.get(HistoryStateKey)).toEqual({ taskState: "old message" });
+    expect(ctx.get(HistoryStateKey)).toEqual({ availableSkills: "old message" });
     expect(getCompatibilityEventTypes(events)).toEqual(["compaction.requested", "session.waiting"]);
     expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "manual session compaction failed" }),
+    );
   });
 
   it("returns a failed manual model resolution to its waiting boundary", async () => {
+    const logs = captureLogRecords();
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
-      createTestConfig("conversation", emit, {
+      createTestConfig(emit, {
         compactOnly: true,
         resolveModel: vi.fn().mockRejectedValueOnce(new Error("model unavailable")),
       }),
@@ -10173,6 +8585,9 @@ describe("createToolLoopHarness", () => {
     expect(getCompatibilityEventTypes(events)).toEqual(["session.waiting"]);
     expect(compactMessages).not.toHaveBeenCalled();
     expect(ToolLoopAgent).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "error", message: "manual session compaction failed" }),
+    );
   });
 
   it("uses the authored compaction model when one is configured", async () => {
@@ -10192,7 +8607,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const config: ToolLoopHarnessConfig = {
-      ...createTestConfig("conversation"),
+      ...createTestConfig(),
       resolveModel: vi.fn().mockImplementation(
         async (reference) =>
           ({
@@ -10262,7 +8677,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     await runStep(createTestSession(), { message: "Hi" });
 
@@ -10316,7 +8731,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(createTestConfig(emit));
 
     await runStep(createTestSession(), { message: "Hi" });
 
@@ -10379,7 +8794,7 @@ describe("createToolLoopHarness", () => {
       },
     });
 
-    const config = createTestConfig("conversation");
+    const config = createTestConfig();
     const runStep = createToolLoopHarness(config);
 
     const result = await runStep(createTestSession(), { message: "Hi" });
@@ -10388,43 +8803,6 @@ describe("createToolLoopHarness", () => {
       lastKnownInputTokens: 321,
       lastKnownPromptMessageCount: 1,
     });
-  });
-
-  it("invokes onCompaction callback after compaction", async () => {
-    vi.mocked(shouldCompact).mockReturnValue(true);
-    vi.mocked(compactMessages).mockResolvedValue([
-      createFrameworkUserMessage("context.compaction", "Summary of our conversation so far:"),
-      { content: "summary", role: "assistant" },
-    ]);
-
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Resuming.", role: "assistant" }] },
-      text: "Resuming.",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const onCompaction = vi
-      .fn()
-      .mockReturnValue([createFrameworkUserMessage("context.state", "[State preserved]")]);
-
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { onCompaction }),
-    );
-    const session = createTestSession({
-      history: [{ content: "old", kind: "user" as const, role: "user" }],
-    });
-
-    const result = await runStep(session, { message: "Continue" });
-
-    expect(onCompaction).toHaveBeenCalledTimes(1);
-    expect(result.session.history).toEqual([
-      { content: "Summary of our conversation so far:", kind: "context.compaction", role: "user" },
-      { content: "summary", role: "assistant" },
-      { content: "[State preserved]", kind: "context.state", role: "user" },
-      { content: "Resuming.", role: "assistant" },
-    ]);
   });
 
   it("compaction appends a framework continuation when recent window trails with assistant", async () => {
@@ -10449,7 +8827,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [{ toolCallId: "call-1", toolName: "add", output: "42" }],
     });
 
-    const step1Harness = createToolLoopHarness(createTestConfig("conversation"));
+    const step1Harness = createToolLoopHarness(createTestConfig());
     const result1 = await step1Harness(createTestSession(), { message: "add stuff" });
     expect(result1.next).toBe(step1Harness);
     expect(result1.session.history.at(-1)).toMatchObject({ role: "tool" });
@@ -10464,7 +8842,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const step2Harness = createToolLoopHarness(createTestConfig("conversation"));
+    const step2Harness = createToolLoopHarness(createTestConfig());
     const result2 = await step2Harness(result1.session);
     expect(result2.next).toBeNull();
     expect(result2.session.history.at(-1)).toMatchObject({
@@ -10491,7 +8869,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const step3Harness = createToolLoopHarness(createTestConfig("conversation"));
+    const step3Harness = createToolLoopHarness(createTestConfig());
     await step3Harness(result2.session, {});
 
     // Verify the model received the continuation user message, not the
@@ -10507,26 +8885,6 @@ describe("createToolLoopHarness", () => {
       kind: "execution.continuation",
       role: "user",
     });
-  });
-
-  it("does not call onCompaction when compaction does not trigger", async () => {
-    vi.mocked(shouldCompact).mockReturnValue(false);
-
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const onCompaction = vi.fn();
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { onCompaction }),
-    );
-    await runStep(createTestSession(), { message: "Hi" });
-
-    expect(onCompaction).not.toHaveBeenCalled();
   });
 
   describe("prompt caching", () => {
@@ -10554,6 +8912,7 @@ describe("createToolLoopHarness", () => {
       };
       type PromptAgentSettings = MockAgentSettings & {
         instructions?: unknown;
+        model: LanguageModel;
         tools?: Record<
           string,
           { description?: unknown; inputSchema?: unknown; providerOptions?: unknown }
@@ -10581,7 +8940,7 @@ describe("createToolLoopHarness", () => {
         const prepared = await prepareStep({
           context: undefined,
           messages: call.messages,
-          model: {},
+          model: settings.model,
           stepNumber: 0,
           steps: [],
         });
@@ -10681,7 +9040,7 @@ describe("createToolLoopHarness", () => {
           },
         ],
       ]);
-      const config = createTestConfig("conversation", undefined, {
+      const config = createTestConfig(undefined, {
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
         tools,
       });
@@ -10750,9 +9109,9 @@ describe("createToolLoopHarness", () => {
         firstPrompt.tools,
       ]);
       expect(modelCalls.map((call) => call.providerOptions)).toEqual([
-        { gateway: { caching: "auto" } },
-        { gateway: { caching: "auto" } },
-        { gateway: { caching: "auto" } },
+        { gateway: { caching: "auto", sessionId: "test-session" } },
+        { gateway: { caching: "auto", sessionId: "test-session" } },
+        { gateway: { caching: "auto", sessionId: "test-session" } },
       ]);
       expect(modelCalls.map((call) => call.messages)).toEqual([
         [{ content: "Add 1 and 2.", kind: "user" as const, role: "user" }],
@@ -10792,7 +9151,7 @@ describe("createToolLoopHarness", () => {
         },
       });
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", undefined, {
+        createTestConfig(undefined, {
           resolveModel: vi.fn().mockResolvedValue("openai/gpt-5.6-sol"),
         }),
       );
@@ -10813,7 +9172,7 @@ describe("createToolLoopHarness", () => {
           await prepareStep({
             context: undefined,
             messages: [],
-            model: null,
+            model: agentCall?.model,
             stepNumber: 0,
             steps: [],
           })
@@ -10821,11 +9180,11 @@ describe("createToolLoopHarness", () => {
       };
 
       await expect(readProviderOptions(0)).resolves.toEqual({
-        gateway: { caching: "auto" },
+        gateway: { caching: "auto", sessionId: "test-session" },
         openai: { safetyIdentifier: invocationOwnerKey(auth), store: false },
       });
       await expect(readProviderOptions(1)).resolves.toEqual({
-        gateway: { caching: "auto" },
+        gateway: { caching: "auto", sessionId: "test-session" },
         openai: { safetyIdentifier: invocationOwnerKey(nextAuth), store: false },
       });
     });
@@ -10833,7 +9192,6 @@ describe("createToolLoopHarness", () => {
     it("gateway-auto path: merges gateway.caching='auto' into providerOptions for string model ids", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
         tools: new Map([
           [
@@ -10859,11 +9217,11 @@ describe("createToolLoopHarness", () => {
         messages: [],
         stepNumber: 0,
         steps: [],
-        model: null,
+        model: agentCall?.model,
         context: undefined,
       });
       expect(stepResult.providerOptions).toEqual({
-        gateway: { caching: "auto" },
+        gateway: { caching: "auto", sessionId: "test-session" },
       });
     });
 
@@ -10880,7 +9238,6 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
         tools: new Map([
           [
@@ -10906,65 +9263,17 @@ describe("createToolLoopHarness", () => {
         messages: [],
         stepNumber: 0,
         steps: [],
-        model: null,
+        model: agentCall?.model,
         context: undefined,
       });
       expect(stepResult.providerOptions).toEqual({
-        gateway: { order: ["anthropic", "bedrock"], caching: "auto" },
-      });
-    });
-
-    it("gateway-auto path: respects author override of gateway.caching", async () => {
-      setupStopResult();
-      const session = createTestSession({
-        agent: {
-          modelReference: {
-            id: "anthropic/claude-sonnet-4-5",
-            providerOptions: { gateway: { caching: false } },
-          },
-          system: "",
-          tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
-        },
-      });
-      const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
-        resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
-        tools: new Map([
-          [
-            "add",
-            {
-              description: "Adds numbers",
-              execute: vi.fn(),
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "add",
-            },
-          ],
-        ]),
-      };
-      const runStep = createToolLoopHarness(config);
-      await runStep(session, { message: "hi" });
-
-      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-      // providerOptions is now returned by prepareStep, not set on the constructor
-      const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
-        agentCall?.prepareStep,
-      );
-      const stepResult = await prepareStep({
-        messages: [],
-        stepNumber: 0,
-        steps: [],
-        model: null,
-        context: undefined,
-      });
-      expect(stepResult.providerOptions).toEqual({
-        gateway: { caching: false },
+        gateway: { order: ["anthropic", "bedrock"], caching: "auto", sessionId: "test-session" },
       });
     });
 
     it("anthropic-direct path: marks the last tool without dropping approval", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue({
           provider: "anthropic.messages",
           modelId: "claude-sonnet-4-5",
@@ -11029,7 +9338,6 @@ describe("createToolLoopHarness", () => {
     it("anthropic-direct path: prepareStep marks last user and last assistant messages", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue({
           provider: "anthropic.messages",
           modelId: "claude-sonnet-4-5",
@@ -11070,7 +9378,7 @@ describe("createToolLoopHarness", () => {
         ],
         stepNumber: 0,
         steps: [],
-        model: null,
+        model: agentCall?.model,
         context: undefined,
       });
 
@@ -11088,7 +9396,6 @@ describe("createToolLoopHarness", () => {
     it("none path: direct OpenAI instance gets no caching changes", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue({
           provider: "openai.chat",
           modelId: "gpt-5",
@@ -11118,7 +9425,7 @@ describe("createToolLoopHarness", () => {
         messages: [],
         stepNumber: 0,
         steps: [],
-        model: null,
+        model: agentCall?.model,
         context: undefined,
       });
       expect(stepResult.providerOptions).toBeUndefined();
@@ -11156,7 +9463,7 @@ describe("createToolLoopHarness", () => {
       });
 
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
       await runStep(createTestSession(), { message: "hi" });
 
       const stepCompleted = events.find((e) => e.type === "step.completed");
@@ -11182,7 +9489,7 @@ describe("createToolLoopHarness", () => {
       });
 
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
       await runStep(createTestSession(), { message: "hi" });
 
       const stepCompleted = events.find((e) => e.type === "step.completed");
@@ -11205,7 +9512,7 @@ describe("createToolLoopHarness", () => {
       });
 
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
       await runStep(createTestSession(), { message: "hi" });
 
       const stepCompleted = events.find((e) => e.type === "step.completed");
@@ -11233,7 +9540,6 @@ describe("createToolLoopHarness", () => {
       process.env.VERCEL_PROJECT_PRODUCTION_URL = "my-agent.vercel.app";
       try {
         const config: ToolLoopHarnessConfig = {
-          mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           runtimeIdentity: {
             agentId: "weather-agent",
@@ -11268,7 +9574,6 @@ describe("createToolLoopHarness", () => {
       delete process.env.VERCEL_URL;
       try {
         const config: ToolLoopHarnessConfig = {
-          mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           runtimeIdentity: {
             agentId: "weather-agent",
@@ -11302,7 +9607,6 @@ describe("createToolLoopHarness", () => {
       process.env.VERCEL_URL = "preview-123.vercel.app";
       try {
         const config: ToolLoopHarnessConfig = {
-          mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           runtimeIdentity: {
             agentId: "my-agent",
@@ -11335,7 +9639,6 @@ describe("createToolLoopHarness", () => {
     it("does not set attribution headers for non-gateway model objects", async () => {
       setupStopResultForAttribution();
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue({
           provider: "anthropic.messages",
           modelId: "claude-sonnet-4-5-20250514",
@@ -11358,7 +9661,6 @@ describe("createToolLoopHarness", () => {
     it("sets the eve user-agent for explicit Gateway model objects", async () => {
       setupStopResultForAttribution();
       const config: ToolLoopHarnessConfig = {
-        mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue(
           new MockLanguageModelV3({
             provider: "gateway.language-model",
@@ -11384,7 +9686,6 @@ describe("createToolLoopHarness", () => {
       delete process.env.VERCEL_URL;
       try {
         const config: ToolLoopHarnessConfig = {
-          mode: "conversation",
           resolveModel: vi.fn().mockResolvedValue("anthropic/claude-sonnet-4-5"),
           tools: new Map(),
         };
@@ -11419,7 +9720,6 @@ describe("createToolLoopHarness", () => {
         const { emit } = createEventCollector();
         const config: ToolLoopHarnessConfig = {
           handleEvent: emit,
-          mode: "conversation",
           resolveModel: vi.fn().mockImplementation(async (reference) =>
             reference.id === "compaction-model"
               ? "anthropic/claude-sonnet-4-5"
@@ -11490,7 +9790,7 @@ describe("createToolLoopHarness", () => {
       });
 
       declareTelemetry({ tracePolicy: () => true });
-      const config = createTestConfig("conversation");
+      const config = createTestConfig();
       const runStep = createToolLoopHarness(config);
       const result = await runStep(createTestSession(), { message: "add stuff" });
       declareTelemetry(undefined);
@@ -11525,7 +9825,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [{ toolCallId: "call-1", toolName: "add", output: "42" }],
       });
 
-      const config = createTestConfig("conversation");
+      const config = createTestConfig();
       const runStep = createToolLoopHarness(config);
       const result = await runStep(createTestSession(), { message: "add stuff" });
 
@@ -11557,7 +9857,7 @@ describe("createToolLoopHarness", () => {
       });
 
       declareTelemetry({ tracePolicy: () => true });
-      const step1Config = createTestConfig("conversation");
+      const step1Config = createTestConfig();
       const step1 = createToolLoopHarness(step1Config);
       const result1 = await step1(createTestSession(), { message: "add stuff" });
 
@@ -11581,7 +9881,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
 
-      const step2Config = createTestConfig("conversation");
+      const step2Config = createTestConfig();
       const step2 = createToolLoopHarness(step2Config);
       // No input — continuation step
       const result2 = await step2(result1.session);
@@ -11624,7 +9924,7 @@ describe("createToolLoopHarness", () => {
         registeredAuthorIntegration,
       ]);
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", undefined, {
+        createTestConfig(undefined, {
           instrumentation: declaredInstrumentation,
         }),
       );
@@ -11702,7 +10002,7 @@ describe("createToolLoopHarness", () => {
         },
       ]);
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", undefined, {
+        createTestConfig(undefined, {
           instrumentation: bindHookInstrumentation(hooks, undefined, true),
         }),
       );
@@ -11745,7 +10045,7 @@ describe("createToolLoopHarness", () => {
         },
       ]);
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", undefined, {
+        createTestConfig(undefined, {
           instrumentation: bindHookInstrumentation(hooks, undefined, true),
         }),
       );
@@ -11902,7 +10202,7 @@ describe("createToolLoopHarness", () => {
       const events: UnstampedMessageStreamEvent[] = [];
       declareTelemetry({ tracePolicy: () => true });
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", async (event) => {
+        createTestConfig(async (event) => {
           events.push(event);
         }),
       );
@@ -11931,7 +10231,7 @@ describe("createToolLoopHarness", () => {
       });
 
       declareTelemetry({ runtimeContext: () => undefined, tracePolicy: () => true });
-      const config = createTestConfig("conversation");
+      const config = createTestConfig();
       const runStep = createToolLoopHarness(config);
       await runStep(createTestSession(), { message: "hi" });
       declareTelemetry(undefined);
@@ -11967,7 +10267,7 @@ describe("createToolLoopHarness", () => {
         { events: { "step.attempt.completed": attemptCompleted }, name: "attempt" },
       ]);
       const runInContext: InstrumentationContextRunner = (_operation, execute) => execute();
-      const config = createTestConfig("conversation", undefined, {
+      const config = createTestConfig(undefined, {
         instrumentation: bindHookInstrumentation(hooks, runInContext),
       });
 
@@ -12047,7 +10347,7 @@ describe("createToolLoopHarness", () => {
       ]);
       const { emit } = createEventCollector();
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", emit, {
+        createTestConfig(emit, {
           instrumentation: bindHookInstrumentation(hooks),
           tools: createDelegationToolMap(),
         }),
@@ -12081,7 +10381,7 @@ describe("createToolLoopHarness", () => {
         registeredAuthorIntegration,
       ]);
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", undefined, {
+        createTestConfig(undefined, {
           instrumentation: declaredInstrumentation,
         }),
       );
@@ -12115,7 +10415,7 @@ describe("createToolLoopHarness", () => {
       });
       declareTelemetry({ recordInputs: true, recordOutputs: true });
 
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       await runStep(createTestSession(), { message: "hi" });
 
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
@@ -12146,7 +10446,7 @@ describe("createToolLoopHarness", () => {
         "development",
       );
 
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       await runStep(createTestSession(), { message: "hi" });
 
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
@@ -12159,6 +10459,7 @@ describe("createToolLoopHarness", () => {
     });
 
     it("merges runtime context before emitting step.started", async () => {
+      const logs = captureLogRecords();
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -12205,7 +10506,7 @@ describe("createToolLoopHarness", () => {
         kind: "user" as const,
         role: "user" as const,
       };
-      const config = createTestConfig("conversation", emit, {
+      const config = createTestConfig(emit, {
         historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
       });
       const runStep = createToolLoopHarness(config);
@@ -12250,9 +10551,16 @@ describe("createToolLoopHarness", () => {
       expect(order.indexOf("turn.started")).toBeLessThan(order.indexOf("runtimeContext"));
       expect(order.indexOf("step.started")).toBeLessThan(order.indexOf("runtimeContext"));
       expect(getCompatibilityEventTypes(events)).toContain("step.started");
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "ignoring reserved instrumentation runtime context key",
+        }),
+      );
     });
 
     it("continues the normal turn flow when runtime context throws", async () => {
+      const logs = captureLogRecords();
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -12268,7 +10576,7 @@ describe("createToolLoopHarness", () => {
       });
 
       const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
       const result = await runStep(createTestSession(), { message: "hi" });
 
       expect(result.next).toBeNull();
@@ -12289,6 +10597,12 @@ describe("createToolLoopHarness", () => {
       expect(agentCall?.runtimeContext).toMatchObject({
         "eve.session.id": "test-session",
       });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          message: "ignoring instrumentation projection after projector failure",
+        }),
+      );
     });
 
     it("resolves runtime context for each step and turn coordinate", async () => {
@@ -12300,7 +10614,7 @@ describe("createToolLoopHarness", () => {
       });
 
       const { emit } = createEventCollector();
-      const config = createTestConfig("conversation", emit);
+      const config = createTestConfig(emit);
       const session = createTestSession();
 
       setupMockAgent({
@@ -12408,7 +10722,7 @@ describe("createToolLoopHarness", () => {
       const ctx = new ContextContainer();
       ctx.set(SandboxKey, sandbox.access);
 
-      const config = createTestConfig("conversation");
+      const config = createTestConfig();
       const runStep = createToolLoopHarness(config);
       const session = createTestSession();
 
@@ -12480,7 +10794,7 @@ describe("createToolLoopHarness", () => {
       const ctx = new ContextContainer();
       ctx.set(SandboxKey, sandbox.access);
 
-      const config = createTestConfig("conversation");
+      const config = createTestConfig();
       const runStep = createToolLoopHarness(config);
       const session = createTestSession();
 
@@ -12560,7 +10874,7 @@ describe("createToolLoopHarness", () => {
 
     it("appends durable channel context as user messages", async () => {
       setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       const session = createTestSession();
 
       await runStep(session, {
@@ -12576,7 +10890,7 @@ describe("createToolLoopHarness", () => {
 
     it("routes role:system durable history into instructions, not messages", async () => {
       setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       const session = createTestSession({
         history: [{ role: "system", content: "durable-system" }],
       });
@@ -12594,7 +10908,7 @@ describe("createToolLoopHarness", () => {
 
     it("persists context strings in session history as user messages", async () => {
       setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       const session = createTestSession();
 
       const result = await runStep(session, {
@@ -12611,7 +10925,7 @@ describe("createToolLoopHarness", () => {
 
     it("does not replay ephemeral client context on later turns", async () => {
       setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       let session = createTestSession();
 
       for (const token of ["CTX-A", "CTX-B", "CTX-C"]) {
@@ -12675,7 +10989,7 @@ describe("createToolLoopHarness", () => {
           },
         ],
       });
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       const clientContext = "Client context:\nroute=/billing";
 
       const firstStep = await runStep(
@@ -12750,10 +11064,11 @@ describe("createToolLoopHarness", () => {
           toolCalls: [toolCall],
           toolResults: [{ ...toolResult, input: toolCall.input }],
         });
+        const announcement = "Available skills\n- policy: Tenant policy";
         const ctx = new ContextContainer();
-        ctx.set(TurnTaskDeliveryKey, "initiating");
+        ctx.set(PendingSkillAnnouncementKey, announcement);
         const runStep = createToolLoopHarness(
-          createTestConfig("conversation", undefined, {
+          createTestConfig(undefined, {
             historyProjector:
               scenario === "projected history"
                 ? ({ messages }) =>
@@ -12773,7 +11088,7 @@ describe("createToolLoopHarness", () => {
         const input = { context: ["Current channel context"], message: "Add 20 and 22." };
         const first = await contextStorage.run(ctx, () =>
           runStep(
-            recordBackgroundTask(initial),
+            initial,
             withClientContext ? attachClientContext(input, ["Client context"]) : input,
           ),
         );
@@ -12781,26 +11096,23 @@ describe("createToolLoopHarness", () => {
         const firstPrompt = structuredClone(getLastAgentSettings().messages);
         expect(first.session.history).toContainEqual({
           role: "user",
-          content: analysisTaskAnnouncement,
+          content: announcement,
           kind: "context.state",
         });
         const nextState = changed
-          ? '[Task state]\n{"tasks":[{"name":"analysis","status":"pending","taskId":"analysis"},{"name":"verification","status":"pending","taskId":"verification"}]}'
-          : analysisTaskAnnouncement;
+          ? "Available skills\n- policy: Tenant policy\n- billing: Billing policy"
+          : announcement;
         const nextContext = await deserializeContext(
           JSON.parse(JSON.stringify(serializeContext(ctx))),
         );
+        nextContext.set(PendingSkillAnnouncementKey, nextState);
         setupMockAgent(defaultModelResult());
         const restored = JSON.parse(JSON.stringify(first.session)) as HarnessSession;
-        await contextStorage.run(nextContext, () =>
-          runStep(changed ? recordBackgroundTask(restored, "verification") : restored),
-        );
+        await contextStorage.run(nextContext, () => runStep(restored));
         const nextPrompt = getLastAgentSettings().messages;
         expect(nextPrompt.slice(0, firstPrompt.length)).toEqual(firstPrompt);
-        expect(
-          nextPrompt.filter((message) => message.content === analysisTaskAnnouncement),
-        ).toHaveLength(1);
-        expect(nextContext.get(HistoryStateKey)).toMatchObject({ taskState: nextState });
+        expect(nextPrompt.filter((message) => message.content === announcement)).toHaveLength(1);
+        expect(nextContext.get(HistoryStateKey)).toMatchObject({ availableSkills: nextState });
         if (changed) {
           expect(nextPrompt.at(-1)).toEqual({
             role: "user",
@@ -12814,10 +11126,11 @@ describe("createToolLoopHarness", () => {
     );
 
     it("does not advance history state when the model call fails", async () => {
+      const logs = captureLogRecords();
       const ctx = new ContextContainer();
       ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
       const { emit } = createEventCollector();
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const runStep = createToolLoopHarness(createTestConfig(emit));
       setupMockAgentError(new Error("Model unavailable"));
 
       const failed = await contextStorage.run(ctx, () =>
@@ -12842,6 +11155,12 @@ describe("createToolLoopHarness", () => {
       expect(ctx.get(HistoryStateKey)).toEqual({
         availableSkills: "Available skills\n- policy: Tenant policy",
       });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     });
 
     it("does not advance history state when recording the step result fails", async () => {
@@ -12849,7 +11168,7 @@ describe("createToolLoopHarness", () => {
       ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
       const failure = new Error("Failed to finish the turn");
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", async (event) => {
+        createTestConfig(async (event) => {
           if (event.type === "session.waiting") throw failure;
         }),
       );
@@ -12867,6 +11186,7 @@ describe("createToolLoopHarness", () => {
     });
 
     it("retains completed compaction when the next model call fails", async () => {
+      const logs = captureLogRecords();
       const announcement = "Available skills\n- policy: Tenant policy";
       const ctx = new ContextContainer();
       ctx.set(PendingSkillAnnouncementKey, announcement);
@@ -12882,7 +11202,7 @@ describe("createToolLoopHarness", () => {
       });
       const { emit } = createEventCollector();
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", emit, {
+        createTestConfig(emit, {
           resolveModel: vi.fn().mockResolvedValue({ modelId: "test-model", provider: "openai" }),
         }),
       );
@@ -12915,6 +11235,12 @@ describe("createToolLoopHarness", () => {
         retried.session.history.filter((message) => message.content === announcement),
       ).toHaveLength(1);
       expect(restoredContext.get(HistoryStateKey)).toEqual({ availableSkills: announcement });
+      expect(logs.records).toContainEqual(
+        expect.objectContaining({
+          level: "error",
+          message: "model call failed — parking session for retry by the user",
+        }),
+      );
     });
 
     it.each(["clear", "manual compaction", "automatic compaction"])(
@@ -12922,19 +11248,13 @@ describe("createToolLoopHarness", () => {
       async (replacement) => {
         const ctx = new ContextContainer();
         const availableSkills = "Available skills\n- policy: Tenant policy";
-        const taskState = analysisTaskAnnouncement;
         ctx.set(PendingSkillAnnouncementKey, availableSkills);
-        ctx.set(TurnTaskDeliveryKey, "initiating");
-        const runStep = createToolLoopHarness(createTestConfig("conversation"));
+        const runStep = createToolLoopHarness(createTestConfig());
         setupMockAgent(defaultModelResult());
         const first = await contextStorage.run(ctx, () =>
-          runStep(recordBackgroundTask(createTestSession()), { message: "Check progress." }),
+          runStep(createTestSession(), { message: "Check progress." }),
         );
-        const expectedState = {
-          availableSkills,
-          taskState,
-          deliveryInstruction: TASK_DELIVERY_INITIATING_INSTRUCTION,
-        };
+        const expectedState = { availableSkills };
         expect(ctx.get(HistoryStateKey)).toEqual(expectedState);
 
         vi.mocked(compactMessages).mockResolvedValue([
@@ -12945,7 +11265,7 @@ describe("createToolLoopHarness", () => {
           vi.mocked(shouldCompact).mockReturnValueOnce(true);
         } else {
           const replaceHistory = createToolLoopHarness(
-            createTestConfig("conversation", undefined, {
+            createTestConfig(undefined, {
               clearOnly: replacement === "clear",
               compactOnly: replacement === "manual compaction",
             }),
@@ -12970,7 +11290,7 @@ describe("createToolLoopHarness", () => {
     it("skips empty skill announcements without rewriting earlier history", async () => {
       const ctx = new ContextContainer();
       ctx.set(PendingSkillAnnouncementKey, "Available skills\n- policy: Tenant policy");
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       setupMockAgent(defaultModelResult());
       const first = await contextStorage.run(ctx, () =>
         runStep(createTestSession(), { message: "Check the policy." }),
@@ -12996,7 +11316,7 @@ describe("createToolLoopHarness", () => {
         ...defaultModelResult(),
         usage: { inputTokens: 321 },
       });
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       const session = createTestSession({
         history: [{ content: "earlier", kind: "user" as const, role: "user" }],
       });
@@ -13031,7 +11351,7 @@ describe("createToolLoopHarness", () => {
 
     it("leaves instructions unchanged when no context is provided", async () => {
       setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       const session = createTestSession();
 
       await runStep(session, { message: "Hi" });
@@ -13040,259 +11360,9 @@ describe("createToolLoopHarness", () => {
       expect(instructions).toBe("You are a test assistant.");
     });
 
-    it.each(["conversation", "task"] as const)(
-      "adds conditional-delivery guidance to a top-level scheduled %s turn",
-      async (mode) => {
-        setupMockAgent(defaultModelResult());
-        const runStep = createToolLoopHarness(createTestConfig(mode));
-
-        await contextStorage.run(createScheduleContext(), () =>
-          runStep(createTestSession(), { message: "Check for alerts." }),
-        );
-
-        const { instructions, messages } = getLastAgentSettings();
-        expect(instructions).toBe("You are a test assistant.");
-        expect(messages).toContainEqual({
-          role: "user",
-          content: CONDITIONAL_DELIVERY_INSTRUCTION,
-          kind: "context.instruction",
-        });
-      },
-    );
-
-    it.each(["conversation", "task"] as const)(
-      "does not add conditional-delivery guidance when a scheduled %s turn has an output schema",
-      async (mode) => {
-        setupMockAgent(finalOutputResult("Done.", { status: "ok" }));
-        const runStep = createToolLoopHarness(createTestConfig(mode));
-
-        await contextStorage.run(createScheduleContext(), () =>
-          runStep(createTestSession({ outputSchema: { type: "object" } }), {
-            message: "Check for alerts.",
-          }),
-        );
-
-        const { instructions } = getLastAgentSettings();
-        expect(instructions).toBe("You are a test assistant.");
-      },
-    );
-
-    it("does not add conditional-delivery guidance to an ordinary task run", async () => {
-      setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("task"));
-
-      await runStep(createTestSession(), { message: "Run this task." });
-
-      const { instructions } = getLastAgentSettings();
-      expect(instructions).toBe("You are a test assistant.");
-    });
-
-    it("adds initiating task-reporting guidance without enabling silent delivery", async () => {
-      setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = new ContextContainer();
-      ctx.set(TurnTaskDeliveryKey, "initiating");
-
-      await contextStorage.run(ctx, () =>
-        runStep(recordBackgroundTask(createTestSession()), {
-          message: "Start the background work.",
-        }),
-      );
-
-      const { instructions, messages } = getLastAgentSettings();
-      expect(instructions).toBe("You are a test assistant.");
-      expect(messages.slice(0, 2)).toEqual([
-        { role: "user", content: analysisTaskAnnouncement, kind: "context.state" },
-        {
-          role: "user",
-          content: TASK_DELIVERY_INITIATING_INSTRUCTION,
-          kind: "context.instruction",
-        },
-      ]);
-    });
-
-    it("routes later-turn initiating task context through user messages", async () => {
-      setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = new ContextContainer();
-      const taskState = analysisTaskAnnouncement;
-      ctx.set(TurnTaskDeliveryKey, "initiating");
-      const session = setHarnessEmissionState(createTestSession(), {
-        sequence: 1,
-        sessionStarted: true,
-        stepIndex: 0,
-        turnId: "",
-      });
-
-      await contextStorage.run(ctx, () =>
-        runStep(recordBackgroundTask(session), { message: "Start the background work." }),
-      );
-
-      const { instructions, messages } = getLastAgentSettings();
-      expect(instructions).toBe("You are a test assistant.");
-      expect(messages.slice(-3)).toEqual([
-        { role: "user", content: taskState, kind: "context.state" },
-        {
-          role: "user",
-          content: TASK_DELIVERY_INITIATING_INSTRUCTION,
-          kind: "context.instruction",
-        },
-        { kind: "user" as const, role: "user", content: "Start the background work." },
-      ]);
-    });
-
-    it.each(["none", "pending", "settled"] as const)(
-      "does not inject initiating task state during the %s phase",
-      async (phase) => {
-        setupMockAgent(defaultModelResult());
-        const ctx = new ContextContainer();
-        ctx.set(TurnTaskDeliveryKey, phase);
-        await contextStorage.run(ctx, () =>
-          createToolLoopHarness(createTestConfig("conversation"))(
-            recordBackgroundTask(createTestSession()),
-            { message: "Check progress." },
-          ),
-        );
-        expect(getLastAgentSettings().messages).not.toContainEqual({
-          kind: "user" as const,
-          role: "user",
-          content: analysisTaskAnnouncement,
-        });
-        expect(ctx.get(HistoryStateKey)?.taskState).toBeUndefined();
-      },
-    );
-
-    it("keeps a scheduled initiating task turn conditionally deliverable", async () => {
-      setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = createScheduledUserContext();
-      ctx.set(TurnTaskDeliveryKey, "initiating");
-
-      await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "[Task state]" }),
-      );
-
-      const { instructions, messages } = getLastAgentSettings();
-      expect(instructions).toBe("You are a test assistant.");
-      expect(messages).toContainEqual({
-        role: "user",
-        content: CONDITIONAL_DELIVERY_INSTRUCTION,
-        kind: "context.instruction",
-      });
-    });
-
-    it("does not apply session schedule provenance to a later human turn", async () => {
-      setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = createScheduledUserContext();
-      const session = setHarnessEmissionState(createTestSession(), {
-        sequence: 1,
-        sessionStarted: true,
-        stepIndex: 0,
-        turnId: "",
-      });
-
-      await contextStorage.run(ctx, () => runStep(session, { message: "What happened?" }));
-
-      expect(getLastAgentSettings().instructions).toBe("You are a test assistant.");
-    });
-
-    it("does not inject or retain silence guidance after a pending task wake", async () => {
-      setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = new ContextContainer();
-      ctx.set(TurnTaskDeliveryKey, "pending");
-      const session = setHarnessEmissionState(createTestSession(), {
-        sequence: 1,
-        sessionStarted: true,
-        stepIndex: 0,
-        turnId: "",
-      });
-
-      const first = await contextStorage.run(ctx, () =>
-        runStep(
-          session,
-          markFrameworkStepInput(
-            { message: "Background task task_1 is completed." },
-            "execution.background_task",
-          ),
-        ),
-      );
-      expect(getLastAgentSettings().messages).toEqual([
-        {
-          role: "user",
-          content: "Background task task_1 is completed.",
-          kind: "execution.background_task",
-        },
-      ]);
-      expect(ctx.get(HistoryStateKey)?.deliveryInstruction).toBeUndefined();
-
-      ctx.set(TurnTaskDeliveryKey, "none");
-      await contextStorage.run(ctx, () =>
-        runStep(first.session, { message: "What is 7 times 8?" }),
-      );
-      expect(getLastAgentSettings().messages).toEqual([
-        ...first.session.history,
-        { kind: "user" as const, role: "user", content: "What is 7 times 8?" },
-      ]);
-    });
-
-    it("adds settled task-delivery guidance to a top-level framework wake", async () => {
-      setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = new ContextContainer();
-      ctx.set(TurnTaskDeliveryKey, "settled");
-      const session = setHarnessEmissionState(createTestSession(), {
-        sequence: 1,
-        sessionStarted: true,
-        stepIndex: 0,
-        turnId: "",
-      });
-
-      await contextStorage.run(ctx, () =>
-        runStep(
-          session,
-          markFrameworkStepInput(
-            { message: "Background task task_1 is completed." },
-            "execution.background_task",
-          ),
-        ),
-      );
-
-      const { instructions, messages } = getLastAgentSettings();
-      expect(instructions).toBe("You are a test assistant.");
-      expect(messages.slice(-2)).toEqual([
-        {
-          role: "user",
-          content: TASK_DELIVERY_SETTLED_INSTRUCTION,
-          kind: "context.instruction",
-        },
-        {
-          role: "user",
-          content: "Background task task_1 is completed.",
-          kind: "execution.background_task",
-        },
-      ]);
-    });
-
-    it("does not add conditional-delivery guidance to a task-owned conversation child", async () => {
-      setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = new ContextContainer();
-      ctx.set(TurnTaskDeliveryKey, "pending");
-      setDelegatedParent(ctx);
-
-      await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "Resume after HITL." }),
-      );
-
-      const { instructions } = getLastAgentSettings();
-      expect(instructions).toBe("You are a test assistant.");
-    });
-
     it("routes dynamic instruction messages from durable keys into instructions", async () => {
       setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       const session = createTestSession();
 
       const ctx = new ContextContainer();
@@ -13350,7 +11420,7 @@ describe("createToolLoopHarness", () => {
         role: "user" as const,
       };
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", handleEvent, {
+        createTestConfig(handleEvent, {
           historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
         }),
       );
@@ -13381,7 +11451,7 @@ describe("createToolLoopHarness", () => {
     it("preserves the Anthropic system cache breakpoint when merging instructions", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(
-        createTestConfig("conversation", undefined, {
+        createTestConfig(undefined, {
           resolveModel: vi.fn().mockResolvedValue(
             new MockLanguageModelV3({
               modelId: "claude-sonnet-4-5",
@@ -13410,7 +11480,7 @@ describe("createToolLoopHarness", () => {
 
     it("does not persist dynamic instruction messages to session history", async () => {
       setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const runStep = createToolLoopHarness(createTestConfig());
       const session = createTestSession();
 
       const ctx = new ContextContainer();
@@ -13448,7 +11518,7 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      await createToolLoopHarness(createTestConfig("conversation"))(createTestSession(), {
+      await createToolLoopHarness(createTestConfig())(createTestSession(), {
         message: "Hi",
       });
     }
@@ -13611,108 +11681,13 @@ describe("appendMissingToolResultMessages", () => {
 });
 
 describe("boundary event failures", () => {
-  it.each(["turn.started", "step.started"] as const)(
-    "parks a failed %s and accepts the next turn",
-    async (boundary) => {
-      const events: UnstampedMessageStreamEvent[] = [];
-      let denied = true;
-      const emit: HarnessEmitFn = async (event) => {
-        events.push(event);
-        if (denied && event.type === boundary)
-          throw new BoundaryHookError(new Error("admission denied"));
-      };
-      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
-      const result = await runStep(createTestSession({ outputSchema: { type: "object" } }), {
-        message: "Denied request",
-      });
-      expect(result.next).toBeNull();
-      expect(result.settledTurn).toEqual({ isError: true, output: "admission denied" });
-      expect(result.session.outputSchema).toBeUndefined();
-      expect(ToolLoopAgent).not.toHaveBeenCalled();
-      expect(events.filter((event) => event.type === "turn.failed")).toMatchObject([
-        { data: { turnId: "turn_0", sequence: 0, code: "EVENT_HANDLER_FAILED" } },
-      ]);
-      expect(events.map((event) => event.type)).toContain("session.waiting");
-      expect(events.map((event) => event.type)).not.toContain("session.failed");
-      expect(getHarnessEmissionState(result.session.state)).toEqual({
-        sessionStarted: true,
-        sequence: 1,
-        stepIndex: 0,
-        turnId: "",
-      });
-      denied = false;
-      setupMockAgent({
-        finishReason: "stop",
-        response: { messages: [{ role: "assistant", content: "recovered" }] },
-        text: "recovered",
-        toolCalls: [],
-        toolResults: [],
-      });
-      const recovered = await runStep(
-        JSON.parse(JSON.stringify(result.session)) as HarnessSession,
-        { message: "Try again" },
-      );
-      expect(recovered.next).toBeNull();
-      expect(events.filter((event) => event.type === "turn.completed")).toMatchObject([
-        { data: { turnId: "turn_1", sequence: 1 } },
-      ]);
-      expect(events.filter((event) => event.type === "session.started")).toHaveLength(1);
-    },
-  );
-
-  it("fails the current later step without invoking another model", async () => {
-    const events: UnstampedMessageStreamEvent[] = [];
-    const emit: HarnessEmitFn = async (event) => {
-      events.push(event);
-      if (event.type === "step.started")
-        throw new BoundaryHookError(new Error("step budget exhausted"));
-    };
-    const session = setHarnessEmissionState(createTestSession(), {
-      sessionStarted: true,
-      sequence: 2,
-      stepIndex: 3,
-      turnId: "turn_2",
-    });
-    const result = await createToolLoopHarness(createTestConfig("conversation", emit))(session);
-    expect(result.next).toBeNull();
-    expect(events[1]).toMatchObject({
-      type: "step.failed",
-      data: { stepIndex: 3, turnId: "turn_2" },
-    });
-    expect(ToolLoopAgent).not.toHaveBeenCalled();
-  });
-
-  it("lets a failed failure handler escalate", async () => {
-    const emit: HarnessEmitFn = async (event) => {
-      if (event.type === "turn.started") throw new BoundaryHookError(new Error("admission denied"));
-      if (event.type === "turn.failed") throw new Error("failure handler failed");
-    };
-    await expect(
-      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
-        message: "Hi",
-      }),
-    ).rejects.toThrow("failure handler failed");
-  });
-
-  it("keeps task failures terminal", async () => {
-    const events: UnstampedMessageStreamEvent[] = [];
-    const emit: HarnessEmitFn = async (event) => {
-      events.push(event);
-      if (event.type === "turn.started") throw new BoundaryHookError(new Error("task denied"));
-    };
-    await expect(
-      createToolLoopHarness(createTestConfig("task", emit))(createTestSession(), { message: "Hi" }),
-    ).rejects.toThrow("task denied");
-    expect(events.map((event) => event.type)).not.toContain("session.waiting");
-  });
-
   it("keeps runtime preamble failures terminal", async () => {
     const failure = new Error("memory recall failed");
     const emit: HarnessEmitFn = async (event) => {
       if (event.type === "turn.started") throw failure;
     };
     await expect(
-      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+      createToolLoopHarness(createTestConfig(emit))(createTestSession(), {
         message: "Hi",
       }),
     ).rejects.toBe(failure);
@@ -13724,7 +11699,7 @@ describe("boundary event failures", () => {
       throw cancellation;
     };
     await expect(
-      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+      createToolLoopHarness(createTestConfig(emit))(createTestSession(), {
         message: "Hi",
       }),
     ).rejects.toBe(cancellation);

@@ -17,7 +17,6 @@ export function createTestSessionState(
       session: {
         agent: { system: "" },
         continuationToken: overrides.continuationToken ?? "test-token",
-        history: [],
         sessionId: overrides.sessionId ?? "test-session",
       },
     },

@@ -150,8 +150,7 @@ export async function dispatchMemoryTurnStarted(input: {
       state: committed.state,
     }) ?? recalledMessages;
   input.ctx.setVirtualContext(PendingMemoryCommitKey, {
-    history: committed.history,
-    projectedMessages,
+    recalledMessages: committed.recalledMessages,
     state: committed.state,
   });
   return projectedMessages;
@@ -200,6 +199,7 @@ export async function dispatchMemoryCompactionRequested(input: {
           sequence: input.event.data.sequence,
           sessionId: callbackContext.session.id,
           slot: memory.slot,
+          stepIndex: input.event.data.stepIndex,
           turnId: turn?.id ?? null,
         });
         await instrumentMemoryOperation(
@@ -262,6 +262,7 @@ export async function dispatchMemoryCompactionCompleted(input: {
             sequence: input.event.data.sequence,
             sessionId: callbackContext.session.id,
             slot: memory.slot,
+            stepIndex: input.event.data.stepIndex,
             turnId: turn?.id ?? null,
           });
           const result = await instrumentMemoryOperation(
@@ -310,8 +311,7 @@ export async function dispatchMemoryCompactionCompleted(input: {
     messages: committed.history,
   });
   input.ctx.setVirtualContext(PendingMemoryCommitKey, {
-    history: committed.history,
-    projectedMessages,
+    recalledMessages: committed.recalledMessages,
     state: committed.state,
   });
   input.ctx.delete(PreparedMemoryCompactionKey);
@@ -475,11 +475,12 @@ async function settleMemoryOperations<T>(operations: readonly Promise<T>[]): Pro
   return values;
 }
 
-export function memoryOperationId(input: {
+function memoryOperationId(input: {
   readonly phase: string;
   readonly sequence: number;
   readonly sessionId: string;
   readonly slot: string;
+  readonly stepIndex?: number;
   readonly turnId: string | null;
 }): string {
   return [
@@ -487,6 +488,7 @@ export function memoryOperationId(input: {
     input.sessionId,
     String(input.sequence),
     input.turnId ?? "standalone",
+    ...(input.stepIndex === undefined ? [] : [String(input.stepIndex)]),
     input.phase,
     input.slot,
   ].join(":");

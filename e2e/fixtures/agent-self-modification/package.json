@@ -8,7 +8,7 @@
     "build": "pnpm run e2e:prepare && eve build",
     "dev": "pnpm run e2e:prepare && eve dev",
     "start": "eve start",
-    "typecheck": "pnpm run build && tsc",
+    "typecheck": "pnpm run e2e:prepare && eve build --skip-sandbox-prewarm && tsc",
     "test:e2e": "pnpm run e2e:prepare && eve eval --strict",
     "test:scenario": "node --test test/*.scenario.test.mjs"
   },
@@ -25,6 +25,30 @@
     "typescript": "catalog:"
   },
   "e2e": {
-    "worlds": []
+    "worlds": [],
+    "modelShards": [
+      {
+        "name": "repair",
+        "evals": [
+          "self-modification/offer-repair",
+          "self-modification/repair-order-total",
+          "self-modification/update-identity"
+        ]
+      },
+      {
+        "name": "registry",
+        "evals": [
+          "self-modification/add-agent-browser",
+          "self-modification/add-slack-channel"
+        ]
+      },
+      {
+        "name": "create",
+        "evals": [
+          "self-modification/create-shipping-quote",
+          "self-modification/create-incident-triage"
+        ]
+      }
+    ]
   }
 }

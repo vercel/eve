@@ -22,7 +22,7 @@ interface ChannelRouteNitro {
 }
 
 /** One active channel binding in the eve-owned application route registry. */
-export type NitroChannelRouteRegistration = ApplicationChannelRouteRegistration;
+type NitroChannelRouteRegistration = ApplicationChannelRouteRegistration;
 
 /**
  * Computes the merged set of channel routes the Nitro host should mount.

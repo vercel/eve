@@ -3,7 +3,7 @@ title: "Judge"
 description: "Grade evals with evaluation models using criteria, typed questions, or batches, and set thresholds on each assertion."
 ---
 
-Use `t.judge(...)` when a deterministic [assertion](./assertions) cannot capture what a good response looks like. It calls [`evaluate` from `eve/ai`](../guides/evaluate#evaluate-inside-a-tool) and defaults to `typesafe-ai/jev`. The judge is separate from the agent under test and is used only for scoring.
+Use `t.judge(...)` when a deterministic [assertion](./assertions) cannot capture what a good response looks like. It calls [`evaluate` from `eve/ai`](../guides/evaluate#evaluate-inside-a-tool) and defaults to `typesafe-ai/jev`, TypeSafe AI's [Jev evaluation model](https://vercel.com/i/what-is-jev). The judge is separate from the agent under test and is used only for scoring.
 
 ```ts
 import { defineEval } from "eve/evals";
@@ -138,14 +138,14 @@ String IDs resolve through the AI SDK default provider, or Vercel AI Gateway whe
 import { openai } from "@ai-sdk/openai";
 
 t.judge("The response addresses the request.", {
-  model: openai.evaluationModel("gpt-5.6-luna"),
+  model: openai.evaluationModel("gpt-6-luna"),
   modelOptions: { providerOptions: { openai: { reasoningEffort: "high" } } },
 });
 ```
 
 Use the provider's `evaluationModel` factory, not a language model instance. AI SDK supplies evaluation adapters for supported language models. Provider support and the evaluation contract are experimental; see [AI SDK evaluation](https://ai-sdk.dev/docs/ai-sdk-core/evaluation).
 
-String model IDs resolve through the default provider's evaluation API. Gateway accepts native evaluation models such as `typesafe-ai/jev`; passing a language model ID such as `openai/gpt-5.6-luna` does not automatically select the OpenAI adapter. Use an evaluation-model instance as shown above for language models.
+String model IDs resolve through the default provider's evaluation API. Gateway accepts native evaluation models such as `typesafe-ai/jev`; passing a language model ID such as `openai/gpt-6-luna` does not automatically select the OpenAI adapter. Use an evaluation-model instance as shown above for language models.
 
 Missing credentials, invalid answers, unsupported question types, and provider errors become failed gates even for tracked-only judgments. They do not silently skip the eval or select another model. Validation, authentication, and retries use the shared `evaluate` implementation.
 

@@ -2,12 +2,25 @@ import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent, defineDynamic } from "eve";
 import { mockModel } from "eve/evals";
 
+import { WORKSPACE_FORWARDING_MARKER, WORKSPACE_LOOKUP_MESSAGE } from "../constants";
 import {
-  SCHEDULED_REMOTE_CHILD_SCENARIO,
-  SCHEDULED_REMOTE_ROOT_SCENARIO,
-  WORKSPACE_FORWARDING_MARKER,
-  WORKSPACE_LOOKUP_MESSAGE,
-} from "../constants";
+  REMOTE_QUESTION_DIRECTIVE,
+  respondToRemoteQuestion,
+} from "./lib/remote-question-script.js";
+import { isNestedDirective, respondToNestedRequest } from "./lib/remote-nested-script.js";
+import { isDirectHitlDirective, respondToDirectHitl } from "./lib/remote-direct-hitl-script.js";
+import {
+  isNotebookDirective,
+  isNotebookEntry,
+  respondAsNotebookKeeper,
+  respondAsNotebookParent,
+} from "./lib/notebook.js";
+import {
+  isSurveyDirective,
+  isSurveyToolDirective,
+  respondAsSurveyParent,
+  respondAsSurveyToolParent,
+} from "./lib/survey.js";
 
 if (process.env.EVE_E2E_MODEL === "mock") {
   process.env.EVE_MOCK_AUTHORED_MODELS = "1";
@@ -65,80 +78,54 @@ const workspaceDispatcher = mockModel({
     ) {
       return "The workspace lookup was submitted.";
     }
-    const previous = [...request.toolResults]
-      .reverse()
-      .find((result) => result.name === "remote-loopback")?.output;
-    const agentId =
-      previous !== null &&
-      typeof previous === "object" &&
-      "agentId" in previous &&
-      typeof previous.agentId === "string"
-        ? previous.agentId
-        : undefined;
-    const requestCount = request.messages.filter(
+    const requests = request.messages.filter(
       (message) => message.role === "user" && message.text.includes(WORKSPACE_FORWARDING_MARKER),
-    ).length;
-    if (requestCount > 1 && agentId === undefined) {
-      throw new Error("Workspace continuation has no existing remote agent receipt.");
+    );
+    const requestCount = requests.length;
+    // Only a continuation names the task, which the [Tasks] note lists.
+    const continuing = requests.at(-1)?.text.includes("taskId") === true;
+    const taskId = continuing ? findListedTaskId(request.messages, "remote-loopback") : undefined;
+    if (continuing && taskId === undefined) {
+      throw new Error("Workspace continuation has no remote-loopback task in the [Tasks] note.");
     }
     return {
       toolCalls: [
         {
           id: `workspace-lookup-${requestCount}`,
           name: "remote-loopback",
-          input: { agentId, message: WORKSPACE_LOOKUP_MESSAGE },
+          input: { message: WORKSPACE_LOOKUP_MESSAGE, taskId },
         },
       ],
     };
   },
 });
-const scheduledRemoteModel = mockModel({
-  modelId: "scheduled-remote-completion",
-  respond(request) {
-    if (request.userMessages.some((message) => message.includes(SCHEDULED_REMOTE_CHILD_SCENARIO))) {
-      return "SCHEDULED-REMOTE-CHILD-RESULT";
-    }
-
-    const remote = completedTaskOutput(request.userMessages, "remote-loopback");
-    if (remote !== undefined) return `SCHEDULED-REMOTE-FINAL ${remote}`;
-    if (!request.toolResults.some((result) => result.id === "scheduled-remote")) {
-      return {
-        toolCalls: [
-          {
-            id: "scheduled-remote",
-            input: { message: SCHEDULED_REMOTE_CHILD_SCENARIO },
-            name: "remote-loopback",
-          },
-        ],
-      };
-    }
-    return "Weekly report could not be completed before delivery because the analytics query did not return a result.";
-  },
+const remoteQuestionModel = mockModel({
+  modelId: "remote-question",
+  respond: respondToRemoteQuestion,
 });
-
-function completedTaskOutput(messages: readonly string[], name: string): string | undefined {
-  const prefix = "[Task state]\n";
-  const state = [...messages].reverse().find((message) => message.startsWith(prefix));
-  if (state === undefined) return undefined;
-  const parsed: unknown = JSON.parse(state.slice(prefix.length));
-  if (parsed === null || typeof parsed !== "object") return undefined;
-  const tasks = Reflect.get(parsed, "tasks");
-  if (!Array.isArray(tasks)) return undefined;
-  const task = tasks.find(
-    (candidate) =>
-      candidate !== null &&
-      typeof candidate === "object" &&
-      Reflect.get(candidate, "name") === name &&
-      Reflect.get(candidate, "status") === "completed",
-  );
-  if (task === undefined) return undefined;
-  const output = Reflect.get(task, "output");
-  return output !== null &&
-    typeof output === "object" &&
-    Reflect.get(output, "type") === "result" &&
-    typeof Reflect.get(output, "data") === "string"
-    ? (Reflect.get(output, "data") as string)
-    : undefined;
+const remoteNestedModel = mockModel({ modelId: "remote-nested", respond: respondToNestedRequest });
+const remoteDirectHitlModel = mockModel({
+  modelId: "remote-direct-hitl",
+  respond: respondToDirectHitl,
+});
+const notebookParent = mockModel({ modelId: "notebook-parent", respond: respondAsNotebookParent });
+const surveyParent = mockModel({ modelId: "survey-parent", respond: respondAsSurveyParent });
+const surveyToolParent = mockModel({
+  modelId: "survey-tool-parent",
+  respond: respondAsSurveyToolParent,
+});
+// The remote keeper is a root session of this deployment, reached through remote-loopback.
+const notebookKeeper = mockModel({ modelId: "notebook-keeper", respond: respondAsNotebookKeeper });
+/** Reads the id of a tool's task from the latest framework-injected `[Tasks]` note. */
+function findListedTaskId(
+  messages: readonly { readonly role: string; readonly text: string }[],
+  tool: string,
+): string | undefined {
+  const note = [...messages]
+    .reverse()
+    .find((message) => message.role === "user" && message.text.startsWith("[Tasks]"));
+  const pattern = new RegExp(`<task id="([^"]+)" tool="${tool}"`);
+  return note?.text.match(pattern)?.[1];
 }
 
 export default defineAgent({
@@ -169,14 +156,26 @@ export default defineAgent({
         if (messages.some((message) => message.includes(WORKSPACE_FORWARDING_MARKER))) {
           return { model: workspaceDispatcher, modelContextWindowTokens: 1_000_000 };
         }
-        if (
-          messages.some(
-            (message) =>
-              message.includes(SCHEDULED_REMOTE_ROOT_SCENARIO) ||
-              message.includes(SCHEDULED_REMOTE_CHILD_SCENARIO),
-          )
-        ) {
-          return { model: scheduledRemoteModel, modelContextWindowTokens: 1_000_000 };
+        if (messages.some((message) => message.includes(REMOTE_QUESTION_DIRECTIVE))) {
+          return { model: remoteQuestionModel, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isNestedDirective)) {
+          return { model: remoteNestedModel, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isDirectHitlDirective)) {
+          return { model: remoteDirectHitlModel, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isNotebookEntry)) {
+          return { model: notebookKeeper, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isNotebookDirective)) {
+          return { model: notebookParent, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isSurveyDirective)) {
+          return { model: surveyParent, modelContextWindowTokens: 1_000_000 };
+        }
+        if (messages.some(isSurveyToolDirective)) {
+          return { model: surveyToolParent, modelContextWindowTokens: 1_000_000 };
         }
         return { model: defaultModel, modelContextWindowTokens };
       },

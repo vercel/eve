@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -18,6 +19,19 @@ export interface MaterializableSkillPackage {
   readonly markdown: string;
   readonly metadata?: Readonly<Record<string, string>>;
   readonly name: string;
+}
+
+export function stripSkillFrontmatter(markdown: string): string {
+  return markdown.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+}
+
+/** Content hash over every package file, including `SKILL.md`. */
+export function skillPackageRevision(skill: MaterializableSkillPackage): string {
+  const hash = createHash("sha256");
+  for (const file of skill.files) {
+    hash.update(`${file.relativePath}\0${file.content.byteLength}\0`).update(file.content);
+  }
+  return hash.digest("hex");
 }
 
 /**
@@ -112,7 +126,7 @@ export async function removeSkillPackageFromSandbox(input: {
  * Validates a runtime-contributed skill name before it becomes one path
  * segment under the sandbox skill root.
  */
-export function assertSafeSkillPackageName(name: string): void {
+function assertSafeSkillPackageName(name: string): void {
   if (
     name.length === 0 ||
     name.startsWith(".") ||

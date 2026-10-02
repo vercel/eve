@@ -3,18 +3,20 @@ import {
   SKILL_INPUT_SCHEMA,
   SKILL_OUTPUT_SCHEMA,
 } from "#execution/tools/load-skill.js";
-import { toolLabel } from "#tools/tool-label.js";
+import { displayTitle } from "#shared/display-name.js";
 import { defineTool } from "#tools/definition.js";
 import { attachToolBehavior } from "#tools/behavior.js";
 
 export const loadSkill = attachToolBehavior(
   defineTool({
     label: {
-      start: (input) =>
-        toolLabel(
-          "Load",
-          typeof input === "object" && input !== null ? Reflect.get(input, "skill") : undefined,
-        ),
+      start: (input) => {
+        const skill =
+          typeof input === "object" && input !== null ? Reflect.get(input, "skill") : undefined;
+        return typeof skill === "string" && skill.trim() !== ""
+          ? `Load skill: ${displayTitle(skill.trim())}`
+          : "Load skill";
+      },
     },
     description: [
       "Load the full instructions for one available skill by name or id.",

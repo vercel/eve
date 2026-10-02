@@ -1,3 +1,5 @@
 import { defineSandbox } from "#public/definitions/sandbox.js";
+import { DefaultSandbox } from "#sandbox/providers.js";
 
-export default defineSandbox({});
+export const environment = DefaultSandbox.environment();
+export default defineSandbox(() => environment.open());

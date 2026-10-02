@@ -6,7 +6,9 @@
 // fixture roots. Emits one GitHub Actions output per matrix:
 //
 //   model_matrix          `{ name, dir, model_name, model_id, optional }`
-//                         entries for the model suite (e2e-local). Fixtures
+//                         entries for the model suite (e2e-local). Sharded
+//                         fixtures expand each selected model into one entry
+//                         per exact eval partition. Fixtures
 //                         marked `"e2e": { "modelMatrix": "full" }` in
 //                         package.json run on every registry model; all other
 //                         fixtures run once on the default (first) model. A
@@ -30,7 +32,7 @@ export function discoverE2eFixtures({ registry, fixtures }) {
   }
 
   const modelMatrix = normalizedFixtures.flatMap(
-    ({ name, dir, modelMatrix, additionalModels, optionalModels }) => {
+    ({ name, dir, modelMatrix, additionalModels, optionalModels, modelShards }) => {
       const fixtureModels = uniqueModels([
         ...(modelMatrix === "full" ? models : models.slice(0, 1)),
         ...additionalModels,
@@ -43,13 +45,18 @@ export function discoverE2eFixtures({ registry, fixtures }) {
           );
         }
       }
-      return fixtureModels.map((model) => ({
-        name,
-        dir,
-        model_name: model.name,
-        model_id: model.id,
-        optional: optionalModels.includes(model.name),
-      }));
+      return fixtureModels.flatMap((model) => {
+        const entry = {
+          name,
+          dir,
+          model_name: model.name,
+          model_id: model.id,
+          optional: optionalModels.includes(model.name),
+        };
+        return modelShards === undefined
+          ? [entry]
+          : modelShards.map((shard) => ({ ...entry, shard: shard.name, eval_ids: shard.evals }));
+      });
     },
   );
 
@@ -68,7 +75,7 @@ export function discoverE2eFixtures({ registry, fixtures }) {
   return { lines: `${outputs.join("\n")}\n`, modelMatrix, worlds, fixtures: normalizedFixtures };
 }
 
-function normalizeFixture({ name, dir, packageJson }, worlds) {
+function normalizeFixture({ name, dir, packageJson, evals = [] }, worlds) {
   const pkg = packageJson ?? {};
   const packageJsonPath = join(dir, "package.json");
   const selectedWorlds = validateNames(
@@ -84,10 +91,15 @@ function normalizeFixture({ name, dir, packageJson }, worlds) {
   if (modelMatrix !== "default" && modelMatrix !== "full") {
     throw new Error(`${packageJsonPath}: e2e.modelMatrix must be "default" or "full".`);
   }
+  const modelShards =
+    pkg.e2e?.modelShards === undefined
+      ? undefined
+      : validateModelShards(pkg.e2e.modelShards, `${packageJsonPath}: e2e.modelShards`, evals);
   return {
     name,
     dir,
     modelMatrix,
+    modelShards,
     additionalModels: validateNamedEntries(
       pkg.e2e?.additionalModels ?? [],
       `${packageJsonPath}: e2e.additionalModels`,
@@ -115,6 +127,7 @@ function discoverFromDisk() {
       fixtures.push({
         name,
         dir,
+        evals: discoverEvalIds(join(dir, "evals")),
         packageJson: existsSync(packageJsonPath)
           ? JSON.parse(readFileSync(packageJsonPath, "utf8"))
           : undefined,
@@ -131,6 +144,58 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   );
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, result.lines);
   else process.stdout.write(result.lines);
+}
+
+function discoverEvalIds(root) {
+  const evalIds = [];
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.isFile() && entry.name.endsWith(".eval.ts")) {
+        evalIds.push(path.slice(root.length + 1, -".eval.ts".length).replaceAll("\\", "/"));
+      }
+    }
+  };
+  visit(root);
+  return evalIds;
+}
+
+function validateModelShards(shards, key, discoveredEvalIds) {
+  if (!Array.isArray(shards) || shards.length === 0) {
+    throw new Error(`${key} must be a non-empty array.`);
+  }
+  const discovered = new Set(discoveredEvalIds);
+  const assigned = new Set();
+  const names = new Set();
+  for (const shard of shards) {
+    if (typeof shard?.name !== "string" || !/^[a-z0-9-]+$/.test(shard.name)) {
+      throw new Error(`${key} shard names must be non-empty lowercase alphanumerics and dashes.`);
+    }
+    if (names.has(shard.name))
+      throw new Error(`${key} contains duplicate shard name "${shard.name}".`);
+    names.add(shard.name);
+    if (!Array.isArray(shard.evals) || shard.evals.length === 0) {
+      throw new Error(`${key} shard "${shard.name}" must have a non-empty eval list.`);
+    }
+    for (const evalId of shard.evals) {
+      if (typeof evalId !== "string" || evalId.length === 0) {
+        throw new Error(`${key} shard "${shard.name}" eval IDs must be non-empty strings.`);
+      }
+      if (assigned.has(evalId)) throw new Error(`${key} assigns eval "${evalId}" more than once.`);
+      assigned.add(evalId);
+      if (!discovered.has(evalId)) throw new Error(`${key} references unknown eval "${evalId}".`);
+    }
+  }
+  const unassigned = discoveredEvalIds.filter((evalId) => !assigned.has(evalId));
+  if (unassigned.length > 0) {
+    throw new Error(
+      `${key} does not assign discovered eval${unassigned.length === 1 ? "" : "s"}: ${unassigned.join(", ")}.`,
+    );
+  }
+  return shards;
 }
 
 function validateNamedEntries(entries, key, requiredFields, options = {}) {

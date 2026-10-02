@@ -2,7 +2,26 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "dependsOn": ["$TURBO_EXTENDS$"]
+      "dependsOn": ["$TURBO_EXTENDS$"],
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
+      ]
+    },
+    "build:types": {
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
+      ]
+    },
+    "typecheck": {
+      "inputs": [
+        "$TURBO_EXTENDS$",
+        "$TURBO_ROOT$/packages/eve-code/extension/**",
+        "$TURBO_ROOT$/packages/eve-computer-use/extension/**"
+      ]
     }
   }
 }

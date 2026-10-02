@@ -37,7 +37,6 @@ export type InitResult = {
   agentLaunched: boolean;
   packageManager: PackageManagerKind;
   projectPath: string;
-  selfModificationEnabled: boolean;
 } & (
   | {
       configurationFilesChanged: string[];

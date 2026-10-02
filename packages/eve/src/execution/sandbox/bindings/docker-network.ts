@@ -5,7 +5,7 @@ import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 /**
  * Applies a coarse-grained run-time network policy by attaching or
  * detaching the container's networks. Domain-level policies and
- * credential brokering require the firewall on the Vercel backend.
+ * credential brokering require the firewall on the Vercel provider.
  */
 export async function setDockerNetworkPolicy(
   cli: DockerCli,
@@ -14,9 +14,9 @@ export async function setDockerNetworkPolicy(
 ): Promise<void> {
   if (policy !== "allow-all" && policy !== "deny-all") {
     throw new Error(
-      'The local Docker sandbox backend supports only the "allow-all" and "deny-all" network ' +
-        "policies. Domain-level allow-lists and credential brokering require the Vercel backend " +
-        "(vercel()) or microsandbox().",
+      'The local Docker sandbox provider supports only the "allow-all" and "deny-all" network ' +
+        "policies. Domain-level allow-lists and credential brokering require the Vercel provider " +
+        "(VercelSandbox) or MicrosandboxSandbox.",
     );
   }
 
@@ -28,9 +28,11 @@ export async function setDockerNetworkPolicy(
     containerName,
   ]);
   expectDockerSuccess(inspect, `inspect networks of sandbox container "${containerName}"`);
-  const networks = Object.keys(
-    JSON.parse(inspect.stdout.trim() === "" ? "{}" : inspect.stdout) as object,
-  );
+  const networkSettings: unknown = JSON.parse(inspect.stdout.trim() === "" ? "{}" : inspect.stdout);
+  if (typeof networkSettings !== "object" || networkSettings === null) {
+    throw new Error(`Docker returned invalid network settings for "${containerName}".`);
+  }
+  const networks = Object.keys(networkSettings);
 
   if (policy === "deny-all") {
     for (const network of networks) {

@@ -27,6 +27,7 @@ export interface DevelopmentNitroArtifactsConfig {
 
 export interface ProductionNitroArtifactsConfig {
   readonly kind: "production";
+  readonly sandboxScope: string;
 }
 
 export type NitroArtifactsConfig = DevelopmentNitroArtifactsConfig | ProductionNitroArtifactsConfig;
@@ -51,7 +52,7 @@ export function resolveNitroCompiledArtifactsSource(
   }
 
   if (readBundledCompiledArtifacts() !== null) {
-    return createBundledRuntimeCompiledArtifactsSource();
+    return createBundledRuntimeCompiledArtifactsSource(config.sandboxScope);
   }
 
   throw new Error("eve Nitro production requires bundled artifacts.");

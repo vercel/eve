@@ -1,10 +1,14 @@
 import { jsonSchema } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { createDurableSessionValues } from "#execution/durable-session-store.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession } from "#harness/types.js";
 import { createCodexSubscriptionModel } from "./model.js";
+
+// The harness runs outside a workflow body here, where run attributes cannot
+// be written; the attribute contract is covered by emit.test.ts.
+vi.mock("#runtime/attributes/emit.js", () => ({ setEveAttributes: vi.fn(async () => {}) }));
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -36,7 +40,6 @@ describe("ChatGPT streamed reasoning replay", () => {
     const execute = vi.fn(async () => ({ id: "invoice-1", total: 42 }));
     const runStep = createToolLoopHarness({
       handleEvent: async () => {},
-      mode: "conversation",
       resolveModel: async () => model,
       tools: new Map([
         [
@@ -72,11 +75,10 @@ describe("ChatGPT streamed reasoning replay", () => {
     expect(execute).toHaveBeenCalledOnce();
     if (typeof first.next !== "function") throw new Error("Expected a second model step.");
 
-    const stored: ReturnType<typeof createDurableSessionState> = JSON.parse(
-      JSON.stringify(createDurableSessionState({ session: first.session })),
+    const stored: ReturnType<typeof createDurableSessionValues> = JSON.parse(
+      JSON.stringify(createDurableSessionValues(first.session)),
     );
-    if (stored.snapshot === undefined) throw new Error("Expected a durable snapshot.");
-    const history = stored.snapshot.session.history;
+    const history = stored.history;
     const reasoning = history.flatMap((message) =>
       message.role === "assistant" && Array.isArray(message.content)
         ? message.content.filter((part) => part.type === "reasoning")

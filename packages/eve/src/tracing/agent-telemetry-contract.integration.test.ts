@@ -5,7 +5,6 @@ import {
   type ReadableSpan,
 } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it, vi } from "vitest";
-import { SpanStatusCode } from "#compiled/@opentelemetry/api/index.js";
 
 import { JsonTraceSerializer } from "#compiled/@opentelemetry/otlp-transformer/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -17,6 +16,7 @@ import {
   ParentSessionKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
+  TraceRootKey,
 } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
@@ -35,11 +35,7 @@ import { createAgentOtelInstrumentation } from "#tracing/agent-otel-provider.js"
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/agent-trace-context-codec.js";
-import { prepareAgentInvocationTrace } from "#tracing/agent-invocation-coordinator.js";
-import {
-  flushAgentInvocationTraces,
-  settleAgentInvocationTrace,
-} from "#tracing/agent-invocation-terminal.js";
+import { resolveToolCallAgentTrace } from "#tracing/agent-invocation-coordinator.js";
 import * as instrumentation from "#instrumentation/runtime.js";
 import {
   assembleLocalTrace,
@@ -47,17 +43,17 @@ import {
   parseLocalTraceSegment,
   type LocalTraceSpan,
 } from "#tracing/local-trace-reader.js";
-import { summarizeLocalTrace } from "#cli/commands/trace-detail.js";
+import { summarizeLocalTrace } from "#tracing/local-trace-summary.js";
 import { buildConversationItems } from "#cli/dev/tui/traces/trace-conversation.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { ConversationContextKey } from "#shared/conversation-context.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const traceContext = (agentName: string, audience: "public" | "private") => ({
   agentName,
   audience,
   channel: { kind: "http" as const },
   environment: "production" as const,
-  mode: "conversation" as const,
   principalType: "anonymous",
 });
 
@@ -92,13 +88,7 @@ function createRuntime() {
     idGenerator,
     ownsAgentSpans: true,
     otelSettings: { recordInputs: true, recordOutputs: true, traceChannelRequests: false },
-    flushSettledInvocations: async () => {
-      await agent.hook.flush?.();
-    },
-    forceFlush: async () => {
-      await agent.hook.flush?.();
-      await provider.forceFlush();
-    },
+    forceFlush: () => provider.forceFlush(),
     shutdown: () => provider.shutdown(),
   };
 }
@@ -136,131 +126,300 @@ function scopeFor(sessionId: string, audience: "public" | "private"): Instrument
 }
 
 describe("exported agent telemetry contract", () => {
-  it("flushes 1000 settled invocations without closing the session or retaining their errors", async () => {
-    const runtime = createRuntime();
-    const exporterFlush = vi.spyOn(runtime.provider, "forceFlush").mockImplementation(() => {
-      throw new Error("Exporter unavailable");
-    });
-    const registered = vi
-      .spyOn(instrumentation, "getInstrumentationRuntime")
-      .mockReturnValue(runtime);
-    let ctx = contextFor("public");
-    const store = new ContextAgentTraceStateStore();
-    const count = 1000;
+  it("preserves explicit trace-session identity on every remote and local-child span", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const runtime = { ...createRuntime(), memoryOperations: true };
     try {
-      for (let index = 0; index < count; index++) {
-        const callId = `nested-${index}`;
-        contextStorage.run(ctx, () =>
-          store.setInvocation(actionIdempotencyKey("parent", "turn_0", callId), {
-            attemptIndex: 0,
-            callId,
-            channelAudience: "public",
-            kind: "subagent-call",
-            name: "child",
-            parent: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
-            parentActionCallId: "outer",
-            recordOutputs: true,
-            rootSessionId: "parent",
-            sessionId: "parent",
-            spanId: runtime.idGenerator.deriveSpanId(callId),
-            startTimeMs: 1,
-            stepIndex: 0,
-            turnId: "turn_0",
-            terminal: {
-              acceptedAtMs: 2,
-              error: new Error("private " + "x".repeat(16384)),
-              outcome: index % 2 === 0 ? "failed" : "cancelled",
+      for (const sessionId of ["remote", "local-child"]) {
+        const ctx = contextFor("public");
+        ctx.set(ConversationIdKey, "caller-conversation");
+        ctx.set(
+          TraceRootKey,
+          sessionId === "remote" ? { kind: "own" } : { kind: "inherited", sessionId: "remote" },
+        );
+        ctx.set(ParentSessionKey, {
+          callId: "dispatch",
+          rootSessionId: "caller-root",
+          sessionId: sessionId === "remote" ? "caller" : "remote",
+          turn: { id: "turn_0", sequence: 0 },
+        });
+        const bound = bindInstrumentationRuntime(runtime, ctx, {
+          agentName: sessionId,
+          rootSessionId: "caller-root",
+          sessionId,
+        })!;
+        const hooks = runtime.hooks.forTrace!(traceContext(sessionId, "public"));
+        await contextStorage.run(ctx, async () => {
+          await bound.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
+          await bound.prepareExecution().runStep(
+            {
+              environment: "production",
+              eveVersion: "test",
+              hasInput: true,
+              session: { sessionId },
             },
-          }),
-        );
-        const flushed = await flushAgentInvocationTraces(serializeContext(ctx));
-        expect(JSON.stringify(flushed)).not.toContain("private ");
-        ctx = await deserializeContext(flushed);
-        contextStorage.run(ctx, () => expect(store.findInvocations("parent")).toEqual([]));
+            async (step) => {
+              const attempt = step.prepareAttempt({
+                attemptIndex: 0,
+                stepIndex: 0,
+                turnId: "turn_0",
+              });
+              const scope = attempt.scope;
+              await hooks.publish({
+                type: "step.attempt.started",
+                idempotencyKey: attemptIdempotencyKey(scope),
+                scope,
+                operation: { modelId: "test", operationId: "ai.streamText", provider: "test" },
+              });
+              const actionKey = actionIdempotencyKey(sessionId, "turn_0", "tool");
+              const toolKey = toolCallIdempotencyKey(scope, "tool", 0);
+              const modelKey = modelCallIdempotencyKey(scope, 0, 0);
+              await hooks.publish({
+                type: "action.started",
+                idempotencyKey: actionKey,
+                scope,
+                callId: "tool",
+                name: "inspect",
+                kind: "tool-call",
+                input: {},
+              });
+              await hooks.publish({
+                type: "tool.call.started",
+                idempotencyKey: toolKey,
+                scope,
+                callId: "tool",
+                toolName: "inspect",
+                input: {},
+              });
+              await hooks.publish({
+                type: "model.call.started",
+                idempotencyKey: modelKey,
+                scope,
+                model: { modelId: "test", provider: "test" },
+              });
+              await hooks.publish({
+                type: "model.call.completed",
+                idempotencyKey: modelKey,
+                scope,
+                finishReason: "stop",
+                content: [],
+                usage: { inputTokens: 1, outputTokens: 1 },
+              });
+              const approvalKey = inputIdempotencyKey(sessionId, "turn_0", "approval");
+              await hooks.publish({
+                type: "input.requested",
+                idempotencyKey: approvalKey,
+                scope,
+                requestId: "approval",
+                kind: "tool-approval",
+                action: { callId: "tool", name: "inspect" },
+                request: { prompt: "Approve" },
+              });
+              // State must preserve identity when execution resumes with a different context.
+              const saved = serializeContext(ctx);
+              const restored = await deserializeContext(saved);
+              await contextStorage.run(restored, async () => {
+                await hooks.publish({
+                  type: "input.resolved",
+                  idempotencyKey: approvalKey,
+                  scope,
+                  requestId: "approval",
+                  kind: "tool-approval",
+                  outcome: "approved",
+                  response: {},
+                });
+                await hooks.publish({
+                  type: "tool.call.completed",
+                  idempotencyKey: toolKey,
+                  scope,
+                  output: { type: "result", output: {} },
+                });
+                await hooks.publish({
+                  type: "action.completed",
+                  idempotencyKey: actionKey,
+                  scope,
+                  outcome: "completed",
+                  output: { type: "result", output: {} },
+                });
+              });
+              await bound.memory!.execute(
+                {
+                  idempotencyKey: `memory:${sessionId}`,
+                  operationName: "search_memory",
+                  phase: "turn.started",
+                  slot: "notes",
+                  storeId: "store",
+                  turnId: "turn_0",
+                },
+                async () => ({ value: undefined }),
+              );
+              await attempt.complete();
+            },
+          );
+          await hooks.publish({
+            type: "turn.completed",
+            idempotencyKey: turnIdempotencyKey(sessionId, "turn_0"),
+            sessionId,
+            turnId: "turn_0",
+          });
+          await hooks.publish({
+            type: "session.waiting",
+            idempotencyKey: sessionIdempotencyKey(sessionId),
+            sessionId,
+            turnId: "turn_0",
+          });
+        });
       }
-      expect(runtime.exporter.getFinishedSpans()).toHaveLength(count);
-      for (const span of runtime.exporter.getFinishedSpans()) {
-        expect(span.status.code).toBe(
-          span.attributes["agent.action.outcome"] === "failed"
-            ? SpanStatusCode.ERROR
-            : SpanStatusCode.UNSET,
+      await runtime.forceFlush();
+      const owned = runtime.exporter
+        .getFinishedSpans()
+        .filter((span) => typeof span.attributes["agent.run.id"] === "string");
+      for (const runId of ["remote", "local-child"]) {
+        const spans = owned.filter((span) => span.attributes["agent.run.id"] === runId);
+        expect(spans.map((span) => span.name).sort()).toEqual(
+          [
+            `invoke_agent ${runId}`,
+            "agent.step",
+            "chat test",
+            "execute_tool inspect",
+            "agent.action",
+            "agent.approval",
+            "search_memory",
+          ].sort(),
         );
+        for (const span of spans) {
+          expect(span.attributes["vercel.session_id"]).toBe("remote");
+          expect(span.attributes["gen_ai.conversation.id"]).toBe("caller-conversation");
+        }
       }
-      await flushAgentInvocationTraces(serializeContext(ctx));
-      expect(runtime.exporter.getFinishedSpans()).toHaveLength(count);
-      expect(exporterFlush).not.toHaveBeenCalled();
     } finally {
-      exporterFlush.mockRestore();
-      registered.mockRestore();
       await runtime.shutdown();
+      vi.unstubAllEnvs();
     }
   });
 
-  it.each(["throw", "reject"] as const)(
-    "preserves the settlement context when invocation materialization fails (%s)",
-    async (failure) => {
-      const runtime = createRuntime();
-      const flush = vi.spyOn(runtime, "flushSettledInvocations").mockImplementation(() => {
-        const error = new Error("Span processor unavailable");
-        if (failure === "throw") throw error;
-        return Promise.reject(error);
-      });
-      const registered = vi
-        .spyOn(instrumentation, "getInstrumentationRuntime")
-        .mockReturnValue(runtime);
-      const serializedContext = { [AGENT_TRACE_CONTEXT_KEY]: {} };
-      try {
-        await expect(flushAgentInvocationTraces(serializedContext)).resolves.toBe(
-          serializedContext,
-        );
-        expect(flush).toHaveBeenCalledOnce();
-      } finally {
-        registered.mockRestore();
-        await runtime.shutdown();
+  it("exports remote roots and a nested local child with the remote project's session grouping", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    const runtime = createRuntime();
+    const caller = {
+      isRemote: true,
+      spanId: "a".repeat(16),
+      traceFlags: 1,
+      traceId: "b".repeat(32),
+    };
+    const hooks = runtime.hooks.forTrace!(traceContext("remote", "public"));
+    const remote = contextFor("public");
+    remote.set(ConversationIdKey, "caller-root");
+    remote.set(TraceRootKey, { kind: "own" });
+    remote.set(ParentSessionKey, {
+      callId: "remote-call",
+      rootSessionId: "caller-root",
+      sessionId: "caller-root",
+      turn: { id: "turn_0", sequence: 0 },
+    });
+    remote.set(ParentTraceContextKey, caller);
+    try {
+      for (const sequence of [0, 1]) {
+        const turnId = `turn_${sequence}`;
+        await contextStorage.run(remote, async () => {
+          const binding = bindInstrumentationRuntime(runtime, remote, {
+            agentName: "remote",
+            rootSessionId: "caller-root",
+            sessionId: "remote-session",
+          })!;
+          await binding.preparePreamble({ sequence, sessionStarted: sequence > 0, turnId });
+          await hooks.publish({
+            idempotencyKey: turnIdempotencyKey("remote-session", turnId),
+            sessionId: "remote-session",
+            turnId,
+            type: "turn.completed",
+          });
+          await hooks.publish({
+            idempotencyKey: sessionIdempotencyKey("remote-session"),
+            sessionId: "remote-session",
+            turnId,
+            type: "session.waiting",
+          });
+        });
       }
-    },
-  );
-
-  it.each(["session.completed", "session.failed"] as const)(
-    "only marks unfinished invocations as errors on %s",
-    async (type) => {
-      const runtime = createRuntime();
-      const ctx = contextFor("public");
-      const hooks = runtime.hooks.forTrace!(traceContext("parent", "public"));
-      await contextStorage.run(ctx, async () => {
-        const store = new ContextAgentTraceStateStore();
-        store.setInvocation(actionIdempotencyKey("parent", "turn_0", "nested"), {
-          attemptIndex: 0,
-          callId: "nested",
-          kind: "subagent-call",
-          name: "child",
-          parent: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
-          parentActionCallId: "outer",
-          rootSessionId: "parent",
-          sessionId: "parent",
-          spanId: "3".repeat(16),
-          startTimeMs: 1,
-          stepIndex: 0,
-          turnId: "turn_0",
-        });
-        await hooks.publish({
-          error: new Error("private failure"),
-          idempotencyKey: sessionIdempotencyKey("parent"),
-          sessionId: "parent",
-          type,
-        });
-        expect(store.findInvocations("parent")).toEqual([]);
+      const remoteSpan = runtime.exporter.getFinishedSpans()[0]!;
+      const child = contextFor("public");
+      child.set(ConversationIdKey, "caller-root");
+      child.set(TraceRootKey, { kind: "inherited", sessionId: "remote-session" });
+      child.set(ParentSessionKey, {
+        callId: "local-call",
+        rootSessionId: "caller-root",
+        sessionId: "remote-session",
+        turn: { id: "turn_0", sequence: 0 },
       });
-      const [span] = runtime.exporter.getFinishedSpans();
-      expect(span?.attributes["agent.action.outcome"]).toBe(
-        type === "session.failed" ? "failed" : "abandoned",
+      child.set(ParentTraceContextKey, remoteSpan.spanContext());
+      await contextStorage.run(child, async () => {
+        const binding = bindInstrumentationRuntime(runtime, child, {
+          agentName: "local",
+          rootSessionId: "caller-root",
+          sessionId: "local-session",
+        })!;
+        await binding.preparePreamble({ sequence: 0, sessionStarted: false, turnId: "turn_0" });
+        await hooks.publish({
+          idempotencyKey: sessionIdempotencyKey("local-session"),
+          sessionId: "local-session",
+          turnId: "turn_0",
+          type: "session.waiting",
+        });
+      });
+      await runtime.forceFlush();
+      const exported = runtime.exporter.getFinishedSpans();
+      const serialized = new TextDecoder().decode(JsonTraceSerializer.serializeRequest(exported)!);
+      const traceIds = [...new Set(exported.map((span) => span.spanContext().traceId))];
+      expect(traceIds).toHaveLength(2);
+      const parsed = traceIds.flatMap((traceId) => parseLocalTraceSegment(serialized, traceId));
+      expect(parsed).toHaveLength(3);
+      expect(new Set(parsed.map((span) => span.spanId)).size).toBe(3);
+      for (const span of parsed) {
+        expect(span.attributes["gen_ai.conversation.id"]).toBe("caller-root");
+        expect(span.attributes["vercel.session_id"]).toBe("remote-session");
+      }
+      const remoteTurns = parsed.filter(
+        (span) => span.attributes["agent.run.id"] === "remote-session",
       );
-      expect(span?.status.code).toBe(
-        type === "session.failed" ? SpanStatusCode.ERROR : SpanStatusCode.UNSET,
+      expect(remoteTurns).toHaveLength(2);
+      expect(remoteTurns[0]!.parentSpanId).toBeUndefined();
+      expect(remoteTurns[0]!.traceId).not.toBe(caller.traceId);
+      expect(remoteSpan.links).toEqual([
+        { context: caller, attributes: { "eve.link.type": "agent.dispatch" } },
+      ]);
+      expect(remoteTurns[1]!.parentSpanId).toBeUndefined();
+      expect(remoteTurns[1]!.traceId).not.toBe(caller.traceId);
+      const local = parsed.find((span) => span.attributes["agent.run.id"] === "local-session")!;
+      expect(local.parentSpanId).toBe(remoteSpan.spanContext().spanId);
+      expect(local.attributes["agent.parent_run.id"]).toBe("remote-session");
+      // Downstream readers use this export; normalize host metadata and clock values for CI.
+      const fixture = JSON.parse(serialized) as unknown;
+      const normalizeTimes = (value: unknown): void => {
+        if (Array.isArray(value)) {
+          for (const child of value) normalizeTimes(child);
+          return;
+        }
+        if (value === null || typeof value !== "object") return;
+        if (Reflect.get(value, "key") === "service.name") {
+          Reflect.set(value, "value", { stringValue: "eve-trace-contract" });
+        }
+        for (const [key, child] of Object.entries(value)) {
+          if (key === "startTimeUnixNano" || key === "timeUnixNano")
+            Reflect.set(value, key, "1700000000000000000");
+          else if (key === "endTimeUnixNano") Reflect.set(value, key, "1700000000001000000");
+          else normalizeTimes(child);
+        }
+      };
+      normalizeTimes(fixture);
+      await expect(`${JSON.stringify(fixture, null, 2)}\n`).toMatchFileSnapshot(
+        "./test-data/remote-local-agent-trace.otlp.json",
       );
+    } finally {
       await runtime.shutdown();
-    },
-  );
+      vi.unstubAllEnvs();
+    }
+  });
 
   it.each(["public", "private"] as const)(
     "round-trips the normalized %s v4 trace forest through OTLP",
@@ -277,7 +436,7 @@ describe("exported agent telemetry contract", () => {
         rootSessionId: "parent",
         sessionId: "parent",
       })!;
-      let dispatch: ReturnType<typeof prepareAgentInvocationTrace>;
+      let dispatch: ReturnType<typeof resolveToolCallAgentTrace>;
       await contextStorage.run(parent, async () => {
         await binding.preparePreamble({ sequence: 0, sessionStarted: false });
         await binding.instrumentChannelDelivery({
@@ -350,45 +509,28 @@ describe("exported agent telemetry contract", () => {
           scope,
           type: "input.resolved",
         });
-        dispatch = prepareAgentInvocationTrace({
+        dispatch = resolveToolCallAgentTrace({
+          callId: "workflow",
           conversation: parent.get(ConversationContextKey),
-          invocation: { callId: "nested", kind: "subagent-call", name: "child" },
-          ownerId: "workflow-run",
-          startTimeMs: Date.now(),
           serializedContext: serializeContext(parent),
           sessionId: "parent",
           turnId: "turn_0",
-          sessionState: {
-            "eve.workflowTool": {
-              version: 3,
-              runs: [
-                {
-                  callId: "workflow",
-                  toolName: "coordinate",
-                  lifetime: "turn" as const,
-                  origin: { turnId: "turn-1", stepIndex: 0 },
-                  address: { runId: "workflow-run", hookToken: "hook" },
-                },
-              ],
-            },
-          },
         });
       });
-      parent = await deserializeContext(dispatch!.serializedContext);
       const child = contextFor(audience);
-      child.set(ConversationIdKey, dispatch!.dispatch.conversationId!);
+      child.set(ConversationIdKey, dispatch!.conversationId!);
       child.set(ParentSessionKey, {
-        callId: "nested",
+        callId: "workflow",
         rootSessionId: "parent",
         sessionId: "parent",
         turn: { id: "turn_0", sequence: 0 },
       });
-      if (dispatch!.dispatch.parentTraceContext !== undefined) {
-        child.set(ParentTraceContextKey, dispatch!.dispatch.parentTraceContext);
+      if (dispatch!.parentTraceContext !== undefined) {
+        child.set(ParentTraceContextKey, dispatch!.parentTraceContext);
         child.set(SessionTraceSeedKey, {
-          ...dispatch!.dispatch.parentTraceContext,
+          ...dispatch!.parentTraceContext,
           spanId: runtime.idGenerator.allocateSpanId(),
-          traceId: runtime.idGenerator.generateTraceId(),
+          traceId: dispatch!.parentTraceContext.traceId,
         });
       }
       const childScope = scopeFor("child", audience);
@@ -410,7 +552,7 @@ describe("exported agent telemetry contract", () => {
           scope: childScope,
           type: "step.attempt.started",
         });
-        const modelKey = modelCallIdempotencyKey(childScope, 0);
+        const modelKey = modelCallIdempotencyKey(childScope, 0, 0);
         await childHooks.publish({
           idempotencyKey: modelKey,
           model: { modelId: "test", provider: "test" },
@@ -447,38 +589,7 @@ describe("exported agent telemetry contract", () => {
           type: "session.waiting",
         });
       });
-      const settled = settleAgentInvocationTrace({
-        acceptedAtMs: Date.now(),
-        serializedContext: serializeContext(parent),
-        sessionId: "parent",
-        result: {
-          callId: "nested",
-          kind: "subagent-result",
-          origin: "child",
-          subagentName: "child",
-          output: "private reply",
-          outcome: {
-            kind: "terminal",
-            result: { kind: "succeeded", output: "private reply" },
-            usageDelta: {
-              inputTokens: 10,
-              outputTokens: 5,
-              cacheReadTokens: 4,
-              cacheWriteTokens: 2,
-            },
-          },
-        },
-      });
-      if (audience === "private") expect(JSON.stringify(settled)).not.toContain("private reply");
-      parent = await deserializeContext(settled);
       await contextStorage.run(parent, async () => {
-        await runtime.forceFlush();
-        expect(
-          runtime.exporter
-            .getFinishedSpans()
-            .filter((span) => span.attributes["agent.invocation.role"] === "caller"),
-        ).toHaveLength(1);
-        expect(new ContextAgentTraceStateStore().findInvocations("parent")).toEqual([]);
         await hooks.publish({
           idempotencyKey: toolCallIdempotencyKey(scope, "workflow", 0),
           output: { type: "result", output: "private output" },
@@ -576,7 +687,7 @@ describe("exported agent telemetry contract", () => {
       const exported = runtime.exporter.getFinishedSpans();
       const bytes = JsonTraceSerializer.serializeRequest(exported)!;
       const traceIds = [...new Set(exported.map((span) => span.spanContext().traceId))];
-      expect(traceIds).toHaveLength(4);
+      expect(traceIds).toHaveLength(3);
       const traces = traceIds.map((traceId) =>
         assembleLocalTrace(
           traceId,
@@ -617,22 +728,25 @@ describe("exported agent telemetry contract", () => {
         );
       }
       expect(new TextDecoder().decode(bytes)).not.toContain("auth-only-secret");
-      const caller = parsed.find((span) => span.attributes["agent.invocation.role"] === "caller")!;
+      const workflow = parsed.find(
+        (span) =>
+          span.name === "agent.action" && span.attributes["agent.action.call_id"] === "workflow",
+      )!;
       const activation = parsed.find(
         (span) => span.name === "invoke_agent child" && isAgentTurnSpan(span),
       )!;
       const parentActivation = parsed.find(
         (span) => span.name === "invoke_agent parent" && isAgentTurnSpan(span),
       )!;
-      expect(activation.parentSpanId).toBeUndefined();
-      expect(activation.traceId).not.toBe(caller.traceId);
+      expect(activation.parentSpanId).toBe(workflow.spanId);
+      expect(activation.traceId).toBe(workflow.traceId);
       expect(parentActivation.attributes).toMatchObject({
         "agent.channel.delivery.id": "delivery",
         "agent.channel.kind": "http",
         "agent.channel.name": "web",
       });
       expect(activation.attributes).toMatchObject({
-        "agent.parent_call.id": "nested",
+        "agent.parent_call.id": "workflow",
         "agent.parent_run.id": "parent",
         "agent.run.id": "child",
         "gen_ai.usage.input_tokens": 10,
@@ -640,29 +754,24 @@ describe("exported agent telemetry contract", () => {
         "agent.usage.input_tokens": 10,
         "agent.usage.output_tokens": 5,
       });
-      expect(caller.attributes["gen_ai.usage.input_tokens"]).toBeUndefined();
-      expect(caller.attributes["gen_ai.usage.output_tokens"]).toBeUndefined();
       expect(normalizeTraceForest(parsed, exported)).toEqual([
         "conversation original-conversation",
         "trace parent:turn_0 outcome=completed channel=http:web delivery=delivery",
         "  invoked from external via channel.request",
         "  invoke_agent parent",
         "    agent.step",
-        "      invoke_workflow coordinate",
-        "        agent.action child role=caller",
+        "      agent.action coordinate",
         "        agent.approval approved",
         "        execute_tool coordinate",
-        "trace child:turn_0 outcome=completed",
-        "  invoked from parent:turn_0/agent.action child role=caller via agent.dispatch",
-        "  invoke_agent child",
-        "    agent.step",
-        "      chat test",
+        "        invoke_agent child",
+        "          agent.step",
+        "            chat test",
         "trace parent:turn_1 outcome=failed channel=http:web delivery=delivery-failed",
         "  invoke_agent parent",
         "trace parent:turn_2 outcome=cancelled channel=http:web delivery=delivery-cancelled",
         "  invoke_agent parent",
       ]);
-      expect(summarizeLocalTrace(parsed)).toMatchObject({
+      expect(summarizeLocalTrace(parsed[0]!.traceId, parsed)).toMatchObject({
         inputTokens: 10,
         outputTokens: 5,
         cacheReadTokens: 4,
@@ -751,6 +860,7 @@ describe("exported agent telemetry contract", () => {
   ] as const)(
     "bounds public-channel principal IDs by origin %s and input/output ceiling %s/%s",
     async (originAudience, recordInputs, recordOutputs) => {
+      const logs = captureLogRecords();
       const runtime = createRuntime();
       const hooks = runtime.hooks.forTrace!(traceContext("child", "public"));
       const registered = vi
@@ -769,6 +879,9 @@ describe("exported agent telemetry contract", () => {
       const includesIds = originAudience === "public" && recordInputs && recordOutputs;
       try {
         instrumentation.initializeSessionInstrumentation({ agentName: "child", ctx });
+        expect(logs.records).toContainEqual(
+          expect.objectContaining({ level: "info", message: "resolved forwarded trace policy" }),
+        );
         expect(ctx.get(SessionTraceSeedKey)?.decision).toEqual({
           action: "record",
           recordInputs: originAudience === "public" && recordInputs,
@@ -896,17 +1009,6 @@ function normalizeTraceForest(
       )}`,
     ]),
   );
-  const causalParents = new Map(
-    exported.flatMap((span) =>
-      span.links
-        .filter(
-          (link) =>
-            link.attributes?.["eve.link.type"] === "agent.dispatch" &&
-            aliases.has(link.context.traceId),
-        )
-        .map((link) => [span.spanContext().traceId, link.context.traceId] as const),
-    ),
-  );
   const byIdentity = new Map(spans.map((span) => [`${span.traceId}:${span.spanId}`, span]));
   const children = Map.groupBy(
     spans.filter((span) => span.parentSpanId !== undefined),
@@ -918,8 +1020,6 @@ function normalizeTraceForest(
   const lines =
     conversationIds.length === 1 ? [`conversation ${conversationIds[0]}`] : ["conversation mixed"];
   for (const root of roots.toSorted((left, right) => {
-    if (causalParents.get(left.traceId) === right.traceId) return 1;
-    if (causalParents.get(right.traceId) === left.traceId) return -1;
     const sequence =
       Number(left.attributes["agent.turn.sequence"]) -
       Number(right.attributes["agent.turn.sequence"]);
@@ -966,9 +1066,6 @@ function normalizeTraceForest(
 }
 
 function spanLabel(span: LocalTraceSpan): string {
-  if (span.attributes["gen_ai.operation.name"] === "invoke_workflow") {
-    return span.name;
-  }
   if (span.name === "agent.action") {
     const role = span.attributes["agent.invocation.role"] === "caller" ? " role=caller" : "";
     return `agent.action ${String(span.attributes["agent.action.name"])}${role}`;

@@ -37,7 +37,7 @@ const BODY_MIN_WIDTH = 20;
 const PANEL_MIN_WIDTH = 20;
 const PANEL_MAX_WIDTH = 64;
 
-export interface TraceViewerFrame {
+interface TraceViewerFrame {
   readonly rows: readonly string[];
   /** Detail rows the panel has for the selected span — fed back into key handling. */
   readonly panelTotalRows: number;
@@ -49,7 +49,7 @@ export interface TraceViewerFrame {
   readonly contentWidth: number;
 }
 
-export interface RenderTraceViewerOptions {
+interface RenderTraceViewerOptions {
   readonly width: number;
   readonly height: number;
   readonly theme: Theme;
@@ -192,7 +192,7 @@ function overlayRight(row: string, segment: string, width: number, margin: numbe
  */
 const CONVERSATION_CONTENT_KEYS: ReadonlySet<string> = new Set([
   "gen_ai.input.messages",
-  "ai.prompt.system",
+  "gen_ai.system_instructions",
   "ai.response.reasoning",
   "ai.response.text",
   "ai.response.tool_calls",

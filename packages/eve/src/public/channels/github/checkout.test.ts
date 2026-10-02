@@ -1,22 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
-import {
-  clearGitHubInstallationTokenCache,
-  seedGitHubInstallationTokenForTests,
-} from "#public/channels/github/auth.js";
 import { checkoutGitHubRepository } from "#public/channels/github/checkout.js";
 
 const credentials = {
-  appId: "test-app",
+  installationToken: "ghs_checkout",
 };
-
-beforeEach(() => {
-  clearGitHubInstallationTokenCache();
-  for (const apiBaseUrl of ["https://api.github.com", "https://github.test"]) {
-    seedGitHubInstallationTokenForTests({ apiBaseUrl, installationId: 55, token: "ghs_checkout" });
-  }
-});
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {

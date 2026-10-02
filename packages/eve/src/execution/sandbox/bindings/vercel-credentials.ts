@@ -4,8 +4,8 @@ import { withPackageUserAgent } from "#internal/user-agent.js";
 import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
 
 export function getVercelSandboxFetch(createOptions: VercelCreateOptions): typeof globalThis.fetch {
-  const fetchOverride = (createOptions as { readonly fetch?: typeof globalThis.fetch }).fetch;
-  return withPackageUserAgent(fetchOverride);
+  const fetchOverride = Reflect.get(createOptions, "fetch");
+  return withPackageUserAgent(typeof fetchOverride === "function" ? fetchOverride : undefined);
 }
 
 export async function getVercelSandboxCredentials(
@@ -35,7 +35,7 @@ export async function getVercelSandboxCredentials(
 }
 
 function readNonEmptyString(object: object, key: string): string | undefined {
-  const value = (object as Record<string, unknown>)[key];
+  const value = Reflect.get(object, key);
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 

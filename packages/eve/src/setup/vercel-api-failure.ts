@@ -1,5 +1,5 @@
 import type { VercelCaptureFailure, VercelCaptureResult } from "#setup/primitives/index.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 const VercelApiErrorSchema = z.object({
   error: z
@@ -44,11 +44,6 @@ export function normalizeVercelApiResult(result: VercelCaptureResult): VercelCap
 /** Whether a Vercel API failure proves that the requested resource does not exist. */
 export function isNotFoundApiFailure(failure: VercelCaptureFailure): boolean {
   return /(^|\W)(404|not_found)(\W|$)|not found/.test(apiFailureText(failure));
-}
-
-/** Whether a Vercel API failure proves that the requested resource already exists. */
-export function isConflictApiFailure(failure: VercelCaptureFailure): boolean {
-  return /(^|\W)(409|conflict)(\W|$)|already exists/.test(apiFailureText(failure));
 }
 
 /** Whether a scoped Vercel API request was denied. */

@@ -1,12 +1,17 @@
-import type { DeliverHookPayload } from "#channel/types.js";
+import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { SettledTurn, StepResult } from "#harness/types.js";
+import type { WithSessionStateDelta } from "#execution/session/state-delta.js";
+import type { TaskToolCall } from "#execution/tasks/calls.js";
+import type { HarnessModelMessage } from "#harness/messages.js";
+import type { SettledTurn } from "#harness/types.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
 /** Trusted runtime-action results collected by the session owner. */
 export interface RuntimeActionResultStepInput {
   readonly acceptedAtMsByCallId?: Readonly<Record<string, number>>;
+  /** What the `ctx.agent` sessions of the `execute` runs behind these results spent. */
+  readonly delegatedUsage?: readonly TokenUsage[];
   readonly results: readonly RuntimeActionResult[];
 }
 
@@ -29,18 +34,16 @@ export interface TurnStepInput {
   readonly sessionWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly history: HarnessModelMessage[];
 }
 
 interface DurableStepResultFields {
-  /** Pre-step context plus the observability state owned by committed background tasks. */
-  readonly backgroundTaskContext?: Record<string, unknown>;
-  readonly backgroundTaskState?: DurableSessionState;
-  readonly backgroundTasks?: StepResult["backgroundTasks"];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly history: HarnessModelMessage[];
 }
 
-/** Result returned by a session-mutating turn step. */
+/** What one turn step's work produces, with the session state it leaves. */
 export type DurableStepResult = (
   | {
       readonly action: "continue" | "done";
@@ -50,19 +53,37 @@ export type DurableStepResult = (
       readonly usageDelta?: TokenUsage;
     }
   | { readonly action: "cancelled" | "steered" }
+  /** The model ended the turn while tasks work; the turn waits for them. */
+  | { readonly action: "held"; readonly hold: "tasks"; readonly taskIds: readonly string[] }
+  /** The turn waits on a sign-in or tool approval it raised. */
+  | {
+      readonly action: "held";
+      readonly authorizationAttemptIds: readonly string[];
+      readonly hasPendingInputBatch: boolean;
+      readonly hold: "request";
+      /** Pending input request ids an answer can resolve. */
+      readonly inputRequestIds: readonly string[];
+    }
   | {
       readonly action: "park";
-      readonly authorizationAttemptIds?: readonly string[];
-      readonly hasPendingAuthorization: boolean;
-      readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
+      readonly pendingTaskToolCalls?: readonly TaskToolCall[];
       readonly settled?: SettledTurn;
     }
 ) &
   DurableStepResultFields;
 
+/** What `turnStep` returns: its result, with the session state as a delta. */
+export type TurnStepResult = WithSessionStateDelta<DurableStepResult>;
+
 /** The only two ways a locally executed conversational turn can settle. */
-export type TurnOutcome =
+export type TurnOutcome = {
+  /**
+   * The delegated caller of the latest message the turn read. A caller's
+   * later message awaits its reply at its own address, so the turn reports there.
+   */
+  readonly caller?: TurnCaller;
+} & (
   | {
       readonly kind: "done";
       readonly output: unknown;
@@ -71,8 +92,8 @@ export type TurnOutcome =
       readonly usageDelta?: TokenUsage;
     }
   | {
-      readonly authorizationAttemptIds?: readonly string[];
       readonly cancelled?: true;
       readonly kind: "park";
       readonly settled?: SettledTurn;
-    };
+    }
+);

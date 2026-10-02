@@ -6,7 +6,10 @@ import { captureVercel, type VercelCaptureResult } from "#setup/primitives/index
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { readProjectLink } from "./project-resolution.js";
 import { resolveVercelHostFrameworkPreset } from "./scaffold/index.js";
-import { syncHostFrameworkPreset } from "./vercel-project-framework.js";
+import {
+  ensureCreatedProjectFramework,
+  syncHostFrameworkPreset,
+} from "./vercel-project-framework.js";
 
 vi.mock("#setup/primitives/index.js", async (importOriginal) => {
   const original = await importOriginal<typeof import("#setup/primitives/index.js")>();
@@ -64,6 +67,30 @@ beforeEach(() => {
   mockedResolvePreset.mockReset();
   mockedReadProjectLink.mockResolvedValue(LINK);
   stubCurrentFramework("eve");
+});
+
+describe("ensureCreatedProjectFramework", () => {
+  it.each(["nextjs", "eve"])(
+    "uses authored services without a host-framework prompt when Vercel detected %s",
+    async (current) => {
+      mockedResolvePreset.mockResolvedValue("services");
+      stubCurrentFramework(current);
+      const { prompter, selectMessages } = createFakePrompter();
+
+      await ensureCreatedProjectFramework(
+        prompter,
+        "/app",
+        LINK.orgId,
+        LINK.projectId,
+        createPromptCommandOutput(prompter.log),
+        {},
+      );
+
+      expect(selectMessages).toEqual([]);
+      expect(patchedFrameworkTo("services")).toBe(true);
+      expect(patchedFrameworkTo("eve")).toBe(false);
+    },
+  );
 });
 
 describe("syncHostFrameworkPreset", () => {

@@ -43,6 +43,9 @@ export default {
     },
   ],
   bundling: "standalone",
+  // shadcn requires Zod 3, a separate major whose schemas stay inside the
+  // registry CLI and never meet eve's shared Zod 4.
+  privateCopies: ["zod"],
   plugins: [json5ShimPlugin],
   banner: `/* oxlint-disable */
 import { fileURLToPath as __eveFileURLToPath } from "node:url";

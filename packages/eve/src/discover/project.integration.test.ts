@@ -3,9 +3,39 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { buildMemoryAgentProject } from "#internal/testing/memory-agent-source.js";
+import { createMemoryProjectSource } from "#discover/project-source.js";
 import { DiscoveryProjectResolutionError, resolveDiscoveryProject } from "#discover/project.js";
 
 describe("resolveDiscoveryProject (memory)", () => {
+  it.each([
+    { appRoot: "/memory/app/agent", layout: "nested" },
+    { appRoot: "/memory/app/agent", layout: "flat" },
+    { appRoot: "/memory/app/src/agent", layout: "nested" },
+    { appRoot: "/memory/app/src/agent", layout: "flat" },
+  ] as const)(
+    "resolves the $layout project at $appRoot using its own manifest",
+    async ({ appRoot, layout }) => {
+      const agentRoot = layout === "nested" ? join(appRoot, "agent") : appRoot;
+      const instructionsPath = join(agentRoot, "instructions.md");
+      const manifest = JSON.stringify({ dependencies: { eve: "*" } });
+      const source = createMemoryProjectSource({
+        files: {
+          "/memory/app/package.json": manifest,
+          [join(appRoot, "package.json")]: manifest,
+          [instructionsPath]: "You are a weather assistant.",
+        },
+      });
+
+      for (const startPath of [appRoot, instructionsPath]) {
+        await expect(resolveDiscoveryProject(startPath, { source })).resolves.toEqual({
+          agentRoot: resolve(agentRoot),
+          appRoot: resolve(appRoot),
+          layout,
+        });
+      }
+    },
+  );
+
   it("resolves a nested app root and agent root from the app root", async () => {
     const project = buildMemoryAgentProject({
       agentFiles: {

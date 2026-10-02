@@ -9,14 +9,16 @@ import type {
   SendTurnInput,
   SendTurnOptions,
   SendTurnPayload,
+  StreamOptions,
 } from "#client/types.js";
 import type {
   MessageStreamEvent,
   RuntimeTraceContext,
+  AgentStartedStreamEvent,
   TurnFailureStreamEvent,
 } from "#protocol/message.js";
-import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
-import { summarizeTurnEvents } from "#client/session-utils.js";
+import { isTurnFailureEvent } from "#protocol/message.js";
+import { summarizeTurnEvents, TurnSegment } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
@@ -26,6 +28,7 @@ import { createOutputAssertions, createScopedAssertions } from "#evals/assertion
 import { EvalRequirementFailed } from "#evals/control-flow.js";
 import { inputRequestMatches, matchesValue, toolCallMatches } from "#evals/match.js";
 import type {
+  EveEvalAgentSession,
   EveEvalAssertions,
   EveEvalDerivedFacts,
   EveEvalLiveTurn,
@@ -142,6 +145,18 @@ export class EvalSessionDriver implements EveEvalSession {
 
   async cancel(): Promise<CancelSessionResult> {
     return await this.#session.cancel();
+  }
+
+  agent(started: AgentStartedStreamEvent): EveEvalAgentSession {
+    const child = this.#session.agent(started);
+    const signal = this.#signal;
+    return {
+      name: child.name,
+      sessionId: child.sessionId,
+      stream: (options: StreamOptions = {}) =>
+        child.stream({ ...options, signal: options.signal ?? signal }),
+      taskId: child.taskId,
+    };
   }
 
   /** @internal */
@@ -432,8 +447,10 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   ): Promise<EveEvalTurn> {
     try {
       let sawBoundary = false;
+      const segment = new TurnSegment();
       for await (const event of source) {
         this.#events.push(event);
+        const endsSegment = segment.observe(event);
         observe(event);
         this.#resolveWaiters(event);
 
@@ -445,7 +462,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
           );
         }
 
-        if (isCurrentTurnBoundaryEvent(event)) {
+        if (endsSegment) {
           sawBoundary = true;
           this.#closeWaiters(
             new Error(`Session ${this.sessionId} reached ${event.type} before the expected event.`),

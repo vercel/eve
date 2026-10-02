@@ -1,28 +1,45 @@
-import { z } from "#compiled/zod/index.js";
-
 import { executeBashOnSandbox, type BashInput } from "#execution/sandbox/bash.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
+import { defineJsonSchema } from "#tools/schema.js";
+
+export interface BashToolInput {
+  command: string;
+}
+
+export interface BashToolOutput {
+  exitCode: number;
+  stderr: string;
+  stdout: string;
+  truncated: boolean;
+}
 
 /**
  * Input schema for the provided `bash` tool.
  */
-export const BASH_INPUT_SCHEMA = z.strictObject({
-  command: z.string().describe("The shell command to execute."),
+export const BASH_INPUT_SCHEMA = defineJsonSchema<BashToolInput>({
+  type: "object",
+  properties: {
+    command: { type: "string", description: "The shell command to execute." },
+  },
+  required: ["command"],
+  additionalProperties: false,
 });
 
 /**
  * Output schema for the provided `bash` tool.
  */
-export const BASH_OUTPUT_SCHEMA = z.strictObject({
-  exitCode: z.number(),
-  stderr: z.string(),
-  stdout: z.string(),
-  truncated: z.boolean(),
+export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
+  type: "object",
+  properties: {
+    exitCode: { type: "number" },
+    stderr: { type: "string" },
+    stdout: { type: "string" },
+    truncated: { type: "boolean" },
+  },
+  required: ["exitCode", "stderr", "stdout", "truncated"],
+  additionalProperties: false,
 });
-
-export type BashToolInput = z.infer<typeof BASH_INPUT_SCHEMA>;
-export type BashToolOutput = z.infer<typeof BASH_OUTPUT_SCHEMA>;
 
 /**
  * Framework-owned executors stay statically imported so hosted server bundles

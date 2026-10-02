@@ -1,5 +1,7 @@
 import { join } from "node:path";
 
+import { extensionMountId } from "#compiler/source-graph.js";
+
 import {
   EXTENSION_CAPABILITY_VERSIONS,
   type ExtensionCapability,
@@ -22,6 +24,7 @@ export async function deriveExtensionCapabilityRequirements(input: {
   readonly packageName: string;
   readonly runtimeDependencies: readonly string[];
   readonly runtimeImports: readonly string[];
+  readonly runtimeRoot: string;
   readonly shortName: string;
   readonly sourceRoot: string;
 }): Promise<ExtensionCapabilityRequirements> {
@@ -64,7 +67,7 @@ export async function deriveExtensionCapabilityRequirements(input: {
     loadAuthoredModuleNamespace(join(input.sourceRoot, input.declarationModule.logicalPath), {
       externalDependencies: input.runtimeDependencies,
     }),
-    extensionUsesState(input.sourceRoot),
+    extensionUsesState(input.runtimeRoot),
   ]);
 
   if (tools.length > 0) required.add("tool");
@@ -116,6 +119,7 @@ function createLoadOptions(
 } {
   const owner = {
     kind: "extension" as const,
+    mountId: extensionMountId("", input.shortName),
     namespace: input.shortName,
     packageName: input.packageName,
   };

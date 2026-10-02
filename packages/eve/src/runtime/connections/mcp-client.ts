@@ -12,6 +12,11 @@ import {
   omitProvidedArgumentsFromSchema,
   resolveProvidedArguments,
 } from "#runtime/connections/provided-arguments.js";
+import {
+  createMcpTraceFetch,
+  withMcpToolCallSpan,
+  withMcpToolsListSpan,
+} from "#runtime/connections/mcp-tracing.js";
 import type {
   AuthorizationDefinition,
   ConnectionClient,
@@ -73,11 +78,15 @@ export class McpConnectionClient implements ConnectionClient {
   async #createClient(): Promise<MCPClient> {
     const headers = await resolveHeaders(this.#connection);
     const url = this.#connection.url;
+    const fetch = createMcpTraceFetch({
+      connectionName: this.#connection.connectionName,
+      getProtocolVersion: () => this.#client?.initializeResult?.protocolVersion,
+    });
 
     try {
       return await createMCPClient({
         protocolVersionDiscovery: this.#connection.protocolVersionDiscovery,
-        transport: { type: "http", url, headers },
+        transport: { fetch, headers, type: "http", url },
       });
     } catch (error) {
       if (!isMcpHttpFallbackRetryableError(error)) {
@@ -85,7 +94,7 @@ export class McpConnectionClient implements ConnectionClient {
       }
       return await createMCPClient({
         protocolVersionDiscovery: this.#connection.protocolVersionDiscovery,
-        transport: { type: "sse", url, headers },
+        transport: { fetch, headers, type: "sse", url },
       });
     }
   }
@@ -102,16 +111,6 @@ export class McpConnectionClient implements ConnectionClient {
   async getToolMetadata(): Promise<readonly ConnectionToolMetadata[]> {
     const cache = await this.#ensureTools();
     return cache.metadata;
-  }
-
-  /**
-   * Returns the AI SDK `ToolSet` produced by `@ai-sdk/mcp`'s
-   * `toolsFromDefinitions()`. Each entry is a full SDK `Tool` with
-   * `inputSchema`, `description`, and `execute` already set.
-   */
-  async getTools(): Promise<ToolSet> {
-    const cache = await this.#ensureTools();
-    return cache.tools;
   }
 
   /**
@@ -137,6 +136,7 @@ export class McpConnectionClient implements ConnectionClient {
           `Tool "${toolName}" not found in connection "${this.#connection.connectionName}".`,
         );
       }
+      const execute = sdkTool.execute;
 
       const resolvedArgs = await resolveProvidedArguments({
         args,
@@ -145,7 +145,14 @@ export class McpConnectionClient implements ConnectionClient {
         toolName,
       });
 
-      return await sdkTool.execute(resolvedArgs, { abortSignal: options.abortSignal } as never);
+      return await withMcpToolCallSpan({
+        arguments: args,
+        connectionName: this.#connection.connectionName,
+        execute: async () =>
+          await execute(resolvedArgs, { abortSignal: options.abortSignal } as never),
+        protocolVersion: this.#client?.initializeResult?.protocolVersion,
+        toolName,
+      });
     } catch (error) {
       return await this.#rethrowClassified(error);
     }
@@ -180,7 +187,11 @@ export class McpConnectionClient implements ConnectionClient {
 
   async #fetchToolsInner(): Promise<McpToolCache> {
     const client = await this.connect();
-    const listResult = await client.listTools();
+    const listResult = await withMcpToolsListSpan({
+      connectionName: this.#connection.connectionName,
+      execute: () => client.listTools(),
+      protocolVersion: client.initializeResult?.protocolVersion,
+    });
 
     const filter = this.#connection.tools;
     const filteredTools =
@@ -375,8 +386,7 @@ export function passesToolFilter(
  * {@link SessionContext}, then resolves the {@link ConnectionPrincipal}
  * and invokes `authorization.getToken({ principal })` to produce the bearer.
  * `getToken` may throw {@link ConnectionAuthorizationRequiredError};
- * callers (`connection_search`, wrapped connection tools) catch it
- * and it propagates as-is from here.
+ * callers catch it and it propagates as-is from here.
  */
 export async function resolveHeaders(
   connection: ResolvedConnectionDefinition,

@@ -1,0 +1,31 @@
+---
+title: "microsandbox"
+description: "Create local lightweight VMs from an OCI image or Dockerfile."
+---
+
+microsandbox environments use eve's default image, an existing OCI image, or `agent/sandbox/Dockerfile`.
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { MicrosandboxSandbox } from "eve/sandbox/microsandbox";
+
+export const environment = MicrosandboxSandbox.dockerfile({
+  setup: { autoInstall: false },
+});
+
+export default defineSandbox(() => environment.open({ networkPolicy: "deny-all" }));
+```
+
+Supported hosts are macOS on Apple Silicon and Linux with glibc and KVM.
+
+## Environment options
+
+Image, CPU, memory, pull policy, environment variables, VM setup, and `prepare` belong to the reusable environment. `eve build` builds a Dockerfile image when present, prepares a VM, and records its snapshot and image references.
+
+## Live VM options
+
+Pass `networkPolicy` to `open()`. The policy applies to the live VM, not the prepared snapshot. microsandbox accepts domain policies and credential transforms.
+
+Session creation uses the recorded snapshot and image directly. Writable VM state persists through the provider's session snapshot lifecycle.
+
+See the [sandbox overview](/docs/sandbox) for managed workspace, skills, parent inheritance, and custom providers.

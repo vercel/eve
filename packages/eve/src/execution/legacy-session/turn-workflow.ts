@@ -27,7 +27,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
     if (isHookConflictError(error)) return;
     throw error;
   }
-  const { mode, sessionWritable } = prepared.input;
+  const { sessionWritable } = prepared.input;
   let interrupted;
   try {
     await inbox.claimSessionHooks(sessionHookTokens(prepared));
@@ -36,7 +36,6 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
     await inbox.dispose();
     return await failSession({
       error,
-      mode,
       serializedContext: prepared.serializedContext,
       sessionId,
       sessionState: prepared.sessionState,
@@ -50,6 +49,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
         notify: (result) =>
           completeLegacyDriverStep({
             completionToken: prepared.input.completionToken,
+            history: prepared.history,
             result,
             serializedContext: prepared.serializedContext,
             sessionState: prepared.sessionState,
@@ -59,12 +59,12 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
       caller: undefined,
       capabilities: prepared.input.capabilities,
       deploymentId: prepared.deploymentId,
+      history: interrupted.history,
       initialInput:
         prepared.input.delivery === undefined
           ? undefined
           : { ...prepared.input.delivery, caller: undefined },
       awaitFirstMessage: false,
-      mode,
       retention: prepared.input.retention,
       serializedContext: interrupted.serializedContext,
       sessionId,

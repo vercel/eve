@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { afterEach, describe, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { renderSelfModificationConfig } from "./setup.js";
 
@@ -81,9 +81,46 @@ describe("packed package consumption", () => {
     await access(join(packageRoot, "dist/src/self-modification/config.js"));
     await access(join(packageRoot, "dist/src/self-modification/sandbox.js"));
     await access(join(packageRoot, "dist/src/self-modification/setup.js"));
-    await access(
-      join(packageRoot, "dist/src/self-modification/extension/subagents/agent/tools/edit_file.js"),
-    );
+    await Promise.all([
+      access(
+        join(
+          packageRoot,
+          "dist/src/self-modification/extension/subagents/agent/skills/trace_analysis.js",
+        ),
+      ),
+      access(
+        join(
+          packageRoot,
+          "dist/src/self-modification/extension/subagents/agent/tools/edit_file.js",
+        ),
+      ),
+      access(
+        join(
+          packageRoot,
+          "dist/src/self-modification/extension/subagents/agent/tools/inspect_trace.js",
+        ),
+      ),
+      access(
+        join(
+          packageRoot,
+          "dist/src/self-modification/extension/subagents/agent/tools/inspect_trace_spans.js",
+        ),
+      ),
+      access(
+        join(
+          packageRoot,
+          "dist/src/self-modification/extension/subagents/agent/tools/search_traces.js",
+        ),
+      ),
+    ]);
+    await Promise.all([
+      expect(
+        access(join(packageRoot, "dist/src/self-modification/extension/skills/trace_analysis.js")),
+      ).rejects.toMatchObject({ code: "ENOENT" }),
+      expect(
+        access(join(packageRoot, "dist/src/self-modification/extension/tools/inspect_trace.js")),
+      ).rejects.toMatchObject({ code: "ENOENT" }),
+    ]);
 
     const root = await mkdtemp(join(tmpdir(), "eve-self-modification-package-"));
     temporaryRoots.push(root);
@@ -143,7 +180,28 @@ describe("packed package consumption", () => {
       appRoot,
     );
     await access(join(appRoot, "node_modules/eve/dist/src/self-modification/agent.js"));
-    const build = await run("pnpm", ["build"], appRoot);
+    await run(
+      "node",
+      ["--input-type=module", "-e", 'await import("eve/extensions/code/sandbox")'],
+      appRoot,
+    );
+    await writeAppFile(
+      appRoot,
+      "verify-development-extension.mjs",
+      `import { defaultDevelopmentExtensions } from "./node_modules/eve/dist/src/compiler/development-extensions.js";
+import { compileAgentManifest } from "./node_modules/eve/dist/src/compiler/normalize-manifest.js";
+import { createAgentSourceManifest } from "./node_modules/eve/dist/src/discover/manifest.js";
+
+const manifest = createAgentSourceManifest({ agentId: "packed-dev", agentRoot: "/virtual/agent", appRoot: "/virtual" });
+const compiled = await compileAgentManifest(manifest, { developmentExtensions: defaultDevelopmentExtensions() });
+const subagent = compiled.subagents.find((entry) => entry.name === "self-modification__agent");
+if (compiled.subagents.length !== 1 || subagent === undefined || !subagent.agent.tools.some((tool) => tool.name === "edit_file")) {
+  throw new Error("Packed eve did not discover the bundled self-modification extension.");
+}
+`,
+    );
+    await run("node", ["verify-development-extension.mjs"], appRoot);
+    const build = await run("pnpm", ["exec", "eve", "build", "--skip-sandbox-prewarm"], appRoot);
     const output = `${build.stdout}\n${build.stderr}`;
     if (output.includes("Could not resolve '#shared/")) {
       throw new Error(

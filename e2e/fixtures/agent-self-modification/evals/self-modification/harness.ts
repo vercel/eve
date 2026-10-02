@@ -11,12 +11,15 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import type { EveEvalContext, EveEvalLiveTurn, EveEvalSession, EveEvalTurn } from "eve/evals";
 
 const SELF_MODIFICATION_AGENT = "self-modification__agent";
 const CLEANUP_TIMEOUT_MS = 30_000;
+const REBUILD_TIMEOUT_MS = 30_000;
+const REBUILD_POLL_INTERVAL_MS = 100;
 const LOCK_DIRECTORY = ".eve-self-modification-eval.lock";
 // Each eval entry bundles its relative imports separately. Share the lock across those copies.
 const shared = globalThis as typeof globalThis & {
@@ -93,12 +96,19 @@ export class SelfModificationHarness {
   readonly #t: EveEvalContext;
   readonly #sourceRoot: string;
   readonly #backupRoot: string;
+  readonly #projectFiles: ReadonlyMap<string, Buffer | undefined>;
   readonly #turns = new Set<EveEvalLiveTurn>();
 
-  private constructor(t: EveEvalContext, sourceRoot: string, backupRoot: string) {
+  private constructor(
+    t: EveEvalContext,
+    sourceRoot: string,
+    backupRoot: string,
+    projectFiles: ReadonlyMap<string, Buffer | undefined>,
+  ) {
     this.#t = t;
     this.#sourceRoot = sourceRoot;
     this.#backupRoot = backupRoot;
+    this.#projectFiles = projectFiles;
   }
 
   static async create(
@@ -119,7 +129,23 @@ export class SelfModificationHarness {
     try {
       await options.onBackupCreated?.(backupRoot);
       await cp(sourceRoot, join(backupRoot, "agent"), { recursive: true, verbatimSymlinks: true });
-      return new SelfModificationHarness(t, sourceRoot, backupRoot);
+      const projectRoot = dirname(sourceRoot);
+      const projectFiles = new Map<string, Buffer | undefined>();
+      for (const path of [
+        join(projectRoot, ".env.local"),
+        join(projectRoot, ".env.example"),
+        join(projectRoot, "package.json"),
+        resolve(projectRoot, "../../../pnpm-lock.yaml"),
+      ]) {
+        projectFiles.set(
+          path,
+          await readFile(path).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === "ENOENT") return undefined;
+            throw error;
+          }),
+        );
+      }
+      return new SelfModificationHarness(t, sourceRoot, backupRoot, projectFiles);
     } catch (error) {
       await rm(backupRoot, { recursive: true, force: true });
       throw error;
@@ -135,39 +161,33 @@ export class SelfModificationHarness {
     const parent = await liveParent.result();
     parent.expectOk();
     const call = parent.requireToolCall(SELF_MODIFICATION_AGENT);
-    const agentId = typeof call.input.agentId === "string" ? call.input.agentId : undefined;
-    const message = agentId === undefined ? undefined : call.input.message;
-    if (agentId !== undefined && (typeof message !== "string" || message.length === 0))
+    const taskId = typeof call.input.taskId === "string" ? call.input.taskId : undefined;
+    const message = taskId === undefined ? undefined : call.input.message;
+    if (taskId !== undefined && (typeof message !== "string" || message.length === 0))
       throw new Error("Self-modification continuation omitted its message.");
 
-    let called = [...this.#turns]
+    const sessionEvents = [...this.#turns]
       .filter((turn) => turn.sessionId === parent.sessionId)
-      .flatMap((turn) => turn.events)
-      .find(
-        (event) =>
-          event.type === "subagent.called" &&
-          event.data.name === SELF_MODIFICATION_AGENT &&
-          (agentId === undefined
-            ? liveParent.events.includes(event)
-            : event.data.agentId === agentId),
-      );
-    let continuation: EveEvalLiveTurn | undefined;
-    if (called?.type !== "subagent.called") {
-      continuation = this.#t.target.watchTurn(parent.sessionId, {
-        startIndex: liveParent.session.state.streamIndex,
-      });
-      this.#turns.add(continuation);
-      const data: { name: string; agentId?: string } = { name: SELF_MODIFICATION_AGENT };
-      if (agentId !== undefined) data.agentId = agentId;
-      called = await continuation.waitForEvent("subagent.called", { data });
+      .flatMap((turn) => turn.events);
+    const task = sessionEvents.find(
+      (event) =>
+        event.type === "task.started" &&
+        event.data.name === SELF_MODIFICATION_AGENT &&
+        (taskId === undefined ? liveParent.events.includes(event) : event.data.taskId === taskId),
+    );
+    const started = sessionEvents.find(
+      (event) =>
+        event.type === "agent.started" &&
+        task?.type === "task.started" &&
+        event.data.taskId === task.data.taskId,
+    );
+    if (started?.type !== "agent.started") {
+      throw new Error("Self-modification parent turn did not start its child agent.");
     }
-    const [child] = await Promise.all([
-      this.#readChild(
-        called.data.childSessionId,
-        typeof message === "string" ? message : undefined,
-      ),
-      continuation?.result().then((turn) => turn.expectOk()),
-    ]);
+    const child = await this.#readChild(
+      started.data.sessionId,
+      typeof message === "string" ? message : undefined,
+    );
     this.#t.calledSubagent(SELF_MODIFICATION_AGENT);
     return { child, parent, session: liveParent.session };
   }
@@ -188,6 +208,43 @@ export class SelfModificationHarness {
       throw new Error("Self-modification rebuild did not return a runtime revision.");
     }
     this.#t.log(`Self-modification runtime revision: ${body.revision}`);
+  }
+
+  async runtimeRevision(): Promise<string> {
+    const revision = await this.#readRuntimeRevision();
+    if (revision === undefined)
+      throw new Error("Could not read the current authored runtime revision.");
+    return revision;
+  }
+
+  async waitForRebuild(previousRevision: string): Promise<string> {
+    const deadline = Date.now() + REBUILD_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      this.#t.signal.throwIfAborted();
+      const revision = await this.#readRuntimeRevision();
+      if (revision !== undefined && revision !== previousRevision) {
+        this.#t.log(`Self-modification runtime revision: ${revision}`);
+        return revision;
+      }
+      await delay(REBUILD_POLL_INTERVAL_MS, undefined, { signal: this.#t.signal });
+    }
+    throw new Error(`Authored runtime did not rebuild within ${REBUILD_TIMEOUT_MS}ms.`);
+  }
+
+  async #readRuntimeRevision(): Promise<string | undefined> {
+    try {
+      const response = await this.#t.target.fetch("/eve/v1/dev/runtime-artifacts", {
+        signal: this.#t.signal,
+      });
+      if (!response.ok) return undefined;
+      const body = (await response.json()) as { revision?: unknown };
+      return typeof body.revision === "string" && body.revision.length > 0
+        ? body.revision
+        : undefined;
+    } catch {
+      this.#t.signal.throwIfAborted();
+      return undefined;
+    }
   }
 
   async assertOnlyChanged(sourcePaths: readonly string[]): Promise<void> {
@@ -220,7 +277,7 @@ export class SelfModificationHarness {
     for (const turn of this.#turns) {
       sessionIds.add(turn.sessionId);
       for (const event of turn.events) {
-        if (event.type === "subagent.called") sessionIds.add(event.data.childSessionId);
+        if (event.type === "agent.started") sessionIds.add(event.data.sessionId);
       }
     }
     const signal = AbortSignal.timeout(CLEANUP_TIMEOUT_MS);
@@ -257,6 +314,10 @@ export class SelfModificationHarness {
         recursive: true,
         verbatimSymlinks: true,
       });
+      for (const [path, content] of this.#projectFiles) {
+        if (content === undefined) await rm(path, { force: true });
+        else await writeFile(path, content);
+      }
     } finally {
       await this.#post(`resume?lease=${lease}`, signal);
     }

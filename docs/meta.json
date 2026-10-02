@@ -30,6 +30,7 @@
     "guides/instrumentation",
     "---Reference---",
     "guides/dev-tui",
+    "guides/self-modification",
     "...reference",
     "responsible-use",
     "[Benchmarks](/benchmarks)",

@@ -144,7 +144,8 @@ describe("memory lifecycle", () => {
       { content: "bravo memory", kind: "memory.load", role: "user" },
       input[0],
     ]);
-    expect(JSON.stringify(commit.history)).toContain("eve.memory");
+    expect(commit.recalledMessages).toHaveLength(2);
+    expect(JSON.stringify(commit.recalledMessages)).toContain("eve.memory");
   });
 
   it("commits no slot when one turn-wide recall batch is invalid", async () => {
@@ -207,7 +208,7 @@ describe("memory lifecycle", () => {
 
     expect(namespace).not.toHaveBeenCalled();
     expect(recall).not.toHaveBeenCalled();
-    expect(drainMemoryCommit(ctx)?.history).toEqual([]);
+    expect(drainMemoryCommit(ctx)?.recalledMessages).toEqual([]);
   });
 
   it("instruments recalls as memory searches with validated result records", async () => {
@@ -295,7 +296,7 @@ describe("memory lifecycle", () => {
     );
     const commit = drainMemoryCommit(ctx)!;
     const settled = [
-      ...commit.history,
+      ...commit.recalledMessages,
       { content: "hello", role: "user" as const },
       { content: "hi", role: "assistant" as const },
     ];
@@ -475,6 +476,7 @@ describe("memory lifecycle", () => {
         modelId: "openai/test",
         sequence: 0,
         sessionId: "session_1",
+        stepIndex: 0,
         turnId: "turn_0",
         usageInputTokens: 100,
       },
@@ -505,6 +507,7 @@ describe("memory lifecycle", () => {
               modelId: "openai/test",
               sequence: 0,
               sessionId: "session_1",
+              stepIndex: 0,
               turnId: "turn_0",
             },
             type: "compaction.completed",
@@ -519,6 +522,73 @@ describe("memory lifecycle", () => {
       { content: "ordinary", role: "user" },
       { content: "new profile", kind: "memory.load", role: "user" },
     ]);
-    expect(drainMemoryCommit(ctx)?.history).toHaveLength(3);
+    expect(drainMemoryCommit(ctx)?.recalledMessages).toHaveLength(1);
+  });
+
+  it("gives each completed compaction within one turn a distinct recall operation id", async () => {
+    const ctx = createContext();
+    const operationIds: string[] = [];
+    const definition = memory("register", {
+      provider: {
+        recall: {
+          "compaction.completed": async (context) => {
+            operationIds.push(context.operationId);
+            return {
+              messages: [{ content: `findings revision ${operationIds.length}`, id: "register" }],
+            };
+          },
+          "turn.started": async () => null,
+        },
+      },
+      scope: "user_1",
+    });
+    const memoryLock = createMemoryLock({
+      namespace: "app",
+      scope: "user_1",
+      slot: "register",
+      turn: { id: "turn_0", input: [], sequence: 0 },
+      visibility: "scope",
+    });
+    ctx.set(TurnMemoryLocksKey, { register: memoryLock });
+    let history: ModelMessage[] = [{ content: "ordinary", role: "user" }];
+    let state: Readonly<Record<string, unknown>> | undefined;
+    let stepIndex = 0;
+
+    const completeCompaction = async () => {
+      prepareMemoryCompaction(ctx, { history, state });
+      const projected = await contextStorage.run(
+        ctx,
+        async () =>
+          await dispatchMemoryCompactionCompleted({
+            ctx,
+            event: {
+              data: {
+                modelId: "openai/test",
+                sequence: 0,
+                sessionId: "session_1",
+                stepIndex: stepIndex++,
+                turnId: "turn_0",
+              },
+              type: "compaction.completed",
+            },
+            memories: [definition],
+            messages: history,
+          }),
+      );
+      const commit = drainMemoryCommit(ctx)!;
+      history = [...history, ...commit.recalledMessages];
+      state = commit.state;
+      return projected;
+    };
+
+    await completeCompaction();
+    const second = await completeCompaction();
+
+    expect(operationIds).toHaveLength(2);
+    expect(operationIds[1]).not.toBe(operationIds[0]);
+    expect(second).toEqual([
+      { content: "ordinary", role: "user" },
+      { content: "findings revision 2", kind: "memory.load", role: "user" },
+    ]);
   });
 });

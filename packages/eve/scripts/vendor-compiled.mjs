@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { resolveNitroRolldownVersion } from "./nitro-rolldown.mjs";
 import { collectFilesRecursively, runVendor } from "./vendor-compiled/_shared.mjs";
 import { MODULES } from "./vendor-compiled/index.mjs";
+import { syncExtensions } from "./sync-extensions.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -30,9 +31,11 @@ const scriptFiles = [
   fileURLToPath(import.meta.url),
   join(packageRoot, "package.json"),
   join(here, "nitro-rolldown.mjs"),
-  join(here, "vendor-warning-log.mjs"),
+  join(packageRoot, "src", "internal", "bundler", "vendored-dependency-log.ts"),
   ...(await collectFilesRecursively(vendorCompiledDir, [".mjs", ".d.ts"])),
 ];
+
+await syncExtensions();
 
 await runVendor({
   packageRoot,

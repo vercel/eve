@@ -46,7 +46,10 @@ describe("linqChannel", () => {
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      formatted: { type: "root", children: [] },
+      metadata: { dateSent: new Date(0), edited: false },
+      author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
       raw: {},
       text: "Hello Linq",
@@ -56,21 +59,19 @@ describe("linqChannel", () => {
     await handler(thread, message);
 
     expect(markRead).toHaveBeenCalledWith(thread.id, message.id);
-    expect(send).toHaveBeenCalledWith(
-      { context: [], message: "Hello Linq" },
-      {
-        auth: {
-          attributes: { user_name: "user" },
-          authenticator: "linq-message",
-          issuer: "linq",
-          principalId: "linq:user",
-          principalType: "user",
-          subject: "user",
-        },
-        thread,
-        title: undefined,
+    expect(send).toHaveBeenCalledWith("Hello Linq", {
+      auth: {
+        attributes: { user_name: "user" },
+        authenticator: "linq-message",
+        issuer: "linq",
+        principalId: "linq:user",
+        principalType: "user",
+        subject: "user",
       },
-    );
+      context: [],
+      thread,
+      title: undefined,
+    });
   });
 
   it("uses lazy credentials and the managed credential verifier", async () => {
@@ -97,7 +98,10 @@ describe("linqChannel", () => {
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      formatted: { type: "root", children: [] },
+      metadata: { dateSent: new Date(0), edited: false },
+      author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
       raw: {},
       text: "  \n",

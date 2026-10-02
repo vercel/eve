@@ -4,7 +4,7 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 
-export type DecodedSessionInbox =
+type DecodedSessionInbox =
   | DeliverHookPayload
   | SessionTimeoutHookPayload
   | Extract<SessionCommand, { readonly kind: "cancel" | "clear" | "compact" | "reset" }>;
@@ -38,7 +38,6 @@ export function decodeSessionInboxPayload(value: unknown): DecodedSessionInbox {
         kind: "deliver",
         payloads: [command.payload],
         requestId: command.requestId,
-        taskDeliveryId: command.taskDeliveryId,
         turnPolicy: command.turnPolicy,
       };
     }

@@ -3,7 +3,7 @@ import { captureVercel } from "#setup/primitives/index.js";
 import type { Dirent } from "node:fs";
 import * as fs from "node:fs/promises";
 import { extname, join } from "node:path";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 import { readProjectLink } from "./project-resolution.js";
 import type { Prompter } from "./prompter.js";
@@ -304,6 +304,13 @@ export async function ensureCreatedProjectFramework(
   options: CreatedProjectFrameworkOptions,
 ): Promise<void> {
   const framework = await fetchProjectFramework(projectRoot, team, projectId, options);
+  // vercel.ts owns the service graph; a detected Next.js dependency is only a peer service.
+  if ((await resolveVercelHostFrameworkPreset(projectRoot)) === "services") {
+    if (framework !== "services") {
+      await setProjectFramework(projectRoot, team, projectId, "services", onOutput, options);
+    }
+    return;
+  }
   if (framework === EVE_FRAMEWORK_PRESET) return;
   const frameworkAction =
     framework === undefined

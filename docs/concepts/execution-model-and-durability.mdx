@@ -25,7 +25,9 @@ The Workflow SDK is not inherently tied to Vercel. In local development and in a
 
 When a Vercel production deployment changes, a new delivery to an idle session hands the session's settled state to the exact deployment that accepted the request. This applies whether the delivery arrives through the session ID or through any channel continuation address the session has claimed. The session keeps its original ID and event stream, while the next model turn uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. A successful handoff restarts the session's original configured [`sessionTimeoutMs`](../agent-config#runtime-limits) duration; disabled timeouts stay disabled. Failed or skipped handoffs keep the existing deadline.
 
-Before taking ownership, the target deployment validates the checkpoint's stored tasks and subagent handles and checks that no pending work remains. This includes settled tasks. If that validation fails, the previous owner recovers the session and processes the triggering delivery. Task and handle state preserve unknown metadata fields, while known fields and lifecycle rules must still be valid. Authored session state remains opaque to this validation.
+Before taking ownership, the target deployment upgrades the checkpoint when an older eve release wrote it, then checks that no pending work remains. A deployment accepts checkpoints from eve 0.66.0 and later, so upgrading eve does not leave long-lived sessions, such as a Slack thread, on their old deployment. An older release cannot read a newer checkpoint: after a rollback, a session that already moved to the newer deployment stays there. Extension state saved before eve 0.69 moves to its mount when exactly one mount uses that extension package and the extension still defines that state. Otherwise eve cannot choose an owner, and the session stays on its current deployment. Idle subagent sessions that eve 0.66–0.68 kept for later reuse are stopped after the handoff. Authored session state remains opaque to this validation.
+
+If the target deployment rejects the session, the previous owner keeps it and processes the triggering delivery. When the target deployment cannot read the checkpoint, its Vercel runtime logs show a `session handoff refused` warning with the checkpoint version and the reason. Owners on this release or later also write a `session handoff failed` warning to their own runtime logs, with the target deployment and the reason.
 
 eve does not move live work between deployments. A session with a running turn, pending human input or authorization, queued messages, or active tasks and subagents stays on its current deployment. After that work settles, a later delivery can move the idle session; the earlier deployment signal is not remembered.
 
@@ -56,7 +58,7 @@ that has not reached its next turn dispatch has not migrated yet.
 Transparent rollback to the former execution model is unsupported. Retire and
 restart affected sessions before rolling back.
 
-Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or `defaultBackend()`.
+Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or the default sandbox environment.
 
 For advanced self-hosted deployments, the root `agent.ts` can select the installed Workflow world package to use with `experimental.workflow.world`:
 
@@ -64,7 +66,7 @@ For advanced self-hosted deployments, the root `agent.ts` can select the install
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "anthropic/claude-opus-4.8",
+  model: "anthropic/claude-opus-5.5",
   experimental: {
     workflow: {
       world: "@workflow/world-postgres",
@@ -97,9 +99,8 @@ Crash the process, hit a timeout, or redeploy mid-turn, and the run picks up fro
 
 With `experimental.workflow.modelCallsPerStep` greater than `1`, an
 interrupted Workflow step can also repeat earlier model calls and inline tool
-executions from the same batch. Approval, input, blocking coordination, and
-background-task boundaries still force a checkpoint before eve waits or
-acknowledges the work.
+executions from the same batch. Approval, input, and blocking coordination
+boundaries still force a checkpoint before eve waits.
 
 Steering can interrupt pending model generation before assistant output begins.
 An executing tool finishes safely, then the batch yields before another model
@@ -115,14 +116,14 @@ For ordinary tools, eve manages the workflow around your executor. Use [`defineW
 
 Some work has to wait, including a human approving a [tool](../tools) or an interactive OAuth sign-in for a [connection](../connections). At those points the turn parks durably. The workflow suspends and holds no compute until the input it's waiting on arrives, even if that's much later. When it does, the conversation picks up exactly where it left off.
 
-Background execution is a separate choice about result delivery. A background workflow tool
-returns a task receipt so the parent turn can continue; the tool's workflow may then run or
-suspend independently. A default workflow tool can suspend too, with its original tool call
-still pending. Declare background work with `defineWorkflowTool`; `defineTool` always executes
-inside its initiating step.
+A workflow tool can suspend too, with its original tool call still pending and the turn parked
+until the workflow settles. `defineTool` always executes inside its initiating step. A workflow
+tool that defines `task(input, ctx)` or `serve(receive, ctx)` doesn't park the turn: its call returns a receipt, the run keeps working,
+and the turn parks only when the model calls `task_wait` or tries to end the turn while the task
+works. See [tasks](../tools/workflows#run-calls-as-tasks-task).
 
-An awaited workflow operation provides the durable wait. A generator's `yield` reports progress
-in default execution; background workflow tools consume yields without publishing progress. See [background execution](../tools#background-execution) and
+An awaited workflow operation provides the durable wait. A generator's `yield` reports progress.
+See [durable waits](../tools#durable-waits) and
 [workflow suspension](../tools/workflows#how-suspension-works) for the execution and result rules.
 
 ## Message delivery and steering
@@ -154,7 +155,7 @@ never starts a replacement session for an address that is mid-handoff.
 
 When a session is waiting, a delivery through its ID or any claimed channel address wakes it and starts the next turn. Message sends default to `turnPolicy: "steer"`. Before assistant output begins, the session owner signals pending model generation to stop, then applies the correction within the same turn and with the same turn ID. This includes model requests that perform provider-managed search before answering; interrupted search work may run again. Reasoning and search progress do not count as assistant output.
 
-An executing eve tool finishes and commits its result before steering reaches the next model request. Steering does not cancel the turn or its background tasks. After assistant output starts, steering applies at the next committed workflow boundary and preserves streamed text. A message that reaches the boundary after the turn has settled starts another turn.
+An executing eve tool finishes and commits its result before steering reaches the next model request. Steering does not cancel the turn. After assistant output starts, steering applies at the next committed workflow boundary and preserves streamed text. A message that reaches the boundary after the turn has settled starts another turn.
 
 Once eve publishes an input request or begins publishing turn completion or failure, eve finishes committing that boundary before applying new messages.
 

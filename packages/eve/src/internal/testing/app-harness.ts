@@ -1,7 +1,9 @@
-import type { JsonObject } from "#shared/json.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { compileFromMemory, type CompileFromMemoryInput } from "#compiler/compile-from-memory.js";
-import type { CompiledAgentManifest, CompiledSkillDefinition } from "#compiler/manifest.js";
+import {
+  compileFromMemory,
+  type CompileFromMemoryInput,
+} from "#internal/testing/compile-from-memory.js";
+import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ProgrammaticAgentModule } from "#compiler/source-graph.js";
 import type { SessionParent, SessionTurn } from "#context/keys.js";
@@ -17,7 +19,7 @@ import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
 import { createNodeHarnessTools } from "#execution/node-step.js";
 import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
-import type { SandboxBackend } from "#public/definitions/sandbox-backend.js";
+import { defineSandboxProvider } from "#shared/sandbox-provider.js";
 import {
   buildActiveSessionContext,
   type ActiveSessionInit,
@@ -37,7 +39,7 @@ import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sand
  * no tools, skills, or subagents. The harness installs an in-memory sandbox
  * backend so runtime tests never depend on a host container or VM service.
  */
-export interface TestAppDescriptor {
+interface TestAppDescriptor {
   readonly agent?: {
     readonly limits?: {
       readonly maxInputTokensPerSession?: number | false;
@@ -47,19 +49,12 @@ export interface TestAppDescriptor {
     };
     readonly model?: string;
     readonly name?: string;
-    readonly outputSchema?: JsonObject;
   };
   /**
    * Authored tools projected into the compiled manifest and available to
    * `runAsSession` for tool dispatch.
    */
   readonly tools?: readonly ResolvedToolDefinition[];
-  /**
-   * Authored skills projected into the compiled manifest. Use `mockSkill`
-   * to describe them declaratively; pass the `.source` field here and
-   * forward it on `runAsSession` when the test reads reference files.
-   */
-  readonly skills?: readonly CompiledSkillDefinition[];
   /** Additional authored modules compiled into the synthetic application. */
   readonly modules?: readonly ProgrammaticAgentModule[];
 }
@@ -102,8 +97,6 @@ export interface TestRuntime {
   readonly moduleMap: CompiledModuleMap;
   /** Descriptor-declared tools. Exposed for test-side registry wiring. */
   readonly tools: readonly ResolvedToolDefinition[];
-  /** Descriptor-declared skills. Exposed for test-side registry wiring. */
-  readonly skills: readonly CompiledSkillDefinition[];
   /**
    * Runs `fn` with this app's runtime session active. Compiled-artifact
    * reads and bundle-cache writes during `fn` target this scoped session,
@@ -144,25 +137,32 @@ const DEFAULT_AGENT_NAME = "test-agent";
  */
 export const TEST_DEFAULT_MODEL_ID = "openai/gpt-5.4";
 
-const TEST_SANDBOX_BACKEND: SandboxBackend = {
+const TEST_SANDBOX_PROVIDER = defineSandboxProvider({
   name: "eve-test-memory",
-  async create(input) {
-    const sandbox = mockSandbox({ id: input.sessionKey });
-    return {
-      session: sandbox.session,
-      useSessionFn: async () => sandbox.session,
-      captureState: async () => ({
-        backendName: TEST_SANDBOX_BACKEND.name,
-        metadata: {},
-        sessionKey: input.sessionKey,
-      }),
-      delete: async (options) => await sandbox.access.delete?.(options),
-      shutdown: async () => undefined,
-      stop: async () => undefined,
-    };
-  },
-  prewarm: async () => ({ reused: true }),
-};
+  environment: () => ({
+    async prepare() {
+      return null;
+    },
+    async resume(context) {
+      return createHandle(context.session.id);
+    },
+    async start(context) {
+      return { handle: createHandle(context.session.id), state: null };
+    },
+  }),
+});
+
+function createHandle(sessionId: string) {
+  const sandbox = mockSandbox({ id: sessionId });
+  return {
+    sandbox: sandbox.session,
+    async onSessionDelete(options?: import("#shared/sandbox-provider.js").SandboxDeleteOptions) {
+      await sandbox.access.delete?.(options);
+    },
+    async onSessionStop() {},
+    async onRuntimeShutdown() {},
+  };
+}
 
 export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
   const compileInput: CompileFromMemoryInput = {
@@ -171,14 +171,14 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     limits: descriptor.agent?.limits,
     modules: [
       {
-        loadNamespace: async () => ({
-          default: defineSandbox({ backend: TEST_SANDBOX_BACKEND }),
-        }),
+        loadNamespace: async () => {
+          const environment = TEST_SANDBOX_PROVIDER.environment();
+          return { environment, default: defineSandbox(() => environment.open()) };
+        },
         logicalPath: "sandbox.ts",
       },
       ...(descriptor.modules ?? []),
     ],
-    outputSchema: descriptor.agent?.outputSchema,
   };
 
   if (descriptor.tools !== undefined && descriptor.tools.length > 0) {
@@ -197,27 +197,9 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     });
   }
 
-  if (descriptor.skills !== undefined && descriptor.skills.length > 0) {
-    Object.assign(compileInput, {
-      skills: descriptor.skills.map((skill) => {
-        const entry: { name: string; description: string; markdown?: string } = {
-          name: skill.name,
-          description: skill.description,
-        };
-
-        if (skill.markdown !== undefined) {
-          entry.markdown = skill.markdown;
-        }
-
-        return entry;
-      }),
-    });
-  }
-
   const { manifest, moduleMap } = await compileFromMemory(compileInput);
   const session = createRuntimeSession(descriptor.agent?.name ?? DEFAULT_AGENT_NAME);
   const tools = descriptor.tools ?? [];
-  const skills = descriptor.skills ?? [];
 
   function install(): void {
     installBundledCompiledArtifacts({ manifest, moduleMap });
@@ -275,7 +257,6 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     run,
     runAsSession,
     session,
-    skills,
     tools,
   };
 }

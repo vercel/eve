@@ -3,7 +3,7 @@ title: "Overview"
 description: "Choose a deployment strategy and prepare an eve agent for production."
 ---
 
-Deploy eve to Vercel or run it as a Node service on your own infrastructure. Your deployment strategy determines the build output, workflow storage, sandbox backend, and routing. The agent’s filesystem-based configuration remains portable across these strategies.
+Deploy eve to Vercel or run it as a Node service on your own infrastructure. Your deployment strategy determines the build output, workflow storage, sandbox provider, and routing. The agent’s filesystem-based configuration remains portable across these strategies.
 
 ## Choose a deployment strategy
 
@@ -47,7 +47,7 @@ curl https://your_agent.example.com/eve/v1/health
 Then connect the development terminal user interface (TUI) to the deployment and send a real message:
 
 ```bash
-eve dev https://your_agent.example.com
+eve remote connect --url https://your_agent.example.com
 ```
 
 Set `VERCEL_AUTOMATION_BYPASS_SECRET` locally first if a Vercel deployment uses Deployment Protection.

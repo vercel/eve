@@ -6,7 +6,7 @@ export const AI_GATEWAY_API_KEY_ENV_VAR = "AI_GATEWAY_API_KEY";
 export const AI_GATEWAY_API_KEY_ENV_FILE = ".env.local";
 
 /** The location written by eve when a user supplies an AI Gateway API key. */
-export interface AiGatewayApiKeyLocation {
+interface AiGatewayApiKeyLocation {
   envKey: typeof AI_GATEWAY_API_KEY_ENV_VAR;
   envFile: typeof AI_GATEWAY_API_KEY_ENV_FILE;
   envPath: string;

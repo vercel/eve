@@ -2,7 +2,6 @@ import type { ContextContainer } from "#context/container.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
-  ModeKey,
   OtelTraceEnabledKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
@@ -53,7 +52,6 @@ export function initializeSessionInstrumentation(input: {
       channelKind: input.ctx.get(ChannelInstrumentationKey)?.kind,
       environment: resolveInstrumentationEnvironment(),
       forwardedTracePolicy,
-      mode: input.ctx.get(ModeKey),
       principalType: input.ctx.get(AuthKey)?.principalType,
     },
     { forwardedOverridesStored: true },
@@ -117,9 +115,12 @@ function allocateSessionTraceSeed(input: {
           : intersectInstrumentationDecisions(forwardedCeiling, inheritedDecision)
         : (inheritedDecision ??
           resolveTracePolicyDecision(isSampledTrace(input.parentTraceContext), input.conversation));
-    const decision = input.forwardedTracePolicy
-      ? intersectInstrumentationDecisions(parentDecision, localDecision())
-      : parentDecision;
+    const isRemote =
+      "isRemote" in input.parentTraceContext && input.parentTraceContext.isRemote === true;
+    const decision =
+      input.forwardedTracePolicy || isRemote
+        ? intersectInstrumentationDecisions(parentDecision, localDecision())
+        : parentDecision;
     const idGenerator = input.runtime?.idGenerator ?? new AgentSpanIdGenerator();
     return {
       decision,
@@ -128,7 +129,7 @@ function allocateSessionTraceSeed(input: {
         : { forwardedTracePolicy: input.forwardedTracePolicy }),
       spanId: idGenerator.allocateSpanId(),
       traceFlags: decision.action === "drop" ? 0 : input.parentTraceContext.traceFlags,
-      traceId: idGenerator.generateTraceId(),
+      traceId: isRemote ? idGenerator.generateTraceId() : input.parentTraceContext.traceId,
     };
   }
   if (input.runtime?.prepareSessionTrace === undefined || input.runtime.idGenerator === undefined)

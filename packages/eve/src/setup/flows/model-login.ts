@@ -26,9 +26,9 @@ import {
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { changeValidatedAgentModel, readAuthoredModelSelection } from "./model-source-change.js";
+import { CONNECTION_OPTIONS } from "./model-login-options.js";
 import {
   authenticateModelConnection,
-  CONNECTION_OPTIONS,
   reuseModelConnection,
   type ValidatedModelConnection,
 } from "./model-login-connection.js";
@@ -82,12 +82,16 @@ type LoginInput = {
   agentRoot?: string;
   prompter: Prompter;
   automatic?: boolean;
+  /** Connection selected by the TUI's `/login <connection>` completion. */
+  selected?: ModelConnectionSelection;
+  /** TUI callers can omit the redundant picker heading beneath `/login`. */
+  connectionMessage?: string;
   signal?: AbortSignal;
   /** Applies writes under one watcher lease and waits for runtime activation. */
   withConnectionUpdate?(task: () => Promise<void>): Promise<void>;
 };
 
-export type ModelLoginResult =
+type ModelLoginResult =
   | { kind: "ready"; reload: boolean; model?: ConnectedModel }
   | { kind: "cancelled" };
 
@@ -289,12 +293,16 @@ export async function runModelLogin(input: LoginInput): Promise<ModelLoginResult
         );
       }
     }
+    let selectedFromCommand = input.selected;
     while (true) {
-      const selected = await prompter.select({
-        message: "Choose a connection",
-        search: true,
-        options: [...CONNECTION_OPTIONS],
-      });
+      const selected =
+        selectedFromCommand ??
+        (await prompter.select({
+          message: input.connectionMessage ?? "Choose a connection",
+          search: true,
+          options: [...CONNECTION_OPTIONS],
+        }));
+      selectedFromCommand = undefined;
       if (!isModelConnection(selected)) throw new Error("Choose a model connection.");
       try {
         const result = await connect(selected, false);

@@ -1,12 +1,9 @@
 /**
  * Protocol-agnostic interfaces for the connection system.
  *
- * Framework tools (`connection_search`) and the context provider
- * depend only on these interfaces, not on any
- * protocol-specific implementation such as MCP.
+ * Framework tools and the context provider depend only on these
+ * interfaces, not on any protocol-specific implementation such as MCP.
  */
-
-import type { ToolSet } from "ai";
 
 import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type { SessionContext } from "#context/session-context.js";
@@ -469,5 +466,4 @@ export interface ConnectionClient {
     options: ConnectionToolExecuteOptions,
   ): Promise<unknown>;
   getToolMetadata(): Promise<readonly ConnectionToolMetadata[]>;
-  getTools(): Promise<ToolSet>;
 }

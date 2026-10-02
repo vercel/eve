@@ -7,8 +7,8 @@ export default defineTool({
   inputSchema: z.object({ marker: z.string() }),
   approval: {
     request: always(),
-    response: ({ response, responder }) =>
-      response.decision === "approve" && responder.principalId === "e2e-approval-responder"
+    response: ({ response }) =>
+      response.decision === "approve" && response.principal.principalId === "e2e-approval-responder"
         ? ({ status: "allowed" } as const)
         : ({ status: "rejected", reason: "Unexpected eval responder." } as const),
   },

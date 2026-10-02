@@ -115,7 +115,7 @@ void (async () => {
       parentSpanId: step,
       attributes: {
         "gen_ai.request.model": "smoke-model-v1",
-        "ai.prompt.system": SYSTEM_PROMPT,
+        "gen_ai.system_instructions": JSON.stringify([{ content: SYSTEM_PROMPT, type: "text" }]),
         "ai.response.text": "smoke reply",
       },
     });

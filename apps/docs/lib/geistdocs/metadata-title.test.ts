@@ -10,7 +10,7 @@ import {
 describe("metadata titles", () => {
   it("defines normal child title inheritance at the shared layout", () => {
     expect(rootTitleMetadata).toEqual({
-      default: "eve – durable AI agent framework",
+      default: "eve – build AI agents that you own",
       template: "%s – eve",
     });
     expect(metadataTitle("Integrations")).toBe("Integrations");

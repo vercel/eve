@@ -33,7 +33,7 @@ const LOCAL_TRACE_RETAIN_COUNT = 20;
 type RetentionBound = number | false;
 
 /** Resolved retention policy for one dev worker. */
-export interface LocalTraceRetentionSettings {
+interface LocalTraceRetentionSettings {
   readonly enabled: boolean;
   readonly maxAgeMs: RetentionBound;
   readonly maxTotalBytes: RetentionBound;
@@ -41,17 +41,17 @@ export interface LocalTraceRetentionSettings {
 }
 
 /** Which bound removed traces, reported for a single diagnostics line. */
-export type LocalTracePruneReason = "maxAgeMs" | "maxTotalBytes";
+type LocalTracePruneReason = "maxAgeMs" | "maxTotalBytes";
 
 /** Outcome of one sweep. `removedTraces` counts trace directories, not spans. */
-export interface LocalTracePruneResult {
+interface LocalTracePruneResult {
   readonly reasons: readonly LocalTracePruneReason[];
   readonly reclaimedBytes: number;
   readonly removedTraces: number;
   readonly retainedTraces: number;
 }
 
-export interface PruneLocalTraceStoreInput {
+interface PruneLocalTraceStoreInput {
   readonly appRoot: string;
   /** Traces whose session is open in this worker; never evicted. */
   readonly activeTraceIds: ReadonlySet<string>;

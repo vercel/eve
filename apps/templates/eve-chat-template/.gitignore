@@ -12,3 +12,8 @@ dist
 .DS_Store
 *.tsbuildinfo
 .env*.local
+
+apps/web/.next
+apps/web/.nuxt
+apps/web/.output
+apps/web/node_modules

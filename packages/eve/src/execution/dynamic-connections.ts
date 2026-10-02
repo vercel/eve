@@ -1,6 +1,6 @@
 import type { ContextContainer } from "#context/container.js";
 import { dispatchDynamicConnectionEvent } from "#context/dynamic-connection-lifecycle.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
+import { announceConnections } from "#execution/connection-announcement.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import {
   createSessionStartedEvent,
@@ -16,22 +16,21 @@ export function bindDynamicConnections(
   agent: Pick<ResolvedAgent, "dynamicConnectionResolvers">,
 ) {
   const resolvers = agent.dynamicConnectionResolvers ?? [];
-  const dispatch = (event: UnstampedMessageStreamEvent): Promise<void> =>
-    dispatchDynamicConnectionEvent({ ctx, event, resolvers });
+  const dispatch = async (event: UnstampedMessageStreamEvent): Promise<void> => {
+    await dispatchDynamicConnectionEvent({ ctx, event, resolvers });
+    if (event.type === "step.started") announceConnections(ctx);
+  };
 
   return {
     dispatch,
     async rehydrate(
       state: HarnessEmissionState,
       runtime: RuntimeIdentity,
-      betweenTurns: boolean,
+      turn?: { readonly sequence: number; readonly turnId: string },
     ): Promise<void> {
       if (!state.sessionStarted) return;
       await dispatch(createSessionStartedEvent({ runtime }));
-      if (betweenTurns) return;
-      await dispatch(
-        createTurnStartedEvent({ sequence: state.sequence, turnId: activeTurnId(state) }),
-      );
+      if (turn !== undefined) await dispatch(createTurnStartedEvent(turn));
     },
   };
 }

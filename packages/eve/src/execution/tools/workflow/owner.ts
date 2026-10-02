@@ -3,27 +3,43 @@ import type {
   WorkflowToolRunMessage,
   WorkflowToolRunRequestMessage,
   WorkflowToolAuthorizationRequest,
-  WorkflowToolRunOwner,
 } from "#execution/tools/workflow/messages.js";
 import {
   createChannelReader,
   type ChannelReader,
 } from "#execution/tools/workflow/owner-channels.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import { disposeHook } from "#execution/hook-ownership.js";
+
+/**
+ * The run's inbox as its body sees it. Everything the body sends its session,
+ * except the outcome, goes through the run, which relays each message before
+ * the outcome.
+ */
+export interface WorkflowToolRunInbox {
+  /** Messages that reached the run's inbox so far. */
+  readonly sent: number;
+  send(message: Exclude<WorkflowToolRunMessage, { readonly kind: "outcome" }>): Promise<void>;
+}
 
 export interface WorkflowToolRunOwnerInbox {
-  dispose(): Promise<void>;
-  readonly owner: WorkflowToolRunOwner;
+  readonly owner: WorkflowToolRunInbox;
   readonly reader: ChannelReader<"workflow", WorkflowToolRunMessage>;
 }
 
-/** Receives body messages before routing them to the turn or session owner. */
+/** Receives body messages before routing them to the waiting turn. */
 export function openWorkflowToolRunOwnerInbox(): WorkflowToolRunOwnerInbox {
   const hook = createHook<WorkflowToolRunMessage>();
+  let sent = 0;
   return {
-    dispose: () => disposeHook(hook),
-    owner: { inbox: hook.token },
+    owner: {
+      get sent() {
+        return sent;
+      },
+      async send(message) {
+        await resumeHookStep(hook.token, message);
+        sent += 1;
+      },
+    },
     reader: createChannelReader("workflow", hook),
   };
 }

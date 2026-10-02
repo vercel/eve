@@ -171,25 +171,64 @@ export function createNodeEsmCompatBannerPlugin(
   };
 }
 
-const DECLARATION_TRIVIA = String.raw`(?:\s|/\*[\s\S]*?\*/|//[^\r\n\u2028\u2029]*[\r\n\u2028\u2029])*`;
+// A block comment body must not be able to span `*/`: a lazy `[\s\S]*?`
+// lets a failed match re-end the comment at every later `*/`, which
+// backtracks catastrophically on large JSDoc-heavy chunks.
+const DECLARATION_TRIVIA = String.raw`(?:\s|/\*(?:[^*]|\*(?!/))*\*/|//[^\r\n\u2028\u2029]*[\r\n\u2028\u2029])*`;
+// A keyword directly after a quote can only be string content. This plugin's
+// own banner templates are bundled into every dev host, so without the
+// lookbehind they would force a full parse of eve's largest chunk.
+const DECLARATION_START = String.raw`(?:(?<![\w$"'\x60])(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}`;
+// `\b` would accept bundler-deconflicted names such as `__filename$1`, which
+// force a full parse of eve's largest vendor chunk on every hosted build.
+const BINDING_END = String.raw`(?![\w$])`;
 const PATH_BINDING_DECLARATION = new RegExp(
-  String.raw`(?:\b(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}(?:__filename|__dirname)\b`,
+  String.raw`${DECLARATION_START}(?:__filename|__dirname)${BINDING_END}`,
 );
 const REQUIRE_BINDING_DECLARATION = new RegExp(
-  String.raw`(?:\b(?:var|let|const|using)\b|,)${DECLARATION_TRIVIA}require\b`,
+  String.raw`${DECLARATION_START}require${BINDING_END}`,
 );
+const IDENTIFIER_ESCAPE = String.raw`\\u(?:[\da-fA-F]{4}|\{[\da-fA-F]+\})`;
+const ESCAPED_IDENTIFIER_DECLARATION = new RegExp(
+  String.raw`${DECLARATION_START}([\w$]*(?:${IDENTIFIER_ESCAPE}[\w$]*)+)`,
+  "g",
+);
+const IDENTIFIER_ESCAPE_PATTERN = new RegExp(IDENTIFIER_ESCAPE, "g");
 
 function mayDeclareCompatibilityBinding(
   code: string,
   options: NodeEsmCompatBannerOptions,
 ): boolean {
   // This is only a negative filter: comments/strings can cause extra parsing,
-  // never a missed declaration. Escaped identifiers always use the parser.
+  // never a missed declaration. Nearly every large bundle contains `\u` in
+  // strings or regexes, so escaped names are decoded rather than treated as a
+  // reason to parse the whole chunk.
   return (
-    code.includes("\\u") ||
     PATH_BINDING_DECLARATION.test(code) ||
-    (options.includeRequire === true && REQUIRE_BINDING_DECLARATION.test(code))
+    (options.includeRequire === true && REQUIRE_BINDING_DECLARATION.test(code)) ||
+    declaresEscapedCompatibilityBinding(code, options)
   );
+}
+
+function declaresEscapedCompatibilityBinding(
+  code: string,
+  options: NodeEsmCompatBannerOptions,
+): boolean {
+  if (!code.includes("\\u")) return false;
+  for (const match of code.matchAll(ESCAPED_IDENTIFIER_DECLARATION)) {
+    const name = match[1]!.replace(IDENTIFIER_ESCAPE_PATTERN, (escape) => {
+      const codePoint = Number.parseInt(escape.slice(2).replace(/[{}]/g, ""), 16);
+      return codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : "\uFFFD";
+    });
+    if (
+      name === FILENAME_BANNER_LINE.bindingName ||
+      name === DIRNAME_BANNER_LINE.bindingName ||
+      (options.includeRequire === true && name === REQUIRE_LINE.bindingName)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function createPrependedLineSourceMap({

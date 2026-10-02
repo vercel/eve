@@ -1,5 +1,5 @@
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
-import { isEveDevEnvironment } from "#internal/application/optional-package-install.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 
 const SHUTDOWN_SIGNALS = ["SIGINT", "SIGTERM"] as const;
 type ShutdownSignal = (typeof SHUTDOWN_SIGNALS)[number];

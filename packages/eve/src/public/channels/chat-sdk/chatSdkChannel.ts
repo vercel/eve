@@ -1,38 +1,31 @@
 import type { UserContent } from "ai";
 
-import type { ChannelAddressDeliveryOptions } from "#channel/channel-address.js";
-import {
-  INTERNAL_CHANNEL_DELIVER,
-  type ChannelFrom,
-  type InternalChannelSource,
+import type {
+  ChannelFrom,
+  ChannelRespondOptions,
+  ChannelSendOptions,
 } from "#channel/channel-operations.js";
-import { normalizeSendInput } from "#channel/send-input.js";
-import type { SendPayload } from "#channel/routes.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InputRequest } from "#shared/input.js";
+import {
+  type InputResponse,
+  parseInputResponses,
+  type StrictInputResponses,
+} from "#shared/input.js";
 import type {
   ActionEvent,
   Adapter,
-  CardChild,
   ChatConfig,
   SerializedThread,
   Thread,
   WebhookOptions,
 } from "#compiled/chat/index.js";
-import {
-  Actions,
-  Button,
-  Card,
-  CardText,
-  Chat,
-  Message,
-  ThreadImpl,
-} from "#compiled/chat/index.js";
+import { Chat, Message, ThreadImpl } from "#compiled/chat/index.js";
 import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
+import { decodeInputAction, renderInputRequests } from "#public/channels/chat-sdk/input-actions.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
   defineChannel,
@@ -54,12 +47,6 @@ const MAX_TYPING_STATUS = 80;
 const streamTextByState = new WeakMap<ChatSdkChannelState, string>();
 
 type ChatSdkAdapters = Record<string, Adapter>;
-type ChatSdkSendInput = string | UserContent | SendPayload;
-type MutableDeliveryOptions<TState> = {
-  -readonly [
-    Key in keyof ChannelAddressDeliveryOptions<TState>
-  ]: ChannelAddressDeliveryOptions<TState>[Key];
-};
 type EventData<T extends UnstampedMessageStreamEvent["type"]> =
   Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
@@ -136,21 +123,10 @@ export interface ChatSdkEventContext<TAdapters extends ChatSdkAdapters = ChatSdk
 export type ChatSdkChannelEvents<TAdapters extends ChatSdkAdapters = ChatSdkAdapters> =
   ChannelEvents<ChatSdkChannelContext<TAdapters>>;
 
-/**
- * Options for `bridge.send(...)` inside Chat SDK handlers. The `thread`
- * determines the eve continuation token and the persisted channel state.
- */
-export interface ChatSdkSendOptions {
+/** Selects the Chat SDK thread that owns the eve continuation token. */
+interface ChatSdkThreadOptions {
   readonly auth?: SessionAuthContext | null;
-  readonly callback?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["callback"];
-  readonly mode?: ChannelAddressDeliveryOptions<ChatSdkChannelState>["mode"];
   readonly thread: SerializedThread | Thread | string;
-  readonly title?: string;
-  /**
-   * Controls how this input interacts with an active eve turn on the same
-   * thread. Defaults to `"steer"`.
-   */
-  readonly turnPolicy?: TurnPolicy;
   /**
    * Required when `thread` is a string that does not include the Chat SDK
    * adapter prefix. Prefer passing the `Thread` object from the Chat SDK handler
@@ -158,6 +134,22 @@ export interface ChatSdkSendOptions {
    */
   readonly adapterName?: string;
 }
+
+/**
+ * Options for `bridge.send`: channel send options plus the thread. The thread
+ * determines the eve continuation token and persisted channel state.
+ */
+export interface ChatSdkSendOptions extends ChatSdkThreadOptions, Omit<ChannelSendOptions, "auth"> {
+  /**
+   * Controls how this input interacts with an active eve turn on the same
+   * thread. Defaults to the channel's `turnPolicy`, then `"steer"`.
+   */
+  readonly turnPolicy?: TurnPolicy;
+}
+
+/** Options for `bridge.respond`: channel respond options plus the thread. */
+export interface ChatSdkRespondOptions
+  extends ChatSdkThreadOptions, Omit<ChannelRespondOptions, "auth" | "state"> {}
 
 /**
  * Configuration for {@link chatSdkChannel}. It accepts normal Chat SDK
@@ -231,7 +223,15 @@ export interface ChatSdkChannelBridge<TAdapters extends ChatSdkAdapters = ChatSd
    * Use `channel.receive(...)` for proactive sends that are not handling an
    * inbound Chat SDK webhook.
    */
-  send(input: ChatSdkSendInput, options: ChatSdkSendOptions): Promise<Session>;
+  send(message: string | UserContent, options: ChatSdkSendOptions): Promise<Session>;
+  /**
+   * Answers pending input requests on the thread's session from inside a Chat
+   * SDK webhook handler. Never creates a session.
+   */
+  respond<const TResponses extends readonly InputResponse[]>(
+    inputResponses: StrictInputResponses<TResponses>,
+    options: ChatSdkRespondOptions,
+  ): Promise<Session>;
 }
 
 /**
@@ -275,14 +275,10 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
         "chatSdkChannel input actions require a thread on the Chat SDK action event.",
       );
     }
-    await bridgeSend(
-      bot,
-      { inputResponses: [response] },
-      {
-        auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
-        thread: event.thread,
-      },
-    );
+    await bridgeRespond(bot, [response], {
+      auth: config.resolveInputAuth ? await config.resolveInputAuth(event) : null,
+      thread: event.thread.toJSON(),
+    });
   });
 
   const channel = defineChannel<
@@ -340,8 +336,11 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
   return {
     bot,
     channel,
-    send(input, options) {
-      return bridgeSend(bot, input, options);
+    send(message, options) {
+      return bridgeSend(bot, message, options);
+    },
+    respond(inputResponses, options) {
+      return bridgeRespond(bot, inputResponses, options);
     },
   };
 }
@@ -515,35 +514,6 @@ function truncate(text: string, max = MAX_TYPING_STATUS): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}\u2026`;
 }
 
-function renderInputRequests(requests: readonly InputRequest[], inputActionPrefix: string) {
-  return Card({
-    children: requests.flatMap((request) => renderInputRequest(request, inputActionPrefix)),
-  });
-}
-
-function renderInputRequest(request: InputRequest, inputActionPrefix: string) {
-  const children: CardChild[] = [CardText(request.prompt)];
-  if (request.options && request.options.length > 0) {
-    children.push(
-      Actions(
-        request.options.map((option) =>
-          Button({
-            id: encodeInputAction(inputActionPrefix, request.requestId, option.id),
-            label: option.label,
-            style: option.style,
-            value: option.id,
-          }),
-        ),
-      ),
-    );
-    return children;
-  }
-  children.push(
-    CardText("This request needs a freeform answer. Continue from the eve session UI."),
-  );
-  return children;
-}
-
 async function postFailure(
   thread: Thread | null,
   prefix: string,
@@ -563,27 +533,41 @@ async function postFailure(
 
 async function bridgeSend<TAdapters extends ChatSdkAdapters>(
   bot: Chat<TAdapters>,
-  input: ChatSdkSendInput,
+  message: string | UserContent,
   options: ChatSdkSendOptions,
 ): Promise<Session> {
+  const from = activeFrom("send");
+  const { adapterName, auth, thread: threadInput, ...sendOptions } = options;
+  const thread = serializeThread(bot, threadInput, adapterName);
+  return from(thread.id).send(message, {
+    ...sendOptions,
+    auth: auth ?? null,
+    state: { thread },
+  });
+}
+
+async function bridgeRespond<TAdapters extends ChatSdkAdapters>(
+  bot: Chat<TAdapters>,
+  inputResponses: readonly InputResponse[],
+  options: ChatSdkRespondOptions,
+): Promise<Session> {
+  const from = activeFrom("respond");
+  const { adapterName, auth, thread: threadInput, ...respondOptions } = options;
+  const thread = serializeThread(bot, threadInput, adapterName);
+  return from(thread.id).respond(parseInputResponses(inputResponses), {
+    ...respondOptions,
+    auth: auth ?? null,
+  });
+}
+
+function activeFrom(operation: "respond" | "send"): ChannelFrom<ChatSdkChannelState> {
   const active = contextStorage.getStore()?.get(ActiveWebhookKey);
   if (!active) {
     throw new Error(
-      "chatSdkChannel().send can only run during a Chat SDK webhook handler for this bridge.",
+      `chatSdkChannel().${operation} can only run during a Chat SDK webhook handler for this bridge.`,
     );
   }
-  const thread = serializeThread(bot, options.thread, options.adapterName);
-  const payload = normalizeSendInput(input);
-  const deliveryOptions: MutableDeliveryOptions<ChatSdkChannelState> = {
-    auth: options.auth ?? null,
-    state: { thread },
-  };
-  if (options.callback !== undefined) deliveryOptions.callback = options.callback;
-  if (options.mode !== undefined) deliveryOptions.mode = options.mode;
-  if (options.title !== undefined) deliveryOptions.title = options.title;
-  if (options.turnPolicy !== undefined) deliveryOptions.turnPolicy = options.turnPolicy;
-  const source = active.from(thread.id) as InternalChannelSource<ChatSdkChannelState>;
-  return source[INTERNAL_CHANNEL_DELIVER](payload, deliveryOptions);
+  return active.from;
 }
 
 function initialState(): ChatSdkChannelState {
@@ -672,26 +656,4 @@ function routeForAdapter<TAdapters extends ChatSdkAdapters>(
   if (override) return override;
   const route = config.route ?? DEFAULT_ROUTE;
   return `${route.replace(/\/$/u, "")}/${adapterName}`;
-}
-
-function encodeInputAction(prefix: string, requestId: string, optionId: string): string {
-  return `${prefix}${encodeURIComponent(requestId)}:${encodeURIComponent(optionId)}`;
-}
-
-function decodeInputAction(
-  actionId: string,
-  prefix: string,
-  value: string | undefined,
-): { optionId: string; requestId: string } | null {
-  if (!actionId.startsWith(prefix)) return null;
-  const encoded = actionId.slice(prefix.length);
-  const separator = encoded.indexOf(":");
-  if (separator <= 0) return null;
-  try {
-    const requestId = decodeURIComponent(encoded.slice(0, separator));
-    const optionId = value ?? decodeURIComponent(encoded.slice(separator + 1));
-    return { optionId, requestId };
-  } catch {
-    return null;
-  }
 }

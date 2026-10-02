@@ -33,7 +33,7 @@ export const SCHEDULE_ADAPTER: ChannelAdapter = {
  * Loaded shape of one schedule for the dispatcher. Either `run` is
  * defined (authored handler) or `markdown` is defined (fire-and-forget).
  */
-export interface ScheduleDispatchInput {
+interface ScheduleDispatchInput {
   readonly scheduleId: string;
   readonly run?: ScheduleRunHandler;
   readonly markdown?: string;
@@ -49,14 +49,14 @@ export interface ScheduleDispatchInput {
  * so the dispatcher awaits in-flight work before settling.
  *
  * For markdown schedules: synthesizes a channel-less run that starts a
- * session with {@link SCHEDULE_ADAPTER} in task mode and the markdown
- * body as the message.
+ * session with {@link SCHEDULE_ADAPTER} and the markdown body as the
+ * message.
  *
  * Returns a {@link ScheduleDispatchResult} carrying any sessions the
  * handler started (for telemetry / task-result observability) and the
  * `waitUntil` promises the handler registered.
  */
-export interface ScheduleDispatchResult {
+interface ScheduleDispatchResult {
   readonly sessions: readonly Session[];
   readonly waitUntilTasks: readonly Promise<unknown>[];
 }
@@ -120,7 +120,6 @@ export class ScheduleDispatcher {
       adapter: SCHEDULE_ADAPTER,
       auth: SCHEDULE_APP_AUTH,
       input: { message: markdown },
-      mode: "task",
     });
     return createSession(handle.sessionId, this.runtime);
   }

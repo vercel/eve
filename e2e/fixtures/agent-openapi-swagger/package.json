@@ -7,7 +7,7 @@
     "build": "eve build",
     "dev": "eve dev",
     "start": "eve start",
-    "typecheck": "eve build && tsc",
+    "typecheck": "eve build --skip-sandbox-prewarm && tsc",
     "test:e2e": "eve eval --strict"
   },
   "dependencies": {
@@ -18,5 +18,8 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:"
+  },
+  "e2e": {
+    "modelMatrix": "full"
   }
 }

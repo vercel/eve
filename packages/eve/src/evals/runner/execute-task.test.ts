@@ -10,6 +10,7 @@ import {
 import { stampTestEvents } from "#internal/testing/events.js";
 import { executeTask } from "#evals/runner/execute-task.js";
 import type { EveEval, EveEvalContext } from "#evals/types.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 import { createEvalTargetHandle } from "#evals/target.js";
 import { satisfies } from "#evals/expect/index.js";
 import { z } from "zod";
@@ -466,12 +467,13 @@ describe("executeTask", () => {
     expect(server.posts[0]?.body).toEqual({ message: "case prompt" });
   });
 
-  it("captures independent sessions created by send", async () => {
+  it("captures independent sessions created by send, each with its own models", async () => {
     const server = createScriptedServer([
       {
         sessionId: "primary",
         events: [
           turnStarted("turn_1"),
+          stepStarted("anthropic/claude-sonnet-4.6", "turn_1"),
           messageCompleted("primary done", "turn_1"),
           turnCompleted("turn_1"),
           sessionCompleted(),
@@ -482,6 +484,8 @@ describe("executeTask", () => {
         events: [
           turnStarted("turn_2"),
           messageReceived("secondary", "turn_2"),
+          stepStarted("openai/gpt-5.1", "turn_2"),
+          stepStarted("anthropic/claude-sonnet-4.6", "turn_2", 1),
           messageCompleted("secondary done", "turn_2"),
           actionsRequested("turn_2", "get_weather"),
           turnCompleted("turn_2"),
@@ -504,9 +508,170 @@ describe("executeTask", () => {
 
     expect(result.sessionId).toBe("primary");
     expect(result.sessions?.map((session) => session.sessionId)).toEqual(["primary", "secondary"]);
-    expect(result.events).toHaveLength(10);
+    expect(result.events).toHaveLength(13);
     expect(secondaryTranscript).toBe("User:\nsecondary\n\nAssistant:\nsecondary done");
     expect(result.derived.toolCalls.map((call) => call.sessionId)).toEqual(["secondary"]);
+    expect({
+      sessions: result.sessions?.map((session) => session.derived.models),
+      combined: result.derived.models,
+    }).toEqual({
+      sessions: [
+        ["anthropic/claude-sonnet-4.6"],
+        ["openai/gpt-5.1", "anthropic/claude-sonnet-4.6"],
+      ],
+      combined: ["anthropic/claude-sonnet-4.6", "openai/gpt-5.1"],
+    });
+  });
+
+  it("sums the usage of every session except those another captured session opened", async () => {
+    const server = createScriptedServer(
+      [
+        {
+          sessionId: "parent",
+          events: [
+            turnStarted("turn_1"),
+            agentStarted("child", "researcher"),
+            messageCompleted("parent done", "turn_1"),
+            sessionWaiting(usage(100)),
+          ],
+        },
+        {
+          sessionId: "independent",
+          events: [
+            turnStarted("turn_3"),
+            messageCompleted("done", "turn_3"),
+            sessionWaiting(usage(7)),
+          ],
+        },
+      ],
+      {
+        streams: [
+          {
+            sessionId: "child",
+            events: [
+              turnStarted("turn_2"),
+              messageCompleted("done", "turn_2"),
+              sessionWaiting(usage(60)),
+            ],
+          },
+        ],
+      },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const { result } = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("parent");
+        await t.target.attachSession("child");
+        await t.send("independent");
+      }, "delegated-usage"),
+    });
+
+    expect(result.derived.usage).toEqual(usage(107, 2));
+  });
+
+  it("counts a session captured twice once, by its latest usage", async () => {
+    const server = createScriptedServer([], {
+      streams: [
+        {
+          sessionId: "scheduled",
+          events: [
+            turnStarted("turn_1"),
+            messageCompleted("first", "turn_1"),
+            sessionWaiting(usage(10)),
+          ],
+        },
+        {
+          sessionId: "scheduled",
+          events: [
+            turnStarted("turn_2"),
+            messageCompleted("second", "turn_2"),
+            sessionWaiting(usage(30)),
+          ],
+        },
+      ],
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const { result } = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.target.attachSession("scheduled");
+        await t.target.attachSession("scheduled");
+      }, "recaptured-usage"),
+    });
+
+    expect(result.derived.usage).toEqual(usage(30, 1));
+  });
+
+  it("sums cost over the counted sessions that reported one", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "priced",
+        events: [
+          turnStarted("turn_1"),
+          messageCompleted("done", "turn_1"),
+          sessionWaiting(usage(5, 1, 0.5)),
+        ],
+      },
+      {
+        sessionId: "unpriced",
+        events: [
+          turnStarted("turn_2"),
+          messageCompleted("done", "turn_2"),
+          sessionWaiting(usage(7)),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const { result } = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("priced");
+        await t.send("unpriced");
+      }, "partial-cost"),
+    });
+
+    expect(result.derived.usage?.costUsd).toBe(0.5);
+  });
+
+  it("reports no usage when a counted session reported none", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "reported",
+        events: [
+          turnStarted("turn_1"),
+          messageCompleted("done", "turn_1"),
+          sessionWaiting({
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputTokens: 5,
+            outputTokens: 1,
+          }),
+        ],
+      },
+      {
+        sessionId: "unreported",
+        events: [turnStarted("turn_2"), messageCompleted("done", "turn_2"), sessionCompleted()],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const { result } = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("reported");
+        await t.send("unreported");
+      }, "unreported-usage"),
+    });
+
+    expect(result.derived.usage).toBeUndefined();
   });
 
   it("records assertions against individual turns without leaking other turns", async () => {
@@ -671,7 +836,7 @@ describe("executeTask", () => {
           sessionId: "parent-session",
           events: [
             turnStarted("parent-turn"),
-            subagentCalled("parent-turn", "child-session", "sleeper"),
+            agentStarted("child-session", "sleeper"),
             turnCompleted("parent-turn"),
             sessionWaiting(),
           ],
@@ -711,12 +876,12 @@ describe("executeTask", () => {
         const parent = await conversation.start("delegate");
         expect(parent.sessionId).toBe("parent-session");
 
-        const called = await parent.waitForEvent("subagent.called", {
+        const started = await parent.waitForEvent("agent.started", {
           data: { name: "sleeper" },
         });
-        expect(called.data.childSessionId).toBe("child-session");
+        expect(started.data.sessionId).toBe("child-session");
 
-        const child = t.target.watchTurn(called.data.childSessionId);
+        const child = t.target.watchTurn(started.data.sessionId);
         const requested = await child.waitForEvent("actions.requested", {
           data: {
             actions: (actions) =>
@@ -734,9 +899,9 @@ describe("executeTask", () => {
 
         const [parentTurn, childTurn] = await Promise.all([parent.result(), child.result()]);
         expect(await parent.result()).toBe(parentTurn);
-        parentTurn.event("subagent.called", { count: 1 });
+        parentTurn.event("agent.started", { count: 1 });
         childTurn.calledTool("wait-for-cancellation", { status: "pending", count: 1 });
-        await expect(parent.waitForEvent("subagent.completed")).rejects.toThrow(/session\.waiting/);
+        await expect(parent.waitForEvent("task.settled")).rejects.toThrow(/session\.waiting/);
 
         const childFollowUp = await child.session.send("continue child");
         childFollowUp.messageIncludes("child continued");
@@ -1054,15 +1219,23 @@ function turnCompleted(turnId: string): UnstampedMessageStreamEvent {
   return { data: { sequence: 3, turnId }, type: "turn.completed" };
 }
 
-function sessionWaiting(): UnstampedMessageStreamEvent {
+function usage(inputTokens: number, outputTokens = 1, costUsd?: number): TokenUsage {
+  return { cacheReadTokens: 0, cacheWriteTokens: 0, costUsd, inputTokens, outputTokens };
+}
+
+function sessionWaiting(usage?: TokenUsage): UnstampedMessageStreamEvent {
   return {
-    data: { continuationToken: "session-id", wait: "next-user-message" },
+    data: { continuationToken: "session-id", wait: "next-user-message", ...(usage && { usage }) },
     type: "session.waiting",
   };
 }
 
 function sessionCompleted(): UnstampedMessageStreamEvent {
   return { type: "session.completed" };
+}
+
+function stepStarted(modelId: string, turnId: string, stepIndex = 0): UnstampedMessageStreamEvent {
+  return { data: { modelId, sequence: 1, stepIndex, turnId }, type: "step.started" };
 }
 
 function messageCompleted(message: string, turnId: string): UnstampedMessageStreamEvent {
@@ -1134,23 +1307,15 @@ function actionsRequested(
   };
 }
 
-function subagentCalled(
-  turnId: string,
-  childSessionId: string,
-  name: string,
-): UnstampedMessageStreamEvent {
+function agentStarted(sessionId: string, name: string): UnstampedMessageStreamEvent {
   return {
     data: {
       callId: "call_subagent",
-      childSessionId,
-      childStreamPath: `/eve/v1/session/${encodeURIComponent(childSessionId)}/stream`,
-      sessionId: "parent-session",
-      sequence: 1,
       name,
-      toolName: name,
-      turnId,
-      workflowId: "workflow_child",
+      sessionId,
+      streamPath: `/eve/v1/session/${encodeURIComponent(sessionId)}/stream`,
+      turnId: "turn_1",
     },
-    type: "subagent.called",
+    type: "agent.started",
   };
 }

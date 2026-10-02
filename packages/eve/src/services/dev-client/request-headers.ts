@@ -1,7 +1,7 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { z } from "zod";
+import { z } from "#compiled/zod/index.js";
 
 const VercelOidcClaimsSchema = z.object({
   owner_id: z.string().min(1),
@@ -14,7 +14,7 @@ const LocalDevelopmentUserOidcClaimsSchema = VercelOidcClaimsSchema.extend({
 });
 
 /** Vercel owner and project expected to have minted an OIDC token. */
-export interface DevelopmentOidcTarget {
+interface DevelopmentOidcTarget {
   readonly ownerId: string;
   readonly projectId: string;
   /** Ignore an ambient token and ask Vercel for this exact project. */

@@ -15,7 +15,7 @@ import type { ResolvedChannelDefinition } from "#runtime/types.js";
 /**
  * Options for sending a message to a channel selected with `ctx.to(...)`.
  */
-export interface CrossChannelSendOptions {
+interface CrossChannelSendOptions {
   readonly auth: SessionAuthContext | null;
   readonly turnPolicy?: TurnPolicy;
 }
@@ -116,7 +116,7 @@ interface InvokeChannelReceiveInput {
 /**
  * Shared authored `receive(input, ctx)` invocation used by route and schedule delivery.
  */
-export async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Session> {
+async function invokeChannelReceive(args: InvokeChannelReceiveInput): Promise<Session> {
   if (!args.target.receive) {
     throw new Error(args.describeMissingReceive());
   }

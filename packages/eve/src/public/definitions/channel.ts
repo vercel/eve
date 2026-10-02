@@ -174,7 +174,7 @@ export interface ChannelContinuationOps {
  * Channel context passed to event handlers: `TCtx` intersected with
  * {@link ChannelContinuationOps}.
  */
-export type ChannelContext<TCtx> = TCtx & ChannelContinuationOps;
+type ChannelContext<TCtx> = TCtx & ChannelContinuationOps;
 
 type ChannelEventHandler<T extends UnstampedMessageStreamEvent["type"], TCtx> = (
   data: EventData<T>,
@@ -207,7 +207,13 @@ export interface ChannelEvents<TCtx = void> {
   readonly "message.appended"?: ChannelEventHandler<"message.appended", TCtx>;
   readonly "reasoning.appended"?: ChannelEventHandler<"reasoning.appended", TCtx>;
   readonly "reasoning.completed"?: ChannelEventHandler<"reasoning.completed", TCtx>;
+  readonly "step.started"?: ChannelEventHandler<"step.started", TCtx>;
+  readonly "step.completed"?: ChannelEventHandler<"step.completed", TCtx>;
   readonly "input.requested"?: ChannelEventHandler<"input.requested", TCtx>;
+  readonly "input.resolved"?: ChannelEventHandler<"input.resolved", TCtx>;
+  readonly "task.started"?: ChannelEventHandler<"task.started", TCtx>;
+  readonly "task.settled"?: ChannelEventHandler<"task.settled", TCtx>;
+  readonly "turn.waiting"?: ChannelEventHandler<"turn.waiting", TCtx>;
   readonly "turn.failed"?: ChannelEventHandler<"turn.failed", TCtx>;
   readonly "turn.completed"?: ChannelEventHandler<"turn.completed", TCtx>;
   readonly "turn.cancelled"?: ChannelEventHandler<"turn.cancelled", TCtx>;
@@ -317,7 +323,13 @@ const channelEventTypes: Record<keyof ChannelEvents, null> = {
   "message.appended": null,
   "reasoning.appended": null,
   "reasoning.completed": null,
+  "step.started": null,
+  "step.completed": null,
   "input.requested": null,
+  "input.resolved": null,
+  "task.started": null,
+  "task.settled": null,
+  "turn.waiting": null,
   "turn.failed": null,
   "turn.completed": null,
   "turn.cancelled": null,

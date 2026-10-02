@@ -64,7 +64,7 @@ describe("authored workflow scope", () => {
         );
         expect(code).toContain(ALIAS_MARKER);
         expect(code).not.toContain('require("@/lib/describe")');
-        await buildApplication(appRoot, { skipVercelSandboxPrewarm: false });
+        await buildApplication(appRoot, { skipSandboxPrewarm: false });
         const server = await startProductionServer(appRoot, { port: 0, host: "127.0.0.1" });
         try {
           expect((await fetch(new URL("/eve/v1/health", server.url))).status).toBe(200);

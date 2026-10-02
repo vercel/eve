@@ -1,5 +1,6 @@
 import { createSessionWaitingEvent, createTurnCancelledEvent } from "#protocol/message.js";
 import type { HarnessEmitFn } from "#harness/types.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 import { activeTurnId } from "#harness/active-turn-id.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
@@ -15,6 +16,7 @@ import type { HarnessEmissionState } from "#harness/emission.js";
 export async function emitCancelledTurn(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
+  usage: TokenUsage,
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCancelledEvent({
@@ -22,7 +24,7 @@ export async function emitCancelledTurn(
       turnId: activeTurnId(state),
     }),
   );
-  await emitFn(createSessionWaitingEvent());
+  await emitFn(createSessionWaitingEvent(usage));
 
   return {
     sessionStarted: true,

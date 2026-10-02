@@ -175,33 +175,67 @@ function guardInlineStepExecution() {
   return {
     name: "eve:guard-inline-step-execution",
     transform(source, id) {
-      if (!id.replaceAll("\\", "/").endsWith("/@workflow/core/dist/runtime.js")) return null;
-
-      // beta.55 only registers recovered inline steps with single-flight.
-      // A queued wake can therefore run a newly claimed step again while its
-      // original body is still active, especially when a local lease expires.
-      // Keep that protection quiet for expected fresh-step contention.
-      const unguarded =
-        /const executed = s\.lazyStepInput === undefined &&\s+s\.preclaimedStart === undefined\s+\? runStepSingleFlight\(runId, s\.correlationId, run\)\s+: run\(\);/;
-      if (!unguarded.test(source)) {
-        throw new Error("Recheck the @workflow/core inline step single-flight patch.");
+      const path = id.replaceAll("\\", "/");
+      if (path.endsWith("/@workflow/core/dist/runtime.js")) return guardInlineStepCallSite(source);
+      if (path.endsWith("/@workflow/core/dist/runtime/step-single-flight.js")) {
+        return quietFreshStepContention(source);
       }
-      return {
-        code: source.replace(
-          unguarded,
-          `const executed = runStepSingleFlight(
-            runId,
-            s.correlationId,
-            run,
-            s.lazyStepInput !== undefined || s.preclaimedStart !== undefined
-              ? "debug"
-              : "warn",
-          );`,
-        ),
-        map: null,
-      };
+      return null;
     },
   };
+}
+
+function guardInlineStepCallSite(source) {
+  // beta.55 only registers recovered inline steps with single-flight.
+  // A queued wake can therefore run a newly claimed step again while its
+  // original body is still active, especially when a local lease expires.
+  // Keep that protection quiet for expected fresh-step contention.
+  const unguarded =
+    /const executed = s\.lazyStepInput === undefined &&\s+s\.preclaimedStart === undefined\s+\? runStepSingleFlight\(runId, s\.correlationId, run\)\s+: run\(\);/;
+  if (!unguarded.test(source)) {
+    throw new Error("Recheck the @workflow/core inline step single-flight patch.");
+  }
+  return {
+    code: source.replace(
+      unguarded,
+      `const fresh = s.lazyStepInput !== undefined || s.preclaimedStart !== undefined;
+          const executed = s.preclaimedStart?.owned === false
+            ? run()
+            : runStepSingleFlight(runId, s.correlationId, run, fresh ? "debug" : "warn");`,
+    ),
+    map: null,
+  };
+}
+
+// Registering fresh claims above also exposes them to the queued-step call
+// site, which always warns: a concurrent wake replay can publish a step
+// message before the fresh claim's owner stamp lands. Contention with a fresh
+// winner is the same expected wake race, so log it at `debug` whichever call
+// site loses. Recovery-only contention keeps warning. See vercel/workflow#4545.
+function quietFreshStepContention(source) {
+  const edits = [
+    [
+      "const singleFlight = globalSingleton(",
+      'const freshSteps = globalSingleton("eve//freshStepSingleFlight", 1, () => new Set());\nconst singleFlight = globalSingleton(',
+    ],
+    ["runtimeLogger[logLevel](", 'runtimeLogger[freshSteps.has(key) ? "debug" : logLevel]('],
+    [
+      "singleFlight.inFlight.set(key, promise);",
+      'singleFlight.inFlight.set(key, promise);\n    if (logLevel === "debug") freshSteps.add(key);',
+    ],
+    [
+      "singleFlight.inFlight.delete(key);",
+      "singleFlight.inFlight.delete(key);\n        freshSteps.delete(key);",
+    ],
+  ];
+  let code = source;
+  for (const [search, replacement] of edits) {
+    if (code.split(search).length !== 2) {
+      throw new Error("Recheck the @workflow/core step single-flight contention patch.");
+    }
+    code = code.replace(search, replacement);
+  }
+  return { code, map: null };
 }
 
 export default {

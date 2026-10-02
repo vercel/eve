@@ -140,6 +140,7 @@ describe("derived programmatic sources", () => {
     const template = registry.templates.get(templateSource.id)!;
     const extensionOwner = {
       kind: "extension" as const,
+      mountId: "extensions/github",
       namespace: "github",
       packageName: "@acme/github",
     };
@@ -204,7 +205,12 @@ describe("derived programmatic sources", () => {
     const dependency = candidate(
       { applyTo: "root", source: dependencySource },
       "extension-package",
-      { kind: "extension", namespace: "example", packageName: "@acme/example" },
+      {
+        kind: "extension",
+        mountId: "extensions/example",
+        namespace: "example",
+        packageName: "@acme/example",
+      },
     );
     const replacement = candidate({ applyTo: "root", source: replacementSource }, "application");
     const derived = instantiateProgrammaticTemplate({

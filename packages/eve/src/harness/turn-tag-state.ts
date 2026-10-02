@@ -78,6 +78,11 @@ export function getSessionTokenUsage(session: Pick<HarnessSession, "state">): To
   return getTurnUsageState(session.state)?.session ?? ZERO_TOKEN_USAGE;
 }
 
+/** The session's usage so far, delegated spend included. */
+export function getSessionUsage(session: Pick<HarnessSession, "state">): TokenUsage {
+  return toUsage(getSessionTokenUsage(session));
+}
+
 /** Projects a {@link TokenUsageTotals} down to the cross-cutting {@link TokenUsage} shape. */
 export function toUsage(totals: TokenUsageTotals): TokenUsage {
   return {
@@ -178,9 +183,11 @@ function configuredSessionUsageLimits(
  * measures everything since the last report, so the deltas of a
  * multi-turn persistent child sum exactly to its session totals.
  */
-export function takeSessionUsageDelta(session: HarnessSession): {
+export function takeSessionUsageDelta<T extends Pick<HarnessSession, "state">>(
+  session: T,
+): {
   readonly delta: TokenUsage;
-  readonly session: HarnessSession;
+  readonly session: T;
 } {
   const totals = getSessionTokenUsage(session);
   const reported =
@@ -244,11 +251,12 @@ export function accumulateTurnUsage(input: {
 }
 
 /**
- * Folds a delegated child session's reported totals into the parent's
- * session totals without touching the in-flight turn totals. Turn tags
- * attribute only the parent's own model calls (child spend is attributed by
- * the caller's durable `agent.action` span); session totals feed the session
- * token limits and the remaining-quota budget granted to later delegations.
+ * Adds usage to session totals without touching the in-flight turn totals:
+ * the delegated spend a parent counts, or a run's tally of what its
+ * `ctx.agent` sessions spent. Turn tags attribute only the parent's own model
+ * calls (child spend is attributed by the caller's durable `agent.action`
+ * span); session totals feed the session token limits and the remaining-quota
+ * budget granted to later delegations.
  */
 export function accumulateSessionUsage(input: {
   readonly previous: TurnUsageState | undefined;

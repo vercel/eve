@@ -20,7 +20,7 @@ describe("session inbox payloads", () => {
       kind: "deliver",
       payloads: [{ message: "hello" }],
       requestId: undefined,
-      taskDeliveryId: undefined,
+      title: undefined,
       turnPolicy: undefined,
     });
   });

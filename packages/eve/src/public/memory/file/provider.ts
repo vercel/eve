@@ -1,6 +1,5 @@
-import { z } from "#compiled/zod/index.js";
-
 import { defineTool } from "#tools/definition.js";
+import { defineJsonSchema } from "#tools/schema.js";
 import {
   MemoryDocumentConflictError,
   type MemoryDocument,
@@ -66,6 +65,24 @@ export function fileMemory(options: FileMemoryOptions = {}): MemoryProvider {
   });
 }
 
+const REMOVE_MEMORY_INPUT_SCHEMA = defineJsonSchema<{ index: number }>({
+  type: "object",
+  properties: {
+    index: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+  },
+  required: ["index"],
+  additionalProperties: false,
+});
+
+const SAVE_MEMORY_INPUT_SCHEMA = defineJsonSchema<{ text: string }>({
+  type: "object",
+  properties: {
+    text: { type: "string", minLength: 1 },
+  },
+  required: ["text"],
+  additionalProperties: false,
+});
+
 function createFileMemoryTools(input: {
   readonly backend: MemoryDocumentBackend;
   readonly key: string;
@@ -84,9 +101,7 @@ function createFileMemoryTools(input: {
           signal: toolContext.abortSignal,
         });
       },
-      inputSchema: z.object({
-        index: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-      }),
+      inputSchema: REMOVE_MEMORY_INPUT_SCHEMA,
     }),
     save_memory: defineTool({
       description:
@@ -101,9 +116,7 @@ function createFileMemoryTools(input: {
           text: toolInput.text,
         });
       },
-      inputSchema: z.object({
-        text: z.string().min(1),
-      }),
+      inputSchema: SAVE_MEMORY_INPUT_SCHEMA,
     }),
   };
 }

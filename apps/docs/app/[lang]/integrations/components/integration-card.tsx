@@ -27,7 +27,7 @@ export const IntegrationCard = ({ integration, onSelect }: IntegrationCardProps)
       prefetch={true}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background text-gray-1000">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-md border bg-background">
           <Logo aria-hidden className="size-5" height={20} width={20} />
         </span>
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">

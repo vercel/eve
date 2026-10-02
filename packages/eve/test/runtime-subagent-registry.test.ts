@@ -1,25 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { RuntimeRegistryError } from "../src/internal/runtime-registry.js";
-import {
-  createPreparedRuntimeSubagentTool,
-  createRuntimeSubagentRegistry,
-} from "../src/runtime/subagents/registry.js";
-import { SUBAGENT_TOOL_INPUT_SCHEMA as subagentToolInputSchema } from "../src/tools/framework/agent-contract.js";
+import { createRuntimeSubagentRegistry } from "../src/runtime/subagents/registry.js";
 import type { ResolvedRuntimeSubagentNode } from "../src/runtime/types.js";
 
 const SUBAGENT_TOOL_INPUT_SCHEMA = {
   type: "object",
   properties: {
-    agentId: {
-      type: ["string", "null"],
-      description:
-        "The id of an existing agent from the <agents> list or a task receipt. A message to a busy agent steers it: its previous task is cancelled and the updated work runs in the same child session. Omit this field (or pass null or an empty string) to start a new agent.",
-    },
     message: {
       type: "string",
-      description:
-        "The message to send to the subagent. Provide all context the subagent needs to complete the task; the subagent does not see the parent's history.",
+      description: "The message to send to the agent, with everything it needs to do the work.",
     },
   },
   required: ["message"],
@@ -27,15 +17,6 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
 } as const;
 
 describe("createRuntimeSubagentRegistry", () => {
-  it("accepts null as an omitted agentId", () => {
-    expect(
-      subagentToolInputSchema.parse({
-        agentId: null,
-        message: "Investigate this",
-      }),
-    ).toEqual({ agentId: null, message: "Investigate this" });
-  });
-
   it("lowers local subagent inputs into serializable model-visible tools with a uniform messaging schema", () => {
     const registry = createRuntimeSubagentRegistry({
       subagents: [
@@ -58,9 +39,7 @@ describe("createRuntimeSubagentRegistry", () => {
 
     expect(registry.preparedTools).toMatchObject([
       {
-        description:
-          "Investigate one task in depth.\n\nThis call starts a background task and returns a task receipt immediately.",
-        execution: "background",
+        description: "Investigate one task in depth.",
         inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
         kind: "subagent",
         logicalPath: "subagents/researcher",
@@ -69,9 +48,7 @@ describe("createRuntimeSubagentRegistry", () => {
         sourceId: "subagents/researcher",
       },
       {
-        description:
-          "Review one draft for clarity.\n\nThis call starts a background task and returns a task receipt immediately.",
-        execution: "background",
+        description: "Review one draft for clarity.",
         inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
         kind: "subagent",
         logicalPath: "subagents/reviewer",
@@ -97,24 +74,6 @@ describe("createRuntimeSubagentRegistry", () => {
         ],
       }),
     ).toThrowError(RuntimeRegistryError);
-  });
-
-  it("always prepares subagent tools for background execution", () => {
-    const definition = createResolvedRuntimeSubagentNode({
-      description: "Investigate one task in depth.",
-      logicalPath: "subagents/researcher",
-      name: "researcher",
-      nodeId: "subagents/researcher",
-      sourceId: "subagents/researcher",
-    });
-
-    const prepared = createPreparedRuntimeSubagentTool(definition);
-
-    expect(prepared.execution).toBe("background");
-    expect(prepared.task).toEqual({
-      nodeId: definition.nodeId,
-      workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
-    });
   });
 });
 

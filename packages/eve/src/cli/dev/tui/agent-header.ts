@@ -5,7 +5,7 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { clipVisible } from "#cli/ui/terminal-text.js";
 import type { Theme } from "./theme.js";
 
-export interface AgentHeaderInput {
+interface AgentHeaderInput {
   /** Resolved display name used when agent inspection is unavailable. */
   name?: string;
   /** Agent inspection payload, or `undefined` when it could not be fetched. */

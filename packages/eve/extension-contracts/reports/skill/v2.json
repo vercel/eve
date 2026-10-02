@@ -1,0 +1,7 @@
+{
+  "kind": "eve-extension-capability-contract",
+  "capability": "skill",
+  "epoch": 2,
+  "sha256": "d2de71a9816d0789bb7f3260f11eb380a11f034fe4e75a1ddac060007ec0e399",
+  "exports": ["NamedSkillDefinition", "defineSkill"]
+}

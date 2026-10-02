@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import type { Message as ExternalMessage, Thread as ExternalThread } from "chat";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
@@ -29,6 +30,11 @@ import type {
   WebhookOptions,
 } from "#compiled/chat/index.js";
 import { Message, parseMarkdown } from "#compiled/chat/index.js";
+
+it("shares Chat SDK type identity with external adapters and handlers", () => {
+  expectTypeOf<Message>().toEqualTypeOf<ExternalMessage>();
+  expectTypeOf<Thread>().toEqualTypeOf<ExternalThread>();
+});
 
 const THREAD_ID = "test:C01:1700000000.000001";
 const CHANNEL_ID = "test:C01";
@@ -136,6 +142,14 @@ async function firePost(
   return { cancel, response, send, waitUntil };
 }
 
+function bridgeSendTypeChecks(bridge: ReturnType<typeof chatSdkChannel>, thread: Thread): void {
+  // @ts-expect-error bridge.send takes a message; answer input with bridge.respond.
+  void bridge.send({ inputResponses: [{ optionId: "approve", requestId: "r1" }] }, { thread });
+  void bridge.send("hello", { context: ["extra"], outputSchema: { type: "object" }, thread });
+}
+
+void bridgeSendTypeChecks;
+
 describe("chatSdkChannel", () => {
   it.each([
     [{ isDM: true, channelVisibility: "unknown" }, "private"],
@@ -163,7 +177,6 @@ describe("chatSdkChannel", () => {
         caller: { type: "anonymous" },
         channel: { kind: "channel:chat-sdk" },
         environment: "production",
-        mode: "conversation",
         state: adapter.state,
       }),
     ).toBe(audience);
@@ -190,6 +203,8 @@ describe("chatSdkChannel", () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       state: memoryState(),
+      // Tests that initialize Chat SDK keep its warnings but not its info-level startup lines.
+      logger: "warn",
       userName: "bot",
     });
     const compiled = asCompiled<ChatSdkChannelState>(bridge.channel);
@@ -222,11 +237,16 @@ describe("chatSdkChannel", () => {
       adapters: { test: adapter },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
 
     bridge.bot.onNewMention(async (thread: Thread, message: Message) => {
-      await bridge.send(message.text, { auth: AUTH, thread, title: "mention" });
+      await bridge.send(message.text, {
+        auth: AUTH,
+        thread,
+        title: "mention",
+      });
     });
 
     const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
@@ -257,6 +277,7 @@ describe("chatSdkChannel", () => {
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
 
@@ -287,19 +308,17 @@ describe("chatSdkChannel", () => {
     });
   });
 
-  it("does not cancel for a steering response without a message", async () => {
+  it("answers pending input through bridge.respond without cancelling", async () => {
     const bridge = chatSdkChannel({
       adapters: { test: testAdapter() },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
 
     bridge.bot.onNewMention(async (thread: Thread) => {
-      await bridge.send(
-        { inputResponses: [{ optionId: "approve", requestId: "request-1" }] },
-        { thread, turnPolicy: "steer" },
-      );
+      await bridge.respond([{ optionId: "approve", requestId: "request-1" }], { thread });
     });
 
     const { cancel, response, send } = await firePost(bridge.channel, "/eve/v1/test", {
@@ -705,6 +724,7 @@ describe("chatSdkChannel", () => {
       adapters: { test: adapter },
       concurrency: "concurrent",
       state: memoryState(),
+      logger: "warn",
       userName: "bot",
     });
     const channelAdapter = withState(getAdapter(bridge.channel), {
@@ -770,12 +790,6 @@ describe("chatSdkChannel", () => {
     expect(send).toHaveBeenCalledWith(THREAD_ID, {
       auth: null,
       inputResponses: [{ optionId: "approve", requestId: "request-1" }],
-      state: {
-        thread: expect.objectContaining({
-          adapterName: "test",
-          id: THREAD_ID,
-        }),
-      },
     });
   });
 });

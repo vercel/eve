@@ -34,7 +34,12 @@ describe("loadAgentInfoData", () => {
     });
     await writeFile(
       join(agentRoot, "sandbox", "sandbox.ts"),
-      ["export default {};", ""].join("\n"),
+      [
+        'import { DefaultSandbox, defineSandbox } from "eve/sandbox";',
+        "export const environment = DefaultSandbox.environment();",
+        "export default defineSandbox(() => environment.open());",
+        "",
+      ].join("\n"),
     );
 
     await compileAgent({
@@ -65,6 +70,7 @@ describe("loadAgentInfoData", () => {
 
       const agentInfoCompiledArtifactsSource = resolveAgentInfoCompiledArtifactsSource({
         kind: "production",
+        sandboxScope: "test-sandbox-scope",
       });
       expect(agentInfoCompiledArtifactsSource.kind).toBe("bundled");
       const data = await loadAgentInfoManifestData({

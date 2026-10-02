@@ -37,9 +37,8 @@ export interface McpClientConnectionDefinition {
   /**
    * Human-readable summary of the connection and its tools.
    *
-   * The system prompt layer uses it to describe the connection to
-   * the model, and `connection_search` results use it so the model
-   * can choose which connection to query.
+   * The model sees it in the connection listing eve announces, so it
+   * can choose which connection to search with `connection_search`.
    */
   readonly description: string;
   /**
@@ -97,9 +96,8 @@ export interface McpClientConnectionDefinition {
    */
   toolCall?: ConnectionToolCallDefinition;
   /**
-   * Client-side tool filter. When set, the model sees only tools
-   * whose names pass the filter; `connection_search` drops all
-   * others.
+   * Client-side tool filter. When set, `connection_search` returns and
+   * `connection_execute` calls only tools whose names pass the filter.
    *
    * Specify exactly one of `allow` or `block`.
    */

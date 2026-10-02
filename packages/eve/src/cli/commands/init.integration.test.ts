@@ -10,12 +10,11 @@ import { EveTUIRunner } from "#cli/dev/tui/runner.js";
 import { createDevBootProgressReporter } from "#cli/dev/boot-progress.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import * as liveRow from "#cli/ui/live-row.js";
-import { Client, MessageResponse } from "#client/index.js";
+import { Client } from "#client/index.js";
+import { FakeEveServer, reply } from "#cli/dev/tui/test/fake-eve-server.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
-import { stampTestEvents } from "#internal/testing/events.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { packageInstallResult, packageProcessResult } from "#internal/testing/package-process.js";
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { detectPackageManager } from "#setup/package-manager.js";
 import {
   addAgentToProject,
@@ -37,6 +36,8 @@ import {
   type InitCliLogger,
   type InitCommandDependencies,
 } from "./init.js";
+
+const DEFAULT_AGENT_MODEL_ID = "openai/gpt-6-luna-fast";
 
 const BASE_VERSIONS = {
   aiPackageVersion: "7.0.0",
@@ -137,6 +138,7 @@ async function createHostProject(
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe("runInitCommand", () => {
@@ -215,34 +217,8 @@ describe("runInitCommand", () => {
         },
       };
       vi.spyOn(client, "info").mockResolvedValue(info);
-      const session = client.sessions.attach("session_init");
-      vi.spyOn(session, "stream").mockImplementation(async function* () {});
-      const send = vi.spyOn(session, "send").mockImplementation(
-        async () =>
-          new MessageResponse({
-            sessionId: "session_init",
-            cancelTurn: async () => ({ status: "no_active_turn" }),
-            createStream: async function* () {
-              yield* stampTestEvents([
-                { type: "turn.started", data: { sequence: 1, turnId: "turn_init" } },
-                {
-                  type: "message.completed",
-                  data: {
-                    sequence: 2,
-                    turnId: "turn_init",
-                    stepIndex: 0,
-                    finishReason: "stop",
-                    message: "Hello Alice, your agent is ready.",
-                  },
-                },
-                {
-                  type: "session.waiting",
-                  data: { continuationToken: "session_init", wait: "next-user-message" },
-                },
-              ]);
-            },
-          }),
-      );
+      const server = new FakeEveServer(reply("Hello Alice, your agent is ready."));
+      vi.stubGlobal("fetch", server.fetch);
       const handle = vi.fn(async () => {
         if (!connected) {
           const provider = await renderer.setupFlow.readSelect({
@@ -254,7 +230,7 @@ describe("runInitCommand", () => {
         }
         return { message: connected ? "Using existing connection." : "Model connected." };
       });
-      const readPrompt = vi.spyOn(renderer, "readPrompt");
+      const readInput = vi.spyOn(renderer, "readInput");
       deps.spawnPackageManager.mockImplementation(async (_manager, projectPath, args) => {
         expect(args).toContain("--onboard");
         const progress = startCliLiveRow(output, { output: screen, elapsed: true });
@@ -262,7 +238,6 @@ describe("runInitCommand", () => {
         report({ type: "phase-started", phase: "compiling internal artifacts" });
         const runner = new EveTUIRunner({
           client,
-          session,
           renderer,
           appRoot: projectPath,
           onboard: true,
@@ -284,7 +259,7 @@ describe("runInitCommand", () => {
           expect(screen.snapshot()).not.toContain("Starting your agent");
           input.enter();
         }
-        await vi.waitFor(() => expect(readPrompt).toHaveBeenCalled());
+        await vi.waitFor(() => expect(readInput).toHaveBeenCalled());
         expect(screen.snapshot()).not.toContain("/login");
         expect(screen.rawOutput()).not.toContain("Using existing connection.");
         expect(screen.rawOutput()).not.toContain("Model connected.");
@@ -295,7 +270,7 @@ describe("runInitCommand", () => {
         input.type("/exit");
         input.enter();
         await run;
-        expect(send).toHaveBeenCalledOnce();
+        expect(server.requestsTo("POST", "/eve/v1/session")).toHaveLength(1);
         expect(handle).toHaveBeenCalledOnce();
         expect(screen.snapshot()).not.toContain("Starting your agent");
         expect(screen.rawOutput()).not.toContain("compiling internal artifacts");
@@ -360,6 +335,17 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalled();
   });
 
+  it("scaffolds without starting development when non-interactive", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-non-interactive-"));
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(output, parentDirectory, "agent", { nonInteractive: true }, deps);
+
+    expect(deps.spawnPackageManager).not.toHaveBeenCalled();
+    expect(output.messages.join("\n")).toContain("pnpm exec eve dev --no-ui");
+  });
+
   it("creates an agent workspace from comma-separated names", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agents-"));
     const output = logger();
@@ -376,12 +362,11 @@ describe("runInitCommand", () => {
     );
 
     const projectRoot = join(parentDirectory, "operations");
-    await expect(
-      pathExists(join(projectRoot, "agents", "foreman", "agent", "agent.ts")),
-    ).resolves.toBe(true);
-    await expect(
-      pathExists(join(projectRoot, "agents", "researcher", "agent", "agent.ts")),
-    ).resolves.toBe(true);
+    for (const name of ["foreman", "researcher"]) {
+      const source = await readFile(join(projectRoot, "agents", name, "agent", "agent.ts"), "utf8");
+      expect(source).toContain('model: "openai/gpt-6-luna-fast"');
+      expect(source).toContain('reasoning: "high"');
+    }
     await expect(pathExists(join(projectRoot, "agent"))).resolves.toBe(false);
     await expect(readFile(join(projectRoot, "tsconfig.json"), "utf8")).resolves.toContain(
       '"agents/**/*.ts"',
@@ -395,28 +380,53 @@ describe("runInitCommand", () => {
     ]);
   });
 
-  it("adds only agent files to an existing workspace", async () => {
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-workspace-agent-"));
-    await mkdir(join(workspaceRoot, "agents", "support", "agent"), { recursive: true });
-    await writeFile(
-      join(workspaceRoot, "package.json"),
-      '{"name":"workspace","dependencies":{"eve":"*"}}\n',
-    );
-    const beforePackageJson = await readFile(join(workspaceRoot, "package.json"), "utf8");
-    const output = logger();
-    const deps = dependencies();
+  it.each([
+    { options: {}, model: "openai/gpt-6-luna-fast", reasoning: "high" },
+    {
+      options: { model: "anthropic/claude-sonnet-5" },
+      model: "anthropic/claude-sonnet-5",
+      reasoning: undefined,
+    },
+    { options: { reasoning: "low" as const }, model: "openai/gpt-6-luna-fast", reasoning: "low" },
+    {
+      options: { reasoning: "provider-default" as const },
+      model: "openai/gpt-6-luna-fast",
+      reasoning: undefined,
+    },
+  ])(
+    "adds only agent files to an existing workspace with $options",
+    async ({ options, model, reasoning }) => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-workspace-agent-"));
+      await mkdir(join(workspaceRoot, "agents", "support", "agent"), { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "package.json"),
+        '{"name":"workspace","dependencies":{"eve":"*"}}\n',
+      );
+      const beforePackageJson = await readFile(join(workspaceRoot, "package.json"), "utf8");
+      const output = logger();
+      const deps = dependencies();
 
-    await runInitCommand(output, workspaceRoot, "billing", {}, deps);
+      const existingConfigPath = join(workspaceRoot, "agents", "support", "agent", "agent.ts");
+      const existingConfig = 'export default { model: "openai/gpt-5.5", reasoning: "low" };\n';
+      await writeFile(existingConfigPath, existingConfig);
 
-    await expect(
-      pathExists(join(workspaceRoot, "agents", "billing", "agent", "agent.ts")),
-    ).resolves.toBe(true);
-    await expect(readFile(join(workspaceRoot, "package.json"), "utf8")).resolves.toBe(
-      beforePackageJson,
-    );
-    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
-  });
+      await runInitCommand(output, workspaceRoot, "billing", options, deps);
+
+      const agentSource = await readFile(
+        join(workspaceRoot, "agents", "billing", "agent", "agent.ts"),
+        "utf8",
+      );
+      expect(agentSource).toContain(`model: "${model}"`);
+      if (reasoning === undefined) expect(agentSource).not.toContain("reasoning:");
+      else expect(agentSource).toContain(`reasoning: "${reasoning}"`);
+      await expect(readFile(existingConfigPath, "utf8")).resolves.toBe(existingConfig);
+      await expect(readFile(join(workspaceRoot, "package.json"), "utf8")).resolves.toBe(
+        beforePackageJson,
+      );
+      expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+      expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+    },
+  );
 
   it("reports a target conflict when a workspace agent already exists", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-workspace-conflict-"));
@@ -484,9 +494,9 @@ describe("runInitCommand", () => {
     await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
 
     const projectPath = join(parentDirectory, "my-agent");
-    expect(await readFile(join(projectPath, "agent/agent.ts"), "utf8")).toContain(
-      DEFAULT_AGENT_MODEL_ID,
-    );
+    const agentSource = await readFile(join(projectPath, "agent/agent.ts"), "utf8");
+    expect(agentSource).toContain('model: "openai/gpt-6-luna-fast"');
+    expect(agentSource).toContain('reasoning: "high"');
     const manifest = await readFile(join(projectPath, "package.json"), "utf8");
     expect(manifest).toContain('"eve": "^0.6.0"');
     const packageJson: unknown = JSON.parse(manifest);
@@ -553,21 +563,33 @@ describe("runInitCommand", () => {
     );
   });
 
-  it("omits authored reasoning when init uses the provider default", async () => {
+  it.each([
+    {
+      options: { reasoning: "provider-default" as const },
+      model: "openai/gpt-6-luna-fast",
+      reasoning: undefined,
+    },
+    { options: { reasoning: "low" as const }, model: "openai/gpt-6-luna-fast", reasoning: "low" },
+    {
+      options: { model: "anthropic/claude-sonnet-5" },
+      model: "anthropic/claude-sonnet-5",
+      reasoning: undefined,
+    },
+    {
+      options: { model: "openai/gpt-6-luna-fast" },
+      model: "openai/gpt-6-luna-fast",
+      reasoning: undefined,
+    },
+  ])("preserves explicit init settings $options", async ({ options, model, reasoning }) => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-reasoning-default-"));
-    const output = logger();
     const deps = dependencies();
 
-    await runInitCommand(
-      output,
-      parentDirectory,
-      "my-agent",
-      { reasoning: "provider-default" },
-      deps,
-    );
+    await runInitCommand(logger(), parentDirectory, "my-agent", options, deps);
 
     const agentSource = await readFile(join(parentDirectory, "my-agent", "agent/agent.ts"), "utf8");
-    expect(agentSource).not.toContain("reasoning:");
+    expect(agentSource).toContain(`model: "${model}"`);
+    if (reasoning === undefined) expect(agentSource).not.toContain("reasoning:");
+    else expect(agentSource).toContain(`reasoning: "${reasoning}"`);
   });
 
   it("rejects an invalid --model before creating the project", async () => {
@@ -582,15 +604,6 @@ describe("runInitCommand", () => {
 
     await expect(pathExists(join(parentDirectory, "my-agent"))).resolves.toBe(false);
     expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
-  });
-
-  it("does not offer self-modification when init was launched by a coding agent", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agent-launched-selfmod-"));
-    const output = logger();
-    const deps = dependencies();
-    deps.isCodingAgentLaunch.mockResolvedValue(true);
-
-    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
   });
 
   it("uses an explicit init package spec for fresh project scaffolds", async () => {
@@ -841,7 +854,7 @@ describe("runInitCommand", () => {
     const projectPath = join(appsDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n",
+      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -890,7 +903,7 @@ describe("runInitCommand", () => {
     const projectPath = join(agentsDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -932,7 +945,7 @@ describe("runInitCommand", () => {
     await expect(pathExists(join(projectPath, "app/page.tsx"))).resolves.toBe(true);
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
+      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  esbuild: true\n  sharp: false\n",
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -1135,9 +1148,9 @@ describe("runInitCommand", () => {
 
     await runInitCommand(output, projectRoot, ".", {}, deps);
 
-    expect(await readFile(join(projectRoot, "agent/agent.ts"), "utf8")).toContain(
-      DEFAULT_AGENT_MODEL_ID,
-    );
+    const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
+    expect(agentSource).toContain('model: "openai/gpt-6-luna-fast"');
+    expect(agentSource).toContain('reasoning: "high"');
     await expect(pathExists(join(projectRoot, "agent/instructions.md"))).resolves.toBe(true);
     await expect(pathExists(join(projectRoot, "agent/channels/eve.ts"))).resolves.toBe(true);
     // Missing runtime deps are added; ones the project already declares stay.
@@ -1171,25 +1184,28 @@ describe("runInitCommand", () => {
     expect(printed).not.toContain("Overrode package.json engines.node");
   });
 
-  it("adds an agent to an existing project with model settings selected by init options", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-model-"));
-    const projectRoot = await createHostProject(parentDirectory);
-    const output = logger();
-    const deps = dependencies();
+  it.each([undefined, "low", "provider-default"] as const)(
+    "adds an agent to an existing project with explicit model and reasoning %s",
+    async (reasoning) => {
+      const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-model-"));
+      const projectRoot = await createHostProject(parentDirectory);
+      const deps = dependencies();
 
-    await runInitCommand(
-      output,
-      projectRoot,
-      ".",
-      { model: "openai/gpt-5.5", reasoning: "high" },
-      deps,
-    );
+      await runInitCommand(
+        logger(),
+        projectRoot,
+        ".",
+        { model: "openai/gpt-5.5", reasoning },
+        deps,
+      );
 
-    const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
-    expect(agentSource).toContain('model: "openai/gpt-5.5"');
-    expect(agentSource).toContain('reasoning: "high"');
-    expect(deps.validateModelSlug).toHaveBeenCalledWith(projectRoot, "openai/gpt-5.5");
-  });
+      const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
+      expect(agentSource).toContain('model: "openai/gpt-5.5"');
+      if (reasoning === "low") expect(agentSource).toContain('reasoning: "low"');
+      else expect(agentSource).not.toContain("reasoning:");
+      expect(deps.validateModelSlug).toHaveBeenCalledWith(projectRoot, "openai/gpt-5.5");
+    },
+  );
 
   it("overrides an incompatible existing node engine declaration and warns for eve init .", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dir-engine-"));

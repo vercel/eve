@@ -66,10 +66,14 @@ export async function resolveToolDefinition(
     registerDefinitionSource(sourceKey, sourceEntry);
     registerDefinitionSource(`tool:${resolvedRecord.description}`, sourceEntry);
 
-    const execute = expectFunction(
-      resolvedRecord.execute,
-      describe(definition, "to provide an execute function"),
-    ) as NonNullable<ResolvedToolDefinition["execute"]>;
+    // A workflow tool's entry point runs from the workflow registry, never in process.
+    const execute =
+      definition.behavior?.handling?.kind === "workflow-tool"
+        ? undefined
+        : (expectFunction(
+            resolvedRecord.execute,
+            describe(definition, "to provide an execute function"),
+          ) as NonNullable<ResolvedToolDefinition["execute"]>);
     const inputSchema = isToolSchema(resolvedRecord.inputSchema)
       ? resolvedRecord.inputSchema
       : toInputSchema(definition.inputSchema);
@@ -88,7 +92,6 @@ export async function resolveToolDefinition(
       description: definition.description,
       execute,
       executeInput,
-      execution: definition.execution,
       exportName: definition.exportName,
       inputSchema,
       logicalPath: definition.logicalPath,
@@ -121,7 +124,7 @@ export async function resolveToolDefinition(
  */
 type OptionalResolvedFields = {
   -readonly [
-    K in "label" | "approval" | "approvalKey" | "toModelOutput"
+    K in "label" | "approval" | "approvalKey" | "endsTurn" | "toModelOutput"
   ]?: ResolvedToolDefinition[K];
 };
 
@@ -175,6 +178,16 @@ function extractOptionalHooks(
       record.approvalKey,
       describe(definition, "to provide an approvalKey function"),
     ) as ResolvedToolDefinition["approvalKey"];
+  }
+
+  if (record.endsTurn !== undefined) {
+    optional.endsTurn =
+      typeof record.endsTurn === "boolean"
+        ? record.endsTurn
+        : (expectFunction(
+            record.endsTurn,
+            describe(definition, "to provide endsTurn as a boolean or a function"),
+          ) as ResolvedToolDefinition["endsTurn"]);
   }
 
   if (record.toModelOutput !== undefined) {

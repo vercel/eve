@@ -7,8 +7,13 @@ import type { ModelMessage, ToolModelMessage } from "ai";
  * message. Each matching call is rewritten as a normal call and consecutive
  * results are moved into a tool message at their original position when the
  * call lacks the matching marker or shares an assistant message with a local
- * tool call. Native provider-only call/result pairs remain untouched. Text
- * before a result remains before it; text after a result remains after it.
+ * tool call. Native provider-only call/result pairs stay in the assistant
+ * message, but content after their results starts a new assistant message:
+ * AI Gateway replays a single message with a result followed by text as if
+ * the text came first. Text before a result remains before it; text after a
+ * result remains after it. Local tool calls in a split message, with their
+ * approval requests, move to its last assistant message, so the local results
+ * that follow the response directly follow their calls.
  */
 export function normalizeProviderToolHistory(input: {
   readonly messages: readonly ModelMessage[];
@@ -40,6 +45,12 @@ export function normalizeProviderToolHistory(input: {
 
     let assistantContent: typeof message.content = [];
     let toolContent: ToolModelMessage["content"] = [];
+    let afterProviderResult = false;
+    const localCallParts: typeof message.content = [];
+    const localCallIds = new Set<string>();
+    const splits = message.content.some(
+      (part) => part.type === "tool-result" && toolCallIdsToNormalize.has(part.toolCallId),
+    );
 
     const flushAssistant = (): void => {
       if (assistantContent.length === 0) return;
@@ -56,8 +67,24 @@ export function normalizeProviderToolHistory(input: {
       if (part.type === "tool-result" && toolCallIdsToNormalize.has(part.toolCallId)) {
         flushAssistant();
         toolContent.push(part);
+      } else if (
+        splits &&
+        part.type === "tool-call" &&
+        part.providerExecuted !== true &&
+        !toolCallIdsToNormalize.has(part.toolCallId)
+      ) {
+        // Local results arrive after the whole response. Keeping their calls
+        // in an earlier split would put a later provider result between a
+        // call and its result, which providers reject.
+        localCallIds.add(part.toolCallId);
+        localCallParts.push(part);
+      } else if (part.type === "tool-approval-request" && localCallIds.has(part.toolCallId)) {
+        localCallParts.push(part);
       } else {
         flushTool();
+        // Parallel results stay together; anything else after them closes the message.
+        if (afterProviderResult && part.type !== "tool-result") flushAssistant();
+        afterProviderResult = part.type === "tool-result";
         assistantContent.push(
           part.type === "tool-call" && toolCallIdsToNormalize.has(part.toolCallId)
             ? { ...part, providerExecuted: false }
@@ -73,8 +100,9 @@ export function normalizeProviderToolHistory(input: {
       position += 1;
     }
 
-    flushAssistant();
     flushTool();
+    assistantContent.push(...localCallParts);
+    flushAssistant();
   }
 
   return {

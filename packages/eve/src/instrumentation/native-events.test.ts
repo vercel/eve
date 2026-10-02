@@ -1,3 +1,4 @@
+import { TEST_USAGE } from "#internal/testing/events.js";
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -53,6 +54,7 @@ describe("createInstrumentationHandleEvent", () => {
         },
         policyAgentName: "weather",
         rootSessionId: "session-1",
+        traceSessionId: "session-1",
         sequence: 0,
         sessionId: "session-1",
         turnId: "turn_0",
@@ -118,7 +120,7 @@ describe("createInstrumentationHandleEvent", () => {
       }),
     );
     await handleEvent(createTurnCompletedEvent({ sequence: 0, turnId: "turn-1" }));
-    await handleEvent(createSessionWaitingEvent());
+    await handleEvent(createSessionWaitingEvent(TEST_USAGE));
 
     expect(order).toEqual([
       "durable:session.started",
@@ -176,7 +178,7 @@ describe("createInstrumentationHandleEvent", () => {
       turnId: "turn-1",
     })!;
 
-    await handleEvent(createSessionWaitingEvent());
+    await handleEvent(createSessionWaitingEvent(TEST_USAGE));
 
     expect(events).toEqual([
       {
@@ -304,11 +306,29 @@ describe("createInstrumentationHandleEvent", () => {
         createActionResultEvent({
           result: {
             callId: "delegate-1",
-            kind: "subagent-result",
-            origin: "dispatch",
-            output: "unavailable",
             isError: true,
+            kind: "subagent-result",
+            origin: "child",
+            outcome: {
+              kind: "terminal",
+              result: { kind: "failed", error: "unavailable" },
+              usageDelta: {
+                cacheReadTokens: 1,
+                cacheWriteTokens: 2,
+                costUsd: 0.003,
+                inputTokens: 4,
+                outputTokens: 2,
+              },
+            },
+            output: "unavailable",
             subagentName: "worker",
+            usage: {
+              cacheReadTokens: 1,
+              cacheWriteTokens: 2,
+              costUsd: 0.003,
+              inputTokens: 4,
+              outputTokens: 2,
+            },
           },
           sequence: 0,
           stepIndex: 0,
@@ -336,6 +356,7 @@ describe("createInstrumentationHandleEvent", () => {
             usage: {
               cacheReadTokens: 3,
               cacheWriteTokens: 4,
+              costUsd: 0.012,
               inputTokens: 10,
               outputTokens: 5,
             },
@@ -414,6 +435,12 @@ describe("createInstrumentationHandleEvent", () => {
       outcome: "failed",
       scope,
       type: "action.failed",
+      usage: {
+        costUsd: 0.003,
+        inputTokenDetails: { cacheReadTokens: 1, cacheWriteTokens: 2 },
+        inputTokens: 4,
+        outputTokens: 2,
+      },
     });
     expect(events[6]).toEqual({
       acceptedAtMs: 1_234,
@@ -423,6 +450,7 @@ describe("createInstrumentationHandleEvent", () => {
       scope,
       type: "action.completed",
       usage: {
+        costUsd: 0.012,
         inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
         inputTokens: 10,
         outputTokens: 5,

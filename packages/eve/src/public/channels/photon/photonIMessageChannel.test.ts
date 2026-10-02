@@ -43,7 +43,10 @@ describe("photonIMessageChannel", () => {
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      formatted: { type: "root", children: [] },
+      metadata: { dateSent: new Date(0), edited: false },
+      author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
       raw: {},
       text: "Steer this response",
@@ -52,10 +55,12 @@ describe("photonIMessageChannel", () => {
 
     await handler(thread, message);
 
-    expect(send).toHaveBeenCalledWith(
-      { context: [], message: "Steer this response" },
-      { auth: null, thread, title: "Photon run" },
-    );
+    expect(send).toHaveBeenCalledWith("Steer this response", {
+      auth: null,
+      context: [],
+      thread,
+      title: "Photon run",
+    });
   });
 
   it("derives user auth for default direct-message dispatch", async () => {
@@ -66,7 +71,10 @@ describe("photonIMessageChannel", () => {
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      formatted: { type: "root", children: [] },
+      metadata: { dateSent: new Date(0), edited: false },
+      author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
       raw: {},
       text: "Hello Photon",
@@ -75,21 +83,19 @@ describe("photonIMessageChannel", () => {
 
     await handler(thread, message);
 
-    expect(send).toHaveBeenCalledWith(
-      { context: [], message: "Hello Photon" },
-      {
-        auth: {
-          attributes: { user_name: "user" },
-          authenticator: "photon-imessage",
-          issuer: "photon",
-          principalId: "photon:user",
-          principalType: "user",
-          subject: "user",
-        },
-        thread,
-        title: undefined,
+    expect(send).toHaveBeenCalledWith("Hello Photon", {
+      auth: {
+        attributes: { user_name: "user" },
+        authenticator: "photon-imessage",
+        issuer: "photon",
+        principalId: "photon:user",
+        principalType: "user",
+        subject: "user",
       },
-    );
+      context: [],
+      thread,
+      title: undefined,
+    });
   });
 
   it("drops blank inbound messages without cancelling or sending", async () => {
@@ -100,7 +106,10 @@ describe("photonIMessageChannel", () => {
     if (handler === undefined) throw new Error("Expected an inbound direct-message handler.");
     const thread = { id: "thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      formatted: { type: "root", children: [] },
+      metadata: { dateSent: new Date(0), edited: false },
+      author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
       raw: {},
       text: "  \n",
@@ -122,7 +131,10 @@ describe("photonIMessageChannel", () => {
     }
     const thread = { id: "group-thread-id" };
     const message = new Message({
-      author: { isBot: false, isMe: false, userId: "user", userName: "user" },
+      attachments: [],
+      formatted: { type: "root", children: [] },
+      metadata: { dateSent: new Date(0), edited: false },
+      author: { fullName: "User", isBot: false, isMe: false, userId: "user", userName: "user" },
       id: "message-id",
       raw: {},
       text: "Hello group",
@@ -132,20 +144,18 @@ describe("photonIMessageChannel", () => {
     expect(pattern.test(message.text)).toBe(true);
     await handler(thread, message);
 
-    expect(send).toHaveBeenCalledWith(
-      { context: [], message: "Hello group" },
-      {
-        auth: {
-          attributes: { user_name: "user" },
-          authenticator: "photon-imessage",
-          issuer: "photon",
-          principalId: "photon:user",
-          principalType: "user",
-          subject: "user",
-        },
-        thread,
-        title: undefined,
+    expect(send).toHaveBeenCalledWith("Hello group", {
+      auth: {
+        attributes: { user_name: "user" },
+        authenticator: "photon-imessage",
+        issuer: "photon",
+        principalId: "photon:user",
+        principalType: "user",
+        subject: "user",
       },
-    );
+      context: [],
+      thread,
+      title: undefined,
+    });
   });
 });

@@ -21,6 +21,7 @@
  * the next run (see local-server-cleanup.ts).
  */
 
+import { createConsoleOutputForwarder } from "./console-records.js";
 import { fork, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -73,7 +74,9 @@ export function createDevelopmentServer(
   const terminated = Promise.withResolvers<void>();
   void exited.promise.catch(() => undefined);
 
+  const consoleOutput = createConsoleOutputForwarder((text) => process.stderr.write(text));
   const release = () => {
+    consoleOutput.flush();
     const active = child;
     if (active === undefined) return;
     child = undefined;
@@ -92,9 +95,11 @@ export function createDevelopmentServer(
       childPath,
       [
         JSON.stringify({
+          developmentExtensions: options.developmentExtensions,
           existing: options.existing,
           host: options.host,
           port: options.port,
+          resume: options.resume,
         }),
       ],
       {
@@ -105,13 +110,18 @@ export function createDevelopmentServer(
           [EVE_DEV_ENV_FLAG]: "1",
         },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
+        execArgv: [
+          ...process.execArgv,
+          "--import",
+          new URL("./console-records-preload.js", import.meta.url).href,
+        ],
       },
     );
     child = spawned;
     spawned.stdout?.on("data", (chunk: Buffer) =>
       (options.output === "stderr" ? process.stderr : process.stdout).write(chunk),
     );
-    spawned.stderr?.on("data", (chunk: Buffer) => process.stderr.write(chunk));
+    spawned.stderr?.on("data", (chunk: Buffer) => consoleOutput.write(chunk.toString()));
 
     return new Promise<DevelopmentServerHandle>((resolve, reject) => {
       let settled = false;

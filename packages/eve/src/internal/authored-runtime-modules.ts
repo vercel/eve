@@ -22,6 +22,7 @@ export interface PreparedAuthoredRuntimeModules {
 
 /** Builds the authored runtime graph before a development or production host packages it. */
 export async function prepareAuthoredRuntimeModules(input: {
+  readonly appRoot: string;
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
 }): Promise<PreparedAuthoredRuntimeModules> {

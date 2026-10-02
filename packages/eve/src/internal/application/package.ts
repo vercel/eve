@@ -65,7 +65,9 @@ function resolveCurrentModulePathFromStack(): string {
   }
 }
 
-const require = createRequire(resolveCurrentModulePath());
+// Not named `require`: bundles inline this module, and a top-level `require`
+// binding makes the Node ESM compatibility banner re-parse the whole chunk.
+const packageRequire = createRequire(resolveCurrentModulePath());
 
 function tryResolveVerifiedPackageRoot(packageJsonPath: string): string | undefined {
   try {
@@ -266,7 +268,43 @@ export function resolvePackageSourceDirectoryPath(relativeSourcePath: string): s
 }
 
 export function resolvePackageDependencyPath(specifier: string): string {
-  return require.resolve(specifier);
+  try {
+    return packageRequire.resolve(specifier);
+  } catch (error) {
+    const packageRoot = tryResolvePackageRoot();
+    const sourcePath =
+      packageRoot === undefined || !isSourceCheckout(packageRoot)
+        ? undefined
+        : resolveSourceCheckoutExport(packageRoot, specifier);
+    if (sourcePath !== undefined) return sourcePath;
+    throw error;
+  }
+}
+
+function resolveSourceCheckoutExport(packageRoot: string, specifier: string): string | undefined {
+  if (specifier !== EVE_PACKAGE_NAME && !specifier.startsWith(`${EVE_PACKAGE_NAME}/`)) {
+    return undefined;
+  }
+  const exportKey =
+    specifier === EVE_PACKAGE_NAME ? "." : `.${specifier.slice(EVE_PACKAGE_NAME.length)}`;
+  try {
+    const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
+      exports?: Record<string, string | Record<string, string>>;
+    };
+    const declaration = manifest.exports?.[exportKey];
+    const target =
+      typeof declaration === "string"
+        ? declaration
+        : (declaration?.["eve-source"] ?? declaration?.import ?? declaration?.default);
+    if (target === undefined) return undefined;
+    const sourceRelativePath = target
+      .replace(/^\.\/dist\/src\//, "src/")
+      .replace(/\.[cm]?js$/u, ".ts");
+    const sourcePath = join(packageRoot, sourceRelativePath);
+    return existsSync(sourcePath) ? sourcePath : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -338,7 +376,7 @@ export function resolveInstalledPackageInfo(): InstalledPackageInfo {
   }
 
   try {
-    const resolvedPackageJsonPath = require.resolve(`${EVE_PACKAGE_NAME}/package.json`);
+    const resolvedPackageJsonPath = packageRequire.resolve(`${EVE_PACKAGE_NAME}/package.json`);
     const resolvedPackageInfo = tryReadInstalledPackageInfo(
       resolvedPackageJsonPath,
       EVE_PACKAGE_NAME,
@@ -410,7 +448,7 @@ export function resolveExpectedWorkflowVersion(): string | undefined {
 
   try {
     return readWorkflowVersionFromManifest(
-      JSON.parse(readFileSync(require.resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8")),
+      JSON.parse(readFileSync(packageRequire.resolve(`${EVE_PACKAGE_NAME}/package.json`), "utf8")),
     );
   } catch {
     return undefined;
@@ -443,5 +481,5 @@ export function resolveWorkflowModulePath(specifier: string): string {
     return resolvePackageCompiledFilePath(alias);
   }
 
-  return require.resolve(specifier);
+  return packageRequire.resolve(specifier);
 }

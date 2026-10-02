@@ -74,7 +74,11 @@ function isSameCompiledArtifactSnapshot(
   // Equivalent bootstrap modules do not share object identity, but the
   // compiler fingerprint is stable across their copies.
   if (installedSourceGraphHash && inputSourceGraphHash) {
-    return installedSourceGraphHash === inputSourceGraphHash;
+    return (
+      installedSourceGraphHash === inputSourceGraphHash &&
+      JSON.stringify(installed.sandboxPreparedArtifacts) ===
+        JSON.stringify(input.sandboxPreparedArtifacts)
+    );
   }
 
   return (

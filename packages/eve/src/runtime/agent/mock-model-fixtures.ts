@@ -1,8 +1,9 @@
 import type { BootstrapPrompt } from "#runtime/agent/bootstrap-model-utils.js";
 import {
   getPromptContentText,
-  isAgentsAnnouncementText,
+  isFrameworkAnnouncementText,
 } from "#runtime/agent/bootstrap-model-utils.js";
+import { TASK_ID_INPUT } from "#execution/tasks/task-id-input.js";
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 
@@ -14,13 +15,15 @@ export interface AvailableBootstrapTool {
 }
 
 export function createMockAuthoredToolInput(
-  tool: AvailableBootstrapTool,
+  offered: AvailableBootstrapTool,
   message: string,
   city: string,
 ): Record<string, unknown> {
+  // The mock only starts tasks; it never names one to continue.
+  const tool = { ...offered, inputSchema: withoutTaskIdInput(offered.inputSchema) };
   const inputPropertyNames = getToolInputPropertyNames(tool.inputSchema);
-  if (tool.name === "ask_question" || hasProperties(inputPropertyNames, ["prompt", "options"])) {
-    return createAskQuestionInput(message);
+  if (inputPropertyNames.includes("question")) {
+    return createQuestionInput(message);
   }
 
   if (inputPropertyNames.includes("command")) {
@@ -49,6 +52,12 @@ export function createMockAuthoredToolInput(
 
   const sample = createJsonSchemaSample(tool.inputSchema);
   return isRecord(sample) ? sample : {};
+}
+
+function withoutTaskIdInput(schema: unknown): unknown {
+  if (!isRecord(schema) || !isRecord(schema.properties)) return schema;
+  const { [TASK_ID_INPUT]: _taskId, ...properties } = schema.properties;
+  return { ...schema, properties };
 }
 
 /**
@@ -142,9 +151,9 @@ function getTrailingUserText(prompt: BootstrapPrompt): string {
     if (message.role === "system") continue;
     if (message.role !== "user") break;
     const text = getPromptContentText(message.content);
-    // Framework-injected [Agents] announcements are scaffolding, not part
-    // of the turn's authored ask.
-    if (isAgentsAnnouncementText(text.trim())) continue;
+    // Framework-injected [Tasks] notes are scaffolding, not part of the
+    // turn's authored ask.
+    if (isFrameworkAnnouncementText(text.trim())) continue;
     texts.unshift(text);
   }
 
@@ -238,40 +247,24 @@ function hasDeclaredInputProperties(schema: unknown): boolean {
   return isRecord(schema) && isRecord(schema.properties);
 }
 
-function hasProperties(actual: readonly string[], expected: readonly string[]): boolean {
-  return expected.every((property) => actual.includes(property));
-}
-
-function createAskQuestionInput(message: string): Record<string, unknown> {
-  const options = parseInputOptions(message);
-  const input: Record<string, unknown> = {
-    prompt: resolveQuestionPrompt(message),
-  };
-
-  if (options.length > 0) {
-    input.options = options;
-  }
-
-  if (/\ballow\s*freeform\s+(?:to\s+)?true\b|\ballowfreeform\s+(?:to\s+)?true\b/iu.test(message)) {
-    input.allowFreeform = true;
-  }
-
-  return input;
-}
-
-function parseInputOptions(message: string): Array<{ id: string; label: string }> {
-  return [...message.matchAll(/\bid\b\s*:?\s*"([^"]+)"\s*,\s*label\b\s*:?\s*"([^"]+)"/giu)].map(
-    (match) => ({
-      id: match[1] ?? "",
-      label: match[2] ?? "",
+function createQuestionInput(message: string): Record<string, unknown> {
+  const labels = parseOptionLabels(message);
+  return {
+    question: resolveQuestionPrompt(message),
+    ...(labels.length >= 2 && {
+      options: labels.map((label) => ({ description: `Choose ${label}.`, label })),
     }),
-  );
+  };
+}
+
+function parseOptionLabels(message: string): string[] {
+  return [...message.matchAll(/\blabel\b\s*:?\s*"([^"]+)"/giu)].map((match) => match[1] ?? "");
 }
 
 function resolveQuestionPrompt(message: string): string {
   const quotedPrompt =
-    /\b(?:set\s+)?prompt\s+to:\s*'([^']+)'/iu.exec(message) ??
-    /\b(?:set\s+)?prompt\s+to:\s*"([^"]+)"/iu.exec(message);
+    /\b(?:set\s+)?question\s+to:\s*'([^']+)'/iu.exec(message) ??
+    /\b(?:set\s+)?question\s+to:\s*"([^"]+)"/iu.exec(message);
   if (quotedPrompt?.[1]) {
     return quotedPrompt[1].trim();
   }

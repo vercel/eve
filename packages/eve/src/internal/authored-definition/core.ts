@@ -60,7 +60,6 @@ export function normalizeAgentDefinition(
       "model",
       "modelContextWindowTokens",
       "modelOptions",
-      "outputSchema",
       "reasoning",
       "tool",
     ],
@@ -112,10 +111,6 @@ export function normalizeAgentDefinition(
       record.modelContextWindowTokens,
       message,
     );
-  }
-
-  if (record.outputSchema !== undefined) {
-    definition.outputSchema = record.outputSchema as NormalizedAgentDefinition["outputSchema"];
   }
 
   if (record.reasoning !== undefined) {

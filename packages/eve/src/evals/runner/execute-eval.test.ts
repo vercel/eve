@@ -31,11 +31,18 @@ function taskOutcome(assertions: readonly AssertionResult[] = [], error?: string
 }
 
 function gate(passed: boolean): AssertionResult {
-  return { name: "gate", score: passed ? 1 : 0, severity: "gate", passed };
+  return { name: "gate", score: passed ? 1 : 0, severity: "gate", passed, errored: false };
 }
 
 function softMiss(): AssertionResult {
-  return { name: "soft", score: 0.5, severity: "soft", threshold: 0.9, passed: false };
+  return {
+    name: "soft",
+    score: 0.5,
+    severity: "soft",
+    threshold: 0.9,
+    passed: false,
+    errored: false,
+  };
 }
 
 function createEval(overrides: Partial<EveEval> = {}): EveEval {

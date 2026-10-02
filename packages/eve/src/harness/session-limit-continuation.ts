@@ -12,10 +12,10 @@ import type { JsonObject } from "#shared/json.js";
 import type { SessionUsageLimitViolation } from "#harness/turn-tag-state.js";
 
 /** Synthetic action tool name carried by session-limit continuation requests. */
-export const SESSION_LIMIT_CONTINUATION_TOOL_NAME = "session_limit_continuation";
+const SESSION_LIMIT_CONTINUATION_TOOL_NAME = "session_limit_continuation";
 
 /** Option id that grants a fresh token budget window. */
-export const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
+const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
 
 /** Option id that declines continuation and ends the session. */
 export const SESSION_LIMIT_STOP_OPTION_ID = "stop";

@@ -1,16 +1,15 @@
 import type { VercelCreateOptions } from "#execution/sandbox/bindings/vercel-sdk-types.js";
-import type { SandboxBackendTags } from "#public/definitions/sandbox-backend.js";
 
 const VERCEL_SANDBOX_TAG_LIMIT = 5;
 
 export function resolveVercelSandboxTags(
   userTags: VercelCreateOptions["tags"],
-  eveTags: SandboxBackendTags | undefined,
+  eveTags: Readonly<Record<string, string>> | undefined,
 ): Record<string, string> | undefined {
   const tags: Record<string, string> = {};
 
   if (userTags !== undefined) {
-    for (const [key, value] of Object.entries(userTags as Record<string, string>)) {
+    for (const [key, value] of Object.entries(userTags)) {
       tags[key] = value;
     }
   }
@@ -27,7 +26,7 @@ export function resolveVercelSandboxTags(
   if (count > VERCEL_SANDBOX_TAG_LIMIT) {
     throw new Error(
       `Vercel Sandbox supports at most ${VERCEL_SANDBOX_TAG_LIMIT} tags. ` +
-        'eve reserves "agent", "channel", and "sessionId"; remove or consolidate custom tags passed to vercel().',
+        'eve reserves "agent", "channel", and "sessionId"; remove or consolidate custom tags.',
     );
   }
 
@@ -58,8 +57,8 @@ function areVercelSandboxTagsEqual(
 
 export function errorMessage(error: unknown): string {
   if (error instanceof Error) {
-    const responseJson = (error as { readonly json?: unknown }).json;
-    const responseText = (error as { readonly text?: unknown }).text;
+    const responseJson = Reflect.get(error, "json");
+    const responseText = Reflect.get(error, "text");
     const responseBody =
       typeof responseText === "string" && responseText.length > 0
         ? responseText

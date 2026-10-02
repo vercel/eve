@@ -1,21 +1,21 @@
 import type { WebSearchProvider } from "#shared/web-search.js";
+import type { WorkflowToolEntryPoint } from "#tools/workflow-entry-point.js";
 
 /** Session facts that can hide a selected tool without changing source composition. */
-export type ToolAvailabilityCondition =
-  | "delegated-task-child"
-  | "requires-request-input"
-  | "root-session";
+export type ToolAvailabilityCondition = "root-session";
 
 /** Native behavior declared by a selected compiled tool. */
 export type CompiledToolHandling =
-  | { readonly kind: "dispatch"; readonly action: "self-agent" | "task-cancel" }
+  | { readonly kind: "dispatch"; readonly action: "self-agent" }
   | { readonly kind: "provider-tool"; readonly provider: WebSearchProvider }
-  | { readonly kind: "request-input"; readonly request: "question" }
-  | { readonly kind: "workflow-tool"; readonly workflowId: string };
+  | {
+      readonly kind: "workflow-tool";
+      readonly entryPoint: WorkflowToolEntryPoint;
+      readonly workflowId: string;
+    };
 
 /** Closed, serializable behavior carried by one selected compiled tool. */
 export interface ToolExecutionShape {
-  readonly lifetime: "step" | "task";
   readonly suspend: "none" | "workflow";
 }
 
@@ -43,13 +43,16 @@ export type PreparedDispatchTarget =
       readonly nodeId: string;
       readonly subagentName: string;
     }
-  | { readonly kind: "task-cancel" }
-  | { readonly kind: "workflow-tool-call"; readonly workflowId: string };
+  | {
+      readonly kind: "workflow-tool-call";
+      readonly entryPoint: WorkflowToolEntryPoint;
+      readonly workflowId: string;
+    };
 
 /** Runtime-prepared handling consumed by the harness and execution boundary. */
 export type PreparedToolHandling =
   | { readonly kind: "dispatch"; readonly target: PreparedDispatchTarget }
-  | Extract<CompiledToolHandling, { readonly kind: "provider-tool" | "request-input" }>;
+  | Extract<CompiledToolHandling, { readonly kind: "provider-tool" }>;
 
 /** Runtime-prepared behavior carried by one harness-visible tool. */
 export interface PreparedToolBehavior {

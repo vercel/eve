@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 
-import type { SandboxBackendTags } from "#shared/sandbox-backend.js";
-
 export const EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV = "EVE_DEVELOPMENT_SANDBOX_RUN_ID";
 export const EVE_DEVELOPMENT_SANDBOX_METADATA_PATH_TAG = "eve.metadataPath";
 export const EVE_DEVELOPMENT_SANDBOX_RUN_ID_TAG = "devRunId";
@@ -16,8 +14,8 @@ export function getDevelopmentSandboxRunId(): string | undefined {
 }
 
 export function withDevelopmentSandboxTags(
-  tags: SandboxBackendTags | undefined,
-): SandboxBackendTags | undefined {
+  tags: Readonly<Record<string, string>> | undefined,
+): Readonly<Record<string, string>> | undefined {
   const runId = getDevelopmentSandboxRunId();
   if (runId === undefined) {
     return tags;
@@ -29,9 +27,9 @@ export function withDevelopmentSandboxTags(
 }
 
 export function withDevelopmentSandboxMetadataPathTag(
-  tags: SandboxBackendTags | undefined,
+  tags: Readonly<Record<string, string>> | undefined,
   metadataPath: string,
-): SandboxBackendTags | undefined {
+): Readonly<Record<string, string>> | undefined {
   if (getDevelopmentSandboxRunId() === undefined) {
     return tags;
   }

@@ -3,6 +3,7 @@ import { defineDynamic, defineInstructions } from "eve/instructions";
 import { resolveSelfModificationConfig } from "../../../config.js";
 import { resolveSelfModificationMode } from "../../../mode.js";
 import selfModification from "../../extension.js";
+import { renderLocalSelfModificationExtension } from "../../../scaffold.js";
 
 const role = `## Role
 
@@ -60,10 +61,15 @@ const localGuidance = `## Local environment
 
 The registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, if a \`needs-terminal\` result includes \`nextCommand\`, present that exact value as the only shell command in your response. Never infer, construct, or rewrite a command: installing an item uses \`eve add <item>\`; \`eve registry add\` configures registry namespace mappings and does not install items.
 
-Local eve dev logs are available read-only at /logs.
-Local trace segments are mounted read-only at /traces when available. Inspect other traces only when the user asks about another session or broader behavior.
+Local eve dev logs are mounted read-only at /logs. Local trace segments are mounted read-only at /traces when available. For latency, failure, token, or behavior analysis, load and follow the \`trace_analysis\` skill. Trace searches are scoped to the invoking conversation and exclude the current investigation by default.
 
 The application package.json is not mounted. Do not search outside /source for application files. You cannot run host binaries such as git, node, pnpm, or tsc. Use existing imports and registry_add for supported registry installations.`;
+
+const selfModificationSubagentGuidance = `## Changing the self-modification subagent
+
+Only when the requester explicitly names the self-modification subagent, edit whichever of /source/extensions/self-modification.ts or /source/extensions/self-modification/extension.ts exists. If neither exists, create /source/extensions/self-modification/extension.ts with write_file using this content, then make the requested model or reasoning change:
+\`\`\`ts
+${renderLocalSelfModificationExtension()}\`\`\``;
 
 const deployedGuidance = `## Deployed environment
 
@@ -73,41 +79,13 @@ The configured target branch is checked out as a disposable workspace under /wor
 
 Complete all edits and registry installations before publication, and call publish by itself. Before publication, review and summarize the complete intended scope. Call publish once with a concise title and summary. A successful result is only a draft pull request. Return its URL and changed paths, and state that merge and deployment have not occurred.`;
 
-function packagedSubagentGuidance(event: unknown): string {
-  const invocation = (
-    event as { readonly data?: { readonly invocation?: { readonly kind?: string } } }
-  ).data?.invocation;
-  if (invocation?.kind !== "subagent") return "";
-
-  return "This self-modification subagent is implemented by the eve package, not an authored directory under /source. Configure its model, reasoning, and policy in /source/extensions/self-modification/extension.ts; do not search for or edit a child implementation directory.";
-}
-
-function readTrace(
-  event: unknown,
-): { readonly traceFlags: number; readonly traceId: string } | undefined {
-  return (
-    event as {
-      readonly data?: {
-        readonly trace?: { readonly traceFlags: number; readonly traceId: string };
-      };
-    }
-  ).data?.trace;
-}
-
-function localTraceGuidance(event: unknown): string {
-  const trace = readTrace(event);
-  if (trace === undefined) return "";
-
-  return `The invoking trace has ID ${trace.traceId}. ${(trace.traceFlags & 1) === 1 ? "If local segments were captured," : "This trace was not sampled, so local segments may be absent. If any are present,"} inspect them at /traces/${trace.traceId}.`;
-}
-
 function renderInstructions(sections: readonly string[]): string {
   return sections.filter((section) => section.length > 0).join("\n\n");
 }
 
 export default defineDynamic({
   events: {
-    "session.started": (event) => {
+    "session.started": () => {
       const mode = resolveSelfModificationMode(
         resolveSelfModificationConfig(selfModification.config),
       );
@@ -117,14 +95,13 @@ export default defineDynamic({
         markdown: renderInstructions([
           role,
           sourceWorkspace,
-          packagedSubagentGuidance(event),
           sourceEditing,
           toolAuthoring,
           registryWorkflow,
           documentationGuidance,
           mode === "local" ? localGuidance : deployedGuidance,
-          mode === "local" ? localTraceGuidance(event) : "",
           workingGuidance,
+          selfModificationSubagentGuidance,
           mode === "local" ? localReportingGuidance : deployedReportingGuidance,
         ]),
       });

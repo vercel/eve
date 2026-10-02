@@ -12,6 +12,7 @@ import { defaultLinearAuth } from "#public/channels/linear/defaults.js";
 import { linearChannel, type LinearChannelState } from "#public/channels/linear/linearChannel.js";
 import { signLinearWebhookBody } from "#public/channels/linear/verify.js";
 import type { InputRequest } from "#shared/input.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const SECRET = "linear-secret";
 
@@ -401,6 +402,7 @@ describe("linearChannel default event handlers", () => {
   });
 
   it("posts turn-start and tool-call progress as ephemeral Linear activities", async () => {
+    const logs = captureLogRecords();
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
         data: {
@@ -460,6 +462,12 @@ describe("linearChannel default event handlers", () => {
         },
       },
     });
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        message: "adapter event handler threw — event swallowed",
+      }),
+    );
   });
 
   it("surfaces pre-tool-call assistant text as the next ephemeral Linear thought", async () => {

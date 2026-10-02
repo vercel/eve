@@ -6,7 +6,7 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
+import { TASK_TOOL_NAMES } from "#protocol/task-tools.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -53,6 +53,12 @@ export async function compileToolEntry(
   const toolName = stripLogicalPathExtension(source.logicalPath)
     .replace(/^tools\//, "")
     .replaceAll("/", "-");
+
+  if (TASK_TOOL_NAMES.includes(toolName)) {
+    throw new Error(
+      `Tool "${source.logicalPath}" uses the reserved name "${toolName}". Rename its path; eve reserves "${toolName}" for its built-in task tool.`,
+    );
+  }
 
   if (entry.kind === "disabled") {
     return { kind: "disabled", name: toolName };
@@ -101,40 +107,27 @@ export async function compileToolEntry(
     };
   }
 
-  const workflowId = readWorkflowFunctionId(entry.definition.execute);
-  if (
-    entry.definition.execution === "background" &&
-    workflowId === undefined &&
-    !(
-      entry.definition.behavior?.handling?.kind === "dispatch" &&
-      entry.definition.behavior.handling.action === "self-agent"
-    )
-  ) {
-    throw new Error(
-      `Background tool "${source.logicalPath}" must use defineWorkflowTool(). defineTool() tools run in the foreground.`,
-    );
-  }
+  const { workflow } = entry.definition;
   const shape = {
-    lifetime: entry.definition.execution === "background" ? ("task" as const) : ("step" as const),
-    suspend: workflowId === undefined ? ("none" as const) : ("workflow" as const),
+    suspend: workflow === undefined ? ("none" as const) : ("workflow" as const),
   };
   return {
     kind: "tool",
     definition: {
       availableInSubagents: entry.definition.availableInSubagents,
       behavior:
-        workflowId === undefined
+        workflow === undefined
           ? entry.definition.behavior === undefined
             ? { availability: [], shape }
             : { ...entry.definition.behavior, shape }
-          : { availability: [], handling: { kind: "workflow-tool", workflowId }, shape },
+          : { availability: [], handling: { kind: "workflow-tool", ...workflow }, shape },
       description: entry.definition.description,
-      execution: entry.definition.execution,
       exportName: source.exportName,
       hasExecute: entry.definition.hasExecute,
       hasModelOutputProjection: entry.definition.hasModelOutputProjection,
       inputSchema: entry.definition.inputSchema ?? null,
       logicalPath: source.logicalPath,
+      modelInputSchema: entry.definition.modelInputSchema,
       name: toolName,
       outputSchema: entry.definition.outputSchema,
       requiresApproval: entry.definition.hasApproval,

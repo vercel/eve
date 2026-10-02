@@ -41,14 +41,12 @@ describe("executeBashOnSandbox", () => {
 
 function createTestSandboxSession(result: SandboxCommandResult): SandboxSession {
   return {
-    id: "test-sandbox",
     readBinaryFile: async () => null,
     readFile: async () => null,
     readTextFile: async () => null,
     removePath: async () => {},
     resolvePath: (path) => path,
     run: vi.fn().mockResolvedValue(result),
-    setNetworkPolicy: async () => {},
     spawn: async () => {
       throw new Error("spawn is not implemented in this test sandbox");
     },

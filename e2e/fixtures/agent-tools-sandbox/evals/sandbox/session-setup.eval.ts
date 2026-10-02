@@ -8,13 +8,13 @@ import {
 } from "./shared";
 
 // Two session-scoped setup surfaces in one bash call:
-//   1. `onSession` wrote SESSION_MARKER_PATH into this live session.
+//   1. The sandbox selector wrote SESSION_MARKER_PATH into this live session.
 //   2. `agent/sandbox/workspace/seed-data.txt` was mounted at WORKSPACE_SEED_PATH.
 // A single `cat` of both files proving both tokens appear shows session-scoped
 // setup and workspace seeding both landed on top of the shared template.
 export default defineEval({
   tags: ["real-model"],
-  description: "Sandbox: onSession marker and seeded workspace file are both present per session.",
+  description: "Sandbox: selector setup and the seeded workspace file are present per session.",
   async test(t) {
     await t.send(
       `Run the bash command \`cat ${SESSION_MARKER_PATH} ${WORKSPACE_SEED_PATH}\` ` +

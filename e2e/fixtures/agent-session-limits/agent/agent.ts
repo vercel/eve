@@ -9,4 +9,6 @@ export default defineAgent({
   limits: {
     maxInputTokensPerSession: 1,
   },
+  // Without the built-in agent tool there are no task tools, so the one-call budget can't go to task_wait.
+  tool: false,
 });

@@ -7,18 +7,24 @@ import { createLogger, logError } from "#internal/logging.js";
 
 const log = createLogger("execution.workflow-tool-run");
 
+/** How a run is told to stop: `end` also finishes a `serve` task's run, which a cancel keeps. */
+export type WorkflowToolRunStop = Extract<
+  WorkflowToolRunControlMessage,
+  { readonly kind: "cancel" | "end" }
+>;
+
 /**
- * Asks the run to cancel itself, then bounds cooperative cleanup. Failures are
+ * Asks the run to stop itself, then bounds cooperative cleanup. Failures are
  * logged: the caller has already committed cancellation of the calling turn.
  */
 export async function cancelWorkflowToolRun(
   run: WorkflowToolRunAddress,
-  reason: string,
+  stop: WorkflowToolRunStop,
 ): Promise<void> {
-  const cancel: WorkflowToolRunControlMessage = { kind: "cancel", reason };
+  const { reason } = stop;
   let signalled = false;
   try {
-    await resumeHook(run.hookToken, cancel);
+    await resumeHook(run.hookToken, stop);
     signalled = true;
   } catch (error) {
     // A fresh run may not have registered its control hook yet.
@@ -69,13 +75,4 @@ export async function settleWorkflowToolRunCancellation(
     if (isTaskWorkflowTargetGone(error)) return;
     throw error;
   }
-}
-
-export async function cancelWorkflowToolRunStep(input: {
-  readonly reason: string;
-  readonly run: WorkflowToolRunAddress;
-}): Promise<void> {
-  "use step";
-
-  await cancelWorkflowToolRun(input.run, input.reason);
 }

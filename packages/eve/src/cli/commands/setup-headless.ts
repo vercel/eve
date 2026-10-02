@@ -86,7 +86,7 @@ export function headlessSetupContinuation(input: {
   };
 }
 
-export type HeadlessIntegrationSetupEvent =
+type HeadlessIntegrationSetupEvent =
   | {
       version: 1;
       type: "external_action";

@@ -1,4 +1,4 @@
-/** Starts workflow-tool runs and framework controls for pending coordination. */
+/** Starts workflow-tool runs for pending coordination. */
 
 import {
   prepareCoordinationDispatch,
@@ -6,10 +6,20 @@ import {
   type CoordinationDispatchResult,
 } from "#execution/coordination-dispatch-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
-import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
-import { startWorkflowTask } from "#execution/tools/workflow/start.js";
+import { publishSessionEvents } from "#execution/publish-session-events.js";
+import {
+  withSessionStateDelta,
+  type WithSessionStateDelta,
+} from "#execution/session/state-delta.js";
+import { startWorkflowTask, type StartWorkflowTaskInput } from "#execution/tools/workflow/start.js";
+import { sendToTask, startTaskRun } from "#execution/tasks/start.js";
+import {
+  captureAgentSessionContext,
+  resolveStepAgentLimits,
+} from "#execution/agent-sessions/context.js";
+import type { TaskStartedStreamEvent } from "#protocol/message.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { HarnessSessionBase } from "#harness/types.js";
 
 type CoordinationDispatchStepInput = CoordinationDispatchInput & {
   readonly action: "park";
@@ -17,9 +27,14 @@ type CoordinationDispatchStepInput = CoordinationDispatchInput & {
 
 export async function dispatchCoordinationStep(
   input: CoordinationDispatchStepInput,
-): Promise<CoordinationDispatchResult> {
+): Promise<WithSessionStateDelta<CoordinationDispatchResult>> {
   "use step";
+  return await withSessionStateDelta(input, dispatchCoordination);
+}
 
+async function dispatchCoordination(
+  input: CoordinationDispatchStepInput,
+): Promise<CoordinationDispatchResult> {
   const prepared = await prepareCoordinationDispatch({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
@@ -27,6 +42,7 @@ export async function dispatchCoordinationStep(
   if (prepared === undefined) {
     return {
       results: [],
+      serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     };
   }
@@ -34,40 +50,56 @@ export async function dispatchCoordinationStep(
   const { batch, session } = prepared;
   let nextSession = session;
   const results: RuntimeActionResult[] = [];
+  const started: TaskStartedStreamEvent[] = [];
+  const agentLimits = resolveStepAgentLimits(prepared);
 
-  for (const entry of prepared.plan) {
-    if (entry.kind === "workflow-task") {
-      const started = await startWorkflowTask({
-        agents: prepared.workflowAgents,
-        auth: prepared.auth,
-        batchEvent: batch.event,
-        initiatorAuth: prepared.initiatorAuth,
-        owner: input.workflowToolRunOwner,
-        parentSession: prepared.parentSession,
-        session: nextSession,
-        task: entry.task,
-      });
-      nextSession = started.session;
-      if (started.result !== undefined) results.push(started.result);
-      continue;
-    }
-    if (entry.kind === "task-control") {
-      const control = await executeTaskControlAction({
-        action: entry.action,
-        cancelOwnedWork: cancelBackgroundAgentTask,
-        serializedContext: prepared.serializedContext,
-        session: nextSession,
-      });
-      nextSession = control.session;
-      results.push(control.result);
-    }
+  for (const task of prepared.plan) {
+    const start = {
+      agentContext: captureAgentSessionContext(prepared, task.callId, agentLimits),
+      auth: { current: prepared.auth, initiator: prepared.initiatorAuth },
+      batchEvent: batch.event,
+      owner: input.workflowToolRunOwner,
+      parentSession: prepared.parentSession,
+      session: nextSession,
+      task,
+    };
+    const dispatched = await dispatchWorkflowCall(start);
+    nextSession = dispatched.session;
+    if (dispatched.result !== undefined) results.push(dispatched.result);
+    if (dispatched.started !== undefined) started.push(dispatched.started);
   }
 
-  return {
-    results,
-    sessionState:
-      nextSession === session
-        ? prepared.sessionState
-        : createDurableSessionState({ session: nextSession }),
-  };
+  const published = await publishSessionEvents(
+    {
+      serializedContext: input.serializedContext,
+      sessionState:
+        nextSession === session
+          ? prepared.sessionState
+          : createDurableSessionState({ session: nextSession }),
+      sessionWritable: input.sessionWritable,
+    },
+    started,
+  );
+  return { results, ...published };
+}
+
+/**
+ * Starts the run the call's entry point names, or sends a call with `taskId`
+ * to the running `serve` task it names.
+ */
+async function dispatchWorkflowCall(start: StartWorkflowTaskInput): Promise<{
+  readonly result?: RuntimeActionResult;
+  readonly session: HarnessSessionBase;
+  readonly started?: TaskStartedStreamEvent;
+}> {
+  const { entry } = start.task;
+  switch (entry.entryPoint) {
+    case "execute":
+      return await startWorkflowTask(start);
+    case "task":
+    case "serve":
+      return await startTaskRun({ ...start, entry });
+    case "receive":
+      return await sendToTask({ ...start, taskId: entry.taskId });
+  }
 }

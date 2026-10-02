@@ -1,4 +1,4 @@
-import type { HarnessSession, StepResult } from "#harness/types.js";
+import type { HarnessSession, HarnessSessionBase, StepResult } from "#harness/types.js";
 import { type ContextContainer, contextStorage } from "#context/container.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { connectionProvider } from "#context/providers/connection.js";
@@ -17,9 +17,9 @@ const frameworkProviders: readonly FrameworkContextProvider<any>[] = [
   sandboxProvider,
 ];
 
-interface ContextScopeResult<T> {
+interface ContextScopeResult<T, S extends HarnessSessionBase> {
   readonly result: T;
-  readonly session: HarnessSession;
+  readonly session: S;
 }
 
 /**
@@ -30,27 +30,21 @@ interface ContextScopeResult<T> {
  * result and the (possibly mutated) session so provider commit hooks can
  * persist provider-owned state (e.g. sandbox snapshots).
  */
-export async function withContextScope<T>(
+export async function withContextScope<T, S extends HarnessSessionBase>(
   ctx: ContextContainer,
-  harnessSession: HarnessSession,
-  callback: (session: HarnessSession) => Promise<ContextScopeResult<T>>,
-  additionalProviders: readonly FrameworkContextProvider<any>[] = [],
-): Promise<ContextScopeResult<T>> {
-  let session = harnessSession;
-  const providers = [...frameworkProviders, ...additionalProviders];
+  session: S,
+  callback: (session: S) => Promise<ContextScopeResult<T, S>>,
+): Promise<ContextScopeResult<T, S>> {
   const createdProviders: FrameworkContextProvider<any>[] = [];
 
   ctx.clearVirtualContext();
 
   try {
-    for (const provider of providers) {
+    for (const provider of frameworkProviders) {
       const result = await provider.create(ctx, session);
       if (result !== undefined) {
         ctx.setVirtualContext(provider.key, result.value);
         createdProviders.push(provider);
-        if (result.session !== undefined) {
-          session = result.session;
-        }
       }
     }
 
@@ -99,23 +93,10 @@ export async function runStep(
   ctx: ContextContainer,
   harnessSession: HarnessSession,
   callback: (session: HarnessSession) => Promise<StepResult>,
-  additionalProviders: readonly FrameworkContextProvider<any>[] = [],
 ): Promise<StepResult> {
-  const scoped = await withContextScope(
-    ctx,
-    harnessSession,
-    async (enriched) => {
-      const result = await callback(enriched);
-      return { result, session: result.session };
-    },
-    additionalProviders,
-  );
-
-  let result = { ...scoped.result, session: scoped.session };
-  for (const provider of [...frameworkProviders, ...additionalProviders]) {
-    if (provider.decorateStepResult !== undefined && ctx.has(provider.key)) {
-      result = await provider.decorateStepResult(ctx.require(provider.key), result);
-    }
-  }
-  return result;
+  const scoped = await withContextScope(ctx, harnessSession, async (enriched) => {
+    const result = await callback(enriched);
+    return { result, session: result.session };
+  });
+  return { ...scoped.result, session: scoped.session };
 }

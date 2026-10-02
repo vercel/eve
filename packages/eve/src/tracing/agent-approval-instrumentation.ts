@@ -14,7 +14,8 @@ import type {
 import type { JsonValue } from "#shared/json.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
-import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
+import { decodeTraceSessionId } from "#tracing/agent-trace-context-codec.js";
 import { AGENT_SPAN_NAMES } from "#tracing/agent-span-contract.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
@@ -23,6 +24,7 @@ import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 
 interface AgentApprovalSpanState {
+  readonly traceSessionId: string;
   readonly actionCallId: string;
   readonly actionName: string;
   readonly attemptIndex: number;
@@ -74,6 +76,7 @@ export function createAgentApprovalInstrumentation(input: {
       },
       requestId: event.requestId,
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+      traceSessionId: traceSessionIdOf(event.scope),
       sessionId: event.scope.sessionId,
       startTimeMs: Date.now(),
       stepIndex: event.scope.stepIndex,
@@ -110,6 +113,7 @@ export function createAgentApprovalInstrumentation(input: {
               ...agentSpanNamingAttributes("agent.approval"),
               ...agentTraceIdentityAttributes({
                 rootSessionId: state.rootSessionId,
+                traceSessionId: state.traceSessionId,
                 sessionId: state.sessionId,
               }),
             },
@@ -179,6 +183,7 @@ function readState(value: unknown): AgentApprovalSpanState | undefined {
     requestAttribute,
     requestId: state["requestId"],
     rootSessionId: state["rootSessionId"],
+    traceSessionId: decodeTraceSessionId(state),
     sessionId: state["sessionId"],
     startTimeMs: state["startTimeMs"],
     stepIndex: state["stepIndex"],

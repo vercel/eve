@@ -20,7 +20,6 @@ import {
   genAiInputMessagesAttribute,
   genAiOutputMessagesAttribute,
   genAiSystemInstructionsAttribute,
-  systemPromptAttribute,
   textContentAttribute,
   toolResultsContentAttribute,
 } from "#tracing/agent-otel-content.js";
@@ -31,7 +30,7 @@ import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channe
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
-import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
+import { agentTraceIdentityAttributes, traceSessionIdOf } from "#tracing/agent-otel-attributes.js";
 import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
 import { createAgentMemoryInstrumentation } from "#tracing/agent-memory-instrumentation.js";
 import {
@@ -75,6 +74,8 @@ import {
   type AgentSamplingOperation,
 } from "#tracing/agent-span-contract.js";
 import { withErrorContent } from "#tracing/error-content-context.js";
+import { withAgentToolContentPolicy } from "#tracing/agent-tool-span-context.js";
+import { withOperationConversation } from "#tracing/conversation-context.js";
 import { recordAgentSpanError as recordError } from "#tracing/agent-span-error.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
 import type { ConversationEnvironment } from "#shared/conversation-context.js";
@@ -96,7 +97,7 @@ export interface AgentOtelInstrumentationInput {
 }
 
 /** OTel event definition and its trusted framework context runner. */
-export interface AgentOtelInstrumentation {
+interface AgentOtelInstrumentation {
   readonly hook: InstrumentationProviderDefinition;
   readonly prepareSessionTrace: (
     event: InstrumentationSessionStartedEvent,
@@ -220,6 +221,7 @@ export function createAgentOtelInstrumentation(
   const onStepStarted = async (event: InstrumentationStepAttemptStartedEvent): Promise<void> => {
     const turn = await input.stateStore.getTurn(event.scope.sessionId, event.scope.turnId);
     if (turn === undefined || !isSampledTrace(turn.context)) return;
+    const session = await input.stateStore.getSession(event.scope.sessionId);
     const turnContext = withChannelAudience(
       contextFromSpanContext(turn.context),
       event.scope.channelAudience,
@@ -231,20 +233,12 @@ export function createAgentOtelInstrumentation(
         input.tracer.startSpan(
           AGENT_SPAN_NAMES.step,
           {
-            attributes: {
-              "agent.framework.name": "eve",
-              "agent.framework.version": input.frameworkVersion,
-              "agent.step.attempt": event.scope.attemptIndex,
-              "agent.step.index": event.scope.stepIndex,
-              "agent.turn.id": event.scope.turnId,
-              "agent.name": event.scope.functionId,
-              ...agentSpanNamingAttributes("agent.step"),
-              ...agentTraceIdentityAttributes({
-                rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
-                sessionId: event.scope.sessionId,
-              }),
-              ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
-            },
+            attributes: runtimeAttributes.agentStepAttributes({
+              event,
+              frameworkVersion: input.frameworkVersion,
+              session,
+              turn,
+            }),
             links:
               activeSpanContext === undefined || activeSpanContext.traceId === turn.context.traceId
                 ? undefined
@@ -301,7 +295,6 @@ export function createAgentOtelInstrumentation(
   const onSessionTransition = async (
     event: InstrumentationSessionTransitionEvent,
   ): Promise<void> => {
-    await actions.flushForSessionTransition(event);
     if (event.type === "session.failed" && event.turnId !== undefined) {
       await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
         ...turn,
@@ -314,7 +307,12 @@ export function createAgentOtelInstrumentation(
         const session = await input.stateStore.getSession(event.sessionId);
         if (isSampledTrace(turn.context)) {
           const agentName = session?.agentName ?? turn.subagentName;
-          const parentContext = withChannelAudience(ROOT_CONTEXT, session?.channelAudience);
+          const parentContext = withChannelAudience(
+            turn.caller === undefined || turn.caller.isRemote === true
+              ? ROOT_CONTEXT
+              : contextFromSpanContext(turn.caller),
+            session?.channelAudience,
+          );
           const startSpan = () =>
             input.tracer.startSpan(
               agentInvocationSpanName(agentName),
@@ -329,7 +327,7 @@ export function createAgentOtelInstrumentation(
                 }),
                 kind: SpanKind.INTERNAL,
                 links: agentActivationLinks(turn),
-                root: true,
+                root: turn.caller === undefined || turn.caller.isRemote === true,
                 startTime: turn.startTimeMs,
               },
               parentContext,
@@ -383,6 +381,7 @@ export function createAgentOtelInstrumentation(
           ...agentSpanNamingAttributes(modelSpanName(event.model.modelId), "chat"),
           ...agentTraceIdentityAttributes({
             rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+            traceSessionId: traceSessionIdOf(event.scope),
             sessionId: event.scope.sessionId,
           }),
           ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
@@ -394,8 +393,6 @@ export function createAgentOtelInstrumentation(
     if (recordInputs && event.input !== undefined) {
       const genAiMessages = genAiInputMessagesAttribute(event.input.messages);
       if (genAiMessages !== undefined) span.setAttribute("gen_ai.input.messages", genAiMessages);
-      const system = systemPromptAttribute(event.input.instructions);
-      if (system !== undefined) span.setAttribute("ai.prompt.system", system);
       const genAiSystem = genAiSystemInstructionsAttribute(event.input.instructions);
       if (genAiSystem !== undefined) {
         span.setAttribute("gen_ai.system_instructions", genAiSystem);
@@ -533,7 +530,6 @@ export function createAgentOtelInstrumentation(
 
   return {
     hook: {
-      flush: actions.flushSettledInvocations,
       events: {
         ...channelDeliveries,
         "action.completed": actions.events["action.completed"],
@@ -600,17 +596,20 @@ export function createAgentOtelInstrumentation(
               seed?.forwardedTracePolicy,
               environment,
             );
-      return parent === undefined
-        ? execute()
-        : context.with(
-            markAgentTraceContext(
-              withErrorContent(
-                parent,
-                recordOutputs && effective?.action === "record" && effective.recordOutputs,
-              ),
-            ),
-            execute,
-          );
+      const toolContentPolicy = {
+        recordInputs: recordInputs && effective?.action === "record" && effective.recordInputs,
+        recordOutputs: recordOutputs && effective?.action === "record" && effective.recordOutputs,
+      };
+      if (parent === undefined) return execute();
+      const withErrorPolicy = withErrorContent(parent, toolContentPolicy.recordOutputs);
+      const operationContext =
+        operation.type === "tool.call"
+          ? withAgentToolContentPolicy(withErrorPolicy, toolContentPolicy)
+          : withErrorPolicy;
+      return context.with(
+        markAgentTraceContext(withOperationConversation(operationContext, operation.scope)),
+        execute,
+      );
     },
   };
 
@@ -634,11 +633,8 @@ export function createAgentOtelInstrumentation(
 
 function agentActivationLinks(turn: AgentTurnTraceState): Link[] | undefined {
   const links: Link[] = [];
-  if (turn.caller !== undefined) {
-    links.push({
-      context: turn.caller,
-      attributes: { "eve.link.type": "agent.dispatch" },
-    });
+  if (turn.caller?.isRemote === true) {
+    links.push({ context: turn.caller, attributes: { "eve.link.type": "agent.dispatch" } });
   }
   if (turn.channelDelivery?.requestTraceContext !== undefined) {
     links.push({

@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { VercelCaptureFailure } from "#setup/primitives/index.js";
 
 import {
-  isConflictApiFailure,
   isForbiddenApiFailure,
   isNotFoundApiFailure,
   normalizeVercelApiResult,
@@ -23,9 +22,6 @@ describe("Vercel API failure classification", () => {
   it("classifies structured resource errors", () => {
     expect(
       isNotFoundApiFailure(failure({ stdout: JSON.stringify({ error: { code: "not_found" } }) })),
-    ).toBe(true);
-    expect(
-      isConflictApiFailure(failure({ stdout: JSON.stringify({ error: { code: "conflict" } }) })),
     ).toBe(true);
     expect(
       isForbiddenApiFailure(failure({ stdout: JSON.stringify({ error: { code: "forbidden" } }) })),
@@ -51,11 +47,8 @@ describe("Vercel API failure classification", () => {
     expect(isForbiddenApiFailure(result.failure)).toBe(true);
   });
 
-  it("classifies the Vercel CLI's stderr-only resource errors", () => {
+  it("classifies the Vercel CLI's stderr-only not-found errors", () => {
     expect(isNotFoundApiFailure(failure({ stderr: "Error: Project not found. (404)" }))).toBe(true);
-    expect(isConflictApiFailure(failure({ stderr: "Error: Project already exists. (409)" }))).toBe(
-      true,
-    );
   });
 
   it("does not infer an HTTP status from the process exit code or command text", () => {
@@ -65,7 +58,6 @@ describe("Vercel API failure classification", () => {
     });
 
     expect(isNotFoundApiFailure(operational)).toBe(false);
-    expect(isConflictApiFailure(operational)).toBe(false);
     expect(isForbiddenApiFailure(operational)).toBe(false);
     expect(isForbiddenApiFailure(failure({ stderr: "Project association failed." }))).toBe(false);
   });

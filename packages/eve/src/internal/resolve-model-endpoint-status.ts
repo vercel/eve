@@ -29,7 +29,7 @@ export type GatewayCredentialSource = { kind: "env-file"; path: string } | { kin
  * whatever their vantage point can see — env files on disk, the process
  * environment, an SDK token lookup — and the resolver ranks it.
  */
-export interface GatewayCredentialEvidence {
+interface GatewayCredentialEvidence {
   /** `AI_GATEWAY_API_KEY` found in an app env file (the file's name). */
   readonly apiKeyFile?: string;
   /** `AI_GATEWAY_API_KEY` present in the process environment. */

@@ -32,6 +32,7 @@ export type {
   AssertionResult,
   AssertionSeverity,
   EveEvalActionStatus,
+  EveEvalAgentSession,
   EveEvalAssertions,
   EveEvalContext,
   EveEvalDerivedFacts,

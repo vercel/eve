@@ -31,10 +31,7 @@ export class RegistryFlowFailedError extends Error {
 function hasSettledOutcomes(
   result: RegistrySessionResult | undefined,
 ): result is RegistrySessionResult {
-  return (
-    result !== undefined &&
-    (result.items.length > 0 || result.failures.length > 0 || result.outcomes !== undefined)
-  );
+  return result !== undefined && result.outcomes.length > 0;
 }
 
 /** Searches the catalog and installs one selected item with its required setup. */
@@ -110,7 +107,11 @@ export async function runRegistryFlow(input: {
           });
         const run = () => (input.runItem === undefined ? install() : input.runItem(install));
         const installed = await (input.prompter.withExclusiveTerminal?.(run) ?? run());
-        activeSession.add(label(item), installed.output, installed.setup);
+        if (installed.setupIncomplete !== undefined) {
+          activeSession.addIncomplete(label(item), installed.setupIncomplete.resumeCommand);
+        } else {
+          activeSession.add(label(item), installed.output, installed.setup);
+        }
       } catch (error) {
         input.signal?.throwIfAborted();
         if (error instanceof WizardCancelledError) {

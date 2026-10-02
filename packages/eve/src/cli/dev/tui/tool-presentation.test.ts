@@ -11,10 +11,10 @@ describe("presentPreparingTool", () => {
     expect(presentPreparingTool("final_output").title).toBe("Return final output");
   });
 
-  it("keeps unknown tools on their name with a quiet hint", () => {
+  it("leads unknown tools with their name", () => {
     const presentation = presentPreparingTool("linear__list_issues");
-    expect(presentation.title).toBe("linear__list_issues");
-    expect(presentation.subtitle).toBe("preparing…");
+    expect(presentation.title).toBe("linear__list_issues …");
+    expect(presentation.subtitle).toBe("");
   });
 });
 
@@ -139,45 +139,31 @@ describe("presentTool", () => {
     ).toBe("Search pricing");
   });
 
-  it("renders todo maintenance without dumping the list", () => {
-    const update = presentTool("todo", {
-      todos: [
-        { content: "a", status: "completed", priority: "high" },
-        { content: "b", status: "in_progress", priority: "low" },
-      ],
-    });
-    expect(update.title).toBe("Update todo list");
-    expect(update.subtitle).toBe("2 tasks");
-    expect(update.summarizeResult({ counts: { total: 2 } })).toBeUndefined();
-
-    expect(presentTool("todo", {}).title).toBe("Read todo list");
-    expect(presentTool("todo", undefined).title).toBe("Read todo list");
-  });
-
   it("renders the remaining structured builtins semantically", () => {
-    expect(presentTool("ask_question", { prompt: "Which environment?" }).title).toBe(
+    expect(presentTool("ask_question", { question: "Which environment?" }).title).toBe(
       "Ask Which environment?",
     );
     expect(presentTool("agent", { message: "Audit the auth flow.\nDetails…" }).title).toBe(
       "Delegate Audit the auth flow.",
     );
-    expect(presentTool("connection_search", { keywords: "linear issues" }).title).toBe(
-      "Discover linear issues",
+    expect(presentTool("connection_search", { query: "linear issues" }).title).toBe(
+      "Search linear issues",
     );
+    expect(
+      presentTool("connection_execute", { connection: "linear", tool: "list_issues" }).title,
+    ).toBe("Call linear.list_issues");
     expect(presentTool("final_output", { anything: true }).title).toBe("Return final output");
   });
 
   it("covers the builtin presentation table with semantic copy", () => {
     const representativeInputs: Record<string, unknown> = {
       agent: { message: "audit the auth flow" },
-      ask_question: { prompt: "Which environment?" },
+      ask_question: { question: "Which environment?" },
       bash: { command: "ls" },
       glob: { pattern: "**/*.ts" },
       grep: { pattern: "useEve" },
       load_skill: { skill: "commit" },
       read_file: { filePath: "/workspace/a.ts" },
-      task_cancel: { taskIds: ["task_abc"] },
-      todo: { todos: [] },
       web_fetch: { url: "https://example.com" },
       web_search: { query: "eve framework" },
       write_file: { filePath: "/workspace/a.ts", content: "x" },
@@ -206,9 +192,16 @@ describe("presentTool", () => {
     expect(presentation.group).toBeUndefined();
     expect(presentation.doneTitle).toBeUndefined();
     expect(presentPreparingTool("task_update")).toMatchObject({
-      title: "task_update",
-      subtitle: "preparing…",
+      title: "task_update …",
+      subtitle: "",
     });
+  });
+
+  it("keeps eve's own copy for builtin tools over their provided labels", () => {
+    // Provided tools define labels too; eve's copy keeps them groupable.
+    const presentation = presentTool("bash", { command: "ls" }, { label: "bash ls" });
+    expect(presentation.title).toBe("Run ls");
+    expect(presentation.group?.verb).toBe("Run");
   });
 
   it("presents a named subagent dispatch as a delegation", () => {
@@ -217,16 +210,30 @@ describe("presentTool", () => {
       { message: "Look up GOOG.\nDetails…" },
       { isSubagent: true },
     );
-    expect(parsed.title).toBe("Delegate stock-price");
-    expect(parsed.doneTitle).toBe("Delegated stock-price");
+    expect(parsed.title).toBe("Delegate subagent(stock-price)");
+    expect(parsed.doneTitle).toBe("Delegated subagent(stock-price)");
     expect(parsed.subtitle).toBe("Look up GOOG.");
 
     // The tool's name carries the target, so it shows before args parse.
     expect(presentPreparingTool("stock-price", { isSubagent: true }).title).toBe(
-      "Delegate stock-price …",
+      "Delegate subagent(stock-price) …",
     );
+    const selfModification = presentTool(
+      "self-modification__agent",
+      { message: "Edit Alice's agent" },
+      { isSubagent: true },
+    );
+    expect(selfModification.title).toBe("Delegate agent editor");
+    expect(selfModification.doneTitle).toBe("Delegated agent editor");
     // Without roster knowledge the generic formatter keeps its shape.
     expect(presentTool("stock-price", { message: "x" }).title).toBe("stock-price");
+  });
+
+  it("names the self-modification subagent without its extension namespace", () => {
+    expect(
+      presentTool("self-modification__agent", { message: "Add a tool." }, { isSubagent: true })
+        .title,
+    ).toBe("Delegate agent editor");
   });
 
   it("keeps unknown tools on the generic formatter", () => {

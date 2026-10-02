@@ -1,4 +1,9 @@
 import type { ApplyModelOutcome } from "#setup/flows/model-source-change.js";
+import {
+  LOGIN_CONNECTION_COMMAND_HINT,
+  loginConnectionForCommand,
+} from "#setup/flows/model-login-options.js";
+import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 import type {
@@ -12,7 +17,7 @@ import type { DevelopmentTuiTarget } from "./target.js";
 
 type ExtensionCommand = Extract<PromptCommand, { type: "extension" }>;
 
-export interface PromptCommandHandlerOptions {
+interface PromptCommandHandlerOptions {
   readonly target: DevelopmentTuiTarget;
   /** Test seam; defaults to the model flow's shared source-change apply. */
   readonly applyModel?: (input: { appRoot: string; slug: string }) => Promise<ApplyModelOutcome>;
@@ -36,41 +41,89 @@ export function createPromptCommandHandler(
       // drift from discovery.
       if (target.kind === "remote" && !isPromptCommandAvailableFor(command.name, "remote")) {
         return {
-          message: `/${command.name} needs eve dev running the local server (it is not available with --url).`,
+          message: `/${command.name} needs eve dev running the local server (it is not available when connected to a remote agent).`,
         };
       }
 
-      // `/model <slug>` applies directly; only the bare command opens the
-      // configure menu flow below.
-      if (command.name === "model" && command.argument.length > 0) {
+      // Model selection is owned by the inline command drawer. Once the
+      // drawer submits, this is the command's single apply path.
+      if (command.name === "model") {
+        if (command.argument.length === 0) {
+          return { message: "Choose a model from the inline /model suggestions." };
+        }
         if (target.kind !== "local") {
           return {
             message:
-              "/model needs eve dev running the local server (it is not available with --url).",
+              "/model needs eve dev running the local server (it is not available when connected to a remote agent).",
           };
         }
         const appRoot = target.agentRoot ?? target.workspaceRoot;
+        const usage = modelFailure(
+          "Use `/model provider/model [default|none|minimal|low|medium|high|xhigh]`.",
+        );
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
           const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
-          const { changeAgentModel, formatApplyModelOutcome } =
+          const { changeAgentModel, changeAgentModelSettings } =
             await import("#setup/flows/model-source-change.js");
+          const [slug, reasoning, ...extra] = command.argument.split(/\s+/u);
+          if (slug === undefined || extra.length > 0) return usage;
+          if (
+            reasoning !== undefined &&
+            !["default", "none", "minimal", "low", "medium", "high", "xhigh"].includes(reasoning)
+          ) {
+            return usage;
+          }
           // A source-backed model (an SDK model call) isn't a string literal eve
           // can rewrite; refuse with a clear reason rather than silently no-op.
           const checkRefusal = options.modelChangeRefusal ?? modelChangeRefusalForUneditableModel;
           const refusal = await checkRefusal(appRoot);
-          if (refusal !== null) {
-            return { message: refusal };
+          if (refusal !== null) return modelFailure(refusal);
+          const requested = reasoning === undefined ? slug : `${slug} ${reasoning}`;
+          if (reasoning !== undefined) {
+            const outcome = await changeAgentModelSettings({
+              appRoot,
+              patch: {
+                model: { kind: "set", value: slug },
+                reasoning:
+                  reasoning === "default"
+                    ? { kind: "remove" }
+                    : { kind: "set", value: reasoning as AgentReasoningDefinition },
+                gatewayServiceTier: { kind: "keep" },
+              },
+            });
+            if (outcome.kind === "rejected") return modelFailure(outcome.message);
+            return outcome.kind === "unchanged"
+              ? { message: "", summary: `Model already set to ${requested}` }
+              : { message: "", summary: `Model set to ${requested}` };
           }
           const applyModel = options.applyModel ?? changeAgentModel;
-          return {
-            message: formatApplyModelOutcome(await applyModel({ appRoot, slug: command.argument })),
-          };
+          const outcome = await applyModel({ appRoot, slug });
+          if (outcome.kind === "rejected") return modelFailure(outcome.message);
+          return outcome.kind === "unchanged"
+            ? { message: "", summary: `Model already set to ${outcome.model}` }
+            : { message: "", summary: `Model set to ${outcome.to}` };
         } catch (error) {
-          return {
-            message: `Couldn't change the model: ${toErrorMessage(error)}`,
-          };
+          return modelFailure(toErrorMessage(error));
         }
+      }
+
+      if (command.name === "add" && command.argument.length === 0) {
+        return { message: "Choose an integration from the inline /add suggestions." };
+      }
+
+      const loginConnection =
+        command.name === "login" && command.argument.length > 0
+          ? loginConnectionForCommand(command.argument)
+          : undefined;
+      if (
+        command.name === "login" &&
+        command.argument.length > 0 &&
+        loginConnection === undefined
+      ) {
+        return {
+          message: `Use \`/login ${LOGIN_CONNECTION_COMMAND_HINT}\`.`,
+        };
       }
 
       const flow = context.renderer.setupFlow;
@@ -84,9 +137,8 @@ export function createPromptCommandHandler(
       } catch (error) {
         return { message: `/${command.name} failed: ${toErrorMessage(error)}` };
       }
-      const { runTuiSetupCommand, SETUP_FLOW_CONFIG } = setupCommands;
-      const flowConfig = SETUP_FLOW_CONFIG[command.name];
-      flow.begin(flowConfig.title, flowConfig.indicator);
+      const { runTuiSetupCommand } = setupCommands;
+      flow.begin("");
       let preserveFlowDiagnostics = true;
       try {
         const commandInput: TuiSetupCommandInput = {
@@ -103,10 +155,8 @@ export function createPromptCommandHandler(
         if (context.onOnboardingScreen !== undefined) {
           commandInput.onOnboardingScreen = context.onOnboardingScreen;
         }
-        // `/add <item>` confirms and installs that address; bare `/add` opens the planner.
-        if (command.name === "add" && command.argument.length > 0) {
-          commandInput.initialRegistryAddress = command.argument;
-        }
+        if (command.name === "add") commandInput.initialRegistryAddress = command.argument;
+        if (loginConnection !== undefined) commandInput.initialLoginConnection = loginConnection;
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;
@@ -118,4 +168,8 @@ export function createPromptCommandHandler(
       }
     },
   };
+}
+
+function modelFailure(message: string): PromptCommandOutcome {
+  return { message, summary: "Couldn't change the model", failed: true };
 }

@@ -1,0 +1,229 @@
+---
+title: "Sandbox"
+description: "Configure the isolated filesystem and command environment used by an eve agent."
+---
+
+Every eve agent has one sandbox rooted at `/workspace`. The built-in `bash`, `read_file`, and `write_file` tools use it. Without an authored sandbox file, eve selects the best available environment automatically.
+
+## Use the sandbox
+
+Authored tools and callbacks access the live sandbox with `ctx.getSandbox()`:
+
+```ts title="agent/tools/run_analysis.ts"
+import { defineTool } from "eve/tools";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Run a Python script.",
+  inputSchema: z.object({ script: z.string() }),
+  async execute({ script }, ctx) {
+    const sandbox = await ctx.getSandbox();
+    await sandbox.writeTextFile({ path: "analysis.py", content: script });
+    const result = await sandbox.run({ command: "python analysis.py" });
+    if (result.exitCode !== 0) throw new Error(result.stderr);
+    return result.stdout;
+  },
+});
+```
+
+Relative paths resolve under `/workspace`. `run()` returns `{ exitCode, stdout, stderr }`; a nonzero exit code does not throw automatically. Use `spawn()` for a long-running process.
+
+Pass the configured environment to preserve its specific session capabilities in authored runtime code:
+
+```ts
+import { environment } from "../sandbox";
+
+const sandbox = await ctx.getSandbox(environment);
+await sandbox.setNetworkPolicy("deny-all");
+```
+
+For example, a Vercel environment returns a handle with `setNetworkPolicy()`. The common handle from `ctx.getSandbox()` does not expose provider-specific capabilities. The environment must match the one configured for the current sandbox.
+
+## Define an environment
+
+A sandbox module exports an environment and returns a sandbox from `defineSandbox()`:
+
+```ts title="agent/sandbox.ts"
+import { DefaultSandbox, defineSandbox } from "eve/sandbox";
+
+export const environment = DefaultSandbox.environment();
+export default defineSandbox(() => environment.open());
+```
+
+`environment.open()` starts the persistent sandbox owned by the current eve session. The `defineSandbox()` selector runs until initialization succeeds, then eve checkpoints the selected provider and its state. Later workflow steps and process restarts call the provider's `resume()` directly without rerunning the selector or `environment.open()`.
+
+Pass options for the live sandbox to `open()`, then configure the returned sandbox before returning it. This initialization runs once for a successfully started durable sandbox:
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export const environment = VercelSandbox.environment();
+
+export default defineSandbox(async ({ session }) => {
+  const sandbox = await environment.open({ networkPolicy: "deny-all" });
+  await sandbox.writeTextFile({ path: ".eve/session", content: session.id });
+  return sandbox;
+});
+```
+
+The environment export is required because `eve build` prepares immutable environment inputs before a session exists.
+
+### Prepare a reusable environment
+
+Use the environment's `prepare` option for setup every new sandbox inherits:
+
+```ts
+import { defineSandbox } from "eve/sandbox";
+import { VercelSandbox } from "eve/sandbox/vercel";
+
+export const environment = VercelSandbox.environment({
+  prepare: async (sandbox) => {
+    const result = await sandbox.run({
+      command: "sudo apt-get update && sudo apt-get install -y jq",
+    });
+    if (result.exitCode !== 0) throw new Error(result.stderr);
+  },
+});
+
+export default defineSandbox(() => environment.open());
+```
+
+eve runs `prepare` while creating a reusable provider artifact, not once for each live session sandbox. Vercel captures a snapshot; Docker captures an image; microsandbox captures a VM snapshot; and just-bash captures a filesystem template.
+
+During `eve dev`, startup and authored-source rebuilds do not prepare sandbox environments. The first sandbox access prepares all environments in that compiled generation before opening the requested sandbox. This includes environments declared by subagents and extensions, even if they use different providers. Concurrent requests share the preparation work; a failed preparation can be retried on a later access. Optional provider installation and setup can make that first access slow.
+
+`eve build` still prepares environments eagerly. In production, eve passes the recorded artifact directly to the provider when it creates a live sandbox. Production runtime does not rebuild or repair a missing artifact. A missing image, snapshot, or template fails with rebuild or redeploy guidance.
+
+### Reuse native resources across sessions
+
+Built-in environments do not expose cross-session sharing. To reuse native compute or storage across eve sessions, define a custom provider that returns a session-owned logical sandbox view and keeps shared resources outside that view's `stop`, `shutdown`, and `delete` operations. A session-specific path is not an isolation boundary; mutually untrusted sessions require separate native compute or stronger provider-owned isolation.
+
+### Share a parent sandbox
+
+A declared subagent can use its dispatching parent's sandbox explicitly:
+
+```ts title="agent/subagents/reviewer/sandbox.ts"
+import { defineParentSandbox } from "eve/sandbox";
+
+export default defineParentSandbox();
+```
+
+An inheriting subagent cannot declare its own managed workspace or skill files.
+
+## Managed workspace and skills
+
+Use the sandbox directory for authored workspace seeds:
+
+```text
+agent/sandbox/
+  sandbox.ts
+  workspace/
+    schema.sql
+```
+
+Files under `agent/sandbox/workspace/` seed writable `/workspace`. eve copies the seed when it prepares a new environment generation. Existing live sandbox state is not overwritten by later seed changes.
+
+Agent skills are compiled into a separate resource tree and exposed at `$HOME/.agents/skills`. These are stable paths across every built-in provider, so instructions and tools can refer to `/workspace` and `$HOME/.agents/skills`. Do not refer to a concrete home directory or `/eve/resources`, which is provider-internal staging.
+
+Providers receive both trees with explicit metadata:
+
+```ts
+interface SandboxProviderResources {
+  source:
+    | { kind: "none" }
+    | { kind: "inline"; key: string }
+    | { kind: "materialized"; key: string; path: string }
+    | { kind: "reference"; key: string };
+  workspace?: SandboxProviderResourceTree;
+  skills?: SandboxProviderResourceTree;
+}
+
+interface SandboxProviderResourceTree {
+  key: string;
+  files: ResourceFile[];
+  mountPath: string;
+  targetPath: string;
+}
+```
+
+Docker and microsandbox mount the compiled trees read-only under `/eve/resources`, copy workspace seeds into writable `/workspace`, and expose skills read-only where possible. Vercel's snapshot environment writes workspace and skill contents before capturing its snapshot. Custom providers decide whether to upload, mount, or write each tree, but must expose the final target paths before authored preparation runs.
+
+## Custom providers
+
+Define a provider with `defineSandboxProvider()` from `eve/sandbox/provider`. The five generic parameters describe environment options, live options, the prepared artifact, minimal serialized session state, and the provider-specific sandbox session type:
+
+```ts
+import type { SandboxSession } from "eve/sandbox";
+import { defineSandboxProvider } from "eve/sandbox/provider";
+
+export const AcmeSandbox = defineSandboxProvider<
+  { image: string; prepare?: (sandbox: SandboxSession) => Promise<void> },
+  { networkPolicy?: "allow-all" | "deny-all" },
+  { templateId: string },
+  { remoteId: string; version: 1 },
+  SandboxSession
+>({
+  name: "acme",
+  environment(options) {
+    const client = createAcmeClient(options);
+
+    return {
+      async prepare(ctx) {
+        const temporary = await client.createTemporary({
+          files: await ctx.files.list(),
+          resources: ctx.resources,
+        });
+        const sandbox = adaptAcmeSandbox(temporary);
+        await options?.prepare?.(sandbox);
+        return { templateId: (await temporary.capture()).id };
+      },
+
+      async start(ctx, liveOptions, artifact) {
+        const remote = await client.open({
+          identity: sessionIdentity(ctx.session.id, artifact, liveOptions),
+          networkPolicy: liveOptions?.networkPolicy,
+          templateId: artifact.templateId,
+        });
+        return {
+          handle: createHandle(remote),
+          state: { remoteId: remote.id, version: 1 },
+        };
+      },
+
+      async resume(_ctx, artifact, state) {
+        const remote = await client.resume({ id: state.remoteId, templateId: artifact.templateId });
+        return createHandle(remote);
+      },
+    };
+  },
+});
+```
+
+`prepare()` returns the complete JSON-serializable artifact. Core calls `start()` once for a new durable sandbox session and persists its minimal JSON-compatible state. Process restarts call `resume()` with only the current context, that state, and the target deployment's exact artifact. Provider handles implement `onSessionStop()`, `onRuntimeShutdown()`, and `onSessionDelete()`.
+
+Open options belong to `start()` and are not serialized or passed to `resume()`. A provider must put any immutable option-derived data needed for reconnection in its session state. With the current immutable-state contract, `resume()` reconnects existing native state and fails if it is gone rather than recreating callback side effects. A custom provider may define start-only callback fields, but built-in providers initialize the sandbox in `defineSandbox()` after `open()`.
+
+Preparation discovers authored files through `ctx.files`; core keeps project layout and artifact storage keys private. Keep provider SDK values behind the provider. `environment.open()` preserves the provider's sandbox capability type, while the heterogeneous runtime registry erases it to eve's common session surface.
+
+## Providers
+
+| Provider                                   | Use it for                                                                              |
+| ------------------------------------------ | --------------------------------------------------------------------------------------- |
+| [Default](/docs/sandbox/default)           | Automatic provider selection with eve's standard behavior.                              |
+| [Vercel](/docs/sandbox/vercel)             | Snapshot-backed persistent Vercel Sandboxes, domain network policies, and Drive mounts. |
+| [Docker](/docs/sandbox/docker)             | Local containers from the default image, an existing OCI image, or a Dockerfile.        |
+| [microsandbox](/docs/sandbox/microsandbox) | Local lightweight VMs from an OCI image or Dockerfile.                                  |
+| [just-bash](/docs/sandbox/just-bash)       | A pure-JavaScript shell and virtual filesystem without native process isolation.        |
+
+## Lifecycle
+
+Session-owned sandboxes persist across turns and deployments while their provider state remains available. `sandbox.stop()` stops compute without deleting persisted state; a later access resumes that state directly. `sandbox.delete()` clears provider state, so the next `ctx.getSandbox()` reruns the selector and starts a fresh sandbox from the current environment.
+
+Changing sandbox source, preparation code, Dockerfile content, environment options, workspace resources, or skills produces a new environment generation. Existing durable sessions retain their recorded sandbox state; new sessions use the current generation.
+
+## What to read next
+
+- [Subagents](/docs/subagents) explains delegation and sandbox ownership.
+- [Security model](/docs/concepts/security-model) describes the app-runtime and sandbox trust boundary.
+- [Vercel Sandbox](https://vercel.com/docs/sandbox) documents hosted sandbox behavior.

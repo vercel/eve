@@ -224,9 +224,10 @@ export function noFailedActions(): RunAssertion {
 }
 
 /**
- * Asserts a subagent delegation to `name` occurred. Identity and remote
- * metadata come from `subagent.called`; `output` comes from
- * `subagent.completed`.
+ * Asserts a call to the agent tool `name` occurred. Each call to an agent
+ * task counts once: its status and `output` come from `task.settled`, and the
+ * session and remote metadata from the task's `agent.started` once its
+ * session opened.
  */
 export function calledSubagent(
   name: string,
@@ -367,7 +368,7 @@ export function outputMatches(schema: StandardSchemaV1): RunAssertion {
 function joinCompletedMessages(events: readonly MessageStreamEvent[]): string {
   const parts: string[] = [];
   for (const evt of events) {
-    if (evt.type === "message.completed" && evt.data.message !== null) {
+    if (evt.type === "message.completed") {
       parts.push(evt.data.message);
     }
   }

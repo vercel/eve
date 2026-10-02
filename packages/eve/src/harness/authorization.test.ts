@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ActivityObserverKey, ActivityRootTurnIdKey, SessionIdKey } from "#context/keys.js";
+import { SessionIdKey } from "#context/keys.js";
 import {
   CallbackBaseUrlKey,
   clearPendingAuthorization,
   consumeAuthorizationResult,
   getPendingAuthorization,
   getHookUrl,
+  getSupersededAuthorizationChallenges,
   PendingAuthorizationResultKey,
   resolveActiveAuthorizationChallenges,
   setPendingAuthorization,
@@ -107,23 +108,6 @@ function candidateChallenge(name: string, candidateId: string) {
 }
 
 describe("pending authorization state", () => {
-  it("captures the originating activity turn", () => {
-    const ctx = new ContextContainer();
-    ctx.set(ActivityObserverKey, {
-      sink: { url: "https://agent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz", version: 1 },
-    });
-    ctx.set(ActivityRootTurnIdKey, "turn-origin");
-    const state = contextStorage.run(ctx, () =>
-      setPendingAuthorization(undefined, {
-        challenges: [candidateChallenge("github", "candidate-1")],
-      }),
-    );
-
-    expect(getPendingAuthorization(state)?.activityRootTurnIds).toEqual({
-      "candidate-1": "turn-origin",
-    });
-  });
-
   it("merges concurrent candidate challenges by authorization name", () => {
     const first = setPendingAuthorization(undefined, {
       challenges: [candidateChallenge("candidate-1:github", "candidate-1")],
@@ -222,6 +206,29 @@ describe("pending authorization attempts", () => {
         setPendingAuthorization(undefined, { challenges: [first, otherPrincipal, latest] }),
       )?.challenges,
     ).toEqual([otherPrincipal, latest]);
+  });
+
+  it("shows one sign-in per Vercel Connect grant across tools and connections", () => {
+    const alice = { id: "alice", issuer: "idp", type: "user" } as const;
+    const bob = { id: "bob", issuer: "idp", type: "user" } as const;
+    const grant = (name: string, attemptId: string, principal: ConnectionPrincipal = alice) => ({
+      ...challenge(name, attemptId, principal),
+      grant: "linear/myagent",
+    });
+    const pending = setPendingAuthorization(undefined, {
+      challenges: [grant("linear", "connection")],
+    });
+    const listTool = grant("list_issues__linear_myagent", "list-tool");
+    const createTool = grant("create_issue__linear_myagent", "create-tool");
+    const bobTool = grant("create_issue__linear_myagent", "bob-tool", bob);
+    const approval = { ...grant("candidate-1:linear", "approval"), candidateId: "candidate-1" };
+
+    expect(resolveActiveAuthorizationChallenges([listTool, createTool, bobTool, approval])).toEqual(
+      [createTool, bobTool, approval],
+    );
+    expect(getSupersededAuthorizationChallenges(pending, [createTool])).toEqual([
+      grant("linear", "connection"),
+    ]);
   });
 
   it("clears by exact attempt identity", () => {

@@ -17,7 +17,7 @@ import { setupIntegration } from "./registry.js";
 import type { IntegrationSetupResult, SetupExternalAction } from "./types.js";
 
 /** Inputs shared by every registry-owned integration setup flow. */
-export interface RunIntegrationSetupOptions {
+interface RunIntegrationSetupOptions {
   /** Selected agent project where authored files are changed. */
   appRoot: string;
   /** Project root for shared dependencies, Vercel links, and environment files. */
@@ -36,7 +36,7 @@ export interface RunIntegrationSetupOptions {
 }
 
 /** Effects shared by the built-in integration setup runner. */
-export type SetupProjectResolver = (integration: string) => Promise<VercelProjectReference>;
+type SetupProjectResolver = (integration: string) => Promise<VercelProjectReference>;
 
 export interface IntegrationSetupRunnerDeps {
   detectDeployment: typeof detectDeployment;

@@ -1,5 +1,10 @@
 import type { SandboxSession } from "eve/sandbox";
 
+import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
+type NetworkPolicySandboxSession = SandboxSession & {
+  setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void>;
+};
+
 import { gitHubRemoteUrl } from "#shared/git.js";
 import { shellQuote } from "#shared/shell-quote.js";
 
@@ -8,9 +13,9 @@ import { gitOutput, runGitCommand, withBrokeredGitHubCredential } from "./git.js
 import { assertFullSha, assertGitRef } from "./identifiers.js";
 
 export const SELF_MODIFICATION_CONFIG_PATH = "agent/extensions/self-modification/extension.ts";
-export const WORKSPACE_PATH = "/workspace";
+const WORKSPACE_PATH = "/workspace";
 export const REPOSITORY_PATH = `${WORKSPACE_PATH}/repository`;
-export const BASE_REF = "refs/eve-self-modification/base";
+const BASE_REF = "refs/eve-self-modification/base";
 const GIT_FETCH_ENV =
   "GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_LFS_SKIP_SMUDGE=1 GIT_TERMINAL_PROMPT=0";
 
@@ -22,7 +27,7 @@ export interface PreparedSelfModificationWorkspace {
   readonly targetBranch: string;
 }
 
-type CheckoutSandbox = Pick<SandboxSession, "run" | "setNetworkPolicy">;
+type CheckoutSandbox = Pick<NetworkPolicySandboxSession, "run" | "setNetworkPolicy">;
 
 /** Prepares a token-free remote and immutable target-branch checkout for one child session. */
 export async function prepareSelfModificationWorkspace(input: {
@@ -85,7 +90,7 @@ export async function readPreparedSelfModificationWorkspace(input: {
   };
 }
 
-export async function verifyApplicationRoot(
+async function verifyApplicationRoot(
   sandbox: Pick<SandboxSession, "run">,
   directory: string,
 ): Promise<void> {

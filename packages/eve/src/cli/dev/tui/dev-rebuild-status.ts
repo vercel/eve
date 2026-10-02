@@ -7,7 +7,7 @@
 
 import type { WatcherChangeEvent } from "#internal/nitro/host/dev-watcher-log.js";
 
-export type DevRebuildPhase = "rebuilding" | "rebuilt" | "reloading";
+type DevRebuildPhase = "rebuilding" | "rebuilt" | "reloading";
 
 const MAX_SUMMARY_PATHS = 3;
 

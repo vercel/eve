@@ -5,7 +5,7 @@ import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 
-export interface EffectiveAgentRuntime {
+interface EffectiveAgentRuntime {
   readonly limits?: AgentLimitsDefinition;
   readonly thresholdPercent?: number;
   readonly turnAgent: RuntimeTurnAgent;
@@ -47,7 +47,6 @@ export function resolveEffectiveAgentRuntimeFromConfig(
       ...turnAgent,
       compactionModel: config.compaction?.model,
       model: config.model,
-      outputSchema: config.outputSchema,
       reasoning: config.reasoning,
     },
   };

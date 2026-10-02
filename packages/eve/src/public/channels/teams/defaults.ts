@@ -13,6 +13,7 @@ import type {
   TeamsContext,
   TeamsInboundResult,
 } from "#public/channels/teams/teamsChannel.js";
+import { displayProperName } from "#shared/display-name.js";
 import { parseJsonObject } from "#shared/json.js";
 
 /** Default auth projection for Teams message actors. */
@@ -203,10 +204,9 @@ export const defaultEvents: TeamsChannelEvents = {
   },
 };
 
-/** Capitalizes the first character of a connection name for Teams auth card display (e.g. "linear" -> "Linear"). */
+/** A connection name for the Teams auth card (`linear` → `Linear`). */
 export function formatConnectionDisplayName(connectionName: string): string {
-  if (connectionName.length === 0) return connectionName;
-  return connectionName.charAt(0).toUpperCase() + connectionName.slice(1);
+  return displayProperName(connectionName);
 }
 
 /** Builds final-state text for a completed connection authorization attempt. */

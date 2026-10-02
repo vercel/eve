@@ -1,7 +1,12 @@
-import { updatePendingAuthorizations } from "#client/session-utils.js";
-import type { MessageStreamEvent } from "#protocol/message.js";
-import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/message.js";
-import { EVE_SESSION_ROUTE_PATH, createEveSessionRoutePath } from "#protocol/routes.js";
+import { TurnSegment } from "#client/session-utils.js";
+import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import {
+  EVE_SESSION_ROUTE_PATH,
+  createEveSessionRoutePath,
+  createEveSessionStreamRoutePath,
+} from "#protocol/routes.js";
+import { ClientAgentSession } from "#client/agent-session.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
 import { followStreamIterable, sleep } from "#client/open-stream.js";
@@ -161,10 +166,9 @@ export class ClientSession {
     );
   }
 
-  /** Requests cooperative cancellation of this session's active turn and optionally its tasks. */
+  /** Requests cooperative cancellation of this session's active turn. */
   async cancel(options?: {
     readonly signal?: AbortSignal;
-    readonly tasks?: boolean;
     readonly turnId?: string;
   }): Promise<CancelSessionResult> {
     return await cancelClientSession({
@@ -206,6 +210,16 @@ export class ClientSession {
     return this.#streamAndAdvance(options);
   }
 
+  /**
+   * The session an agent run opened, as this session's stream announced it.
+   * Pass an `agent.started` event from this session, then follow the child
+   * with `stream()`; reads use this session's host and credentials, for local
+   * and remote agents alike.
+   */
+  agent(started: AgentStartedStreamEvent): ClientAgentSession {
+    return new ClientAgentSession(this.#context, started);
+  }
+
   [followSession](options: FollowSessionOptions): AsyncIterable<MessageStreamEvent> {
     return this.#streamAndAdvance({ ...options, keepAlive: true });
   }
@@ -235,7 +249,7 @@ export class ClientSession {
     let eventCount = 0;
     let started = deliveryId === undefined;
     let reachedBoundary = false;
-    const pendingAuthorizations = new Set<string>();
+    const segment = new TurnSegment({ followCallbacks: true });
     try {
       for await (const event of source ??
         this.#readStream({
@@ -258,10 +272,7 @@ export class ClientSession {
           if (!terminal && event.meta?.deliveryIds !== undefined && !matches) continue;
           started = true;
         }
-        updatePendingAuthorizations(pendingAuthorizations, event);
-        reachedBoundary =
-          isCurrentTurnBoundaryEvent(event) &&
-          (event.type !== "session.waiting" || pendingAuthorizations.size === 0);
+        reachedBoundary = segment.observe(event);
         yield event;
         if (reachedBoundary) {
           break;
@@ -323,8 +334,8 @@ export class ClientSession {
       host: this.#context.host,
       keepAlive: input.keepAlive,
       resolveHeaders: () => this.#context.resolveHeaders(input.resolveHeaders?.() ?? input.headers),
+      path: createEveSessionStreamRoutePath(this.#state.sessionId),
       redirect: this.#context.redirect,
-      sessionId: this.#state.sessionId,
       signal: input.signal,
       startIndex: input.startIndex,
       streamReconnectPolicy: input.streamReconnectPolicy,

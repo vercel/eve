@@ -36,7 +36,7 @@ import {
   resolveConnectionPrincipal,
   resolveConnectionPrincipalFromAuth,
 } from "#runtime/connections/principal.js";
-import type { SessionAuthContext } from "#context/keys.js";
+import { AuthKey, type SessionAuthContext } from "#context/keys.js";
 import {
   type AuthorizationDefinition,
   type ConnectionAuthorizationContext,
@@ -90,6 +90,10 @@ export function createAuthorizationExecution(
 
   return {
     complete,
+    /** Whether this execution completed a sign-in for `scoped`. */
+    isJustAuthorized(scoped: ScopedAuthorization): boolean {
+      return justAuthorized.has(scoped.instanceId ?? scoped.scope);
+    },
     async getToken(scoped: ScopedAuthorization): Promise<TokenResult> {
       await complete(scoped);
       try {
@@ -314,7 +318,7 @@ export async function completeScopedAuthorization(input: ScopedAuthorization): P
  * callback URL can be minted (for example outside a deployment), so
  * callers can fall through to rethrowing the original `Required` error.
  */
-export async function startScopedAuthorization(
+async function startScopedAuthorization(
   input: ScopedAuthorization,
 ): Promise<AuthorizationSignal | undefined> {
   const { scope, authorization, connection } = input;
@@ -325,6 +329,7 @@ export async function startScopedAuthorization(
 
   const interactive = authorization as InteractiveAuthorizationDefinition<JsonValue>;
   const principal = resolveScopedPrincipal(input);
+  const requester = input.boundResponder ?? contextStorage.getStore()?.get(AuthKey) ?? undefined;
   const callbackUrl = resolveAuthorizationCallbackUrl({
     authorization,
     callbackUrl: attempt.hookUrl,
@@ -338,10 +343,13 @@ export async function startScopedAuthorization(
     {
       attemptId: attempt.attemptId,
       challenge: stampChallengeDisplayName(challenge, authorization),
+      grant: authorization.vercelConnect?.connector,
       hookUrl: callbackUrl,
       instanceId: input.instanceId,
       name: scope,
       principal,
+      principalId: requester?.principalId,
+      requester,
       resume,
     },
   ]);

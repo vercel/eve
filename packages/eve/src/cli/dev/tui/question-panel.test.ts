@@ -31,24 +31,24 @@ function render(state: {
 }
 
 describe("renderQuestionPanel", () => {
-  it("opens with a borderless prompt and closes on the dismiss hint", () => {
+  it("renders a prompt and options for its enclosing drawer", () => {
     const rows = render({ cursor: 0 });
 
     expect(rows[0]).toBe("  What type of options would you like to see?");
     expect(rows).toContain("  What type of options would you like to see?");
-    expect(rows.find((row) => row.includes("1. Available Tools"))).toContain("›");
-    expect(rows).toContain("        See 4 tools I can use");
-    expect(rows).toContain("     2. Connected Services");
+    expect(rows.find((row) => row.includes("Available Tools"))).toBe("     Available Tools");
+    expect(rows).toContain("     See 4 tools I can use");
+    expect(rows).toContain("     Connected Services");
     expect(rows[1]).toBe("");
-    expect(rows.at(-1)).toBe("  Esc to dismiss");
+    expect(rows.at(-1)).toBe("     Type your own answer…");
   });
 
   it("marks only the cursor row with the pointer and enter badge", () => {
     const rows = render({ cursor: 1 });
     const selected = rows.find((row) => row.includes("Connected Services"));
 
-    expect(selected).toContain(" › 2. Connected Services ");
-    expect(selected).toContain("↵");
+    expect(selected).toBe("     Connected Services");
+    expect(selected).not.toContain("↵");
     expect(rows.find((row) => row.includes("Available Tools"))).not.toContain("›");
   });
 
@@ -56,21 +56,21 @@ describe("renderQuestionPanel", () => {
     const columnsOf = (rows: string[]) =>
       rows
         .filter((row) => row.includes("Connected Services"))
-        .map((row) => row.indexOf("2. Connected Services"));
+        .map((row) => row.indexOf("Connected Services"));
 
     // Selected and unselected variants of the same row must not drift.
     expect(columnsOf(render({ cursor: 1 }))).toEqual(columnsOf(render({ cursor: 0 })));
   });
 
-  it("shows the elbow editor only while the freeform row is focused or drafted", () => {
-    expect(render({ cursor: 0 }).some((row) => row.includes("⎿"))).toBe(false);
+  it("turns the freeform placeholder into an inline editor when focused", () => {
+    expect(render({ cursor: 0 }).at(-1)).toBe("     Type your own answer…");
 
     const focused = render({ cursor: 2 });
-    expect(focused.some((row) => row.includes("⎿"))).toBe(true);
+    expect(focused.at(-1)).toBe("     Type your own answer…");
 
-    // A draft typed then abandoned stays visible under the row.
+    // A draft remains in the inline field when the cursor moves away.
     const drafted = render({ cursor: 0, editor: { text: "custom", cursor: 6 } });
-    expect(drafted.find((row) => row.includes("⎿"))).toContain("custom");
+    expect(drafted.at(-1)).toBe("     custom");
   });
 
   it("splits a multi-paragraph prompt into real rows before wrapping", () => {

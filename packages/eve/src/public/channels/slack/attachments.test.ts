@@ -7,7 +7,12 @@ import {
   createSlackFetchFile,
 } from "#public/channels/slack/attachments.js";
 import type { SlackAttachment } from "#public/channels/slack/inbound.js";
+import {
+  resolveSlackTransportOptions,
+  type SlackTransportOptions,
+} from "#public/channels/slack/transport.js";
 import { DEFAULT_UPLOAD_POLICY, mergeUploadPolicy } from "#public/channels/upload-policy.js";
+import { captureLogRecords } from "#internal/testing/log-records.js";
 
 const DISABLED_POLICY = mergeUploadPolicy("disabled");
 const ZERO_BYTES_POLICY = mergeUploadPolicy({ maxBytes: 0 });
@@ -72,6 +77,7 @@ describe("collectSlackFileParts", () => {
   });
 
   it("drops attachments missing a url (nothing for fetchFile to fetch)", () => {
+    const logs = captureLogRecords();
     const attachments = makeAttachments([
       { type: "file", url: undefined, name: "ghost.csv", mimeType: "text/csv" },
       { type: "file", url: "https://files.slack.com/a/b/real.csv", mimeType: "text/csv" },
@@ -81,6 +87,9 @@ describe("collectSlackFileParts", () => {
 
     expect(parts).toHaveLength(1);
     expect((parts[0]!.data as URL).href).toBe("https://files.slack.com/a/b/real.csv");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({ level: "warn", message: "dropped attachment — no url available" }),
+    );
   });
 
   it("falls back to a generic mediaType when the attachment lacks one", () => {
@@ -130,6 +139,7 @@ describe("collectSlackFileParts", () => {
   });
 
   it("drops attachments whose mediaType is not in the policy allowlist", () => {
+    const logs = captureLogRecords();
     const policy = mergeUploadPolicy({ allowedMediaTypes: ["image/*"] });
     const attachments = makeAttachments([
       { type: "file", url: "https://files.slack.com/a/b/x.csv", mimeType: "text/csv" },
@@ -140,6 +150,13 @@ describe("collectSlackFileParts", () => {
 
     expect(parts).toHaveLength(1);
     expect(parts[0]?.mediaType).toBe("image/png");
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          'dropped attachment — attachment-0 has media type "text/csv" which is not allowed by this route. Allowed: image/*.',
+      }),
+    );
   });
 
   it("returns an empty array when the message has no attachments", () => {
@@ -251,6 +268,86 @@ describe("createSlackFetchFile", () => {
     const result = fetchFile("https://files.slack.com/locked.png?sig=PRIVATE");
     await expect(result).rejects.toThrow(/files:read.*reinstall/is);
     await expect(result).rejects.not.toThrow("PRIVATE");
+  });
+
+  const fetchFileFor = (api?: SlackTransportOptions) =>
+    createSlackFetchFile({ api: resolveSlackTransportOptions(api), botToken: "xoxb-test-token" });
+  const pngFetch = () =>
+    vi.fn<typeof fetch>(
+      async () => new Response(new Uint8Array([7]), { headers: { "content-type": "image/png" } }),
+    );
+
+  it("downloads a file under the configured file base with api.fetch", async () => {
+    const globalSpy = vi.spyOn(globalThis, "fetch");
+    const apiFetch = pngFetch();
+
+    const result = await fetchFileFor({
+      apiBaseUrl: "http://localhost:3000/api/slack",
+      fetch: apiFetch,
+      fileBaseUrl: "http://localhost:3000/files",
+    })("http://localhost:3000/files/F01/cat.png");
+
+    expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
+    expect(apiFetch).toHaveBeenCalledWith("http://localhost:3000/files/F01/cat.png", {
+      headers: { authorization: "Bearer xoxb-test-token" },
+    });
+    expect(globalSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls the download base back to apiBaseUrl, and widens it by path prefix only", async () => {
+    const apiFetch = pngFetch();
+    const underApiBase = fetchFileFor({
+      apiBaseUrl: "http://localhost:3000/api/slack",
+      fetch: apiFetch,
+    });
+
+    const result = await underApiBase("http://localhost:3000/api/slack/files/F01/cat.png");
+
+    expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
+    expect(await underApiBase("http://localhost:3000/files/F01/cat.png")).toBeNull();
+    expect(await fetchFileFor()("http://localhost:3000/files/F01/cat.png")).toBeNull();
+    // `https://slack.com/api/` is the default base: it must not turn every
+    // `https://slack.com/…` link into a bot-token-authenticated download.
+    expect(
+      await fetchFileFor({ apiBaseUrl: "https://slack.com/api/" })(
+        "https://slack.com/files/secret.png",
+      ),
+    ).toBeNull();
+  });
+
+  it("downloads from Slack's own file host on the global fetch, past a stand-in's api.fetch", async () => {
+    const globalFetch = pngFetch();
+    vi.stubGlobal("fetch", globalFetch);
+    const apiFetch = pngFetch();
+
+    const result = await fetchFileFor({
+      apiBaseUrl: "http://localhost:3000/api/slack",
+      fetch: apiFetch,
+    })("https://files.slack.com/files-pri/T01-F01/cat.png");
+
+    expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
+    expect(globalFetch).toHaveBeenCalledWith("https://files.slack.com/files-pri/T01-F01/cat.png", {
+      headers: { authorization: "Bearer xoxb-test-token" },
+    });
+    // A stand-in's api.fetch attaches that stand-in's credentials, and this URL
+    // arrives in an inbound payload.
+    expect(apiFetch).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("downloads from Slack's own file host on api.fetch when no base is configured", async () => {
+    const globalSpy = vi.spyOn(globalThis, "fetch");
+    const apiFetch = pngFetch();
+
+    const result = await fetchFileFor({ fetch: apiFetch })(
+      "https://files.slack.com/files-pri/T01-F01/cat.png",
+    );
+
+    expect(result?.bytes.equals(Buffer.from([7]))).toBe(true);
+    expect(apiFetch).toHaveBeenCalledWith("https://files.slack.com/files-pri/T01-F01/cat.png", {
+      headers: { authorization: "Bearer xoxb-test-token" },
+    });
+    expect(globalSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -400,6 +497,7 @@ describe("collectInboundFileParts", () => {
   });
 
   it("drops 'disabled'-policy inline mention attachments at the per-file check", async () => {
+    const logs = captureLogRecords();
     const refresh = vi.fn().mockResolvedValue(undefined);
     const thread = makeSlackThread({ refresh });
 
@@ -411,6 +509,13 @@ describe("collectInboundFileParts", () => {
 
     expect(parts).toEqual([]);
     expect(refresh).not.toHaveBeenCalled();
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message:
+          'dropped attachment — mention.csv has media type "text/csv" which is not allowed by this route.',
+      }),
+    );
   });
 
   it("keeps inline mention attachments with maxBytes: 0 (size unknown until fetch)", async () => {
@@ -428,6 +533,7 @@ describe("collectInboundFileParts", () => {
   });
 
   it("returns an empty array when refresh throws", async () => {
+    const logs = captureLogRecords();
     const refresh = vi.fn().mockRejectedValue(new Error("Slack 500"));
     const thread = makeSlackThread({ refresh });
 
@@ -438,6 +544,12 @@ describe("collectInboundFileParts", () => {
     });
 
     expect(parts).toEqual([]);
+    expect(logs.records).toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "slack thread refresh failed for attachment collection",
+      }),
+    );
   });
 });
 

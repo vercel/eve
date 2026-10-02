@@ -1,8 +1,4 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import {
-  attachChannelActivityPresentation,
-  type ChannelActivityPresentation,
-} from "#channel/activity-renderer.js";
 import type { UserContent } from "ai";
 import type { ChannelReceiveContext } from "#channel/channel-operations.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
@@ -10,8 +6,10 @@ import type { TypedReceiveTarget } from "#channel/receive-target.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
+import type { JsonObject } from "#shared/json.js";
 
 export const CHANNEL_SENTINEL = "eve:channel" as const;
+const CHANNEL_BUILD_METADATA = Symbol.for("eve.channel.buildMetadata");
 const CHANNEL_INSTRUMENTATION_KIND = Symbol.for("eve.channel.instrumentationKind");
 const CHANNEL_INSTRUMENTATION_KINDS = Symbol.for("eve.channel.instrumentationKinds");
 
@@ -24,6 +22,13 @@ type ChannelInstrumentationKindGlobal = typeof globalThis & {
 const channelInstrumentationKindGlobal = globalThis as ChannelInstrumentationKindGlobal;
 channelInstrumentationKindGlobal[CHANNEL_INSTRUMENTATION_KINDS] ??= new Map();
 const channelInstrumentationKinds = channelInstrumentationKindGlobal[CHANNEL_INSTRUMENTATION_KINDS];
+
+interface ChannelBuildMetadata {
+  readonly externalCredentials?: unknown;
+  readonly manifest?: JsonObject;
+}
+
+type ChannelBuildMetadataFactory = (channelName: string) => ChannelBuildMetadata;
 
 /** Structural identity shared by public authored channels and compiled channels. */
 export interface ChannelReference<
@@ -60,6 +65,31 @@ export function isCompiledChannel(value: unknown): value is CompiledChannel {
   );
 }
 
+export function getChannelBuildMetadata(
+  value: unknown,
+  channelName: string,
+): ChannelBuildMetadata | undefined {
+  if (!isCompiledChannel(value)) return undefined;
+  const factory = Reflect.get(value, CHANNEL_BUILD_METADATA);
+  return typeof factory === "function"
+    ? (factory as ChannelBuildMetadataFactory)(channelName)
+    : undefined;
+}
+
+export function setChannelBuildMetadata(
+  channel: unknown,
+  factory: ChannelBuildMetadataFactory,
+): void {
+  if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
+  // Enumerable so `{ ...channel, routes }` keeps build metadata when an app
+  // wraps a channel's routes.
+  Object.defineProperty(channel, CHANNEL_BUILD_METADATA, {
+    configurable: true,
+    enumerable: true,
+    value: factory,
+  });
+}
+
 export function getChannelInstrumentationKind(value: unknown): string | undefined {
   if (!isCompiledChannel(value)) {
     return undefined;
@@ -77,14 +107,6 @@ export function getChannelInstrumentationKind(value: unknown): string | undefine
 
   const routeSignature = channelRouteSignature(value);
   return routeSignature === undefined ? undefined : channelInstrumentationKinds.get(routeSignature);
-}
-
-export function setChannelActivityRenderers(
-  channel: unknown,
-  input: ChannelActivityPresentation,
-): void {
-  if (!isCompiledChannel(channel)) throw new TypeError("Expected a compiled channel.");
-  attachChannelActivityPresentation(channel.adapter, input);
 }
 
 export function setChannelInstrumentationKind(channel: CompiledChannel, kind: string): void {

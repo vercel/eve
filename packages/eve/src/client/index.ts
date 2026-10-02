@@ -5,13 +5,23 @@
 export { EveAgentStore } from "#client/eve-agent-store.js";
 export { Client } from "#client/client.js";
 export { AgentInfoResponseError } from "#client/agent-info-error.js";
-export { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 export { HealthResponseError } from "#client/health-response-error.js";
-export { HealthResultSchema } from "#client/health-schema.js";
 export { ClientError } from "#client/client-error.js";
 export { defaultMessageReducer } from "#client/message-reducer.js";
+export { conversationReducer } from "#client/conversation-reducer.js";
+export { openConversationInputs } from "#client/conversation-state.js";
+export type {
+  AgentObservation,
+  ConversationAgentSession,
+  ConversationInput,
+  ConversationState,
+  ConversationTask,
+  ConversationTaskCall,
+  ConversationTurn,
+} from "#client/conversation-state.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
+export { ClientAgentSession } from "#client/agent-session.js";
 export { ClientSession } from "#client/session.js";
 export {
   ClientSessions,
@@ -102,6 +112,7 @@ export type {
   ActionPartialStreamEvent,
   ActionResultStreamEvent,
   ActionsRequestedStreamEvent,
+  AgentStartedStreamEvent,
   AssistantStepFinishReason,
   AuthorizationOutcome,
   CompactionCompletedStreamEvent,
@@ -131,25 +142,21 @@ export type {
   StepCompletedStreamEvent,
   StepFailedStreamEvent,
   StepStartedStreamEvent,
-  SubagentCalledStreamEvent,
-  SubagentChildEventStreamEvent,
-  SubagentCompletedStreamEvent,
-  SubagentStartedStreamEvent,
+  TaskSettledStreamEvent,
+  TaskStartedStreamEvent,
   TurnCancelledStreamEvent,
   TurnCompletedStreamEvent,
   TurnFailedStreamEvent,
   TurnStartedStreamEvent,
   TurnFailureStreamEvent,
+  TurnWaitingOn,
+  TurnWaitingStreamEvent,
 } from "#protocol/message.js";
 
 export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 
 export type { InputOption, InputRequest, InputRequestKind, InputResponse } from "#shared/input.js";
 export {
-  inputOptionSchema,
-  inputRequestKindSchema,
-  inputRequestSchema,
-  inputResponseSchema,
   isInputRequest,
   isInputResponse,
   parseInputResponse,

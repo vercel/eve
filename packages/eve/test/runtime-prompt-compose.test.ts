@@ -28,7 +28,7 @@ describe("composeRuntimeBasePrompt", () => {
     ).toEqual([
       [
         "Tool execution",
-        "A single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.",
+        "Tool calls in one response run in parallel, so batch only calls that don't depend on each other.",
       ].join("\n"),
     ]);
   });
@@ -162,7 +162,7 @@ describe("composeRuntimeBasePrompt", () => {
       ].join("\n"),
       [
         "Tool execution",
-        "A single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.",
+        "Tool calls in one response run in parallel, so batch only calls that don't depend on each other.",
       ].join("\n"),
     ]);
   });
