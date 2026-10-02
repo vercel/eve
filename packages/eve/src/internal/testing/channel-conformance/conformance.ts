@@ -6,6 +6,7 @@ import {
   hitlContract,
 } from "#internal/testing/channel-conformance/contract.js";
 import {
+  type ChannelCapability,
   type ChannelDriver,
   type ClientDriver,
   withChannelConversation,
@@ -330,8 +331,13 @@ const BROKEN_WAIT_TIMEOUT_MS = 3_000;
 /** How one channel or client stands on one rule. */
 type Cell =
   | { readonly kind: "pass" }
-  | { readonly kind: "unsupported"; readonly reason?: string }
+  | { readonly kind: "unsupported"; readonly reason: string }
   | { readonly kind: "broken"; readonly broken: BrokenCell };
+
+const CAPABILITY_NAMES: Record<ChannelCapability, string> = {
+  buttons: "buttons a person can press",
+  "text-replies": "plain-text replies",
+};
 
 function cellOf(entry: ConformanceChannel, rule: (typeof hitlContract)[number]): Cell {
   if (entry.dm === true && (rule as ContractRule).variesByConversation !== true) {
@@ -342,11 +348,18 @@ function cellOf(entry: ConformanceChannel, rule: (typeof hitlContract)[number]):
     };
   }
   const { capabilities, surface } = entry.driver();
-  if (!rule.requires.every((capability) => capabilities.includes(capability))) {
-    return { kind: "unsupported" };
+  const missing = rule.requires.filter((capability) => !capabilities.includes(capability));
+  if (missing.length > 0) {
+    const names = missing.map((capability) => CAPABILITY_NAMES[capability]).join(" or ");
+    return { kind: "unsupported", reason: `the platform has no ${names}` };
   }
   const { surfaces } = rule as ContractRule;
-  if (surfaces !== undefined && !surfaces.includes(surface)) return { kind: "unsupported" };
+  if (surfaces !== undefined && !surfaces.includes(surface)) {
+    return {
+      kind: "unsupported",
+      reason: `the rule applies only where the conversation is ${surfaces.join(" or ")}, and this one is ${surface}`,
+    };
+  }
   const declined = entry.unsupported?.[rule.rule];
   if (declined !== undefined) return { kind: "unsupported", reason: declined };
   const broken = entry.broken?.[rule.rule];
@@ -369,8 +382,7 @@ export function describeHitlConformance(channel: keyof typeof hitlConformance): 
         const run = (options?: { readonly waitTimeoutMs: number }) =>
           withChannelConversation(entry.driver(), (c) => rule.run(c), { ...agent, ...options });
         if (cell.kind === "unsupported") {
-          const why = cell.reason === undefined ? "" : `: ${cell.reason}`;
-          it.skip(`${rule.rule} (not supported${why})`, () => {});
+          it.skip(`${rule.rule} (not supported: ${cell.reason})`, () => {});
         } else if (cell.kind === "pass") {
           it(rule.rule, () => run(), 60_000);
         } else {
@@ -402,15 +414,22 @@ export function renderHitlConformanceMatrix(): string {
   const names = entries.map((entry) => entry.driver().name);
   const escape = (text: string) => text.replaceAll("|", "\\|");
   const row = (cells: readonly string[]) => `| ${cells.join(" | ")} |`;
-  const notes = (kind: "broken" | "unsupported") =>
-    entries.flatMap((entry, index) =>
-      hitlContract.flatMap((rule) => {
-        const cell = cellOf(entry, rule);
-        if (cell.kind !== kind) return [];
-        const reason = cell.kind === "broken" ? cell.broken.reason : cell.reason;
-        return reason === undefined ? [] : [`- **${names[index]}**, ${rule.rule}: ${reason}`];
-      }),
-    );
+  // One footnote per distinct reason, numbered in reading order, so every
+  // cell sharing a cause links to the same note.
+  const notes = new Map<string, number>();
+  const shown = (cell: Cell) => {
+    if (cell.kind === "pass") return MATRIX_SYMBOLS.pass;
+    const note = `${MATRIX_SYMBOLS[cell.kind]} ${cell.kind === "broken" ? cell.broken.reason : cell.reason}`;
+    if (!notes.has(note)) notes.set(note, notes.size + 1);
+    return `${MATRIX_SYMBOLS[cell.kind]}[^${notes.get(note)}]`;
+  };
+  const rows = hitlContract.map((rule) =>
+    row([
+      // Non-breaking spaces keep each rule on one line; GitHub scrolls the table instead.
+      escape(rule.rule).replaceAll(" ", "\u00a0"),
+      ...entries.map((entry) => shown(cellOf(entry, rule))),
+    ]),
+  );
   return [
     "# HITL conformance matrix",
     "",
@@ -425,26 +444,15 @@ export function renderHitlConformanceMatrix(): string {
     "pnpm --filter eve exec vitest run --config vitest.unit.config.ts channel-conformance/matrix -u",
     "```",
     "",
-    "✅ passes · ❌ broken · — not supported (the platform lacks a capability the rule",
-    "needs, or the client declines it below)",
+    "✅ passes · ❌ broken · — not supported. Every ❌ and — cell links to a note on why;",
+    "cells with the same cause share one. A `-dm` column is the same channel in a",
+    "direct message instead of a shared thread.",
     "",
     row(["Rule", ...names.map((name) => `\`${name}\``)]),
     row(["---", ...names.map(() => ":---:")]),
-    ...hitlContract.map((rule) =>
-      row([
-        // Non-breaking spaces keep each rule on one line; GitHub scrolls the table instead.
-        escape(rule.rule).replaceAll(" ", "\u00a0"),
-        ...entries.map((entry) => MATRIX_SYMBOLS[cellOf(entry, rule).kind]),
-      ]),
-    ),
+    ...rows,
     "",
-    "## Broken",
-    "",
-    ...notes("broken").map(escape),
-    "",
-    "## Declined",
-    "",
-    ...notes("unsupported").map(escape),
+    ...[...notes].map(([note, index]) => `[^${index}]: ${note}`),
     "",
   ].join("\n");
 }
