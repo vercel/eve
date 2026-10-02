@@ -1,7 +1,10 @@
 import { readFileSync, realpathSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 
 const MOUNT_QUERY = "?eve-mount=";
+
+/** Directory beside an extension distribution's source root that holds its shared chunks. */
+export const EXTENSION_CHUNK_DIRECTORY = "_chunks";
 
 interface Mount {
   readonly mountId: string;
@@ -22,6 +25,11 @@ function canonicalize(path: string): string {
 
 function within(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}${sep}`);
+}
+
+/** Whether `path` is the extension's own code: its source, or a chunk shared by that source. */
+export function isExtensionModule(path: string, root: string): boolean {
+  return within(path, root) || within(path, join(dirname(root), EXTENSION_CHUNK_DIRECTORY));
 }
 
 /** Isolates extension-owned source modules, but leaves ordinary dependencies shared. */
@@ -114,7 +122,7 @@ export function createExtensionMountPlugin(
       const override =
         mount !== undefined &&
         importerPath !== undefined &&
-        !within(importerPath, mount.root) &&
+        !isExtensionModule(importerPath, mount.root) &&
         overrideMounts.get(importerPath) === mount;
       const sourceMount =
         mount !== undefined &&
@@ -142,7 +150,7 @@ export function createExtensionMountPlugin(
       const path = canonical(resolved.id);
       if (
         mount !== undefined &&
-        (sourceMount !== undefined || (!override && within(path, mount.root)))
+        (sourceMount !== undefined || (!override && isExtensionModule(path, mount.root)))
       ) {
         return { id: `${resolved.id}${MOUNT_QUERY}${encodeURIComponent(mountId!)}` };
       }
@@ -150,7 +158,7 @@ export function createExtensionMountPlugin(
       if (mount === undefined && (importer === undefined || importer.startsWith("\0"))) {
         return undefined;
       }
-      const owners = roots.filter((root) => within(path, root.root));
+      const owners = roots.filter((root) => isExtensionModule(path, root.root));
       if (mount !== undefined) {
         // Source owned by another extension keeps that extension's mount identity, so a mount
         // declared inside an extension reads the configuration its enclosing mount bound. When
