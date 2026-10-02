@@ -63,6 +63,19 @@ export type ChannelCapability =
   | "text-replies";
 
 /**
+ * Who can see the conversation a driver holds. Anything meant for the person
+ * alone must reach them privately on a shared surface and can't be shown at
+ * all on a public one.
+ */
+export type Surface =
+  /** Anyone, such as a GitHub issue. */
+  | "public"
+  /** Members of a channel, group, or workspace, such as a Slack channel thread. Most agents run here. */
+  | "shared"
+  /** Only the person, such as a direct message or a local terminal. */
+  | "private";
+
+/**
  * Teaches the HITL conformance suite to speak one channel's platform protocol.
  *
  * Drivers translate only between platform wire formats and conversation
@@ -72,6 +85,7 @@ export type ChannelCapability =
 export interface ChannelDriver {
   readonly name: string;
   readonly capabilities: readonly ChannelCapability[];
+  readonly surface: Surface;
   /**
    * Builds the channel against a fake platform that reports each outbound call
    * to `record`. HTTP platforms use {@link recordingFetch}.
@@ -151,6 +165,7 @@ export interface ChannelConversation {
 export interface ClientDriver {
   readonly name: string;
   readonly capabilities: readonly ChannelCapability[];
+  readonly surface: Surface;
   /**
    * Starts the client against the agent at `host`. The global `fetch` serves
    * that origin from the eve channel's routes until the client closes.
@@ -501,7 +516,10 @@ async function converse(
       );
 
     const conversation: ChannelConversation = {
-      say: (text) => view.say(text),
+      async say(text) {
+        await waitForStepsToFinish([...sessions.values()], wait);
+        await view.say(text);
+      },
       press: (option) => view.press(option),
       async waitForQuestion(prompt) {
         const { options } = await view.waitForQuestion([prompt]);
@@ -602,20 +620,48 @@ const TERMINAL_STEP_STATUSES = new Set(["completed", "failed", "cancelled"]);
  * still running. A turn that starts after the first cancel needs another.
  */
 async function cancelUntilResting(session: Session): Promise<void> {
-  const world = await getWorld();
   const deadline = Date.now() + WAIT_TIMEOUT_MS;
+  let last: string | undefined;
+  let running: string[] = [];
   while (Date.now() < deadline) {
     await session.cancel();
     const tail = await session.getStreamTailIndex();
     const reader = (await session.getEventStream({ startIndex: tail })).getReader();
-    const last = await reader.read().finally(() => reader.cancel());
-    if (last.value?.type === "session.waiting") {
-      const steps = await world.steps.list({ resolveData: "none", runId: session.id });
-      if (steps.data.every((step) => TERMINAL_STEP_STATUSES.has(step.status))) return;
-    }
+    last = (await reader.read().finally(() => reader.cancel())).value?.type;
+    running = await runningSteps(session);
+    if (last === "session.waiting" && running.length === 0) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error(`Timed out waiting for session ${session.id} to rest.`);
+  throw new Error(
+    `Timed out waiting for session ${session.id} to rest. Its stream ends with ${last ?? "nothing"}` +
+      (running.length === 0 ? "." : `, and these steps are still running: ${running.join(", ")}.`),
+  );
+}
+
+/** The names of `session`'s steps that haven't finished. */
+async function runningSteps(session: Session): Promise<string[]> {
+  const world = await getWorld();
+  const steps = await world.steps.list({ resolveData: "none", runId: session.id });
+  return steps.data
+    .filter((step) => !TERMINAL_STEP_STATUSES.has(step.status))
+    .map((step) => `${step.stepName} (${step.status})`);
+}
+
+/**
+ * Waits until no session has a step running. A person writes once the bot has
+ * finished, and a channel claims the address of a message it posted, such as
+ * the Telegram message a person replies to, only once the step that posted it
+ * commits. Writing sooner starts a second session instead of continuing this one.
+ */
+async function waitForStepsToFinish(sessions: readonly Session[], wait: Wait): Promise<void> {
+  await wait(
+    "every session's steps to finish",
+    async () => {
+      const running = await Promise.all(sessions.map(runningSteps));
+      return running.every((steps) => steps.length === 0) ? true : undefined;
+    },
+    () => "",
+  );
 }
 
 /** How long a session's stream must stay unchanged to count as resting. */

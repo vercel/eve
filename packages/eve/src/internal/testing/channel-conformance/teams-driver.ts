@@ -3,6 +3,7 @@ import {
   type ChannelDriver,
   type PlatformCall,
   type RenderedOption,
+  type Surface,
   recordingFetch,
 } from "#internal/testing/channel-conformance/harness.js";
 
@@ -11,6 +12,7 @@ const TENANT = "TENANT";
 const PERSON = { id: "USER", name: "Alice" } as const;
 const BOT = { id: "BOT", name: "eve Bot" } as const;
 const SERVICE_URL = "https://smba.example.test/teams";
+const MENTION = `<at>${BOT.name}</at>`;
 
 interface Choice {
   readonly title: string;
@@ -47,11 +49,24 @@ interface PressHandle {
   readonly value?: string;
 }
 
-/** Drives Teams' Bot Framework webhook and Connector API in a personal chat. */
-export function teamsDriver(): ChannelDriver {
+/**
+ * Drives Teams' Bot Framework webhook and Connector API, in a team channel's
+ * thread by default or in a personal chat.
+ */
+export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
+  const personal = surface === "private";
   // Conversation ids are part of Teams' continuation token, so isolate each driver instance.
   nextConversation += 1;
-  const conversationId = `CONV-${nextConversation}`;
+  // A channel thread's conversation id names the post that started it.
+  const conversationId = personal
+    ? `CONV-${nextConversation}`
+    : `CONV-${nextConversation};messageid=MSG-1`;
+  const conversation = personal
+    ? { conversationType: "personal", id: conversationId }
+    : { conversationType: "channel", id: conversationId };
+  const channelData = personal
+    ? { tenant: { id: TENANT } }
+    : { channel: { id: "CHANNEL" }, team: { id: "TEAM" }, tenant: { id: TENANT } };
   let activityId = 0;
 
   function nextActivityId(): string {
@@ -62,8 +77,8 @@ export function teamsDriver(): ChannelDriver {
   function activity(payload: Record<string, unknown>): Request {
     return new Request("https://agent.example.com/eve/v1/teams", {
       body: JSON.stringify({
-        channelData: { tenant: { id: TENANT } },
-        conversation: { id: conversationId, conversationType: "personal" },
+        channelData,
+        conversation,
         from: PERSON,
         id: `MSG-${activityId + 1}`,
         recipient: BOT,
@@ -85,14 +100,25 @@ export function teamsDriver(): ChannelDriver {
   }
 
   return {
-    name: "teams",
+    name: personal ? "teams-dm" : "teams",
     capabilities: ["buttons", "text-replies"],
+    surface,
     createChannel: (record) =>
       teamsChannel({
         api: { fetch: recordingFetch(record, decode) },
         credentials: { tokenProvider: () => "test-token", webhookVerifier: () => true },
       }),
-    message: (text) => activity({ text, type: "message" }),
+    message: (text) =>
+      personal
+        ? activity({ text, type: "message" })
+        : // In a channel the default policy hears only mentions, so a person mentions the bot
+          // each time, on its own line so the test model's line-based directives still read it.
+          activity({
+            entities: [{ mentioned: BOT, text: MENTION, type: "mention" }],
+            text: `${text}\n${MENTION}`,
+            textFormat: "xml",
+            type: "message",
+          }),
     findOptions(call, prompt) {
       const body = call.body as ActivityBody;
       if (body.type !== "message" || !body.text?.includes(prompt)) return undefined;

@@ -63,6 +63,8 @@ export function linearDriver(): ChannelDriver {
   return {
     name: "linear",
     capabilities: ["text-replies"],
+    // An agent session lives on an issue the whole workspace can see.
+    surface: "shared",
     createChannel: (record) =>
       linearChannel({
         api: { fetch: recordingFetch(record, decode) },

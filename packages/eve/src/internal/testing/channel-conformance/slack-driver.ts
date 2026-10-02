@@ -4,6 +4,7 @@ import { slackChannel } from "#public/channels/slack/index.js";
 import { HITL_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import {
   type ChannelDriver,
+  type Surface,
   type PlatformCall,
   type RenderedOption,
   recordingFetch,
@@ -12,6 +13,7 @@ import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 
 const SIGNING_SECRET = "slack-conformance-secret";
 const PERSON = "U_ALICE";
+const BOT = "U_EVE";
 let nextChannel = 0;
 const TEAM = "T01";
 
@@ -47,11 +49,15 @@ interface SlackMessageBody {
   readonly ts?: string;
 }
 
-/** Drives the Slack channel through its Events API and interactivity webhooks in a DM. */
-export function slackDriver(): ChannelDriver {
-  // A fresh DM per driver keeps each test's session apart in the shared workflow world.
+/**
+ * Drives the Slack channel through its Events API and interactivity webhooks,
+ * in a public channel thread by default or in a DM.
+ */
+export function slackDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
+  const dm = surface === "private";
+  // A fresh channel per driver keeps each test's session apart in the shared workflow world.
   nextChannel += 1;
-  const CHANNEL = `D${String(nextChannel).padStart(3, "0")}`;
+  const CHANNEL = `${dm ? "D" : "C"}${String(nextChannel).padStart(3, "0")}`;
   let sequence = 0;
   // Every message is a reply in the thread the first one starts.
   const threadTs = "1700000000.000001";
@@ -91,14 +97,15 @@ export function slackDriver(): ChannelDriver {
         ok: true,
         team_id: TEAM,
         ts,
-        user_id: "U_EVE",
+        user_id: BOT,
       },
     };
   }
 
   return {
-    name: "slack",
+    name: dm ? "slack-dm" : "slack",
     capabilities: ["buttons", "text-replies"],
+    surface,
     createChannel: (record) =>
       slackChannel({
         api: { fetch: recordingFetch(record, decode) },
@@ -108,18 +115,26 @@ export function slackDriver(): ChannelDriver {
       const ts = threadStarted ? nextTs() : threadTs;
       const thread = threadStarted ? { thread_ts: threadTs } : {};
       threadStarted = true;
+      // In a channel the default policy hears only mentions, so a person mentions the bot each
+      // time. On its own line, so the test model's line-based directives still read the message.
+      const event = dm
+        ? { channel_type: "im", text, type: "message" }
+        : { channel_type: "channel", text: `${text}\n<@${BOT}>`, type: "app_mention" };
       return signed(
         JSON.stringify({
           event: {
             ...thread,
+            ...event,
             channel: CHANNEL,
-            channel_type: "im",
             event_ts: ts,
-            text,
             ts,
-            type: "message",
             user: PERSON,
           },
+          // Slack names the installation that received the event, which is how eve knows its
+          // own bot user, e.g. to strip that mention from a typed answer.
+          authorizations: [
+            { is_bot: true, is_enterprise_install: false, team_id: TEAM, user_id: BOT },
+          ],
           event_id: `Ev${ts}`,
           team_id: TEAM,
           type: "event_callback",
