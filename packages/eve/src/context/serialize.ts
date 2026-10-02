@@ -88,9 +88,9 @@ export async function deserializeContext(
 
 /**
  * Admits a context written before mount-scoped state (eve 0.68 and earlier).
- * Extension state moves to the one mount that still defines it. State nothing
- * defines was removed and is dropped as in the current layout; state that
- * several mounts define refuses rather than guessing an owner.
+ * Extension state moves to the one mount that still defines it. Authored state
+ * nothing defines was removed, so the loader drops it as in the current layout.
+ * State that several mounts define refuses rather than guessing an owner.
  */
 async function adoptLegacyStateLayout(
   data: Record<string, unknown>,
@@ -115,15 +115,12 @@ async function adoptLegacyStateLayout(
       const mounted = mountedStateKeyName(mount.mountId, name.slice(prefix.length));
       return resolveKey(mounted) === undefined ? [] : [mounted];
     });
-    if (owners.length === 0) {
-      adopted[name] = value;
-      continue;
-    }
-    const [mounted] = owners;
-    if (owners.length !== 1 || mounted === undefined || data[mounted] !== undefined) {
+    // Authored state cannot use `eve.`, so an unknown framework key means a
+    // checkpoint migration missed it.
+    if (owners.length > 1 || (owners.length === 0 && name.startsWith("eve."))) {
       throw new IncompatibleStateLayoutError(name);
     }
-    adopted[mounted] = value;
+    adopted[owners[0] ?? name] = value;
   }
   return adopted;
 }
@@ -142,7 +139,7 @@ function legacyPackageStateNamespace(packageName: string): string {
 export class IncompatibleStateLayoutError extends Error {
   constructor(key?: string) {
     super(
-      `Incompatible context state layout${key === undefined ? "" : ` for key "${key}"`}. This deployment cannot place the saved state without guessing its owner. Restore this session with its original deployment or start a new session.`,
+      `Incompatible context state layout${key === undefined ? "" : ` for key "${key}"`}. This deployment cannot read the saved state. Continue this session on its original deployment or start a new session.`,
     );
     this.name = "IncompatibleStateLayoutError";
   }

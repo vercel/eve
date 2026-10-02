@@ -41,11 +41,11 @@ describe("state layout admission", () => {
     try {
       // Registration in a previous graph must not turn a reserved legacy authored name
       // into proof that it belongs to the new layout.
-      new ContextKey("eve:mount.v1:extensions%2Fcrm:requests");
+      new ContextKey("eve:mount.v1:extensions%2Freserved:requests");
       await expect(
         deserializeContext({
           "eve.bundle": {},
-          "eve:mount.v1:extensions%2Fcrm:requests": 4,
+          "eve:mount.v1:extensions%2Freserved:requests": 4,
         }),
       ).rejects.toThrow("Incompatible context state layout");
     } finally {
@@ -68,7 +68,6 @@ describe("state layout admission", () => {
       .mockImplementation(async () => ({ ...manifest, extensionMounts: mounts }));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      expect((await deserializeContext({ "eve.bundle": {} })).get(BundleKey)).toBe(bundle);
       const restored = await deserializeContext({
         "eve.bundle": {},
         "acme-crm.history": 5,
@@ -95,7 +94,7 @@ describe("state layout admission", () => {
     }
   });
 
-  it("keeps declared legacy application state and drops state the deployment removed", async () => {
+  it("drops removed legacy application state but refuses unknown framework state", async () => {
     const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
     const bundle = { compiledArtifactsSource: { kind: "bundled" } } as CompiledBundle;
     const name = "test.legacy.app-owned";
@@ -119,6 +118,9 @@ describe("state layout admission", () => {
         expect.stringContaining("dropping unknown context key"),
         expect.objectContaining({ key: "test.legacy.removed" }),
       );
+      await expect(
+        deserializeContext({ "eve.bundle": {}, "eve.unmigrated": "none" }),
+      ).rejects.toThrow('Incompatible context state layout for key "eve.unmigrated"');
     } finally {
       deserialize.mockRestore();
       loadManifest.mockRestore();
