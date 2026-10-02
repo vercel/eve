@@ -32,9 +32,16 @@ export type ToolState = {
   readonly errorText?: string;
 };
 
-/** A task whose start line is written, named once and never renamed. */
+/**
+ * A task whose start line is written, named once and never renamed. Calls that reach the task
+ * while it works join this record rather than reading as tasks of their own.
+ */
 export interface TaskRecord {
+  /** The call that started this stretch of the task. */
   readonly callId: string;
+  readonly taskId: string;
+  /** Every call this record answers, the starting call first. */
+  readonly callIds: string[];
   readonly kind: "agent" | "tool";
   readonly name: string;
   readonly toolName: string;
@@ -105,6 +112,31 @@ export function startLine(record: TaskRecord): Block {
   };
 }
 
+/** A later call that reached a working task: a message to it, not a new delegation. */
+export function followUpLine(
+  record: TaskRecord,
+  part: EveDynamicToolPart,
+  label: string | undefined,
+): Block {
+  if (record.kind === "agent") {
+    return {
+      kind: "task",
+      taskKind: "agent",
+      title: `Message ${agentTaskLabel(record.name)}`,
+      subtitle: agentTaskSummary(part.input),
+      live: false,
+    };
+  }
+  const presentation = presentTool(part.toolName, part.input, labelContext(label));
+  return {
+    kind: "task",
+    taskKind: "tool",
+    title: stripTerminalControls(presentation.title),
+    subtitle: stripTerminalControls(presentation.subtitle),
+    live: false,
+  };
+}
+
 export function nestedTaskRecord(
   callId: string,
   part: EveDynamicToolPart,
@@ -113,6 +145,8 @@ export function nestedTaskRecord(
 ): TaskRecord {
   return {
     callId,
+    taskId: task.taskId,
+    callIds: [part.toolCallId],
     kind: task.kind,
     name:
       task.kind === "agent"
