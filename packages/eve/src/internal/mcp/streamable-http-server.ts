@@ -1,3 +1,4 @@
+import { context as otelContext } from "#compiled/@opentelemetry/api/index.js";
 import {
   createMcpHandler,
   McpServer,
@@ -7,6 +8,7 @@ import {
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { withMcpRequestTraceContext } from "#internal/mcp/request-trace-context.js";
 
 const log = createLogger("mcp.server");
 
@@ -168,7 +170,12 @@ export function createMcpStreamableHttpServer(
     const preflightFailure = await preflightModernRequest(request, parsedBody);
     if (preflightFailure !== undefined) return preflightFailure;
 
-    return await handler.fetch(request, { parsedBody });
+    // The client's trace context rides in `_meta`, not headers, so it is
+    // adopted here, before the SDK dispatches into a tool.
+    return await otelContext.with(
+      withMcpRequestTraceContext(otelContext.active(), parsedBody),
+      () => handler.fetch(request, { parsedBody }),
+    );
   };
 }
 
