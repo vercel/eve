@@ -32,46 +32,33 @@ needs, or the client declines it below)
 | pressing Cancel stops the gated tool without running it | ✅ | — | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | — |
 | a text reply of approve runs the gated tool | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
 | a text reply of cancel stops the gated tool without running it | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ |
-| pressing an option clears the question's buttons | ❌ | — | ❌ | — | — | — | ✅ | ❌ | ❌ | ✅ | — |
-| answering a question by text clears its buttons | ❌ | — | — | — | — | — | ❌ | ❌ | ❌ | ✅ | — |
+| pressing an option clears the question's buttons | ✅ | — | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | — |
+| answering a question by text clears its buttons | ✅ | — | — | — | — | — | ❌ | ✅ | ✅ | ✅ | — |
 | pressing an option names who answered on the question | ❌ | — | ❌ | — | — | — | ✅ | ❌ | ❌ | — | — |
 | answering a question by text names who answered on the question | ❌ | — | — | — | — | — | ❌ | ❌ | ❌ | — | — |
-| pressing Approve clears the approval's buttons | ❌ | — | ❌ | — | — | — | ✅ | ✅ | ❌ | ✅ | — |
-| approving by text clears the approval's buttons | ❌ | — | — | — | — | — | ✅ | ❌ | ❌ | — | — |
+| pressing Approve clears the approval's buttons | ✅ | — | ✅ | — | — | — | ✅ | ✅ | ✅ | ✅ | — |
+| approving by text clears the approval's buttons | ✅ | — | — | — | — | — | ✅ | ✅ | ✅ | — | — |
 | pressing Approve names who approved on the approval | ❌ | — | ❌ | — | — | — | ✅ | ✅ | ❌ | — | — |
 | approving by text names who approved on the approval | ❌ | — | — | — | — | — | ❌ | ❌ | ❌ | — | — |
 
 ## Broken
 
-- **chat-sdk**, pressing an option clears the question's buttons: the bridge never edits an answered prompt
-- **chat-sdk**, answering a question by text clears its buttons: the bridge never edits an answered prompt
-- **chat-sdk**, pressing an option names who answered on the question: the bridge never edits an answered prompt
-- **chat-sdk**, answering a question by text names who answered on the question: the bridge never edits an answered prompt
-- **chat-sdk**, pressing Approve clears the approval's buttons: the bridge never edits an answered prompt
-- **chat-sdk**, approving by text clears the approval's buttons: the bridge never edits an answered prompt
-- **chat-sdk**, pressing Approve names who approved on the approval: the bridge never edits an answered prompt
-- **chat-sdk**, approving by text names who approved on the approval: the bridge never edits an answered prompt
-- **discord**, pressing an option clears the question's buttons: a press gets a deferred update and the message is never edited
-- **discord**, pressing an option names who answered on the question: a press gets a deferred update and the message is never edited
-- **discord**, pressing Approve clears the approval's buttons: a press gets a deferred update and the message is never edited
-- **discord**, pressing Approve names who approved on the approval: a press gets a deferred update and the message is never edited
+- **chat-sdk**, pressing an option names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **chat-sdk**, answering a question by text names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **chat-sdk**, pressing Approve names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **chat-sdk**, approving by text names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **discord**, pressing an option names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **discord**, pressing Approve names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
 - **slack**, answering a question by text clears its buttons: only the button interaction handler edits a question; a typed answer leaves it
 - **slack**, answering a question by text names who answered on the question: only the button interaction handler edits a question; a typed answer leaves it
 - **slack**, approving by text names who approved on the approval: the card loses its buttons after a typed approval but doesn't say who approved
-- **teams**, pressing an option clears the question's buttons: only a pressed approval card is recorded for editing; questions and typed approvals are not
-- **teams**, answering a question by text clears its buttons: only a pressed approval card is recorded for editing; questions and typed approvals are not
-- **teams**, pressing an option names who answered on the question: only a pressed approval card is recorded for editing; questions and typed approvals are not
-- **teams**, answering a question by text names who answered on the question: only a pressed approval card is recorded for editing; questions and typed approvals are not
-- **teams**, approving by text clears the approval's buttons: only a pressed approval card is recorded for editing; questions and typed approvals are not
-- **teams**, approving by text names who approved on the approval: only a pressed approval card is recorded for editing; questions and typed approvals are not
-- **telegram**, pressing an option clears the question's buttons: nothing edits an answered prompt; a press only answers the callback query
-- **telegram**, answering a question by text clears its buttons: nothing edits an answered prompt; a press only answers the callback query
-- **telegram**, pressing an option names who answered on the question: nothing edits an answered prompt; a press only answers the callback query
-- **telegram**, answering a question by text names who answered on the question: nothing edits an answered prompt; a press only answers the callback query
-- **telegram**, pressing Approve clears the approval's buttons: nothing edits an answered prompt; a press only answers the callback query
-- **telegram**, approving by text clears the approval's buttons: nothing edits an answered prompt; a press only answers the callback query
-- **telegram**, pressing Approve names who approved on the approval: nothing edits an answered prompt; a press only answers the callback query
-- **telegram**, approving by text names who approved on the approval: nothing edits an answered prompt; a press only answers the callback query
+- **teams**, pressing an option names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **teams**, answering a question by text names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **teams**, approving by text names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **telegram**, pressing an option names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **telegram**, answering a question by text names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **telegram**, pressing Approve names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **telegram**, approving by text names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
 
 ## Declined
 

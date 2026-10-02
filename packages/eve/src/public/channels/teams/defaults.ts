@@ -1,5 +1,6 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
+import { resolvedPromptAnswer } from "#channel/resolved-prompt.js";
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
 import { splitTeamsMessageText, type TeamsMention } from "#public/channels/teams/api.js";
@@ -76,17 +77,20 @@ export const defaultEvents: TeamsChannelEvents = {
           replyToActivityId: channel.teams.replyToActivityId,
         }),
       );
-      if (request.kind === "tool-approval" && posted.id) {
-        channel.state.pendingApprovalCards = {
-          ...channel.state.pendingApprovalCards,
-          [request.requestId]: { activityId: posted.id, prompt: request.prompt },
-        };
-      }
+      if (!posted.id) continue;
+      const card = { activityId: posted.id, prompt: request.prompt };
+      channel.state.pendingPromptCards = {
+        ...channel.state.pendingPromptCards,
+        [request.requestId]:
+          request.kind === "question"
+            ? { ...card, options: (request.options ?? []).map(({ id, label }) => ({ id, label })) }
+            : card,
+      };
     }
   },
 
   async "approval.settled"(event, channel, _ctx) {
-    const cards = channel.state.pendingApprovalCards ?? {};
+    const cards = channel.state.pendingPromptCards ?? {};
     const card = cards[event.requestId];
     if (card === undefined) return;
     const account = channel.state.approvalResponderAccounts?.[event.responderPrincipalId];
@@ -102,7 +106,28 @@ export const defaultEvents: TeamsChannelEvents = {
     );
     const next = { ...cards };
     delete next[event.requestId];
-    channel.state.pendingApprovalCards = next;
+    channel.state.pendingPromptCards = next;
+  },
+
+  // `approval.settled` runs first and retires pressed approvals with their
+  // responder. Cards that end any other way (a typed answer, any question, or a
+  // withdrawal) are retired here.
+  async "input.resolved"(event, channel, _ctx) {
+    for (const resolution of event.resolutions) {
+      const cards = channel.state.pendingPromptCards ?? {};
+      const card = cards[resolution.requestId];
+      if (card === undefined) continue;
+      await channel.thread.update(
+        card.activityId,
+        renderAnsweredInputRequestMessage({
+          includeText: false,
+          label: resolvedPromptAnswer(resolution, card.options),
+          prompt: card.prompt,
+        }),
+      );
+      const { [resolution.requestId]: _, ...rest } = cards;
+      channel.state.pendingPromptCards = rest;
+    }
   },
 
   async "message.completed"(event, channel, _ctx) {

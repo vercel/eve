@@ -9,7 +9,8 @@ import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { InputResolution, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { InputRequest } from "#shared/input.js";
 import {
   type InputResponse,
   parseInputResponses,
@@ -73,7 +74,15 @@ export interface ChatSdkChannelState extends Record<string, unknown> {
   pendingToolCallMessage?: string | null;
   /** Authorization status messages, keyed by connection name. */
   pendingAuthMessageIds?: Record<string, string>;
+  /** Posted input request cards, keyed by message id, until eve resolves every request on them. */
+  pendingInputCards?: Record<string, ChatSdkPendingInputCard>;
   streamStepIndex?: number | null;
+}
+
+/** One posted card's requests and the resolutions eve has reported for them so far. */
+export interface ChatSdkPendingInputCard {
+  readonly requests: readonly InputRequest[];
+  readonly resolved: Readonly<Record<string, InputResolution>>;
 }
 
 /**
@@ -397,7 +406,52 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
     },
     async "input.requested"(event, channel, _ctx) {
       if (!channel.thread || event.requests.length === 0) return;
-      await channel.thread.post(renderInputRequests(event.requests, inputActionPrefix));
+      const posted = await channel.thread.post(
+        renderInputRequests(event.requests, inputActionPrefix),
+      );
+      if (!posted.id || channel.state.editSupported === false) return;
+      channel.state.pendingInputCards = {
+        ...channel.state.pendingInputCards,
+        [posted.id]: { requests: event.requests, resolved: {} },
+      };
+    },
+    // Covers every way a request ends: a press, a typed answer, or a withdrawal.
+    async "input.resolved"(event, channel, _ctx) {
+      const thread = channel.thread;
+      if (!thread) return;
+      for (const [messageId, card] of Object.entries(channel.state.pendingInputCards ?? {})) {
+        const resolutions = event.resolutions.filter((resolution) =>
+          card.requests.some((request) => request.requestId === resolution.requestId),
+        );
+        if (resolutions.length === 0) continue;
+        const resolved = {
+          ...card.resolved,
+          ...Object.fromEntries(
+            resolutions.map((resolution) => [resolution.requestId, resolution]),
+          ),
+        };
+        const { [messageId]: _, ...rest } = channel.state.pendingInputCards ?? {};
+        channel.state.pendingInputCards = card.requests.every(
+          (request) => resolved[request.requestId] !== undefined,
+        )
+          ? rest
+          : { ...rest, [messageId]: { requests: card.requests, resolved } };
+        try {
+          await thread.adapter.editMessage(
+            thread.id,
+            messageId,
+            renderInputRequests(card.requests, inputActionPrefix, resolved),
+          );
+        } catch (error) {
+          if (!isNotImplemented(error)) {
+            log.warn("answered input card edit failed", { error, messageId });
+            continue;
+          }
+          channel.state.editSupported = false;
+          channel.state.pendingInputCards = {};
+          return;
+        }
+      }
     },
     async "message.completed"(event, channel, _ctx) {
       if (event.finishReason === "tool-calls") {

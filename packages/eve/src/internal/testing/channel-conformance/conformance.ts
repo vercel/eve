@@ -28,32 +28,34 @@ export interface BrokenCell {
 
 /** Rules that check how an answered prompt's message changes, by prompt kind and how it was answered. */
 const answeredPromptRules = {
-  approvalPress: [
-    "pressing Approve clears the approval's buttons",
-    "pressing Approve names who approved on the approval",
-  ],
-  approvalText: [
-    "approving by text clears the approval's buttons",
-    "approving by text names who approved on the approval",
-  ],
-  questionPress: [
-    "pressing an option clears the question's buttons",
-    "pressing an option names who answered on the question",
-  ],
-  questionText: [
-    "answering a question by text clears its buttons",
-    "answering a question by text names who answered on the question",
-  ],
-} as const satisfies Record<string, readonly HitlRule[]>;
+  approvalPress: {
+    cleared: "pressing Approve clears the approval's buttons",
+    named: "pressing Approve names who approved on the approval",
+  },
+  approvalText: {
+    cleared: "approving by text clears the approval's buttons",
+    named: "approving by text names who approved on the approval",
+  },
+  questionPress: {
+    cleared: "pressing an option clears the question's buttons",
+    named: "pressing an option names who answered on the question",
+  },
+  questionText: {
+    cleared: "answering a question by text clears its buttons",
+    named: "answering a question by text names who answered on the question",
+  },
+} as const satisfies Record<string, { readonly cleared: HitlRule; readonly named: HitlRule }>;
+
+type AnsweredPrompt = keyof typeof answeredPromptRules;
 
 /** Answered prompts in `groups` are never edited, so they keep their buttons and never say who answered. */
 function staleAnsweredPrompts(
   reason: string,
-  groups: readonly (keyof typeof answeredPromptRules)[],
+  groups: readonly AnsweredPrompt[],
 ): Partial<Record<HitlRule, BrokenCell>> {
   return Object.fromEntries(
     groups
-      .flatMap((group) => answeredPromptRules[group])
+      .flatMap((group) => Object.values(answeredPromptRules[group]))
       .map((rule) => [
         rule,
         {
@@ -61,6 +63,19 @@ function staleAnsweredPrompts(
           symptom: /the answered prompt (still offers \[".+\]|never names who answered)/,
         },
       ]),
+  );
+}
+
+/** Answered prompts in `groups` lose their buttons, but the edit doesn't say who answered. */
+function unnamedAnsweredPrompts(
+  reason: string,
+  groups: readonly AnsweredPrompt[],
+): Partial<Record<HitlRule, BrokenCell>> {
+  return Object.fromEntries(
+    groups.map((group) => [
+      answeredPromptRules[group].named,
+      { reason, symptom: /the answered prompt never names who answered/ },
+    ]),
   );
 }
 
@@ -91,20 +106,18 @@ const hitlConformance = {
   "chat-sdk": [
     {
       driver: chatSdkDriver,
-      broken: staleAnsweredPrompts("the bridge never edits an answered prompt", [
-        "approvalPress",
-        "approvalText",
-        "questionPress",
-        "questionText",
-      ]),
+      broken: unnamedAnsweredPrompts(
+        "a resolved prompt doesn't say who answered; input.resolved carries no responder",
+        ["approvalPress", "approvalText", "questionPress", "questionText"],
+      ),
     },
     { driver: chatSdkTextDriver },
   ],
   discord: [
     {
       driver: discordDriver,
-      broken: staleAnsweredPrompts(
-        "a press gets a deferred update and the message is never edited",
+      broken: unnamedAnsweredPrompts(
+        "a resolved prompt doesn't say who answered; input.resolved carries no responder",
         ["approvalPress", "questionPress"],
       ),
     },
@@ -130,8 +143,8 @@ const hitlConformance = {
   teams: [
     {
       driver: teamsDriver,
-      broken: staleAnsweredPrompts(
-        "only a pressed approval card is recorded for editing; questions and typed approvals are not",
+      broken: unnamedAnsweredPrompts(
+        "a resolved prompt doesn't say who answered; input.resolved carries no responder",
         ["approvalText", "questionPress", "questionText"],
       ),
     },
@@ -139,8 +152,8 @@ const hitlConformance = {
   telegram: [
     {
       driver: telegramDriver,
-      broken: staleAnsweredPrompts(
-        "nothing edits an answered prompt; a press only answers the callback query",
+      broken: unnamedAnsweredPrompts(
+        "a resolved prompt doesn't say who answered; input.resolved carries no responder",
         ["approvalPress", "approvalText", "questionPress", "questionText"],
       ),
     },

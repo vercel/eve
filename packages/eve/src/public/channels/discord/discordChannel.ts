@@ -50,7 +50,7 @@ import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js"
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
-import type { ValidatedInputResponse } from "#shared/input.js";
+import type { InputOption, ValidatedInputResponse } from "#shared/input.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
 
@@ -87,6 +87,15 @@ export interface DiscordChannelState {
   initialResponseSent: boolean;
   /** Whether `conversationId` is a real Discord message id. */
   hasMessageAnchor: boolean;
+  /** Posted prompts with components, keyed by requestId, until eve resolves them. */
+  hitlPrompts?: Record<string, DiscordHitlPrompt>;
+}
+
+/** What a posted prompt needs so its message can be edited once eve resolves it. */
+export interface DiscordHitlPrompt {
+  readonly content: string;
+  readonly messageId: string;
+  readonly options: readonly Pick<InputOption, "id" | "label">[];
 }
 
 /** Discord channel credentials. */
@@ -140,6 +149,7 @@ export interface DiscordChannelEvents {
   readonly "message.completed"?: DiscordEventHandler<"message.completed">;
   readonly "message.appended"?: DiscordEventHandler<"message.appended">;
   readonly "input.requested"?: DiscordEventHandler<"input.requested">;
+  readonly "input.resolved"?: DiscordEventHandler<"input.resolved">;
   readonly "turn.failed"?: DiscordEventHandler<"turn.failed">;
   readonly "turn.completed"?: DiscordEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: DiscordEventHandler<"turn.cancelled">;

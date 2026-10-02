@@ -68,7 +68,7 @@ describe("defaultEvents approval lifecycle", () => {
     );
 
     expect(post).toHaveBeenCalledTimes(1);
-    expect(channel.state.pendingApprovalCards).toEqual({
+    expect(channel.state.pendingPromptCards).toEqual({
       approval_1: { activityId: "act1", prompt: "Approve deployment?" },
     });
   });
@@ -76,7 +76,7 @@ describe("defaultEvents approval lifecycle", () => {
   it("replaces the settled approval card with the responder's identity", async () => {
     const { channel, update } = buildChannelStub({
       approvalResponderAccounts: { "teams:TENANT:USER": { id: "USER", name: "Ada" } },
-      pendingApprovalCards: {
+      pendingPromptCards: {
         approval_1: { activityId: "approval-card", prompt: "Approve deployment?" },
       },
     });
@@ -99,7 +99,7 @@ describe("defaultEvents approval lifecycle", () => {
       expect.objectContaining({ attachments: expect.any(Array) }),
     );
     expect(JSON.stringify(update.mock.calls[0]?.[1])).toContain("Answered: Approved by Ada");
-    expect(channel.state.pendingApprovalCards).toEqual({});
+    expect(channel.state.pendingPromptCards).toEqual({});
   });
 });
 

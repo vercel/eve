@@ -1,3 +1,5 @@
+import { resolvedPromptLabel } from "#channel/resolved-prompt.js";
+import type { InputResolution } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
 import type { CardChild } from "#compiled/chat/index.js";
 import { Actions, Button, Card, CardText } from "#compiled/chat/index.js";
@@ -8,14 +10,35 @@ const FREEFORM_HINT = "Reply with your answer.";
 
 /**
  * Renders pending input requests as a Chat SDK card with one button per option,
- * plus fallback text for adapters without cards (such as Photon iMessage).
+ * plus fallback text for adapters without cards (such as Photon iMessage). A
+ * request in `resolved` shows its outcome in place of its buttons.
  */
-export function renderInputRequests(requests: readonly InputRequest[], inputActionPrefix: string) {
+export function renderInputRequests(
+  requests: readonly InputRequest[],
+  inputActionPrefix: string,
+  resolved: Readonly<Record<string, InputResolution>> = {},
+) {
+  const outcome = (request: InputRequest) => {
+    const resolution = resolved[request.requestId];
+    return resolution === undefined ? undefined : resolvedPromptLabel(resolution, request.options);
+  };
   return {
     card: Card({
-      children: requests.flatMap((request) => renderInputRequest(request, inputActionPrefix)),
+      children: requests.flatMap((request) => {
+        const label = outcome(request);
+        return label === undefined
+          ? renderInputRequest(request, inputActionPrefix)
+          : [CardText(request.prompt), CardText(label)];
+      }),
     }),
-    fallbackText: requests.map(renderInputRequestText).join("\n\n"),
+    fallbackText: requests
+      .map((request) => {
+        const label = outcome(request);
+        return label === undefined
+          ? renderInputRequestText(request)
+          : `${request.prompt}\n\n${label}`;
+      })
+      .join("\n\n"),
   };
 }
 

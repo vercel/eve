@@ -158,6 +158,7 @@ export interface TelegramChannelEvents {
   readonly "message.completed"?: TelegramEventHandler<"message.completed">;
   readonly "message.appended"?: TelegramEventHandler<"message.appended">;
   readonly "input.requested"?: TelegramEventHandler<"input.requested">;
+  readonly "input.resolved"?: TelegramEventHandler<"input.resolved">;
   readonly "turn.failed"?: TelegramEventHandler<"turn.failed">;
   readonly "turn.completed"?: TelegramEventHandler<"turn.completed">;
   readonly "turn.cancelled"?: TelegramEventHandler<"turn.cancelled">;
