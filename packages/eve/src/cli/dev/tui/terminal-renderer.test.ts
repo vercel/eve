@@ -3703,13 +3703,13 @@ describe("TerminalRenderer status line", () => {
       model: "xai/grok-4.5",
       reasoning: "xhigh" as const,
       providerOptions: { gateway: { serviceTier: "priority" } },
-      expected: "grok-4.5 · xhigh · ⚡︎",
+      expected: "grok-4.5 · xhigh · ↯",
     },
     {
       model: "openai/gpt-6-luna-fast",
       reasoning: "high" as const,
       providerOptions: {},
-      expected: "gpt-6-luna · high · ⚡︎",
+      expected: "gpt-6-luna · high · ↯",
     },
   ])("renders model metadata from the header: $expected", (selection) => {
     const { screen, renderer } = makeRenderer(100);
@@ -3751,7 +3751,7 @@ describe("TerminalRenderer status line", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("grok-4.5");
     expect(snapshot).not.toContain("provider-default");
-    expect(snapshot).not.toContain("⚡︎");
+    expect(snapshot).not.toContain("↯");
     renderer.shutdown();
   });
 });
@@ -4057,7 +4057,7 @@ describe("TerminalRenderer conversation", () => {
     renderer.renderConversation(
       conversationOf([turn("turn_1")], { data: { modelId: "openai/gpt-6-luna-fast" } }),
     );
-    expect(screen.snapshot()).toContain("dynamic model · gpt-6-luna · ⚡︎");
+    expect(screen.snapshot()).toContain("dynamic model · gpt-6-luna · ↯");
     renderer.requestInterrupt();
     await prompt.catch(() => {});
   });
