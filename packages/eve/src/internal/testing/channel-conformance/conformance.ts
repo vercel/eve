@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { type HitlRule, hitlContract } from "#internal/testing/channel-conformance/contract.js";
+import {
+  type ContractRule,
+  type HitlRule,
+  hitlContract,
+} from "#internal/testing/channel-conformance/contract.js";
 import {
   type ChannelDriver,
   type ClientDriver,
@@ -81,6 +85,11 @@ function unnamedAnsweredPrompts(
 
 interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
+  /**
+   * A DM column beside the channel's shared-thread column. It runs only rules
+   * whose behavior varies by conversation; the shared column covers the rest.
+   */
+  readonly dm?: true;
   readonly broken?: Partial<Record<HitlRule, BrokenCell>>;
   /** Rules this client deliberately doesn't offer, with why, beyond what its capabilities rule out. */
   readonly unsupported?: Partial<Record<HitlRule, string>>;
@@ -161,13 +170,13 @@ const TUI_SINGLE_PERSON = "one person answers at their own terminal; there's nob
  */
 const hitlConformance = {
   "chat-sdk": [{ driver: chatSdkDriver, broken: CHAT_SDK_BROKEN }, { driver: chatSdkTextDriver }],
-  "chat-sdk-dm": [{ driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
+  "chat-sdk-dm": [{ dm: true, driver: () => chatSdkDriver("private"), broken: CHAT_SDK_BROKEN }],
   discord: [{ driver: discordDriver, broken: DISCORD_BROKEN }],
-  "discord-dm": [{ driver: () => discordDriver("private"), broken: DISCORD_BROKEN }],
+  "discord-dm": [{ dm: true, driver: () => discordDriver("private"), broken: DISCORD_BROKEN }],
   github: [{ driver: githubDriver }],
   linear: [{ driver: linearDriver }],
   linq: [{ driver: linqDriver }],
-  "linq-dm": [{ driver: () => linqDriver("private") }],
+  "linq-dm": [{ dm: true, driver: () => linqDriver("private") }],
   slack: [
     {
       driver: slackDriver,
@@ -187,11 +196,11 @@ const hitlConformance = {
       },
     },
   ],
-  "slack-dm": [{ driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
+  "slack-dm": [{ dm: true, driver: () => slackDriver("private"), broken: SLACK_BROKEN }],
   teams: [{ driver: teamsDriver, broken: TEAMS_BROKEN }],
-  "teams-dm": [{ driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],
+  "teams-dm": [{ dm: true, driver: () => teamsDriver("private"), broken: TEAMS_BROKEN }],
   telegram: [{ driver: telegramDriver, broken: TELEGRAM_BROKEN }],
-  "telegram-dm": [{ driver: () => telegramDriver("private"), broken: TELEGRAM_BROKEN }],
+  "telegram-dm": [{ dm: true, driver: () => telegramDriver("private"), broken: TELEGRAM_BROKEN }],
   tui: [
     {
       driver: tuiDriver,
@@ -224,6 +233,13 @@ type Cell =
   | { readonly kind: "broken"; readonly broken: BrokenCell };
 
 function cellOf(entry: ConformanceChannel, rule: (typeof hitlContract)[number]): Cell {
+  if (entry.dm === true && (rule as ContractRule).variesByConversation !== true) {
+    return {
+      kind: "unsupported",
+      reason:
+        "it doesn't vary between a shared thread and a DM, and the shared-thread column covers it",
+    };
+  }
   const { capabilities } = entry.driver();
   if (!rule.requires.every((capability) => capabilities.includes(capability))) {
     return { kind: "unsupported" };

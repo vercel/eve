@@ -23,6 +23,13 @@ export interface ContractRule {
   /** Where the behavior is promised: a docs anchor or the PR that introduced it. */
   readonly source: string;
   readonly requires: readonly ChannelCapability[];
+  /**
+   * The behavior can differ between a shared thread and a DM, such as a typed
+   * answer that must mention the bot in a channel, or a press whose presser a
+   * platform names differently in a server. A channel's DM column runs only
+   * these; its shared-thread column covers the rest.
+   */
+  readonly variesByConversation?: boolean;
   run(conversation: ChannelConversation): Promise<void>;
 }
 
@@ -165,6 +172,7 @@ export const hitlContract = [
     rule: "pressing a rendered option answers the pending question with that option",
     source: "docs/tools/human-in-the-loop.md#answering-from-a-client-or-channel",
     requires: ["buttons"],
+    variesByConversation: true,
     async run(conversation) {
       const options = await askWhichDay(conversation);
       const saturday = options.find((option) => option.label === "Saturday");
@@ -177,6 +185,7 @@ export const hitlContract = [
     rule: "a text reply matching an option answers the only pending question",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["text-replies"],
+    variesByConversation: true,
     async run(conversation) {
       await askWhichDay(conversation);
       await conversation.say("Saturday");
@@ -187,6 +196,7 @@ export const hitlContract = [
     rule: "a text reply that matches no option answers the question with the person's words",
     source: "docs/tools/human-in-the-loop.md#questions",
     requires: ["text-replies"],
+    variesByConversation: true,
     async run(conversation) {
       await askWhichDay(conversation);
       await conversation.say(OWN_WORDS);
@@ -197,6 +207,7 @@ export const hitlContract = [
     rule: "a text reply answers an open-ended question with the person's words",
     source: "docs/tools/human-in-the-loop.md#questions",
     requires: ["text-replies"],
+    variesByConversation: true,
     async run(conversation) {
       await conversation.say(ASK_OPEN);
       await conversation.waitForQuestion(OPEN_PROMPT);
@@ -236,6 +247,7 @@ export const hitlContract = [
     rule: "a text reply matching an option does not answer either of two pending questions",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["text-replies"],
+    variesByConversation: true,
     async run(conversation) {
       await conversation.say(PLAN_REVIEW);
       await conversation.waitForRequest(DAY_PROMPT);
@@ -268,6 +280,7 @@ export const hitlContract = [
     rule: "pressing Approve runs the gated tool",
     source: "docs/tools/human-in-the-loop.md#approvals",
     requires: ["buttons"],
+    variesByConversation: true,
     async run(conversation) {
       const options = await askToDeploy(conversation);
       const approve = options.find((option) => APPROVE_LABELS.includes(option.label));
@@ -333,6 +346,7 @@ export const hitlContract = [
     rule: "a text reply of approve runs the gated tool",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["text-replies"],
+    variesByConversation: true,
     async run(conversation) {
       await askToDeploy(conversation);
       await conversation.say("approve");
@@ -343,6 +357,7 @@ export const hitlContract = [
     rule: "a text reply of cancel stops the gated tool without running it",
     source: "docs/tools/human-in-the-loop.md#how-pause-and-resume-works",
     requires: ["text-replies"],
+    variesByConversation: true,
     async run(conversation) {
       await askToDeploy(conversation);
       await conversation.say("cancel");
@@ -362,6 +377,7 @@ export const hitlContract = [
     rule: "answering a question by text clears its buttons",
     source: "#1 (Slack's answered question card)",
     requires: ["buttons", "text-replies"],
+    variesByConversation: true,
     async run(conversation) {
       await answerSaturday(conversation, "text");
       expectButtonsCleared(conversation, PROMPT);
@@ -380,6 +396,7 @@ export const hitlContract = [
     rule: "answering a question by text names who answered on the question",
     source: "#1 (Slack's answered question card)",
     requires: ["buttons", "text-replies"],
+    variesByConversation: true,
     async run(conversation) {
       await answerSaturday(conversation, "text");
       expectResponderNamed(conversation, PROMPT);
@@ -398,6 +415,7 @@ export const hitlContract = [
     rule: "approving by text clears the approval's buttons",
     source: "#2212 (Slack's settled approval card)",
     requires: ["buttons", "text-replies"],
+    variesByConversation: true,
     async run(conversation) {
       await approveDeploy(conversation, "text");
       expectButtonsCleared(conversation, APPROVAL_PROMPT);
@@ -416,6 +434,7 @@ export const hitlContract = [
     rule: "approving by text names who approved on the approval",
     source: "#2212 (Slack's settled approval card)",
     requires: ["buttons", "text-replies"],
+    variesByConversation: true,
     async run(conversation) {
       await approveDeploy(conversation, "text");
       expectResponderNamed(conversation, APPROVAL_PROMPT);
