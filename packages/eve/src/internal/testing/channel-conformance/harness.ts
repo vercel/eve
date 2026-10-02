@@ -122,7 +122,7 @@ export interface ClientView {
   /** The person presses one shown choice. */
   press(option: RenderedOption): Promise<void>;
   /** The bot replies the client shows now. */
-  replies(): readonly string[];
+  replies(): readonly string[] | Promise<readonly string[]>;
   /** What the client shows now, for timeout errors. */
   describe(): string;
   /** Stops the client and releases anything it holds, such as its event stream. */
@@ -406,8 +406,8 @@ async function converse(
     const replyWait = <T>(label: string, select: (reply: string) => T | undefined) =>
       wait(
         label,
-        () => {
-          for (const reply of view.replies()) {
+        async () => {
+          for (const reply of await view.replies()) {
             const selected = select(reply);
             if (selected !== undefined) return selected;
           }
