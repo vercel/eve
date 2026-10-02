@@ -3,6 +3,7 @@ import {
   SpanKind,
   trace,
   type Attributes,
+  type Context,
   type Span,
 } from "#compiled/@opentelemetry/api/index.js";
 
@@ -12,12 +13,16 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { buildConversationContext } from "#channel/conversation-context.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import { resolveInstrumentationEnvironment } from "#internal/application/dev-environment.js";
-import { createLogger, logError } from "#internal/logging.js";
+import { createLogger, formatError } from "#internal/logging.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { resolveTracePolicy } from "#shared/trace-policy.js";
 import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { recordAgentSpanError } from "#tracing/agent-span-error.js";
+import {
+  DIRECT_TOOL_CALL_ATTRIBUTE,
+  DIRECT_TOOL_CALL_VALUE,
+} from "#tracing/agent-span-contract.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { withAgentToolSpanContext } from "#tracing/agent-tool-span-context.js";
@@ -46,7 +51,14 @@ export interface InvokeToolTraceOrigin {
  * text is never captured, on this span or on any span the call nests in or
  * under: error content is switched off for the whole call even when the
  * policy drops the span, so a failure logged inside the tool cannot land on
- * an already-active parent.
+ * an already-active parent. That includes the trace policy itself: it runs
+ * inside the protected context, and a policy that throws is logged as a
+ * warning, which never touches a span.
+ *
+ * The span is marked as a direct call so trace processors treat it as the
+ * call's activation: it claims the trace when it starts and completes it
+ * when it ends. The call flushes the runtime afterwards so that completion
+ * is released even on a deployment that only serves direct calls.
  */
 export async function withInvokeToolSpan(
   input: {
@@ -61,9 +73,18 @@ export async function withInvokeToolSpan(
   run: () => Promise<InvokeToolResult>,
 ): Promise<InvokeToolResult> {
   const base = withErrorContent(otelContext.active(), false);
-  const settings = getInstrumentationRuntime()?.otelSettings;
+  return await otelContext.with(base, () => traced(input, base, run));
+}
+
+async function traced(
+  input: Parameters<typeof withInvokeToolSpan>[0],
+  base: Context,
+  run: () => Promise<InvokeToolResult>,
+): Promise<InvokeToolResult> {
+  const runtime = getInstrumentationRuntime();
+  const settings = runtime?.otelSettings;
   // No declared OpenTelemetry: eve emits no agent spans anywhere, so none here either.
-  if (settings === undefined) return await otelContext.with(base, run);
+  if (settings === undefined) return await run();
 
   const conversation = buildConversationContext(
     {
@@ -76,7 +97,10 @@ export async function withInvokeToolSpan(
   const decision = resolveTracePolicy(
     settings.tracePolicy,
     { agentName: input.origin?.agentName ?? "", ...conversation },
-    (error) => logError(log, "tracePolicy threw; dropping the tool call's trace", error),
+    (error) =>
+      log.warn("tracePolicy threw; dropping the tool call's trace", {
+        error: formatError(error),
+      }),
   );
   if (decision.action === "drop") return await otelContext.with(suppressTracing(base), run);
   const content = applyLiveDeliveryAudienceCeiling(
@@ -99,6 +123,7 @@ export async function withInvokeToolSpan(
     "gen_ai.tool.call.id": input.callId,
     "gen_ai.tool.name": input.toolName,
     "gen_ai.tool.type": "function",
+    [DIRECT_TOOL_CALL_ATTRIBUTE]: DIRECT_TOOL_CALL_VALUE,
     ...agentSpanNamingAttributes(spanName, "execute_tool"),
     ...agentTraceIdentityAttributes({
       rootSessionId: input.sessionId,
@@ -145,6 +170,9 @@ export async function withInvokeToolSpan(
     throw error;
   } finally {
     span.end();
+    await runtime?.forceFlush().catch((error: unknown) => {
+      log.warn("flushing a tool call's trace failed", { error: formatError(error) });
+    });
   }
 }
 
