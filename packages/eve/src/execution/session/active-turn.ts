@@ -1,4 +1,5 @@
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
+import { mapHeldInputResponsesStep } from "#execution/proxied-deliver-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
@@ -40,6 +41,7 @@ export type RuntimeEvent =
 export class ActiveTurn {
   private readonly admitted = new Set<number>();
   private readonly routedToChildren = new Set<number>();
+  private readonly mappedForHeldRequest = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller = new AbortController();
   private readonly expectedTurnId: string;
@@ -177,14 +179,26 @@ export class ActiveTurn {
    * responder: an approver need not be the turn's own person. Returns
    * `undefined` when no admitted delivery answers one.
    */
-  takeInputResponses(requestIds: ReadonlySet<string>): DeliverHookPayload | undefined {
+  async takeInputResponses(
+    requestIds: ReadonlySet<string>,
+  ): Promise<DeliverHookPayload | undefined> {
     for (const sequence of this.admitted) {
-      const delivery = this.input.queue.delivery(sequence);
+      let delivery = this.input.queue.delivery(sequence);
       if (delivery === undefined) continue;
-      const answers = delivery.payloads.some((payload) =>
-        payload.inputResponses?.some((response) => requestIds.has(response.requestId)),
-      );
-      if (!answers) continue;
+      const responses = delivery.payloads.flatMap((payload) => payload.inputResponses ?? []);
+      if (responses.length === 0) continue;
+      if (!responses.some((response) => requestIds.has(response.requestId))) {
+        // Some channels answer with ids only their `deliver` hook resolves,
+        // such as Telegram's compact button callbacks.
+        if (this.mappedForHeldRequest.has(sequence)) continue;
+        this.mappedForHeldRequest.add(sequence);
+        const target = delivery;
+        const mapped = await this.input.cursor.advance((state) =>
+          mapHeldInputResponsesStep({ delivery: target, requestIds: [...requestIds], ...state }),
+        );
+        if (mapped.delivery === undefined) continue;
+        delivery = mapped.delivery;
+      }
       this.admitted.delete(sequence);
       this.input.queue.replaceDelivery(sequence, undefined);
       return delivery;

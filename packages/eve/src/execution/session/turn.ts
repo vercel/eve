@@ -325,7 +325,7 @@ export class SessionExecution {
     while (true) {
       const callbacks = this.input.queue.takeAuthorizations(attemptIds);
       if (callbacks !== undefined) return { kind: "deliver", payloads: callbacks };
-      const answer = turn.takeInputResponses(requestIds);
+      const answer = await turn.takeInputResponses(requestIds);
       if (answer !== undefined) return answer;
       const steering = await turn.takeSteering({ heldOnPerson: true });
       if (steering !== undefined) return steering;

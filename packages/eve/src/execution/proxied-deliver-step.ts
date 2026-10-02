@@ -79,7 +79,11 @@ export async function routeProxiedDeliverStep(
 async function routeProxiedDeliver(
   input: SessionStepState & { readonly delivery: DeliverHookPayload },
 ): Promise<RoutedDeliverResult> {
-  const { delivery: sourceDelivery, serializedContext } = await deliverChannelInputResponses(input);
+  const requests = getProxyInputRequests(readDurableSession(input.sessionState).state);
+  const { delivery: sourceDelivery, serializedContext } = await deliverChannelInputResponses({
+    ...input,
+    routable: (response) => requests.has(response.requestId),
+  });
   let durableSession = readDurableSession(input.sessionState);
   const parentPayloads = new Map<number, DeliverPayload>();
   const children = new Map<string, ChildBucket>();
@@ -221,20 +225,46 @@ async function routeProxiedDeliver(
 }
 
 /**
+ * Maps a delivery's channel-specific answers to the requests a held turn waits
+ * on, so the turn can tell they answer it. Returns the mapped delivery, or
+ * `undefined` when the channel maps none of them to one of `requestIds`.
+ */
+export async function mapHeldInputResponsesStep(
+  input: SessionStepState & {
+    readonly delivery: DeliverHookPayload;
+    readonly requestIds: readonly string[];
+  },
+): Promise<WithSessionStateDelta<{ readonly delivery: DeliverHookPayload | undefined }>> {
+  "use step";
+  return await withSessionStateDelta(input, async () => {
+    const requestIds = new Set(input.requestIds);
+    const mapped = await deliverChannelInputResponses({
+      ...input,
+      routable: (response) => requestIds.has(response.requestId),
+    });
+    return mapped.delivery === input.delivery
+      ? { delivery: undefined }
+      : { delivery: mapped.delivery, serializedContext: mapped.serializedContext };
+  });
+}
+
+/**
  * Maps each input response this session cannot route as sent through the
- * channel's `deliver` hook, and routes what it maps to a proxied request.
+ * channel's `deliver` hook, and routes what it maps to a `routable` request.
  * Telegram buttons, for example, carry compact callback ids that only its hook
  * resolves against channel state. Every other response stays as sent for the
  * turn's own `deliver` call.
  */
 async function deliverChannelInputResponses(
-  input: SessionStepState & { readonly delivery: DeliverHookPayload },
+  input: SessionStepState & {
+    readonly delivery: DeliverHookPayload;
+    readonly routable: (response: InputResponse) => boolean;
+  },
 ): Promise<{
   readonly delivery: DeliverHookPayload;
   readonly serializedContext: Record<string, unknown>;
 }> {
-  const requests = getProxyInputRequests(readDurableSession(input.sessionState).state);
-  const routable = (response: InputResponse) => requests.has(response.requestId);
+  const { routable } = input;
   const unrouted = input.delivery.payloads.some(
     (payload) => payload.inputResponses?.some((response) => !routable(response)) === true,
   );
