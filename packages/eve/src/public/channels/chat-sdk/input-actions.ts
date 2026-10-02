@@ -2,7 +2,9 @@ import type { InputRequest } from "#shared/input.js";
 import type { CardChild } from "#compiled/chat/index.js";
 import { Actions, Button, Card, CardText } from "#compiled/chat/index.js";
 
-const FREEFORM_NOTICE = "This request needs a freeform answer. Continue from the eve session UI.";
+// A text reply answers a pending request: an option's number, label, or id, or
+// any text when the request has no options or allows a freeform answer.
+const FREEFORM_HINT = "Reply with your answer.";
 
 /**
  * Renders pending input requests as a Chat SDK card with one button per option,
@@ -17,10 +19,10 @@ export function renderInputRequests(requests: readonly InputRequest[], inputActi
   };
 }
 
-// The SDK's card fallback drops buttons, so options are numbered; a reply with the number, label, or id answers the request.
+// The SDK's card fallback drops buttons, so the options are numbered instead.
 function renderInputRequestText(request: InputRequest): string {
   const options = request.options ?? [];
-  if (options.length === 0) return `${request.prompt}\n\n${FREEFORM_NOTICE}`;
+  if (options.length === 0) return `${request.prompt}\n\n${FREEFORM_HINT}`;
   return [
     request.prompt,
     "",
@@ -50,9 +52,10 @@ function renderInputRequest(request: InputRequest, inputActionPrefix: string) {
         ),
       ),
     );
+    if (request.allowFreeform === true) children.push(CardText("Or reply with your own answer."));
     return children;
   }
-  children.push(CardText(FREEFORM_NOTICE));
+  children.push(CardText(FREEFORM_HINT));
   return children;
 }
 

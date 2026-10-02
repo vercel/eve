@@ -784,6 +784,63 @@ describe("chatSdkChannel", () => {
       fallbackText: "Deploy?\n\n1. Approve\n2. Cancel\n\nReply with a number to choose.",
     });
   });
+
+  it("asks for a typed reply when an input request accepts a freeform answer", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      concurrency: "concurrent",
+      state: memoryState(),
+      logger: "warn",
+      userName: "bot",
+    });
+    const channelAdapter = withState(getAdapter(bridge.channel), {
+      thread: serializedThread(),
+    });
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: { callId: "call-1", name: "ask", type: "tool-call" },
+            display: "text",
+            prompt: "Which region?",
+            requestId: "request-1",
+          },
+          {
+            action: { callId: "call-2", name: "ask", type: "tool-call" },
+            allowFreeform: true,
+            display: "select",
+            options: [{ id: "iad1", label: "Washington" }],
+            prompt: "Which zone?",
+            requestId: "request-2",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    const posted = adapter.posted[0]?.message as AdapterPostableMessage;
+    expect(posted).toMatchObject({
+      card: {
+        children: [
+          { content: "Which region?", type: "text" },
+          { content: "Reply with your answer.", type: "text" },
+          { content: "Which zone?", type: "text" },
+          { type: "actions" },
+          { content: "Or reply with your own answer.", type: "text" },
+        ],
+      },
+      fallbackText:
+        "Which region?\n\nReply with your answer.\n\n" +
+        "Which zone?\n\n1. Washington\n\nReply with a number, or with your own answer.",
+    });
+  });
 });
 
 describe("messageToUserContent", () => {

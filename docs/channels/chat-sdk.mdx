@@ -179,7 +179,7 @@ chatSdkChannel({
 
 ### Human-in-the-loop (HITL)
 
-HITL prompts render as a Chat SDK `Card` with buttons. Button clicks resume the parked session automatically — the channel wires `bot.onAction` to `respond` for you. Adapters that can't render cards, such as Photon iMessage, get fallback text with the options numbered. A reply forwarded through `send` with an option's number or label answers the pending request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. Change the action-id prefix with `inputActionPrefix` (default `eve_input:`) if your app already uses it, and provide `resolveInputAuth` to carry user or tenant auth across the resume:
+HITL prompts render as a Chat SDK `Card` with buttons. Button clicks resume the parked session automatically — the channel wires `bot.onAction` to `respond` for you. Adapters that can't render cards, such as Photon iMessage, get fallback text with the options numbered. A reply forwarded through `send` with an option's number or label answers the pending request, so `1` or `approve` runs an approval-gated tool and `2` or `cancel` stops it. If the question allows a custom answer, or has no options, the message asks for a typed reply and any other text is taken as that answer. Change the action-id prefix with `inputActionPrefix` (default `eve_input:`) if your app already uses it, and provide `resolveInputAuth` to carry user or tenant auth across the resume:
 
 ```ts
 chatSdkChannel({
