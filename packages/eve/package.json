@@ -333,6 +333,18 @@
       "import": "./dist/src/self-modification/extension/extension.js",
       "default": "./dist/src/self-modification/extension/extension.js"
     },
+    "./self-modification/local": {
+      "eve-source": "./dist/src/self-modification/extension/extension.js",
+      "types": "./dist/src/self-modification/extension/extension.d.ts",
+      "import": "./dist/src/self-modification/extension/extension.js",
+      "default": "./dist/src/self-modification/extension/extension.js"
+    },
+    "./self-modification/deployed": {
+      "eve-source": "./dist/src/self-modification/deployed/extension.js",
+      "types": "./dist/src/self-modification/deployed/extension.d.ts",
+      "import": "./dist/src/self-modification/deployed/extension.js",
+      "default": "./dist/src/self-modification/deployed/extension.js"
+    },
     "./self-modification/agent": {
       "eve-source": "./dist/src/self-modification/agent.js",
       "types": "./dist/src/self-modification/agent.d.ts",
@@ -639,6 +651,12 @@
     "builtInExtensions": {
       "./self-modification": {
         "dist": "./dist/src/self-modification/extension"
+      },
+      "./self-modification/local": {
+        "dist": "./dist/src/self-modification/extension"
+      },
+      "./self-modification/deployed": {
+        "dist": "./dist/src/self-modification/deployed"
       },
       "./extensions/code": {
         "dist": "./dist/src/extensions/code/extension"
