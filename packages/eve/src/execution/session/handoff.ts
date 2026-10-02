@@ -1,6 +1,6 @@
 import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { SessionCapabilities } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
 import { readAcceptedDeploymentId } from "#execution/session/accepted-deployment.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
@@ -85,6 +85,11 @@ type SessionRetainedReason =
   | "checkpoint-incompatible"
   | "known-incompatible";
 
+/** A compaction handoff the owner owes; the successor keeps this deadline. */
+export interface CompactionHandoff {
+  readonly sessionTimeoutDeadline: Date | undefined;
+}
+
 type SessionTransferState = Pick<
   SessionCheckpoint,
   "history" | "serializedContext" | "sessionState"
@@ -114,40 +119,48 @@ export class SessionHandoff {
   }
 
   /**
-   * Attempts to move the session to the selected delivery's deployment. The
-   * outcome states whether the successor activated or this owner retained the
-   * session. Candidate failures recover locally rather than escaping.
+   * Attempts to move the session to the selected delivery's deployment. When a
+   * compaction handoff is due and that deployment is this one or unknown, the
+   * session moves to a fresh run here instead. The outcome states whether the
+   * successor activated or this owner retained the session. Candidate failures
+   * recover locally rather than escaping.
    */
   async tryTransfer(
     selection: TurnSelection,
     state: SessionTransferState,
+    options: { readonly compaction?: CompactionHandoff } = {},
   ): Promise<SessionTransferOutcome> {
-    const targetDeploymentId = readAcceptedDeploymentId(selection.delivery);
+    const { delivery } = selection;
+    const targetDeploymentId = readAcceptedDeploymentId(delivery);
+    const sameDeployment =
+      targetDeploymentId === undefined || targetDeploymentId === this.input.deploymentId;
+    if (sameDeployment && options.compaction !== undefined) {
+      if (!selection.handoffEligible) return { kind: "retained", reason: "busy" };
+      return await this.tryCompactionTransfer(state, { ...options.compaction, delivery });
+    }
     if (targetDeploymentId === undefined) return { kind: "retained", reason: "missing-deployment" };
     if (targetDeploymentId === this.input.deploymentId)
       return { kind: "retained", reason: "same-deployment" };
     if (this.incompatibleTargetDeploymentIds.has(targetDeploymentId))
       return { kind: "retained", reason: "known-incompatible" };
     if (!selection.handoffEligible) return { kind: "retained", reason: "busy" };
-    return await this.transfer(state, targetDeploymentId, { delivery: selection.delivery });
+    return await this.transfer(state, targetDeploymentId, { delivery });
   }
 
   /**
-   * Attempts to move a session that just compacted to a fresh run on this
-   * deployment. The caller guarantees no input is waiting; the successor parks
-   * until the next one arrives and keeps the session's deadline.
+   * Attempts to move a session that compacted to a fresh run on this
+   * deployment. Without a delivery the caller guarantees no input is waiting,
+   * and the successor parks until the next one arrives. The successor keeps
+   * the session's deadline.
    */
   async tryCompactionTransfer(
     state: SessionTransferState,
-    sessionTimeoutDeadline: Date | undefined,
+    compaction: CompactionHandoff & { readonly delivery?: DeliverHookPayload },
   ): Promise<SessionTransferOutcome> {
     const { deploymentId } = this.input;
     if (this.incompatibleTargetDeploymentIds.has(deploymentId))
       return { kind: "retained", reason: "known-incompatible" };
-    return await this.transfer(state, deploymentId, {
-      reason: "compaction",
-      sessionTimeoutDeadline,
-    });
+    return await this.transfer(state, deploymentId, { ...compaction, reason: "compaction" });
   }
 
   private async transfer(

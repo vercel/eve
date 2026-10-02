@@ -8,6 +8,9 @@ const SLEEPER_FOLLOW_UP = "SLEEPER-FOLLOW-UP";
 const CANCELLED_TURN_FOLLOW_UP = "CANCELLATION-SUBAGENT-FOLLOW-UP-OK";
 /** How a call the cancelled turn stopped reads in history. */
 const CANCELLED_CALL_TEXT = "cancelled before this call finished";
+/** Shared with `evals/cancellation/compact-session-handoff.eval.ts`. */
+const CODE_WORD = "ORCHID-42";
+const CODE_WORD_QUESTION = "What is Alice's project code word?";
 
 async function respond(request: MockModelRequest): Promise<MockModelResponse | string> {
   const message = request.lastUserMessage ?? "";
@@ -76,7 +79,16 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     };
   }
   if (message.includes(CANCELLED_TURN_FOLLOW_UP)) return replyAfterCancelledTurn(request);
+  if (message.includes(CODE_WORD_QUESTION)) return recallCodeWord(request);
   return `Mock reply: ${message}`;
+}
+
+/** Answers only from history, so a session that lost it across compaction cannot answer. */
+function recallCodeWord(request: MockModelRequest): string {
+  const remembered = request.messages.some(
+    (entry) => !entry.text.includes(CODE_WORD_QUESTION) && entry.text.includes(CODE_WORD),
+  );
+  return remembered ? CODE_WORD : "Alice's code word is not in this conversation.";
 }
 
 /**

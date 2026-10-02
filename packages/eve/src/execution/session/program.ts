@@ -18,7 +18,11 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { finalizeSession, type SessionTerminalOutcome } from "#execution/session/finalization.js";
 import { type SessionInboxHandle } from "#execution/session-inbox/inbox.js";
 import { createSessionTimeoutControl } from "#execution/session/timeout-control.js";
-import { SessionHandoff, sessionAnchorToken } from "#execution/session/handoff.js";
+import {
+  type CompactionHandoff,
+  SessionHandoff,
+  sessionAnchorToken,
+} from "#execution/session/handoff.js";
 import { signalSessionAnchorStep } from "#execution/session/handoff-steps.js";
 import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
 
@@ -239,8 +243,8 @@ async function runSessionLoop(
   };
 
   let turnIndex = 0;
-  // Set when a turn compacts; the owner then hands the session to a fresh run
-  // at its next idle boundary, so the run's event log does not keep growing.
+  // Set when a turn compacts and kept until the session moves to a fresh run,
+  // so this run's event log does not keep growing.
   let compactionHandoffDue = false;
   const runTurn = async (payload: TurnStepPayload | undefined): Promise<TurnOutcome> => {
     const caller = progress.caller;
@@ -250,35 +254,33 @@ async function runSessionLoop(
     if (outcome.compacted === true) compactionHandoffDue = true;
     return outcome;
   };
+  const transferState = () => ({
+    history: cursor.history,
+    serializedContext: cursor.serializedContext,
+    sessionState: cursor.sessionState,
+  });
+  const dueCompactionHandoff = (): CompactionHandoff | undefined =>
+    compactionHandoffDue &&
+    progress.caller === undefined &&
+    workingTasks(sessionTaskTable(cursor)).length === 0
+      ? { sessionTimeoutDeadline: boot.sessionTimeoutDeadline }
+      : undefined;
   /**
-   * Hands a session that compacted to a fresh run on this deployment once
-   * nothing is waiting. Retries at later idle boundaries only while the
-   * session is busy; a failed successor is not retried by this owner.
+   * Hands a session that compacted to a fresh run on this deployment while
+   * nothing is waiting. When input arrives first, the next lone delivery
+   * carries the handoff instead; see `runDeliveredTurn`.
    */
   const tryCompactionHandoff = async (): Promise<SessionLoopOutcome | undefined> => {
-    if (!compactionHandoffDue || progress.caller !== undefined) return undefined;
-    if (queue.pendingCount > 0 || inbox.hasPending()) return undefined;
-    if (workingTasks(sessionTaskTable(cursor)).length > 0) return undefined;
-    const transfer = await handoff.tryCompactionTransfer(
-      {
-        history: cursor.history,
-        serializedContext: cursor.serializedContext,
-        sessionState: cursor.sessionState,
-      },
-      boot.sessionTimeoutDeadline,
-    );
-    if (transfer.kind === "transferred") return transfer;
-    compactionHandoffDue =
-      transfer.reason === "not-idle" || transfer.reason === "accepted-during-release";
-    return undefined;
+    const compaction = dueCompactionHandoff();
+    if (compaction === undefined || queue.pendingCount > 0 || inbox.hasPending()) return undefined;
+    const transfer = await handoff.tryCompactionTransfer(transferState(), compaction);
+    return transfer.kind === "transferred" ? transfer : undefined;
   };
   const runDeliveredTurn = async (
     next: Extract<NextTurnInstruction, { kind: "turn" }>,
   ): Promise<SessionActionResult> => {
-    const transfer = await handoff.tryTransfer(next, {
-      history: cursor.history,
-      serializedContext: cursor.serializedContext,
-      sessionState: cursor.sessionState,
+    const transfer = await handoff.tryTransfer(next, transferState(), {
+      compaction: dueCompactionHandoff(),
     });
     if (transfer.kind === "transferred") return transfer;
     if (next.delivery.caller !== undefined) progress.caller = next.delivery.caller;

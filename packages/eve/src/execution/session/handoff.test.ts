@@ -71,6 +71,41 @@ describe("SessionHandoff", () => {
     expect(startSessionOwnerStepMock).not.toHaveBeenCalled();
   });
 
+  it("moves a compacted session to this deployment with the delivery that arrived first", async () => {
+    installActivation({ kind: "active" });
+    startSessionOwnerStepMock.mockResolvedValue(undefined);
+    const sessionTimeoutDeadline = new Date("2026-11-01T00:00:00.000Z");
+    const trigger = selection("deployment-a");
+
+    await expect(
+      createHandoff(createInbox()).tryTransfer(trigger, state(), {
+        compaction: { sessionTimeoutDeadline },
+      }),
+    ).resolves.toEqual({ kind: "transferred" });
+    expect(startSessionOwnerStepMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delivery: trigger.delivery,
+        reason: "compaction",
+        sessionTimeoutDeadline,
+        targetDeploymentId: "deployment-a",
+      }),
+    );
+  });
+
+  it("moves a compacted session to a newer deployment as a deployment handoff", async () => {
+    installActivation({ kind: "active" });
+    startSessionOwnerStepMock.mockResolvedValue(undefined);
+
+    await expect(
+      createHandoff(createInbox()).tryTransfer(selection("deployment-b"), state(), {
+        compaction: { sessionTimeoutDeadline: new Date("2026-11-01T00:00:00.000Z") },
+      }),
+    ).resolves.toEqual({ kind: "transferred" });
+    const [start] = startSessionOwnerStepMock.mock.calls[0] as [Record<string, unknown>];
+    expect(start).toMatchObject({ targetDeploymentId: "deployment-b" });
+    expect(start).not.toHaveProperty("reason");
+  });
+
   it("retains ownership when the selection was not a lone fresh conversational delivery", async () => {
     installActivation({ kind: "active" });
     const inbox = createInbox();

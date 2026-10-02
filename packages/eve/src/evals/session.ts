@@ -147,6 +147,14 @@ export class EvalSessionDriver implements EveEvalSession {
     return await this.#session.cancel();
   }
 
+  async compact(): Promise<EveEvalTurn> {
+    const result = await this.#session.compact();
+    if (result.status !== "accepted") {
+      throw new Error(`compact() found no active session for "${this.sessionId}".`);
+    }
+    return await this.readTurn();
+  }
+
   agent(started: AgentStartedStreamEvent): EveEvalAgentSession {
     const child = this.#session.agent(started);
     const signal = this.#signal;

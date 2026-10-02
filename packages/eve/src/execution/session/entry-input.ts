@@ -33,9 +33,14 @@ export type SessionHandoffStart =
       /**
        * The previous owner compacted the session and moved it to a fresh run on
        * its own deployment, so no single run's event log grows with the
-       * session. The successor parks until the next input arrives.
+       * session.
        */
       readonly reason: "compaction";
+      /**
+       * The lone delivery that arrived before the owner could move, processed
+       * first. Without one, the successor parks until the next input arrives.
+       */
+      readonly delivery?: DeliverHookPayload;
       /** Compaction does not extend the session's lifetime. */
       readonly sessionTimeoutDeadline?: Date;
     };

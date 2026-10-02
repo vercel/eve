@@ -247,10 +247,16 @@ latches a handoff. At the next idle boundary after the turn settles, it moves th
 successor on its own deployment through the same `SessionHandoff` transaction:
 
 - Eligibility adds to the shared idle check: no queued or buffered input, no unsettled delegated
-  caller, and no working tasks. Busy sessions retry at later idle boundaries; a failed or
-  incompatible successor is not retried by that owner.
-- The successor input carries `reason: "compaction"` and no delivery. The successor claims the
-  hook set, activates, and parks instead of running a turn.
+  caller, and no working tasks. The latch holds until a transfer succeeds; like deployment
+  handoffs, a failed successor is retried at the next opportunity, and an incompatible one is
+  remembered.
+- The successor input carries `reason: "compaction"`. From the eager path it carries no delivery,
+  so the successor claims the hook set, activates, and parks instead of running a turn.
+- A client that replies the moment `session.waiting` arrives races that eager attempt, which
+  then abandons the transfer and restores the message. While the latch holds, a lone
+  handoff-eligible delivery therefore carries the transfer itself, exactly like a deployment
+  signal: the successor runs that delivery first. A delivery accepted by another deployment
+  takes the ordinary deployment handoff instead.
 - The successor keeps the existing deadline. Compaction is a storage concern and never extends the
   session lifetime, unlike a deployment handoff.
 

@@ -207,11 +207,12 @@ async function bootHandoffOwner(
     inbox,
     session: {
       anchor: { kind: "successor" },
-      caller: compaction ? undefined : input.delivery.caller,
+      caller: input.delivery?.caller,
       capabilities: checkpoint.capabilities,
       deploymentId: input.ownerDeploymentId,
       history: checkpoint.history,
-      start: compaction ? { kind: "parked" } : { input: input.delivery, kind: "turn" },
+      start:
+        input.delivery === undefined ? { kind: "parked" } : { input: input.delivery, kind: "turn" },
       retention: checkpoint.retention,
       serializedContext,
       sessionId,

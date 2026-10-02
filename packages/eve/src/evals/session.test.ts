@@ -88,6 +88,36 @@ describe("eval judge input", () => {
   });
 });
 
+describe("eval session compact", () => {
+  it("returns the compaction events through session.waiting", async () => {
+    const { session } = await setup();
+    await session.send("Plan Alice's trip.");
+    const compact = vi
+      .spyOn(ClientSession.prototype, "compact")
+      .mockResolvedValue({ sessionId: "session_1", status: "accepted" });
+    vi.mocked(ClientSession.prototype.stream).mockImplementation(compactionEvents);
+
+    const compacted = await session.compact();
+
+    expect(compact).toHaveBeenCalledOnce();
+    expect(compacted.events.map((event) => event.type)).toEqual([
+      "compaction.requested",
+      "compaction.completed",
+      "session.waiting",
+    ]);
+  });
+
+  it("throws instead of waiting when the session is no longer active", async () => {
+    const { session } = await setup();
+    vi.spyOn(ClientSession.prototype, "compact").mockResolvedValue({
+      status: "no_active_session",
+    });
+
+    await expect(session.compact()).rejects.toThrow(/no active session/);
+    expect(ClientSession.prototype.stream).not.toHaveBeenCalled();
+  });
+});
+
 async function setup() {
   mocks.evaluate.mockResolvedValue({
     answers: { judgment: { type: "boolean", probability: 1 } },
@@ -124,6 +154,24 @@ function response() {
     cancelTurn: async () => ({ status: "no_active_turn" }),
     createStream: events,
   });
+}
+
+async function* compactionEvents() {
+  const compaction = {
+    modelId: "test",
+    sequence: 2,
+    sessionId: "session_1",
+    stepIndex: 0,
+    turnId: "turn_1",
+  };
+  yield* stampTestEvents([
+    { type: "compaction.requested", data: { ...compaction, usageInputTokens: 100 } },
+    { type: "compaction.completed", data: compaction },
+    {
+      type: "session.waiting",
+      data: { continuationToken: "session_1", wait: "next-user-message" },
+    },
+  ]);
 }
 
 async function* events() {

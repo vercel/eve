@@ -1,5 +1,5 @@
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session/timeout.js";
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateStepReturnValue, hydrateWorkflowArguments } from "@workflow/core/serialization";
 import { captureTurnEvents } from "#internal/testing/events.js";
@@ -291,8 +291,33 @@ describe("workflowEntry integration", () => {
           ).toBe(true);
           await waitForParkedTurnStep(successor.runId);
 
-          // An intermediate owner exits after its own compaction handoff.
-          const nextOwner = await compactTo(successor.runId);
+          // A message sent right behind the compaction is answered, and
+          // the session still moves. An intermediate owner exits after its own
+          // compaction handoff.
+          await workflowRuntime.dispatchSession({
+            command: { kind: "compact" },
+            sessionId: anchor.runId,
+          });
+          await workflowRuntime.dispatchSession({
+            command: handoffFollowUp("dpl_a", "Alice confirms the milestone.", "delivery-c"),
+            sessionId: anchor.runId,
+          });
+          expect((await stream.nextTurn()).map((event) => event.type)).toContain(
+            "compaction.completed",
+          );
+          expect(
+            (await stream.nextTurn()).some(
+              (event) =>
+                event.type === "message.completed" &&
+                event.data.message?.includes("Alice confirms the milestone.") === true,
+            ),
+          ).toBe(true);
+          let nextOwner: Awaited<ReturnType<typeof waitForCommandHookOwner>> | undefined;
+          await vi.waitFor(async () => {
+            nextOwner = await waitForCommandHookOwner(inboxToken);
+            expect(nextOwner.runId).not.toBe(successor.runId);
+          });
+          assert(nextOwner !== undefined);
           await vi.waitFor(async () =>
             expect((await world.runs.get(successor.runId)).status).toBe("completed"),
           );
