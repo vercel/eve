@@ -444,6 +444,9 @@ importers:
       '@liveblocks/chat-sdk-adapter':
         specifier: 3.23.0
         version: 3.23.0(@types/json-schema@7.0.15)(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))
+      '@mdx-js/mdx':
+        specifier: 3.1.1
+        version: 3.1.1(supports-color@10.2.2)
       '@novu/chat-sdk-adapter':
         specifier: 0.1.0
         version: 0.1.0(ai@7.0.105(zod@4.5.4))(chat@4.41.0(ai@7.0.105(zod@4.5.4))(supports-color@10.2.2)(zod@4.5.4))(react@19.2.6)(supports-color@10.2.2)(zod@4.5.4)
@@ -534,6 +537,12 @@ importers:
       eve-channel-blooio:
         specifier: 0.2.0
         version: 0.2.0(ai@7.0.105(zod@4.5.4))(eve@packages+eve)
+      mdast-util-mdx-jsx:
+        specifier: 3.2.0
+        version: 3.2.0(supports-color@10.2.2)
+      mdast-util-to-markdown:
+        specifier: 2.1.2
+        version: 2.1.2
       portless:
         specifier: 0.15.6
         version: 0.15.6
