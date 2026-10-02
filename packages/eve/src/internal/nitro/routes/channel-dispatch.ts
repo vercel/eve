@@ -278,7 +278,11 @@ async function buildRouteArgs(
             attachSession,
             ...channelOperations,
             ...createAgentDescriptionRouteArgs(() => resolveNitroCompiledArtifactsSource(config)),
-            invokeTool: createRouteInvokeTool({ config, requestUrl: event.req.url }),
+            invokeTool: createRouteInvokeTool({
+              config,
+              origin: { adapter, agentName: bundle.agentName, channelName },
+              requestUrl: event.req.url,
+            }),
             params,
             requestIp,
             to,
