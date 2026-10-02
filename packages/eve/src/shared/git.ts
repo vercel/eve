@@ -11,15 +11,19 @@ export function isFullGitSha(value: string): boolean {
 export function isValidGitRef(value: string): boolean {
   return !(
     value.length === 0 ||
+    value === "@" ||
     value.startsWith("-") ||
-    value.endsWith(".") ||
-    value.endsWith("/") ||
     value.includes("..") ||
-    value.includes("//") ||
     value.includes("@{") ||
     value.includes("\\") ||
-    value.split("/").some((part) => part.length === 0 || part.endsWith(".lock")) ||
-    /[\x00-\x20~^:?*[]/u.test(value)
+    value
+      .split("/")
+      .some(
+        (part) =>
+          part.length === 0 || part.startsWith(".") || part.endsWith(".") || part.endsWith(".lock"),
+      ) ||
+    // oxlint-disable-next-line no-control-regex -- Git refs must not contain ASCII control characters or whitespace.
+    /[\x00-\x20\x7f~^:?*[]/u.test(value)
   );
 }
 
