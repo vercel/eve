@@ -7,12 +7,11 @@
  */
 
 import type { Block } from "./blocks.js";
-import { agentTaskLabel } from "./tool-presentation.js";
+import { agentTaskLabel, isSelfModificationAgent } from "./tool-presentation.js";
 import type { Theme } from "./theme.js";
 import { formatTurnDuration } from "./stream-format.js";
 import { renderTransientDrawer } from "./flow-drawer.js";
 import { truncate } from "./tool-format.js";
-import { isSelfModificationAgent } from "./tool-presentation.js";
 import { clipVisible, visibleLength } from "#cli/ui/terminal-text.js";
 
 export type TaskKind = "agent" | "tool";
@@ -40,62 +39,6 @@ export interface TaskEntry {
 
 /** Includes the heading and overflow summary, regardless of nesting. */
 const maxPanelRows = 15;
-
-export class TaskActivity {
-  readonly #entries = new Map<string, TaskEntry>();
-
-  start(input: {
-    readonly callId: string;
-    readonly kind: TaskKind;
-    readonly baseName: string;
-    readonly toolName: string;
-    readonly input: unknown;
-    readonly label: string | undefined;
-    readonly nowMs: number;
-  }): TaskEntry {
-    const entry: TaskEntry = {
-      callId: input.callId,
-      kind: input.kind,
-      name: this.#uniqueName(input.baseName),
-      toolName: input.toolName,
-      input: input.input,
-      label: input.label,
-      startedAtMs: input.nowMs,
-      childTools: new Map(),
-    };
-    this.#entries.set(input.callId, entry);
-    return entry;
-  }
-
-  get(callId: string): TaskEntry | undefined {
-    return this.#entries.get(callId);
-  }
-
-  /** Removes and returns a task that ended. */
-  finish(callId: string): TaskEntry | undefined {
-    const entry = this.#entries.get(callId);
-    this.#entries.delete(callId);
-    return entry;
-  }
-
-  working(): readonly TaskEntry[] {
-    return [...this.#entries.values()];
-  }
-
-  clear(): void {
-    this.#entries.clear();
-  }
-
-  /** Parallel calls to one agent read `researcher`, `researcher:2`, …; a name is never renamed. */
-  #uniqueName(baseName: string): string {
-    const taken = new Set([...this.#entries.values()].map((entry) => entry.name));
-    if (!taken.has(baseName)) return baseName;
-    for (let ordinal = 2; ; ordinal += 1) {
-      const candidate = `${baseName}:${String(ordinal)}`;
-      if (!taken.has(candidate)) return candidate;
-    }
-  }
-}
 
 /** Joins the working tasks' names for the turn bar: `Waiting for researcher and reviewer`. */
 export function waitingLabel(entries: readonly TaskEntry[]): string {
