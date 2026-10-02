@@ -57,7 +57,21 @@ const channels: readonly {
   { driver: linqDriver },
   { driver: slackDriver },
   { driver: teamsDriver },
-  { driver: telegramDriver },
+  {
+    driver: telegramDriver,
+    broken: {
+      "pressing Approve runs the gated tool": {
+        reason:
+          "#4135: a held approval checks the button's callback id before Telegram maps it to the request",
+        symptom: /Timed out waiting for deploy_release to run or be denied on telegram/,
+      },
+      "pressing Cancel stops the gated tool without running it": {
+        reason:
+          "#4135: a held approval checks the button's callback id before Telegram maps it to the request",
+        symptom: /Timed out waiting for deploy_release to run or be denied on telegram/,
+      },
+    },
+  },
   {
     driver: twilioDriver,
     broken: {
