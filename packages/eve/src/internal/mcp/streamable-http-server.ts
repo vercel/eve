@@ -47,7 +47,14 @@ export type McpContent =
  * change or re-read something; `not_found` means stop; `internal` means the
  * server failed and `errorId` correlates with its logs.
  */
-type McpToolOperationErrorCode = "invalid_input" | "not_found" | "conflict" | "internal";
+type McpToolOperationErrorCode =
+  | "invalid_input"
+  | "not_found"
+  | "conflict"
+  | "denied"
+  | "approval_required"
+  | "authorization_required"
+  | "internal";
 
 interface McpToolOperationErrorData {
   readonly code: McpToolOperationErrorCode;
