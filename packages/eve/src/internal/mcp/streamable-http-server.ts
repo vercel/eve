@@ -25,9 +25,11 @@ interface McpToolDefinition<TInputSchema extends StandardSchemaWithJSON = Standa
   readonly outputSchema?: StandardSchemaWithJSON;
 }
 
-export interface McpCallToolResult<
-  TStructured extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
-> {
+/**
+ * `TStructured` is any JSON value: 2026 clients accept non-object structured
+ * content, and the SDK wraps it as `{ result }` for 2025 clients.
+ */
+export interface McpCallToolResult<TStructured = Readonly<Record<string, unknown>>> {
   readonly content: readonly McpContent[];
   readonly isError?: boolean;
   readonly structuredContent?: TStructured | McpToolOperationErrorEnvelope;
@@ -88,7 +90,7 @@ type InferSchemaOutput<TSchema> =
 /** Keeps a schema and its inferred handler input coupled while erasing heterogeneous storage. */
 export function defineMcpTool<
   const TInputSchema extends StandardSchemaWithJSON<unknown, unknown>,
-  TStructured extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
+  TStructured = Readonly<Record<string, unknown>>,
 >(input: {
   readonly definition: McpToolDefinition<TInputSchema>;
   call(
@@ -353,7 +355,7 @@ function createServer(
   return server;
 }
 
-async function callTool<TInput, TStructured extends Readonly<Record<string, unknown>>>(
+async function callTool<TInput, TStructured>(
   call: (
     input: TInput,
     context: { readonly auth: SessionAuthContext | null; readonly signal: AbortSignal },
@@ -384,9 +386,7 @@ async function callTool<TInput, TStructured extends Readonly<Record<string, unkn
   }
 }
 
-function toolError<TStructured extends Readonly<Record<string, unknown>>>(
-  error: McpToolOperationErrorData,
-): McpCallToolResult<TStructured> {
+function toolError<TStructured>(error: McpToolOperationErrorData): McpCallToolResult<TStructured> {
   const text =
     error.errorId === undefined ? error.message : `${error.message} (errorId: ${error.errorId})`;
   // The SDK skips outputSchema validation when isError is set, so this shape

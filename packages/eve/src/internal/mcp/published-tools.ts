@@ -49,13 +49,17 @@ export function createPublishedTools(input: {
             throw new McpToolOperationError("denied", "The channel authenticated no caller.");
           }
           const result = await input.invokeTool(tool.name, value, { auth, signal });
-          return toCallToolResult(tool.name, result);
+          return toCallToolResult(tool.name, result, tool.outputSchema !== undefined);
         },
       }),
     );
 }
 
-function toCallToolResult(name: string, result: InvokeToolResult): McpCallToolResult {
+function toCallToolResult(
+  name: string,
+  result: InvokeToolResult,
+  hasOutputSchema: boolean,
+): McpCallToolResult<JsonValue> {
   switch (result.status) {
     case "completed": {
       const output = result.output as JsonValue;
@@ -63,8 +67,11 @@ function toCallToolResult(name: string, result: InvokeToolResult): McpCallToolRe
         result.modelOutput.type === "text"
           ? result.modelOutput.value
           : JSON.stringify(output ?? null);
-      return isJsonObjectValue(output)
-        ? { content: [{ text, type: "text" }], structuredContent: output }
+      // A declared outputSchema obliges structured content of any JSON type: the
+      // SDK rejects a result without it and wraps non-objects as `{ result }` on
+      // 2025 connections. Without a schema, only objects are structured.
+      return hasOutputSchema || isJsonObjectValue(output)
+        ? { content: [{ text, type: "text" }], structuredContent: output ?? null }
         : { content: [{ text, type: "text" }] };
     }
     case "invalid-input":
