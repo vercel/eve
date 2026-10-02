@@ -552,7 +552,7 @@ export class ConversationTranscript {
       const terminalMessage = authorizationTerminalMessage(state);
       return {
         kind: "connection-auth",
-        title: `${stripTerminalControls(part.name)} · authorization · ${state}`,
+        title: `${stripTerminalControls(part.displayName)} · authorization · ${state}`,
         body: formatAuthorization(part, terminalMessage),
         preformatted: true,
         live: terminalMessage === undefined,
