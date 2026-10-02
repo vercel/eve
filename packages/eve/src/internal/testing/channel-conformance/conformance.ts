@@ -429,7 +429,9 @@ export function renderHitlConformanceMatrix(): string {
   const html = (text: string) =>
     text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
   const td = (content: string, span = 1) =>
-    `<td align="center"${span > 1 ? ` colspan="${span}"` : ""}>${content}</td>`;
+    span > 1
+      ? `<td align="left" colspan="${span}">${content}</td>`
+      : `<td align="center">${content}</td>`;
   // One note per distinct reason, numbered in reading order, so every cell
   // sharing a cause links to the same note. Plain anchors rather than Markdown
   // footnotes, which GitHub renders with links back up to every citing cell.
