@@ -3,7 +3,7 @@ title: "MCP Channel"
 description: "Publish an eve agent as an MCP server with auth support."
 ---
 
-The MCP channel lets clients such as Claude Code delegate durable work to an eve agent through four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`.
+The MCP channel lets clients such as Claude Code delegate durable work to an eve agent through four tools: `agent_start`, `agent_get`, `agent_update`, and `agent_cancel`. It can also publish the agent's own tools, so a client calls them directly; see [Publish the agent's tools](#publish-the-agents-tools).
 
 Use an [MCP connection](../connections/mcp) instead when your eve agent needs to call someone else's MCP server.
 
@@ -210,6 +210,38 @@ Requests are bounded: the whole MCP request body is limited to 1 MiB, `message` 
 - `agent_start` is not idempotent. If its response is lost, the client has no `invocationId` to check, and a second call starts a second task. Ask the user before starting again rather than retrying blindly.
 - `agent_update` answers one pending batch. Re-sending the same answers after eve has accepted them returns the current invocation state; sending different answers for an already-answered batch is a conflict.
 - `agent_cancel` is cooperative and can race with completion. Poll `agent_get` until the status is terminal (`cancelled`, `completed`, or `failed`), not specifically `cancelled`.
+
+## Publish the agent's tools
+
+By default the channel serves only the `agent_*` tools. Set `tools: true` to also publish every tool the agent can run outside a conversation, and `agent: false` to stop serving the `agent_*` tools:
+
+```ts title="agent/channels/mcp.ts"
+import { localDev } from "eve/channels/auth";
+import { mcpChannel } from "eve/channels/mcp";
+
+export default mcpChannel({
+  auth: localDev(),
+  tools: true,
+});
+```
+
+`tools/list` returns the `agent_*` tools first, then the agent's tools in name order with their input and output JSON schemas. Framework tools, workflow and provider tools, tools without `execute`, and tools added by dynamic resolvers or subagents are not published. While `agent` is on, an agent tool named `agent_start`, `agent_get`, `agent_update`, or `agent_cancel` is not published, and eve logs a warning. With `agent: false`, the channel sends no `agent_*` instructions. Turning off both `agent` and `tools` throws.
+
+Each `tools/call` checks the arguments against the tool's input schema, then runs the tool as the route-authenticated caller, with no model, turn, or workflow run. Every caller the channel's `auth` admits can call these tools, outside the agent's instructions, so review what becomes callable before you turn this on. Each call gets its own session:
+
+- Authored state starts from its initial value, and updates are not kept.
+- A sandbox the tool opens is deleted when the call ends.
+- Calls may run in parallel, and a call retried after a lost response runs again.
+
+A tool that cannot finish over MCP returns an error result with `isError: true` and a `structuredContent.error.code`:
+
+| Code                     | When                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| `invalid_input`          | The tool rejected its input.                                                                     |
+| `denied`                 | The tool's approval policy denied the call.                                                      |
+| `approval_required`      | The approval policy asks a person. The tool did not run; call it from a conversation instead.    |
+| `authorization_required` | The tool needs a sign-in to a connection first. Sign in from a conversation, then call it again. |
+| `internal`               | The tool failed. The message carries an error id that matches the server logs.                   |
 
 ## Invocation ownership
 
