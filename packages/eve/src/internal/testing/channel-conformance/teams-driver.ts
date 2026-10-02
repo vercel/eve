@@ -1,6 +1,7 @@
 import { teamsChannel } from "#public/channels/teams/index.js";
 import {
   type ChannelDriver,
+  type Person,
   type PlatformCall,
   type RenderedOption,
   type Surface,
@@ -11,6 +12,7 @@ import {
 let nextConversation = 0;
 const TENANT = "TENANT";
 const PERSON = { id: "USER", name: "Alice" } as const;
+const PEOPLE = { alice: PERSON, bob: { id: "USER-BOB", name: "Bob" } } as const;
 const BOT = { id: "BOT", name: "eve Bot" } as const;
 const SERVICE_URL = "https://smba.example.test/teams";
 const MENTION = `<at>${BOT.name}</at>`;
@@ -102,7 +104,9 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
 
   return {
     name: personal ? "teams-dm" : "teams",
-    capabilities: ["buttons", "text-replies"],
+    capabilities: personal
+      ? ["buttons", "text-replies"]
+      : ["another-person", "buttons", "text-replies"],
     surface,
     createChannel: (record) =>
       teamsChannel({
@@ -139,9 +143,10 @@ export function teamsDriver(surface: Exclude<Surface, "public"> = "shared"): Cha
       };
     },
     personShownAs: [PERSON.name],
-    press: (option: RenderedOption) => {
+    press: (option: RenderedOption, person: Person) => {
       const { activityId: cardActivityId, data, value } = option.handle as PressHandle;
       return activity({
+        from: PEOPLE[person],
         id: `INVOKE-${activityId + 1}`,
         name: "adaptiveCard/action",
         replyToId: cardActivityId,

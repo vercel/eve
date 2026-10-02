@@ -84,6 +84,19 @@ function unnamedAnsweredPrompts(
   );
 }
 
+/** Presses reach a response policy without the presser's identity, so eve refuses them all. */
+function anonymousPresses(
+  reason: string,
+  rules: readonly HitlRule[],
+): Partial<Record<HitlRule, BrokenCell>> {
+  return Object.fromEntries(
+    rules.map((rule) => [
+      rule,
+      { reason, symptom: /Authentication is required to respond to this approval/ },
+    ]),
+  );
+}
+
 interface ConformanceChannel {
   readonly driver: () => ChannelDriver | ClientDriver;
   /**
@@ -159,6 +172,14 @@ const CHAT_SDK_BROKEN = {
 
 const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
+  ...anonymousPresses(
+    "a button press responds with `auth: null`, so no one can satisfy a response policy",
+    [
+      "the requester pressing Approve on a requester-only approval runs the tool",
+      "another person pressing Approve on a requester-only approval leaves it pending",
+      "another person pressing Cancel on a requester-only approval leaves it pending",
+    ],
+  ),
   ...budgetPromptNotShown(
     "a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws",
     "running out of budget opens budget prompt",
@@ -335,6 +356,7 @@ type Cell =
   | { readonly kind: "broken"; readonly broken: BrokenCell };
 
 const CAPABILITY_NAMES: Record<ChannelCapability, string> = {
+  "another-person": "second person who can act",
   buttons: "buttons a person can press",
   "text-replies": "plain-text replies",
 };

@@ -3,6 +3,7 @@ import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { discordChannel } from "#public/channels/discord/index.js";
 import {
   type ChannelDriver,
+  type Person,
   type PlatformCall,
   type RenderedOption,
   type Surface,
@@ -12,6 +13,7 @@ import {
 
 let nextChannel = 0;
 const PERSON = { id: "U_CONFORMANCE", username: "alice" } as const;
+const PEOPLE = { alice: PERSON, bob: { id: "U_BOB", username: "bob" } } as const;
 
 /** A message component eve renders for a choice: a button (type 2) or a select menu (type 3). */
 interface DiscordComponent {
@@ -44,9 +46,10 @@ function testKeys(): { privateKey: KeyObject; publicKeyHex: string } {
 export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): ChannelDriver {
   const dm = surface === "private";
   // In a server, Discord names the actor as a member; in a DM, as a user.
-  const where = dm
-    ? { channel: { type: 1 }, user: PERSON }
-    : { channel: { type: 0 }, guild_id: "G_CONFORMANCE", member: { roles: [], user: PERSON } };
+  const where = (user: (typeof PEOPLE)[Person] = PERSON) =>
+    dm
+      ? { channel: { type: 1 }, user }
+      : { channel: { type: 0 }, guild_id: "G_CONFORMANCE", member: { roles: [], user } };
   nextChannel += 1;
   const channelId = `C_CONFORMANCE_${nextChannel}`;
   const { privateKey, publicKeyHex } = testKeys();
@@ -111,7 +114,7 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
 
   return {
     name: dm ? "discord-dm" : "discord",
-    capabilities: ["buttons"],
+    capabilities: dm ? ["buttons"] : ["another-person", "buttons"],
     surface,
     createChannel: (record) =>
       discordChannel({
@@ -122,7 +125,7 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
       const id = nextInteraction();
       return signed(
         JSON.stringify({
-          ...where,
+          ...where(),
           application_id: "APP1",
           channel_id: channelId,
           data: { name: "ask", options: [{ name: "message", type: 3, value: text }] },
@@ -152,7 +155,7 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
       };
     },
     personShownAs: [`<@${PERSON.id}>`, PERSON.username],
-    press(option) {
+    press(option, person: Person) {
       const handle = option.handle as PressHandle;
       const id = nextInteraction();
       // A component interaction's `@original` response is the message holding the component.
@@ -166,7 +169,7 @@ export function discordDriver(surface: Exclude<Surface, "public"> = "shared"): C
               ? { component_type: 2, custom_id: handle.customId }
               : { component_type: 3, custom_id: handle.customId, values: [handle.value] },
           id,
-          ...where,
+          ...where(PEOPLE[person]),
           message: { id: handle.messageId },
           token: `tok-${id}`,
           type: 3,

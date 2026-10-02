@@ -8,8 +8,10 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { createAttachSessionFn, type Session } from "#channel/session.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { eveChannel } from "#public/channels/eve.js";
 import { z } from "#compiled/zod/index.js";
+import type { ApprovalResponsePolicy } from "#approval/definition.js";
 import { always } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { askQuestion } from "#tools/provided/ask-question.js";
@@ -89,6 +91,8 @@ export function linkTargets(value: unknown): string[] {
  * capability a driver lacks is skipped for that channel as "not supported".
  */
 export type ChannelCapability =
+  /** Someone besides the person who started the conversation can act in it. */
+  | "another-person"
   /** A person can press a rendered choice. */
   | "buttons"
   /** A person can send a plain-text message to the conversation. */
@@ -134,8 +138,11 @@ export interface ChannelDriver {
    * request metadata.
    */
   findOptions(call: PlatformCall, prompt: string): readonly RenderedOption[] | undefined;
-  /** A webhook request pressing a rendered option. */
-  press(option: RenderedOption): Request;
+  /**
+   * A webhook request in which `person` presses a rendered option. Drivers
+   * with the `another-person` capability must press as `"bob"` when asked.
+   */
+  press(option: RenderedOption, person: Person): Request;
   /** Text the bot posted in one outbound call, if any. */
   postedText(call: PlatformCall): string | undefined;
   /**
@@ -148,6 +155,12 @@ export interface ChannelDriver {
   /** How the person driving the conversation appears in the platform's text, in any form. */
   readonly personShownAs?: readonly string[];
 }
+
+/**
+ * Who acts in a conversation: Alice starts it and asks for every request; Bob
+ * is someone else in it, and needs the `another-person` capability.
+ */
+export type Person = "alice" | "bob";
 
 /** What a person can do and see in one channel conversation. Contract rules use only this. */
 export interface ChannelConversation {
@@ -168,8 +181,8 @@ export interface ChannelConversation {
    * yet. A client may show several pending requests one at a time.
    */
   waitForRequest(prompt: string): Promise<void>;
-  /** The person presses one rendered choice. */
-  press(option: RenderedOption): Promise<void>;
+  /** `person`, Alice unless given, presses one rendered choice. */
+  press(option: RenderedOption, person?: Person): Promise<void>;
   /** Waits until `tool` returns, as visible in the bot's reply, and returns its output. */
   waitForToolResult(tool: string): Promise<unknown>;
   /** Waits until the bot replies to input that carried `text`, however the channel framed it. */
@@ -233,8 +246,8 @@ export interface ClientView {
    * choices. A client may show several pending requests one at a time.
    */
   waitForQuestion(prompts: readonly string[]): Promise<ShownQuestion>;
-  /** The person presses one shown choice. */
-  press(option: RenderedOption): Promise<void>;
+  /** `person` presses one shown choice. */
+  press(option: RenderedOption, person: Person): Promise<void>;
   /** The bot replies the client shows now. */
   replies(): readonly string[];
   /** The message that asked `prompt` as it stands now; see {@link ChannelConversation.shownPrompt}. */
@@ -280,7 +293,13 @@ export const GATED_TOOL = "deploy_release";
 /** A second always-gated tool, so two approvals can be pending at once. */
 export const SECOND_GATED_TOOL = "publish_notes";
 
-export type GatedTool = typeof GATED_TOOL | typeof SECOND_GATED_TOOL;
+/**
+ * An always-gated tool whose response policy lets only the person who asked
+ * for the call approve or cancel it.
+ */
+export const REQUESTER_GATED_TOOL = "release_hotfix";
+
+export type GatedTool = typeof GATED_TOOL | typeof SECOND_GATED_TOOL | typeof REQUESTER_GATED_TOOL;
 
 /** The test agent's plain tool: it runs without asking anyone. */
 export const PLAIN_TOOL = "look_up_notes";
@@ -421,7 +440,7 @@ function webhookView(
 
   return {
     say: (text) => post(driver.message(text)),
-    press: (option) => post(driver.press(option)),
+    press: (option, person) => post(driver.press(option, person)),
     waitForQuestion: (prompts) =>
       wait(
         `one of the questions ${JSON.stringify(prompts)}`,
@@ -515,6 +534,7 @@ async function converse(
   const channel: CompiledChannel = created;
   const runs: Record<CountedTool, number> = {
     [GATED_TOOL]: 0,
+    [REQUESTER_GATED_TOOL]: 0,
     [SECOND_GATED_TOOL]: 0,
     [PLAIN_TOOL]: 0,
     read_calendar: 0,
@@ -586,6 +606,19 @@ async function converse(
         runs[SECOND_GATED_TOOL] += 1;
         return { published: true };
       }),
+      gatedTool(
+        REQUESTER_GATED_TOOL,
+        "Releases a hotfix.",
+        () => {
+          runs[REQUESTER_GATED_TOOL] += 1;
+          return { released: true };
+        },
+        // The requester-only policy from docs/tools/human-in-the-loop.md.
+        ({ request, response }) =>
+          request.principal !== null && samePrincipal(response.principal, request.principal)
+            ? { status: "allowed" }
+            : { reason: "Only the person who asked can respond.", status: "rejected" },
+      ),
       {
         logicalPath: `tools/${TWO_QUESTIONS_TOOL}.ts`,
         loadNamespace: async () => ({
@@ -697,7 +730,7 @@ async function converse(
         await waitForStepsToFinish([...sessions.values()], wait);
         await view.say(text);
       },
-      press: (option) => view.press(option),
+      press: (option, person = "alice") => view.press(option, person),
       async waitForQuestion(prompt) {
         const { options } = await view.waitForQuestion([prompt]);
         await holdForInput(prompt);
@@ -708,7 +741,7 @@ async function converse(
         while (remaining.length > 0) {
           const { options, prompt } = await view.waitForQuestion(remaining);
           await holdForInput(prompt);
-          await view.press(choose(prompt, options));
+          await view.press(choose(prompt, options), "alice");
           remaining.splice(remaining.indexOf(prompt), 1);
         }
       },
@@ -973,18 +1006,32 @@ async function holdsFor(
   return held;
 }
 
-function gatedTool(name: GatedTool, description: string, execute: () => unknown) {
+function gatedTool(
+  name: GatedTool,
+  description: string,
+  execute: () => unknown,
+  response?: ApprovalResponsePolicy,
+) {
   return {
     logicalPath: `tools/${name}.ts`,
     loadNamespace: async () => ({
       default: defineTool({
-        approval: always(),
+        approval: response === undefined ? always() : { request: always(), response },
         description: `${description} Only call when asked to use ${name}.`,
         execute: async () => execute(),
         inputSchema: z.object({ release: z.string().optional() }),
       }),
     }),
   };
+}
+
+function samePrincipal(a: SessionAuthContext, b: SessionAuthContext): boolean {
+  return (
+    a.authenticator === b.authenticator &&
+    a.issuer === b.issuer &&
+    a.principalType === b.principalType &&
+    a.principalId === b.principalId
+  );
 }
 
 function findRoute(channel: CompiledChannel, request: Request) {
