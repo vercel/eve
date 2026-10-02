@@ -2,6 +2,7 @@ import { context as otelContext, trace } from "#compiled/@opentelemetry/api/inde
 
 import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
 import type { InvokeToolOptions, InvokeToolResult } from "#channel/invoke-tool.js";
+import { stampForwardedBy } from "#channel/forwarded-principal.js";
 import {
   compiledToolOwner,
   type CompiledToolBindings,
@@ -146,7 +147,7 @@ async function runInvocation(input: {
 
   const sandbox = await callSandbox(runtime, sessionId);
   const context = createCallContext({
-    auth: options.auth,
+    ...callPrincipals(options),
     callId,
     callbackBaseUrl: runtime.callbackBaseUrl,
     sessionId,
@@ -206,19 +207,33 @@ async function callSandbox(
   };
 }
 
+function callPrincipals(options: InvokeToolOptions): {
+  readonly auth: SessionAuthContext;
+  readonly initiator: SessionAuthContext;
+} {
+  const initiator = options.initiator ?? options.auth;
+  const forwardedBy = options.forwarder?.principalId;
+  if (forwardedBy === undefined) return { auth: options.auth, initiator };
+  return {
+    auth: stampForwardedBy(options.auth, forwardedBy),
+    initiator: stampForwardedBy(initiator, forwardedBy),
+  };
+}
+
 function createCallContext(input: {
   readonly auth: SessionAuthContext;
+  readonly initiator: SessionAuthContext;
   readonly callId: string;
   readonly callbackBaseUrl: string;
   readonly sessionId: string;
 }): ContextContainer {
   const context = new ContextContainer();
   context.set(AuthKey, input.auth);
-  context.set(InitiatorAuthKey, input.auth);
+  context.set(InitiatorAuthKey, input.initiator);
   context.set(SessionIdKey, input.sessionId);
   // No turn exists; the stand-in names the call, as sandbox setup outside a turn does.
   context.setVirtualContext(SessionKey, {
-    auth: { current: input.auth, initiator: input.auth },
+    auth: { current: input.auth, initiator: input.initiator },
     sessionId: input.sessionId,
     turn: { id: input.callId, sequence: 0 },
   });

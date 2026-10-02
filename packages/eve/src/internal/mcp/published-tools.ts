@@ -3,6 +3,7 @@ import { fromJsonSchema } from "#compiled/@modelcontextprotocol/server/index.js"
 import type { AgentToolDescription } from "#channel/agent-description.js";
 import type { InvokeToolFn, InvokeToolResult } from "#channel/invoke-tool.js";
 import { createLogger } from "#internal/logging.js";
+import type { McpRequestPrincipals } from "#internal/mcp/forwarded-principal-header.js";
 import {
   defineMcpTool,
   McpToolOperationError,
@@ -16,11 +17,13 @@ const warnedReserved = new Set<string>();
 
 /**
  * The agent's invocable tools as MCP tools. Each `tools/call` runs the tool
- * through `invokeTool` as the route-authenticated caller. Tools named like
- * one in `reserved` are skipped, since the channel serves that name itself.
+ * through `invokeTool` as `principals`: the route-authenticated caller, or the
+ * user a trusted forwarder named. Tools named like one in `reserved` are
+ * skipped, since the channel serves that name itself.
  */
 export function createPublishedTools(input: {
   readonly invokeTool: InvokeToolFn;
+  readonly principals: McpRequestPrincipals;
   readonly reserved: ReadonlySet<string>;
   readonly tools: readonly AgentToolDescription[];
 }): McpServerTool[] {
@@ -44,11 +47,13 @@ export function createPublishedTools(input: {
           outputSchema:
             tool.outputSchema === undefined ? undefined : fromJsonSchema(tool.outputSchema),
         },
-        async call(value, { auth, signal }) {
-          if (auth === null) {
-            throw new McpToolOperationError("denied", "The channel authenticated no caller.");
-          }
-          const result = await input.invokeTool(tool.name, value, { auth, signal });
+        async call(value, { signal }) {
+          const { current, forwarder, initiator } = input.principals;
+          const result = await input.invokeTool(tool.name, value, {
+            auth: current,
+            ...(forwarder !== undefined && { forwarder, initiator }),
+            signal,
+          });
           return toCallToolResult(tool.name, result, tool.outputSchema !== undefined);
         },
       }),

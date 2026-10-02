@@ -1,8 +1,7 @@
 import type { ModelMessage } from "ai";
 
-import { contextStorage } from "#context/container.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { AuthKey, SessionKey } from "#context/keys.js";
+import { readTurnPrincipals } from "#context/turn-principals.js";
 import type { InputRequest } from "#shared/input.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
@@ -166,22 +165,13 @@ export function appendPendingInputBatch(input: {
     ...getPendingInputBatches(input.session.state),
     {
       event: input.event,
-      requester: currentRequester(),
+      // An anonymous requester records none: it cannot be told apart from another.
+      requester: readTurnPrincipals()?.current ?? null,
       responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
       requests: input.requests,
       responseMessages: input.responseMessages,
     },
   ]);
-}
-
-/**
- * Every anonymous caller shares one synthetic identity, so an anonymous
- * requester can't be told apart from another anonymous responder: record none.
- */
-function currentRequester(): SessionAuthContext | null {
-  const context = contextStorage.getStore();
-  const auth = context?.get(AuthKey) ?? context?.get(SessionKey)?.auth.current ?? null;
-  return auth?.principalType === "anonymous" ? null : auth;
 }
 
 /** The requester recorded on the pending batch that holds `requestId`. */

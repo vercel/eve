@@ -11,7 +11,7 @@ import {
 } from "#internal/nitro/routes/channel-route-context.js";
 import { MCP_PROTOCOL_VERSION } from "#internal/mcp/streamable-http-server.js";
 import { ForbiddenError, none, oauthResource, withAuthChallenges } from "#public/channels/auth.js";
-import { mcpChannel } from "#public/channels/mcp.js";
+import { mcpChannel, type McpChannelInput } from "#public/channels/mcp.js";
 import { mockAgentRouteArgs } from "#internal/testing/mocks/mock-route-args.js";
 
 const MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25";
@@ -627,6 +627,96 @@ describe("mcpChannel tools", () => {
         signal: expect.any(AbortSignal),
       });
     }
+  });
+
+  it("runs published tools as the user a trusted forwarder names, and agent_* as the forwarder", async () => {
+    const alice: SessionAuthContext = {
+      attributes: { team: "équipe" },
+      authenticator: "oidc",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const encode = (text: string) => Buffer.from(text).toString("base64url");
+    const json = JSON.stringify({ current: alice });
+    const valid = encode(json);
+    // Unpadded base64url of 12,288 bytes is exactly the 16 KiB cap; JSON whitespace pads it.
+    const sized = (bytes: number) => encode(json + " ".repeat(bytes - Buffer.byteLength(json)));
+    const trusted = {
+      trustedForwarders: (forwarder: SessionAuthContext) => forwarder === principal,
+    };
+    const forwardedAlice = {
+      ...alice,
+      attributes: { ...alice.attributes, "eve:forwarded-by": "user-1" },
+    };
+    function post(
+      options: Partial<McpChannelInput>,
+      header: string | undefined,
+      tool: string,
+      overrides: { createSession?: () => Promise<never>; invokeTool?: InvokeToolFn },
+    ) {
+      const args = routeArgs(overrides.createSession, {
+        describe: async () => ({ name: "compiled-agent", tools: [note] }),
+        invokeTool: overrides.invokeTool,
+      });
+      const route = mcpChannel({ auth: () => principal, tools: true, ...options }).routes[1]!;
+      if (route.transport === "websocket") throw new Error("expected HTTP route");
+      const params = { arguments: tool === "agent_start" ? { message: "hi" } : {}, name: tool };
+      const body = { id: 1, jsonrpc: "2.0", method: "tools/call", params };
+      return route.handler(
+        mcpRequest(body, header ? { "eve-forwarded-principal": header } : {}),
+        args,
+      );
+    }
+    // [label, header, channel options, expected status or the user the tool runs as, error]
+    const rows: Array<[string, string?, Partial<McpChannelInput>?, (number | object)?, string?]> = [
+      ["no header", undefined, trusted, principal],
+      ["a valid header", valid, trusted, forwardedAlice],
+      ["a header at the 16 KiB cap", sized(12_288), trusted, forwardedAlice],
+      ["a padded header", `${valid}=`, trusted, 400, "unpadded base64url"],
+      ["not a principal", encode('{"current":{}}'), trusted, 400, "Invalid forwardedPrincipal"],
+      ["a header over 16 KiB", sized(12_289), trusted, 400, "at most 16384 bytes"],
+      ["an untrusted forwarder", valid, { trustedForwarders: () => false }, 403, "not authorized"],
+      [
+        "an anonymous forwarder",
+        valid,
+        { auth: none(), trustedForwarders: () => true },
+        403,
+        "anonymous",
+      ],
+      [
+        "no trustedForwarders",
+        valid,
+        {},
+        403,
+        "This deployment does not accept a forwarded principal.",
+      ],
+    ];
+    for (const [label, header, options, expected, error] of rows) {
+      const invokeTool = vi.fn<InvokeToolFn>(async () => ({
+        modelOutput: { type: "text", value: "ok" },
+        output: "ok",
+        status: "completed",
+      }));
+      const response = await post(options!, header, "note", { invokeTool });
+      if (typeof expected === "number") {
+        expect(response.status, label).toBe(expected);
+        expect(((await response.json()) as { error: string }).error, label).toContain(error);
+        expect(invokeTool, label).not.toHaveBeenCalled();
+        continue;
+      }
+      expect(response.status, label).toBe(200);
+      expect(invokeTool.mock.calls[0]![2], label).toEqual({
+        auth: expected,
+        ...(expected !== principal && { forwarder: principal, initiator: forwardedAlice }),
+        signal: expect.any(AbortSignal),
+      });
+    }
+
+    const createSession = vi.fn(async (_input: unknown) => {
+      throw new Error("stop after createSession");
+    });
+    await post(trusted, valid, "agent_start", { createSession: createSession as never });
+    expect(createSession.mock.calls[0]![0]).toMatchObject({ auth: principal });
   });
 
   it("checks arguments against the tool's JSON schema before invoking it", async () => {
