@@ -243,6 +243,12 @@ A tool that cannot finish over MCP returns an error result with `isError: true` 
 | `authorization_required` | The tool needs a sign-in to a connection first. Sign in from a conversation, then call it again. |
 | `internal`               | The tool failed. The message carries an error id that matches the server logs.                   |
 
+### Trace context
+
+MCP clients send W3C trace context in each request's `params._meta`, not in HTTP headers. When a request carries a valid `_meta.traceparent`, that span becomes the parent of everything the request runs, including a published tool's `execute_tool` span. It takes precedence over any parent your platform extracted from the HTTP request's headers. A missing, malformed, or all-zero `traceparent` leaves that parent in place. `_meta.tracestate` is kept only alongside a valid `_meta.traceparent` and only up to 512 characters; a longer value is dropped.
+
+`_meta.baggage` is never read. A caller cannot choose the trace audience, session lineage, or content capture: those come from the channel and your `tracePolicy`, as they do for conversations. The `execute_tool` span records the call's arguments and result only when that content decision allows it, and never records exception text.
+
 ## Invocation ownership
 
 Every MCP operation reruns the configured auth policy. With authenticated policies, an invocation belongs to the principal that started it; knowing its ID is not sufficient. Bearer tokens are not stored with the invocation or forwarded to the agent's tools.
