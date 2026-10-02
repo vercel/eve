@@ -1,4 +1,4 @@
-import type { LanguageModel, ModelMessage } from "ai";
+import { jsonSchema, type LanguageModel, type ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
@@ -111,5 +111,92 @@ describe("framework tool input validation (real AI SDK)", () => {
     expect(findToolResult(model.doGenerateCalls[1]?.prompt ?? [], invalidCallId)).toBeDefined();
     expect(validStep.next).toBeNull();
     expect(validStep.settledTurn).toEqual({ output: { answer: "done" } });
+  });
+
+  it.each([
+    {
+      name: "beside a truncated call",
+      truncated: [{ input: '{"path": "notes/bob', toolCallId: "read-truncated" }],
+    },
+    { name: "alone", truncated: [] },
+  ])("answers complete tool calls cut short at the output limit $name", async ({ truncated }) => {
+    const skippedCallId = "read-skipped";
+    const model = new MockLanguageModelV4({
+      doGenerate: [
+        {
+          content: [
+            {
+              input: JSON.stringify({ path: "notes/alice.md" }),
+              toolCallId: skippedCallId,
+              toolName: "read_note",
+              type: "tool-call",
+            },
+            ...truncated.map((call) => ({
+              ...call,
+              toolName: "read_note",
+              type: "tool-call" as const,
+            })),
+          ],
+          finishReason: { raw: undefined, unified: "length" },
+          usage,
+          warnings: [],
+        },
+        {
+          content: [{ text: "I will read Alice's note again.", type: "text" }],
+          finishReason: { raw: undefined, unified: "stop" },
+          usage,
+          warnings: [],
+        },
+      ],
+      modelId: "output-limit-model",
+      provider: "eve-integration-mock",
+    });
+    const execute = vi.fn(async () => ({ text: "Meeting moved to Friday." }));
+    const runStep = createToolLoopHarness({
+      resolveModel: async (): Promise<LanguageModel> => model,
+      tools: new Map([
+        [
+          "read_note",
+          {
+            name: "read_note",
+            description: "Read one of Alice's notes.",
+            execute,
+            inputSchema: jsonSchema({
+              properties: { path: { type: "string" } },
+              required: ["path"],
+              type: "object",
+            }),
+          },
+        ],
+      ]),
+    });
+    const session: HarnessSession = {
+      agent: {
+        modelReference: { id: "output-limit-model" },
+        system: "Help Alice with her notes.",
+        tools: [],
+      },
+      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      continuationToken: "task:output-limit-session",
+      history: [],
+      sessionId: "output-limit-session",
+    };
+
+    const cutShortStep = await runStep(session, { message: "Read Alice's and Bob's notes." });
+    if (typeof cutShortStep.next !== "function") {
+      throw new TypeError("Expected the cut-short step to continue the tool loop.");
+    }
+    const nextStep = await cutShortStep.next(cutShortStep.session);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(model.doGenerateCalls).toHaveLength(2);
+    const retryPrompt = model.doGenerateCalls[1]?.prompt ?? [];
+    expect(findToolResult(retryPrompt, skippedCallId)).toMatchObject({
+      output: { type: "error-text", value: expect.stringContaining("finish reason: length") },
+    });
+    for (const call of truncated) {
+      expect(findToolResult(retryPrompt, call.toolCallId)).toBeDefined();
+    }
+    expect(nextStep.next).toBeNull();
   });
 });
