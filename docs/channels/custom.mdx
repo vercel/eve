@@ -68,6 +68,7 @@ Each route receives these operation surfaces:
 - `to(channel, target).send(message, options)` hands work to another authored channel.
 - `params`, `waitUntil`, and `requestIp` provide request metadata and lifetime control.
 - `describe()` returns the agent's name, description, and the compiled tools a caller can run outside a turn, with their JSON schemas, sorted by name. It carries no paths, config, or other inspection detail, so a channel can publish it to its callers. Tools that need a turn (framework tools, workflow and provider tools, tools without `execute`) and tools added by dynamic resolvers or subagents are left out.
+- `invokeTool(name, input, { auth })` runs one of those tools as `auth`, outside any conversation: no model, turn, or workflow run. Each call gets its own session. Authored state starts from its initial value and is not kept, and a sandbox the tool opens is deleted when the call ends. It resolves to `completed` with the tool's output, or to `invalid-input`, `denied`, `failed`, `approval-required` when the tool's approval policy asks a person (the tool did not run), or `authorization-required` with the connections the tool needs a sign-in to.
 
 Event handlers receive `(eventData, channel, ctx)`. `ctx.session.id` identifies
 the exact session, while `channel.continuation` exposes the current address and
