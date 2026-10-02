@@ -249,8 +249,13 @@ async function converse(
     const conversation: ChannelConversation = {
       say: (text) => post(driver.message(text)),
       press: (option) => post(driver.press(option)),
-      waitForQuestion: (prompt) =>
-        waitFor(`the question "${prompt}"`, (call) => driver.findOptions(call, prompt)),
+      async waitForQuestion(prompt) {
+        const options = await waitFor(`the question "${prompt}"`, (call) =>
+          driver.findOptions(call, prompt),
+        );
+        await waitForTurnToHoldForInput();
+        return options;
+      },
       waitForToolResult: (tool) =>
         waitFor(`${tool} to return`, (call) => {
           const text = driver.postedText(call);
@@ -283,6 +288,29 @@ async function converse(
       },
     };
 
+    /** How many times each session's turn has held for input, as of the last wait. */
+    const inputHolds = new Map<string, number>();
+
+    /**
+     * A person answers once the bot has finished asking. Answering the moment
+     * the question appears races the channel's own bookkeeping for it, such as
+     * Discord aliasing the session to the message it just posted.
+     */
+    async function waitForTurnToHoldForInput(): Promise<void> {
+      const deadline = Date.now() + waitTimeoutMs;
+      while (Date.now() < deadline) {
+        for (const session of sessions.values()) {
+          const holds = await countInputHolds(session);
+          if (holds > (inputHolds.get(session.id) ?? 0)) {
+            inputHolds.set(session.id, holds);
+            return;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      throw new Error(`Timed out waiting for the turn to hold for input on ${driver.name}.`);
+    }
+
     function track(session: Session): Session {
       sessions.set(session.id, session);
       return session;
@@ -294,6 +322,23 @@ async function converse(
       await Promise.allSettled([...sessions.values()].map((session) => session.cancel()));
     }
   });
+}
+
+async function countInputHolds(session: Session): Promise<number> {
+  const tail = await session.getStreamTailIndex();
+  if (tail < 0) return 0;
+  const reader = (await session.getEventStream({ startIndex: 0 })).getReader();
+  let holds = 0;
+  try {
+    for (let index = 0; index <= tail; index += 1) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value.type === "turn.waiting" && value.data.on === "input") holds += 1;
+    }
+  } finally {
+    await reader.cancel();
+  }
+  return holds;
 }
 
 function findRoute(channel: CompiledChannel, request: Request) {
