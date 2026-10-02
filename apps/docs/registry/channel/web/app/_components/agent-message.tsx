@@ -135,31 +135,36 @@ function AgentMessagePart({
       }
 
       return (
-        <Tool
-          defaultOpen={part.state === "approval-requested" || part.state === "approval-responded"}
-        >
-          <ToolHeader
-            state={part.state}
-            title={part.toolName}
-            toolName={part.toolName}
-            type="dynamic-tool"
-          />
-          <ToolContent>
-            {part.toolName === "bash" ? (
-              <BashToolContent errorText={part.errorText} input={part.input} output={part.output} />
-            ) : (
-              <ToolInput input={part.input} />
-            )}
-            <InputRequestActions
-              canRespond={canRespond}
-              part={part}
-              onInputResponses={onInputResponses}
+        <>
+          <Tool>
+            <ToolHeader
+              state={part.state}
+              title={part.toolName}
+              toolName={part.toolName}
+              type="dynamic-tool"
             />
-            {part.toolName === "bash" ? null : (
-              <ToolOutput errorText={part.errorText} output={part.output} />
-            )}
-          </ToolContent>
-        </Tool>
+            <ToolContent>
+              {part.toolName === "bash" ? (
+                <BashToolContent
+                  errorText={part.errorText}
+                  input={part.input}
+                  output={part.output}
+                />
+              ) : (
+                <>
+                  <ToolInput input={part.input} />
+                  <ToolOutput errorText={part.errorText} output={part.output} />
+                </>
+              )}
+            </ToolContent>
+          </Tool>
+          {/* Kept outside the collapsed card so a pending approval is always visible. */}
+          <InputRequestActions
+            canRespond={canRespond}
+            part={part}
+            onInputResponses={onInputResponses}
+          />
+        </>
       );
     }
   }
