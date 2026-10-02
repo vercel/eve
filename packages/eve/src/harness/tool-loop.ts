@@ -1945,10 +1945,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     } catch {
       modelTag = undefined;
     }
-    // Not awaited here: the write overlaps result handling, which can run
-    // tools, and it is settled below so it never outlives its step. It never
-    // rejects, so the overlap cannot fail the step.
-    const attributeWrite = setEveAttributes({
+    await setEveAttributes({
       "$eve.model": modelTag,
       "$eve.input_tokens": nextTurnUsage.inputTokens,
       "$eve.output_tokens": nextTurnUsage.outputTokens,
@@ -1985,8 +1982,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       throwIfTurnAborted(config.abortSignal);
       if (generation.interrupted) return finishSteeredStep();
       throw error;
-    } finally {
-      await attributeWrite;
     }
     // The returned session now owns these messages; persist their baseline with it.
     ctx?.set(HistoryStateKey, currentMessages.historyState);

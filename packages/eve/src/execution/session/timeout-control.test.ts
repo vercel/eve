@@ -54,18 +54,6 @@ describe("createSessionTimeoutControl", () => {
     expect(cancelSessionTimeoutStep).toHaveBeenCalledWith({ runId: "timer-run" });
   });
 
-  it("does not reject when cancelling the timer fails", async () => {
-    vi.mocked(startSessionTimeoutStep).mockResolvedValue({ runId: "timer-run" });
-    vi.mocked(cancelSessionTimeoutStep).mockRejectedValueOnce(new Error("world unavailable"));
-    const control = createSessionTimeoutControl({
-      deadline: new Date("2026-02-01T00:00:00.000Z"),
-      sessionId: "wrun_1",
-    });
-
-    await control.start();
-    await expect(control.dispose()).resolves.toBeUndefined();
-  });
-
   it("propagates timer startup failures", async () => {
     const failure = new Error("timer startup failed");
     vi.mocked(startSessionTimeoutStep).mockRejectedValue(failure);

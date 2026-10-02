@@ -7,8 +7,7 @@ import {
 import { sessionCommandHookToken } from "#execution/session-inbox/address.js";
 
 /** Workflow-body handle that targets a durable deadline at the stable command inbox. */
-export interface SessionTimeoutControl {
-  /** Cancels the armed timer. Best effort: never rejects. */
+interface SessionTimeoutControl {
   dispose(): Promise<void>;
   start(): Promise<void>;
 }
@@ -25,13 +24,7 @@ export function createSessionTimeoutControl(input: {
       if (active === undefined) return;
       const current = active;
       active = undefined;
-      try {
-        await cancelSessionTimeoutStep({ runId: current.runId });
-      } catch {
-        // A timer that outlives its owner finds no hook to signal, or a successor
-        // that ignores another owner's deadline, so a cancel that still fails after
-        // the step's retries must not fail or delay the session.
-      }
+      await cancelSessionTimeoutStep({ runId: current.runId });
     },
 
     async start(): Promise<void> {

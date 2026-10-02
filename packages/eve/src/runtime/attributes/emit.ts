@@ -47,16 +47,19 @@ let WARNED_ABOUT_TAG_FAILURE = false;
  * Failure policy: tag writes are observability metadata, not load-bearing
  * state. A failure inside the runtime (transient network, schema bug,
  * missing world adapter) is logged once per process and then swallowed
- * so the eve session it tagged is unaffected. The returned promise never
- * rejects, so callers may start a write and settle it later.
+ * so the eve session it tagged is unaffected.
  *
  * Must be called from inside a `"use workflow"` or `"use step"` body —
  * the runtime throws a `FatalError` outside those contexts.
  */
 export async function setEveAttributes(attrs: Record<string, EveAttributeValue>): Promise<void> {
+  const normalized = normalizeEveAttributes(attrs);
+
+  if (Object.keys(normalized).length === 0) {
+    return;
+  }
+
   try {
-    const normalized = normalizeEveAttributes(attrs);
-    if (Object.keys(normalized).length === 0) return;
     // Import `@workflow/core` dynamically (matching `session/turn-step.ts`,
     // `session/entry.ts`, etc.). A static import here would pull the
     // compiled core into emit.js's static graph and defeat the dynamic
@@ -69,8 +72,8 @@ export async function setEveAttributes(attrs: Record<string, EveAttributeValue>)
     if (!WARNED_ABOUT_TAG_FAILURE) {
       WARNED_ABOUT_TAG_FAILURE = true;
       console.warn("[eve] setEveAttributes failed; suppressing further warnings this process.", {
-        keys: Object.keys(attrs),
-        error: error instanceof Error ? error.message : String(error),
+        keys: Object.keys(normalized),
+        error: (error as Error).message,
       });
     }
   }

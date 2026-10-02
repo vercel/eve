@@ -483,7 +483,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementation(
         turnStepWork(async () => ({
           action: "park",
-          hasRunsToDispatch: true,
           pendingCoordinationCallIds: ["hold-call"],
           serializedContext: {},
           sessionState,
@@ -587,7 +586,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementationOnce(
         turnStepWork(async () => ({
           action: "park",
-          hasRunsToDispatch: true,
           pendingCoordinationCallIds: ["hold-call"],
           serializedContext: {},
           sessionState,
@@ -805,7 +803,6 @@ describe("SessionExecution checkpoints", () => {
     vi.mocked(turnStep).mockImplementation(
       turnStepWork(async () => ({
         action: "park",
-        hasRunsToDispatch: true,
         pendingCoordinationCallIds: ["child-call"],
         serializedContext: {},
         sessionState,
@@ -881,7 +878,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementation(
         turnStepWork(async () => ({
           action: "park",
-          hasRunsToDispatch: true,
           pendingCoordinationCallIds: ["deploy-call"],
           serializedContext: {},
           sessionState,
@@ -972,13 +968,8 @@ describe("SessionExecution checkpoints", () => {
           sessionState,
         })),
       );
-    vi.mocked(dispatchCoordinationStep).mockImplementation(
-      dispatchWork(async () => ({
-        results: [],
-        serializedContext: {},
-        sessionState,
-      })),
-    );
+    vi.mocked(dispatchCoordinationStep).mockClear();
+    vi.mocked(cancelDescendantTurnsStep).mockClear();
 
     await expect(
       createExecution({ inbox, sessionState }).runTurn({
@@ -988,8 +979,10 @@ describe("SessionExecution checkpoints", () => {
 
     expect(publishTurnWaitingStep).toHaveBeenCalledTimes(1);
     expect(publishTurnWaitingStep).toHaveBeenCalledWith(expect.objectContaining({ sessionState }));
-    // Only a task tool call is pending, so no run is dispatched.
+    // Only a task tool call is pending: nothing is dispatched, and the cancel has
+    // no workflow tool run to stop.
     expect(dispatchCoordinationStep).not.toHaveBeenCalled();
+    expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
   });
 
   it("admits an idle agent task's usage report while the turn waits and counts it", async () => {
@@ -1050,7 +1043,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementation(
         turnStepWork(async () => ({
           action: "park",
-          hasRunsToDispatch: true,
           pendingCoordinationCallIds: ["hold-call"],
           serializedContext: {},
           sessionState,
@@ -1144,7 +1136,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementationOnce(
         turnStepWork(async () => ({
           action: "park",
-          hasRunsToDispatch: true,
           pendingCoordinationCallIds: tools.map((name) => `${name}-call`),
           serializedContext: {},
           sessionState,
@@ -1324,7 +1315,6 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementation(
         turnStepWork(async () => ({
           action: "park",
-          hasRunsToDispatch: true,
           pendingCoordinationCallIds: ["hold-call"],
           serializedContext: {},
           sessionState,

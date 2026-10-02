@@ -1,12 +1,7 @@
 import { failSession, runPreparedSession, type SessionBoot } from "#execution/session/program.js";
 import { getWorkflowMetadata, getWritable } from "#compiled/@workflow/core/index.js";
 
-import type {
-  DeliverHookPayload,
-  RunInput,
-  SessionCapabilities,
-  TurnCaller,
-} from "#channel/types.js";
+import type { DeliverHookPayload, RunInput, SessionCapabilities } from "#channel/types.js";
 import { readChannelRequestId, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import type { DurableCompiledArtifactsSource } from "#runtime/durable-compiled-artifacts-source.js";
 import { resolveInitialTurnCallerStep } from "#subagents/parent-notification.js";
@@ -93,7 +88,6 @@ async function bootInitialOwner(
     source: DurableCompiledArtifactsSource;
     nodeId?: string;
   };
-  let caller: TurnCaller | undefined;
   try {
     const [sessionCreation, stableClaim, aliasClaim, callerResolution] = await Promise.allSettled([
       createSessionStep({
@@ -114,7 +108,6 @@ async function bootInitialOwner(
         ? resolveInitialTurnCallerStep({ serializedContext })
         : Promise.resolve(undefined),
     ]);
-    if (callerResolution.status === "fulfilled") caller = callerResolution.value;
     if (sessionCreation.status === "rejected") throw sessionCreation.reason;
     if (stableClaim.status === "rejected") throw stableClaim.reason;
     if (aliasClaim.status === "rejected") {
@@ -133,7 +126,7 @@ async function bootInitialOwner(
       inbox,
       session: {
         anchor: { kind: "self" },
-        caller,
+        caller: callerResolution.value,
         capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
         deploymentId: input.ownerDeploymentId,
         history: sessionCreation.value.history,
@@ -154,7 +147,6 @@ async function bootInitialOwner(
   } catch (error) {
     await inbox.dispose();
     return await failSession({
-      caller,
       error,
       serializedContext,
       sessionId,

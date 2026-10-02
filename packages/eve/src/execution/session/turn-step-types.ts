@@ -68,7 +68,10 @@ export type DurableStepResult = (
     }
   | {
       readonly action: "park";
-      /** Set with the pending call ids: whether any of them is a workflow tool run to start. */
+      /**
+       * `false` when every pending call is a task tool call the session answers
+       * itself, so the dispatch step can be skipped. Absent, the step runs.
+       */
       readonly hasRunsToDispatch?: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
       readonly pendingTaskToolCalls?: readonly TaskToolCall[];

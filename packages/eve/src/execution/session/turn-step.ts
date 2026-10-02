@@ -198,15 +198,17 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     sessionId: initialSession.sessionId,
   });
   const initialEmissionState = getHarnessEmissionState(initialSession.state);
-  let newSessionTitle: string | undefined;
   if (
     !initialEmissionState.sessionStarted &&
     !ctx.has(SessionTitleKey) &&
     !ctx.has(ParentSessionKey)
   ) {
     const message = rawDelivery?.payloads.find((payload) => payload.message !== undefined)?.message;
-    newSessionTitle = deriveSessionTitle(rawDelivery?.title ?? message);
-    if (newSessionTitle !== undefined) ctx.set(SessionTitleKey, newSessionTitle);
+    const title = deriveSessionTitle(rawDelivery?.title ?? message);
+    if (title !== undefined) {
+      ctx.set(SessionTitleKey, title);
+      await setEveAttributes({ "$eve.title": title });
+    }
   }
 
   if (rawDelivery !== undefined) {
@@ -257,10 +259,6 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     input.abortSignal === undefined
       ? hookCancellation.signal
       : AbortSignal.any([input.abortSignal, hookCancellation.signal]);
-  // Overlaps the rest of the step. It never rejects, and the `finally` settles it
-  // so it cannot outlive the step.
-  const titleWrite =
-    newSessionTitle === undefined ? undefined : setEveAttributes({ "$eve.title": newSessionTitle });
   try {
     const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
     const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
@@ -576,6 +574,5 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
     return durableResult;
   } finally {
     publisher.writer.release();
-    await titleWrite;
   }
 }
