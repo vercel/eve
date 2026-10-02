@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { AgentToolDescription } from "#channel/agent-description.js";
+import type { InvokeToolFn, InvokeToolResult } from "#channel/invoke-tool.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import {
@@ -486,12 +488,148 @@ describe("mcpChannel", () => {
   });
 });
 
-function routeArgs(createSession: () => Promise<never> = vi.fn()): RouteHandlerArgs {
+describe("mcpChannel tools", () => {
+  const lookup: AgentToolDescription = {
+    approval: false,
+    description: "Looks up one order.",
+    inputSchema: {
+      properties: { id: { type: "string" } },
+      required: ["id"],
+      type: "object",
+    },
+    name: "lookup",
+    outputSchema: { properties: { status: { type: "string" } }, type: "object" },
+  };
+  const shadow: AgentToolDescription = {
+    approval: false,
+    description: "An authored tool named like the channel's.",
+    inputSchema: { type: "object" },
+    name: "agent_start",
+  };
+  const note: AgentToolDescription = {
+    approval: false,
+    description: "Writes a note.",
+    inputSchema: { type: "object" },
+    name: "note",
+  };
+
+  function serve(
+    options: { readonly agent?: boolean; readonly tools?: boolean },
+    invokeTool: InvokeToolFn = vi.fn(),
+  ) {
+    const channel = mcpChannel({ auth: () => principal, ...options });
+    const post = channel.routes[1]!;
+    if (post.transport === "websocket") throw new Error("expected HTTP route");
+    const args = routeArgs(vi.fn(), {
+      describe: async () => ({ name: "compiled-agent", tools: [shadow, lookup, note] }),
+      invokeTool,
+    });
+    return async (method: string, params?: unknown) =>
+      (await jsonRpcResponse(
+        await post.handler(mcpRequest({ id: 1, jsonrpc: "2.0", method, params }), args),
+      )) as { result?: Record<string, any>; error?: { code: number } };
+  }
+
+  it("lists the agent's tools after agent_*, and only them with agent: false", async () => {
+    const names = async (rpc: ReturnType<typeof serve>) =>
+      (await rpc("tools/list")).result!.tools.map((tool: { name: string }) => tool.name);
+    const both = serve({ tools: true });
+    expect(await names(both)).toEqual([
+      "agent_start",
+      "agent_get",
+      "agent_update",
+      "agent_cancel",
+      "lookup",
+      "note",
+    ]);
+    const listed = (await both("tools/list")).result!.tools;
+    expect(listed[0].description).toContain("Investigates tasks.");
+    expect(listed[4]).toMatchObject({
+      inputSchema: lookup.inputSchema,
+      outputSchema: lookup.outputSchema,
+    });
+
+    const toolsOnly = serve({ agent: false, tools: true });
+    expect(await names(toolsOnly)).toEqual(["agent_start", "lookup", "note"]);
+    const initialize = await toolsOnly("initialize", {
+      capabilities: {},
+      clientInfo: { name: "test-client", version: "0.0.0" },
+      protocolVersion: MCP_LEGACY_PROTOCOL_VERSION,
+    });
+    expect(initialize.result!.instructions).toBeUndefined();
+
+    expect(await names(serve({}))).toHaveLength(4);
+    expect(() => mcpChannel({ agent: false, auth: none() })).toThrow(
+      "mcpChannel publishes nothing with agent and tools both false. Enable one.",
+    );
+  });
+
+  it("runs each call through invokeTool as the caller and maps its outcome", async () => {
+    const completed = (output: unknown, text?: string): InvokeToolResult => ({
+      modelOutput:
+        text === undefined ? { type: "json", value: output } : { type: "text", value: text },
+      output,
+      status: "completed",
+    });
+    const rows: Array<[string, InvokeToolResult, object]> = [
+      [
+        "lookup",
+        completed({ status: "shipped" }),
+        {
+          content: [{ text: '{"status":"shipped"}', type: "text" }],
+          structuredContent: { status: "shipped" },
+        },
+      ],
+      ["note", completed("saved", "Saved."), { content: [{ text: "Saved.", type: "text" }] }],
+      ["note", { message: "Bad id.", status: "invalid-input" }, { code: "invalid_input" }],
+      ["note", { reason: "Not today.", status: "denied" }, { code: "denied" }],
+      ["note", { status: "approval-required" }, { code: "approval_required" }],
+      [
+        "note",
+        { connections: ["linear"], status: "authorization-required" },
+        { code: "authorization_required", message: expect.stringContaining("linear") },
+      ],
+      ["note", { message: "Boom.", status: "failed" }, { code: "internal", message: "Boom." }],
+    ];
+    for (const [name, result, expected] of rows) {
+      const invokeTool = vi.fn<InvokeToolFn>(async () => result);
+      const rpc = serve({ tools: true }, invokeTool);
+      const args = name === "lookup" ? { id: "7" } : {};
+      const called = (await rpc("tools/call", { arguments: args, name })).result!;
+      if ("code" in expected) {
+        expect(called, result.status).toMatchObject({
+          isError: true,
+          structuredContent: { error: expected },
+        });
+      } else {
+        expect(called, result.status).toMatchObject(expected);
+      }
+      expect(invokeTool).toHaveBeenCalledWith(name, args, {
+        auth: principal,
+        signal: expect.any(AbortSignal),
+      });
+    }
+  });
+
+  it("checks arguments against the tool's JSON schema before invoking it", async () => {
+    const invokeTool = vi.fn<InvokeToolFn>();
+    const rpc = serve({ tools: true }, invokeTool);
+    const called = await rpc("tools/call", { arguments: { id: 7 }, name: "lookup" });
+    expect(called.result?.isError ?? called.error !== undefined).toBe(true);
+    expect(invokeTool).not.toHaveBeenCalled();
+  });
+});
+
+function routeArgs(
+  createSession: () => Promise<never> = vi.fn(),
+  overrides: Partial<RouteHandlerArgs> = {},
+): RouteHandlerArgs {
   const unavailable = () => {
     throw new Error("Route operation is unavailable in this test.");
   };
   const args: RouteHandlerArgs = {
     ...mockAgentRouteArgs(),
+    ...overrides,
     attachSession: unavailable,
     from: unavailable,
     params: {},
