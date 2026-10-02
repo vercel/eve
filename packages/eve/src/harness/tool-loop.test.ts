@@ -11705,3 +11705,164 @@ describe("boundary event failures", () => {
     ).rejects.toBe(cancellation);
   });
 });
+
+describe("completed-turn tool-result retention", () => {
+  it("stubs file payloads before persisting a completed turn", async () => {
+    const imageData = "iVBORw0KGgo".repeat(500);
+    const toolCall = {
+      input: { prompt: "A sunset" },
+      toolCallId: "image-1",
+      toolName: "generate_image",
+      type: "tool-call" as const,
+    };
+    const toolResult = {
+      output: {
+        type: "content" as const,
+        value: [
+          { text: "Generated image:", type: "text" as const },
+          {
+            data: { data: imageData, type: "data" as const },
+            filename: "sunset.png",
+            mediaType: "image/png",
+            type: "file" as const,
+          },
+        ],
+      },
+      toolCallId: toolCall.toolCallId,
+      toolName: toolCall.toolName,
+      type: "tool-result" as const,
+    };
+    setupMockAgent({
+      finishReason: "stop",
+      response: {
+        messages: [
+          { content: [toolCall], role: "assistant" },
+          { content: [toolResult], role: "tool" },
+          { content: "The image is ready.", role: "assistant" },
+        ],
+      },
+      text: "The image is ready.",
+      toolCalls: [toolCall],
+      toolResults: [toolResult],
+    });
+
+    const result = await createToolLoopHarness(createTestConfig())(createTestSession(), {
+      message: "Generate a sunset image.",
+    });
+
+    expect(result.next).toBeNull();
+    expect(JSON.stringify(result.session.history)).not.toContain(imageData);
+    expect(result.session.history).toContainEqual({
+      content: [
+        {
+          output: {
+            type: "content",
+            value: [
+              { text: "Generated image:", type: "text" },
+              { text: "Attached file sunset.png (image/png)", type: "text" },
+            ],
+          },
+          toolCallId: "image-1",
+          toolName: "generate_image",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    });
+  });
+
+  it("emits raw file payloads with turn.completed before stubbing history", async () => {
+    const imageData = "iVBORw0KGgo".repeat(500);
+    const toolCall = {
+      input: { prompt: "A sunset" },
+      toolCallId: "image-1",
+      toolName: "generate_image",
+      type: "tool-call" as const,
+    };
+    const toolResult = {
+      output: {
+        type: "content" as const,
+        value: [
+          {
+            data: { data: imageData, type: "data" as const },
+            filename: "sunset.png",
+            mediaType: "image/png",
+            type: "file" as const,
+          },
+        ],
+      },
+      toolCallId: toolCall.toolCallId,
+      toolName: toolCall.toolName,
+      type: "tool-result" as const,
+    };
+    setupMockAgent({
+      finishReason: "stop",
+      response: {
+        messages: [
+          { content: [toolCall], role: "assistant" },
+          { content: [toolResult], role: "tool" },
+          { content: "The image is ready.", role: "assistant" },
+        ],
+      },
+      text: "The image is ready.",
+      toolCalls: [toolCall],
+      toolResults: [toolResult],
+    });
+    const completedHistory: unknown[] = [];
+    const emit: HarnessEmitFn = async (event, messages) => {
+      if (event.type === "turn.completed") completedHistory.push(messages);
+    };
+
+    const result = await createToolLoopHarness(createTestConfig(emit))(createTestSession(), {
+      message: "Generate a sunset image.",
+    });
+
+    expect(JSON.stringify(completedHistory)).toContain(imageData);
+    expect(JSON.stringify(result.session.history)).not.toContain(imageData);
+  });
+
+  it("retains file payloads while the tool loop is still active", async () => {
+    const imageData = "iVBORw0KGgo".repeat(500);
+    const toolCall = {
+      input: { prompt: "A sunset" },
+      toolCallId: "image-1",
+      toolName: "generate_image",
+      type: "tool-call" as const,
+    };
+    const toolResult = {
+      output: {
+        type: "content" as const,
+        value: [
+          {
+            data: { data: imageData, type: "data" as const },
+            filename: "sunset.png",
+            mediaType: "image/png",
+            type: "file" as const,
+          },
+        ],
+      },
+      toolCallId: toolCall.toolCallId,
+      toolName: toolCall.toolName,
+      type: "tool-result" as const,
+    };
+    setupMockAgent({
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          { content: [toolCall], role: "assistant" },
+          { content: [toolResult], role: "tool" },
+        ],
+      },
+      text: "",
+      toolCalls: [toolCall],
+      toolResults: [toolResult],
+    });
+
+    const result = await createToolLoopHarness(createTestConfig())(createTestSession(), {
+      message: "Generate a sunset image.",
+    });
+
+    expect(result.next).not.toBeNull();
+    expect(JSON.stringify(result.session.history)).toContain(imageData);
+  });
+});

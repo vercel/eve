@@ -83,6 +83,7 @@ import {
   resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction.js";
+import { stubContentOutputFileParts } from "#harness/compaction-prompt.js";
 import { createCurrentMessages, hasTailApprovalResponse } from "#harness/current-messages.js";
 import { collectDeferredCalls, dispatchApprovedWorkflowCalls } from "#harness/workflow-dispatch.js";
 import { estimateTokens } from "#harness/token-estimate.js";
@@ -3066,7 +3067,20 @@ async function emitStructuredResult(
  * otherwise the structured value (or prose) ends the turn and the session
  * waits for the next message.
  */
-async function finishTurn(input: {
+/**
+ * Settles the turn, then stubs tool-result file payloads in the persisted
+ * history. Turn-completed consumers still receive the raw messages.
+ */
+async function finishTurn(input: Parameters<typeof settleTurn>[0]): Promise<StepResult> {
+  const step = await settleTurn(input);
+  const history = stubCompletedToolResultFileParts(step.session.history);
+  if (history === step.session.history) {
+    return step;
+  }
+  return { ...step, session: replaceSessionHistory(step.session, history) };
+}
+
+async function settleTurn(input: {
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly history: readonly HarnessModelMessage[];
@@ -3126,6 +3140,44 @@ async function finishTurn(input: {
   }
   const settledTurn = { output: structured } satisfies SettledTurn;
   return { next: null, session, settledTurn };
+}
+
+/**
+ * Drops raw file payloads once a turn is settled. During an active tool loop,
+ * later model steps still need the original results; afterward a text stub
+ * retains the tool result's provenance without persisting binary data again.
+ */
+function stubCompletedToolResultFileParts(messages: HarnessModelMessage[]): HarnessModelMessage[] {
+  let historyChanged = false;
+  const history = messages.map((message) => {
+    if (message.role !== "tool" || typeof message.content === "string") {
+      return message;
+    }
+
+    let messageChanged = false;
+    const content = message.content.map((part) => {
+      if (part.type !== "tool-result") {
+        return part;
+      }
+
+      const output = stubContentOutputFileParts(part.output) as typeof part.output;
+      if (output === part.output) {
+        return part;
+      }
+
+      messageChanged = true;
+      return { ...part, output };
+    });
+
+    if (!messageChanged) {
+      return message;
+    }
+
+    historyChanged = true;
+    return { ...message, content };
+  });
+
+  return historyChanged ? history : messages;
 }
 
 function createNextCompactionConfig(
