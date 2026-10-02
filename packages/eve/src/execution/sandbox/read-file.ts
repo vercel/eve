@@ -6,6 +6,7 @@ import {
   setReadFileStamp,
 } from "#execution/tools/file-state.js";
 import { resolveAbsoluteFilePath } from "#execution/sandbox/require-sandbox.js";
+import { readMediaMetadata, type MediaMetadata } from "#internal/attachments/media-metadata.js";
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import { capLineLength, MAX_OUTPUT_BYTES } from "#execution/sandbox/truncate-output.js";
 
@@ -44,8 +45,11 @@ export interface ReadFileInput {
  */
 export interface ReadFileResult {
   readonly content: string;
-  /** Base64 image the model sees when the file is a PNG, JPEG, GIF, or WebP image. */
-  readonly image?: { readonly data: string; readonly mediaType: string };
+  /**
+   * Set when the file is a PNG, JPEG, GIF, or WebP image the model sees as
+   * an image. Carries no bytes, so `action.result` stays small.
+   */
+  readonly image?: MediaMetadata;
   readonly nextOffset?: number;
   readonly path: string;
   readonly totalLines: number;
@@ -218,7 +222,7 @@ async function readImageFile(
   }
   return {
     content: `Image ${path} (${mediaType}, ${bytes.byteLength} bytes).`,
-    image: { data: Buffer.from(bytes).toString("base64"), mediaType },
+    image: readMediaMetadata(bytes, mediaType),
     path,
     totalLines: 0,
     truncated: false,

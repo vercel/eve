@@ -10923,9 +10923,10 @@ describe("createToolLoopHarness", () => {
 
       expect(sandbox.writes).toHaveLength(1);
       expect(JSON.stringify(result.session.history)).not.toContain(base64);
-      const modelCall = (
-        vi.mocked(ToolLoopAgent).mock.results[0]?.value as { generate: ReturnType<typeof vi.fn> }
-      ).generate.mock.calls[0]?.[0] as { messages: ModelMessage[] };
+      const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as
+        | { generate: ReturnType<typeof vi.fn> }
+        | undefined;
+      const modelCall = agent?.generate.mock.calls[0]?.[0] as { messages: ModelMessage[] };
       expect(JSON.stringify(modelCall.messages)).toContain(base64);
     });
 

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { basename } from "node:path";
+import { basename, extname } from "node:path";
 import type { FilePart, ModelMessage, TextPart, ToolResultPart, UserContent } from "ai";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -38,6 +38,16 @@ const UNSAFE_FILENAME_CHARS = /[^\w.-]+/g;
 const SHA_PREFIX_LENGTH = 16;
 
 const DEFAULT_MEDIA_TYPE = "application/octet-stream";
+
+// A staged name keeps or gains the extension its media type implies, so a
+// nameless file (an MCP image, say) can still be opened by path later.
+const MEDIA_TYPE_EXTENSIONS: Readonly<Record<string, string>> = {
+  "application/pdf": ".pdf",
+  "image/gif": ".gif",
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+};
 
 type ToolResultOutput = ToolResultPart["output"];
 type ToolOutputContentPart = Extract<ToolResultOutput, { type: "content" }>["value"][number];
@@ -484,7 +494,7 @@ async function writeSandboxRef(
   sandbox: SandboxSession,
 ): Promise<SandboxRef> {
   const sha = sha256Prefix(bytes);
-  const authored = `${ATTACHMENTS_ROOT}/${sha}/${safeFilename(filename, sha)}`;
+  const authored = `${ATTACHMENTS_ROOT}/${sha}/${safeFilename(filename, sha, mediaType)}`;
   await sandbox.writeBinaryFile({ content: bytes, path: authored });
   return { ...readMediaMetadata(bytes, mediaType), path: sandbox.resolvePath(authored) };
 }
@@ -543,10 +553,9 @@ function sha256Prefix(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex").slice(0, SHA_PREFIX_LENGTH);
 }
 
-function safeFilename(provided: string | undefined, sha: string): string {
-  if (provided === undefined) {
-    return `file-${sha}`;
-  }
-  const base = basename(provided).replace(UNSAFE_FILENAME_CHARS, "_");
-  return base.length > 0 ? base : `file-${sha}`;
+function safeFilename(provided: string | undefined, sha: string, mediaType: string): string {
+  const base = provided === undefined ? "" : basename(provided).replace(UNSAFE_FILENAME_CHARS, "_");
+  const name = base.length > 0 ? base : `file-${sha}`;
+  const extension = MEDIA_TYPE_EXTENSIONS[mediaType];
+  return extension === undefined || extname(name) !== "" ? name : `${name}${extension}`;
 }
