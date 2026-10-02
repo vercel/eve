@@ -47,12 +47,13 @@ function tool(
   };
 }
 
-function sandboxes() {
+function sandboxes(options: { readonly startGate?: Promise<void> } = {}) {
   const started: string[] = [];
   const deleted = vi.fn(async () => {});
   const shutdown = vi.fn(async () => {});
   const start = vi.fn(async (context: { readonly session: { readonly id: string } }) => {
     started.push(context.session.id);
+    await options.startGate;
     const sandbox = mockSandbox();
     return {
       handle: {
@@ -174,5 +175,48 @@ describe("invokeTool", () => {
     expect(deleted).toHaveBeenCalledTimes(2);
     await shutdownActiveSandboxHandles();
     expect(shutdown).not.toHaveBeenCalled();
+  });
+
+  it("deletes a sandbox whose start finishes after the call failed", async () => {
+    let finishStart!: () => void;
+    const startGate = new Promise<void>((resolve) => {
+      finishStart = resolve;
+    });
+    const { deleted, registry, shutdown, started } = sandboxes({ startGate });
+    let gaveUp = false;
+    const racing = tool("racing", async (_input: unknown, ctx) => {
+      // The call gives up while the provider is still starting, as a lost
+      // race against cancellation would.
+      void ctx.getSandbox().catch(() => {});
+      await vi.waitFor(() => expect(started).toHaveLength(1));
+      gaveUp = true;
+      throw new Error("gave up");
+    });
+    const runtime = runtimeWith([racing], registry);
+
+    const result = invokeTool(runtime, "racing", {}, { auth: alice });
+    await vi.waitFor(() => expect(gaveUp).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(deleted).not.toHaveBeenCalled();
+    finishStart();
+    // Let a start that outlived the call settle before checking what it left behind.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(await result).toMatchObject({ status: "failed" });
+    expect(deleted).toHaveBeenCalledTimes(1);
+    await shutdownActiveSandboxHandles();
+    expect(shutdown).not.toHaveBeenCalled();
+  });
+
+  it("allocates no sandbox for a failed call that never asked for one", async () => {
+    const { deleted, registry, started } = sandboxes();
+    const failing = tool("failing", () => {
+      throw new Error("boom");
+    });
+    expect(
+      await invokeTool(runtimeWith([failing], registry), "failing", {}, { auth: alice }),
+    ).toMatchObject({ status: "failed" });
+    expect(started).toHaveLength(0);
+    expect(deleted).not.toHaveBeenCalled();
   });
 });
