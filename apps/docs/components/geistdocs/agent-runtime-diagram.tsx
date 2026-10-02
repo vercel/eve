@@ -7,8 +7,17 @@ import {
   IconWrench,
 } from "@vercel/geistdocs/assets/icons";
 import type { JSX, ReactNode } from "react";
-import { agentRuntimeDiagram } from "@/lib/geistdocs/agent-runtime-diagram";
+import { agentRuntimeDiagram, type CardId } from "@/lib/geistdocs/agent-runtime-diagram";
 import { cn } from "@/lib/utils";
+
+const cardPresentation: Record<CardId, { icon: ReactNode; className?: string }> = {
+  "agent-loop": { icon: <IconWorkflow size={18} /> },
+  "runtime-code": { icon: <IconWrench size={18} /> },
+  credentials: { icon: <IconLinked size={18} /> },
+  skills: { icon: <IconFileText size={18} />, className: "order-2 lg:order-1" },
+  "sandbox-operations": { icon: <IconSandbox size={18} />, className: "order-1 lg:order-2" },
+  workspace: { icon: <IconFolderOpen size={18} />, className: "order-3" },
+};
 
 function Environment({
   title,
@@ -42,7 +51,7 @@ function RuntimeCard({
   icon: ReactNode;
   title: string;
   description: string;
-  paths?: string[];
+  paths?: readonly string[];
   className?: string;
 }): JSX.Element {
   return (
@@ -91,30 +100,18 @@ export function AgentRuntimeDiagram(): JSX.Element {
       className="my-8 grid w-full min-w-0 items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_160px_minmax(0,1fr)]"
     >
       <Environment {...agentRuntimeDiagram.runtime}>
-        <RuntimeCard icon={<IconWorkflow size={18} />} {...agentRuntimeDiagram.runtime.cards[0]} />
-        <RuntimeCard icon={<IconWrench size={18} />} {...agentRuntimeDiagram.runtime.cards[1]} />
-        <RuntimeCard icon={<IconLinked size={18} />} {...agentRuntimeDiagram.runtime.cards[2]} />
+        {agentRuntimeDiagram.runtime.cards.map((card) => (
+          <RuntimeCard key={card.id} {...card} {...cardPresentation[card.id]} />
+        ))}
       </Environment>
 
       <SandboxBridge />
 
       <Environment {...agentRuntimeDiagram.sandbox}>
         <div className="grid gap-3">
-          <RuntimeCard
-            icon={<IconFileText size={18} />}
-            {...agentRuntimeDiagram.sandbox.cards[0]}
-            className="order-2 lg:order-1"
-          />
-          <RuntimeCard
-            icon={<IconSandbox size={18} />}
-            {...agentRuntimeDiagram.sandbox.cards[1]}
-            className="order-1 lg:order-2"
-          />
-          <RuntimeCard
-            icon={<IconFolderOpen size={18} />}
-            {...agentRuntimeDiagram.sandbox.cards[2]}
-            className="order-3"
-          />
+          {agentRuntimeDiagram.sandbox.cards.map((card) => (
+            <RuntimeCard key={card.id} {...card} {...cardPresentation[card.id]} />
+          ))}
         </div>
       </Environment>
     </figure>
