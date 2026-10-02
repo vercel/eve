@@ -36,7 +36,7 @@
     "@changesets/cli": "3.0.1",
     "@microsoft/api-extractor": "7.59.0",
     "@types/node": "catalog:",
-    "gray-matter": "4.0.3",
+    "js-yaml": "4.3.2",
     "oxfmt": "0.66.0",
     "oxlint": "1.81.0",
     "syncpack": "15.3.3",
