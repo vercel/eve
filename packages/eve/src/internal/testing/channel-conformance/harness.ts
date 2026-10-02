@@ -304,7 +304,7 @@ export const SIGN_IN_TOOLS = {
 export type SignInTool = keyof typeof SIGN_IN_TOOLS;
 
 /** A tool whose runs a rule can count. */
-export type CountedTool = GatedTool | SignInTool;
+export type CountedTool = GatedTool | SignInTool | typeof PLAIN_TOOL;
 
 /** The code the fake provider hands back when a person finishes signing in. */
 const SIGN_IN_CODE = "conformance-code";
@@ -516,6 +516,7 @@ async function converse(
   const runs: Record<CountedTool, number> = {
     [GATED_TOOL]: 0,
     [SECOND_GATED_TOOL]: 0,
+    [PLAIN_TOOL]: 0,
     read_calendar: 0,
     read_mail: 0,
   };
@@ -563,7 +564,10 @@ async function converse(
         loadNamespace: async () => ({
           default: defineTool({
             description: `Looks up meeting notes. Only call when asked to use ${PLAIN_TOOL}.`,
-            execute: async () => ({ notes: "Bob's review notes" }),
+            execute: async () => {
+              runs[PLAIN_TOOL] += 1;
+              return { notes: "Bob's review notes" };
+            },
             inputSchema: z.object({}),
           }),
         }),

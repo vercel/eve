@@ -96,11 +96,11 @@ interface ConformanceChannel {
   readonly unsupported?: Partial<Record<HitlRule, string>>;
 }
 
-/** An off-topic reply to a budget prompt is queued, and every later message queues behind it. */
+/** A message sent during a budget prompt is queued, and every later message queues behind it. */
 const QUEUED_BUDGET_REPLY = {
-  "a reply that answers neither budget option keeps the prompt open": {
+  "a message sent during a budget prompt is answered once the person approves": {
     reason: "eve coalesces the queued reply with the later approve, which then matches no option",
-    symptom: /Timed out waiting for a reply on/u,
+    symptom: /Timed out waiting for a reply to "Carol wants the review by Friday\."/u,
   },
 } satisfies Partial<Record<HitlRule, BrokenCell>>;
 
@@ -161,8 +161,8 @@ const DISCORD_BROKEN = {
   ...unnamedAnsweredPrompts(UNNAMED_RESPONDER, ["approvalPress", "questionPress"]),
   ...budgetPromptNotShown(
     "a budget prompt's request id overflows Discord's 100-character custom_id, so posting it throws",
-    "an exhausted session budget asks to Approve or Stop",
-    "pressing Approve on a budget prompt finishes the held turn",
+    "running out of budget asks the person whether to keep going",
+    "pressing Approve on a budget prompt lets the agent pick up where it left off",
   ),
   ...noSignInRenderer(
     "a sign-in names the service and shows its sign-in link",
@@ -203,7 +203,7 @@ const TEAMS_BROKEN = {
 
 /** The sign-in prompt, link included, goes to the whole thread. */
 const SIGN_IN_LINK_POSTED_TO_THREAD = {
-  "a sign-in keeps its link and code out of messages everyone can see": {
+  "only the person signing in sees the sign-in link and code": {
     reason: "the sign-in prompt, link included, is posted to the whole thread",
     symptom: /a message everyone sees carried the sign-in (link|code)/u,
   },
@@ -251,7 +251,7 @@ const hitlConformance = {
         ...noSignInRenderer(
           "a sign-in without a link shows its instructions",
           "completing a sign-in tells the person it succeeded",
-          "a cancelled sign-in tells the person it was cancelled",
+          "moving on from a sign-in tells the person it was cancelled",
         ),
       },
     },
@@ -261,7 +261,7 @@ const hitlConformance = {
       driver: linearDriver,
       broken: {
         ...QUEUED_BUDGET_REPLY,
-        "a sign-in keeps its link and code out of messages everyone can see": {
+        "only the person signing in sees the sign-in link and code": {
           reason:
             "the code is in the elicitation body the whole issue sees; who sees the auth signal's link is unverified",
           symptom: /a message everyone sees carried the sign-in (link|code)/u,
@@ -288,8 +288,8 @@ const hitlConformance = {
         },
         ...budgetPromptNotShown(
           "a re-raised budget prompt keeps its request id, and eve/client ignores ids it has seen",
-          "pressing Stop on a budget prompt ends the held turn and asks again next time",
-          "a text reply of stop on a budget prompt ends the held turn and asks again next time",
+          "pressing Stop on a budget prompt halts the work, and the next message asks again",
+          "a text reply of stop on a budget prompt halts the work, and the next message asks again",
         ),
       },
       unsupported: {
@@ -315,7 +315,7 @@ const hitlConformance = {
           "a sign-in shows its confirmation code",
           "a sign-in without a link shows its instructions",
           "completing a sign-in tells the person it succeeded",
-          "a cancelled sign-in tells the person it was cancelled",
+          "moving on from a sign-in tells the person it was cancelled",
         ),
       },
     },

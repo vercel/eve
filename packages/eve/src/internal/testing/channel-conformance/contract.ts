@@ -181,13 +181,16 @@ async function exhaustBudget(conversation: ChannelConversation) {
 }
 
 /**
- * The held turn replies once approved. A text answer's channel context (such
- * as Telegram's message id) reaches the model after the tool result, and the
- * test model answers that context instead of reporting the result, so this
- * waits for any reply rather than the tool's.
+ * Once approved, the agent replies without redoing the work it did before the
+ * prompt. A text answer's channel context (such as Telegram's message id)
+ * reaches the model after the tool result, and the test model answers that
+ * context instead of reporting the result, so this waits for any reply rather
+ * than the tool's.
  */
-async function expectHeldTurnFinished(conversation: ChannelConversation) {
+async function expectWorkContinued(conversation: ChannelConversation) {
   await conversation.waitForReply();
+  await conversation.waitForRest();
+  expect(conversation.runsOf(PLAIN_TOOL), `${PLAIN_TOOL} ran again after approval`).toBe(1);
 }
 
 async function expectStoppedAndAskedAgain(conversation: ChannelConversation) {
@@ -519,7 +522,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "an exhausted session budget asks to Approve or Stop",
+    rule: "running out of budget asks the person whether to keep going",
     source: "docs/agent-config.md#runtime-limits",
     requires: [],
     agent: ONE_TOKEN_BUDGET,
@@ -530,11 +533,11 @@ export const hitlContract = [
         "Approve",
         "Stop",
       ]);
-      expect(conversation.replyCount(), "the held turn replied").toBe(0);
+      expect(conversation.replyCount(), "the agent replied before anyone approved").toBe(0);
     },
   },
   {
-    rule: "pressing Approve on a budget prompt finishes the held turn",
+    rule: "pressing Approve on a budget prompt lets the agent pick up where it left off",
     source: "docs/agent-config.md#runtime-limits",
     requires: ["buttons"],
     agent: ONE_TOKEN_BUDGET,
@@ -543,11 +546,11 @@ export const hitlContract = [
       const approve = options.find((option) => option.label === "Approve");
       expect(approve, "an Approve option to press").toBeDefined();
       await conversation.press(approve!);
-      await expectHeldTurnFinished(conversation);
+      await expectWorkContinued(conversation);
     },
   },
   {
-    rule: "a text reply of approve on a budget prompt finishes the held turn",
+    rule: "a text reply of approve on a budget prompt lets the agent pick up where it left off",
     source: "docs/agent-config.md#runtime-limits",
     requires: ["text-replies"],
     variesByConversation: true,
@@ -555,11 +558,11 @@ export const hitlContract = [
     async run(conversation) {
       await exhaustBudget(conversation);
       await conversation.say("approve");
-      await expectHeldTurnFinished(conversation);
+      await expectWorkContinued(conversation);
     },
   },
   {
-    rule: "pressing Stop on a budget prompt ends the held turn and asks again next time",
+    rule: "pressing Stop on a budget prompt halts the work, and the next message asks again",
     source: "docs/agent-config.md#runtime-limits",
     requires: ["buttons", "text-replies"],
     variesByConversation: true,
@@ -573,7 +576,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "a text reply of stop on a budget prompt ends the held turn and asks again next time",
+    rule: "a text reply of stop on a budget prompt halts the work, and the next message asks again",
     source: "docs/agent-config.md#runtime-limits",
     requires: ["text-replies"],
     variesByConversation: true,
@@ -585,7 +588,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "a reply that answers neither budget option keeps the prompt open",
+    rule: "a message sent during a budget prompt is answered once the person approves",
     source: "docs/agent-config.md#runtime-limits",
     requires: ["text-replies"],
     variesByConversation: true,
@@ -593,9 +596,9 @@ export const hitlContract = [
     async run(conversation) {
       await exhaustBudget(conversation);
       await conversation.say(LATER_MESSAGE);
-      // Had the reply closed or replaced the prompt, approve would be a new held message.
+      // Had the message closed or replaced the prompt, approve would be held behind it.
       await conversation.say("approve");
-      await expectHeldTurnFinished(conversation);
+      await conversation.waitForReplyTo(LATER_MESSAGE);
     },
   },
   {
@@ -625,7 +628,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "a sign-in keeps its link and code out of messages everyone can see",
+    rule: "only the person signing in sees the sign-in link and code",
     source:
       "docs/channels/slack.mdx#render-and-decode-hitl-controls-yourself (a sign-in challenge is a credential)",
     requires: [],
@@ -653,7 +656,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "completing a sign-in runs the tool that asked for it",
+    rule: "after signing in, the agent carries on with the request",
     source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
     requires: [],
     async run(conversation) {
@@ -677,7 +680,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "a new message during a sign-in cancels it and gets an answer",
+    rule: "moving on from a sign-in gets an answer, and signing in late doesn't run the dropped request",
     source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
@@ -694,7 +697,7 @@ export const hitlContract = [
     },
   },
   {
-    rule: "a cancelled sign-in tells the person it was cancelled",
+    rule: "moving on from a sign-in tells the person it was cancelled",
     source: "docs/connections/overview.mdx#interactive-oauth-via-vercel-connect",
     requires: ["text-replies"],
     variesByConversation: true,
