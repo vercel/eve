@@ -1,7 +1,7 @@
 import { hasPendingAuthorizations, type ConversationState } from "#client/conversation-state.js";
 import type { ActiveTurn } from "#client/eve-agent-store-state.js";
 import type { MessageResponse } from "#client/message-response.js";
-import { endsTurnSegment, TurnSegment } from "#client/session-utils.js";
+import { endsTurnSegment, processedDeliveryIds } from "#client/session-utils.js";
 import type { CancelSessionResult, SendTurnPayload } from "#client/types.js";
 import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
@@ -136,63 +136,67 @@ export function createActiveTurn(
   const completion = Promise.withResolvers<void>();
   const turn: ActiveTurn = {
     abortController: new AbortController(),
-    acceptedFollowUps: 0,
     cancel: () => cancel(turn),
     completion: completion.promise,
     followUpDispatches: new Set(),
-    receivedFollowUps: 0,
-    receivedFollowUpEvents: new Map(),
-    followUpSubmissionIds: new Set(),
+    followUps: new Set(),
     resolveCompletion: completion.resolve,
     response: response.promise,
     resolveResponse: response.resolve,
+    steered: false,
   };
   return turn;
 }
 
-/** Counts confirmed steered messages toward the active turn's accepted follow-ups. */
-export function countFollowUpDeliveries(
-  turn: ActiveTurn,
-  reconciliation: {
-    readonly alreadyProjected: boolean;
-    readonly event: MessageStreamEvent;
-    readonly ids: readonly string[];
-  },
-): void {
-  let followed = 0;
-  for (const id of reconciliation.ids) {
-    if (turn.followUpSubmissionIds.delete(id)) followed += 1;
-  }
-  if (followed === 0) return;
-  if (reconciliation.alreadyProjected) {
-    turn.receivedFollowUps += followed;
-  } else {
-    const previous = turn.receivedFollowUpEvents.get(reconciliation.event) ?? 0;
-    turn.receivedFollowUpEvents.set(reconciliation.event, previous + followed);
-  }
-}
-
+/** Follows the session past the turn's end until a boundary processed every steered message. */
 export async function followSteeredTurns(
   turn: ActiveTurn,
   events: AsyncIterable<MessageStreamEvent>,
   isActive: () => boolean,
 ): Promise<void> {
-  while (turn.followUpDispatches.size > 0) {
-    await Promise.allSettled(turn.followUpDispatches);
-  }
-  if (turn.receivedFollowUps >= turn.acceptedFollowUps) return;
-  const segment = new TurnSegment({ followCallbacks: true });
+  const processed = async () => {
+    while (turn.followUpDispatches.size > 0) {
+      await Promise.allSettled(turn.followUpDispatches);
+    }
+    return turn.followUps.size === 0;
+  };
+  if (await processed()) return;
   for await (const event of events) {
     if (!isActive()) return;
-    turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
-    turn.receivedFollowUpEvents.delete(event);
-    if (segment.observe(event)) {
-      while (turn.followUpDispatches.size > 0) {
-        await Promise.allSettled(turn.followUpDispatches);
-      }
-      if (turn.receivedFollowUps >= turn.acceptedFollowUps) return;
-    }
+    if (!settleFollowUps(turn, event)) continue;
+    if (await processed()) return;
   }
+}
+
+/**
+ * Takes the steered messages a boundary processed off the turn's follow-ups, and returns whether
+ * `event` is a boundary. An older writer's `session.waiting`, which lists none, processes them all.
+ */
+export function settleFollowUps(turn: ActiveTurn, event: MessageStreamEvent): boolean {
+  const ids = processedDeliveryIds(event);
+  if (ids !== undefined) {
+    for (const id of ids) turn.followUps.delete(id);
+    return true;
+  }
+  if (event.type !== "session.waiting") return false;
+  turn.followUps.clear();
+  return true;
+}
+
+/** Whether a boundary in `events` already processed `deliveryId`. */
+export function isDeliveryProcessed(
+  events: readonly MessageStreamEvent[],
+  deliveryId: string,
+): boolean {
+  let received = false;
+  for (const event of events) {
+    received ||= event.meta.deliveryIds?.includes(deliveryId) === true;
+    const ids = processedDeliveryIds(event);
+    if (ids?.includes(deliveryId)) return true;
+    // An older writer's boundary processes every delivery received before it.
+    if (ids === undefined && event.type === "session.waiting" && received) return true;
+  }
+  return false;
 }
 
 /** Aborts a caller's wait without cancelling shared work owned by the store. */

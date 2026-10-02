@@ -77,6 +77,10 @@ function createAbortError(): Error {
 
 function optimisticUserData(message: string, status: "failed" | "submitted") {
   return {
+    authorizations: {},
+    calls: {},
+    candidates: {},
+    nextSequence: 0,
     tasks: {},
     agents: {},
     inputs: {},
@@ -101,6 +105,10 @@ function completedTurnData(input: {
   readonly userMessage: string;
 }): ConversationState {
   return {
+    authorizations: {},
+    calls: {},
+    candidates: {},
+    nextSequence: 0,
     tasks: {},
     agents: {},
     inputs: {},
@@ -857,12 +865,11 @@ describe("useEveAgent", () => {
     expect(helpers?.status).toBe("error");
     expect(helpers?.error?.message).toBe("Bad Request");
     expect(helpers?.events).toEqual(stampTestEvents(events));
-    expect(helpers?.data).toEqual(
-      completedTurnData({
-        turnId: "turn_1",
-        userMessage: "Hello",
-      }),
-    );
+    // The session failed, so its conversation ended.
+    expect(helpers?.data).toEqual({
+      ...completedTurnData({ turnId: "turn_1", userMessage: "Hello" }),
+      ended: true,
+    });
   });
 
   it("does not surface recoverable step failures as hook errors", async () => {

@@ -5,6 +5,12 @@ import type {
   UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
+import {
+  foldSession,
+  initialSessionProjection,
+  openInputs,
+  openSignIns,
+} from "#protocol/session-projection.js";
 import type { InputRequest } from "#shared/input.js";
 
 /** A connection authorization challenge that remains unresolved at a turn boundary. */
@@ -94,52 +100,46 @@ export function endsTurnSegment(
 
 /** The requests and sign-ins one segment of a session's events leaves open. */
 export class TurnSegment {
+  #projection = initialSessionProjection();
   readonly #authorizations = new Map<string, PendingAuthorization>();
   readonly #followCallbacks: boolean;
-  readonly #requests = new Map<string, InputRequest>();
 
   constructor(options: { readonly followCallbacks?: boolean } = {}) {
     this.#followCallbacks = options.followCallbacks === true;
   }
 
   get inputRequests(): readonly InputRequest[] {
-    return [...this.#requests.values()];
+    return openInputs(this.#projection).map((input) => input.request);
   }
 
   get pendingAuthorizations(): readonly PendingAuthorization[] {
-    return [...this.#authorizations.values()];
+    return openSignIns(this.#projection).flatMap(
+      (attempt) => this.#authorizations.get(attempt.attemptId) ?? [],
+    );
   }
 
   /** Records `event` and returns true when it ends the segment. */
   observe(event: UnstampedMessageStreamEvent): boolean {
-    switch (event.type) {
-      case "input.requested":
-        for (const request of event.data.requests) this.#requests.set(request.requestId, request);
-        break;
-      case "approval.settled":
-        this.#requests.delete(event.data.requestId);
-        break;
-      case "input.resolved":
-        for (const resolution of event.data.resolutions) {
-          this.#requests.delete(resolution.requestId);
-        }
-        break;
-      case "authorization.required":
-        this.#authorizations.set(authorizationKey(event.data), event.data);
-        break;
-      case "authorization.completed":
-        this.#authorizations.delete(authorizationKey(event.data));
-        break;
+    this.#projection = foldSession(this.#projection, event);
+    if (event.type === "authorization.required") {
+      this.#authorizations.set(event.data.attemptId ?? event.data.name, event.data);
     }
     return endsTurnSegment(event, {
       callbacks:
         this.#followCallbacks &&
-        [...this.#authorizations.values()].some(
-          (authorization) => authorization.webhookUrl !== undefined,
-        ),
-      requests: this.#requests.size > 0,
+        openSignIns(this.#projection).some((attempt) => attempt.awaitsCallback === true),
+      requests: openInputs(this.#projection).length > 0,
     });
   }
+}
+
+/** The deliveries a boundary completes, or `undefined` for an event that isn't one. */
+export function processedDeliveryIds(
+  event: UnstampedMessageStreamEvent,
+): readonly string[] | undefined {
+  return event.type === "session.waiting" || event.type === "turn.waiting"
+    ? (event.data as { processedDeliveryIds?: readonly string[] } | undefined)?.processedDeliveryIds
+    : undefined;
 }
 
 function isFinalMessageCompleted(

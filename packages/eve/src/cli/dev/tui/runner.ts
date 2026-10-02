@@ -1577,6 +1577,16 @@ export class EveTUIRunner {
           });
         }
         break;
+      // A task call's receipt never fails; its task's outcome does.
+      case "task.settled":
+        if (event.data.status === "failed") {
+          diagnostics.append({
+            source: "tool",
+            summary: `${this.#store.snapshot.conversation.tasks[event.data.taskId]?.name ?? "A task"} failed`,
+            detail: event.data.error?.message ?? "Task failed.",
+          });
+        }
+        break;
       case "agent.started":
         diagnostics.recordSubagentDispatch(event.data.callId);
         break;

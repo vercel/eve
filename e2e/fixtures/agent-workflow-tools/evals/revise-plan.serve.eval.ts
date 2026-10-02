@@ -22,7 +22,14 @@ export default defineEval({
 
     const revised = await drafted.session.send("WORKFLOW-PLAN-REVISE");
     revised.expectOk();
-    revised.calledTool("revise_plan", { count: 2, output: /^Sent to task revise_plan-\w{6}\. /u });
+    // A call that sends a task work reports that work's outcome: the held stretch was cancelled.
+    for (const status of ["cancelled", "completed"] as const) {
+      revised.calledTool("revise_plan", {
+        count: 1,
+        output: /^Sent to task revise_plan-\w{6}\. /u,
+        status,
+      });
+    }
     revised.calledTool("task_wait", { output: /^Stopped waiting after/u });
     revised.calledTool("task_cancel", {
       count: 1,

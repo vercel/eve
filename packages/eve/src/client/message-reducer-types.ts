@@ -1,10 +1,12 @@
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { AuthorizationOutcome } from "#protocol/message.js";
+import type { SessionProjection } from "#protocol/session-projection.js";
 
 /**
- * UIMessage-compatible eve message projection for chat and agent UIs.
+ * UIMessage-compatible eve message projection for chat and agent UIs, beside the session
+ * projection its tool parts take their state from.
  */
-export interface EveMessageData {
+export interface EveMessageData extends SessionProjection {
   readonly messages: readonly EveMessage[];
 }
 

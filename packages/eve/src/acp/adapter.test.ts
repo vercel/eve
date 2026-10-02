@@ -535,37 +535,70 @@ describe("EveAcpAdapter", () => {
     expect(error).toMatchObject({ code: -32_002, data: { httpStatus: 401 } });
   });
 
-  it("reports rejected actions as failed tool calls", async () => {
+  it("reports a denied approval as failed, with the denial's reason", async () => {
+    const at = { sequence: 1, stepIndex: 0, turnId: "turn-1" };
+    const action = { callId: "call-1", input: {}, kind: "tool-call" as const, toolName: "write" };
+    const waiting = {
+      type: "session.waiting" as const,
+      data: { continuationToken: "session-id", wait: "next-user-message" as const },
+    };
     const { adapter } = adapterWith([
       [
+        { type: "actions.requested", data: { ...at, actions: [action] } },
         {
-          type: "action.result",
+          type: "input.requested",
           data: {
-            result: {
-              callId: "call-1",
-              kind: "tool-result",
-              output: "Denied",
-              toolName: "write",
-            },
-            sequence: 1,
-            status: "rejected",
-            stepIndex: 0,
-            turnId: "turn-1",
+            ...at,
+            requests: [
+              {
+                action,
+                display: "confirmation",
+                kind: "tool-approval",
+                options: [
+                  { id: "approve", label: "Approve" },
+                  { id: "deny", label: "Deny" },
+                ],
+                prompt: "Allow write?",
+                requestId: "req-1",
+              },
+            ],
+          },
+        },
+        waiting,
+      ],
+      // The denial resolves the request before the result that carries its reason arrives.
+      [
+        {
+          type: "input.resolved",
+          data: {
+            ...at,
+            resolutions: [{ kind: "tool-approval", outcome: "denied", requestId: "req-1" }],
           },
         },
         {
-          type: "session.waiting",
-          data: { continuationToken: "session-id", wait: "next-user-message" },
+          type: "action.result",
+          data: {
+            ...at,
+            error: { code: "TOOL_EXECUTION_DENIED", message: "Bob declined the write." },
+            result: { callId: "call-1", kind: "tool-result", output: "Denied", toolName: "write" },
+            status: "rejected",
+          },
         },
+        waiting,
       ],
     ]);
+    const request = vi.fn(async (_method: string, params: any) => ({
+      outcome: { outcome: "selected", optionId: params.options[1].optionId },
+    })) as AgentContext["request"];
+    const { client, notifications } = acpClient({ request });
     const sessionId = await createSession(adapter);
-    const { client, notifications } = acpClient();
 
     await adapter.prompt(textPrompt(sessionId), client, new AbortController().signal);
 
-    expect(notifications).toHaveLength(1);
-    expect((notifications[0]!.params as any).update.status).toBe("failed");
+    const updates = notifications
+      .map((notification) => (notification.params as any).update)
+      .filter((update) => update.sessionUpdate === "tool_call_update");
+    expect(updates.at(-1)).toMatchObject({ rawOutput: "Denied", status: "failed" });
   });
 
   it("fails unsupported authorization requests instead of ending successfully", async () => {

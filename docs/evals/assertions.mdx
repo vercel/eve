@@ -21,7 +21,7 @@ Scoped assertions take no explicit value and gate by default. Assertions on `t` 
 | `t.toolOrder([...names])`                             | Tool requests appear in order                                                 |
 | `t.usedNoTools()`                                     | No tool calls at all                                                          |
 | `t.maxToolCalls(n)`                                   | At most `n` tool calls                                                        |
-| `t.noFailedActions()`                                 | No tool, subagent, or skill action reported a failure                         |
+| `t.noFailedActions()`                                 | No tool, subagent, or skill call failed; denied and stopped calls don't count |
 | `t.calledSubagent(name, opts?)`                       | A subagent delegation happened (identity, remote, output, status, count)      |
 | `t.event(type, opts?)` / `t.notEvent(type, opts?)`    | Typed event presence, data, and count matching                                |
 | `t.eventOrder([...matchers])`                         | Matching event groups occur in order                                          |
@@ -83,7 +83,7 @@ Pick the cheapest builder that captures what "correct" means. When exact match i
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, and `"rejected"`. Subagent checks accept `"working"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
+`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default. Tool lifecycle checks also accept `"pending"`, `"failed"`, `"rejected"`, and `"cancelled"`, and a tool call that runs as a task takes its status from its task. Subagent checks accept `"working"`, `"completed"`, `"failed"`, and `"cancelled"`. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
 
 A subagent call is a task call: it stays `working` until its `task.settled` event arrives, then takes that event's `status` (`completed`, `failed`, or `cancelled`) and, when completed, its `output`. A completed call leaves the child session available for later calls with the same `taskId`.
 

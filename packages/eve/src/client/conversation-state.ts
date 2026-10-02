@@ -1,48 +1,18 @@
 import type { EveAuthorizationPart, EveMessageData } from "#client/message-reducer-types.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
-import type { JsonValue } from "#shared/json.js";
+import type {
+  SessionInput,
+  SessionProjection,
+  SessionTask,
+  SessionTaskCall,
+  SessionTurn,
+} from "#protocol/session-projection.js";
+import { openSignIns } from "#protocol/session-projection.js";
 
-export interface ConversationTurn {
-  readonly turnId: string;
-  readonly status: "active" | "completed" | "cancelled" | "failed";
-  /** The open turn is parked, holding on its tasks or on a question one of its calls asked. */
-  readonly waiting?: boolean;
-}
-
-export interface ConversationInput {
-  readonly request: InputRequest;
-  readonly turnId: string;
-  readonly stepIndex: number;
-  /** The task whose run asks, when a task asks. */
-  readonly taskId?: string;
-  readonly status: "open" | "responded" | "settled";
-  readonly response?: InputResponse;
-  readonly outcome?: string;
-}
-
+export type ConversationTurn = SessionTurn;
+export type ConversationInput = SessionInput;
 /** One call that started or reached a task, settled by its `task.settled`. */
-export interface ConversationTaskCall {
-  readonly callId: string;
-  readonly turnId: string;
-  readonly status: "working" | "completed" | "failed" | "cancelled";
-  /** The call's result; present only when `status` is `"completed"`. */
-  readonly output?: JsonValue;
-  /** Why the call failed; present only when `status` is `"failed"`. */
-  readonly error?: { readonly message: string };
-}
-
-export interface ConversationTask {
-  readonly taskId: string;
-  /** The tool whose call started the task. */
-  readonly name: string;
-  /**
-   * `"agent"` when a subagent's tool, local or remote, started the task; `"tool"` for an authored
-   * tool, including one that opens sessions with `ctx.agent`.
-   */
-  readonly kind: "agent" | "tool";
-  /** Calls in the order they started or reached the task. */
-  readonly calls: Readonly<Record<string, ConversationTaskCall>>;
-}
+export type ConversationTaskCall = SessionTaskCall;
+export type ConversationTask = SessionTask;
 
 export type AgentObservation =
   | { readonly status: "not-followed" }
@@ -67,12 +37,11 @@ export interface ConversationAgentSession {
   readonly observation: AgentObservation;
 }
 
-/** Renderable conversation state. Root and agent-session input IDs occupy separate scopes. */
-export interface ConversationState extends EveMessageData {
-  readonly activeTurnId?: string;
-  readonly turns: Readonly<Record<string, ConversationTurn>>;
-  readonly inputs: Readonly<Record<string, ConversationInput>>;
-  readonly tasks: Readonly<Record<string, ConversationTask>>;
+/**
+ * Renderable conversation state: the message list plus the session projection every reader
+ * shares. Root and agent-session input IDs occupy separate scopes.
+ */
+export interface ConversationState extends EveMessageData, SessionProjection {
   /** Sessions opened by this session's runs, by session ID. */
   readonly agents: Readonly<Record<string, ConversationAgentSession>>;
 }
@@ -95,9 +64,7 @@ export function conversationAuthorizations(
 
 /** A sign-in the session still waits on, which resumes its work when the callback arrives. */
 export function hasPendingAuthorizations(state: ConversationState): boolean {
-  return conversationAuthorizations(state).some(
-    (part) => part.state === "required" && part.awaitsCallback === true,
-  );
+  return openSignIns(state).some((attempt) => attempt.awaitsCallback === true);
 }
 
 /**

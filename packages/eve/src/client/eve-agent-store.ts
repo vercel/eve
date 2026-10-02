@@ -29,9 +29,10 @@ import {
   assertExclusiveTurnInput,
   assertInFlightFollowUp,
   validateFollowUp,
-  countFollowUpDeliveries,
   createAbortSignal,
   createActiveTurn,
+  isDeliveryProcessed,
+  settleFollowUps,
   followSteeredTurns,
   isAbortError,
   isResponseBoundary,
@@ -200,7 +201,7 @@ export class EveAgentStore<TData> {
     }
 
     const turn = createActiveTurn((turn) =>
-      turn.acceptedFollowUps > 0 && this.#session !== undefined
+      turn.steered && this.#session !== undefined
         ? this.#session.cancel()
         : turn.response.then((response) =>
             response === undefined ? { status: "no_active_turn" } : response.cancel(),
@@ -249,10 +250,8 @@ export class EveAgentStore<TData> {
       turn.resolveResponse(response);
 
       this.#correlate(submissionId, response);
-      for await (const event of consumeMessageResponse(response, reader)) {
+      for await (const _event of consumeMessageResponse(response, reader)) {
         if (!this.#isActiveTurn(turn)) return;
-        turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
-        turn.receivedFollowUpEvents.delete(event);
       }
 
       if (!this.#isActiveTurn(turn)) return;
@@ -331,8 +330,6 @@ export class EveAgentStore<TData> {
         this.#publish();
         for await (const event of reader) {
           if (!this.#isActiveTurn(turn)) return;
-          turn.receivedFollowUps += turn.receivedFollowUpEvents.get(event) ?? 0;
-          turn.receivedFollowUpEvents.delete(event);
           if (isResponseBoundary(event, this.#conversationClient.conversation)) break;
         }
       }
@@ -462,7 +459,6 @@ export class EveAgentStore<TData> {
       this.#events.length,
       activeTurnForOptimisticFollowUp(this.#events),
     );
-    if (submissionId !== undefined) turn.followUpSubmissionIds.add(submissionId);
     this.#publish();
 
     let dispatch!: Promise<void>;
@@ -487,7 +483,12 @@ export class EveAgentStore<TData> {
         retractResponses = undefined;
         // Answers settle through the active turn's stream; only steered messages extend it.
         if (preparedInput.message === undefined) return;
-        turn.acceptedFollowUps += 1;
+        turn.steered = true;
+        const deliveryId = getMessageResponseDeliveryId(response);
+        // The stream may already have reached the follow-up's boundary.
+        if (deliveryId !== undefined && !isDeliveryProcessed(this.#events, deliveryId)) {
+          turn.followUps.add(deliveryId);
+        }
         this.#correlate(submissionId, response);
       } catch (error) {
         if (this.#isActiveTurn(turn)) {
@@ -613,6 +614,7 @@ export class EveAgentStore<TData> {
       !this.#conversationClient.observe(event, {
         onAccepted: () => {
           this.#events = [...this.#events, event];
+          if (this.#activeTurn !== undefined) settleFollowUps(this.#activeTurn, event);
         },
         project: (accepted) => {
           this.#handleReconciliation(this.#messageSubmissions.apply(accepted));
@@ -652,9 +654,7 @@ export class EveAgentStore<TData> {
   #handleReconciliation(
     reconciliation: ReturnType<OptimisticMessageSubmissions["apply"]>,
   ): boolean {
-    if (reconciliation === undefined) return false;
-    if (this.#activeTurn !== undefined) countFollowUpDeliveries(this.#activeTurn, reconciliation);
-    return true;
+    return reconciliation !== undefined;
   }
 
   #applyTerminalStreamFailure(event: MessageStreamEvent): void {

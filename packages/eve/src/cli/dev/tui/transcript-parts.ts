@@ -13,6 +13,7 @@ import type {
   EveMessage,
   EveMessagePart,
 } from "#client/message-reducer-types.js";
+import { toolCallState } from "#client/tool-call-state.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
 import type { Block, ToolStatus } from "./blocks.js";
 import { formatTurnDuration } from "./stream-format.js";
@@ -130,47 +131,30 @@ export function nestedTaskRecord(
   };
 }
 
+/** The shared tool call state, in the transcript's vocabulary. */
 export function toolState(
   part: EveDynamicToolPart,
   conversation: ConversationState,
   working: boolean,
-  taskWorking: boolean,
 ): ToolState {
-  // A task call's receipt closes the tool part; the call runs until its task.settled, even after
-  // its turn ends, as a root approval ends it.
-  if (taskWorking) return { status: "running" };
-  const state = settledToolState(part, conversation);
-  return state.status === "running" && !working
-    ? { status: "error", errorText: "interrupted" }
-    : state;
-}
-
-function settledToolState(part: EveDynamicToolPart, conversation: ConversationState): ToolState {
-  switch (part.state) {
-    case "approval-requested": {
-      const input = conversation.inputs[part.approval.id];
-      if (input?.status !== "responded") return { status: "approval" };
-      return input.response?.optionId === "approve"
+  const state = toolCallState(conversation, part.toolCallId, { streaming: working });
+  if (state === undefined) return { status: "running" };
+  switch (state.status) {
+    case "running":
+      return state.output === undefined
         ? { status: "running" }
-        : { status: "denied", errorText: "Denied by user." };
-    }
-    case "approval-responded":
-      return part.approval.approved === false
-        ? { status: "denied", errorText: part.approval.reason ?? "Denied by user." }
-        : { status: "running" };
-    case "output-available":
-      return part.partial === true
-        ? { status: "running" }
-        : { status: "done", output: part.output };
-    case "output-error":
-      return { status: "error", errorText: part.errorText };
-    case "output-denied":
-      return {
-        status: "denied",
-        errorText: part.approval.reason ?? "Tool execution was cancelled.",
-      };
-    default:
-      return { status: "running" };
+        : { status: "running", output: state.output };
+    case "awaiting-input":
+      return { status: "approval" };
+    case "completed":
+      return { status: "done", output: state.output };
+    case "rejected":
+      return { status: "denied", errorText: state.errorText ?? "Denied by user." };
+    case "interrupted":
+      return { status: "error", errorText: "interrupted" };
+    case "cancelled":
+    case "failed":
+      return { status: "error", errorText: state.errorText };
   }
 }
 

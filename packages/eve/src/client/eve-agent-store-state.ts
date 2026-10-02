@@ -87,13 +87,13 @@ export interface PendingMessageSubmission {
 
 export interface ActiveTurn {
   readonly abortController: AbortController;
-  acceptedFollowUps: number;
   readonly cancel: () => Promise<CancelSessionResult>;
   readonly completion: Promise<void>;
   readonly followUpDispatches: Set<Promise<void>>;
-  receivedFollowUps: number;
-  readonly receivedFollowUpEvents: Map<MessageStreamEvent, number>;
-  readonly followUpSubmissionIds: Set<string>;
+  /** Steered messages the server accepted that no boundary has processed yet, by delivery ID. */
+  readonly followUps: Set<string>;
+  /** The turn took a steered message, so cancelling it cancels the session's active turn. */
+  steered: boolean;
   readonly resolveCompletion: () => void;
   readonly response: Promise<MessageResponse | undefined>;
   readonly resolveResponse: (response: MessageResponse | undefined) => void;

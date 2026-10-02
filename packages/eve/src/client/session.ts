@@ -1,4 +1,4 @@
-import { TurnSegment } from "#client/session-utils.js";
+import { processedDeliveryIds, TurnSegment } from "#client/session-utils.js";
 import type { AgentStartedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
 import {
@@ -158,6 +158,8 @@ export class ClientSession {
         "Message route did not return a delivery id. Update the server before sending with this client.",
       );
     }
+    // A message's response ends at the boundary that lists its delivery. An answer's ends at its
+    // first turn boundary: not every path that publishes an answer's events attributes them.
     return this.#messageResponse<TOutput>(
       response,
       input,
@@ -261,6 +263,14 @@ export class ClientSession {
         })) {
         eventCount += 1;
         if (deliveryId !== undefined) {
+          // A boundary that lists the deliveries it completes ends exactly this one's response.
+          const processed = processedDeliveryIds(event);
+          if (processed !== undefined) {
+            if (!processed.includes(deliveryId)) continue;
+            yield event;
+            reachedBoundary = true;
+            break;
+          }
           const matches = event.meta?.deliveryIds?.includes(deliveryId) === true;
           const terminal = event.type === "session.failed" || event.type === "session.completed";
           if (!matches && terminal && (!started || event.type === "session.completed")) {
@@ -269,7 +279,9 @@ export class ClientSession {
             );
           }
           if (!started && !matches) continue;
-          if (!terminal && event.meta?.deliveryIds !== undefined && !matches) continue;
+          const attributed =
+            event.meta?.deliveryIds !== undefined || event.meta?.answerDeliveryIds !== undefined;
+          if (!terminal && attributed && !matches) continue;
           started = true;
         }
         reachedBoundary = segment.observe(event);

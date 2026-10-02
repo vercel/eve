@@ -1,4 +1,5 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import { callStatus, foldSession, initialSessionProjection } from "#protocol/session-projection.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   deepEquals,
@@ -197,22 +198,21 @@ export function maxToolCalls(max: number): RunAssertion {
 }
 
 /**
- * Asserts no action result (tool, subagent, or skill) reported a failure.
+ * Asserts no call (tool, subagent, or skill) failed. A subagent's call fails when its task
+ * does; a denied or cancelled call didn't fail.
  */
 export function noFailedActions(): RunAssertion {
   return {
     name: "noFailedActions",
     evaluate(result) {
-      const failed = result.events.filter(
-        (evt): evt is Extract<MessageStreamEvent, { type: "action.result" }> =>
-          evt.type === "action.result" &&
-          // A call eve stopped didn't fail: its turn ended before the call finished.
-          (evt.data.status === "failed" ||
-            (evt.data.result.isError === true && evt.data.status !== "cancelled")),
+      const projection = result.events.reduce(foldSession, initialSessionProjection());
+      const failedCallIds = new Set(
+        Object.keys(projection.calls).filter((id) => callStatus(projection, id) === "failed"),
       );
-      if (failed.length === 0) return PASS;
+      if (failedCallIds.size === 0) return PASS;
+      const failed = failedResults(result.events, failedCallIds);
       const details = failed.map(formatFailedActionResult);
-      return fail(`${failed.length} failed action(s): ${details.join("; ")}`, {
+      return fail(`${failedCallIds.size} failed action(s): ${details.join("; ")}`, {
         failedActions: failed.map((evt) => ({
           callId: evt.data.result.callId,
           error: evt.data.error,
@@ -379,6 +379,32 @@ function joinCompletedMessages(events: readonly MessageStreamEvent[]): string {
 
 function failureDetail(prefix: string, code: string | undefined): string {
   return code === undefined ? prefix : `${prefix} (code: ${code})`;
+}
+
+/** Each failed call's last result, or its task's outcome when the task failed. */
+function failedResults(
+  events: readonly MessageStreamEvent[],
+  failedCallIds: ReadonlySet<string>,
+): readonly Extract<MessageStreamEvent, { type: "action.result" }>[] {
+  const byCall = new Map<string, Extract<MessageStreamEvent, { type: "action.result" }>>();
+  for (const event of events) {
+    if (event.type === "action.result" && failedCallIds.has(event.data.result.callId)) {
+      byCall.set(event.data.result.callId, event);
+    }
+    if (event.type === "task.settled" && failedCallIds.has(event.data.callId)) {
+      const receipt = byCall.get(event.data.callId);
+      if (receipt === undefined) continue;
+      byCall.set(event.data.callId, {
+        ...receipt,
+        data: {
+          ...receipt.data,
+          error: { code: "TASK_FAILED", message: event.data.error?.message ?? "" },
+          status: "failed",
+        },
+      });
+    }
+  }
+  return [...byCall.values()];
 }
 
 function formatFailedActionResult(
