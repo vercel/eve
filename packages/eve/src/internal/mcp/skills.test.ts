@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import type { AgentDescription } from "#channel/agent-description.js";
-import { MAX_SKILL_FILE_BYTES } from "#channel/skill-files.js";
+import { MAX_SKILL_FILE_BYTES, SkillReadError } from "#channel/skill-files.js";
 import { createMcpSkillsFeature } from "#internal/mcp/skills.js";
 import { createMcpStreamableHttpServer } from "#internal/mcp/streamable-http-server.js";
 
-/** A skill's files; `null` is listed by `describe()` but fails to read. */
-type Files = Readonly<Record<string, string | Uint8Array | null>>;
+/**
+ * A skill's files; `null` is listed by `describe()` but is missing on read
+ * (a deterministic `SkillReadError`), and a function is called per read so a
+ * test can fail transiently.
+ */
+type Files = Readonly<Record<string, string | Uint8Array | null | (() => string)>>;
 
 const PROTOCOL = "2026-07-28";
 const encode = (content: string | Uint8Array) =>
@@ -20,14 +24,19 @@ function handler(skills: Readonly<Record<string, Files>>) {
       name,
       description: "Catalog description.",
       files: Object.entries(files)
-        .map(([path, content]) => ({ path, size: content === null ? 1 : encode(content).length }))
+        .map(([path, content]) => ({
+          path,
+          size: content === null || typeof content === "function" ? 1 : encode(content).length,
+        }))
         .sort((left, right) => (left.path < right.path ? -1 : 1)),
     })),
   });
   const readSkill = async (skill: string, path = "SKILL.md") => {
     const content = skills[skill]?.[path];
-    if (content === undefined || content === null) throw new Error(`${skill}/${path} is gone`);
-    return encode(content);
+    if (content === undefined || content === null) {
+      throw new SkillReadError("unknown-file", `Skill "${skill}" has no file "${path}".`);
+    }
+    return encode(typeof content === "function" ? content() : content);
   };
   const mcp = createMcpStreamableHttpServer({
     authenticate: async () => null,
@@ -148,6 +157,67 @@ describe("MCP skills (SEP-2640)", () => {
     expect(read.result?.contents).toEqual([
       { uri: "skill://synthesized/SKILL.md", mimeType: "text/markdown", text: synthesized },
     ]);
+  });
+});
+
+describe("MCP skills catalog", () => {
+  it("retries a skill whose file read failed transiently", async () => {
+    let reads = 0;
+    const call = handler({
+      flaky: {
+        ...doc("flaky", "Reads once it settles."),
+        "notes.md": () => {
+          reads += 1;
+          if (reads === 1) throw new Error("EIO: transient");
+          return "notes\n";
+        },
+      },
+    });
+    const first = await call("skills/list");
+    expect(first.error).toBeDefined();
+    expect(first.result).toBeUndefined();
+
+    const second = await call("skills/list");
+    expect(second.result?.skills.map((s: { uri: string }) => s.uri)).toEqual([
+      "skill://flaky/SKILL.md",
+    ]);
+    expect(reads).toBe(2);
+  });
+
+  it("carries the list cache hint on every skill and resource method", async () => {
+    const call = handler({ hinted: doc("hinted", "Cached.") });
+    const hint = { cacheScope: "private", ttlMs: 5 * 60 * 1000 };
+    for (const [method, params] of [
+      ["skills/list", {}],
+      ["skills/get", { uri: "skill://hinted/SKILL.md" }],
+      ["resources/list", {}],
+      ["resources/templates/list", {}],
+      ["resources/read", { uri: "skill://hinted/notes.md" }],
+      ["resources/directory/read", { uri: "skill://hinted" }],
+    ] as const) {
+      const { result } = await call(method, params);
+      expect(result, method).toMatchObject(hint);
+    }
+  });
+
+  it("does not resolve MIME types from Object.prototype", async () => {
+    const call = handler({
+      proto: {
+        ...doc("proto", "Prototype-named files."),
+        "notes.constructor": "text\n",
+        "x.__proto__": new Uint8Array([0, 1, 2]),
+        "y.hasOwnProperty": "text\n",
+      },
+    });
+    const read = async (path: string) =>
+      (await call("resources/read", { uri: `skill://proto/${path}` })).result?.contents[0];
+    expect(await read("notes.constructor")).toEqual({
+      uri: "skill://proto/notes.constructor",
+      mimeType: "text/plain",
+      text: "text\n",
+    });
+    expect((await read("x.__proto__"))?.mimeType).toBe("application/octet-stream");
+    expect((await read("y.hasOwnProperty"))?.mimeType).toBe("text/plain");
   });
 });
 

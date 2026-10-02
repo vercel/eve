@@ -292,7 +292,7 @@ export default mcpChannel({
 });
 ```
 
-The channel declares the `io.modelcontextprotocol/skills` extension and serves `skills/list`, `skills/get`, `resources/list`, `resources/read`, and `resources/directory/read`. Every caller the channel's `auth` admits can read every served skill. Each skill's entry is `skill://<name>/SKILL.md`, and its `resources` list every file with its `size` in bytes and a `sha256:` digest. `resources/read` returns UTF-8 text as `text` and anything else, such as images or Latin-1 files, as a base64 `blob`, byte for byte. Skill lists and reads carry the same cache hint as `tools/list`: private, for 5 minutes.
+The channel declares the `io.modelcontextprotocol/skills` extension and serves `skills/list`, `skills/get`, `resources/list`, `resources/templates/list`, `resources/read`, and `resources/directory/read`. Every caller the channel's `auth` admits can read every served skill. Each skill's entry is `skill://<name>/SKILL.md`, and its `resources` list every file with its `size` in bytes and a `sha256:` digest. `resources/list` returns one resource per served skill, its `SKILL.md`; the other files of a skill are reachable through `resources/directory/read` and the entry's `resources`, not listed there. `resources/templates/list` is always empty. `resources/read` returns UTF-8 text as `text` and anything else, such as images or Latin-1 files, as a base64 `blob`, byte for byte. Every skill and resource method carries the same cache hint as `tools/list`: private, for 5 minutes.
 
 A skill is served whole or not at all. eve leaves a skill out of every method, and logs one warning naming the reason, when:
 
@@ -302,7 +302,7 @@ A skill is served whole or not at all. eve leaves a skill out of every method, a
 
 A `SKILL.md` whose frontmatter already names the skill and has a `description` is served as authored. Otherwise, as for flat `.md` and module skills, eve serves it with frontmatter that carries the skill's name and description, and the digest describes that served document. Skills added by dynamic resolvers or subagents are not served.
 
-Production builds ship skill files as server assets, so they count toward the deployed function's size.
+Production builds ship skill files as eve-owned server assets, so they count toward the deployed function's size. `eve build` also drops Nitro's default `server` server-asset entry, the one that would bundle the app's `assets/` directory; eve reads only its own asset bases, and a route that reads `assets:server` storage finds it empty in production.
 
 ## Invocation ownership
 

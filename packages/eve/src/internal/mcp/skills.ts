@@ -7,6 +7,7 @@ import {
   isSkillEntryFileName,
   MAX_SKILL_FILE_BYTES,
   SKILL_ENTRY_FILE_NAME,
+  SkillReadError,
 } from "#channel/skill-files.js";
 import {
   type McpServer,
@@ -198,7 +199,7 @@ function registerSkillHandlers(
           uri: params.uri,
         });
       }
-      return { skill: snapshot.entry };
+      return { skill: snapshot.entry, ...MCP_LIST_CACHE_HINT };
     },
   );
 
@@ -211,7 +212,7 @@ function registerSkillHandlers(
       const snapshot = parsed === undefined ? undefined : await catalog.skill(parsed.skill);
       const resources = snapshot === undefined ? undefined : listDirectory(snapshot, parsed?.path);
       if (resources === undefined) throw new ResourceNotFoundError(params.uri);
-      return { resources };
+      return { resources, ...MCP_LIST_CACHE_HINT };
     },
   );
 
@@ -323,11 +324,15 @@ async function snapshotSkill(
   if (typeof paths === "string") return unserved(paths);
 
   const entries = [...paths.entries()].sort(([left], [right]) => comparePaths(left, right));
+  // Only `SkillReadError` is deterministic for this build; anything else
+  // (a transient asset or disk read failure) propagates so the catalog evicts
+  // the pending snapshot and retries on the next request.
   const read = await mapWithConcurrency(entries, READ_CONCURRENCY, async ([, authored]) => {
     try {
       return toServedFile(await source.readSkill(skill.name, authored));
     } catch (error) {
-      return error instanceof Error ? error.message : String(error);
+      if (error instanceof SkillReadError) return error.message;
+      throw error;
     }
   });
   const failed = read.find((file): file is string => typeof file === "string");
@@ -533,36 +538,36 @@ function rejectCursor(cursor: unknown): void {
   }
 }
 
-const MIME_TYPES: Readonly<Record<string, string>> = {
-  css: "text/css",
-  csv: "text/csv",
-  gif: "image/gif",
-  htm: "text/html",
-  html: "text/html",
-  jpeg: "image/jpeg",
-  jpg: "image/jpeg",
-  js: "text/javascript",
-  json: "application/json",
-  md: "text/markdown",
-  mjs: "text/javascript",
-  pdf: "application/pdf",
-  png: "image/png",
-  py: "text/x-python",
-  sh: "text/x-shellscript",
-  svg: "image/svg+xml",
-  ts: "text/typescript",
-  txt: "text/plain",
-  webp: "image/webp",
-  xml: "application/xml",
-  yaml: "application/yaml",
-  yml: "application/yaml",
-};
+const MIME_TYPES: ReadonlyMap<string, string> = new Map([
+  ["css", "text/css"],
+  ["csv", "text/csv"],
+  ["gif", "image/gif"],
+  ["htm", "text/html"],
+  ["html", "text/html"],
+  ["jpeg", "image/jpeg"],
+  ["jpg", "image/jpeg"],
+  ["js", "text/javascript"],
+  ["json", "application/json"],
+  ["md", "text/markdown"],
+  ["mjs", "text/javascript"],
+  ["pdf", "application/pdf"],
+  ["png", "image/png"],
+  ["py", "text/x-python"],
+  ["sh", "text/x-shellscript"],
+  ["svg", "image/svg+xml"],
+  ["ts", "text/typescript"],
+  ["txt", "text/plain"],
+  ["webp", "image/webp"],
+  ["xml", "application/xml"],
+  ["yaml", "application/yaml"],
+  ["yml", "application/yaml"],
+]);
 
 /** MIME type by extension; a text file with an unknown extension is `text/plain`. */
 function servedMimeType(path: string, file: ServedFile): string {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
-  const known = MIME_TYPES[dot <= 0 ? "" : name.slice(dot + 1).toLowerCase()];
+  const known = dot <= 0 ? undefined : MIME_TYPES.get(name.slice(dot + 1).toLowerCase());
   return known ?? (file.text === undefined ? "application/octet-stream" : "text/plain");
 }
 
