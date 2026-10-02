@@ -63,7 +63,7 @@ describe("renderTelegramInputRequest", () => {
 });
 
 describe("resolveTelegramInputResponses", () => {
-  it("maps compact callback ids back to real request ids", () => {
+  it("maps a compact callback id to its request on every press", () => {
     const state: TelegramHitlState = {
       hitlCallbacks: {
         [`${TELEGRAM_HITL_CALLBACK_PREFIX}0`]: {
@@ -78,7 +78,11 @@ describe("resolveTelegramInputResponses", () => {
         telegramCallbackInputResponse(`${TELEGRAM_HITL_CALLBACK_PREFIX}0`),
       ]),
     ).toEqual([{ optionId: "approve", requestId: "call_1" }]);
-    expect(state.hitlCallbacks).toEqual({});
+    expect(
+      resolveTelegramInputResponses(state, [
+        telegramCallbackInputResponse(`${TELEGRAM_HITL_CALLBACK_PREFIX}0`),
+      ]),
+    ).toEqual([{ optionId: "approve", requestId: "call_1" }]);
   });
 
   it("maps replies to ForceReply prompts back to freeform answers", () => {

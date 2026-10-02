@@ -59,18 +59,7 @@ const hitlConformance = {
   linq: [{ driver: linqDriver }],
   slack: [{ driver: slackDriver }],
   teams: [{ driver: teamsDriver }],
-  telegram: [
-    {
-      driver: telegramDriver,
-      broken: {
-        "pressing an option of an answered question sends it to the agent as new input": {
-          reason:
-            "the first press consumes the button's callback id, so a later press is acknowledged and dropped",
-          symptom: /Timed out waiting for a reply to "Saturday" on telegram/,
-        },
-      },
-    },
-  ],
+  telegram: [{ driver: telegramDriver }],
   twilio: [{ driver: twilioDriver }],
 } satisfies Record<string, readonly ConformanceChannel[]>;
 
