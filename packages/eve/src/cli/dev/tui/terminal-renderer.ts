@@ -1110,7 +1110,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#hitlDrawer = (width) =>
       renderTransientDrawer(
         [
-          `  ${this.#theme.colors.bold(`Approve ${formatToolApprovalTitle(request)}?`)}`,
+          `  ${this.#theme.colors.bold(stripTerminalControls(request.prompt))}`,
           "",
           ...renderQuestionChoices(
             [
@@ -4453,10 +4453,6 @@ function hiddenRowsMarker(hidden: number, theme: Theme): string {
   return theme.colors.dim(
     `${theme.glyph.dot} ${theme.glyph.ellipsis} ${count} earlier ${noun} hidden while streaming`,
   );
-}
-
-function formatToolApprovalTitle(request: AgentTUIToolApprovalRequest): string {
-  return stripTerminalControls(request.title ?? request.toolName);
 }
 
 function questionSectionId(requestId: string): string {

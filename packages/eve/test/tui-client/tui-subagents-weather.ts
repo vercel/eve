@@ -80,16 +80,11 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   // The task panel names the approval the child waits on, and the TUI
   // parks on a y/n prompt. Match the question smoke's handshake delay so
   // the server's resume hook is registered before we reply.
-  await waitForCondition(
-    () =>
-      screen.snapshot().includes("Approve get_stock_price?") ||
-      screen.snapshot().includes("Approve get stock price?"),
-    {
-      timeoutMs: 120_000,
-      label: "approval prompt for get_stock_price",
-      onTimeout: () => screen.snapshot(),
-    },
-  );
+  await waitForCondition(() => screen.snapshot().includes("Approve Get stock price?"), {
+    timeoutMs: 120_000,
+    label: "approval prompt for get_stock_price",
+    onTimeout: () => screen.snapshot(),
+  });
   await sleep(500);
   input.emit("data", Buffer.from("y"));
   console.log(theme.muted("[tui-weather] approved get_stock_price"));
