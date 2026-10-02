@@ -1,6 +1,6 @@
 import { createHook, getWorkflowMetadata, type Hook } from "#compiled/@workflow/core/index.js";
 
-import type { DeliverHookPayload, SessionCapabilities } from "#channel/types.js";
+import type { SessionCapabilities } from "#channel/types.js";
 import { readAcceptedDeploymentId } from "#execution/session/accepted-deployment.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { HarnessModelMessage } from "#harness/messages.js";
@@ -8,7 +8,7 @@ import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import type { TurnSelection } from "#execution/session/input-queue.js";
-import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
+import type { SessionHandoffStart, WorkflowEntryResult } from "#execution/session/entry-input.js";
 import { startSessionOwnerStep } from "#execution/workflow-runtime.js";
 import { sessionHandoffMarkerToken } from "#execution/session-inbox/address.js";
 import {
@@ -56,21 +56,6 @@ export type SessionOwnerActivation =
       readonly payloads: readonly SessionInboxPayload[];
     };
 
-type SessionTransferOutcome =
-  | { readonly kind: "transferred" }
-  | {
-      readonly kind: "retained";
-      readonly reason:
-        | "same-deployment"
-        | "missing-deployment"
-        | "not-idle"
-        | "busy"
-        | "accepted-during-release"
-        | "activation-failed"
-        | "checkpoint-incompatible"
-        | "known-incompatible";
-    };
-
 interface SessionHandoffInput {
   readonly checkpoint: Omit<
     SessionCheckpoint,
@@ -86,9 +71,30 @@ export function sessionAnchorToken(sessionId: string): string {
   return `${sessionId}:anchor`;
 }
 
+type SessionTransferOutcome =
+  | { readonly kind: "transferred" }
+  | { readonly kind: "retained"; readonly reason: SessionRetainedReason };
+
+type SessionRetainedReason =
+  | "same-deployment"
+  | "missing-deployment"
+  | "not-idle"
+  | "busy"
+  | "accepted-during-release"
+  | "activation-failed"
+  | "checkpoint-incompatible"
+  | "known-incompatible";
+
+type SessionTransferState = Pick<
+  SessionCheckpoint,
+  "history" | "serializedContext" | "sessionState"
+>;
+
 /**
- * The sole boundary for moving an idle session to another exact deployment.
- * Constructed once per owner; `tryTransfer()` is attempted per eligible selection.
+ * The sole boundary for moving an idle session to a successor run: on another
+ * exact deployment when newer code accepts a delivery, or on this deployment
+ * after compaction so no single run's event log grows with the session.
+ * Constructed once per owner; each `try*` method attempts one transfer.
  * When the upstream atomic hook-handoff primitive lands, only this class changes.
  *
  * Skipping known-incompatible targets requires this owner run to execute the
@@ -114,15 +120,42 @@ export class SessionHandoff {
    */
   async tryTransfer(
     selection: TurnSelection,
-    state: Pick<SessionCheckpoint, "history" | "serializedContext" | "sessionState">,
+    state: SessionTransferState,
   ): Promise<SessionTransferOutcome> {
-    const { deploymentId, inbox } = this.input;
     const targetDeploymentId = readAcceptedDeploymentId(selection.delivery);
     if (targetDeploymentId === undefined) return { kind: "retained", reason: "missing-deployment" };
-    if (targetDeploymentId === deploymentId) return { kind: "retained", reason: "same-deployment" };
+    if (targetDeploymentId === this.input.deploymentId)
+      return { kind: "retained", reason: "same-deployment" };
     if (this.incompatibleTargetDeploymentIds.has(targetDeploymentId))
       return { kind: "retained", reason: "known-incompatible" };
     if (!selection.handoffEligible) return { kind: "retained", reason: "busy" };
+    return await this.transfer(state, targetDeploymentId, { delivery: selection.delivery });
+  }
+
+  /**
+   * Attempts to move a session that just compacted to a fresh run on this
+   * deployment. The caller guarantees no input is waiting; the successor parks
+   * until the next one arrives and keeps the session's deadline.
+   */
+  async tryCompactionTransfer(
+    state: SessionTransferState,
+    sessionTimeoutDeadline: Date | undefined,
+  ): Promise<SessionTransferOutcome> {
+    const { deploymentId } = this.input;
+    if (this.incompatibleTargetDeploymentIds.has(deploymentId))
+      return { kind: "retained", reason: "known-incompatible" };
+    return await this.transfer(state, deploymentId, {
+      reason: "compaction",
+      sessionTimeoutDeadline,
+    });
+  }
+
+  private async transfer(
+    state: SessionTransferState,
+    targetDeploymentId: string,
+    start: SessionHandoffStart,
+  ): Promise<SessionTransferOutcome> {
+    const { inbox } = this.input;
     if (!(await isSessionIdleForHandoffStep({ sessionState: state.sessionState })))
       return { kind: "retained", reason: "not-idle" };
 
@@ -153,11 +186,7 @@ export class SessionHandoff {
       }
       let acceptedByFailedCandidate: readonly SessionInboxPayload[] = [];
       try {
-        const activation = await this.startAndActivate(
-          checkpoint,
-          selection.delivery,
-          targetDeploymentId,
-        );
+        const activation = await this.startAndActivate(checkpoint, start, targetDeploymentId);
         if (activation.kind === "active") return { kind: "transferred" };
         acceptedByFailedCandidate = activation.payloads;
         if (activation.kind === "incompatible") {
@@ -198,7 +227,7 @@ export class SessionHandoff {
   /** Starts the candidate and waits for it to activate or fail. */
   private async startAndActivate(
     checkpoint: SessionCheckpoint,
-    delivery: DeliverHookPayload,
+    start: SessionHandoffStart,
     targetDeploymentId: string,
   ): Promise<SessionOwnerActivation> {
     const activation = createHook<SessionOwnerActivation>({
@@ -207,10 +236,10 @@ export class SessionHandoff {
     await claimHookOwnership(activation);
     try {
       await startSessionOwnerStep({
+        ...start,
         activationToken: activation.token,
         anchorRunId: this.input.sessionId,
         checkpoint,
-        delivery,
         targetDeploymentId,
       });
       return await activation;

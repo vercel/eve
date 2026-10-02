@@ -12,8 +12,8 @@ controls, and streams. Every operation targets that exact session; none follows
 or creates a replacement implicitly.
 
 The session ID currently identifies the original Workflow run that owns the
-event stream. A deployment handoff changes the executing run, not the session
-ID or stream. Stream namespaces belong to a run; eve does not support
+event stream. A deployment or compaction handoff changes the executing run, not
+the session ID or stream. Stream namespaces belong to a run; eve does not support
 caller-assigned session IDs or globally addressed streams.
 
 Authored channels also have channel-local continuation tokens. A token addresses
@@ -24,7 +24,7 @@ by the eve HTTP session API. See [Custom channels](../channels/custom#channel-op
 Sessions last 30 days by default; configure `limits.sessionTimeoutMs` in
 `agent.ts`, or set it to `false` to disable the deadline. A successful deployment
 handoff or legacy-session import restarts the original configured duration.
-Ordinary messages and process restarts keep the existing deadline. At expiration, eve
+Ordinary messages, compaction handoffs, and process restarts keep the existing deadline. At expiration, eve
 lets an active turn settle, emits `session.completed`, and releases the
 session's continuation addresses so the next qualifying channel message starts fresh. Stored
 session data is not deleted. See [Agent config](../agent-config#runtime-limits).

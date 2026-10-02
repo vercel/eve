@@ -108,7 +108,11 @@ export class SessionExecution {
       if (outcome.kind === "park" && outcome.settled !== undefined) {
         await cancelWorkingTasks(this.input.cursor, "turn_ended");
       }
-      return turn.caller === undefined ? outcome : { ...outcome, caller: turn.caller };
+      return {
+        ...outcome,
+        ...(turn.caller !== undefined && { caller: turn.caller }),
+        ...(turn.compacted && { compacted: true }),
+      };
     } finally {
       turn.dispose();
     }
@@ -158,6 +162,7 @@ export class SessionExecution {
           steeringSignal: turn.steeringSignal,
         }),
       );
+      if (result.compacted === true) turn.compacted = true;
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const turnCompleted = result.action === "park" && result.settled !== undefined;

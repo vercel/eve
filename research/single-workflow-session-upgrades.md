@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: implemented
-last_updated: "2026-09-15"
+last_updated: "2026-10-02"
 ---
 
 # Single-workflow sessions with ingress-driven upgrades
@@ -151,7 +151,8 @@ Deferring to the next idle delivery costs nothing in protocol and only delays co
 busy sessions.
 
 HITL responses, tool and subagent results, cancellation, reset, clear, and compact never trigger
-upgrades. eve never cancels or restarts work to make a session eligible.
+upgrades. eve never cancels or restarts work to make a session eligible. Compaction does trigger a
+same-deployment handoff; see [Compaction handoff](#compaction-handoff).
 
 ### Exact deployment selection
 
@@ -234,6 +235,27 @@ The upstream replacement is a global stream independent of any run's lifetime. A
 available and delete the anchor. Keep the anchor mechanics behind the session runtime boundary so
 public identity, streaming, and cursors are unaffected either way. Global streams are follow-up
 work, not a prerequisite.
+
+## Compaction handoff
+
+Workflow replay reads every step output of a run, so one owner that serves a session for its whole
+life accumulates an unbounded event log. Compaction is the natural reset point: it rewrites history
+to a summary plus a recent window, and it is already a slow, infrequent operation.
+
+When any step of a turn (automatic or an explicit `compact` control) reports `compacted`, the owner
+latches a handoff. At the next idle boundary after the turn settles, it moves the session to a
+successor on its own deployment through the same `SessionHandoff` transaction:
+
+- Eligibility adds to the shared idle check: no queued or buffered input, no unsettled delegated
+  caller, and no working tasks. Busy sessions retry at later idle boundaries; a failed or
+  incompatible successor is not retried by that owner.
+- The successor input carries `reason: "compaction"` and no delivery. The successor claims the
+  hook set, activates, and parks instead of running a turn.
+- The successor keeps the existing deadline. Compaction is a storage concern and never extends the
+  session lifetime, unlike a deployment handoff.
+
+The anchor's log stops growing at the first handoff, and each later owner's log spans at most the
+turns between two compactions.
 
 ## Open questions and upstream request
 

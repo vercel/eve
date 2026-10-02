@@ -133,8 +133,10 @@ async function bootInitialOwner(
         capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
         deploymentId: input.ownerDeploymentId,
         history: sessionCreation.value.history,
-        initialInput: createInitialDelivery(input, serializedContext),
-        awaitFirstMessage: input.input.message === undefined,
+        start:
+          input.input.message === undefined
+            ? { kind: "first-message" }
+            : { input: createInitialDelivery(input, serializedContext), kind: "turn" },
         retention: input.retention,
         serializedContext,
         sessionId,
@@ -200,22 +202,25 @@ async function bootHandoffOwner(
   if (childRunIdsToStop.length > 0) {
     await stopUntrackedChildSessionsStep({ runIds: childRunIdsToStop, sessionId });
   }
+  const compaction = input.reason === "compaction";
   return {
     inbox,
     session: {
       anchor: { kind: "successor" },
-      caller: input.delivery.caller,
+      caller: compaction ? undefined : input.delivery.caller,
       capabilities: checkpoint.capabilities,
       deploymentId: input.ownerDeploymentId,
       history: checkpoint.history,
-      initialInput: input.delivery,
-      awaitFirstMessage: false,
+      start: compaction ? { kind: "parked" } : { input: input.delivery, kind: "turn" },
       retention: checkpoint.retention,
       serializedContext,
       sessionId,
       sessionState: checkpoint.sessionState,
       sessionTimeoutMs: checkpoint.sessionTimeoutMs,
-      sessionTimeoutDeadline: sessionTimeoutDeadline(checkpoint.sessionTimeoutMs, Date.now()),
+      // A deployment handoff renews the configured lifetime; compaction keeps the deadline.
+      sessionTimeoutDeadline: compaction
+        ? input.sessionTimeoutDeadline
+        : sessionTimeoutDeadline(checkpoint.sessionTimeoutMs, Date.now()),
       sessionWritable: input.sessionWritable,
     },
   };

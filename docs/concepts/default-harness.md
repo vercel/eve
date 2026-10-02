@@ -36,6 +36,10 @@ if a turn is running, eve queues it until that turn settles. A successful manual
 compaction emits the same `compaction.requested` and `compaction.completed`
 events as automatic compaction, followed by `session.waiting`.
 
+After either kind of compaction, eve moves the idle session to a fresh workflow
+run on the same deployment, so a long session's run history does not keep
+growing. See [Execution model and durability](./execution-model-and-durability#compaction-handoff).
+
 To discard model-message history instead of summarizing it, call the corresponding
 `clear()` method on any of those handles. Clearing preserves the session identity,
 system prompt, configured tools and skills, durable state, limits, and sandbox.

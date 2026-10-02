@@ -31,6 +31,12 @@ If the target deployment rejects the session, the previous owner keeps it and pr
 
 eve does not move live work between deployments. A session with a running turn, pending human input or authorization, queued messages, or active tasks and subagents stays on its current deployment. After that work settles, a later delivery can move the idle session; the earlier deployment signal is not remembered.
 
+### Compaction handoff
+
+Every workflow run records each step it executes, so a session that ran on one run for weeks would carry its whole history in that run. To bound this, eve moves a session to a fresh run on its current deployment after [compaction](./default-harness#compaction) rewrites the conversation history. This applies to automatic compaction during a turn and to a client or channel compaction request.
+
+The move happens once the turn settles and nothing else is waiting: no queued messages, running tasks or subagents, or pending human input. If work is still pending, eve tries again after a later turn settles. The new run receives the compacted history and settled state, then waits for the next message. The session keeps its ID, event stream, continuation addresses, and deadline; compaction never extends [`sessionTimeoutMs`](../agent-config#runtime-limits). If the new run cannot take ownership, the current run keeps the session and writes a `session handoff failed` warning to its runtime logs.
+
 ### Upgrading sessions from the former execution model
 
 You can upgrade directly from a release that used a session driver and separate

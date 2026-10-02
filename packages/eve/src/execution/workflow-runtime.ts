@@ -9,7 +9,6 @@ import {
 import type {
   CancelTurnInput,
   CancelTurnResult,
-  DeliverHookPayload,
   DispatchContinuationInput,
   DispatchSessionInput,
   GetEventStreamOptions,
@@ -52,6 +51,7 @@ import {
   SESSION_HANDOFF_VERSION,
   type HandoffWorkflowEntryInput,
   type InitialWorkflowEntryInput,
+  type SessionHandoffStart,
 } from "#execution/session/entry-input.js";
 import type { SessionCheckpoint } from "#execution/session/handoff.js";
 import { walkCauseChain } from "#shared/errors.js";
@@ -253,35 +253,35 @@ export function createWorkflowRuntime(config: {
   };
 }
 
-export interface SessionOwnerStartInput {
+export type SessionOwnerStartInput = SessionHandoffStart & {
   readonly activationToken: string;
   /** Original run whose stream stays the public session stream. */
   readonly anchorRunId: string;
   readonly checkpoint: SessionCheckpoint;
-  readonly delivery: DeliverHookPayload;
   readonly targetDeploymentId: string;
-}
+};
 
 /** Starts a successor owner and binds its output to the original session stream. */
 export async function startSessionOwnerStep(input: SessionOwnerStartInput): Promise<void> {
   "use step";
+  const { activationToken, anchorRunId, checkpoint, targetDeploymentId, ...start } = input;
   const workflowInput: HandoffWorkflowEntryInput = {
-    activationToken: input.activationToken,
-    checkpoint: input.checkpoint,
-    delivery: input.delivery,
+    ...start,
+    activationToken,
+    checkpoint,
     handoffVersion: SESSION_HANDOFF_VERSION,
     kind: "handoff",
-    ownerDeploymentId: input.targetDeploymentId,
-    sessionWritable: getRun(input.anchorRunId).getWritable<Uint8Array>(),
-    sessionId: input.anchorRunId,
+    ownerDeploymentId: targetDeploymentId,
+    sessionWritable: getRun(anchorRunId).getWritable<Uint8Array>(),
+    sessionId: anchorRunId,
   };
   await startWorkflowOnDeployment(
     workflowEntryReference,
     [workflowInput],
-    input.targetDeploymentId,
-    input.checkpoint.retention === undefined
+    targetDeploymentId,
+    checkpoint.retention === undefined
       ? undefined
-      : { experimental_retention: input.checkpoint.retention },
+      : { experimental_retention: checkpoint.retention },
   );
 }
 

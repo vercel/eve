@@ -78,7 +78,10 @@ export type DurableStepResult = (
       readonly settled?: SettledTurn;
     }
 ) &
-  DurableStepResultFields;
+  DurableStepResultFields & {
+    /** The step compacted the history. */
+    readonly compacted?: true;
+  };
 
 /** What `turnStep` returns: its result, with the session state as a delta. */
 export type TurnStepResult = WithSessionStateDelta<DurableStepResult>;
@@ -90,6 +93,8 @@ export type TurnOutcome = {
    * later message awaits its reply at its own address, so the turn reports there.
    */
   readonly caller?: TurnCaller;
+  /** A step of the turn compacted the history. */
+  readonly compacted?: true;
 } & (
   | {
       readonly kind: "done";

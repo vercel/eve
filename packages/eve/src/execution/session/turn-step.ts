@@ -49,7 +49,7 @@ import {
   type UserModelMessage,
 } from "#harness/messages.js";
 import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -262,7 +262,8 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   try {
     const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
     const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
-    const handleEvent = createTurnEventHandler({
+    let compacted = false;
+    const emitTurnEvent = createTurnEventHandler({
       abortSignal,
       bundle,
       canCancelTurn: input.input?.control === undefined,
@@ -274,6 +275,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       instrumentation,
       publisher,
     });
+    const handleEvent: HandleEventFn = async (event, messages) => {
+      if (event.type === "compaction.completed") compacted = true;
+      await emitTurnEvent(event, messages);
+    };
     const previousAdapterState =
       delivery !== undefined && !isHarnessBetweenTurns(initialSession)
         ? structuredClone(adapterCtx.state)
@@ -571,7 +576,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 
     const durableResult = resolveSessionStepResult(stepResult, nextSerializedContext);
     if (durableResult.action === "done") await publisher.writer.close();
-    return durableResult;
+    return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
     publisher.writer.release();
   }

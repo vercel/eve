@@ -100,18 +100,7 @@ const routeWork = stepWork<Parameters<typeof routeDeliverToChildren>[0], RoutedD
 
 describe("SessionExecution checkpoints", () => {
   it("retains the durable steering signal across steps until a correction uses it", async () => {
-    const inbox: SessionInbox = {
-      claimedTokens: [],
-      claimSessionHook: vi.fn(),
-      claimSessionHooks: vi.fn(),
-      drain: () => [],
-      hasPending: () => false,
-      whenPending: () => new Promise<void>(() => {}),
-      next: vi.fn(),
-      restore: vi.fn(),
-      onDelivery: () => () => {},
-      onInterrupt: () => () => {},
-    };
+    const inbox = idleInbox();
     let signal: AbortSignal | undefined;
     vi.mocked(turnStep)
       .mockReset()
@@ -137,6 +126,32 @@ describe("SessionExecution checkpoints", () => {
       );
     await createExecution({ inbox, sessionState: state("") }).runTurn(undefined);
     expect(turnStep).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a compaction from an earlier step when the turn settles", async () => {
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "continue",
+          compacted: true,
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "park",
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+          settled: { output: "Alice's plan is ready." },
+        })),
+      );
+    const outcome = await createExecution({
+      inbox: idleInbox(),
+      sessionState: state(""),
+    }).runTurn(undefined);
+    expect(outcome).toMatchObject({ compacted: true, kind: "park" });
   });
   it("binds the delegated caller on the turn's first step only", async () => {
     const inbox: SessionInbox = {
@@ -1422,6 +1437,21 @@ function createCursor(input: {
     serializedContext: input.serializedContext ?? {},
     sessionState: input.sessionState,
   });
+}
+
+function idleInbox(): SessionInbox {
+  return {
+    claimedTokens: [],
+    claimSessionHook: vi.fn(),
+    claimSessionHooks: vi.fn(),
+    drain: () => [],
+    hasPending: () => false,
+    whenPending: () => new Promise<void>(() => {}),
+    next: vi.fn(),
+    restore: vi.fn(),
+    onDelivery: () => () => {},
+    onInterrupt: () => () => {},
+  };
 }
 
 function createExecution(input: {

@@ -53,6 +53,8 @@ export class ActiveTurn {
   private steeringController = new AbortController();
   /** The delegated caller of the latest message the turn read. */
   caller: TurnCaller | undefined;
+  /** A step of this turn compacted the history. */
+  compacted = false;
 
   constructor(
     input: SessionExecutionInput,
