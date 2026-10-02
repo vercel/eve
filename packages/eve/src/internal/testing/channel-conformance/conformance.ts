@@ -43,19 +43,7 @@ interface ConformanceChannel {
 const hitlConformance = {
   "chat-sdk": [
     { driver: chatSdkDriver },
-    {
-      driver: chatSdkTextDriver,
-      broken: {
-        "a rendered question shows every option a person can choose": {
-          reason: "#3712: the card's fallback text is only the prompt",
-          symptom: /the question showed \[\]/,
-        },
-        "a tool approval shows Approve and Cancel": {
-          reason: "#3712: the card's fallback text is only the prompt",
-          symptom: /the approval showed \[\]/,
-        },
-      },
-    },
+    { driver: chatSdkTextDriver },
   ],
   discord: [{ driver: discordDriver }],
   github: [{ driver: githubDriver }],

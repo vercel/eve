@@ -76,11 +76,12 @@ export function chatSdkTextDriver(): ChannelDriver {
       if (!isPost(call) || typeof call.body !== "string" || !call.body.includes(prompt)) {
         return undefined;
       }
-      // #3715's fallback lists each choice as `"<id>" (<label>)`.
-      return [...call.body.matchAll(/"[^"]+" \(([^)]+)\)/gu)].map(([, label]) => ({
-        handle: label,
-        label: label!,
-      }));
+      return call.body
+        .split("\n")
+        .map((line) => /^\s*\d+[.)]\s*(.+?)\s*$/u.exec(line)?.[1])
+        .filter((label): label is string => label !== undefined)
+        .map((line) => line.split(" - ", 1)[0]!)
+        .map((label) => ({ handle: label, label }));
     },
     press() {
       throw new Error("A text-only Chat SDK adapter has nothing to press.");

@@ -718,7 +718,7 @@ describe("chatSdkChannel", () => {
     expect(state.pendingToolCallMessage).toBe("Let me check that.");
   });
 
-  it("renders input requests as Chat SDK cards with one button per option", async () => {
+  it("renders input requests as Chat SDK cards with buttons and a text fallback naming each reply", async () => {
     const adapter = testAdapter();
     const bridge = chatSdkChannel({
       adapters: { test: adapter },
@@ -754,31 +754,34 @@ describe("chatSdkChannel", () => {
       ctx,
     );
 
-    const card = adapter.posted[0]?.message as AdapterPostableMessage;
-    expect(card).toMatchObject({
-      children: [
-        { content: "Deploy?", type: "text" },
-        {
-          children: [
-            {
-              id: "eve_input:request-1:approve",
-              label: "Approve",
-              style: "primary",
-              type: "button",
-              value: "approve",
-            },
-            {
-              id: "eve_input:request-1:cancel",
-              label: "Cancel",
-              style: "danger",
-              type: "button",
-              value: "cancel",
-            },
-          ],
-          type: "actions",
-        },
-      ],
-      type: "card",
+    const posted = adapter.posted[0]?.message as AdapterPostableMessage;
+    expect(posted).toMatchObject({
+      card: {
+        children: [
+          { content: "Deploy?", type: "text" },
+          {
+            children: [
+              {
+                id: "eve_input:request-1:approve",
+                label: "Approve",
+                style: "primary",
+                type: "button",
+                value: "approve",
+              },
+              {
+                id: "eve_input:request-1:cancel",
+                label: "Cancel",
+                style: "danger",
+                type: "button",
+                value: "cancel",
+              },
+            ],
+            type: "actions",
+          },
+        ],
+        type: "card",
+      },
+      fallbackText: "Deploy?\n\n1. Approve\n2. Cancel\n\nReply with a number to choose.",
     });
   });
 });

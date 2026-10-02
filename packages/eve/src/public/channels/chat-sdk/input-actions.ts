@@ -2,11 +2,37 @@ import type { InputRequest } from "#shared/input.js";
 import type { CardChild } from "#compiled/chat/index.js";
 import { Actions, Button, Card, CardText } from "#compiled/chat/index.js";
 
-/** Renders pending input requests as a Chat SDK card with one button per option. */
+const FREEFORM_NOTICE = "This request needs a freeform answer. Continue from the eve session UI.";
+
+/**
+ * Renders pending input requests as a Chat SDK card with one button per option,
+ * plus fallback text for adapters without cards (such as Photon iMessage).
+ */
 export function renderInputRequests(requests: readonly InputRequest[], inputActionPrefix: string) {
-  return Card({
-    children: requests.flatMap((request) => renderInputRequest(request, inputActionPrefix)),
-  });
+  return {
+    card: Card({
+      children: requests.flatMap((request) => renderInputRequest(request, inputActionPrefix)),
+    }),
+    fallbackText: requests.map(renderInputRequestText).join("\n\n"),
+  };
+}
+
+// The SDK's card fallback drops buttons, so options are numbered; a reply with the number, label, or id answers the request.
+function renderInputRequestText(request: InputRequest): string {
+  const options = request.options ?? [];
+  if (options.length === 0) return `${request.prompt}\n\n${FREEFORM_NOTICE}`;
+  return [
+    request.prompt,
+    "",
+    ...options.map((option, index) => {
+      const description = option.description ? ` - ${option.description}` : "";
+      return `${index + 1}. ${option.label}${description}`;
+    }),
+    "",
+    request.allowFreeform === true
+      ? "Reply with a number, or with your own answer."
+      : "Reply with a number to choose.",
+  ].join("\n");
 }
 
 function renderInputRequest(request: InputRequest, inputActionPrefix: string) {
@@ -26,9 +52,7 @@ function renderInputRequest(request: InputRequest, inputActionPrefix: string) {
     );
     return children;
   }
-  children.push(
-    CardText("This request needs a freeform answer. Continue from the eve session UI."),
-  );
+  children.push(CardText(FREEFORM_NOTICE));
   return children;
 }
 
