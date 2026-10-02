@@ -742,6 +742,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "sanity",
+    name: "Sanity",
+    kind: "connection",
+    tagline: "Query and edit Sanity content, inspect schemas, and manage releases.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Sanity: query content with GROQ, edit documents, inspect schemas, and manage releases.",
+      mcp: { url: "https://mcp.sanity.io" },
+    },
+  },
+  {
     slug: "sentry",
     name: "Sentry",
     kind: "connection",

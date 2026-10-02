@@ -1287,6 +1287,41 @@
       ]
     },
     {
+      "name": "connection/sanity",
+      "type": "registry:item",
+      "title": "Sanity",
+      "description": "Query and edit Sanity content, inspect schemas, and manage releases.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "sanity",
+              "sanity",
+              "sanity",
+              "--connection-method",
+              "mcp"
+            ]
+          },
+          "requires": ">=0.55.0"
+        }
+      },
+      "dependencies": [
+        "@vercel/connect"
+      ],
+      "files": [
+        {
+          "path": "registry/connections/sanity.ts",
+          "type": "registry:file",
+          "target": "agent/connections/sanity.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/sentry",
       "type": "registry:item",
       "title": "Sentry",
