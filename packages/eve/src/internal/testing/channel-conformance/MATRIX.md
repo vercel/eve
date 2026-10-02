@@ -40,6 +40,11 @@ needs, or the client declines it below)
 | approving by text clears the approval's buttons | ✅ | — | — | — | — | — | ✅ | ✅ | ✅ | — | — |
 | pressing Approve names who approved on the approval | ❌ | — | ❌ | — | — | — | ✅ | ✅ | ❌ | — | — |
 | approving by text names who approved on the approval | ❌ | — | — | — | — | — | ❌ | ❌ | ❌ | — | — |
+| the requester pressing Approve on a requester-only approval runs the tool | ✅ | — | ❌ | — | — | — | ✅ | ✅ | ✅ | ✅ | — |
+| another person pressing Approve on a requester-only approval leaves it pending | ✅ | — | ❌ | — | — | — | ✅ | ✅ | ✅ | — | — |
+| another person pressing Cancel on a requester-only approval leaves it pending | ✅ | — | ❌ | — | — | — | ✅ | ✅ | ✅ | — | — |
+| another person's rejected press leaves the approval's buttons in place | ✅ | — | ✅ | — | — | — | ✅ | ✅ | ✅ | — | — |
+| another person pressing Approve runs a tool with no response policy | ✅ | — | ✅ | — | — | — | ✅ | ✅ | ✅ | — | — |
 
 ## Broken
 
@@ -49,6 +54,9 @@ needs, or the client declines it below)
 - **chat-sdk**, approving by text names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
 - **discord**, pressing an option names who answered on the question: a resolved prompt doesn't say who answered; input.resolved carries no responder
 - **discord**, pressing Approve names who approved on the approval: a resolved prompt doesn't say who answered; input.resolved carries no responder
+- **discord**, the requester pressing Approve on a requester-only approval runs the tool: a button press responds with `auth: null`, so no one can satisfy a response policy
+- **discord**, another person pressing Approve on a requester-only approval leaves it pending: a button press responds with `auth: null`, so no one can satisfy a response policy
+- **discord**, another person pressing Cancel on a requester-only approval leaves it pending: a button press responds with `auth: null`, so no one can satisfy a response policy
 - **slack**, answering a question by text clears its buttons: only the button interaction handler edits a question; a typed answer leaves it
 - **slack**, answering a question by text names who answered on the question: only the button interaction handler edits a question; a typed answer leaves it
 - **slack**, approving by text names who approved on the approval: the card loses its buttons after a typed approval but doesn't say who approved

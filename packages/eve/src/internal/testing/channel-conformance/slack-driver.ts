@@ -4,6 +4,7 @@ import { slackChannel } from "#public/channels/slack/index.js";
 import { HITL_ACTION_PREFIX } from "#public/channels/slack/hitl.js";
 import {
   type ChannelDriver,
+  type Person,
   type PlatformCall,
   type RenderedOption,
   recordingFetch,
@@ -12,6 +13,10 @@ import { decodeSlackApiBody } from "#internal/testing/slack-api-body.js";
 
 const SIGNING_SECRET = "slack-conformance-secret";
 const PERSON = "U_ALICE";
+const PEOPLE = {
+  alice: { id: PERSON, name: "alice" },
+  bob: { id: "U_BOB", name: "bob" },
+} as const;
 let nextChannel = 0;
 const TEAM = "T01";
 
@@ -98,7 +103,7 @@ export function slackDriver(): ChannelDriver {
 
   return {
     name: "slack",
-    capabilities: ["buttons", "text-replies"],
+    capabilities: ["another-person", "buttons", "text-replies"],
     createChannel: (record) =>
       slackChannel({
         api: { fetch: recordingFetch(record, decode) },
@@ -151,15 +156,16 @@ export function slackDriver(): ChannelDriver {
       };
     },
     personShownAs: [`<@${PERSON}>`],
-    press: (option) => {
+    press: (option, person: Person) => {
       const { action, blocks, messageTs } = option.handle as PressHandle;
+      const { id, name } = PEOPLE[person];
       const payload = {
         actions: [action],
         channel: { id: CHANNEL },
         message: { blocks, thread_ts: threadTs, ts: messageTs },
         team: { id: TEAM },
         type: "block_actions",
-        user: { id: PERSON, name: "alice", team_id: TEAM, username: "alice" },
+        user: { id, name, team_id: TEAM, username: name },
       };
       return signed(
         new URLSearchParams({ payload: JSON.stringify(payload) }).toString(),
