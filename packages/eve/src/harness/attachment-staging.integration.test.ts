@@ -151,7 +151,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(staged).toHaveLength(2);
     const filePart = staged[1] as FilePart;
     expect(filePart.filename).toMatch(
-      new RegExp(`^${ATTACHMENTS_ROOT}/[0-9a-f]{16}/report\\.csv$`),
+      new RegExp(`^${ATTACHMENTS_ROOT.replaceAll(".", "\\.")}/[0-9a-f]{16}/report\\.csv$`),
     );
     // `data` is replaced with an eve-sandbox: ref — the bytes live in
     // the sandbox and are rehydrated at the model call site. The
@@ -453,7 +453,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     expect((hydratedFilePart.data as Buffer).equals(smallImageBytes)).toBe(true);
     expect(hydratedFilePart.mediaType).toBe("image/png");
     expect(hydratedFilePart.filename).toMatch(
-      /^\/workspace\/attachments\/[0-9a-f]{16}\/logo\.png$/,
+      /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/logo\.png$/,
     );
   });
 

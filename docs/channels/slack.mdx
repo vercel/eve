@@ -798,7 +798,7 @@ Private file downloads resolve credentials from the session's app installation w
 
 Downloads cover Slack's own file hosts plus URLs under a configured [`api.fileBaseUrl`](#point-the-channel-at-a-different-slack-api-host), and travel on `api.fetch` when one is configured.
 
-Staged files live in the session sandbox under `/workspace/attachments`. Session history keeps a reference to that path, not a second copy of the Slack file. If the backend can no longer reattach the original sandbox, eve cannot restore the attachment bytes from history; later turns receive a missing-file result. Store files outside the sandbox when the agent must retain them independently of sandbox availability.
+Staged files live in the session sandbox under `/workspace/.eve/attachments`. Session history keeps a reference to that path, not a second copy of the Slack file. If the backend can no longer reattach the original sandbox, eve cannot restore the attachment bytes from history; later turns receive a missing-file result. Store files outside the sandbox when the agent must retain them independently of sandbox availability.
 
 ## What to read next
 

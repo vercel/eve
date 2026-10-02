@@ -153,7 +153,7 @@ describe("estimateTokens", () => {
     const ref = encodeSandboxRef({
       height: 1080,
       mediaType: "image/png",
-      path: "/workspace/attachments/abc/screen.png",
+      path: "/workspace/.eve/attachments/abc/screen.png",
       size: 2_000_000,
       width: 1920,
     });
@@ -169,7 +169,7 @@ describe("estimateTokens", () => {
         {
           data: encodeSandboxRef({
             mediaType: "text/csv",
-            path: "/workspace/attachments/abc/report.csv",
+            path: "/workspace/.eve/attachments/abc/report.csv",
             size: 3_000_000,
           }),
           mediaType: "text/csv",
@@ -708,7 +708,7 @@ describe("compactMessages: tool-result cap heuristic", () => {
   });
 
   it("stubs a staged tool file with its sandbox path so the agent can reopen it", async () => {
-    const path = "/workspace/attachments/0123456789abcdef/chart.png";
+    const path = "/workspace/.eve/attachments/0123456789abcdef/chart.png";
     const messages: ModelMessage[] = [
       user("render the chart"),
       {

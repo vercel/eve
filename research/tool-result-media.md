@@ -112,7 +112,7 @@ compaction ──► batched eviction: ref ──► "Attached file <path> (<typ
   `data: { type: "url", url: <eve-sandbox: ref> }`. Dimensions and page counts
   are parsed once at write time from image headers (PNG, JPEG, GIF, WebP) and
   the PDF page tree, with no dependency. They exist for the estimator.
-- **Store contract.** Write bytes to `/workspace/attachments/<sha>/<name>` and
+- **Store contract.** Write bytes to `/workspace/.eve/attachments/<sha>/<name>` and
   read them back by ref path. Content-addressed and immutable. Refs are
   minted only by eve: the HTTP channel already rejects internal ref schemes,
   and `normalizeToolModelOutput` rejects non-`data` file tags. The sandbox is

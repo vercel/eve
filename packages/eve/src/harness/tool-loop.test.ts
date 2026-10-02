@@ -10748,7 +10748,7 @@ describe("createToolLoopHarness", () => {
       const historyRef = decodeSandboxRef(historyFilePart.data as URL);
       expect(historyRef.mediaType).toBe("image/png");
       expect(historyRef.size).toBe(imageBytes.byteLength);
-      expect(historyRef.path).toMatch(/^\/workspace\/attachments\/[0-9a-f]{16}\/logo\.png$/);
+      expect(historyRef.path).toMatch(/^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/logo\.png$/);
 
       // --- Invariant 3: the mocked ToolLoopAgent.generate saw hydrated bytes.
       //

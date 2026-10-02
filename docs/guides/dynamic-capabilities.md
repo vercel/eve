@@ -55,7 +55,7 @@ export default defineAgent({
 });
 ```
 
-eve stages byte-backed `file` parts under `/workspace/attachments` before
+eve stages byte-backed `file` parts under `/workspace/.eve/attachments` before
 `step.started`, but keeps their media type in `ctx.messages`. When an image
 reaches the provider, vision models can process it and non-vision models reject
 it. eve does not reroute automatically. See [Inbound

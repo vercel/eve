@@ -25,11 +25,12 @@ import {
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 
 /**
- * Sandbox directory where inbound file attachments are staged before the
- * model call. Authored canonical path — {@link SandboxSession.writeFile}
- * translates to the backend-native location.
+ * Sandbox directory where eve stages message attachments and tool-result
+ * files. It sits under eve's own dot-directory so it never collides with an
+ * agent's `/workspace/attachments`. Authored canonical path —
+ * {@link SandboxSession.writeFile} translates to the backend-native location.
  */
-export const ATTACHMENTS_ROOT = "/workspace/attachments";
+export const ATTACHMENTS_ROOT = "/workspace/.eve/attachments";
 
 const log = createLogger("harness.attachment-staging");
 

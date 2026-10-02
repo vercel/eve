@@ -12,7 +12,7 @@ import {
 } from "#harness/attachment-staging.js";
 
 const UTF8 = new TextEncoder();
-const ATTACHMENTS_PATH_PATTERN = /^\/workspace\/attachments\/[0-9a-f]{16}\//;
+const ATTACHMENTS_PATH_PATTERN = /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\//;
 
 /**
  * Minimal {@link ChannelAdapterContext} for tests that never encounter
@@ -79,12 +79,14 @@ describe("stageAttachmentsForAdapter", () => {
     const ref = decodeSandboxRef(filePart.data as URL);
     expect(ref.mediaType).toBe("text/csv");
     expect(ref.size).toBe(data.byteLength);
-    expect(ref.path).toMatch(/^\/workspace\/attachments\/[0-9a-f]{16}\/quarterly\.csv$/);
+    expect(ref.path).toMatch(/^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/quarterly\.csv$/);
     expect(filePart.filename).toBe(ref.path);
 
     expect(sandbox.writes).toHaveLength(1);
     const write = sandbox.writes[0];
-    expect(write?.path).toMatch(new RegExp(`^${ATTACHMENTS_ROOT}/[0-9a-f]{16}/quarterly\\.csv$`));
+    expect(write?.path).toMatch(
+      new RegExp(`^${ATTACHMENTS_ROOT.replaceAll(".", "\\.")}/[0-9a-f]{16}/quarterly\\.csv$`),
+    );
     expect(write?.content).toEqual(data);
   });
 
