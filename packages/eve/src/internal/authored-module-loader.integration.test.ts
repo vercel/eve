@@ -1354,6 +1354,51 @@ export default defineWorkflowTool({ description: "Probe", inputSchema: { type: "
     }
   });
 
+  it("evaluates a module shared by authored tools once per compilation", async () => {
+    const evaluationsKey = "__eveSharedAuthoredModuleEvaluations";
+    const tool = (sharedImport: string) =>
+      [
+        `import { shared } from ${JSON.stringify(sharedImport)};`,
+        "",
+        "export default {",
+        '  description: "Read the shared value.",',
+        "  execute() {",
+        "    return shared;",
+        "  },",
+        "};",
+        "",
+      ].join("\n");
+    const app = await createApp({
+      files: {
+        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };',
+        "agent/lib/shared.ts": [
+          `globalThis.${evaluationsKey} = (globalThis.${evaluationsKey} ?? 0) + 1;`,
+          'export const shared = "shared";',
+          "",
+        ].join("\n"),
+        "agent/tools/first.ts": tool("../lib/shared"),
+        "agent/tools/second.ts": tool("../lib/shared"),
+        "agent/subagents/helper/agent.ts":
+          'export default { description: "Help.", model: "openai/gpt-5.4" };',
+        "agent/subagents/helper/tools/third.ts": tool("../../../lib/shared"),
+      },
+      name: "shared-authored-module",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    const scope = globalThis as Record<string, unknown>;
+
+    try {
+      await compileAgentManifest(discovered.manifest);
+
+      expect(scope[evaluationsKey]).toBe(1);
+    } finally {
+      delete scope[evaluationsKey];
+    }
+  });
+
   it("loads authored modules that use asset imports", async () => {
     const app = await createApp({
       files: {
