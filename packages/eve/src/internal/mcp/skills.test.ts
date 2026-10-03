@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentDescription } from "#channel/agent-description.js";
-import { MAX_SKILL_FILE_BYTES, SkillReadError } from "#channel/skill-files.js";
-import { createMcpSkillsFeature } from "#internal/mcp/skills.js";
+import {
+  MAX_SKILL_FILE_BYTES,
+  type SkillFileSource,
+  SkillReadError,
+} from "#channel/skill-files.js";
+import { createMcpSkillsFeature, type McpSkillSource } from "#internal/mcp/skills.js";
 import { createMcpStreamableHttpServer } from "#internal/mcp/streamable-http-server.js";
 
 /**
- * A skill's files; `null` is listed by `describe()` but is missing on read
- * (a deterministic `SkillReadError`), and a function is called per read so a
- * test can fail transiently.
+ * A skill's files; `null` is listed but missing on read (a deterministic
+ * `SkillReadError`), and a function is called per read so a test can fail
+ * transiently.
  */
 type Files = Readonly<Record<string, string | Uint8Array | null | (() => string)>>;
 
@@ -16,35 +19,50 @@ const PROTOCOL = "2026-07-28";
 const encode = (content: string | Uint8Array) =>
   typeof content === "string" ? new TextEncoder().encode(content) : content;
 
-function handler(skills: Readonly<Record<string, Files>>) {
-  const describe = async (): Promise<AgentDescription> => ({
-    name: "fixture",
-    tools: [],
-    skills: Object.entries(skills).map(([name, files]) => ({
-      name,
-      description: "Catalog description.",
-      files: Object.entries(files)
+/**
+ * A skill source as the route args provide one: the `skills` array is
+ * stable for the life of the source, as a build's description is, and
+ * `calls` counts listings and reads per skill.
+ */
+function skillSource(skills: Readonly<Record<string, Files>>) {
+  const calls = { list: new Map<string, number>(), read: new Map<string, number>() };
+  const count = (calls: Map<string, number>, key: string) =>
+    calls.set(key, (calls.get(key) ?? 0) + 1);
+  const files: SkillFileSource = {
+    async listFiles(skill) {
+      count(calls.list, skill);
+      return Object.entries(skills[skill] ?? {})
         .map(([path, content]) => ({
           path,
           size: content === null || typeof content === "function" ? 1 : encode(content).length,
         }))
-        .sort((left, right) => (left.path < right.path ? -1 : 1)),
-    })),
-  });
-  const readSkill = async (skill: string, path = "SKILL.md") => {
-    const content = skills[skill]?.[path];
-    if (content === undefined || content === null) {
-      throw new SkillReadError("unknown-file", `Skill "${skill}" has no file "${path}".`);
-    }
-    return encode(typeof content === "function" ? content() : content);
+        .sort((left, right) => (left.path < right.path ? -1 : 1));
+    },
+    async readFile(skill, path) {
+      count(calls.read, `${skill}/${path}`);
+      const content = skills[skill]?.[path];
+      if (content === undefined || content === null) {
+        throw new SkillReadError("unknown-file", `Skill "${skill}" has no file "${path}".`);
+      }
+      return encode(typeof content === "function" ? content() : content);
+    },
   };
-  const mcp = createMcpStreamableHttpServer({
-    authenticate: async () => null,
-    features: [createMcpSkillsFeature({ describe, readSkill })],
-    name: "eve-skills-test",
-    version: "0.0.0",
-  });
+  const source: McpSkillSource = {
+    files,
+    skills: Object.keys(skills).map((name) => ({ name, description: "Catalog description." })),
+  };
+  return { calls, source };
+}
+
+/** Every request builds a fresh server, as `mcpChannel` does. */
+function handler(skills: Readonly<Record<string, Files>>, source = skillSource(skills).source) {
   return async (method: string, params: Record<string, unknown> = {}) => {
+    const mcp = createMcpStreamableHttpServer({
+      authenticate: async () => null,
+      features: [createMcpSkillsFeature(source)],
+      name: "eve-skills-test",
+      version: "0.0.0",
+    });
     const _meta = {
       "io.modelcontextprotocol/clientCapabilities": {},
       "io.modelcontextprotocol/clientInfo": { name: "skills-test", version: "0.0.0" },
@@ -161,9 +179,45 @@ describe("MCP skills (SEP-2640)", () => {
 });
 
 describe("MCP skills catalog", () => {
+  it("lists and reads each skill once while its description is stable", async () => {
+    const skills = { a: doc("a", "First."), b: doc("b", "Second.") };
+    const { calls, source } = skillSource(skills);
+    const call = handler(skills, source);
+    for (let request = 0; request < 3; request += 1) {
+      expect((await call("skills/list")).result?.skills).toHaveLength(2);
+      expect((await call("resources/list")).result?.resources).toHaveLength(2);
+      expect((await call("skills/get", { uri: "skill://a/SKILL.md" })).result).toBeDefined();
+      expect((await call("resources/read", { uri: "skill://b/SKILL.md" })).result).toBeDefined();
+    }
+    expect([...calls.list]).toEqual([
+      ["a", 1],
+      ["b", 1],
+    ]);
+    expect([...calls.read]).toEqual([
+      ["a/SKILL.md", 1],
+      ["a/notes.md", 1],
+      ["b/SKILL.md", 1],
+      ["b/notes.md", 1],
+    ]);
+
+    // Only `SKILL.md` stays in memory; other files are read per request.
+    expect((await call("resources/read", { uri: "skill://a/notes.md" })).result).toBeDefined();
+    expect(calls.read.get("a/notes.md")).toBe(2);
+
+    // A new description, as after a recompile, lists and reads again.
+    const recompiled = skillSource(skills);
+    expect((await handler(skills, recompiled.source)("skills/list")).result?.skills).toHaveLength(
+      2,
+    );
+    expect([...recompiled.calls.list]).toEqual([
+      ["a", 1],
+      ["b", 1],
+    ]);
+  });
+
   it("retries a skill whose file read failed transiently", async () => {
     let reads = 0;
-    const call = handler({
+    const skills = {
       flaky: {
         ...doc("flaky", "Reads once it settles."),
         "notes.md": () => {
@@ -172,7 +226,9 @@ describe("MCP skills catalog", () => {
           return "notes\n";
         },
       },
-    });
+    };
+    const { calls, source } = skillSource(skills);
+    const call = handler(skills, source);
     const first = await call("skills/list");
     expect(first.error).toBeDefined();
     expect(first.result).toBeUndefined();
@@ -182,6 +238,27 @@ describe("MCP skills catalog", () => {
       "skill://flaky/SKILL.md",
     ]);
     expect(reads).toBe(2);
+    expect(calls.list.get("flaky")).toBe(2);
+  });
+
+  it("retries a skill whose listing failed transiently", async () => {
+    const skills = { listed: doc("listed", "Lists once it settles.") };
+    const { source } = skillSource(skills);
+    let listings = 0;
+    const call = handler(skills, {
+      ...source,
+      files: {
+        ...source.files,
+        async listFiles(skill) {
+          listings += 1;
+          if (listings === 1) throw new Error("EIO: transient");
+          return await source.files.listFiles(skill);
+        },
+      },
+    });
+    expect((await call("skills/list")).error).toBeDefined();
+    expect((await call("skills/list")).result?.skills).toHaveLength(1);
+    expect(listings).toBe(2);
   });
 
   it("carries the list cache hint on every skill and resource method", async () => {
