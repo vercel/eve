@@ -1,3 +1,4 @@
+import { context as otelContext } from "#compiled/@opentelemetry/api/index.js";
 import {
   createMcpHandler,
   McpServer,
@@ -7,6 +8,7 @@ import {
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { withMcpRequestTraceContext } from "#internal/mcp/request-trace-context.js";
 
 const log = createLogger("mcp.server");
 
@@ -25,9 +27,11 @@ interface McpToolDefinition<TInputSchema extends StandardSchemaWithJSON = Standa
   readonly outputSchema?: StandardSchemaWithJSON;
 }
 
-export interface McpCallToolResult<
-  TStructured extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
-> {
+/**
+ * `TStructured` is any JSON value: 2026 clients accept non-object structured
+ * content, and the SDK wraps it as `{ result }` for 2025 clients.
+ */
+export interface McpCallToolResult<TStructured = Readonly<Record<string, unknown>>> {
   readonly content: readonly McpContent[];
   readonly isError?: boolean;
   readonly structuredContent?: TStructured | McpToolOperationErrorEnvelope;
@@ -47,7 +51,14 @@ export type McpContent =
  * change or re-read something; `not_found` means stop; `internal` means the
  * server failed and `errorId` correlates with its logs.
  */
-type McpToolOperationErrorCode = "invalid_input" | "not_found" | "conflict" | "internal";
+type McpToolOperationErrorCode =
+  | "invalid_input"
+  | "not_found"
+  | "conflict"
+  | "denied"
+  | "approval_required"
+  | "authorization_required"
+  | "internal";
 
 interface McpToolOperationErrorData {
   readonly code: McpToolOperationErrorCode;
@@ -81,7 +92,7 @@ type InferSchemaOutput<TSchema> =
 /** Keeps a schema and its inferred handler input coupled while erasing heterogeneous storage. */
 export function defineMcpTool<
   const TInputSchema extends StandardSchemaWithJSON<unknown, unknown>,
-  TStructured extends Readonly<Record<string, unknown>> = Readonly<Record<string, unknown>>,
+  TStructured = Readonly<Record<string, unknown>>,
 >(input: {
   readonly definition: McpToolDefinition<TInputSchema>;
   call(
@@ -159,7 +170,14 @@ export function createMcpStreamableHttpServer(
     const preflightFailure = await preflightModernRequest(request, parsedBody);
     if (preflightFailure !== undefined) return preflightFailure;
 
-    return await handler.fetch(request, { parsedBody });
+    // The client's trace context rides in `_meta`, not headers, so it is
+    // adopted here, before the SDK dispatches into a tool. A valid
+    // `_meta.traceparent` replaces any parent extracted from the HTTP
+    // headers; anything else keeps it. `_meta.baggage` is never read.
+    return await otelContext.with(
+      withMcpRequestTraceContext(otelContext.active(), parsedBody),
+      () => handler.fetch(request, { parsedBody }),
+    );
   };
 }
 
@@ -346,7 +364,7 @@ function createServer(
   return server;
 }
 
-async function callTool<TInput, TStructured extends Readonly<Record<string, unknown>>>(
+async function callTool<TInput, TStructured>(
   call: (
     input: TInput,
     context: { readonly auth: SessionAuthContext | null; readonly signal: AbortSignal },
@@ -377,9 +395,7 @@ async function callTool<TInput, TStructured extends Readonly<Record<string, unkn
   }
 }
 
-function toolError<TStructured extends Readonly<Record<string, unknown>>>(
-  error: McpToolOperationErrorData,
-): McpCallToolResult<TStructured> {
+function toolError<TStructured>(error: McpToolOperationErrorData): McpCallToolResult<TStructured> {
   const text =
     error.errorId === undefined ? error.message : `${error.message} (errorId: ${error.errorId})`;
   // The SDK skips outputSchema validation when isError is set, so this shape

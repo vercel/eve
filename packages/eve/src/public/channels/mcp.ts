@@ -16,6 +16,7 @@ import type {
 } from "#internal/invocation/agent-invocation.js";
 import { WorkflowAgentInvocationExecution } from "#internal/invocation/workflow-execution.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { createPublishedTools } from "#internal/mcp/published-tools.js";
 import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mcp/http-security.js";
 import {
   createMcpStreamableHttpServer,
@@ -46,15 +47,30 @@ export interface McpChannelInput {
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /** Override the default MCP route path (`/eve/v1/mcp`). */
   readonly route?: string;
+  /**
+   * Serve the `agent_*` tools, which start and follow a durable agent task.
+   * With `false`, the channel serves only the tools `tools` publishes.
+   * @default true
+   */
+  readonly agent?: boolean;
+  /**
+   * Also publish the agent's invocable tools, each `tools/call` running the
+   * tool as the route-authenticated caller. While `agent` is on, an agent
+   * tool named like an `agent_*` tool is not published.
+   * @default false
+   */
+  readonly tools?: boolean;
 }
 
-/** Public MCP channel exposing durable agent invocation compatibility tools. */
+/** Public MCP channel publishing this agent's `agent_*` tools and, optionally, its own tools. */
 export type McpChannel = Channel;
 
 /**
  * Publishes this agent as a stateless Streamable HTTP MCP server.
  *
- * This channel owns only MCP transport and durable eve invocation. It reuses
+ * This channel owns MCP transport, durable eve invocation through the
+ * `agent_*` tools (unless `agent: false`), and, with `tools: true`, the
+ * agent's invocable tools, each call run through `invokeTool`. It reuses
  * eve's inbound auth strategies and recognizes `oauthResource(...)` metadata
  * when OAuth discovery is needed.
  * The file containing this channel must be `agent/channels/mcp.ts`.
@@ -63,20 +79,27 @@ export function mcpChannel(input: McpChannelInput): McpChannel {
   if (input?.auth === undefined) {
     throw new Error("mcpChannel requires auth. Use none() for explicit public access.");
   }
+  const publish: McpPublishOptions = { agent: input.agent ?? true, tools: input.tools ?? false };
+  if (!publish.agent && !publish.tools) {
+    throw new Error("mcpChannel publishes nothing with agent and tools both false. Enable one.");
+  }
   const path = input.route ?? "/eve/v1/mcp";
   const oauth = readOAuthResourceOptions(input.auth);
   const routes = [
     GET(
       path,
-      async (request, args) => await authenticateMcpRequest(request, args, input.auth, oauth),
+      async (request, args) =>
+        await authenticateMcpRequest(request, args, input.auth, oauth, publish),
     ),
     POST(
       path,
-      async (request, args) => await authenticateMcpRequest(request, args, input.auth, oauth),
+      async (request, args) =>
+        await authenticateMcpRequest(request, args, input.auth, oauth, publish),
     ),
     DELETE(
       path,
-      async (request, args) => await authenticateMcpRequest(request, args, input.auth, oauth),
+      async (request, args) =>
+        await authenticateMcpRequest(request, args, input.auth, oauth, publish),
     ),
   ];
   if (oauth !== undefined) {
@@ -326,6 +349,7 @@ async function authenticateMcpRequest(
   args: RouteHandlerArgs,
   policy: AuthFn<Request> | readonly AuthFn<Request>[],
   oauth: OAuthResourceOptions | undefined,
+  publish: McpPublishOptions,
 ): Promise<Response> {
   const securityFailure = validateMcpHttpRequest(request);
   if (securityFailure !== undefined) return securityFailure;
@@ -333,13 +357,19 @@ async function authenticateMcpRequest(
   if (auth instanceof Response) {
     return oauth === undefined ? auth : addResourceChallenge(auth, request, oauth);
   }
-  return await handleMcpRequest(request, args, auth);
+  return await handleMcpRequest(request, args, auth, publish);
+}
+
+interface McpPublishOptions {
+  readonly agent: boolean;
+  readonly tools: boolean;
 }
 
 async function handleMcpRequest(
   request: Request,
   args: RouteHandlerArgs,
   auth: import("#channel/types.js").SessionAuthContext,
+  publish: McpPublishOptions,
 ): Promise<Response> {
   const createSession = readRouteSessionCreator(args);
   const channelName = readRouteChannelName(args);
@@ -365,15 +395,25 @@ async function handleMcpRequest(
     createSession,
     from: args.from,
   });
+  const agentTools = publish.agent
+    ? createInvocationTools(
+        execution,
+        description,
+        auth.authenticator === "none" && auth.principalType === "anonymous",
+      )
+    : [];
+  const publishedTools = publish.tools
+    ? createPublishedTools({
+        invokeTool: args.invokeTool,
+        reserved: new Set(agentTools.map((tool) => tool.name)),
+        tools: (await args.describe()).tools,
+      })
+    : [];
   return await createMcpStreamableHttpServer({
     authenticate: async () => auth,
-    instructions: MCP_SERVER_INSTRUCTIONS,
+    instructions: publish.agent ? MCP_SERVER_INSTRUCTIONS : undefined,
     name: agentInfo.agent.name,
-    tools: createInvocationTools(
-      execution,
-      description,
-      auth.authenticator === "none" && auth.principalType === "anonymous",
-    ),
+    tools: [...agentTools, ...publishedTools],
     version: resolveInstalledPackageInfo().version,
   })(request);
 }
