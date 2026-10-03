@@ -1,0 +1,57 @@
+import type { SessionTraceContext } from "#channel/types.js";
+import { ConversationIdKey } from "#context/keys.js";
+import { readConversationId } from "#shared/conversation-identity.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { ConversationContext } from "#shared/conversation-context.js";
+import {
+  applyLiveDeliveryAudienceCeiling,
+  readForwardedTraceAssertion,
+} from "#shared/forwarded-trace-policy.js";
+import {
+  readActionTraceContext,
+  readTurnTraceContext,
+} from "#tracing/eve/agent-trace-context-store.js";
+
+export interface AgentChildTraceDispatch {
+  readonly conversationId?: string;
+  readonly originAudience: ChannelAudience;
+  readonly parentTraceContext?: SessionTraceContext;
+}
+
+/**
+ * The trace dispatch for sessions opened with `ctx.agent` while a run serves
+ * one workflow tool call: the call's tool span in the calling turn, read from
+ * the calling session when it admits the call.
+ */
+export function resolveToolCallAgentTrace(input: {
+  readonly callId: string;
+  readonly conversation?: ConversationContext;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionId: string;
+  readonly turnId: string;
+}): AgentChildTraceDispatch {
+  const { serializedContext, sessionId, turnId } = input;
+  const stored =
+    readActionTraceContext(serializedContext, sessionId, turnId, input.callId) ??
+    readTurnTraceContext(serializedContext, sessionId, turnId);
+  const liveAudience = input.conversation?.audience ?? "unknown";
+  const environment = input.conversation?.environment ?? "production";
+  const forwardedTracePolicy = readForwardedTraceAssertion(stored?.forwardedTracePolicy);
+  const parentTraceContext =
+    stored?.decision === undefined
+      ? stored
+      : {
+          ...stored,
+          decision: applyLiveDeliveryAudienceCeiling(
+            stored.decision,
+            liveAudience,
+            forwardedTracePolicy,
+            environment,
+          ),
+        };
+  return {
+    conversationId: readConversationId(serializedContext[ConversationIdKey.name]),
+    originAudience: forwardedTracePolicy?.originAudience ?? liveAudience,
+    parentTraceContext,
+  };
+}

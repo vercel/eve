@@ -1,4 +1,4 @@
-import { context, trace } from "#compiled/@opentelemetry/api/index.js";
+import { context, trace } from "@opentelemetry/api";
 import {
   EntityConflictError,
   HookNotFoundError,
@@ -56,7 +56,7 @@ import {
 import type { SessionCheckpoint } from "#execution/session/handoff.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
-import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
+import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import {
   sessionCommandHookToken,
   sessionInboxHookToken,

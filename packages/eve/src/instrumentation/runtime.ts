@@ -1,5 +1,5 @@
 import type { Telemetry, TelemetryOptions } from "ai";
-import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
+import { context as otelContext, trace } from "@opentelemetry/api";
 
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
@@ -41,8 +41,8 @@ import {
   type PrepareTurnTraceContextInput,
 } from "#instrumentation/prepare-trace-context.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
-import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/otel-declaration.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/eve/otel-declaration.js";
+import { AgentSpanIdGenerator } from "#tracing/eve/otel-ids.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import {
   createMemoryInstrumentation,
@@ -50,15 +50,15 @@ import {
 } from "#instrumentation/memory.js";
 import { ConversationIdKey, ParentSessionKey } from "#context/keys.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
-import { withErrorContent } from "#tracing/error-content-context.js";
-import type { AgentSamplingOperation } from "#tracing/agent-span-contract.js";
+import { withCapture } from "#tracing/lib/index.js";
+import type { SamplingOperation as AgentSamplingOperation } from "#tracing/eve/otel-registration.js";
 import {
   isSampledTrace,
   resolveTracePolicy,
   resolveTracePolicyDecision,
-} from "#tracing/sampled-trace.js";
+} from "#shared/trace-policy.js";
 import { readInstrumentationSessionContext } from "#instrumentation/session-context.js";
-import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
+import { readSessionTraceDecision } from "#tracing/eve/agent-trace-context-store.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { applyLiveDeliveryAudienceCeiling } from "#shared/forwarded-trace-policy.js";
 import { readConversationId } from "#shared/conversation-identity.js";
@@ -141,7 +141,7 @@ export interface BoundInstrumentationSession {
 export interface InstrumentationRuntime {
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
-  readonly idGenerator?: AgentSpanIdGenerator;
+  readonly idGenerator: AgentSpanIdGenerator;
   readonly memoryOperations?: boolean;
   readonly ownsAgentSpans?: boolean;
   readonly prepareSessionTrace?: (
@@ -485,7 +485,11 @@ export function bindInstrumentationRuntime(
           });
         try {
           return await otelContext.with(
-            withErrorContent(parentContext ?? otelContext.active(), content.recordOutputs),
+            withCapture(parentContext ?? otelContext.active(), {
+              emit: true,
+              recordInputs: content.recordInputs,
+              recordOutputs: content.recordOutputs,
+            }),
             run,
           );
         } finally {

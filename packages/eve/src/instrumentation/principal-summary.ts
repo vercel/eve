@@ -11,7 +11,7 @@ import {
 } from "#shared/instrumentation-content.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { resolveTracePolicyDecision } from "#shared/trace-policy.js";
-import { boundedPrincipalId } from "#tracing/telemetry-budget.js";
+import { boundedPrincipalId } from "#tracing/eve/serialization.js";
 
 export function summarizeInstrumentationPrincipal(
   principal: SessionAuthContext | null | undefined,

@@ -29,8 +29,7 @@ import {
   isSampledTrace,
   resolveTracePolicy,
   resolveTracePolicyDecision,
-} from "#tracing/sampled-trace.js";
-import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+} from "#shared/trace-policy.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime-global.js";
 import type { InstrumentationRuntime } from "#instrumentation/runtime.js";
 
@@ -97,6 +96,7 @@ function allocateSessionTraceSeed(input: {
   readonly parentTraceContext?: SessionTraceContext;
   readonly runtime: InstrumentationRuntime | undefined;
 }): SessionTraceSeed | undefined {
+  if (input.runtime === undefined) return undefined;
   const localDecision = () =>
     resolveTracePolicy(input.runtime?.otelSettings?.tracePolicy, {
       agentName: input.agentName,
@@ -118,7 +118,7 @@ function allocateSessionTraceSeed(input: {
     const decision = input.forwardedTracePolicy
       ? intersectInstrumentationDecisions(parentDecision, localDecision())
       : parentDecision;
-    const idGenerator = input.runtime?.idGenerator ?? new AgentSpanIdGenerator();
+    const idGenerator = input.runtime.idGenerator;
     return {
       decision,
       ...(input.forwardedTracePolicy === undefined
@@ -129,8 +129,7 @@ function allocateSessionTraceSeed(input: {
       traceId: idGenerator.generateTraceId(),
     };
   }
-  if (input.runtime?.prepareSessionTrace === undefined || input.runtime.idGenerator === undefined)
-    return undefined;
+  if (input.runtime.prepareSessionTrace === undefined) return undefined;
   const decision = localDecision();
   const traceId = input.runtime.idGenerator.generateTraceId();
   const sampled = decision.action === "record";

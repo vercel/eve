@@ -1,0 +1,255 @@
+import { createRequire } from "node:module";
+
+import { context, propagation, trace, type Context } from "@opentelemetry/api";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  ROOT_CONTEXT as COMPILED_ROOT_CONTEXT,
+  context as runtimeContext,
+  metrics as runtimeMetrics,
+  trace as runtimeTrace,
+} from "@opentelemetry/api";
+import { registerOtelPipeline } from "./otel-registration.js";
+
+const require = createRequire(import.meta.url);
+const authoredApi = require("@opentelemetry/api") as typeof import("@opentelemetry/api");
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  authoredApi.context.disable();
+  authoredApi.metrics.disable();
+  authoredApi.propagation.disable();
+  authoredApi.trace.disable();
+  context.disable();
+  propagation.disable();
+  trace.disable();
+  (runtimeContext as typeof runtimeContext & { disable(): void }).disable();
+  (runtimeMetrics as typeof runtimeMetrics & { disable(): void }).disable();
+  (runtimeTrace as typeof runtimeTrace & { disable(): void }).disable();
+});
+
+describe("OTel registration", () => {
+  it("samples using the real activation name and attributes without exporting probes", async () => {
+    const exporter = new InMemorySpanExporter();
+    const sampler = {
+      shouldSample: (
+        _context: unknown,
+        _traceId: string,
+        name: string,
+        _kind: unknown,
+        attributes: Record<string, unknown>,
+      ) => ({
+        decision:
+          name === "invoke_agent researcher" && attributes["gen_ai.conversation.id"] === "session-1"
+            ? 2
+            : 0,
+      }),
+      toString: () => "activation-sampler",
+    };
+    const runtime = registerOtelPipeline({
+      otel: { sampler, spanProcessors: [new SimpleSpanProcessor(exporter)] },
+      serviceName: "researcher",
+    });
+    const operation = {
+      name: "invoke_agent researcher",
+      attributes: { "gen_ai.conversation.id": "session-1" },
+    };
+    expect(runtime.samplesTrace("a".repeat(32), operation)).toBe(true);
+    expect(
+      runtime.samplesTrace("b".repeat(32), {
+        ...operation,
+        attributes: { "gen_ai.conversation.id": "other" },
+      }),
+    ).toBe(false);
+    runtimeTrace
+      .getTracer("eve.agent")
+      .startSpan(operation.name, { attributes: operation.attributes, root: true })
+      .end();
+    await runtime.forceFlush();
+    expect(exporter.getFinishedSpans().map((span) => span.name)).toEqual([operation.name]);
+    await runtime.shutdown();
+  });
+
+  it.each(["traceidratio", "parentbased_traceidratio"] as const)(
+    "honors the configured %s root ratio",
+    async (sampler) => {
+      vi.stubEnv("OTEL_TRACES_SAMPLER_ARG", "0");
+      const runtime = registerOtelPipeline({
+        otel: { sampler, spanProcessors: [] },
+        serviceName: "test",
+      });
+      expect(runtime.samplesTrace("a".repeat(32), { name: "invoke_agent test" })).toBe(false);
+      await runtime.shutdown();
+    },
+  );
+
+  it("delegates an authored tracer cached before registration", async () => {
+    const authoredTracer = authoredApi.trace.getTracer("authored");
+    expect(authoredTracer.startSpan("before-registration").isRecording()).toBe(false);
+
+    const exporter = new InMemorySpanExporter();
+    const processor = new SimpleSpanProcessor(exporter);
+    const runtime = registerOtelPipeline({
+      otel: { spanProcessors: [processor] },
+      serviceName: "weather",
+    });
+    const parent = runtimeTrace.getTracer("eve").startSpan("eve.parent");
+    const parentContext = parent.spanContext();
+    const activeContext = runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, parent);
+    const child = await runtimeContext.with(activeContext, async () => {
+      await Promise.resolve();
+      return authoredTracer.startSpan("authored.child");
+    });
+
+    expect(child.isRecording()).toBe(true);
+    expect(child.spanContext().traceId).toBe(parentContext.traceId);
+    child.end();
+    parent.end();
+    await runtime.forceFlush();
+
+    const exportedChild = exporter
+      .getFinishedSpans()
+      .find((span) => span.name === "authored.child");
+    expect(exportedChild?.parentSpanContext?.spanId).toBe(parentContext.spanId);
+    await runtime.shutdown();
+  });
+
+  it("passes the pre-allocated trace id to a custom sampler without exporting the probe", async () => {
+    const seen: string[] = [];
+    const sampler: NonNullable<Parameters<typeof registerOtelPipeline>[0]["otel"]["sampler"]> = {
+      shouldSample: (_context: unknown, traceId: string) => {
+        seen.push(traceId);
+        return { decision: traceId.startsWith("a") ? 2 : 0 };
+      },
+      toString: () => "test-sampler",
+    };
+    const exporter = new InMemorySpanExporter();
+    const processor = new SimpleSpanProcessor(exporter);
+    const runtime = registerOtelPipeline({
+      otel: {
+        sampler,
+        spanProcessors: [processor],
+      },
+      serviceName: "weather",
+    });
+
+    expect(runtime.samplesTrace("a".repeat(32))).toBe(true);
+    expect(runtime.samplesTrace("b".repeat(32))).toBe(false);
+    expect(seen).toContain("a".repeat(32));
+    expect(seen).toContain("b".repeat(32));
+
+    await runtime.forceFlush();
+    expect(exporter.getFinishedSpans()).toEqual([]);
+  });
+
+  it("fails without replacing another runtime's global propagator", async () => {
+    let foreignInjections = 0;
+    const shutdown = vi.fn(async () => undefined);
+    expect(
+      propagation.setGlobalPropagator({
+        extract: (carrierContext: Context) => carrierContext,
+        fields: () => [],
+        inject: () => {
+          foreignInjections += 1;
+        },
+      }),
+    ).toBe(true);
+    const tracerDelegate = currentTracerDelegate();
+
+    expect(() =>
+      registerOtelPipeline({
+        otel: {
+          spanProcessors: [
+            { forceFlush: async () => {}, onEnd: () => {}, onStart: () => {}, shutdown },
+          ],
+        },
+        serviceName: "weather",
+      }),
+    ).toThrow(/another runtime already owns the global propagator/u);
+
+    const injectionsAfterFailure = foreignInjections;
+    propagation.inject(context.active(), {}, { set: () => {} });
+    expect(foreignInjections).toBe(injectionsAfterFailure + 1);
+    expect(currentTracerDelegate()).toBe(tracerDelegate);
+    await vi.waitFor(() => expect(shutdown).toHaveBeenCalledOnce());
+  });
+
+  it("leaves an existing tracer provider untouched when registration fails", () => {
+    const provider = new BasicTracerProvider();
+    const shutdown = vi.spyOn(provider, "shutdown");
+    expect(authoredApi.trace.setGlobalTracerProvider(provider)).toBe(true);
+    const authoredProxy = authoredApi.trace.getTracerProvider();
+    expect(authoredProxy).toBeInstanceOf(authoredApi.ProxyTracerProvider);
+    const setDelegate = vi.spyOn(
+      authoredProxy as InstanceType<typeof authoredApi.ProxyTracerProvider>,
+      "setDelegate",
+    );
+
+    expect(() =>
+      registerOtelPipeline({
+        otel: { spanProcessors: [] },
+        serviceName: "weather",
+      }),
+    ).toThrow(/another runtime already owns the global tracer provider/u);
+
+    expect(currentTracerDelegate()).toBe(provider);
+    expect(setDelegate).not.toHaveBeenCalled();
+    expect(shutdown).not.toHaveBeenCalled();
+    expect(
+      propagation.setGlobalPropagator({
+        extract: (carrierContext: Context) => carrierContext,
+        fields: () => [],
+        inject: () => {},
+      }),
+    ).toBe(true);
+  });
+
+  it("flushes and shuts down the registered meter provider", async () => {
+    const reader = {
+      forceFlush: vi.fn(async () => {}),
+      setMetricProducer: vi.fn(),
+      shutdown: vi.fn(async () => {}),
+    };
+    const runtime = registerOtelPipeline({
+      otel: { metricReaders: [reader], spanProcessors: [] },
+      serviceName: "weather",
+    });
+
+    await runtime.forceFlush();
+    expect(reader.forceFlush).toHaveBeenCalledOnce();
+    expect(reader.shutdown).not.toHaveBeenCalled();
+
+    await runtime.shutdown();
+    expect(reader.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("disables declared instrumentations at shutdown", async () => {
+    const instrumentation = {
+      disable: vi.fn(),
+      enable: vi.fn(),
+      getConfig: () => ({ enabled: false }),
+      setMeterProvider: vi.fn(),
+      setTracerProvider: vi.fn(),
+    };
+    const runtime = registerOtelPipeline({
+      otel: { instrumentations: [instrumentation], spanProcessors: [] },
+      serviceName: "weather",
+    });
+    expect(instrumentation.enable).toHaveBeenCalledOnce();
+    expect(instrumentation.disable).not.toHaveBeenCalled();
+
+    await runtime.shutdown();
+    expect(instrumentation.disable).toHaveBeenCalledOnce();
+  });
+});
+
+function currentTracerDelegate(): unknown {
+  const provider = trace.getTracerProvider() as { getDelegate?: () => unknown };
+  return provider.getDelegate?.();
+}

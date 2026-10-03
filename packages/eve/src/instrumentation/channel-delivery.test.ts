@@ -1,3 +1,4 @@
+import { AgentSpanIdGenerator } from "#tracing/eve/otel-ids.js";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -34,6 +35,7 @@ function bindHooks(
   return bindInstrumentationRuntime(
     {
       forceFlush: async () => undefined,
+      idGenerator: new AgentSpanIdGenerator(),
       hooks,
       otelSettings: undefined,
       runInContext: (_operation, execute) => execute(),

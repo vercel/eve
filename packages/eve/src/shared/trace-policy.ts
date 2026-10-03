@@ -1,5 +1,10 @@
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type { ConversationContext } from "#shared/conversation-context.js";
+
+// Keep sampled-flag checks free of OTel imports for workflow driver bundles.
+export function isSampledTrace(context: { readonly traceFlags: number }): boolean {
+  return (context.traceFlags & 1) !== 0;
+}
 import {
   DROP_INSTRUMENTATION,
   type InstrumentationDecision,

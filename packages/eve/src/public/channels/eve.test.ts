@@ -939,6 +939,77 @@ describe("eveChannel — onMessage", () => {
 });
 
 describe("eveChannel — create session idempotency", () => {
+  it.each([true, false])(
+    "accepts library handoff only with trusted forwarded provenance (%s)",
+    async (trusted) => {
+      const { AsyncLocalStorageContextManager } =
+        await import("@opentelemetry/context-async-hooks");
+      const { context } = await import("@opentelemetry/api");
+      const manager = new AsyncLocalStorageContextManager().enable();
+      context.setGlobalContextManager(manager);
+      try {
+        const handler = createEveCreateHandler({
+          auth: () => ACCEPTED_AUTH,
+          trustedForwarders: () => trusted,
+        });
+        const request = createJsonMessageRequest({
+          callback: {
+            callId: "call-1",
+            subagentName: "research",
+            token: "tok123",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          message: "hi",
+          protocolVersion: REMOTE_AGENT_PROTOCOL_VERSION,
+          ...(trusted
+            ? {
+                forwardedPrincipal: {
+                  current: {
+                    attributes: {},
+                    authenticator: "api-key",
+                    principalId: "user",
+                    principalType: "user",
+                  },
+                },
+              }
+            : {}),
+        });
+        request.headers.set("traceparent", `00-${"a".repeat(32)}-${"b".repeat(16)}-01`);
+        request.headers.set(
+          "baggage",
+          writeForwardedParentSessionBaggage(undefined, {
+            callId: "call-1",
+            rootSessionId: "root",
+            sessionId: "parent",
+            turn: { id: "turn", sequence: 0 },
+          })!,
+        );
+        request.headers.set(
+          "x-agent-tracing",
+          JSON.stringify({
+            caller: { traceId: "a".repeat(32), spanId: "b".repeat(16), traceFlags: 1 },
+            conversationId: "handoff-conversation",
+            parentRunId: "parent",
+            parentCallId: "call-1",
+            agentName: "research",
+            capture: { emit: true, recordInputs: false, recordOutputs: false },
+          }),
+        );
+        expect((await handler.fetch(request)).status).toBe(202);
+        const options = handler.createSession.mock.calls[0]?.[0];
+        expect(options?.conversationId).toBe(trusted ? "handoff-conversation" : undefined);
+        if (trusted)
+          expect(options?.parentTraceContext?.decision).toEqual({
+            action: "record",
+            recordInputs: false,
+            recordOutputs: false,
+          });
+      } finally {
+        context.disable();
+        manager.disable();
+      }
+    },
+  );
   it("creates once for an operation id and uses it as the continuation token", async () => {
     const handler = createEveCreateHandler({ auth: () => ACCEPTED_AUTH });
 

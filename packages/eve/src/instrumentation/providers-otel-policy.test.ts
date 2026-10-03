@@ -8,20 +8,16 @@ import {
 import { defineInstrumentation } from "#public/instrumentation/index.js";
 import { otel, type TracePolicyDecision } from "#public/instrumentation/otel.js";
 
-vi.mock("#tracing/otel-registration.js", () => ({
-  registerOtelPipeline: () => ({
-    forceFlush: async () => undefined,
-    idGenerator: {
-      deriveSpanId: () => "2".repeat(16),
-      generateTraceId: () => "1".repeat(32),
-      withSpanId: (_spanId: string, run: () => unknown) => run(),
-      withTraceId: (_traceId: string, run: () => unknown) => run(),
-    },
-    shutdown: async () => undefined,
+const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
+vi.mock("#tracing/eve/otel-registration.js", () => ({
+  registerOtel: () => ({
+    provider: { getTracer: () => ({}) },
+    idGenerator: { deriveSpanId: () => "2".repeat(16), generateTraceId: () => "1".repeat(32) },
+    samplesTrace: () => true,
+    forceFlush: async () => {},
+    shutdown: async () => {},
   }),
 }));
-
-const REGISTRY_GLOBAL_KEY = Symbol.for("eve.harness-instrumentation-providers");
 const RUNTIME_GLOBAL_KEY = Symbol.for("eve.instrumentation-runtime");
 
 const traceContext = (audience: "public" | "private" | "unknown") => ({

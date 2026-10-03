@@ -1,3 +1,4 @@
+import { AgentSpanIdGenerator } from "#tracing/eve/otel-ids.js";
 import type { H3Event } from "nitro";
 import {
   context as apiContext,
@@ -13,10 +14,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  context as vendoredContext,
-  trace as vendoredTrace,
-} from "#compiled/@opentelemetry/api/index.js";
+import { context as vendoredContext, trace as vendoredTrace } from "@opentelemetry/api";
 
 import {
   CHANNEL_SENTINEL,
@@ -31,7 +29,7 @@ import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
-import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
+import { isAgentTraceContext } from "#tracing/eve/agent-trace-context.js";
 import {
   dispatchChannelRequest,
   dispatchChannelWebSocketRequest,
@@ -94,6 +92,7 @@ function createDeferred<T>() {
 function registerChannelRequestTracing(enabled: boolean): void {
   registerInstrumentationRuntime({
     forceFlush: async () => undefined,
+    idGenerator: new AgentSpanIdGenerator(),
     hooks: createInstrumentationHooks([]),
     otelSettings: {
       functionId: undefined,

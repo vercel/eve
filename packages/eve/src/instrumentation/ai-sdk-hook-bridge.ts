@@ -3,7 +3,6 @@ import type { Telemetry } from "ai";
 import type {
   InstrumentationAttemptScope,
   InstrumentationStepAttemptStartedEvent,
-  InstrumentationContentPart,
   InstrumentationContextRunner,
   InstrumentationHooks,
   InstrumentationModelCallCompletedEvent,
@@ -12,7 +11,6 @@ import type {
   InstrumentationToolCallCompletedEvent,
   InstrumentationToolCallStartedEvent,
   InstrumentationToolOutput,
-  InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import {
   attemptIdempotencyKey,
@@ -20,6 +18,7 @@ import {
   toolCallIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
 import { structuralProviderMetadata } from "#instrumentation/content.js";
+import { modelContent, modelUsage } from "#tracing/eve/ai-sdk-payload.js";
 
 type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
 
@@ -225,76 +224,17 @@ function toModelCallCompleted(
   source: TelemetryEvent<"onLanguageModelCallEnd">,
 ): InstrumentationModelCallCompletedEvent {
   return Object.freeze({
-    content: state.capturesOutputs ? toContentParts(source.content) : undefined,
+    content: state.capturesOutputs
+      ? Object.freeze(modelContent(source.content).map((part) => Object.freeze(part)))
+      : undefined,
     finishReason: source.finishReason,
     idempotencyKey,
     responseModelId: source.modelId,
     responseId: source.responseId,
     scope: state.scope,
     type: "model.call.completed",
-    usage: toUsage(source.usage),
+    usage: Object.freeze(modelUsage(source.usage)),
   });
-}
-
-function toUsage(usage: TelemetryEvent<"onLanguageModelCallEnd">["usage"]): InstrumentationUsage {
-  return Object.freeze({
-    inputTokenDetails: Object.freeze({
-      cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
-      cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,
-    }),
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-  });
-}
-
-/** Drops kinds eve does not record; see {@link InstrumentationContentPart}. */
-function toContentParts(
-  content: TelemetryEvent<"onLanguageModelCallEnd">["content"],
-): readonly InstrumentationContentPart[] {
-  const parts: InstrumentationContentPart[] = [];
-  for (const part of content) {
-    switch (part.type) {
-      case "text":
-      case "reasoning":
-        parts.push(Object.freeze({ text: part.text, type: part.type }));
-        break;
-      case "tool-call":
-        parts.push(
-          Object.freeze({
-            callId: part.toolCallId,
-            input: part.input,
-            toolName: part.toolName,
-            type: "tool-call",
-          }),
-        );
-        break;
-      case "tool-result":
-        parts.push(
-          Object.freeze({
-            callId: part.toolCallId,
-            input: part.input,
-            output: part.output,
-            toolName: part.toolName,
-            type: "tool-result",
-          }),
-        );
-        break;
-      case "tool-error":
-        parts.push(
-          Object.freeze({
-            callId: part.toolCallId,
-            error: part.error,
-            input: part.input,
-            toolName: part.toolName,
-            type: "tool-error",
-          }),
-        );
-        break;
-      default:
-        break;
-    }
-  }
-  return Object.freeze(parts);
 }
 
 function toToolCallStarted(

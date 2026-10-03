@@ -1,3 +1,4 @@
+import { AgentSpanIdGenerator } from "#tracing/eve/otel-ids.js";
 import { ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Runtime } from "#channel/types.js";
@@ -327,6 +328,7 @@ describe("createExecutionNodeStep", () => {
     setupMockAgentForToolExecution("regular-tool", { question: "Run the tool." });
     const forceFlush = vi.fn(async () => undefined);
     const runtime: InstrumentationRuntime = {
+      idGenerator: new AgentSpanIdGenerator(),
       forceFlush,
       hooks: createInstrumentationHooks([]),
       otelSettings: undefined,

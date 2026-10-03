@@ -42,7 +42,8 @@ import {
   writeForwardedParentSessionBaggage,
 } from "#protocol/baggage.js";
 import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
-import { writeConversationBaggage } from "#tracing/conversation-context.js";
+import { writeConversationBaggage } from "#tracing/eve/conversation-context.js";
+import { agentDelegation } from "#tracing/eve/delegation.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),
@@ -147,7 +148,7 @@ export async function startRemoteAgentSession(input: {
     "baggage",
     writeForwardedParentSessionBaggage(conversationBaggage, input.parent?.lineage),
   );
-  const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
+  const response = await agentDelegation.fetch(createRemoteAgentSessionUrl(input.remote), {
     body: JSON.stringify(requestBody),
     headers: {
       "content-type": "application/json",
