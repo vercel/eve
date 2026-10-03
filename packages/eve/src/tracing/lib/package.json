@@ -1,0 +1,11 @@
+{
+  "name": "@vercel/agent-tracing",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0"
+  }
+}

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
  * Mechanical enforcement of framework code invariants.
+ * Rule 49 keeps tracing library imports self-contained and prevents host
+ * consumers from importing private tracing core modules.
  *
  * Several framework invariants can be checked mechanically. Each one gets a
  * dedicated guard here. Every guard prints an error message that explains
@@ -240,6 +242,7 @@ function isTsLike(relPath) {
  *   rule46: Violation[];
  *   rule47: Violation[];
  *   rule48: Violation[];
+ *   rule49: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -273,6 +276,49 @@ async function scanRepo(state) {
     checkRule46(posix, lines, state.rule46);
     checkRule47(posix, lines, state.rule47);
     checkRule48(posix, lines, state.rule48);
+    if (posix.startsWith("packages/eve/src/tracing/lib/")) {
+      for (const [index, line] of lines.entries()) {
+        const imports = [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)];
+        for (const match of imports) {
+          const specifier = match[2];
+          const escapes =
+            specifier.startsWith("#") ||
+            (specifier.startsWith(".") &&
+              !toPosix(relative(REPO_ROOT, resolve(dirname(absPath), specifier))).startsWith(
+                "packages/eve/src/tracing/lib/",
+              ));
+          if (escapes)
+            state.rule49.push({
+              rule: 49,
+              file: posix,
+              line: index + 1,
+              message:
+                "Tracing library imports must stay inside the library or use an external package. Host integration belongs outside lib/.",
+            });
+        }
+      }
+    }
+    if (!posix.startsWith("packages/eve/src/tracing/lib/")) {
+      lines.forEach((line, index) => {
+        const privateImport =
+          /['"]#tracing\/lib\/(?:core|adapters)\//.test(line) ||
+          [...line.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)].some(
+            (match) =>
+              match[2].startsWith(".") &&
+              /^packages\/eve\/src\/tracing\/lib\/(?:core|adapters)\//.test(
+                toPosix(relative(REPO_ROOT, resolve(dirname(absPath), match[2]))),
+              ),
+          );
+        if (privateImport)
+          state.rule49.push({
+            rule: 49,
+            file: posix,
+            line: index + 1,
+            message:
+              "Import the tracing library public or runtime entrypoint, not private core modules.",
+          });
+      });
+    }
   }
 }
 
@@ -1544,6 +1590,7 @@ async function main() {
     rule46: /** @type {Violation[]} */ ([]),
     rule47: /** @type {Violation[]} */ ([]),
     rule48: /** @type {Violation[]} */ ([]),
+    rule49: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1658,6 +1705,7 @@ async function main() {
   // Rule 47
   violations.push(...state.rule47);
   violations.push(...state.rule48);
+  violations.push(...state.rule49);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");
