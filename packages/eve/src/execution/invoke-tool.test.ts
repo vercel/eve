@@ -98,6 +98,7 @@ function runtimeWith(
   owners: Readonly<Record<string, "application" | "framework">> = {},
 ): InvokeToolRuntime {
   return {
+    agentName: "test-agent",
     callbackBaseUrl: "https://agent.example",
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     manifest: {
@@ -151,6 +152,24 @@ describe("invokeTool", () => {
       status: "invalid-input",
     });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("checks input as a conversation does: none is {}, and a non-object is refused", async () => {
+    const execute = vi.fn((input: unknown) => input);
+    const runtime = runtimeWith([tool("note", execute)]);
+    for (const input of [[1], "plain", 7, true]) {
+      expect(await invokeTool(runtime, "note", input, { auth: alice })).toMatchObject({
+        message: expect.stringContaining('Invalid input for tool "note"'),
+        status: "invalid-input",
+      });
+    }
+    expect(execute).not.toHaveBeenCalled();
+    for (const input of [undefined, null, ""]) {
+      expect(await invokeTool(runtime, "note", input, { auth: alice })).toMatchObject({
+        output: {},
+        status: "completed",
+      });
+    }
   });
 
   it("gives each call its own sandbox and deletes it when the call ends", async () => {
