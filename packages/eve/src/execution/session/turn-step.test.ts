@@ -17,6 +17,7 @@ import {
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
   SessionDynamicSubagentRuntimeRevisionKey,
+  SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
@@ -24,6 +25,7 @@ import {
   SessionIdKey,
   SessionTraceSeedKey,
   TraceRootKey,
+  TurnDynamicInstructionsKey,
   TurnDynamicToolMetadataKey,
   TurnDeliveryIdsKey,
   HistoryStateKey,
@@ -1658,6 +1660,60 @@ describe("turnStep", () => {
       { role: "user", content: announcement, kind: "user" },
       { content: "thread=unset; user=cancel this turn", kind: "user", role: "user" },
     ]);
+  });
+
+  it("keeps session-scoped dynamic instructions when the first turn is cancelled", async () => {
+    // A hook cancels the first turn after its session.started preamble
+    // resolved the session's instructions. The session is now started, so no
+    // later turn resolves them again; they must survive the cancellation.
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createRuntimeHookRegistry([]),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    const sessionInstructions = {
+      tenant: [{ role: "system" as const, content: "Answer for the Acme tenant." }],
+    };
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (): Promise<StepResult> => {
+        const ctx = loadContext();
+        ctx.set(SessionDynamicInstructionsKey, sessionInstructions);
+        ctx.set(TurnDynamicInstructionsKey, {
+          today: [{ role: "system", content: "discard this turn-scoped instruction" }],
+        });
+        throw new TurnCancelledError();
+      };
+    });
+
+    const result = await turnStep({
+      history: session.history,
+      input: { kind: "deliver", payloads: [{ message: "cancel this turn" }] },
+      sessionWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "cancelled",
+      serializedContext: { [SessionDynamicInstructionsKey.name]: sessionInstructions },
+    });
+    expect(result.serializedContext).not.toHaveProperty(TurnDynamicInstructionsKey.name);
   });
 
   it("preserves a cancelled turn message that carries an attachment", async () => {

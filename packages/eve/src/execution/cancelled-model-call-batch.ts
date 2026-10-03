@@ -1,6 +1,7 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import { TurnDeliveryIdsKey } from "#context/keys.js";
 import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
+import { preserveSerializedSessionDynamicInstructions } from "#context/serialized-session-dynamic-instructions.js";
 import { serializeContext } from "#context/serialize.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { createDurableSessionValues } from "#execution/durable-session-store.js";
@@ -39,7 +40,10 @@ export async function createCancelledModelCallBatchResult(input: {
     action: "cancelled",
     serializedContext: preserveSerializedInstrumentationState(
       preserveSerializedAgentTraceState(
-        preserveSerializedSessionDynamicModelSelection(checkpointContext, interruptedContext),
+        preserveSerializedSessionDynamicInstructions(
+          preserveSerializedSessionDynamicModelSelection(checkpointContext, interruptedContext),
+          interruptedContext,
+        ),
         interruptedContext,
       ),
       interruptedContext,
