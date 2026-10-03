@@ -1,5 +1,5 @@
 import { contextStorage, type ContextContainer } from "#context/container.js";
-import { TurnDeliveryIdsKey } from "#context/keys.js";
+import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { serializeContext } from "#context/serialize.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
@@ -32,6 +32,7 @@ export async function createCancelledModelCallBatchResult(input: {
       : checkpointSession;
   const checkpointContext = {
     ...(input.checkpoint?.serializedContext ?? input.beforeBatchContext),
+    [AuthKey.name]: interruptedContext[AuthKey.name],
     [TurnDeliveryIdsKey.name]: interruptedContext[TurnDeliveryIdsKey.name],
   };
 
