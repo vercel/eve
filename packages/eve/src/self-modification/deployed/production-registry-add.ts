@@ -5,7 +5,7 @@ import { shellQuote } from "#shared/shell-quote.js";
 import type { PreparedSelfModificationWorkspace } from "../git-workspace.js";
 import { gitOutput, runGitCommand } from "../git.js";
 import { assertFullSha } from "../identifiers.js";
-import { readTerminalHeadlessEvent } from "./eve-add.js";
+import { readTerminalHeadlessEvent } from "../extension/eve-add.js";
 
 const OFFICIAL_ADDRESS =
   /^(?:(?:channel|connection|extension|instrumentation)\/)?[a-z0-9][a-z0-9._-]*$/u;

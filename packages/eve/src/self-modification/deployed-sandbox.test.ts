@@ -1,23 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { SelfModificationConfig } from "./config.js";
+import type { DeployedSelfModificationConfig } from "./deployed/config.js";
 import {
-  defineSelfModificationSandbox,
+  defineDeployedSelfModificationSandbox,
   selectDeployedSelfModificationEnvironment,
-} from "./sandbox.js";
+} from "./deployed-sandbox.js";
 
-const connectConfig: SelfModificationConfig = {
-  deployed: {
-    authorize: () => true,
-    credentials: { pat: true },
-    source: { git: { directory: ".", repository: "github.com/acme/agent" } },
-    target: { branch: "main" },
-  },
+const connectConfig: DeployedSelfModificationConfig = {
+  authorize: () => true,
+  credentials: { pat: true },
+  source: { git: { directory: ".", repository: "github.com/acme/agent" } },
+  target: { branch: "main" },
 };
 
 afterEach(() => vi.unstubAllEnvs());
 
-describe("self-modification sandbox", () => {
+describe("deployed self-modification sandbox", () => {
   it("selects Vercel Sandbox on Vercel", () => {
     expect(
       selectDeployedSelfModificationEnvironment({
@@ -45,8 +43,11 @@ describe("self-modification sandbox", () => {
     ).toThrow("No supported provider is available");
   });
 
-  it("returns a callback definition", () => {
-    vi.stubEnv("VERCEL", "1");
-    expect(defineSelfModificationSandbox({ config: connectConfig })).toBeTypeOf("function");
+  it("does not probe deployed providers during eve dev", () => {
+    vi.stubEnv("EVE_DEV", "1");
+    const probes = { isDeployedOnVercel: vi.fn(), isMicrosandboxSupported: vi.fn() };
+    expect(defineDeployedSelfModificationSandbox(connectConfig, probes)).toBeTypeOf("function");
+    expect(probes.isDeployedOnVercel).not.toHaveBeenCalled();
+    expect(probes.isMicrosandboxSupported).not.toHaveBeenCalled();
   });
 });

@@ -1,11 +1,11 @@
 import { defineDynamic, defineTool, type ToolContext } from "eve/tools";
 
-import { resolveSelfModificationConfig } from "../../../../config.js";
 import { createGitHubCredentialProvider } from "../../../../credentials.js";
 import { readPreparedSelfModificationWorkspace } from "../../../../git-workspace.js";
 import { publishGitHubDraftPullRequest } from "../../../../github-publisher.js";
-import { resolveSelfModificationMode } from "../../../../mode.js";
+import { isDeployedRuntime } from "../../../../mode.js";
 import { withSelfModificationWorkspaceLock } from "../../../../workspace-lock.js";
+import { resolveDeployedSelfModificationConfig } from "../../../config.js";
 import selfModification from "../../../extension.js";
 
 const inputSchema = {
@@ -56,9 +56,7 @@ const outputSchema = {
 } as const;
 
 function resolveTool() {
-  const config = resolveSelfModificationConfig(selfModification.config);
-  if (resolveSelfModificationMode(config) !== "deployed" || config.deployed === undefined)
-    return null;
+  if (!isDeployedRuntime()) return null;
   return defineTool({
     description:
       "Publish the complete validated agent source change as one draft pull request. Merge and deployment do not occur.",
@@ -81,11 +79,10 @@ async function publish(input: unknown, toolContext: ToolContext) {
   ) {
     throw new Error("Production publication requires a valid title and summary.");
   }
-  const config = resolveSelfModificationConfig(selfModification.config);
-  if (resolveSelfModificationMode(config) !== "deployed" || config.deployed === undefined) {
-    throw new Error("Production publication requires deployed self-modification configuration.");
+  if (!isDeployedRuntime()) {
+    throw new Error("Production publication is unavailable during eve dev.");
   }
-  const deployed = config.deployed;
+  const deployed = resolveDeployedSelfModificationConfig(selfModification.config);
   const summary = input.summary;
   const title = input.title;
   const operationId = publicationOperationId(toolContext);

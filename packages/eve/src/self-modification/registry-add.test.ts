@@ -24,6 +24,7 @@ import {
   unsetEnvVars,
 } from "./extension/subagents/agent/tools/registry_add.js";
 import { clearRegistryIndexCache } from "./extension/subagents/agent/tools/search_registry.js";
+import { productionRegistryAddTool } from "./deployed/subagents/agent/tools/registry_add.js";
 
 const APP_ROOT = "/workspace/agent";
 const originalEveDev = process.env.EVE_DEV;
@@ -160,17 +161,12 @@ describe("resolveRegistryAddTool", () => {
   });
 
   it("resolves the deployed lifecycle with continuation arguments and outcomes", () => {
-    delete process.env.EVE_DEV;
-
-    const tool = resolveRegistryAddTool({
-      localEnabled: true,
-      deployed: {
-        authorize: () => true,
-        credentials: { kind: "pat" },
-        directory: ".",
-        repository: { owner: "acme", repo: "agent" },
-        targetBranch: "main",
-      },
+    const tool = productionRegistryAddTool({
+      authorize: () => true,
+      credentials: { kind: "pat" },
+      directory: ".",
+      repository: { owner: "acme", repo: "agent" },
+      targetBranch: "main",
     });
 
     expect(tool).toMatchObject({

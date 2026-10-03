@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { win32 } from "node:path";
 import { runInNewContext } from "node:vm";
 
-import { defineSelfModificationConfig } from "./config.js";
+import type { DeployedSelfModificationConfig } from "./deployed/config.js";
 
 import { captureVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
 
@@ -21,25 +21,31 @@ function evaluateGeneratedConfig(source: string, getToken = vi.fn()) {
   return runInNewContext(
     source
       .replace('import { getToken } from "@vercel/connect";', "")
-      .replace('import { defineSelfModificationConfig } from "eve/self-modification/config";', "")
-      .replace('import selfModification from "eve/self-modification";', "")
-      .replace("export default ", "")
-      .replace("selfModification(", "defineSelfModificationConfig("),
+      .replace('import selfModification from "eve/self-modification/deployed";', "")
+      .replace("export default ", ""),
     {
-      defineSelfModificationConfig,
       getToken,
       process: { env: { VERCEL_PROJECT_ID: "prj_123" } },
+      selfModification: (config: DeployedSelfModificationConfig) => config,
     },
-  ) as ReturnType<typeof defineSelfModificationConfig>;
+  ) as DeployedSelfModificationConfig;
 }
 
 describe("self-modification setup", () => {
   it("recognizes default local configurations", () => {
     expect(renderSelfModificationConfig()).toContain(
-      'import selfModification from "eve/self-modification";',
+      'import selfModification from "eve/self-modification/local";',
     );
     expect(renderSelfModificationConfig()).toContain('// model: "provider/model"');
     expect(classifySelfModificationConfig(renderSelfModificationConfig())).toBe("local");
+    expect(
+      classifySelfModificationConfig(
+        renderSelfModificationConfig().replace(
+          '"eve/self-modification/local"',
+          '"eve/self-modification"',
+        ),
+      ),
+    ).toBe("local");
     expect(
       classifySelfModificationConfig(
         'import { defineSelfModificationConfig } from "eve/self-modification/config";\n\nexport default defineSelfModificationConfig({});\n',
@@ -60,7 +66,8 @@ describe("self-modification setup", () => {
     expect(source).toContain('directory: "apps/support"');
     expect(source).toContain('target: { branch: "release/production" }');
     expect(source).toContain('import { getToken } from "@vercel/connect"');
-    expect(source).toContain('import selfModification from "eve/self-modification"');
+    expect(source).toContain('import selfModification from "eve/self-modification/deployed"');
+    expect(source).not.toContain("deployed: {");
     expect(source).toContain('return await getToken("github/selfmod-acme-agents"');
     expect(source).toContain("async resolve({ capability, repository })");
     expect(source).toContain('case "http"');
@@ -72,7 +79,7 @@ describe("self-modification setup", () => {
       "// Authorize trusted principals for this channel before returning true.\n        return false;",
     );
     expect(source).toContain(
-      "// Add another branch when you add a trusted channel.\n          return false;",
+      "// Add another branch when you add a trusted channel.\n        return false;",
     );
     expect(source).not.toContain("authorize: () => false");
     expect(source).not.toContain("EVE_SELF_MODIFICATION_GITHUB_TOKEN");
@@ -90,7 +97,7 @@ describe("self-modification setup", () => {
     });
     const getToken = vi.fn().mockResolvedValue("github-token");
     const config = evaluateGeneratedConfig(source, getToken);
-    const credentials = config.deployed?.credentials;
+    const credentials = config.credentials;
     if (credentials === undefined || "pat" in credentials) {
       throw new Error("Expected generated credential provider.");
     }
@@ -125,7 +132,7 @@ describe("self-modification setup", () => {
     });
     const failure = new Error("connector is not attached");
     const config = evaluateGeneratedConfig(source, vi.fn().mockRejectedValue(failure));
-    const credentials = config.deployed?.credentials;
+    const credentials = config.credentials;
     if (credentials === undefined || "pat" in credentials) {
       throw new Error("Expected generated credential provider.");
     }
@@ -160,7 +167,7 @@ describe("self-modification setup", () => {
       vercelBackend: true,
     });
     const config = evaluateGeneratedConfig(source);
-    const authorize = config.deployed!.authorize;
+    const authorize = config.authorize;
     const principal = {
       attributes: { project_id: "prj_123" },
       authenticator: "oidc",
@@ -200,7 +207,7 @@ describe("self-modification setup", () => {
     expect(source).not.toContain('case "channel:');
     expect(source).not.toContain("VERCEL_PROJECT_ID");
     expect(source).toContain(
-      "switch (channel.kind) {\n        default:\n          // Add another branch when you add a trusted channel.",
+      "switch (channel.kind) {\n      default:\n        // Add another branch when you add a trusted channel.",
     );
   });
 
