@@ -43,6 +43,7 @@ export function snapshotFromReport(report) {
         if (!result) throw new Error(`No result for contender ${score.contender}.`);
         return {
           harness: score.contender,
+          version: harnessVersion(score.contender, result.provenance),
           resolved: score.resolved,
           attempts: score.attempts,
           resolveRate: score.resolveRate,
@@ -60,6 +61,15 @@ export function snapshotFromReport(report) {
       }),
     },
   };
+}
+
+/** A released harness reports its package version; eve-code is identified by its source commit. */
+function harnessVersion(harness, provenance) {
+  const settings = provenance.harness ?? {};
+  const version = settings.version ?? settings[`${harness}Version`];
+  if (typeof version === "string") return version;
+  const sha = settings.source?.gitSha ?? provenance.source?.revision;
+  return typeof sha === "string" ? sha.slice(0, 7) : null;
 }
 
 /** Replaces one dataset's section in an existing snapshot. */

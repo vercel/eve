@@ -38,13 +38,13 @@ function benchmarkTable(results, dataset) {
     )
     .map(
       (h) =>
-        `| \`${h.harness}\` | ${pct(h.resolveRate.estimate)} (${h.resolved}/${h.attempts}) | ${pct(h.resolveRate.low)}–${pct(h.resolveRate.high)} | ${(h.latencyP50Ms / 1000).toFixed(1)}s | ${(h.latencyP90Ms / 1000).toFixed(1)}s | ${h.costUsd === null ? "—" : `$${h.costUsd.toFixed(2)}`} | ${h.measuredAt?.slice(0, 10) ?? "—"} |`,
+        `| \`${h.harness}\` | ${pct(h.resolveRate.estimate)} (${h.resolved}/${h.attempts}) | ${pct(h.resolveRate.low)}–${pct(h.resolveRate.high)} | ${(h.latencyP50Ms / 1000).toFixed(1)}s | ${(h.latencyP90Ms / 1000).toFixed(1)}s | ${h.measuredAt?.slice(0, 10) ?? "—"} |`,
     );
   return [
     `${results.tasks} tasks × ${results.attempts} attempts on \`${results.model.id}\`. Snapshot updated ${results.generatedAt.slice(0, 10)}.`,
     "",
-    "| Harness | Resolved | 95% interval | Median latency | p90 latency | Cost | Measured |",
-    "| --- | --- | --- | --- | --- | --- | --- |",
+    "| Harness | Resolved | 95% interval | Median latency | p90 latency | Measured |",
+    "| --- | --- | --- | --- | --- | --- |",
     ...rows,
   ].join("\n");
 }

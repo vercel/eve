@@ -20,7 +20,14 @@ const score = (contender, resolved) => ({
 const result = (harness) => ({
   harness,
   trials: [{ finishedAt: "2026-09-29T00:00:00.000Z" }],
-  provenance: { source: { revision: "abc" }, run: { url: `https://example.test/${harness}` } },
+  provenance: {
+    harness:
+      harness === "eve-code"
+        ? { source: { gitSha: "a7b0fb2b5c" } }
+        : { opencodeVersion: "1.18.30" },
+    source: { revision: "abc" },
+    run: { url: `https://example.test/${harness}` },
+  },
 });
 
 const report = (overrides = {}) => ({
@@ -50,10 +57,15 @@ test("summarizes each harness with its own measurement time", () => {
   const { section } = snapshotFromReport(report());
   assert.equal(section.tasks, 2);
   assert.deepEqual(
-    section.harnesses.map(({ harness, resolved, measuredAt }) => [harness, resolved, measuredAt]),
+    section.harnesses.map(({ harness, version, resolved, measuredAt }) => [
+      harness,
+      version,
+      resolved,
+      measuredAt,
+    ]),
     [
-      ["eve-code", 8, "2026-09-29T00:00:00.000Z"],
-      ["opencode", 7, "2026-09-30T00:00:00.000Z"],
+      ["eve-code", "a7b0fb2", 8, "2026-09-29T00:00:00.000Z"],
+      ["opencode", "1.18.30", 7, "2026-09-30T00:00:00.000Z"],
     ],
   );
 });

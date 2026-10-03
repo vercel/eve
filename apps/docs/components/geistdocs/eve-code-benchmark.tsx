@@ -1,129 +1,213 @@
+"use client";
+
+import { useState } from "react";
+
 import {
   eveCodeBenchmark,
   rankedHarnesses,
   type EveCodeHarnessScore,
 } from "@/lib/evals/eve-code-results";
 
-const percent = (value: number) => `${Math.round(value * 100)}%`;
-const seconds = (ms: number) =>
-  ms >= 60_000 ? `${(ms / 60_000).toFixed(1)}m` : `${(ms / 1000).toFixed(1)}s`;
-const dollars = (value: number | null) => (value === null ? "—" : `$${value.toFixed(2)}`);
-const date = (value: string | null) =>
-  value === null
-    ? "—"
-    : new Intl.DateTimeFormat("en", { dateStyle: "medium", timeZone: "UTC" }).format(
-        new Date(value),
-      );
+const REFERENCE = "eve-code";
+const COLORS = ["#4f6bed", "#5ed37f", "#e0803f", "#c26bd9", "#d9c24f"];
+
+interface Metric {
+  label: string;
+  higherIsBetter: boolean;
+  value: (score: EveCodeHarnessScore) => number;
+  /** Interval drawn around the dot, when the metric has one. */
+  range?: (score: EveCodeHarnessScore) => [number, number];
+  format: (value: number) => string;
+  /** Difference from the reference contender. */
+  delta: (value: number, reference: number) => string;
+  /** Fixed axis maximum; otherwise fit to the data. */
+  max?: number;
+}
+
+const signed = (value: number, unit: string) =>
+  `${value > 0 ? "+" : value < 0 ? "−" : "±"}${Math.abs(Math.round(value))}${unit}`;
+const relative = (value: number, reference: number) =>
+  reference === 0 ? "—" : signed((value / reference - 1) * 100, "%");
+
+const METRICS: Record<string, Metric> = {
+  correctness: {
+    label: "correctness",
+    higherIsBetter: true,
+    value: (score) => score.resolveRate.estimate,
+    range: (score) => [score.resolveRate.low, score.resolveRate.high],
+    format: (value) => `${Math.round(value * 100)}%`,
+    delta: (value, reference) => signed((value - reference) * 100, " pp"),
+    max: 1,
+  },
+  "input tokens": {
+    label: "input tokens",
+    higherIsBetter: false,
+    value: (score) => score.inputTokens / score.attempts,
+    format: (value) =>
+      value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : `${Math.round(value / 1000)}k`,
+    delta: relative,
+  },
+  latency: {
+    label: "latency",
+    higherIsBetter: false,
+    value: (score) => score.latencyP50Ms,
+    range: (score) => [score.latencyP50Ms, score.latencyP90Ms],
+    format: (value) => `${Math.round(value / 1000)}s`,
+    delta: relative,
+  },
+};
 
 /** Renders the latest published eve-code results for one eve-bench dataset. */
 export const EveCodeBenchmark = ({ dataset }: { dataset: string }) => {
+  const [metricKey, setMetricKey] = useState("correctness");
   const results = eveCodeBenchmark.datasets[dataset];
   if (!results) return <p>No published {dataset} results yet.</p>;
-  const ranked = rankedHarnesses(results);
-  const slowest = Math.max(...ranked.map((score) => score.latencyP50Ms));
+
+  const metric = METRICS[metricKey];
+  const rows = rankedHarnesses(results);
+  const colors = new Map(
+    rows.map((score, index) => [score.harness, COLORS[index % COLORS.length]]),
+  );
+  const reference = rows.find((score) => score.harness === REFERENCE);
+  const max =
+    metric.max ??
+    niceCeiling(Math.max(...rows.map((score) => metric.range?.(score)[1] ?? metric.value(score))));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((fraction) => fraction * max);
+  const best = (metric.higherIsBetter ? Math.max : Math.min)(...rows.map(metric.value));
+  const position = (value: number) => `${(value / max) * 100}%`;
+  const runs = new Set(rows.map((score) => score.runUrl)).size;
+  const sorted = [...rows].sort((left, right) =>
+    metric.higherIsBetter
+      ? metric.value(right) - metric.value(left)
+      : metric.value(left) - metric.value(right),
+  );
 
   return (
-    <figure className="not-prose my-6 overflow-hidden rounded-xl border border-gray-400 bg-background-100">
-      <figcaption className="flex flex-wrap items-baseline justify-between gap-2 border-gray-400 border-b px-5 py-4">
-        <span className="font-medium text-gray-1000">
-          {results.tasks} tasks × {results.attempts} attempts
+    <figure className="not-prose my-6 overflow-x-auto rounded-xl border border-gray-400 bg-background-100 p-4 text-sm">
+      <figcaption className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="font-mono font-medium text-gray-1000">
+          {results.dataset.name}@{results.dataset.version} · {results.model.id.split("/").at(-1)}
         </span>
-        <span className="text-gray-800 text-sm">
-          <code className="font-mono">{results.model.id}</code> · updated{" "}
-          {date(results.generatedAt)}
+        <span className="text-gray-800">
+          {rows.length} contenders across {runs} run{runs === 1 ? "" : "s"}
         </span>
       </figcaption>
 
-      <ol className="divide-y divide-gray-400">
-        {ranked.map((score, index) => (
-          <HarnessRow key={score.harness} rank={index + 1} score={score} slowest={slowest} />
+      <div
+        aria-label="Metric"
+        className="mt-3 inline-flex rounded-lg border border-gray-400 p-0.5"
+        role="tablist"
+      >
+        {Object.keys(METRICS).map((key) => (
+          <button
+            aria-selected={key === metricKey}
+            className={`rounded-md px-3 py-1 ${key === metricKey ? "bg-gray-200 text-gray-1000" : "text-gray-800 hover:text-gray-1000"}`}
+            key={key}
+            onClick={() => setMetricKey(key)}
+            role="tab"
+            type="button"
+          >
+            {key}
+          </button>
         ))}
-      </ol>
+      </div>
 
-      <p className="border-gray-400 border-t px-5 py-3 text-gray-700 text-xs">
-        Bars show resolve rate; the shaded band is the 95% interval. Overlapping bands are not a
-        measured difference.
+      <div className="mt-4 min-w-[640px]" role="tabpanel">
+        <div className="grid grid-cols-[12rem_1fr_6rem_5rem] items-end gap-x-4 pb-1 text-gray-800">
+          <span>{metric.higherIsBetter ? "higher is better" : "lower is better"}</span>
+          <div className="relative h-5 font-mono text-xs">
+            {ticks.map((tick) => (
+              <span
+                className="absolute -translate-x-1/2"
+                key={tick}
+                style={{ left: position(tick) }}
+              >
+                {metric.format(tick)}
+              </span>
+            ))}
+          </div>
+          <span className="text-right">{metric.label}</span>
+          <span className="text-right">vs ref</span>
+        </div>
+
+        {sorted.map((score) => {
+          const value = metric.value(score);
+          const color = colors.get(score.harness);
+          const range = metric.range?.(score);
+          const isReference = score.harness === REFERENCE;
+          return (
+            <div
+              className="grid grid-cols-[12rem_1fr_6rem_5rem] items-center gap-x-4 rounded-md py-1.5 hover:bg-gray-100"
+              key={score.harness}
+            >
+              <span className="flex min-w-0 items-center gap-2 font-mono text-gray-1000">
+                <span className="size-2.5 shrink-0 rounded-full" style={{ background: color }} />
+                <span className="truncate">
+                  {score.runUrl ? (
+                    <a href={score.runUrl} title="Open the GitHub Actions run">
+                      {score.harness}
+                      {score.version ? `@${score.version}` : ""}
+                    </a>
+                  ) : (
+                    `${score.harness}${score.version ? `@${score.version}` : ""}`
+                  )}
+                </span>
+              </span>
+
+              <div className="relative h-5">
+                {ticks.map((tick) => (
+                  <span
+                    className="absolute inset-y-0 w-px bg-gray-300"
+                    key={tick}
+                    style={{ left: position(tick) }}
+                  />
+                ))}
+                {range ? (
+                  <span
+                    className="absolute top-1/2 h-0.5 -translate-y-1/2 opacity-60"
+                    style={{
+                      background: color,
+                      left: position(range[0]),
+                      width: `calc(${position(range[1])} - ${position(range[0])})`,
+                    }}
+                  />
+                ) : null}
+                <span
+                  aria-label={`${score.harness}: ${metric.format(value)}${range ? `, interval ${metric.format(range[0])} to ${metric.format(range[1])}` : ""}`}
+                  className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-background-100 transition-[left] duration-300"
+                  role="img"
+                  style={{ background: color, left: position(value) }}
+                />
+              </div>
+
+              <span
+                className={`text-right font-mono ${value === best ? "text-green-700" : "text-gray-1000"}`}
+              >
+                {metric.format(value)}
+              </span>
+              <span className="text-right font-mono text-gray-900">
+                {isReference || !reference ? "ref" : metric.delta(value, metric.value(reference))}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="mt-3 text-gray-700 text-xs">
+        {metric.range
+          ? metricKey === "latency"
+            ? "Dots are median latency; lines extend to p90."
+            : "Lines are 95% intervals; overlapping lines are not a measured difference."
+          : "Mean input tokens per attempt."}{" "}
+        Click a contender to open its run.
       </p>
     </figure>
   );
 };
 
-const HarnessRow = ({
-  rank,
-  score,
-  slowest,
-}: {
-  rank: number;
-  score: EveCodeHarnessScore;
-  slowest: number;
-}) => {
-  const isEveCode = score.harness === "eve-code";
-  const { estimate, low, high } = score.resolveRate;
-
-  return (
-    <li
-      className={`grid gap-3 px-5 py-4 sm:grid-cols-[10rem_1fr_14rem] sm:items-center ${isEveCode ? "bg-gray-100" : ""}`}
-    >
-      <div className="flex items-center gap-3">
-        <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-gray-500 text-gray-900 text-xs tabular-nums">
-          {rank}
-        </span>
-        <span
-          className={`font-mono text-sm ${isEveCode ? "font-semibold text-gray-1000" : "text-gray-900"}`}
-        >
-          {score.harness}
-        </span>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <div
-          aria-label={`${percent(estimate)} resolved, 95% interval ${percent(low)} to ${percent(high)}`}
-          className="relative h-3 flex-1 rounded-full bg-gray-200"
-          role="img"
-        >
-          <div
-            className="absolute inset-y-0 rounded-full bg-gray-400"
-            style={{ left: percent(low), width: percent(high - low) }}
-          />
-          <div
-            className={`absolute inset-y-0.5 left-0 rounded-full ${isEveCode ? "bg-gray-1000" : "bg-gray-700"}`}
-            style={{ width: percent(estimate) }}
-          />
-        </div>
-        <span className="w-24 text-right text-sm tabular-nums">
-          <span className="font-semibold text-gray-1000">{percent(estimate)}</span>{" "}
-          <span className="text-gray-700">
-            {score.resolved}/{score.attempts}
-          </span>
-        </span>
-      </div>
-
-      <dl className="grid grid-cols-3 gap-2 text-xs">
-        <Stat label="Median">
-          {seconds(score.latencyP50Ms)}
-          <span
-            className="mt-1 block h-1 rounded-full bg-gray-500"
-            style={{ width: percent(score.latencyP50Ms / slowest) }}
-          />
-        </Stat>
-        <Stat label="Cost">{dollars(score.costUsd)}</Stat>
-        <Stat label="Run">
-          {score.runUrl ? (
-            <a className="underline underline-offset-2" href={score.runUrl}>
-              {date(score.measuredAt)}
-            </a>
-          ) : (
-            date(score.measuredAt)
-          )}
-        </Stat>
-      </dl>
-    </li>
-  );
-};
-
-const Stat = ({ label, children }: { label: string; children: React.ReactNode }) => (
-  <div>
-    <dt className="text-gray-700">{label}</dt>
-    <dd className="font-medium text-gray-1000 tabular-nums">{children}</dd>
-  </div>
-);
+function niceCeiling(value: number): number {
+  if (value <= 0) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const step = [1, 2, 2.5, 5, 10].find((candidate) => candidate * magnitude >= value) ?? 10;
+  return step * magnitude;
+}

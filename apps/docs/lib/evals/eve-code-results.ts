@@ -3,6 +3,8 @@ import rawSnapshot from "./eve-code-benchmark.json";
 /** Written by `.github/scripts/eve-code-docs-snapshot.mjs` from eve-bench reports of `main`. */
 export interface EveCodeHarnessScore {
   harness: string;
+  /** Package version for released harnesses; short source commit for eve-code. */
+  version: string | null;
   resolved: number;
   attempts: number;
   resolveRate: { estimate: number; low: number; high: number };

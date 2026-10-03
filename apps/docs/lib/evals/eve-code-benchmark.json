@@ -16,6 +16,7 @@
       "harnesses": [
         {
           "harness": "eve-code",
+          "version": "4d14914",
           "resolved": 24,
           "attempts": 36,
           "resolveRate": {
@@ -36,6 +37,7 @@
         },
         {
           "harness": "opencode",
+          "version": "1.18.30",
           "resolved": 18,
           "attempts": 36,
           "resolveRate": {
@@ -56,6 +58,7 @@
         },
         {
           "harness": "pi",
+          "version": "0.85.1",
           "resolved": 26,
           "attempts": 36,
           "resolveRate": {
@@ -75,7 +78,7 @@
           "measuredAt": "2026-09-30T03:33:15.823Z"
         }
       ],
-      "generatedAt": "2026-10-02T17:48:28.281Z"
+      "generatedAt": "2026-10-03T03:29:12.252Z"
     }
   }
 }
