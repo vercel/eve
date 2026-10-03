@@ -2,6 +2,7 @@ import { jsonSchema, type LanguageModel } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
+import { DynamicModelSelectionError } from "#context/dynamic-model-lifecycle.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -95,6 +96,37 @@ describe("tool loop cancellation (real AI SDK)", () => {
       expect(eventTypes).not.toContain(failureType);
     }
   });
+
+  it.each([
+    { label: "directly", wrap: (error: Error): Error => error },
+    {
+      label: "as a model selection cause",
+      wrap: (error: Error): Error => new DynamicModelSelectionError(error),
+    },
+  ])(
+    "propagates a model resolver cancellation raised $label before the signal aborts",
+    async ({ wrap }) => {
+      const logs = captureLogRecords();
+      const thrown = wrap(new TurnCancelledError());
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(
+        createConfig(new MockLanguageModelV3(), emit, {
+          abortSignal: new AbortController().signal,
+          resolveModel: vi.fn().mockRejectedValue(thrown),
+        }),
+      );
+
+      await expect(runStep(createSession(), { message: "Hi" })).rejects.toBe(thrown);
+
+      const eventTypes = events.map((event) => event.type);
+      for (const failureType of FAILURE_EVENT_TYPES) {
+        expect(eventTypes).not.toContain(failureType);
+      }
+      expect(logs.records).not.toContainEqual(
+        expect.objectContaining({ message: "model selection failed terminally" }),
+      );
+    },
+  );
 
   it("forwards a live signal to executing tools and discards the straggler result", async () => {
     const logs = captureLogRecords();
