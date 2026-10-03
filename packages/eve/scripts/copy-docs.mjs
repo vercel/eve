@@ -18,16 +18,21 @@ await cp(join(monorepoRoot, "docs"), packageDocsDir, { recursive: true });
 // Agents read the raw file, where the site's <EveCodeBenchmark /> component
 // would render nothing, so inline the same snapshot as a Markdown table.
 const benchmarkPage = join(packageDocsDir, "code-extension.mdx");
-const snapshot = JSON.parse(
-  await readFile(join(monorepoRoot, "apps/docs/lib/evals/eve-code-benchmark.json"), "utf8"),
-);
-const page = await readFile(benchmarkPage, "utf8");
-await writeFile(
-  benchmarkPage,
-  page.replace(/<EveCodeBenchmark dataset="([^"]+)" \/>/gu, (_, dataset) =>
-    benchmarkTable(snapshot.datasets[dataset], dataset),
-  ),
-);
+const page = await readFile(benchmarkPage, "utf8").catch((error) => {
+  if (error.code === "ENOENT") return null;
+  throw error;
+});
+if (page !== null) {
+  const snapshot = JSON.parse(
+    await readFile(join(monorepoRoot, "apps/docs/lib/evals/eve-code-benchmark.json"), "utf8"),
+  );
+  await writeFile(
+    benchmarkPage,
+    page.replace(/<EveCodeBenchmark dataset="([^"]+)" \/>/gu, (_, dataset) =>
+      benchmarkTable(snapshot.datasets[dataset], dataset),
+    ),
+  );
+}
 
 function benchmarkTable(results, dataset) {
   if (!results) return `No published ${dataset} results yet.`;
