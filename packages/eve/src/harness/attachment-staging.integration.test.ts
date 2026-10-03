@@ -733,6 +733,38 @@ describe("hydrateSandboxAttachments (integration)", () => {
     );
   });
 
+  it("does not inline a staged attachment that sandbox code overwrote (#4284)", async () => {
+    const sandbox = mockSandbox({ id: "sbx_overwritten" });
+    const runtime = await createTestRuntime();
+
+    const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
+      stageAttachmentsToSandbox([
+        {
+          data: Buffer.from("original"),
+          filename: "logo.png",
+          mediaType: "image/png",
+          type: "file",
+        },
+      ] as UserContent),
+    )) as UserContent;
+    const stagedPath = (stagedContent[0] as FilePart).filename as string;
+
+    // Same size, different bytes: only the content address can tell them apart.
+    await sandbox.session.writeBinaryFile({ content: Buffer.from("replaced"), path: stagedPath });
+
+    const messages = [{ content: stagedContent, role: "user" as const }];
+    const hydrated = await runtime.runAsSession({ sandbox }, async () =>
+      hydrateSandboxAttachments(messages),
+    );
+
+    expect(hydrated[0]?.content).toEqual([
+      {
+        text: `FileNotFound: Current snapshot may be newer and does not contain ${stagedPath}.`,
+        type: "text",
+      },
+    ]);
+  });
+
   it("does not touch the sandbox when every ref is non-inlinable — text references carry all the info", async () => {
     // Regression guard: the non-inlinable path must render the text
     // reference entirely from ref metadata (path, mediaType, size)
