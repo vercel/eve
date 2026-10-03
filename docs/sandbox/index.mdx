@@ -158,6 +158,8 @@ Before every model call, eve reads the referenced files back from the sandbox:
 - An image up to 3 MiB or a PDF up to 20 MiB attached to a message reaches the model as a file. Larger files and other types reach the model as a text reference, such as `Attached file /workspace/.eve/attachments/<hash>/report.csv (text/csv)`, that the agent can open with `read_file` or `bash`.
 - A file returned by a tool always reaches the model as a file.
 
+If a referenced file is missing, or its bytes no longer match what eve staged because something in the sandbox overwrote it, the model receives a `FileNotFound` note in its place.
+
 Each call sends the same bytes for the same file, so the model still sees attachments from earlier turns and the provider's prompt cache stays valid. Compaction replaces files in older tool results with their text reference. The `read_file` tool shows PNG, JPEG, GIF, and WebP files up to 3 MiB to the model as images, so the agent can look at an image again after compaction.
 
 ## Custom providers

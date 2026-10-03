@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { basename, extname } from "node:path";
+import { basename, dirname, extname } from "node:path";
 import type { FilePart, ModelMessage, TextPart, ToolResultPart, UserContent } from "ai";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -357,6 +357,17 @@ async function readSandboxRefBytes(
       path: ref.path,
       size: ref.size,
     });
+    return null;
+  }
+  // Sandbox code can overwrite a staged file; only the bytes eve staged may
+  // reach the model as the original attachment.
+  if (bytes.byteLength !== ref.size || sha256Prefix(bytes) !== basename(dirname(ref.path))) {
+    log.warn("sandbox-ref attachment bytes changed since staging — degrading to text reference", {
+      mediaType: ref.mediaType,
+      path: ref.path,
+      size: ref.size,
+    });
+    return null;
   }
   return bytes;
 }
@@ -549,7 +560,7 @@ function reconstitueFilePartUrls(
   return changed ? result : content;
 }
 
-function sha256Prefix(bytes: Buffer): string {
+function sha256Prefix(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex").slice(0, SHA_PREFIX_LENGTH);
 }
 
