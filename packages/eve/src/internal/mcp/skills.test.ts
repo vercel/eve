@@ -179,6 +179,15 @@ describe("MCP skills (SEP-2640)", () => {
 });
 
 describe("MCP skills catalog", () => {
+  it("advertises resources without list-changed notifications", async () => {
+    const call = handler({ hinted: doc("hinted", "Cached.") });
+    const { result } = await call("server/discover");
+    expect(result?.capabilities).toEqual({
+      extensions: { "io.modelcontextprotocol/skills": { directoryRead: true } },
+      resources: { listChanged: false },
+    });
+  });
+
   it("lists and reads each skill once while its description is stable", async () => {
     const skills = { a: doc("a", "First."), b: doc("b", "Second.") };
     const { calls, source } = skillSource(skills);
