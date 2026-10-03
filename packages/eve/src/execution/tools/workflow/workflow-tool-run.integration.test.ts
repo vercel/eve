@@ -362,7 +362,7 @@ describe("workflow tools", () => {
         await answer(first!);
         const answeredFirst = await stream.nextUntil((event) => event.type === "input.resolved");
         await answer(second!);
-        const answeredSecond = await stream.nextTurn();
+        const answeredSecond = await stream.nextUntil((event) => event.type === "turn.completed");
 
         // The second question still holds the turn, so the first answer ends
         // at a new rest point, as a partial answer to two approvals does.
@@ -380,7 +380,6 @@ describe("workflow tools", () => {
           on: "input",
           turnId: parked.data.turnId,
         });
-        expect(filterEventsByType(answeredSecond, "turn.completed")).toHaveLength(1);
       } finally {
         stream.dispose();
         await run.cancel();
