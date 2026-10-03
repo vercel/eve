@@ -857,7 +857,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       normalizeModelMessages(projectHistory(createModelMessages(messages), session.state)),
     );
 
-    if (emit) {
+    // A turn still held here (a message arrived behind the budget question)
+    // holds again before its model call, so a step announced now would never
+    // complete.
+    if (emit && !("held" in HumanInput.read(session.state).next())) {
       try {
         await emitStepStarted(
           emit,
@@ -1403,7 +1406,14 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       if (applied.ended !== undefined) return applied.ended;
     }
     if ("held" in HumanInput.read(session.state).next()) {
-      return await holdForInput({ emit, emissionState, session });
+      // The held history keeps this step's messages, so a message sent
+      // meanwhile is read when it runs.
+      ctx?.set(HistoryStateKey, currentMessages.historyState);
+      return await holdForInput({
+        emit,
+        emissionState,
+        session: { ...session, history: [...currentMessages.history] },
+      });
     }
 
     let result: HarnessStepResult;

@@ -6,8 +6,8 @@ import { advanceStep, emitFailedStep, setHarnessEmissionState } from "#harness/e
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import { HumanInput, type Transition } from "#harness/human-input/index.js";
 import { createFrameworkUserMessage, validateHarnessModelMessages } from "#harness/messages.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import { getSessionUsage } from "#harness/turn-tag-state.js";
+import { SessionLimitDeclinedError, TurnCancelledError } from "#harness/turn-cancellation.js";
+import { bumpSessionRuntimeUsageLimits, getSessionUsage } from "#harness/turn-tag-state.js";
 import type {
   HarnessSession,
   StepInput,
@@ -136,6 +136,11 @@ export async function applyHumanInput(input: {
       }
       case "turn.cancelled":
         throw new TurnCancelledError();
+      case "budget.granted":
+        session = bumpSessionRuntimeUsageLimits(session);
+        continue;
+      case "budget.declined":
+        throw new SessionLimitDeclinedError(event.requestId, transition.humanInput);
       case "turn.failed": {
         // Callers without an emit fn get the raw throw, as for model failures.
         if (!emit) throw new Error(event.message);
@@ -152,7 +157,6 @@ export async function applyHumanInput(input: {
       }
       case "responder.check":
       case "answer.forwarded":
-      case "budget.granted":
         throw new Error(`Human input event "${event.type}" is not implemented.`);
     }
   }
@@ -219,7 +223,9 @@ export async function applyStepArrivals(input: {
       },
     };
   }
-  if ("held" in HumanInput.read(session.state).next()) {
+  // A message that answers nothing still joins history, so it is read once
+  // the turn runs again; the hold before the model call keeps it.
+  if ("held" in HumanInput.read(session.state).next() && turnInput?.message === undefined) {
     return { result: await holdForInput({ emit, emissionState, session }) };
   }
   return { session, turnInput };

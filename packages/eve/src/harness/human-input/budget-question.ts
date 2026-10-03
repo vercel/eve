@@ -12,10 +12,22 @@ import type { SessionUsageLimitViolation } from "#harness/turn-tag-state.js";
 const SESSION_LIMIT_CONTINUATION_TOOL_NAME = "session_limit_continuation";
 
 /** Option id that grants a fresh token budget window. */
-const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
+export const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
 
-/** Option id that declines continuation and ends the session. */
-const SESSION_LIMIT_STOP_OPTION_ID = "stop";
+/** Option id that declines continuation and cancels the turn. */
+export const SESSION_LIMIT_STOP_OPTION_ID = "stop";
+
+/**
+ * Whether a request id has the shape of a budget question's id. Budget
+ * questions never enter model history, so after one closes, the id is the
+ * only way to recognize a late answer to it.
+ */
+export function isSessionLimitContinuationRequestId(requestId: string): boolean {
+  return (
+    /:limit:(?:input|output):\d+$/u.test(requestId) ||
+    /:limit:token-cost:\d+(?:\.\d+)?(?:e[+-]?\d+)?$/iu.test(requestId)
+  );
+}
 
 /**
  * Builds the deterministic continuation prompt for one session usage-limit

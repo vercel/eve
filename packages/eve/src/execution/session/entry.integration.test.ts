@@ -737,6 +737,51 @@ describe("workflowEntry integration", () => {
     );
   }, 60_000);
 
+  it("runs a steering message after the budget prompt that followed its cancelled approval", async () => {
+    await withHeldApprovalRun(
+      {
+        agent: {
+          limits: { maxInputTokensPerSession: 1 },
+          name: "workflow-entry-steer-held-limit",
+        },
+        auth: ALICE,
+        modules: [gatedTool("approve_change", [])],
+      },
+      async ({ sessionInbox, stream }) => {
+        const held = await withTimeout(stream.nextTurn(), "approval hold");
+        expect(held.at(-1)?.type).toBe("turn.waiting");
+
+        await resumeHook(sessionInbox, {
+          auth: ALICE,
+          kind: "send",
+          payload: { message: "Never mind, just say hello." },
+          turnPolicy: "queue",
+        });
+        const limited = await withTimeout(stream.nextTurn(), "budget prompt");
+        const budget = filterEventsByType(limited, "input.requested")
+          .flatMap((event) => event.data.requests)
+          .find((request) => request.kind === "session-limit");
+        expect(budget).toBeDefined();
+
+        await resumeHook(sessionInbox, {
+          auth: ALICE,
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "continue", requestId: budget!.requestId }] },
+          turnPolicy: "queue",
+        });
+        const resumed = await withTimeout(stream.nextTurn(), "granted turn");
+        // The message joined the step that cancelled the approval; the grant
+        // resumes with one model call that answers it.
+        expect(filterEventsByType(limited, "message.received").map((e) => e.data.message)).toEqual([
+          "Never mind, just say hello.",
+        ]);
+        expect(filterEventsByType(resumed, "message.received")).toHaveLength(0);
+        expect(filterEventsByType(resumed, "step.started")).toHaveLength(1);
+        expect(filterEventsByType(resumed, "message.completed")).toHaveLength(1);
+      },
+    );
+  }, 60_000);
+
   it("releases a session reset while its turn is held on an approval", async () => {
     await withHeldApprovalRun(
       {

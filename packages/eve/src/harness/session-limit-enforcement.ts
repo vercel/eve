@@ -4,7 +4,7 @@
  * person could grant more budget, hands the question to human input.
  */
 import { emitFailedStep, type HarnessEmissionState } from "#harness/emission.js";
-import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
+import { createSessionLimitContinuationRequest } from "#harness/human-input/index.js";
 import {
   getSessionUsageLimitViolation,
   getSessionTokenUsage,

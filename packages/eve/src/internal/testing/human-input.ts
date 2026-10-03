@@ -182,3 +182,25 @@ export function message(text: string, sender: SessionAuthContext | null = ALICE)
 }
 
 export const cancel: Intake = { type: "cancelled" };
+
+/** The question a turn asks once its session runs over its input token budget. */
+export const BUDGET_QUESTION: InputRequest = {
+  action: { callId: "s:limit:input:12", input: {}, kind: "tool-call", toolName: "session-limit" },
+  kind: "session-limit",
+  options: [
+    { id: "continue", label: "Approve" },
+    { id: "stop", label: "Stop" },
+  ],
+  prompt: "Alice's session is over budget. Continue?",
+  requestId: "s:limit:input:12",
+};
+
+/** The turn's next model call would run over the session's budget. */
+export function overBudget(at: RequestAt = AT): Interrupt {
+  return { at, request: BUDGET_QUESTION, type: "budget.exceeded" };
+}
+
+/** A turn held on the budget question. */
+export function heldOnBudget(): Turn {
+  return Turn.idle().interrupt(overBudget());
+}

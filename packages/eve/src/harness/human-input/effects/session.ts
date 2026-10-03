@@ -45,6 +45,7 @@ export async function applyHumanInputEvents(
       case "responder.check":
       case "answer.forwarded":
       case "budget.granted":
+      case "budget.declined":
         throw new Error(`Human input event "${event.type}" is not implemented.`);
     }
   }

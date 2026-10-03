@@ -2,6 +2,13 @@ import type { ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
+import {
+  answerBudget,
+  answerBudgetByText,
+  askBudget,
+  withdrawBudget,
+  withoutClosedBudgetAnswers,
+} from "#harness/human-input/budget.js";
 import type { SessionStateMap, StepInput } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
@@ -20,6 +27,7 @@ import type { SuspendedStep } from "./suspended-step.js";
 import { arrivalsOf } from "./arrivals.js";
 
 export { approvalsRequested, withoutApprovalParts } from "./approvals.js";
+export { createSessionLimitContinuationRequest } from "./budget-question.js";
 
 /**
  * Everything a turn waits on from a person: tool approvals, sign-ins, the
@@ -69,15 +77,17 @@ export class HumanInput {
   }
 
   /**
-   * The input a step runs with, once answers to requests that are no longer
-   * open become text the model reads. `displayMessage` is that input's message
-   * as the person sent it, for `message.received`.
+   * The input a step runs with, once answers to closed budget questions are
+   * dropped and answers to other requests that are no longer open become text
+   * the model reads. `displayMessage` is that input's message as the person
+   * sent it, for `message.received`.
    */
   acceptInput(input: StepInput | undefined): {
     readonly input: StepInput | undefined;
     readonly displayMessage?: string | UserContent;
   } {
-    return staleAnswersAsText(input, this.openRequestIds());
+    const open = this.openRequestIds();
+    return staleAnswersAsText(withoutClosedBudgetAnswers(input, open), open);
   }
 
   /** What arrived for the turn's step, as the intakes to hand to `intake`, in order. */
@@ -234,6 +244,8 @@ export type HumanInputEvent =
     }
   /** Grant a fresh budget window: the person chose to continue. */
   | { readonly type: "budget.granted" }
+  /** The person chose to stop: the budget question is resolved; cancel the turn. */
+  | { readonly type: "budget.declined"; readonly requestId: string }
   /** Tell the model something with the turn's next input. */
   | { readonly type: "note"; readonly text: string }
   | { readonly type: "turn.cancelled" }
@@ -258,7 +270,8 @@ export interface RelayRoute {
 
 const STATE_KEY = "eve.harness.humanInput";
 
-interface HumanInputState {
+/** Exported only for the rules files beside this one. */
+export interface HumanInputState {
   /** Every open request, by `requestId`. */
   readonly requests: Readonly<Record<string, OpenRequest>>;
   /** Input that arrived before it could run: a partial answer, or a message behind one. */
@@ -316,6 +329,8 @@ interface Reduced {
 
 function reduce(state: HumanInputState, input: Interrupt | Intake): Reduced {
   switch (input.type) {
+    case "budget.exceeded":
+      return askBudget(state, input);
     case "approvals.requested":
       // Response policies decide who may answer; they come back in a later change.
       if (input.responsePolicyRequestIds.length > 0) {
@@ -325,18 +340,25 @@ function reduce(state: HumanInputState, input: Interrupt | Intake): Reduced {
         );
       }
       return openApprovals(state, input);
-    case "answered":
-      return answerApprovals(state, input.responses);
+    case "answered": {
+      const budget = answerBudget(state, input.responses);
+      const approvals = answerApprovals(budget.state, budget.unclaimed);
+      return { events: [...budget.events, ...approvals.events], state: approvals.state };
+    }
+    // A typed reply answers the budget question when it names one of its
+    // options; otherwise it is for the approvals.
     case "message":
-      return receiveMessage(state, input.text);
-    case "cancelled":
-      return cancelApprovals(state);
+      return answerBudgetByText(state, input.text) ?? receiveMessage(state, input.text);
+    case "cancelled": {
+      const budget = withdrawBudget(state);
+      const approvals = cancelApprovals(budget.state);
+      return { events: [...budget.events, ...approvals.events], state: approvals.state };
+    }
     case "calls.settled":
       return settleCalls(state, input.results, input.running);
     // Human input is being rebuilt case by case. Until a case exists, a turn
     // that needs a person fails with a clear error instead of hanging.
     case "authorization.required":
-    case "budget.exceeded":
     case "relayed.requested":
       return unavailable(
         state,

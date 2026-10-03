@@ -63,8 +63,12 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
 import { countRunUsage } from "#execution/agent-sessions/usage.js";
 import { createTask, writeTaskTable } from "#execution/tasks/table.js";
-import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
+import { SessionLimitDeclinedError, TurnCancelledError } from "#harness/turn-cancellation.js";
+import {
+  getSessionTokenUsage,
+  getSessionUsageLimitViolation,
+  setTurnUsageState,
+} from "#harness/turn-tag-state.js";
 import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import {
   createInstrumentationHooks,
@@ -1570,6 +1574,220 @@ describe("createToolLoopHarness", () => {
     expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
     expect(result.next).toEqual({ done: true, output: "" });
     expect(events.some((event) => event.type === "input.requested")).toBe(false);
+  });
+
+  // Session state with 12 input tokens already spent against a 12-token
+  // budget: the next model call is over the limit. The matching continuation
+  // request id is `test-session:limit:input:12` (absolute total = 12).
+  function createLimitReachedSession(): HarnessSession {
+    const usage = {
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 0,
+      inputTokens: 12,
+      outputTokens: 3,
+      sawCost: false,
+    };
+    return setTurnUsageState(createTestSession({ limits: { maxInputTokensPerSession: 12 } }), {
+      turnId: "turn_previous",
+      ...usage,
+      session: usage,
+    });
+  }
+
+  const LIMIT_REQUEST_ID = "test-session:limit:input:12";
+  const HELLO = {
+    finishReason: "stop",
+    response: { messages: [{ content: "Hello!", role: "assistant" }] },
+    text: "Hello!",
+    toolCalls: [],
+    toolResults: [],
+    usage: { inputTokens: 7, outputTokens: 3 },
+  };
+
+  it("holds the turn on a deterministic continuation prompt when the session reaches its token limit", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+
+    const result = await runStep(createLimitReachedSession(), { message: "Hi again" });
+
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    expect(result.next).toBeNull();
+    expect(result.held).toEqual({ kind: "input" });
+    expect(result.settledTurn).toBeUndefined();
+    expect(events.map((event) => event.type)).toEqual([
+      "session.started",
+      "turn.started",
+      "message.received",
+      "step.started",
+      "input.requested",
+      "turn.waiting",
+    ]);
+    expect(events.at(-1)?.data).toMatchObject({ on: "input" });
+    expect(events.find((event) => event.type === "input.requested")?.data).toMatchObject({
+      requests: [
+        {
+          action: {
+            callId: LIMIT_REQUEST_ID,
+            input: { kind: "input", limit: 12, usedTokens: 12 },
+            kind: "tool-call",
+            toolName: "session_limit_continuation",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          kind: "session-limit",
+          options: [
+            { id: "continue", label: "Approve", style: "primary" },
+            { id: "stop", label: "Stop", style: "danger" },
+          ],
+          requestId: LIMIT_REQUEST_ID,
+        },
+      ],
+    });
+  });
+
+  it("holds and grants a fresh model token-cost budget", async () => {
+    const usage = {
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 1.51,
+      inputTokens: 12,
+      outputTokens: 3,
+      sawCost: true,
+    };
+    const reached = setTurnUsageState(
+      createTestSession({ limits: { maxTokenCostUsdPerSession: 1.5 } }),
+      { turnId: "turn_previous", ...usage, session: usage },
+    );
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+
+    const held = await runStep(reached, { message: "Hi again" });
+    expect(events.find((event) => event.type === "input.requested")?.data).toMatchObject({
+      requests: [
+        {
+          action: { input: { kind: "token-cost", limitUsd: 1.5, usedCostUsd: 1.51 } },
+          prompt: expect.stringContaining("$1.5 model token-cost limit"),
+          requestId: "test-session:limit:token-cost:1.51",
+        },
+      ],
+    });
+
+    setupMockAgent(HELLO);
+    const resumed = await runStep(held.session, {
+      inputResponses: [{ optionId: "continue", requestId: "test-session:limit:token-cost:1.51" }],
+    });
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
+  });
+
+  it("runs the held model call in the same turn when the user continues past the limit prompt", async () => {
+    setupMockAgent(HELLO);
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+
+    const held = await runStep(createLimitReachedSession(), { message: "Hi again" });
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    const heldEvents = events.length;
+
+    const resumed = await runStep(held.session, {
+      inputResponses: [{ optionId: "continue", requestId: LIMIT_REQUEST_ID }],
+    });
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(resumed.next).toBeNull();
+    expect(resumed.settledTurn).toBeDefined();
+    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
+    // The held user message survives into model history for the resumed call.
+    expect(resumed.session.history).toContainEqual({
+      content: "Hi again",
+      kind: "user" as const,
+      role: "user",
+    });
+    const resumedTypes = events.slice(heldEvents).map((event) => event.type);
+    expect(resumedTypes).not.toContain("turn.started");
+    expect(resumedTypes.indexOf("input.resolved")).toBeLessThan(
+      resumedTypes.indexOf("step.started"),
+    );
+    expect(events.find((event) => event.type === "input.resolved")?.data).toMatchObject({
+      resolutions: [
+        {
+          kind: "session-limit",
+          outcome: "answered",
+          requestId: LIMIT_REQUEST_ID,
+          response: { optionId: "continue", requestId: LIMIT_REQUEST_ID },
+        },
+      ],
+    });
+  });
+
+  it("grants the budget when the user types the continue option as plain text", async () => {
+    setupMockAgent(HELLO);
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+
+    const held = await runStep(createLimitReachedSession(), { message: "Hi again" });
+    // Surfaces without buttons deliver the answer as a plain message.
+    const resumed = await runStep(held.session, { message: "continue" });
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(resumed.next).toBeNull();
+    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
+    // The answer shows as sent, but it is not a message for the model.
+    expect(
+      events.filter((event) => event.type === "message.received").map((e) => e.data.message),
+    ).toEqual(["Hi again", "continue"]);
+    expect(resumed.session.history).not.toContainEqual(
+      expect.objectContaining({ content: "continue", role: "user" }),
+    );
+  });
+
+  it("cancels the turn when the user declines the limit continuation prompt", async () => {
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+
+    const held = await runStep(createLimitReachedSession(), { message: "Hi again" });
+    const declined = runStep(held.session, {
+      inputResponses: [{ optionId: "stop", requestId: LIMIT_REQUEST_ID }],
+    });
+
+    // A decline is a decision, not an error: the execution layer settles the
+    // thrown cancellation as `turn.cancelled` -> `session.waiting`.
+    await expect(declined).rejects.toBeInstanceOf(SessionLimitDeclinedError);
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    expect(events.filter((event) => event.type === "input.resolved")).toHaveLength(1);
+    expect(events.some((event) => event.type.endsWith(".failed"))).toBe(false);
+    expect(events.some((event) => event.type === "session.completed")).toBe(false);
+  });
+
+  it("receives a message sent behind the limit prompt without starting a step, and reads it after the grant", async () => {
+    setupMockAgent(HELLO);
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig(emit));
+
+    const held = await runStep(createLimitReachedSession(), { message: "Hi again" });
+    const whileHeld = events.length;
+    const heldAgain = await runStep(held.session, { message: "Also check the invoices." });
+
+    // Received at once; the question still holds the turn and is not asked again.
+    expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
+    expect(heldAgain.held).toEqual({ kind: "input" });
+    expect(events.slice(whileHeld).map((event) => event.type)).toEqual([
+      "message.received",
+      "turn.waiting",
+    ]);
+
+    const resumed = await runStep(heldAgain.session, {
+      inputResponses: [{ optionId: "continue", requestId: LIMIT_REQUEST_ID }],
+    });
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(resumed.session.history).toContainEqual({
+      content: "Also check the invoices.",
+      kind: "user" as const,
+      role: "user",
+    });
   });
 
   it("preserves a user-authored web_search tool instead of replacing it with the provider tool", async () => {

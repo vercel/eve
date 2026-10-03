@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
+import { createSessionLimitContinuationRequest } from "#harness/human-input/budget-question.js";
 
 const VIOLATION = { kind: "input", limit: 40_000_000, usedTokens: 40_120_500 } as const;
 

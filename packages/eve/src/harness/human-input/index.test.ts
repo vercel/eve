@@ -9,6 +9,7 @@ import {
   cancel,
   heldOnApprovals,
   message,
+  overBudget,
 } from "#internal/testing/human-input.js";
 
 /** What a person or the runtime can do to a turn, by name. */
@@ -20,6 +21,8 @@ const ACTIONS: Readonly<Record<string, (turn: Turn) => Turn>> = {
   "Alice types Approve": (turn) => turn.intake(message("Approve")),
   "Alice types something else": (turn) => turn.intake(message("Check the invoices first.")),
   "the turn is cancelled": (turn) => turn.intake(cancel),
+  "the session runs over budget": (turn) => turn.interrupt(overBudget()),
+  "Alice continues past the budget": (turn) => turn.intake(answer("continue", "s:limit:input:12")),
 };
 
 /** Every sequence of up to `length` actions, by name. */
