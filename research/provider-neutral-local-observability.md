@@ -1,12 +1,18 @@
 ---
 issue: TBD
-status: in-progress
-last_updated: "2026-08-28"
+status: superseded
+last_updated: "2026-10-01"
 ---
 
 # Provider-neutral local observability
 
 ## Summary
+
+This historical plan is superseded by
+[Agent tracing library](./agent-tracing-library.md). Current tracing uses one root
+per turn and links child activations to dispatch. It does not emit `agent.session`
+roots or adopt the caller's trace. The existing `createAiSdkHookBridge` remains
+the eve SDK-to-event adapter. The topology below records the earlier proposal.
 
 eve produces local traces without depending on Workflow tracing, changing production
 instrumentation, or coupling observability providers to the AI SDK. The first consumer is
