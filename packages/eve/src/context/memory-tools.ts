@@ -67,7 +67,12 @@ function createProviderToolCallbacks(input: {
   readonly key: string;
   readonly tool: MemoryToolSet[string];
 }) {
-  const closure = parseJsonObject({ context: input.context, key: input.key });
+  // History is not part of a tool's identity and can hold durable non-JSON
+  // values (dates, bytes) once a turn has run tools, so replay omits it.
+  const closure = parseJsonObject({
+    context: { ...input.context, messages: [] },
+    key: input.key,
+  });
   const loadTool = async (rawClosure: JsonObject) => {
     const key = rawClosure.key;
     const context = rawClosure.context;

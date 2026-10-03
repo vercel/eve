@@ -147,6 +147,51 @@ describe("memory provider tools", () => {
     });
   });
 
+  it("rebinds after a restart when mid-turn history holds non-JSON values", async () => {
+    const ctx = createContext("user_1");
+    const compiledResolver = resolver(() => 1);
+    await contextStorage.run(
+      ctx,
+      async () =>
+        await dispatchDynamicToolEvent({
+          ctx,
+          event,
+          messages: [{ content: "hello", role: "user" }],
+          resolvers: [compiledResolver],
+        }),
+    );
+    clearDurableDynamicCallbacks(ctx.require(SessionIdKey));
+
+    // A fresh process resumes mid-turn: history now carries this turn's tool
+    // results, which are durable values rather than plain JSON.
+    await rebindMissingCompiledDynamicToolCallbacks({
+      ctx,
+      event,
+      messages: [
+        { content: "hello", role: "user" },
+        {
+          content: [
+            {
+              output: { type: "json", value: { createdAt: new Date(0) } as never },
+              toolCallId: "call_0",
+              toolName: "lookup",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+      ],
+      resolvers: [compiledResolver],
+    });
+
+    const [replayed] = buildDynamicTools(ctx);
+    const output = await contextStorage.run(
+      ctx,
+      async () => await replayed?.execute?.({}, { messages: [], toolCallId: "call_1" }),
+    );
+    expect(output).toBe("1:user_1");
+  });
+
   it("omits tools when the provider has no tool factory", async () => {
     const ctx = createContext("user_1");
     const definition = defineMemory({
