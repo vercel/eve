@@ -61,9 +61,6 @@ The rule that the model never runs while a request is open is checked inside
 the evals above by `expectNoModelCallWhileOpen` and
 `expectNoModelCallDuringSignIn` ([helpers](./helpers.ts)).
 
-Known-bug evals skip unless `EVE_E2E_KNOWN_BUGS=1`; each carries a `// BUG:`
-note with the runtime location.
-
 ## Not covered here
 
 - **Candidate expiry.** A candidate times out after a 10-minute wall-clock
