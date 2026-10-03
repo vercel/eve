@@ -38,7 +38,7 @@ import { durableOtelBackend } from "#tracing/eve/otel.js";
 import { aiSdkContentSerializer } from "#tracing/eve/serialization.js";
 import { eveOutputMapping } from "#tracing/eve/profile.js";
 import { ContextAgentTraceStateStore } from "#tracing/eve/agent-trace-context-store.js";
-import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/eve/agent-trace-context-codec.js";
+import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/eve/agent-trace-context-store.js";
 import { resolveToolCallAgentTrace } from "#tracing/eve/agent-invocation-coordinator.js";
 import * as instrumentation from "#instrumentation/runtime.js";
 import * as runtimeGlobal from "#instrumentation/runtime-global.js";

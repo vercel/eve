@@ -5,7 +5,7 @@ import {
   ContextAgentTraceStateStore,
   pruneAgentTraceState,
 } from "#tracing/eve/agent-trace-context-store.js";
-import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/eve/agent-trace-context-codec.js";
+import { AGENT_TRACE_CONTEXT_KEY } from "#tracing/eve/agent-trace-context-store.js";
 import { AgentTraceSpanProcessor } from "#tracing/local/agent-trace-span-processor.js";
 
 const anchor = {
