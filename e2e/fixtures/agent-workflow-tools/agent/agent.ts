@@ -134,6 +134,7 @@ async function respond(request: MockModelRequest): Promise<MockModelResponse | s
     ["WORKFLOW-FANOUT-START", "fanout_deploy"],
     ["WORKFLOW-WEBHOOK-START", "webhook_deploy"],
     ["WORKFLOW-AGENT-FANOUT-START", "fanout_agents"],
+    ["WORKFLOW-LAPSE-START", "lapsing_offer"],
   ] as const) {
     if (!message.includes(directive)) continue;
     const result = [...request.toolResults].reverse().find((entry) => entry.name === tool);
