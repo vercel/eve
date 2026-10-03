@@ -2,7 +2,7 @@ import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import { hasDelegatedSessionContext } from "#execution/delegated-session-context.js";
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
-import { AuthKey } from "#context/keys.js";
+import { AuthKey, TurnDeliveryIdsKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
@@ -10,7 +10,12 @@ import {
   readDurableSession,
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
-import { relaySessionEvents, type SessionStepState } from "#execution/publish-session-events.js";
+import {
+  publishSessionEvents,
+  relaySessionEvents,
+  type PublishedSessionEvents,
+  type SessionStepState,
+} from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
   type WithSessionStateDelta,
@@ -31,6 +36,7 @@ import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
 import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
 import {
   createInputResolvedEvent,
+  createMessageReceivedEvent,
   type InputResolution,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
@@ -95,6 +101,10 @@ async function routeProxiedDeliver(
   // resolved by an earlier payload is hidden from later ones; its run takes
   // one answer, and later messages must reach the parent instead.
   const resolvedQuestions = new Set<string>();
+  // A message that answers a question is still the person's turn in the
+  // conversation, so the stream records it with its delivery ids.
+  const answerMessages: UnstampedMessageStreamEvent[] = [];
+  const answerDeliveryIds: string[] = [];
 
   for (const [sourcePayloadIndex, payload] of sourceDelivery.payloads.entries()) {
     const routed = routeDeliverPayload({
@@ -109,6 +119,17 @@ async function routeProxiedDeliver(
     for (const [childIndex, forChild] of routed.forChildren.entries()) {
       if (forChild.workflowAsk !== undefined) {
         for (const { requestId } of forChild.resolved.resolutions) resolvedQuestions.add(requestId);
+      }
+      if (forChild.message !== undefined) {
+        const { sequence, turnId } = forChild.resolved.event;
+        answerMessages.push(
+          createMessageReceivedEvent({ message: forChild.message, sequence, turnId }),
+        );
+        for (const metadata of sourceDelivery.deliveryMetadata ?? []) {
+          if (metadata.payloadIndex === sourcePayloadIndex) {
+            answerDeliveryIds.push(metadata.deliveryId);
+          }
+        }
       }
       const key = JSON.stringify([
         forChild.childContinuationToken,
@@ -206,14 +227,26 @@ async function routeProxiedDeliver(
     resolvedEvents.push(createTurnWaitingOnInputEvent(durableSession));
   }
 
+  let published: PublishedSessionEvents = {
+    serializedContext,
+    sessionState: retired
+      ? replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState })
+      : input.sessionState,
+  };
+  if (answerMessages.length > 0) {
+    // Like a steering message, the answer joins the open turn, so the turn's
+    // later events carry its delivery ids too.
+    published = await publishSessionEvents(
+      {
+        serializedContext: joinTurnDeliveryIds(published.serializedContext, answerDeliveryIds),
+        sessionState: published.sessionState,
+        sessionWritable: input.sessionWritable,
+      },
+      answerMessages,
+    );
+  }
   const context = await relaySessionEvents(
-    {
-      serializedContext,
-      sessionState: retired
-        ? replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState })
-        : input.sessionState,
-      sessionWritable: input.sessionWritable,
-    },
+    { ...published, sessionWritable: input.sessionWritable },
     resolvedEvents,
   );
   if (parentAction !== undefined) return { ...context, ...parentAction };
@@ -232,6 +265,19 @@ async function routeProxiedDeliver(
           payloads: orderedParentPayloads.map(([, payload]) => payload),
         };
   return { ...context, kind: "continue", remainder };
+}
+
+function joinTurnDeliveryIds(
+  serializedContext: Record<string, unknown>,
+  deliveryIds: readonly string[],
+): Record<string, unknown> {
+  if (deliveryIds.length === 0) return serializedContext;
+  const current =
+    (serializedContext[TurnDeliveryIdsKey.name] as readonly string[] | undefined) ?? [];
+  return {
+    ...serializedContext,
+    [TurnDeliveryIdsKey.name]: [...new Set([...current, ...deliveryIds])],
+  };
 }
 
 /**
