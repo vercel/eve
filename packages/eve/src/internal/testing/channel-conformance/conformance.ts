@@ -14,6 +14,7 @@ import { discordDriver } from "#internal/testing/channel-conformance/discord-dri
 import { githubDriver } from "#internal/testing/channel-conformance/github-driver.js";
 import { linearDriver } from "#internal/testing/channel-conformance/linear-driver.js";
 import { linqDriver } from "#internal/testing/channel-conformance/linq-driver.js";
+import { photonDriver } from "#internal/testing/channel-conformance/photon-driver.js";
 import { slackDriver } from "#internal/testing/channel-conformance/slack-driver.js";
 import { teamsDriver } from "#internal/testing/channel-conformance/teams-driver.js";
 import { telegramDriver } from "#internal/testing/channel-conformance/telegram-driver.js";
@@ -54,6 +55,7 @@ const hitlConformance = {
   github: [{ driver: githubDriver }],
   linear: [{ driver: linearDriver }],
   linq: [{ driver: linqDriver }],
+  photon: [{ driver: photonDriver }],
   slack: [{ driver: slackDriver }],
   teams: [{ driver: teamsDriver }],
   telegram: [{ driver: telegramDriver }],
