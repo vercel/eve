@@ -1,5 +1,8 @@
-import { executeBashOnSandbox, type BashInput } from "#execution/sandbox/bash.js";
-import { BASH_JOB_YIELD_SECONDS } from "#execution/sandbox/bash-jobs.js";
+import {
+  BASH_YIELD_SECONDS,
+  executeBashOnSandbox,
+  type BashInput,
+} from "#execution/sandbox/bash.js";
 import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 import { defineJsonSchema } from "#tools/schema.js";
@@ -10,9 +13,9 @@ export interface BashToolInput {
 
 /**
  * Output of the provided `bash` tool. A command that finishes within 30
- * seconds is `completed`. A longer command keeps running in the sandbox as a
- * job and returns `running` with its output so far; later `bash` calls run
- * `eve-job wait <jobId>` or `eve-job stop <jobId>` to observe or stop it.
+ * seconds is `completed`. A longer command keeps running in the sandbox as
+ * process group `pid` and returns `running` with its output so far; it keeps
+ * writing `stdout`, `stderr`, and finally `exit` files in `outputDirectory`.
  */
 export type BashToolOutput =
   | {
@@ -24,7 +27,8 @@ export type BashToolOutput =
     }
   | {
       status: "running";
-      jobId: string;
+      pid: number;
+      outputDirectory: string;
       message: string;
       stderr: string;
       stdout: string;
@@ -64,13 +68,14 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
       type: "object",
       properties: {
         status: { const: "running" },
-        jobId: { type: "string" },
+        pid: { type: "number" },
+        outputDirectory: { type: "string" },
         message: { type: "string" },
         stderr: { type: "string" },
         stdout: { type: "string" },
         truncated: { type: "boolean" },
       },
-      required: ["status", "jobId", "message", "stderr", "stdout", "truncated"],
+      required: ["status", "pid", "outputDirectory", "message", "stderr", "stdout", "truncated"],
       additionalProperties: false,
     },
   ],
@@ -86,10 +91,10 @@ export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
  */
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = defineTool({
   label: { start: (input) => toolLabel("Run", input.command) },
-  description: `Execute a shell command in the shared workspace environment. A command still running after ${BASH_JOB_YIELD_SECONDS} seconds keeps running in the background and returns status "running" with instructions to check on or stop it.`,
+  description: `Execute a shell command in the shared workspace environment. A command still running after ${BASH_YIELD_SECONDS} seconds keeps running in the background and returns status "running" with its output so far and how to check on or stop it.`,
   async execute(input, ctx) {
     return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput, {
-      jobKey: `${ctx.session.id}/${ctx.callId}`,
+      abortSignal: ctx.abortSignal,
     });
   },
   inputSchema: BASH_INPUT_SCHEMA,

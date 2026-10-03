@@ -80,22 +80,29 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   return `Mock reply: ${message}`;
 }
 
-/** Starts the slow command, waits on its job once, stops it, then replies. */
+/** Starts the slow command, reads its output once, stops it, then replies. */
 function respondToBashJob(message: string, request: MockModelRequest): MockModelResponse | string {
   const outputs = request.toolResults
     .filter((result) => result.name === "bash")
-    .map((result) => result.output as { readonly jobId?: unknown });
+    .map(
+      (result) => result.output as { readonly outputDirectory?: unknown; readonly pid?: unknown },
+    );
   if (outputs.length === 0) {
     const command = /by running: `([^`]+)`/u.exec(message)?.[1] ?? "";
     return { toolCalls: [{ input: { command }, name: "bash" }] };
   }
-  const jobId = outputs[0]?.jobId;
-  if (typeof jobId !== "string") return formatOutput(outputs[0]);
+  const { outputDirectory, pid } = outputs[0] ?? {};
+  if (typeof outputDirectory !== "string" || typeof pid !== "number") {
+    return formatOutput(outputs[0]);
+  }
   if (outputs.length === 1) {
-    return { toolCalls: [{ input: { command: `eve-job wait ${jobId} 2` }, name: "bash" }] };
+    const command = `sleep 2; tail -n 1 ${outputDirectory}/stdout`;
+    return { toolCalls: [{ input: { command }, name: "bash" }] };
   }
   if (outputs.length === 2) {
-    return { toolCalls: [{ input: { command: `eve-job stop ${jobId}` }, name: "bash" }] };
+    const exitFile = `${outputDirectory}/exit`;
+    const command = `kill -- -${pid}; for i in 1 2 3 4 5; do [ -f ${exitFile} ] && break; sleep 1; done; cat ${exitFile}`;
+    return { toolCalls: [{ input: { command }, name: "bash" }] };
   }
   return "index job stopped";
 }

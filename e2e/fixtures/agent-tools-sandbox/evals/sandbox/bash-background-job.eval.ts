@@ -5,14 +5,15 @@ const BASH_TOOL = "bash";
 const INDEX_COMMAND = "for i in $(seq 1 120); do echo indexed batch $i; sleep 1; done";
 
 interface BashOutput {
-  readonly jobId?: string;
+  readonly exitCode?: number;
   readonly status?: string;
   readonly stdout?: string;
 }
 
 export default defineEval({
-  description: "Sandbox Bash: a slow command returns running, and eve-job waits on and stops it.",
-  // The first bash call waits the full 30-second yield before it reports the job.
+  description:
+    "Sandbox Bash: a slow command returns running, keeps writing its output file, and stops with kill.",
+  // The first bash call waits the full 30-second yield before it reports the command.
   timeoutMs: 150_000,
   async test(t) {
     const turn = await t.send(
@@ -20,8 +21,8 @@ export default defineEval({
         "EVE_SANDBOX_BASH_JOB",
         "Alice is rebuilding a search index that prints one progress line per second for two minutes.",
         `Start it with the \`${BASH_TOOL}\` tool by running: \`${INDEX_COMMAND}\``,
-        "The tool will report that the command is still running and give it a job id.",
-        "Check its progress once with `eve-job wait <job id> 2`, then stop it with `eve-job stop <job id>`.",
+        "The tool will report that the command is still running, with its process group and output directory.",
+        "Check its latest progress line once with `tail`, then stop it with `kill` and read its exit code.",
         "After it stops, reply with exactly: index job stopped",
       ].join("\n"),
     );
@@ -29,20 +30,21 @@ export default defineEval({
 
     t.log(JSON.stringify(bashOutputs(turn.events)));
     turn.noFailedActions();
-    turn.eventsSatisfy("the slow command yields, then eve-job waits on and stops it", (events) =>
+    turn.eventsSatisfy("the slow command yields, keeps running, then stops with kill", (events) =>
       jobWasObservedAndStopped(bashOutputs(events)),
     );
   },
 });
 
 function jobWasObservedAndStopped(outputs: readonly BashOutput[]): boolean {
-  const started = outputs.find((output) => output.status === "running");
-  const jobId = started?.jobId;
-  if (jobId === undefined || !started?.stdout?.includes("indexed batch 1")) return false;
-  const later = outputs.slice(outputs.indexOf(started) + 1);
+  const [started, observed, stopped] = outputs;
   return (
-    later.some((output) => output.stdout?.includes(`[eve-job ${jobId}: still running.`)) &&
-    later.some((output) => output.stdout?.includes(`[eve-job ${jobId}: stopped`))
+    started?.status === "running" &&
+    started.stdout?.includes("indexed batch 1") === true &&
+    observed?.status === "completed" &&
+    /indexed batch \d+/u.test(observed.stdout ?? "") &&
+    stopped?.status === "completed" &&
+    stopped.stdout?.trim() === "143"
   );
 }
 

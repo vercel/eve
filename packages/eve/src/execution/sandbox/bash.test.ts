@@ -4,7 +4,7 @@ import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install
 import type { SandboxCommandResult, SandboxSession } from "#shared/sandbox-session.js";
 
 import { executeBashOnSandbox } from "./bash.js";
-import { createBashJobId } from "./bash-jobs.js";
+import { bufferToStream } from "./stream-utils.js";
 
 describe("executeBashOnSandbox", () => {
   const previousDevFlag = process.env[EVE_DEV_ENV_FLAG];
@@ -21,18 +21,13 @@ describe("executeBashOnSandbox", () => {
   it("logs sandbox command progress in dev without adding to stderr", async () => {
     process.env[EVE_DEV_ENV_FLAG] = "1";
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const jobId = createBashJobId("session-1/call-1");
     const sandbox = createTestSandboxSession({
       exitCode: 0,
       stderr: "",
-      stdout: `eve-job:v1:${jobId} exited 0 0 0 ${jobId}\nweather-codes.md\n`,
+      stdout: "weather-codes.md\n",
     });
 
-    const result = await executeBashOnSandbox(
-      sandbox,
-      { command: "ls -la /workspace" },
-      { jobKey: "session-1/call-1" },
-    );
+    const result = await executeBashOnSandbox(sandbox, { command: "ls -la /workspace" });
 
     expect(result).toEqual({
       exitCode: 0,
@@ -44,44 +39,25 @@ describe("executeBashOnSandbox", () => {
     expect(log).toHaveBeenCalledWith("eve: starting sandbox command: ls -la /workspace");
     expect(log).toHaveBeenCalledWith("eve: sandbox command finished (exit 0): ls -la /workspace");
   });
-
-  it("returns a still-running command as a job the model can wait on or stop", async () => {
-    const jobId = createBashJobId("session-1/call-1");
-    const sandbox = createTestSandboxSession({
-      exitCode: 0,
-      stderr: "",
-      stdout: `eve-job:v1:${jobId} running - 0 0 ${jobId}\nindexing 1/9\n`,
-    });
-
-    const result = await executeBashOnSandbox(
-      sandbox,
-      { command: "grep -r TODO /" },
-      { jobKey: "session-1/call-1" },
-    );
-
-    expect(result).toMatchObject({
-      status: "running",
-      stderr: "",
-      stdout: "indexing 1/9\n",
-      truncated: false,
-    });
-    if (result.status !== "running") throw new Error("expected a running job");
-    expect(result.message).toContain(`eve-job wait ${result.jobId}`);
-    expect(result.message).toContain(`eve-job stop ${result.jobId}`);
-  });
 });
 
 function createTestSandboxSession(result: SandboxCommandResult): SandboxSession {
+  const encoder = new TextEncoder();
   return {
     readBinaryFile: async () => null,
     readFile: async () => null,
     readTextFile: async () => null,
     removePath: async () => {},
     resolvePath: (path) => path,
-    run: vi.fn().mockResolvedValue(result),
-    spawn: async () => {
-      throw new Error("spawn is not implemented in this test sandbox");
+    run: async () => {
+      throw new Error("run is not used by a command that finishes in time");
     },
+    spawn: async () => ({
+      kill: async () => {},
+      stderr: bufferToStream(encoder.encode(result.stderr)),
+      stdout: bufferToStream(encoder.encode(result.stdout)),
+      wait: async () => ({ exitCode: result.exitCode }),
+    }),
     writeBinaryFile: async () => {},
     writeFile: async () => {},
     writeTextFile: async () => {},
