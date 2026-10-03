@@ -18,7 +18,7 @@ import {
 } from "./contract.js";
 import { modelInputAttributes, modelResultAttributes, type ContentSerializer } from "./model.js";
 import { withoutDeclinedContent } from "./content-policy.js";
-import type { ScopeData, ScopeIdentity, ScopeRecord, ScopeTerminal } from "./scope-lifecycle.js";
+import type { ScopeData, ScopeIdentity, ScopeRecord, ScopeTerminal } from "./types.js";
 import type { Attributes, CaptureDecision, PreparedSpan } from "./types.js";
 import type { TraceOperation } from "./writer.js";
 

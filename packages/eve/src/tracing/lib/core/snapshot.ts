@@ -1,11 +1,11 @@
-import type { ScopeRecord } from "./scope-lifecycle.js";
+import type { ScopeRecord } from "./types.js";
 import type { ContentSerializer } from "./model.js";
 import { capturedScopeData } from "./span-kinds.js";
 const SERIALIZED_BYTES = 32768;
 const SNAPSHOT_BYTES = 65536;
 const UNFINISHED_CHILDREN = 10000;
 import { withoutDeclinedContent } from "./content-policy.js";
-import type { ScopeTerminal } from "./scope-lifecycle.js";
+import type { ScopeTerminal } from "./types.js";
 import type { Attributes, TraceLink, Usage } from "./types.js";
 import type { TraceSnapshot } from "./types.js";
 

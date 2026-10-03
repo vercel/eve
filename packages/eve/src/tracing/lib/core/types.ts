@@ -147,6 +147,142 @@ export interface Usage {
 }
 
 export type ActionKind = string;
+export interface ContentSerializer {
+  json(value: unknown): string | undefined;
+  text(value: string): string | undefined;
+  inputMessages(value: unknown): string | undefined;
+  instructions(value: unknown): string | undefined;
+  outputMessages(value: readonly ContentPart[], finishReason: string): string | undefined;
+  toolResults(value: readonly Record<string, unknown>[]): string | undefined;
+}
+export interface ModelResult {
+  readonly usage: Usage;
+  readonly responseId?: string;
+  readonly responseModelId?: string;
+  readonly finishReason: string;
+  readonly content?: readonly ContentPart[];
+}
+export interface ScopeIdentity extends RunIdentity {
+  readonly agentName?: string;
+  readonly framework?: FrameworkIdentity;
+}
+export interface TurnMetadata {
+  readonly attributes?: Attributes;
+  readonly sequence: number;
+  readonly subagent?: boolean;
+  readonly subagentName?: string;
+  readonly parentCallId?: string;
+  readonly parentRunId?: string;
+  readonly channel?: { kind?: string; origin?: string };
+}
+export interface StepOptions {
+  readonly index: number;
+  readonly attempt?: number;
+  readonly channel?: { kind?: string; origin?: string };
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
+}
+export interface ModelOptions {
+  readonly provider: string;
+  readonly modelId: string;
+  readonly messages?: readonly unknown[];
+  readonly instructions?: unknown;
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
+}
+export interface ActionOptions {
+  readonly callId: string;
+  readonly name: string;
+  readonly kind?: ActionKind;
+  readonly arguments?: unknown;
+}
+export type ScopeData =
+  | { readonly type: "activation"; readonly options: TurnMetadata }
+  | { readonly type: "step"; readonly options: StepOptions }
+  | { readonly type: "model"; readonly options: ModelOptions }
+  | { readonly type: "action"; readonly options: ActionOptions }
+  | {
+      readonly type: "tool";
+      readonly options: Pick<ActionOptions, "callId" | "name" | "arguments">;
+    }
+  | {
+      readonly type: "approval";
+      readonly options: {
+        requestId: string;
+        request?: unknown;
+        callId: string;
+        actionName: string;
+      };
+    }
+  | {
+      readonly type: "memory";
+      readonly options: {
+        operation: "search_memory" | "upsert_memory";
+        phase: string;
+        slot: string;
+        storeId: string;
+      };
+    };
+export interface ScopeTerminal {
+  readonly outcome?: string;
+  readonly failed?: boolean;
+  readonly error?: unknown;
+  readonly errorCode?: string;
+  readonly output?: unknown;
+  readonly response?: unknown;
+  readonly usage?: Usage;
+  readonly model?: ModelResult;
+  readonly recordCount?: number;
+  readonly records?: readonly { id?: string; content: string }[];
+  readonly endTimeMs?: number;
+}
+export interface ScopeRecord {
+  readonly pendingParent?: boolean;
+  readonly version?: 1;
+  readonly finished?: boolean;
+  readonly key: string;
+  readonly identity: ScopeIdentity;
+  readonly data: ScopeData;
+  readonly reference: TraceReference;
+  readonly parent?: TraceReference;
+  readonly attempt?: { readonly index: number; readonly attempt: number };
+  readonly capture: CaptureDecision;
+  readonly startTimeMs: number;
+  readonly links?: readonly TraceLink[];
+  readonly usage?: Usage;
+  readonly usageKeys?: readonly string[];
+  readonly attributes?: Attributes;
+  readonly childSequence?: number;
+  readonly children?: readonly ScopeRecord[];
+  readonly terminal?: ScopeTerminal;
+}
+export interface OperationFacts {
+  identity: ScopeIdentity;
+  capture: CaptureDecision;
+  operationId: string;
+  reference?: TraceReference;
+  parent?: TraceReference;
+  startTimeMs?: number;
+  links?: readonly TraceLink[];
+  context?: object;
+  attributes?: Attributes;
+  attempt?: { index: number; attempt: number };
+}
+export interface Operation {
+  readonly type: ScopeData["type"];
+  readonly reference: TraceReference;
+  readonly parent?: TraceReference;
+  readonly startTimeMs: number;
+  readonly capture: CaptureDecision;
+  readonly finished: boolean;
+  snapshot(): TraceSnapshot;
+  run<T>(execute: () => T, ceiling?: CaptureDecision): T;
+  attributes(attributes: Attributes): void;
+  update(input: { attributes?: Attributes; links?: readonly TraceLink[] }): void;
+  complete(result?: ScopeTerminal & { errorType?: string; result?: ModelResult }): Promise<void>;
+  fail(error: unknown): Promise<void>;
+  modelCall(input: ModelOptions, key?: string): Promise<Operation>;
+  attach(parent: TraceReference, context?: object): Promise<void>;
+  drain(result?: ScopeTerminal): Promise<void>;
+}
 
 export type ContentPart =
   | { readonly type: "text"; readonly text: string }

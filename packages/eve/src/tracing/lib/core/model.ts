@@ -1,14 +1,8 @@
 import type { Attributes, ContentPart, Usage } from "./types.js";
 import { usageAttributes } from "./attributes.js";
 
-export interface ContentSerializer {
-  json(value: unknown): string | undefined;
-  text(value: string): string | undefined;
-  inputMessages(value: unknown): string | undefined;
-  instructions(value: unknown): string | undefined;
-  outputMessages(value: readonly ContentPart[], finishReason: string): string | undefined;
-  toolResults(value: readonly Record<string, unknown>[]): string | undefined;
-}
+import type { ContentSerializer } from "./types.js";
+export type { ContentSerializer } from "./types.js";
 
 export function modelInputAttributes(
   input: {

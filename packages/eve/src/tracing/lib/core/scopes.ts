@@ -13,7 +13,7 @@ import {
 import { mcpLifecycle } from "./mcp.js";
 import { intersectCapture } from "./activation.js";
 import { snapshotRecord, traceSnapshot, validSnapshot, checkpointSnapshot } from "./snapshot.js";
-import type { Operation, OperationFacts } from "./operations.js";
+import type { Operation, OperationFacts } from "./types.js";
 import { withAgentHandoff } from "./delegation.js";
 import { boundedSerializer } from "./serializer.js";
 import { withoutDeclinedContent } from "./content-policy.js";
@@ -22,7 +22,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 const SERIALIZED_BYTES = 32768;
 const UNFINISHED_CHILDREN = 10000;
 
-import type { ScopeIdentity, ScopeData, ScopeRecord } from "./scope-lifecycle.js";
+import type { ScopeIdentity, ScopeData, ScopeRecord } from "./types.js";
 type Construction = Partial<ScopeRecord> & {
   key: string;
   reservationKey?: string;
@@ -591,10 +591,10 @@ export function createTraceRecorder(input: {
     turnReference(key: string, capture: CaptureDecision) {
       return backend.reserveReference({ key: `turn:${key}`, traceFlags: capture.emit ? 1 : 0 });
     },
-    turn(facts: OperationFacts & { metadata: import("./scope-lifecycle.js").TurnMetadata }) {
+    turn(facts: OperationFacts & { metadata: import("./types.js").TurnMetadata }) {
       return start(facts, { type: "activation", options: facts.metadata });
     },
-    attempt(facts: OperationFacts & { step: import("./scope-lifecycle.js").StepOptions }) {
+    attempt(facts: OperationFacts & { step: import("./types.js").StepOptions }) {
       return start(
         facts,
         { type: "step", options: facts.step },
@@ -603,7 +603,7 @@ export function createTraceRecorder(input: {
     },
     action(
       facts: OperationFacts & {
-        action: import("./scope-lifecycle.js").ActionOptions;
+        action: import("./types.js").ActionOptions;
         parentAttemptId: string;
       },
     ) {

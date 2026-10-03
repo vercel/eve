@@ -7,8 +7,33 @@ export { runTraceContext } from "./core/context.js";
 export { withoutDeclinedContent, type ResolvedContentOptions } from "./core/content-policy.js";
 export { mcpLifecycle, type McpLifecycle, type McpUpdate } from "./core/mcp.js";
 export * from "./core/contract.js";
-export type * from "./core/types.js";
-export type * from "./core/operations.js";
-export type { TurnMetadata } from "./core/scope-lifecycle.js";
-export type { ContentSerializer } from "./core/model.js";
+export type {
+  AttributeValue,
+  Attributes,
+  TraceJson,
+  TraceSnapshot,
+  SpanType,
+  SpanKind,
+  ExecutionContext,
+  TraceReference,
+  CaptureDecision,
+  TraceErrorContext,
+  TraceErrorHandler,
+  TraceLink,
+  PreparedSpan,
+  SpanWriter,
+  TraceBackend,
+  ActiveOperation,
+  MappingContext,
+  OutputMapping,
+  RunIdentity,
+  FrameworkIdentity,
+  Usage,
+  ActionKind,
+  ContentPart,
+  ContentSerializer,
+  Operation,
+  OperationFacts,
+  TurnMetadata,
+} from "./core/types.js";
 export type DurableTraceRuntime = ReturnType<typeof import("./core/scopes.js").createTraceRecorder>;
