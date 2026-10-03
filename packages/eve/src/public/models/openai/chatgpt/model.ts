@@ -68,6 +68,9 @@ function normalizeCodexCallOptions(
       ...providerOptions,
       openai: {
         ...openaiOptions,
+        // OpenAI documents `fast` as an alias of `priority`, but the Codex
+        // backend rejects `fast`. Codex itself sends `priority` for Fast mode.
+        ...(openaiOptions.serviceTier === "fast" && { serviceTier: "priority" }),
         ...(instructions !== undefined && { instructions }),
         store: false,
       },
