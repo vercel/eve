@@ -16,7 +16,7 @@ import {
   actionErrorAttributes,
   memoryCountAttributes,
 } from "./contract.js";
-import { modelInputAttributes, modelResultAttributes, type ContentSerializer } from "./model.js";
+import type { ContentSerializer, ModelResult } from "./types.js";
 import { withoutDeclinedContent } from "./content-policy.js";
 import type { ScopeData, ScopeIdentity, ScopeRecord, ScopeTerminal } from "./types.js";
 import type { Attributes, CaptureDecision, PreparedSpan } from "./types.js";
@@ -152,10 +152,10 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
           "gen_ai.request.model": options.modelId,
           ...runtimeContextAttributes(options.runtimeContext),
           ...(context.capture.recordInputs && options.messages !== undefined
-            ? modelInputAttributes(
-                { messages: options.messages, instructions: options.instructions },
-                context.serializer,
-              )
+            ? {
+                "gen_ai.input.messages": context.serializer.inputMessages(options.messages),
+                "gen_ai.system_instructions": context.serializer.instructions(options.instructions),
+              }
             : undefined),
         },
       };
@@ -351,4 +351,52 @@ export function completeScope(
 export function capturedScopeData(data: ScopeData, capture: CaptureDecision): ScopeData {
   if (!capture.emit) capture = { emit: false, recordInputs: false, recordOutputs: false };
   return kind(data).redact?.(data, capture) ?? data;
+}
+function modelResultAttributes(
+  input: ModelResult,
+  serializer: ContentSerializer,
+  recordOutputs: boolean,
+): Attributes {
+  const attributes: Record<string, Attributes[string]> = {
+    ...usageAttributes(input.usage, true),
+    "gen_ai.response.id": input.responseId,
+    "gen_ai.response.model": input.responseModelId,
+    "gen_ai.response.finish_reasons": [input.finishReason],
+  };
+  if (!recordOutputs) return attributes;
+  attributes["ai.response.finish_reason"] = input.finishReason;
+  const content = input.content;
+  if (content === undefined) return attributes;
+  attributes["gen_ai.output.messages"] = serializer.outputMessages(content, input.finishReason);
+  attributes["ai.response.reasoning"] = serializer.text(
+    content
+      .filter((part) => part.type === "reasoning")
+      .map((part) => part.text)
+      .filter((text) => text.trim().length > 0)
+      .join("\n"),
+  );
+  attributes["ai.response.text"] = serializer.text(
+    content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join(""),
+  );
+  const calls = content
+    .filter((part) => part.type === "tool-call")
+    .map((part) => ({ callId: part.callId, input: part.input, toolName: part.toolName }));
+  if (calls.length > 0) attributes["ai.response.tool_calls"] = serializer.json(calls);
+  const results = content
+    .filter((part) => part.type === "tool-result" || part.type === "tool-error")
+    .map((part) =>
+      part.type === "tool-result"
+        ? { callId: part.callId, input: part.input, output: part.output, toolName: part.toolName }
+        : {
+            callId: part.callId,
+            input: part.input,
+            error: part.error instanceof Error ? part.error.message : part.error,
+            toolName: part.toolName,
+          },
+    );
+  if (results.length > 0) attributes["ai.response.tool_results"] = serializer.toolResults(results);
+  return attributes;
 }

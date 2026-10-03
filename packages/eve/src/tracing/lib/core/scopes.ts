@@ -2,7 +2,7 @@ import type { ExecutionContext } from "./types.js";
 import { createSpanWriter, type TraceOperation } from "./writer.js";
 import { usageAttributes } from "./attributes.js";
 import { applyAttributes } from "./contract.js";
-import type { ContentSerializer } from "./model.js";
+import type { ContentSerializer } from "./types.js";
 import type { Attributes, CaptureDecision, TraceBackend, TraceReference } from "./types.js";
 import {
   completeScope,

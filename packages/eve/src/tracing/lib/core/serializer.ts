@@ -1,4 +1,4 @@
-import type { ContentSerializer } from "./model.js";
+import type { ContentSerializer } from "./types.js";
 
 export function boundedSerializer(
   serializer: ContentSerializer,

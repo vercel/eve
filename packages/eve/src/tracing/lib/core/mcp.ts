@@ -5,7 +5,7 @@ import {
   rpcStatusAttributes,
   CONTENT_FIELDS,
 } from "./contract.js";
-import type { ContentSerializer } from "./model.js";
+import type { ContentSerializer } from "./types.js";
 
 export interface McpUpdate {
   readonly connectionName?: string;
