@@ -20,6 +20,7 @@ import {
   toolCallIdempotencyKey,
 } from "#instrumentation/lifecycle.js";
 import { structuralProviderMetadata } from "#instrumentation/content.js";
+import { gatewayCallMetadata } from "#instrumentation/gateway-call-metadata.js";
 
 type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
 
@@ -224,7 +225,8 @@ function toModelCallCompleted(
   idempotencyKey: string,
   source: TelemetryEvent<"onLanguageModelCallEnd">,
 ): InstrumentationModelCallCompletedEvent {
-  return Object.freeze({
+  const gateway = gatewayCallMetadata(source.providerMetadata);
+  const event: InstrumentationModelCallCompletedEvent = {
     content: state.capturesOutputs ? toContentParts(source.content) : undefined,
     finishReason: source.finishReason,
     idempotencyKey,
@@ -233,7 +235,8 @@ function toModelCallCompleted(
     scope: state.scope,
     type: "model.call.completed",
     usage: toUsage(source.usage),
-  });
+  };
+  return Object.freeze(gateway === undefined ? event : { ...event, gateway });
 }
 
 function toUsage(usage: TelemetryEvent<"onLanguageModelCallEnd">["usage"]): InstrumentationUsage {

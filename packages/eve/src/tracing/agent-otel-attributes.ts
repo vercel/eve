@@ -1,4 +1,6 @@
 import { operationConversationId } from "#tracing/conversation-context.js";
+import type { Span } from "#compiled/@opentelemetry/api/index.js";
+import type { InstrumentationModelCallCompletedEvent } from "#instrumentation/lifecycle.js";
 import { AGENT_TRACE_SCHEMA_VERSION } from "#tracing/agent-span-contract.js";
 
 export function traceSessionIdOf(scope: {
@@ -24,4 +26,18 @@ export function agentTraceIdentityAttributes(input: {
     attributes["vercel.session_id"] = input.traceSessionId;
   }
   return attributes;
+}
+
+export function setModelCallCompletedAttributes(
+  span: Span,
+  event: InstrumentationModelCallCompletedEvent,
+  recordOutputs: boolean,
+): void {
+  span.setAttribute("agent.trace.content.output", recordOutputs && event.content !== undefined);
+  if (event.gateway?.generationId !== undefined) {
+    span.setAttribute("gen_ai.generation.id", event.gateway.generationId);
+  }
+  if (event.gateway?.transcriptsEnabled === true) {
+    span.setAttribute("vercel.ai_gateway.transcript.enabled", true);
+  }
 }
