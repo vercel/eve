@@ -1,5 +1,18 @@
 # eve
 
+## 0.70.3
+
+### Patch Changes
+
+- 8136e50: Retry session stream opens and reconnects when Safari, iOS browsers, or Firefox reject `fetch()` with `TypeError: Load failed` or `TypeError: NetworkError when attempting to fetch resource.`, matching the existing Chrome and Node behavior.
+- 69888f1: Compaction now estimates tokens from UTF-8 bytes instead of string length, so Chinese, Japanese, Korean, and other non-Latin text no longer counts at a fraction of its real cost. A large tool result in those scripts now triggers compaction before the request overflows the context window.
+- 4b880a5: The packaged docs now include a Code Extension page for `eve/extensions/code`, with its latest eve-code benchmark results inlined as Markdown tables so agents reading `node_modules/eve/docs` see the numbers.
+- 983c375: Answering some of several pending `ctx.ask()` or subagent questions now parks the open turn again with `turn.waiting`, as a partial answer to tool approvals already does, so clients waiting for the next rest point stop reading instead of hanging until the last answer.
+- f234b51: Staged attachments are now checked against their content address before each model call. If code in the sandbox overwrote a staged file, the model gets a `FileNotFound` note instead of the replaced bytes posing as the original upload.
+- 0c0c1e5: A step interrupted by a steering message now ends with `step.completed` (`finishReason: "other"`, with any usage the provider reported) before the next step starts, instead of leaving its `step.started` open.
+- 3b1fe5c: Record `gen_ai.execute_tool.duration` on `execute_tool` spans, as `@ai-sdk/otel` does. Instrumentation providers also receive the tool's run time as `durationMs` on `tool.call.completed`.
+- 2c3b781: `useEveAgent` no longer aborts an in-flight turn when React replays its effects during Fast Refresh or Strict Mode. Unmounting still stops the local stream.
+
 ## 0.70.2
 
 ### Patch Changes
