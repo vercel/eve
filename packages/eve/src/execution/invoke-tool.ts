@@ -117,7 +117,6 @@ export async function invokeTool(
       agentName: runtime.agentName,
       auth: options.auth,
       callId,
-      input,
       origin: runtime.origin,
       sessionId,
       toolName: name,
@@ -269,6 +268,10 @@ async function runCall(input: {
   let output: unknown;
   let json: unknown;
   let returned = false;
+  // Started after the start event's handlers, and read once when execute settles.
+  const startedAt = performance.now();
+  const elapsed = () => performance.now() - startedAt;
+  let durationMs: number;
   try {
     output = await definition.execute!(input.input, executeOptions);
     if (isAsyncIterable(output)) output = await lastIterated(output);
@@ -281,8 +284,9 @@ async function runCall(input: {
         toolName: definition.name,
       });
     }
+    durationMs = elapsed();
   } catch (error) {
-    await observer.executed({ error, type: "error" });
+    await observer.executed({ durationMs: elapsed(), error, type: "error" });
     observer.failedWith(error);
     if (returned) {
       return failedFromError(error, definition.name, "tool output could not be serialized");
@@ -293,13 +297,17 @@ async function runCall(input: {
     return failedFromError(error, definition.name, "tool execution failed");
   }
   if (isAuthorizationSignal(output)) {
-    await observer.executed({ output: modelFacingAuthorizationOutput(output), type: "result" });
+    await observer.executed({
+      durationMs,
+      output: modelFacingAuthorizationOutput(output),
+      type: "result",
+    });
     return {
       connections: output.challenges.map((challenge) => challenge.name),
       status: "authorization-required",
     };
   }
-  await observer.executed({ output: json, type: "result" });
+  await observer.executed({ durationMs, output: json, type: "result" });
 
   try {
     return {
