@@ -624,6 +624,7 @@ describe("mcpChannel tools", () => {
       }
       expect(invokeTool).toHaveBeenCalledWith(name, args, {
         auth: principal,
+        initiator: principal,
         signal: expect.any(AbortSignal),
       });
     }
@@ -637,8 +638,10 @@ describe("mcpChannel tools", () => {
       principalType: "user",
     };
     const encode = (text: string) => Buffer.from(text).toString("base64url");
+    const bob: SessionAuthContext = { ...alice, attributes: {}, principalId: "bob" };
     const json = JSON.stringify({ current: alice });
     const valid = encode(json);
+    const withInitiator = encode(JSON.stringify({ current: alice, initiator: bob }));
     // Unpadded base64url of 12,288 bytes is exactly the 16 KiB cap; JSON whitespace pads it.
     const sized = (bytes: number) => encode(json + " ".repeat(bytes - Buffer.byteLength(json)));
     const trusted = {
@@ -648,6 +651,7 @@ describe("mcpChannel tools", () => {
       ...alice,
       attributes: { ...alice.attributes, "eve:forwarded-by": "user-1" },
     };
+    const forwardedBob = { ...bob, attributes: { "eve:forwarded-by": "user-1" } };
     function post(
       options: Partial<McpChannelInput>,
       header: string | undefined,
@@ -667,11 +671,13 @@ describe("mcpChannel tools", () => {
         args,
       );
     }
-    // [label, header, channel options, expected status or the user the tool runs as, error]
-    const rows: Array<[string, string?, Partial<McpChannelInput>?, (number | object)?, string?]> = [
-      ["no header", undefined, trusted, principal],
-      ["a valid header", valid, trusted, forwardedAlice],
-      ["a header at the 16 KiB cap", sized(12_288), trusted, forwardedAlice],
+    // [label, header, channel options, expected status or the [current, initiator] the tool runs as, error]
+    type Ran = readonly [object, object];
+    const rows: Array<[string, string?, Partial<McpChannelInput>?, (number | Ran)?, string?]> = [
+      ["no header", undefined, trusted, [principal, principal]],
+      ["a valid header", valid, trusted, [forwardedAlice, forwardedAlice]],
+      ["a header naming an initiator", withInitiator, trusted, [forwardedAlice, forwardedBob]],
+      ["a header at the 16 KiB cap", sized(12_288), trusted, [forwardedAlice, forwardedAlice]],
       ["a padded header", `${valid}=`, trusted, 400, "unpadded base64url"],
       ["not a principal", encode('{"current":{}}'), trusted, 400, "Invalid forwardedPrincipal"],
       ["a header over 16 KiB", sized(12_289), trusted, 400, "at most 16384 bytes"],
@@ -705,9 +711,10 @@ describe("mcpChannel tools", () => {
         continue;
       }
       expect(response.status, label).toBe(200);
+      const [auth, initiator] = expected as Ran;
       expect(invokeTool.mock.calls[0]![2], label).toEqual({
-        auth: expected,
-        ...(expected !== principal && { forwarder: principal, initiator: forwardedAlice }),
+        auth,
+        initiator,
         signal: expect.any(AbortSignal),
       });
     }

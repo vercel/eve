@@ -48,10 +48,10 @@ export function createPublishedTools(input: {
             tool.outputSchema === undefined ? undefined : fromJsonSchema(tool.outputSchema),
         },
         async call(value, { signal }) {
-          const { current, forwarder, initiator } = input.principals;
+          const { current, initiator } = input.principals;
           const result = await input.invokeTool(tool.name, value, {
             auth: current,
-            ...(forwarder !== undefined && { forwarder, initiator }),
+            initiator,
             signal,
           });
           return toCallToolResult(tool.name, result, tool.outputSchema !== undefined);

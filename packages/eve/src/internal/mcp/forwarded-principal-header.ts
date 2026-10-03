@@ -17,10 +17,8 @@ const BASE64URL_UNPADDED = /^[A-Za-z0-9_-]+$/;
 export interface McpRequestPrincipals {
   /** The route-auth principal, or the accepted forwarded `current`. */
   readonly current: SessionAuthContext;
-  /** The accepted forwarded initiator; `current` when the forwarder omitted it. */
-  readonly initiator?: SessionAuthContext;
-  /** The route-auth principal that forwarded `current`, when one was accepted. */
-  readonly forwarder?: SessionAuthContext;
+  /** The accepted forwarded initiator, or `current` when none was forwarded. */
+  readonly initiator: SessionAuthContext;
 }
 
 /**
@@ -39,7 +37,7 @@ export async function resolveMcpRequestPrincipals(
   trustedForwarders: TrustedForwarders | undefined,
 ): Promise<McpRequestPrincipals | Response> {
   const header = request.headers.get(FORWARDED_PRINCIPAL_HEADER);
-  if (header === null) return { current: routePrincipal };
+  if (header === null) return { current: routePrincipal, initiator: routePrincipal };
   if (trustedForwarders === undefined) {
     return failure(403, "This deployment does not accept a forwarded principal.");
   }
@@ -55,8 +53,9 @@ export async function resolveMcpRequestPrincipals(
     trustedForwarders,
   });
   if (resolved instanceof Response) return resolved;
-  if (!resolved.accepted) return { current: routePrincipal };
-  return { current: resolved.auth, forwarder: routePrincipal, initiator: resolved.initiatorAuth };
+  if (!resolved.accepted) return { current: routePrincipal, initiator: routePrincipal };
+  // resolveForwardedPrincipal already stamped both with `eve:forwarded-by`.
+  return { current: resolved.auth, initiator: resolved.initiatorAuth };
 }
 
 /**

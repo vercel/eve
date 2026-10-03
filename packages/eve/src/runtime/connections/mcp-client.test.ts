@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { contextStorage, ContextContainer } from "#context/container.js";
-import { AuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
+import { AuthKey, InitiatorAuthKey, SessionKey, type SessionAuthContext } from "#context/keys.js";
 import {
   isConnectionAuthorizationFailedError,
   isConnectionAuthorizationRequiredError,
@@ -197,6 +197,17 @@ describe("McpConnectionClient", () => {
 
       await send({ ...userAuth("anon"), principalType: "anonymous" });
       expect(sent.mock.calls[1]![1]).toEqual({});
+
+      const delegated = ctxWithAuth(userAuth("alice"));
+      delegated.set(InitiatorAuthKey, userAuth("bob"));
+      await contextStorage.run(delegated, () => fetch("https://mcp.example.com", {}));
+      const delegatedHeader = new Headers(sent.mock.calls[2]![1]!.headers).get(
+        "eve-forwarded-principal",
+      )!;
+      expect(JSON.parse(Buffer.from(delegatedHeader, "base64url").toString())).toEqual({
+        current: userAuth("alice"),
+        initiator: userAuth("bob"),
+      });
 
       const large = { ...userAuth("alice"), attributes: { blob: "a".repeat(16 * 1024) } };
       await expect(send(large)).rejects.toThrow(/Connection "test" cannot forward.*16384-byte/u);

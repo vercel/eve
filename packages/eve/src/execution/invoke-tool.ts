@@ -2,7 +2,6 @@ import { context as otelContext, trace } from "#compiled/@opentelemetry/api/inde
 
 import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
 import type { InvokeToolOptions, InvokeToolResult } from "#channel/invoke-tool.js";
-import { stampForwardedBy } from "#channel/forwarded-principal.js";
 import {
   compiledToolOwner,
   type CompiledToolBindings,
@@ -147,7 +146,8 @@ async function runInvocation(input: {
 
   const sandbox = await callSandbox(runtime, sessionId);
   const context = createCallContext({
-    ...callPrincipals(options),
+    auth: options.auth,
+    initiator: options.initiator ?? options.auth,
     callId,
     callbackBaseUrl: runtime.callbackBaseUrl,
     sessionId,
@@ -204,19 +204,6 @@ async function callSandbox(
       const sandbox = await requested.catch(() => null);
       if (sandbox !== null) await inner.delete?.();
     },
-  };
-}
-
-function callPrincipals(options: InvokeToolOptions): {
-  readonly auth: SessionAuthContext;
-  readonly initiator: SessionAuthContext;
-} {
-  const initiator = options.initiator ?? options.auth;
-  const forwardedBy = options.forwarder?.principalId;
-  if (forwardedBy === undefined) return { auth: options.auth, initiator };
-  return {
-    auth: stampForwardedBy(options.auth, forwardedBy),
-    initiator: stampForwardedBy(initiator, forwardedBy),
   };
 }
 
