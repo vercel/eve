@@ -1,0 +1,16 @@
+import { mcpChannel } from "eve/channels/mcp";
+
+import { SERVICE_ID, SERVICE_TOKEN } from "../../fixture";
+
+export default mcpChannel({
+  auth: (request) =>
+    request.headers.get("authorization") === `Bearer ${SERVICE_TOKEN}`
+      ? {
+          attributes: {},
+          authenticator: "e2e-fixture",
+          principalId: SERVICE_ID,
+          principalType: "service",
+        }
+      : null,
+  tools: true,
+});
