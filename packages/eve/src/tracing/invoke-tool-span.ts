@@ -69,8 +69,6 @@ export async function withInvokeToolSpan(
     readonly agentName: string;
     readonly auth: SessionAuthContext;
     readonly callId: string;
-    /** The caller's arguments, recorded only when the content decision allows inputs. */
-    readonly input: unknown;
     readonly origin: InvokeToolTraceOrigin | undefined;
     readonly sessionId: string;
     readonly toolName: string;
@@ -86,16 +84,18 @@ export async function withInvokeToolSpan(
  * same steps a model-issued call goes through.
  */
 export interface InvokeToolObserver {
-  /** The tool's `execute` is about to run with its checked input. */
+  /** The tool's `execute` is about to run with its checked input, the input the span records. */
   executing(input: unknown): Promise<void>;
-  /** `execute` settled with this output, or threw this error. */
+  /**
+   * `execute` settled with this output, or threw this error, after running
+   * for `durationMs`: measured from just before `execute` to its settlement,
+   * so provider handlers are not counted, as in the AI SDK.
+   */
   executed(
-    outcome:
+    outcome: (
       | { readonly type: "result"; readonly output: unknown }
-      | {
-          readonly type: "error";
-          readonly error: unknown;
-        },
+      | { readonly type: "error"; readonly error: unknown }
+    ) & { readonly durationMs: number },
   ): Promise<void>;
   /** The error behind a `failed` result, recorded on the span when outputs are. */
   failedWith(error: unknown): void;
@@ -181,10 +181,6 @@ async function traced(
     attributes["eve.channel.kind"] = conversation.channel.kind;
     attributes["eve.channel.name"] = input.origin.channelName;
   }
-  if (recordInputs) {
-    const args = contentAttribute(input.input);
-    if (args !== undefined) attributes["gen_ai.tool.call.arguments"] = args;
-  }
   const span = trace
     .getTracer("eve.agent")
     .startSpan(spanName, { attributes, kind: SpanKind.INTERNAL }, parent);
@@ -204,6 +200,7 @@ async function traced(
     failedWith: (error) => {
       failure = { error };
     },
+    recordInputs,
     span,
   });
   try {
@@ -257,12 +254,21 @@ function toolCallEvents(
   const idempotencyKey = toolCallIdempotencyKey(scope, input.callId, 0);
   return {
     observer(
-      spanState: { readonly failedWith: (error: unknown) => void; readonly span: Span } | undefined,
+      spanState:
+        | {
+            readonly failedWith: (error: unknown) => void;
+            readonly recordInputs: boolean;
+            readonly span: Span;
+          }
+        | undefined,
     ): InvokeToolObserver {
-      let startedAt: number | undefined;
       return {
         async executing(toolInput) {
-          startedAt = performance.now();
+          // The checked input, as a conversation's span records it; rejected input never gets here.
+          if (spanState?.recordInputs) {
+            const args = contentAttribute(toolInput);
+            if (args !== undefined) spanState.span.setAttribute("gen_ai.tool.call.arguments", args);
+          }
           await hooks.publish(
             Object.freeze({
               callId: input.callId,
@@ -275,12 +281,7 @@ function toolCallEvents(
           );
         },
         async executed(outcome) {
-          if (startedAt !== undefined) {
-            spanState?.span.setAttribute(
-              "gen_ai.execute_tool.duration",
-              (performance.now() - startedAt) / 1000,
-            );
-          }
+          spanState?.span.setAttribute("gen_ai.execute_tool.duration", outcome.durationMs / 1000);
           const output =
             outcome.type === "result"
               ? capturesOutputs
