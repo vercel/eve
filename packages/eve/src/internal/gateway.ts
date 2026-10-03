@@ -1,6 +1,7 @@
 import type { LanguageModel } from "ai";
 
 import { appendPackageUserAgent, withPackageUserAgent } from "#internal/user-agent.js";
+import { createGatewayTraceContextHeaders } from "#tracing/gateway-trace-context.js";
 
 const GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh";
 
@@ -31,6 +32,18 @@ export function resolveProviderHeaders(model: LanguageModel): Record<string, str
 
 export function isGatewayModel(model: LanguageModel): boolean {
   return typeof model === "string" || model.provider?.split(".")[0] === "gateway";
+}
+
+export function resolveGatewayTraceContextHeaders(
+  model: LanguageModel,
+  headers?: Record<string, string | undefined>,
+): Record<string, string | undefined> | undefined {
+  const gatewayModel =
+    typeof model === "string" ? globalThis.AI_SDK_DEFAULT_PROVIDER?.languageModel(model) : model;
+  if (gatewayModel !== undefined && !isGatewayModel(gatewayModel)) return headers;
+
+  const traceHeaders = createGatewayTraceContextHeaders();
+  return traceHeaders === undefined ? headers : { ...headers, ...traceHeaders };
 }
 
 /** Groups Gateway generations under the same identity used by eve's agent spans. */

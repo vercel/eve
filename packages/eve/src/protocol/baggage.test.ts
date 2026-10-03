@@ -4,6 +4,7 @@ import {
   readBaggageMember,
   readForwardedAudienceBaggage,
   readForwardedParentSessionBaggage,
+  stripEveTraceBaggage,
   writeForwardedAudienceBaggage,
   writeForwardedParentSessionBaggage,
 } from "#protocol/baggage.js";
@@ -163,5 +164,28 @@ describe("forwarded parent session baggage", () => {
     `eve.parent_session=${encodeURIComponent(JSON.stringify(PARENT))};extra=yes`,
   ])("rejects malformed lineage %s", (value) => {
     expect(readForwardedParentSessionBaggage(value)).toBe("malformed");
+  });
+});
+
+describe("stripEveTraceBaggage", () => {
+  it("removes Eve context while preserving unrelated baggage", () => {
+    const carrier = {
+      baggage:
+        "vendor=value,eve.audience=private;ceiling=i0o0,eve.conversation.id=session-1,eve.parent_session=parent",
+    };
+
+    stripEveTraceBaggage(carrier);
+
+    expect(carrier.baggage).toBe("vendor=value");
+  });
+
+  it("drops an oversized remainder", () => {
+    const carrier = {
+      baggage: `eve.audience=private,vendor=${"x".repeat(8_192)}`,
+    };
+
+    stripEveTraceBaggage(carrier);
+
+    expect(carrier.baggage).toBeUndefined();
   });
 });
