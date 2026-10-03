@@ -10,6 +10,7 @@ import {
   type RequestAt,
 } from "#harness/human-input/index.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 
 /** Scenario builders for the `HumanInput` rule tests, which read as given, when, then. */
 
@@ -91,3 +92,93 @@ export class Turn {
     return this.humanInput.write(undefined) === undefined;
   }
 }
+
+/** The approval request for the call Alice's model step made to `toolName`. */
+export function approval(toolName: string, requestId = toolName): InputRequest {
+  return {
+    action: { callId: `call-${requestId}`, input: {}, kind: "tool-call", toolName },
+    allowFreeform: false,
+    display: "confirmation",
+    kind: "tool-approval",
+    options: [
+      { id: "approve", label: "Approve" },
+      { id: "cancel", label: "Cancel" },
+    ],
+    prompt: `Alice asks to run ${toolName}.`,
+    requestId,
+  };
+}
+
+/** The response of Alice's model step that made the calls `requests` ask about. */
+export function stepResponse(requests: readonly InputRequest[]): ModelMessage[] {
+  return [
+    {
+      content: requests.flatMap((request) =>
+        request.action === undefined
+          ? []
+          : [
+              {
+                input: request.action.input,
+                toolCallId: request.action.callId,
+                toolName: request.action.toolName,
+                type: "tool-call" as const,
+              },
+            ],
+      ),
+      role: "assistant",
+    },
+  ];
+}
+
+/** Alice's model step made calls whose tools ask a person to approve them. */
+export function approvalsRequested(
+  requests: readonly InputRequest[],
+  options: Partial<Extract<Interrupt, { type: "approvals.requested" }>> = {},
+): Interrupt {
+  return {
+    approvalKeys: {},
+    at: AT,
+    messages: stepResponse(requests),
+    requester: ALICE,
+    requests,
+    responsePolicyRequestIds: [],
+    type: "approvals.requested",
+    ...options,
+  };
+}
+
+/** A turn held because Alice's model step asked to run each of `toolNames`. */
+export function heldOnApprovals(...toolNames: string[]): Turn {
+  return Turn.idle().interrupt(approvalsRequested(toolNames.map((name) => approval(name))));
+}
+
+/** `responder` sends these answers at once, in this order. */
+export function answered(
+  responses: readonly InputResponse[],
+  responder: SessionAuthContext | null = ALICE,
+): Intake {
+  return { responder, responses, type: "answered" };
+}
+
+/** `responder` picks `optionId` for request `requestId`. */
+export function answer(
+  optionId: string,
+  requestId: string,
+  responder: SessionAuthContext | null = ALICE,
+): Intake {
+  return answered([{ optionId, requestId }], responder);
+}
+
+/** Alice answers several requests at once, in this order. */
+export function answers(byRequest: Readonly<Record<string, string>>): Intake {
+  return answered(
+    Object.entries(byRequest).map(([requestId, optionId]) => ({ optionId, requestId })),
+  );
+}
+
+/** `sender` types a message into the conversation. */
+export function message(text: string, sender: SessionAuthContext | null = ALICE): Intake {
+  return { sender, text, type: "message" };
+}
+
+export const cancel: Intake = { type: "cancelled" };

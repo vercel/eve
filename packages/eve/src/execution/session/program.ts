@@ -206,6 +206,7 @@ async function runSessionLoop(
   const { cursor, handoff, inbox, progress } = deps;
   const queue = new SessionInputQueue();
   const execution = new SessionExecution({
+    capabilities: boot.capabilities,
     cursor,
     inbox,
     queue,

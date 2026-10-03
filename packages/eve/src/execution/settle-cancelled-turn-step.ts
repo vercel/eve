@@ -1,3 +1,5 @@
+import type { ModelMessage } from "ai";
+
 import {
   commitCancelledCoordinationBatch,
   getPendingCoordinationBatch,
@@ -14,7 +16,7 @@ import {
 } from "#execution/session/state-delta.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import { HumanInput, type Transition } from "#harness/human-input/index.js";
-import type { HarnessModelMessage } from "#harness/messages.js";
+import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
 import { applyHumanInputEvents } from "#harness/human-input/effects/index.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
@@ -65,13 +67,15 @@ export async function settleCancelledTurn(
   };
   const durableState = step.durableSession.state;
   let transition: Transition | undefined;
+  let cancelledResults: readonly ModelMessage[] = [];
   const { published, result: usage } = await publishFromSessionStep(step, {
     origin: "own",
     async publish(emit) {
       transition = HumanInput.read(durableState).intake({ type: "cancelled" });
-      const ending = await applyHumanInputEvents(emit, transition.events);
+      const { ending, history } = await applyHumanInputEvents(emit, transition.events);
       // The turn already ends as cancelled; a failure here has no turn left to fail.
       if (ending?.kind === "failed") throw new Error(ending.message);
+      cancelledResults = history;
       const emissionState = getHarnessEmissionState(durableState);
       return await emitCancelledTurn(emit, emissionState, getSessionUsage(step.durableSession));
     },
@@ -83,10 +87,15 @@ export async function settleCancelledTurn(
       const owningTurnId =
         getPendingCoordinationBatch(session.state)?.event.turnId ??
         input.sessionState.emissionState.turnId;
+      // After the batch, which may hold the response that made the cancelled calls.
+      const committed = commitCancelledCoordinationBatch(
+        removeBlockingWorkflowToolRuns({ ...session, outputSchema: undefined }, owningTurnId),
+      );
       const cancelledSession = setHarnessEmissionState(
-        commitCancelledCoordinationBatch(
-          removeBlockingWorkflowToolRuns({ ...session, outputSchema: undefined }, owningTurnId),
-        ),
+        {
+          ...committed,
+          history: validateHarnessModelMessages([...committed.history, ...cancelledResults]),
+        },
         emissionState,
       );
       if (!input.reportUsage || getTurnUsageState(session.state) === undefined) {

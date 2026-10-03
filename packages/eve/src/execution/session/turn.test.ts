@@ -7,7 +7,7 @@ import { SessionExecution } from "#execution/session/turn.js";
 import { SessionStateCursor } from "#execution/session/state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { turnStep } from "#execution/session/turn-step.js";
-import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
+import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { publishTurnWaitingStep } from "#execution/session/turn-waiting-step.js";
 import {
@@ -663,6 +663,66 @@ describe("SessionExecution checkpoints", () => {
     expect(queue.pendingCount).toBe(1);
   });
 
+  it.each([
+    { capabilities: undefined, holds: false, serializedContext: {} },
+    { capabilities: { requestInput: true }, holds: true, serializedContext: {} },
+    {
+      capabilities: undefined,
+      holds: true,
+      serializedContext: { "eve.sessionCallback": { callId: "call_1", token: "parent" } },
+    },
+  ])(
+    "holds on open input only when someone can answer it: %o",
+    async ({ capabilities, holds, serializedContext }) => {
+      const inbox: SessionInbox = {
+        claimedTokens: [],
+        claimSessionHook: vi.fn(),
+        claimSessionHooks: vi.fn(),
+        drain: vi.fn(() => []),
+        hasPending: vi.fn(() => false),
+        whenPending: () => new Promise<void>(() => {}),
+        next: vi.fn(() => new Promise<never>(() => {})),
+        onDelivery: vi.fn(() => () => {}),
+        onInterrupt: vi.fn(() => () => {}),
+        restore: vi.fn(),
+      };
+      const execution = createExecution({
+        capabilities,
+        inbox,
+        serializedContext,
+        sessionState: state(""),
+      });
+      vi.mocked(turnStep)
+        .mockReset()
+        .mockImplementation(
+          turnStepWork(async (input) => ({
+            action: "held",
+            hold: "input",
+            inputRequestIds: ["request_1"],
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          })),
+        );
+
+      const turn = execution.runTurn({
+        delivery: { kind: "deliver", payloads: [{ message: "Deploy the release." }] },
+      });
+      if (holds) {
+        // Someone can answer, so the turn waits for them.
+        const outcome = await Promise.race([
+          turn.then(
+            () => "settled",
+            () => "rejected",
+          ),
+          new Promise((resolve) => setTimeout(() => resolve("waiting"), 20)),
+        ]);
+        expect(outcome).toBe("waiting");
+      } else {
+        await expect(turn).rejects.toThrow("cannot request human input");
+      }
+    },
+  );
+
   it("preserves the completed turn when cancellation races its checkpoint", async () => {
     const settled = { output: "Done." };
     const followUp: DeliverHookPayload = {
@@ -1227,6 +1287,7 @@ function idleInbox(): SessionInbox {
 }
 
 function createExecution(input: {
+  readonly capabilities?: SessionCapabilities;
   readonly cursor?: SessionStateCursor;
   readonly inbox: SessionInbox;
   readonly queue?: SessionInputQueue;
@@ -1235,6 +1296,7 @@ function createExecution(input: {
 }): SessionExecution {
   const cursor = input.cursor ?? createCursor(input);
   return new SessionExecution({
+    capabilities: input.capabilities,
     cursor,
     inbox: input.inbox,
     queue: input.queue ?? new SessionInputQueue(),

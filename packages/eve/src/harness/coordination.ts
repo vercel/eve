@@ -49,12 +49,15 @@ export interface PendingCoordinationBatch {
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly event: PendingCoordinationEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
+  /** Turn input that arrived with the calls, read after their results. */
+  readonly followingInput?: StepInput;
 }
 
 /**
  * Outcome of resolving a pending coordination batch.
  */
 interface ResolvePendingCoordinationResult {
+  readonly followingInput?: StepInput;
   readonly messages: ModelMessage[];
   readonly outcome: "continue" | "resolved" | "unresolved";
   readonly session: HarnessSession;
@@ -133,6 +136,7 @@ export function commitCancelledCoordinationBatch(session: HarnessSession): Harne
 export function setPendingCoordinationBatch<T extends { readonly state?: SessionStateMap }>(input: {
   readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly event: PendingCoordinationEventMetadata;
+  readonly followingInput?: StepInput;
   readonly responseMessages: readonly ModelMessage[];
   readonly session: T;
 }): T {
@@ -142,6 +146,7 @@ export function setPendingCoordinationBatch<T extends { readonly state?: Session
     tasks: [...input.tasks],
     event: input.event,
     responseMessages: [...input.responseMessages],
+    ...(input.followingInput !== undefined && { followingInput: input.followingInput }),
   } satisfies PendingCoordinationBatch;
 
   return { ...input.session, state };
@@ -303,6 +308,7 @@ export async function resolvePendingCoordination(input: {
     }
   }
   return {
+    followingInput: batch.followingInput,
     messages,
     outcome: "resolved",
     session: nextSession,

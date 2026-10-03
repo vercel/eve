@@ -2,6 +2,7 @@ import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
+import { preparePersistedStepDynamicToolMetadata } from "#context/dynamic-tool-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
@@ -67,6 +68,10 @@ interface CreateExecutionNodeStepInput {
    */
   readonly createRuntime: CreateRuntime;
   readonly handleEvent?: HandleEventFn;
+  readonly prepareApprovalTurn?: (event: {
+    readonly sequence: number;
+    readonly turnId: string;
+  }) => Promise<void>;
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
   readonly instrumentation: ExecutionInstrumentation | undefined;
@@ -101,6 +106,12 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     historyProjector: input.historyProjector,
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
+    prepareApprovalTurn: input.prepareApprovalTurn,
+    resolveStepDynamicTools: (resolveInput) =>
+      preparePersistedStepDynamicToolMetadata({
+        ...resolveInput,
+        resolvers: input.node.agent.dynamicToolResolvers ?? [],
+      }),
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),

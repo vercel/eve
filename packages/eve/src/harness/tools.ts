@@ -42,6 +42,8 @@ const toolApprovals = new WeakMap<object, ApprovalFn>();
  * retry call so the request can proceed without it.
  */
 export function buildToolSet(input: {
+  /** Approval keys `once()` approvals granted, which approval policies read. */
+  readonly approvedTools?: ReadonlySet<string>;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: HarnessToolMap;
 }): ToolSet {
@@ -54,7 +56,7 @@ export function buildToolSet(input: {
     }
 
     const authorToModelOutput = definition.toModelOutput;
-    const approval = buildApprovalFn(definition);
+    const approval = buildApprovalFn(definition, input.approvedTools);
     const aiTool = tool({
       description: definition.description,
       execute: wrapToolExecute(definition),
@@ -126,6 +128,7 @@ export function buildToolSet(input: {
  * ordering where step tools override turn/session tools.
  */
 export function buildToolSetFromDefinitions(input: {
+  readonly approvedTools?: ReadonlySet<string>;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly tools: readonly HarnessToolDefinition[];
 }): ToolSet {
@@ -136,6 +139,7 @@ export function buildToolSetFromDefinitions(input: {
     }
   }
   return buildToolSet({
+    approvedTools: input.approvedTools,
     disabledProviderTools: input.disabledProviderTools,
     tools,
   });
@@ -219,6 +223,7 @@ function normalizeToolExecuteOutput(
  * a gateway fallback provider has rejected a provider-specific tool.
  */
 export async function buildToolSetWithProviderTools(input: {
+  readonly approvedTools?: ReadonlySet<string>;
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly modelReference: RuntimeModelReference;
   readonly tools: HarnessToolMap;
@@ -226,6 +231,7 @@ export async function buildToolSetWithProviderTools(input: {
   const disabled = input.disabledProviderTools;
   const tools: ToolSet = {
     ...buildToolSet({
+      approvedTools: input.approvedTools,
       disabledProviderTools: disabled,
       tools: input.tools,
     }),
@@ -250,7 +256,10 @@ export async function buildToolSetWithProviderTools(input: {
   return tools;
 }
 
-function buildApprovalFn(definition: HarnessToolDefinition): ApprovalFn {
+function buildApprovalFn(
+  definition: HarnessToolDefinition,
+  approvedTools: ReadonlySet<string> = new Set(),
+): ApprovalFn {
   return async (toolInput, callId, abortSignal) => {
     if (definition.approval === undefined) return undefined;
 
@@ -258,7 +267,7 @@ function buildApprovalFn(definition: HarnessToolDefinition): ApprovalFn {
     const context = {
       ...buildCallbackContext(),
       abortSignal: abortSignal ?? new AbortController().signal,
-      approvedTools: new Set<string>(),
+      approvedTools,
       callId,
       toolInput: toolInputRecord,
       toolName: definition.name,
@@ -267,6 +276,22 @@ function buildApprovalFn(definition: HarnessToolDefinition): ApprovalFn {
     const status = await resolveApprovalPolicy(definition.approval)(context);
     return typeof status === "boolean" ? (status ? "user-approval" : "not-applicable") : status;
   };
+}
+
+/**
+ * Re-runs a tool's approval policy for a call a person approved, just before
+ * eve runs it, so the policy can still refuse it.
+ */
+export async function recheckApprovedCall(
+  definition: HarnessToolDefinition,
+  call: { readonly callId: string; readonly input: unknown; readonly abortSignal?: AbortSignal },
+): Promise<{ readonly denied: boolean; readonly reason?: string }> {
+  const status = await buildApprovalFn(definition)(call.input, call.callId, call.abortSignal);
+  if (status === "denied") return { denied: true };
+  if (typeof status === "object" && status !== null && status.type === "denied") {
+    return { denied: true, reason: status.reason };
+  }
+  return { denied: false };
 }
 
 /** Builds the AI SDK 7 call-level approval policy for an assembled tool set. */

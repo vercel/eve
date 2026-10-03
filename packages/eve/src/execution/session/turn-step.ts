@@ -384,6 +384,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
         compactOnly: input.input?.control === "compact",
         createRuntime: createWorkflowRuntime,
         handleEvent,
+        prepareApprovalTurn: (event) => dynamicConnections.dispatch(createTurnStartedEvent(event)),
         historyProjector: history.projector,
         historyView: history.prepare(modelSession),
         instrumentation,

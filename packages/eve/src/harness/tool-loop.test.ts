@@ -6457,9 +6457,11 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Delete the temp directory." });
 
     expect(typeof result.next).toBe("function");
+    // The AI SDK's approval records never reach history; the call and its result do.
     expect(result.session.history).toEqual([
       { content: "Delete the temp directory.", kind: "user" as const, role: "user" },
-      ...responseMessages,
+      { content: [toolCall], role: "assistant" },
+      { content: [responseMessages[1]!.content[1]], role: "tool" },
     ]);
     expect(events.filter((event) => event.type === "input.requested")).toEqual([]);
     expect(events.filter((event) => event.type === "actions.requested")).toHaveLength(1);

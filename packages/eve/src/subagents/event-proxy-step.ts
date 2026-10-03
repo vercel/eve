@@ -92,7 +92,7 @@ export async function emitProxiedSubagentEvent(
         },
         type: "relayed.requested",
       });
-      return await applyHumanInputEvents(emit, transition.events);
+      return (await applyHumanInputEvents(emit, transition.events)).ending;
     },
     updateSession(session, ending) {
       if (transition === undefined) return { session };

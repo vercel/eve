@@ -57,6 +57,13 @@ export type DurableStepResult = (
   | { readonly action: "cancelled" | "steered" }
   /** The model ended the turn while tasks work; the turn waits for them. */
   | { readonly action: "held"; readonly hold: "tasks"; readonly taskIds: readonly string[] }
+  /** The turn waits on a person: an answer, a message from its own person, or a cancel. */
+  | {
+      readonly action: "held";
+      readonly hold: "input";
+      /** The open requests an answer can resolve. */
+      readonly inputRequestIds: readonly string[];
+    }
   | {
       readonly action: "park";
       /**

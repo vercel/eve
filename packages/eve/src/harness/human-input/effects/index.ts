@@ -3,5 +3,5 @@
 // turn apply them there (`session.ts`). Workflow bodies use `workflow.ts`
 // instead, since they cannot load these step-side modules.
 
-export { applyHumanInput, applyStepArrivals } from "./turn.js";
+export { applyHumanInput, applyStepArrivals, holdForInput, type StepEffects } from "./turn.js";
 export { applyHumanInputEvents, type HumanInputEnding } from "./session.js";

@@ -1,6 +1,11 @@
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
+import { mapHeldInputResponses } from "#harness/human-input/effects/workflow.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
-import { isSteeringMessage, type SteeringTurn } from "#execution/session/input-queue.js";
+import {
+  isSteeringMessage,
+  type SteeringOptions,
+  type SteeringTurn,
+} from "#execution/session/input-queue.js";
 import type { SessionExecutionInput } from "#execution/session/turn.js";
 import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
@@ -17,6 +22,8 @@ export type RuntimeEvent =
   | { readonly kind: "steering" }
   /** A `task_wait` call's timeout passed. */
   | { readonly kind: "timeout"; readonly callId: string }
+  /** A delivery was admitted; it may answer a held turn's request. */
+  | { readonly kind: "input" }
   | "cancelled";
 
 /**
@@ -33,6 +40,8 @@ export class ActiveTurn {
   private readonly admitted = new Set<number>();
   /** Admitted deliveries a runtime wait already checked for steering. */
   private readonly inspected = new Set<number>();
+  /** Admitted deliveries the channel already mapped for a held turn's requests. */
+  private readonly mappedForHeldRequest = new Set<number>();
   private readonly runtimeResults: RuntimeEvent[] = [];
   private readonly controller = new AbortController();
   private readonly expectedTurnId: string;
@@ -105,10 +114,10 @@ export class ActiveTurn {
    * The next step reads it as input, so its signal must not interrupt that
    * step; only deliveries still unread re-signal the next generation.
    */
-  async takeSteering(): Promise<DeliverHookPayload | undefined> {
+  async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
     while (true) {
-      const selection = this.input.queue.takeSteering(this.admitted, this.identity);
+      const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
       steering.push(selection.delivery);
@@ -154,8 +163,37 @@ export class ActiveTurn {
       const payload = await this.input.inbox.next();
       if (payload === undefined)
         throw new Error("Session inbox closed before runtime actions completed.");
-      await this.admit(payload);
+      if (await this.admit(payload)) return { kind: "input" };
     }
+  }
+
+  /**
+   * Takes one admitted delivery that answers an open request, from any
+   * responder: an approver need not be the turn's own person. Returns
+   * `undefined` when no admitted delivery answers one.
+   */
+  async takeInputResponses(
+    requestIds: ReadonlySet<string>,
+  ): Promise<DeliverHookPayload | undefined> {
+    for (const sequence of this.admitted) {
+      let delivery = this.input.queue.delivery(sequence);
+      if (delivery === undefined) continue;
+      const responses = delivery.payloads.flatMap((payload) => payload.inputResponses ?? []);
+      if (responses.length === 0) continue;
+      if (!responses.some((response) => requestIds.has(response.requestId))) {
+        // Some channels answer with ids only their `deliver` hook resolves,
+        // such as Telegram's compact button callbacks.
+        if (this.mappedForHeldRequest.has(sequence)) continue;
+        this.mappedForHeldRequest.add(sequence);
+        const mapped = await mapHeldInputResponses(this.input.cursor, delivery, requestIds);
+        if (mapped === undefined) continue;
+        delivery = mapped;
+      }
+      this.admitted.delete(sequence);
+      this.input.queue.replaceDelivery(sequence, undefined);
+      return delivery;
+    }
+    return undefined;
   }
 
   /** Resolves with the id of the call whose timer won, or `undefined` once inbox input is ready. */
@@ -173,26 +211,27 @@ export class ActiveTurn {
     return payload.turnId === undefined || payload.turnId === this.expectedTurnId;
   }
 
-  private async admit(value: SessionInboxPayload): Promise<void> {
+  /** Admits one payload; returns whether it was a delivery. */
+  private async admit(value: SessionInboxPayload): Promise<boolean> {
     const admitted = await admitSessionInboxPayload(value, this.input);
     switch (admitted.kind) {
       case "delivery":
         this.admitted.add(admitted.admission.sequence);
-        return;
+        return true;
       case "runtime-action-result":
         this.runtimeResults.push({
           kind: "runtime-action-result",
           results: admitted.payload.results,
         });
-        return;
+        return false;
       case "workflow":
         this.runtimeResults.push({ kind: "workflow", message: admitted.message });
-        return;
+        return false;
       case "cancel":
         if (this.cancelsThisTurn(value)) this.abort();
-        return;
+        return false;
       case "consumed":
-        return;
+        return false;
     }
   }
 
