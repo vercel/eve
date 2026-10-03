@@ -8,7 +8,6 @@ import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-ho
 import { context, ROOT_CONTEXT, createContextKey } from "@opentelemetry/api";
 import { liveOtelBackend, durableOtelBackend } from "./otel.js";
 import { AgentSpanIdGenerator } from "./otel-ids.js";
-import { createSpanWriter } from "#tracing/lib/index.js";
 
 describe("OTel trace output", () => {
   it("preserves explicit host context at span start and activation", async () => {
@@ -32,9 +31,8 @@ describe("OTel trace output", () => {
     const manager = new AsyncLocalStorageContextManager().enable();
     context.setGlobalContextManager(manager);
     try {
-      const operation = createSpanWriter({
-        backend: liveOtelBackend(provider.getTracer("host")),
-      }).start(
+      const backend = liveOtelBackend(provider.getTracer("host"));
+      const operation = backend.start(
         {
           type: "channelRequest",
           operationId: "request",
@@ -42,11 +40,15 @@ describe("OTel trace output", () => {
           kind: "SERVER",
           attributes: {},
         },
-        { emit: true, recordInputs: false, recordOutputs: false },
         host,
       );
       expect(audience).toBe("private");
-      operation.run(() => expect(context.active().getValue(key)).toBe("private"));
+      backend.run(
+        operation.reference,
+        { emit: true, recordInputs: false, recordOutputs: false },
+        () => expect(context.active().getValue(key)).toBe("private"),
+        host,
+      );
       operation.end();
       expect(exporter.getFinishedSpans()).toHaveLength(1);
     } finally {
@@ -85,9 +87,8 @@ describe("OTel trace output", () => {
         ],
       };
       const reference = backend.reserveActivation({ key: "activation", span, capture });
-      const engine = createSpanWriter({ backend });
       const childReference = backend.reserveChild(reference, "tool");
-      const child = engine.startReserved(
+      const child = backend.startReserved(
         {
           type: "tool",
           operationId: "tool",
@@ -96,11 +97,10 @@ describe("OTel trace output", () => {
           attributes: span.attributes,
         },
         childReference,
-        capture,
       );
       child.setAttribute("agent.connection.name", "catalog");
       child.end(2000);
-      const root = engine.startReserved(span, reference, capture);
+      const root = backend.startReserved(span, reference);
       root.addEvent("turn.completed", undefined, 3000);
       root.end(3000);
       const recorded = exporter.getFinishedSpans();
