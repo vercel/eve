@@ -5,6 +5,8 @@ import type { ToolModelOutput } from "#tools/model-output.js";
 export interface InvokeToolOptions {
   /** The caller this request authenticated. Becomes `ctx.session.auth.current`. */
   readonly auth: SessionAuthContext;
+  /** Becomes `ctx.session.auth.initiator`. Defaults to `auth`. */
+  readonly initiator?: SessionAuthContext;
   readonly signal?: AbortSignal;
 }
 

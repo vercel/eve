@@ -148,6 +148,23 @@ Return `"user-approval"` (or `true`) to pause for a person and `"not-applicable"
 
 [Human-in-the-loop](/docs/human-in-the-loop#approvals) covers the full set of statuses, how `approvedTools` and `session.auth` factor in, and how a gated call pauses and resumes durably.
 
+## Forward the caller to an eve agent
+
+When the server is another eve agent's [`mcpChannel`](../channels/mcp), set `forwardPrincipal: true` so its published tools run as the user of the current turn instead of as this deployment:
+
+```ts title="agent/connections/specialist.ts"
+import { defineMcpClientConnection } from "eve/connections";
+
+export default defineMcpClientConnection({
+  url: "https://specialist.example.com/eve/v1/mcp",
+  description: "The specialist agent's tools.",
+  headers: { authorization: `Bearer ${process.env.SPECIALIST_TOKEN}` },
+  forwardPrincipal: true,
+});
+```
+
+eve sends the turn's user, and its initiator when that differs, in the `eve-forwarded-principal` header on every request. A turn with no caller, or an anonymous one, sends no header. The server must trust this deployment's route-authenticated identity in `trustedForwarders`; otherwise it refuses the request with `403`. See [Forwarded principals](../channels/mcp#forwarded-principals). A request carrying the header fails rather than follow a redirect, so the header never reaches another host. A principal over 16 KiB encoded fails the call before it is sent; trim its attributes.
+
 ## Control result size
 
 `connection_execute` returns an MCP tool's `structuredContent` when the server sends it. Otherwise it returns the result's text, parsed as JSON when the tool declares no output schema. Image, audio, and resource content reaches the model as file parts, and a result with `isError: true` fails the call with its text. MCP connections do not expose a per-result transform equivalent to an authored tool's [`toModelOutput`](/docs/tools#shape-what-the-model-sees-with-tomodeloutput).

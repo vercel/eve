@@ -147,6 +147,7 @@ async function runInvocation(input: {
   const sandbox = await callSandbox(runtime, sessionId);
   const context = createCallContext({
     auth: options.auth,
+    initiator: options.initiator ?? options.auth,
     callId,
     callbackBaseUrl: runtime.callbackBaseUrl,
     sessionId,
@@ -208,17 +209,18 @@ async function callSandbox(
 
 function createCallContext(input: {
   readonly auth: SessionAuthContext;
+  readonly initiator: SessionAuthContext;
   readonly callId: string;
   readonly callbackBaseUrl: string;
   readonly sessionId: string;
 }): ContextContainer {
   const context = new ContextContainer();
   context.set(AuthKey, input.auth);
-  context.set(InitiatorAuthKey, input.auth);
+  context.set(InitiatorAuthKey, input.initiator);
   context.set(SessionIdKey, input.sessionId);
   // No turn exists; the stand-in names the call, as sandbox setup outside a turn does.
   context.setVirtualContext(SessionKey, {
-    auth: { current: input.auth, initiator: input.auth },
+    auth: { current: input.auth, initiator: input.initiator },
     sessionId: input.sessionId,
     turn: { id: input.callId, sequence: 0 },
   });

@@ -8,6 +8,7 @@ export default defineDynamic({
     "session.started": () =>
       defineMcpClientConnection({
         description: "The Maple Street kennel agent's own tools, reached over its MCP channel.",
+        forwardPrincipal: true,
         headers: { ...previewBypassHeaders(), authorization: `Bearer ${SERVICE_TOKEN}` },
         url: selfMcpUrl(),
       }),

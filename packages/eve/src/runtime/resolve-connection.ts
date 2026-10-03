@@ -84,6 +84,7 @@ export async function resolveConnectionDefinition(
       logicalPath: string;
       protocol: ResolvedConnectionDefinition["protocol"];
       protocolVersionDiscovery?: boolean;
+      forwardPrincipal?: boolean;
       sourceId: string;
       sourceKind: "module";
       spec?: ResolvedConnectionDefinition["spec"];
@@ -132,6 +133,13 @@ export async function resolveConnectionDefinition(
         throw new Error('"protocolVersionDiscovery" must be a boolean.');
       }
       result.protocolVersionDiscovery = resolvedRecord.protocolVersionDiscovery;
+    }
+
+    if (definition.protocol === "mcp" && resolvedRecord.forwardPrincipal !== undefined) {
+      if (typeof resolvedRecord.forwardPrincipal !== "boolean") {
+        throw new Error('"forwardPrincipal" must be a boolean.');
+      }
+      result.forwardPrincipal = resolvedRecord.forwardPrincipal;
     }
 
     if (hasHeaders) {
@@ -241,6 +249,7 @@ export function resolveDynamicConnectionValue(
     sourceKind: "module" as const,
     toolCall: normalized.toolCall,
     protocolVersionDiscovery: normalized.protocolVersionDiscovery,
+    forwardPrincipal: normalized.forwardPrincipal,
     tools: normalized.tools,
     url: normalized.url,
   });

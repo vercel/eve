@@ -8,6 +8,11 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import { isObject } from "#shared/guards.js";
+import { readTurnPrincipals } from "#context/turn-principals.js";
+import {
+  encodeForwardedPrincipalHeader,
+  FORWARDED_PRINCIPAL_HEADER,
+} from "#internal/mcp/forwarded-principal-header.js";
 import {
   omitProvidedArgumentsFromSchema,
   resolveProvidedArguments,
@@ -80,6 +85,7 @@ export class McpConnectionClient implements ConnectionClient {
     const url = this.#connection.url;
     const fetch = createMcpTraceFetch({
       connectionName: this.#connection.connectionName,
+      fetcher: this.#forwardingFetch(),
       getProtocolVersion: () => this.#client?.initializeResult?.protocolVersion,
     });
 
@@ -97,6 +103,29 @@ export class McpConnectionClient implements ConnectionClient {
         transport: { fetch, headers, type: "sse", url },
       });
     }
+  }
+
+  /**
+   * With `forwardPrincipal`, adds `eve-forwarded-principal` to every request,
+   * read per request: one client can serve turns from different people in a
+   * shared session.
+   */
+  #forwardingFetch(): typeof fetch | undefined {
+    if (this.#connection.forwardPrincipal !== true) return undefined;
+    const connectionName = this.#connection.connectionName;
+    return async (request, init) => {
+      const principals = readTurnPrincipals();
+      if (principals === undefined) return await globalThis.fetch(request, init);
+      const headers = new Headers(init?.headers);
+      headers.set(
+        FORWARDED_PRINCIPAL_HEADER,
+        encodeForwardedPrincipalHeader(principals, connectionName),
+      );
+      // Fetch keeps custom headers across a cross-origin redirect, unlike
+      // `Authorization`, so following one would hand the user's identity to
+      // another host.
+      return await globalThis.fetch(request, { ...init, headers, redirect: "error" });
+    };
   }
 
   /**

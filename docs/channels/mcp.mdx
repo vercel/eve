@@ -227,7 +227,7 @@ export default mcpChannel({
 
 `tools/list` returns the `agent_*` tools first, then the agent's tools in name order with their input and output JSON schemas. Framework tools, workflow and provider tools, tools without `execute`, and tools added by dynamic resolvers or subagents are not published. While `agent` is on, an agent tool named `agent_start`, `agent_get`, `agent_update`, or `agent_cancel` is not published, and eve logs a warning. With `agent: false`, the channel sends no `agent_*` instructions. Turning off both `agent` and `tools` throws.
 
-Each `tools/call` checks the arguments against the tool's input schema, then runs the tool as the route-authenticated caller, with no model, turn, or workflow run. Every caller the channel's `auth` admits can call these tools, outside the agent's instructions, so review what becomes callable before you turn this on. Each call gets its own session:
+Each `tools/call` checks the arguments against the tool's input schema, then runs the tool as the route-authenticated caller, or as a [forwarded user](#forwarded-principals), with no model, turn, or workflow run. Every caller the channel's `auth` admits can call these tools, outside the agent's instructions, so review what becomes callable before you turn this on. Each call gets its own session:
 
 - Authored state starts from its initial value, and updates are not kept.
 - A sandbox the tool opens is deleted when the call ends.
@@ -248,6 +248,34 @@ A tool that cannot finish over MCP returns an error result with `isError: true` 
 MCP clients send W3C trace context in each request's `params._meta`, not in HTTP headers. When a request carries a valid `_meta.traceparent`, that span becomes the parent of everything the request runs, including a published tool's `execute_tool` span. It takes precedence over any parent your platform extracted from the HTTP request's headers. A missing, malformed, or all-zero `traceparent` leaves that parent in place. `_meta.tracestate` is kept only alongside a valid `_meta.traceparent` and only up to 512 characters; a longer value is dropped.
 
 `_meta.baggage` is never read. A caller cannot choose the trace audience, session lineage, or content capture: those come from the channel and your `tracePolicy`, as they do for conversations. The `execute_tool` span records the call's arguments and result only when that content decision allows it, and never records exception text.
+
+### Forwarded principals
+
+A router that calls the channel on behalf of its own users, such as another eve agent's [`forwardPrincipal` connection](../connections/mcp#forward-the-caller-to-an-eve-agent), can name the user in the `eve-forwarded-principal` header: unpadded base64url of UTF-8 JSON `{ current, initiator? }`, at most 16 KiB. eve accepts the header only when `trustedForwarders` is set, and only from a route-authenticated forwarder the predicate accepts:
+
+```ts title="agent/channels/mcp.ts"
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+import { mcpChannel } from "eve/channels/mcp";
+
+export default mcpChannel({
+  auth: [vercelOidc()],
+  tools: true,
+  // Only the router deployment may name the user a tool runs as.
+  trustedForwarders: (forwarder) =>
+    forwarder.subject === vercelSubject({ teamSlug: "acme", projectName: "router" }),
+});
+```
+
+The predicate receives the verified forwarder and the principals it asserts, as the [eve channel](./eve)'s `trustedForwarders` does, so match the forwarder precisely; see [Accepting forwarded identity](../guides/auth-and-route-protection#accepting-forwarded-identity-from-another-deployment). A published tool called with an accepted header runs as the forwarded user: `ctx.session.auth.current` is that user, `ctx.session.auth.initiator` is the asserted initiator or that user, and both carry the forwarder's `principalId` in the `eve:forwarded-by` attribute. The `agent_*` tools still act as the route-authenticated caller.
+
+| Request                                                | Response                 |
+| ------------------------------------------------------ | ------------------------ |
+| No header                                              | Runs as the route caller |
+| Malformed or over 16 KiB                               | `400`                    |
+| The predicate refuses the forwarder or what it asserts | `403`                    |
+| The forwarder is anonymous (`none()`)                  | `403`                    |
+| The channel has no `trustedForwarders`                 | `403`                    |
+| The predicate throws                                   | `500`                    |
 
 ## Invocation ownership
 

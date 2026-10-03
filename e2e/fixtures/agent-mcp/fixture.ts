@@ -4,6 +4,9 @@
  * values exist so the fixture can call itself without injected env.
  */
 
+/** Header naming the person behind an eve-channel request. */
+export const USER_HEADER = "x-eve-fixture-user";
+
 /** The service principal the loopback connection authenticates as. */
 export const SERVICE_ID = "maple-router";
 
