@@ -2,6 +2,8 @@ import type { ModelMessage } from "ai";
 
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
+import { contextStorage } from "#context/container.js";
+import { AuthKey, SessionKey } from "#context/keys.js";
 import { hasTailApprovalResponse } from "#harness/current-messages.js";
 import {
   getApprovedTools,
@@ -26,7 +28,8 @@ import {
   isSessionLimitInputBatch,
   resolveSessionLimitInput,
 } from "#harness/hitl/session-limit-input-requests.js";
-import type { HarnessSession, StepInput } from "#harness/types.js";
+import { checkRemoteInputResponder, getPendingRemoteInput } from "#harness/remote-input.js";
+import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import { readAnswerText } from "#internal/input-text.js";
 
@@ -84,7 +87,9 @@ export function selectApprovalReplayBatch(
   const batches = getPendingInputBatches(session.state);
   if (batches.some(isSessionLimitInputBatch)) return;
   const resolved =
-    batches.length === 1 ? resolveTextMessageInput(batches[0]!, stepInput) : stepInput;
+    batches.length === 1
+      ? resolveTextMessageInput(batches[0]!, stepInput, session.state)
+      : stepInput;
   const responses = canonicalizeInputResponses(resolved?.inputResponses ?? []);
   const batch = findAnsweredApprovalBatches(batches, responses)[0];
   return batch?.requests.some(
@@ -134,7 +139,7 @@ export function resolvePendingInput(input: {
   const resolvedStepInput =
     textResolutionBatch === undefined
       ? input.stepInput
-      : resolveTextMessageInput(textResolutionBatch, input.stepInput);
+      : resolveTextMessageInput(textResolutionBatch, input.stepInput, input.session.state);
   const responses = canonicalizeInputResponses(resolvedStepInput?.inputResponses ?? []);
 
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
@@ -194,6 +199,7 @@ function canonicalizeInputResponses(responses: readonly InputResponse[]): readon
 function resolveTextMessageInput(
   pendingBatch: PendingInputBatch,
   stepInput: StepInput | undefined,
+  state: SessionStateMap | undefined,
 ): ResolvedStepInput | undefined {
   const text = readAnswerText(stepInput);
   if (stepInput === undefined || text === undefined) return stepInput;
@@ -207,7 +213,11 @@ function resolveTextMessageInput(
   const textRequests = pendingBatch.requests.filter(
     (request) => !responseAuthRequired.has(request.requestId),
   );
-  const responses = resolveTextToResponses(text, textRequests);
+  const responses = screenRemoteInputTextResponses(
+    state,
+    stepInput,
+    resolveTextToResponses(text, textRequests),
+  );
   if (responses.length === 0) return stepInput;
 
   return compactStepInput({
@@ -215,5 +225,32 @@ function resolveTextMessageInput(
     inputResponses: [...(stepInput.inputResponses ?? []), ...responses],
     messageConsumed: true,
     message: undefined,
+  });
+}
+
+/**
+ * A typed answer ("approve", "1") to a remote input counts only when it
+ * comes from the user the remote call ran for, the same rule the approval
+ * delivery coordinator applies to explicit answers. Anything else is dropped:
+ * the request stays pending and the text stays an ordinary message.
+ */
+function screenRemoteInputTextResponses(
+  state: SessionStateMap | undefined,
+  stepInput: StepInput,
+  responses: readonly InputResponse[],
+): readonly InputResponse[] {
+  if (
+    !responses.some((response) => getPendingRemoteInput(state, response.requestId) !== undefined)
+  ) {
+    return responses;
+  }
+  const context = contextStorage.getStore();
+  const responder =
+    stepInput.messageAuth !== undefined
+      ? stepInput.messageAuth
+      : (context?.get(AuthKey) ?? context?.get(SessionKey)?.auth.current ?? null);
+  return responses.filter((response) => {
+    const rule = checkRemoteInputResponder(state, response.requestId, responder);
+    return rule === undefined || rule === "accept";
   });
 }

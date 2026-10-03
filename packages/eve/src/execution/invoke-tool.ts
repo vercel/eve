@@ -1,7 +1,12 @@
 import { context as otelContext, trace } from "#compiled/@opentelemetry/api/index.js";
 
 import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
-import type { InvokeToolOptions, InvokeToolResult } from "#channel/invoke-tool.js";
+import {
+  INVOKE_TOOL_CALL_ID_MAX_LENGTH,
+  type InvokeToolOptions,
+  type InvokeToolResult,
+  type InvokeToolSignIn,
+} from "#channel/invoke-tool.js";
 import {
   compiledToolOwner,
   type CompiledToolBindings,
@@ -14,8 +19,13 @@ import { buildCallbackContext } from "#context/build-callback-context.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SandboxKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import {
+  buildApprovalResponseAuth,
+  handleApprovalResponsePolicyError,
+} from "#execution/tool-auth.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
+  type AuthorizationSignal,
   AuthorizationHookKey,
   CallbackBaseUrlKey,
   isAuthorizationSignal,
@@ -33,6 +43,7 @@ import { isAsyncIterable } from "#shared/async-iterable.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import type { SandboxAccess } from "#sandbox/state.js";
+import { isObject } from "#shared/guards.js";
 import { createUlid } from "#shared/ulid.js";
 import {
   type InvokeToolObserver,
@@ -98,6 +109,12 @@ export async function invokeTool(
   input: unknown,
   options: InvokeToolOptions,
 ): Promise<InvokeToolResult> {
+  if (options.callId !== undefined && !isValidCallId(options.callId)) {
+    return {
+      message: `callId must be 1 to ${INVOKE_TOOL_CALL_ID_MAX_LENGTH} characters.`,
+      status: "invalid-input",
+    };
+  }
   const compiled = runtime.manifest.tools.find((tool) => tool.name === name);
   const definition = runtime.tools.get(name);
   if (compiled === undefined || definition === undefined) {
@@ -110,7 +127,7 @@ export async function invokeTool(
     return failed(`Tool "${name}" cannot be invoked outside a conversation: ${ineligible}.`);
   }
 
-  const callId = `call_${createUlid()}`;
+  const callId = options.callId ?? `call_${createUlid()}`;
   const sessionId = `call_session_${createUlid()}`;
   return await withInvokeToolSpan(
     {
@@ -161,7 +178,7 @@ async function runInvocation(input: {
         definition,
         input: validated.value,
         observer,
-        signal: options.signal,
+        options,
       }),
     );
   } finally {
@@ -233,10 +250,10 @@ async function runCall(input: {
   readonly definition: HarnessToolDefinition;
   readonly input: JsonObject;
   readonly observer: InvokeToolObserver;
-  readonly signal: AbortSignal | undefined;
+  readonly options: InvokeToolOptions;
 }): Promise<InvokeToolResult> {
-  const { callId, definition, observer } = input;
-  const signal = input.signal ?? new AbortController().signal;
+  const { callId, definition, observer, options } = input;
+  const signal = options.signal ?? new AbortController().signal;
 
   if (definition.approval !== undefined) {
     let status: ApprovalStatus;
@@ -255,7 +272,22 @@ async function runCall(input: {
     }
     const decision = decideApproval(status);
     if (decision.kind === "denied") return denied(decision.reason);
-    if (decision.kind === "user-approval") return { status: "approval-required" };
+    if (decision.kind === "user-approval" && options.approval === undefined) {
+      return { callId, status: "approval-required" };
+    }
+  }
+  // A supplied answer is always checked, even when the policy let the call
+  // through: the response policy decides who may answer, not whether to ask.
+  if (options.approval !== undefined) {
+    const stopped = await authorizeApprovalAnswer({
+      approved: options.approval.approved,
+      callId,
+      definition,
+      input: input.input,
+      observer,
+      responder: options.auth,
+    });
+    if (stopped !== undefined) return stopped;
   }
 
   const executeOptions: ToolExecuteOptions = {
@@ -302,10 +334,7 @@ async function runCall(input: {
       output: modelFacingAuthorizationOutput(output),
       type: "result",
     });
-    return {
-      connections: output.challenges.map((challenge) => challenge.name),
-      status: "authorization-required",
-    };
+    return authorizationRequired(output, callId);
   }
   await observer.executed({ durationMs, output: json, type: "result" });
 
@@ -334,6 +363,82 @@ function decideApproval(
     if (status.type === "denied") return { kind: "denied", reason: status.reason };
   }
   return { kind: "run" };
+}
+
+/**
+ * Runs the tool's response policy on the caller's answer, the check a
+ * conversation runs when an answer arrives. Returns the outcome that stops the
+ * call, or `undefined` when the tool may run.
+ */
+async function authorizeApprovalAnswer(input: {
+  readonly approved: boolean;
+  readonly callId: string;
+  readonly definition: HarnessToolDefinition;
+  readonly input: unknown;
+  readonly observer: InvokeToolObserver;
+  readonly responder: SessionAuthContext;
+}): Promise<InvokeToolResult | undefined> {
+  const approval = input.definition.approval;
+  const responsePolicy =
+    approval !== undefined && typeof approval !== "function" ? approval.response : undefined;
+  if (responsePolicy !== undefined) {
+    const context = buildCallbackContext();
+    try {
+      const decision = await responsePolicy({
+        auth: buildApprovalResponseAuth({ responder: input.responder, scope: input.callId }),
+        request: {
+          callId: input.callId,
+          principal: input.responder,
+          requestId: input.callId,
+          toolInput: isObject(input.input) ? input.input : undefined,
+          toolName: input.definition.name,
+        },
+        response: {
+          decision: input.approved ? "approve" : "cancel",
+          principal: input.responder,
+        },
+        session: {
+          id: context.session.id,
+          initiator: context.session.auth.initiator,
+          turn: context.session.turn,
+        },
+      });
+      // A call has no pending request to leave open for another responder.
+      if (decision.status === "rejected") return denied(decision.reason);
+      if (decision.status !== "allowed") {
+        return failed(
+          `The approval response policy of tool "${input.definition.name}" returned an unknown decision.`,
+        );
+      }
+    } catch (error) {
+      const authorization = await handleApprovalResponsePolicyError(error).catch(() => undefined);
+      if (isAuthorizationSignal(authorization)) {
+        return authorizationRequired(authorization, input.callId);
+      }
+      input.observer.failedWith(error);
+      return failedFromError(error, input.definition.name, "approval response policy failed");
+    }
+  }
+  return input.approved ? undefined : denied("The person declined this call.");
+}
+
+function authorizationRequired(signal: AuthorizationSignal, callId: string): InvokeToolResult {
+  return {
+    callId,
+    signIns: signal.challenges.map(({ challenge, name }) => {
+      const signIn: { -readonly [K in keyof InvokeToolSignIn]: InvokeToolSignIn[K] } = {
+        connection: name,
+      };
+      if (challenge.url !== undefined) signIn.url = challenge.url;
+      if (challenge.userCode !== undefined) signIn.userCode = challenge.userCode;
+      return signIn;
+    }),
+    status: "authorization-required",
+  };
+}
+
+function isValidCallId(callId: string): boolean {
+  return callId.length > 0 && callId.length <= INVOKE_TOOL_CALL_ID_MAX_LENGTH;
 }
 
 async function lastIterated(iterable: AsyncIterable<unknown>): Promise<unknown> {

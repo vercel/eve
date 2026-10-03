@@ -7,6 +7,7 @@ import {
   isPendingAuthorizationToolOutput,
   resolveActiveAuthorizationChallenges,
 } from "#harness/authorization.js";
+import { isPendingRemoteInputToolOutput } from "#harness/remote-input.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 
 /** Returns whether an inline tool result represents a pending authorization interrupt. */
@@ -15,6 +16,18 @@ export function isInlineAuthorizationToolResult(toolResult: TypedToolResult<Tool
     isPendingAuthorizationToolOutput(toolResult.output) ||
     readAuthorizationSignal(toolResult) !== undefined
   );
+}
+
+/**
+ * Which park an inline tool result belongs to, if any. Parked results go to
+ * their park handler (the authorization detector, or remote input parking in
+ * the step handler) instead of `action.result`.
+ */
+export function parkedToolResult(
+  toolResult: TypedToolResult<ToolSet>,
+): "authorization" | "remote-input" | undefined {
+  if (isInlineAuthorizationToolResult(toolResult)) return "authorization";
+  return isPendingRemoteInputToolOutput(toolResult.output) ? "remote-input" : undefined;
 }
 
 /**

@@ -4,6 +4,16 @@
  * values exist so the fixture can call itself without injected env.
  */
 
+/** Header naming the person behind an eve-channel request. Fixture-only. */
+export const USER_HEADER = "x-eve-fixture-user";
+
+/**
+ * HMAC key for MCP `requestState`. Fixture-only: passing it to `mcpChannel`
+ * makes approval rounds verify on every instance, locally and on Vercel,
+ * without `EVE_MCP_REQUEST_STATE_SECRET`. At least 32 bytes.
+ */
+export const REQUEST_STATE_SECRET = "agent-mcp-fixture-request-state-secret-0123456789";
+
 /** The service principal the loopback connection authenticates as. */
 export const SERVICE_ID = "maple-router";
 

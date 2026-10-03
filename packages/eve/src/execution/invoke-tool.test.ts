@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ApprovalPolicy } from "#approval/definition.js";
+import type { Approval, ApprovalPolicy } from "#approval/definition.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { shutdownActiveSandboxHandles } from "#execution/sandbox/active-handles.js";
 import { invokeTool, type InvokeToolRuntime } from "#execution/invoke-tool.js";
@@ -117,22 +117,40 @@ function runtimeWith(
 }
 
 describe("invokeTool", () => {
-  it("evaluates the approval policy and never asks anyone", async () => {
-    const policies: Array<[ApprovalPolicy, object, boolean]> = [
-      [() => "user-approval", { status: "approval-required" }, false],
+  it("evaluates the approval policy on every call and checks a passed answer", async () => {
+    const ask: ApprovalPolicy = () => "user-approval";
+    const onlyBob: Approval = {
+      request: ask,
+      response: ({ response }) =>
+        response.principal.principalId === "bob"
+          ? { status: "allowed" }
+          : { reason: "Only Bob may approve.", status: "rejected" },
+    };
+    const yes = { approved: true };
+    const policies: Array<[Approval, { approved: boolean } | undefined, object, boolean]> = [
+      [ask, undefined, { callId: "call-1", status: "approval-required" }, false],
       [
         () => ({ reason: "Read-only mode.", type: "denied" }),
+        yes,
         { reason: "Read-only mode.", status: "denied" },
         false,
       ],
-      [() => "not-applicable", { output: "ran", status: "completed" }, true],
+      [() => "not-applicable", undefined, { output: "ran", status: "completed" }, true],
+      [ask, yes, { output: "ran", status: "completed" }, true],
+      [ask, { approved: false }, { status: "denied" }, false],
+      [onlyBob, yes, { reason: "Only Bob may approve.", status: "denied" }, false],
     ];
-    for (const [approval, expected, ran] of policies) {
+    for (const [approval, answer, expected, ran] of policies) {
       const execute = vi.fn(() => "ran");
       const runtime = runtimeWith([tool("deploy", execute, { approval })]);
-      expect(await invokeTool(runtime, "deploy", {}, { auth: alice })).toMatchObject(expected);
+      const options = { approval: answer, auth: alice, callId: "call-1" };
+      expect(await invokeTool(runtime, "deploy", {}, options)).toMatchObject(expected);
       expect(execute).toHaveBeenCalledTimes(ran ? 1 : 0);
     }
+    const tooLong = { auth: alice, callId: "c".repeat(513) };
+    expect(await invokeTool(runtimeWith([]), "deploy", {}, tooLong)).toMatchObject({
+      status: "invalid-input",
+    });
   });
 
   it("refuses unknown, framework, and badly typed calls before running anything", async () => {

@@ -11,9 +11,14 @@ import {
   isConnectionAuthorizationRequiredError,
 } from "#connections/errors.js";
 import { loadContext } from "#context/container.js";
+import { CapabilitiesKey } from "#context/keys.js";
+import { requestRemoteInput, takeRemoteInputContinuation } from "#harness/remote-input.js";
+import { isMcpInputRequiredOutcome } from "#runtime/connections/mcp-client.js";
+import { planMcpInput, type McpSignInLink } from "#runtime/connections/mcp-input-required.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { getAuthorizationResults, type AuthorizationSignal } from "#harness/authorization.js";
 import { reportNestedToolAction } from "#harness/nested-actions.js";
+import { currentRequester } from "#harness/pending-input-batches.js";
 import { createLogger } from "#internal/logging.js";
 import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
@@ -29,6 +34,7 @@ import { renderToolSignature } from "#runtime/connections/tool-signature.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import {
   supportsInteractiveAuthorization,
+  type ConnectionToolExecuteOptions,
   type ConnectionToolMetadata,
 } from "#shared/connection-types.js";
 import { displayProperName } from "#shared/display-name.js";
@@ -40,7 +46,11 @@ import { defineTool, type ToolContext } from "#tools/definition.js";
 import type { DynamicToolSet } from "#tools/dynamic.js";
 import { defineJsonSchema } from "#tools/schema.js";
 
-import { connectionExecuteApproval, releaseApprovalPin } from "./connection-approval.js";
+import {
+  connectionExecuteApproval,
+  pinRemoteInputInstance,
+  releaseApprovalPin,
+} from "./connection-approval.js";
 import {
   closestToolNames,
   rankConnectionTools,
@@ -57,6 +67,11 @@ import {
 const log = createLogger("framework.connection-tools");
 
 export const CONNECTION_SEARCH_TOOL_NAME = "connection_search";
+
+/** Bound on `input_required` rounds that carry only `requestState`. */
+const MAX_STATE_ONLY_RETRIES = 3;
+/** Bound on how many times one call asks its user (re-asks after unfinished sign-in). */
+const MAX_REMOTE_INPUT_ASKS = 3;
 
 const DEFAULT_SEARCH_LIMIT = 10;
 const MAX_SEARCH_LIMIT = 50;
@@ -362,21 +377,85 @@ async function executeConnectionTool(
   const input = await validToolInput(connection, tool, target.input);
 
   const toolName = qualifiedToolName(target);
+  const fail = (message: string): never => {
+    reportNestedToolAction(ctx.callId, { input, isError: true, output: message, toolName });
+    throw new Error(message);
+  };
+  const continuation = takeRemoteInputContinuation(ctx.callId);
+  let attempt = continuation?.attempt ?? 0;
+  let inputRetry: ConnectionToolExecuteOptions["inputRetry"] =
+    continuation === undefined
+      ? undefined
+      : {
+          inputResponses: continuation.inputResponses,
+          requestState: continuation.requestState,
+          resolvedArguments: continuation.resolvedArguments,
+        };
   let raw: unknown;
-  try {
-    raw = await client.executeTool(tool.name, input, {
-      abortSignal: ctx.abortSignal,
-      callId: ctx.callId,
+  for (let stateOnlyRetries = 0; ;) {
+    try {
+      raw = await client.executeTool(tool.name, input, {
+        abortSignal: ctx.abortSignal,
+        callId: ctx.callId,
+        inputRetry,
+      });
+    } catch (error) {
+      if (isConnectionAuthorizationRequiredError(error)) {
+        return await auth.handleError(error, scoped);
+      }
+      reportNestedToolAction(ctx.callId, {
+        input,
+        isError: true,
+        output: toErrorMessage(error),
+        toolName,
+      });
+      throw error;
+    }
+    if (!isMcpInputRequiredOutcome(raw)) break;
+
+    const plan = planMcpInput(raw);
+    if (plan.kind === "unsupported") {
+      return fail(`${toolName} needs input eve cannot ask for: ${plan.reason}.`);
+    }
+    if (plan.kind === "retry") {
+      // State-only rounds carry no question; retry with the state, bounded.
+      if (++stateOnlyRetries > MAX_STATE_ONLY_RETRIES) {
+        return fail(`${toolName} kept asking to retry without saying what it needs.`);
+      }
+      inputRetry = { requestState: raw.requestState, resolvedArguments: raw.resolvedArguments };
+      continue;
+    }
+    // No person can answer this run (a schedule, an unattended caller), or no
+    // answer could be attributed to one (an anonymous session).
+    const cannotAsk =
+      loadContext().get(CapabilitiesKey)?.requestInput !== true
+        ? "this session cannot ask anyone, such as a scheduled run"
+        : currentRequester() === null
+          ? "only a signed-in user can answer, and this session is anonymous"
+          : undefined;
+    if (cannotAsk !== undefined) {
+      return fail(
+        `${toolName} needs the user to ${plan.kind === "sign-in" ? "sign in" : "approve it"}, ` +
+          `but ${cannotAsk}.`,
+      );
+    }
+    if (++attempt > MAX_REMOTE_INPUT_ASKS) {
+      return fail(`${toolName} asked for input ${MAX_REMOTE_INPUT_ASKS} times without finishing.`);
+    }
+    pinRemoteInputInstance(ctx.callId, connection);
+    return requestRemoteInput({
+      approve: {
+        attempt,
+        inputResponses: plan.approve,
+        requestState: raw.requestState,
+        resolvedArguments: raw.resolvedArguments,
+      },
+      connection: connection.connectionName,
+      prompt:
+        plan.kind === "sign-in"
+          ? signInPrompt(toolName, connection.connectionName, plan.links)
+          : approvalPrompt(toolName, connection.connectionName, plan.message),
     });
-  } catch (error) {
-    if (isConnectionAuthorizationRequiredError(error)) return await auth.handleError(error, scoped);
-    reportNestedToolAction(ctx.callId, {
-      input,
-      isError: true,
-      output: toErrorMessage(error),
-      toolName,
-    });
-    throw error;
   }
 
   const result = toConnectionToolResult(connection.protocol, tool, raw);
@@ -391,6 +470,56 @@ async function executeConnectionTool(
   }
   reportNestedToolAction(ctx.callId, { input, output: result.value, toolName });
   return result.value;
+}
+
+/**
+ * eve's own question first, so the user can tell which tool and connection
+ * asks; the server's text follows, quoted.
+ */
+function approvalPrompt(
+  toolName: string,
+  connectionName: string,
+  message: string | undefined,
+): string {
+  const ask = `Approve ${toolName}?`;
+  return message === undefined ? ask : `${ask} ${connectionName} asks: ${quoteRemoteText(message)}`;
+}
+
+/** One prompt for every page the user must visit before the call can retry. */
+function signInPrompt(
+  toolName: string,
+  connectionName: string,
+  links: readonly McpSignInLink[],
+): string {
+  const lines = links.map(
+    (link) =>
+      `- ${link.message === undefined ? "Sign in" : quoteRemoteText(link.message)}: ${link.url}`,
+  );
+  return [
+    `${toolName} needs you to sign in for ${connectionName} first.`,
+    ...lines,
+    "Approve once you're done.",
+  ].join("\n");
+}
+
+const REMOTE_TEXT_MAX_LENGTH = 300;
+
+/**
+ * A remote server's text as one inert line: channels render prompts as
+ * markup (Slack as mrkdwn), so unquoted text could mention `@channel`, add
+ * links, or pose as another line of eve's own. Line breaks and control
+ * characters collapse to spaces, angle brackets (Slack's mention and link
+ * syntax) become lookalikes, and the result sits in a code span with
+ * backticks replaced, so no channel formats it.
+ */
+function quoteRemoteText(text: string): string {
+  const line = text
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const capped =
+    line.length > REMOTE_TEXT_MAX_LENGTH ? `${line.slice(0, REMOTE_TEXT_MAX_LENGTH - 1)}…` : line;
+  return `\`${capped.replace(/</gu, "‹").replace(/>/gu, "›").replace(/`/gu, "'")}\``;
 }
 
 /** Validates `input` against the tool's schema, returning it with schema defaults filled in. */

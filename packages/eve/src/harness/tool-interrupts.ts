@@ -2,8 +2,9 @@
  * Per-step holding pen for the full interrupt signal a tool returns from
  * `execute`.
  *
- * A tool signals a park (e.g. connection OAuth) by *returning* an
- * {@link AuthorizationSignal}. The AI SDK records that return value as the
+ * A tool signals a park (e.g. connection OAuth, or a remote server's
+ * `input_required`) by *returning* an {@link AuthorizationSignal} or a
+ * {@link RemoteInputSignal}. The AI SDK records that return value as the
  * tool-result `output`, which `experimental_telemetry`'s `recordOutputs`
  * exports to OTel spans. So the {@link "#harness/tools.js"} wrapper hands the
  * AI SDK a `resume`-redacted copy of the signal and stashes the full signal
@@ -18,8 +19,12 @@
 import type { AlsContext, ContextContainer } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import type { AuthorizationSignal } from "#harness/authorization.js";
+import type { RemoteInputSignal } from "#harness/remote-input.js";
 
-const PendingToolInterruptsKey = new ContextKey<Readonly<Record<string, AuthorizationSignal>>>(
+/** Every interrupt a tool can return from `execute`. */
+export type ToolInterruptSignal = AuthorizationSignal | RemoteInputSignal;
+
+const PendingToolInterruptsKey = new ContextKey<Readonly<Record<string, ToolInterruptSignal>>>(
   "eve.pendingToolInterrupts",
 );
 
@@ -27,7 +32,7 @@ const PendingToolInterruptsKey = new ContextKey<Readonly<Record<string, Authoriz
 export function stashToolInterrupt(
   ctx: AlsContext,
   toolCallId: string,
-  signal: AuthorizationSignal,
+  signal: ToolInterruptSignal,
 ): void {
   const existing = ctx.get(PendingToolInterruptsKey) ?? {};
   asContainer(ctx).setVirtualContext(PendingToolInterruptsKey, {
@@ -40,7 +45,7 @@ export function stashToolInterrupt(
 export function readToolInterrupt(
   ctx: AlsContext,
   toolCallId: string,
-): AuthorizationSignal | undefined {
+): ToolInterruptSignal | undefined {
   return ctx.get(PendingToolInterruptsKey)?.[toolCallId];
 }
 

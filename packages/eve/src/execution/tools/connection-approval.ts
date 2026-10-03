@@ -198,6 +198,18 @@ function markApprovalPinChanged(callId: string): void {
   }));
 }
 
+/**
+ * Re-pins a call that parked for remote input to the instance it just ran
+ * against, so the retry after the person answers passes the approved-call
+ * recheck and still fails if the connection changes meanwhile.
+ */
+export function pinRemoteInputInstance(
+  callId: string,
+  connection: ResolvedConnectionDefinition,
+): void {
+  pinApprovedInstance(callId, connection);
+}
+
 /** Consumes the call's approval pin, rejecting the call if its connection changed. */
 export function releaseApprovalPin(callId: string, connection: ResolvedConnectionDefinition): void {
   const ctx = loadContext();

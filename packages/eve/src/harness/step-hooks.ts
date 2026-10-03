@@ -47,6 +47,7 @@ import {
 } from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
+import { isPendingRemoteInputToolOutput, isRemoteInputSignal } from "#harness/remote-input.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import { emitNestedToolActions } from "#harness/nested-actions.js";
 import { AuthKey } from "#context/keys.js";
@@ -403,7 +404,10 @@ function reconcileToolResults(step: HarnessStepResult): readonly RuntimeToolResu
 }
 
 function shouldSkipAuthorizationActionResult(callId: string, rawOutput: unknown): boolean {
-  if (rawOutput !== undefined && isPendingAuthorizationToolOutput(rawOutput)) {
+  if (
+    rawOutput !== undefined &&
+    (isPendingAuthorizationToolOutput(rawOutput) || isPendingRemoteInputToolOutput(rawOutput))
+  ) {
     return true;
   }
   const ctx = contextStorage.getStore();
@@ -411,7 +415,7 @@ function shouldSkipAuthorizationActionResult(callId: string, rawOutput: unknown)
     return false;
   }
   const stashed = readToolInterrupt(ctx, callId);
-  return stashed !== undefined && isAuthorizationSignal(stashed);
+  return stashed !== undefined && (isAuthorizationSignal(stashed) || isRemoteInputSignal(stashed));
 }
 
 function extractToolResultParts(messages: readonly ModelMessage[]): ToolResultPart[] {

@@ -178,7 +178,7 @@ export function appendPendingInputBatch(input: {
  * Every anonymous caller shares one synthetic identity, so an anonymous
  * requester can't be told apart from another anonymous responder: record none.
  */
-function currentRequester(): SessionAuthContext | null {
+export function currentRequester(): SessionAuthContext | null {
   const context = contextStorage.getStore();
   const auth = context?.get(AuthKey) ?? context?.get(SessionKey)?.auth.current ?? null;
   return auth?.principalType === "anonymous" ? null : auth;
