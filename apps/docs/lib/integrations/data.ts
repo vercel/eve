@@ -2301,6 +2301,25 @@ See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/prof
     keywords: ["mcp", "tasks", "projects", "todo", "oauth", "connect"],
     authModes: ["user"],
   },
+  upstash: {
+    logo: "upstash",
+    docsHref: "https://upstash.com/docs/agent-resources/mcp",
+    keywords: [
+      "mcp",
+      "redis",
+      "qstash",
+      "workflow",
+      "vector",
+      "search",
+      "serverless",
+      "oauth",
+      "connect",
+    ],
+    authModes: ["user"],
+    connectors: { user: { service: "upstash-redis", name: "upstash" } },
+    configureNote:
+      "Upstash's MCP server can delete databases and run arbitrary Redis commands. Choose a read-only grant during OAuth consent, or append `?features=redis` (or another feature group) to the URL to limit which tools the agent sees.",
+  },
   webflow: {
     logo: "webflow",
     docsHref: "/docs/connections/mcp",

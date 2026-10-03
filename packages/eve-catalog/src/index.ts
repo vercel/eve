@@ -842,6 +842,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "upstash",
+    name: "Upstash",
+    kind: "connection",
+    tagline: "Manage and query Upstash Redis, QStash, Workflow, Vector, Search, Box, and Blob.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Upstash: manage and query Redis, QStash, Workflow, Vector, Search, Box, and Blob resources.",
+      mcp: { url: "https://mcp.upstash.com/mcp" },
+    },
+  },
+  {
     slug: "webflow",
     name: "Webflow",
     kind: "connection",

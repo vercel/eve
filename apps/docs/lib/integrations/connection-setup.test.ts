@@ -70,6 +70,20 @@ describe("Neon connection setup", () => {
   });
 });
 
+describe("Upstash connection setup", () => {
+  it("creates the native upstash-redis Connect connector for the hosted MCP server", () => {
+    const integration = getIntegration("upstash")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/upstash");
+    expect(setup.variants["mcp:user"]).toContain('url: "https://mcp.upstash.com/mcp"');
+    expect(setup.variants["mcp:user"]).toContain('auth: connect("upstash")');
+    expect(setup.configureVariants["mcp:user"]).toContain(
+      "vercel connect create upstash-redis --name upstash",
+    );
+  });
+});
+
 describe("Shopify connection setup", () => {
   it("uses hand-authored sections without generating authentication variants", () => {
     const integration = getIntegration("shopify")!;

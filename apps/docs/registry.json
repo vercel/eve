@@ -1519,6 +1519,31 @@
       ]
     },
     {
+      "name": "connection/upstash",
+      "type": "registry:item",
+      "title": "Upstash",
+      "description": "Manage and query Upstash Redis, QStash, Workflow, Vector, Search, Box, and Blob.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "upstash", "upstash-redis", "upstash"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/upstash.ts",
+          "type": "registry:file",
+          "target": "agent/connections/upstash.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/webflow",
       "type": "registry:item",
       "title": "Webflow",
