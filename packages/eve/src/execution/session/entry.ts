@@ -21,8 +21,11 @@ import {
 } from "#execution/session-inbox/address.js";
 import {
   signalSessionOwnerActivationStep,
+  stopUntrackedChildSessionsStep,
   validateSessionCheckpointStep,
 } from "#execution/session/handoff-steps.js";
+import { migrateSessionCheckpoint } from "#execution/session/checkpoint-migrations.js";
+import type { SessionCheckpoint } from "#execution/session/handoff.js";
 import type {
   HandoffWorkflowEntryInput,
   InitialWorkflowEntryInput,
@@ -89,7 +92,7 @@ async function bootInitialOwner(
     nodeId?: string;
   };
   try {
-    const [sessionCreation, stableClaim, aliasClaim] = await Promise.allSettled([
+    const [sessionCreation, stableClaim, aliasClaim, callerResolution] = await Promise.allSettled([
       createSessionStep({
         compiledArtifactsSource: serializedBundle.source,
         continuationToken,
@@ -104,6 +107,9 @@ async function bootInitialOwner(
       }),
       inbox.claimSessionHook(sessionCommandHookToken(sessionId)),
       continuationToken === "" ? Promise.resolve() : inbox.claimSessionHook(continuationToken),
+      hasDelegatedSessionContext(serializedContext)
+        ? resolveInitialTurnCallerStep({ serializedContext })
+        : Promise.resolve(undefined),
     ]);
     if (sessionCreation.status === "rejected") throw sessionCreation.reason;
     if (stableClaim.status === "rejected") throw stableClaim.reason;
@@ -118,18 +124,19 @@ async function bootInitialOwner(
       await inbox.dispose();
       return undefined;
     }
+    if (callerResolution.status === "rejected") throw callerResolution.reason;
     return {
       inbox,
       session: {
         anchor: { kind: "self" },
-        caller: hasDelegatedSessionContext(serializedContext)
-          ? await resolveInitialTurnCallerStep({ serializedContext })
-          : undefined,
+        caller: callerResolution.value,
         capabilities: serializedContext["eve.capabilities"] as SessionCapabilities | undefined,
         deploymentId: input.ownerDeploymentId,
         history: sessionCreation.value.history,
-        initialInput: createInitialDelivery(input, serializedContext),
-        awaitFirstMessage: input.input.message === undefined,
+        start:
+          input.input.message === undefined
+            ? { kind: "first-message" }
+            : { input: createInitialDelivery(input, serializedContext), kind: "turn" },
         retention: input.retention,
         serializedContext,
         sessionId,
@@ -158,19 +165,25 @@ async function bootInitialOwner(
 async function bootHandoffOwner(
   input: HandoffWorkflowEntryInput,
 ): Promise<BootOutcome | undefined> {
-  const { checkpoint, sessionId } = input;
-  const serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
+  const { sessionId } = input;
   const inbox = createSessionInbox(sessionId);
+  let checkpoint: SessionCheckpoint;
+  let childRunIdsToStop: readonly string[];
+  let serializedContext: Record<string, unknown>;
   try {
-    const validation = await validateSessionCheckpointStep({ checkpoint });
-    if (validation.kind === "incompatible") {
+    // The previous owner may run an older eve build; read its checkpoint in this build's shape.
+    const migration = migrateSessionCheckpoint(input.checkpoint);
+    const validation = await validateSessionCheckpointStep({ migration, sessionId });
+    if (migration.kind === "incompatible" || validation.kind === "incompatible") {
       const payloads = await inbox.release();
       await signalSessionOwnerActivationStep({
-        activation: { kind: "incompatible", payloads, reason: validation.reason },
+        activation: { kind: "incompatible", payloads, reason: "checkpoint-version" },
         token: input.activationToken,
       });
       return undefined;
     }
+    ({ checkpoint, childRunIdsToStop } = migration);
+    serializedContext = stampSessionIdentity(checkpoint.serializedContext, sessionId);
     await inbox.claimSessionHooks(
       sessionHookTokens({ serializedContext, sessionState: checkpoint.sessionState }),
     );
@@ -186,22 +199,29 @@ async function bootHandoffOwner(
     });
     return undefined;
   }
+  if (childRunIdsToStop.length > 0) {
+    await stopUntrackedChildSessionsStep({ runIds: childRunIdsToStop, sessionId });
+  }
+  const compaction = input.reason === "compaction";
   return {
     inbox,
     session: {
       anchor: { kind: "successor" },
-      caller: input.delivery.caller,
+      caller: input.delivery?.caller,
       capabilities: checkpoint.capabilities,
       deploymentId: input.ownerDeploymentId,
       history: checkpoint.history,
-      initialInput: input.delivery,
-      awaitFirstMessage: false,
+      start:
+        input.delivery === undefined ? { kind: "parked" } : { input: input.delivery, kind: "turn" },
       retention: checkpoint.retention,
       serializedContext,
       sessionId,
       sessionState: checkpoint.sessionState,
       sessionTimeoutMs: checkpoint.sessionTimeoutMs,
-      sessionTimeoutDeadline: sessionTimeoutDeadline(checkpoint.sessionTimeoutMs, Date.now()),
+      // A deployment handoff renews the configured lifetime; compaction keeps the deadline.
+      sessionTimeoutDeadline: compaction
+        ? input.sessionTimeoutDeadline
+        : sessionTimeoutDeadline(checkpoint.sessionTimeoutMs, Date.now()),
       sessionWritable: input.sessionWritable,
     },
   };

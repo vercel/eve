@@ -15,11 +15,11 @@ describe("onVendoredDependencyLog", () => {
     ["a Windows dependency path", { id: "C:\\app\\node_modules\\dep\\index.js" }],
     [
       "eve's generated vendor modules",
-      { ids: ["/repo/packages/eve/.generated/compiled/gray-matter/index.js"] },
+      { ids: ["/repo/packages/eve/.generated/compiled/js-yaml/index.js"] },
     ],
     [
       "eve's published vendor modules",
-      { id: "/app/node_modules/eve/dist/src/compiled/gray-matter/index.js" },
+      { id: "/app/node_modules/eve/dist/src/compiled/js-yaml/index.js" },
     ],
   ])("drops a warning raised only by %s", (_, log) => {
     expect(forwardedLogs("warn", { message: "dependency detail", ...log })).toEqual([]);

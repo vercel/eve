@@ -219,6 +219,10 @@ export function createAgentToolInstrumentation(input: {
     if (span === undefined || state.finished === true) return;
     state.finished = true;
     const terminal = state.terminal;
+    // As `@ai-sdk/otel` records it: execute's own run time, in seconds, success or error.
+    if (terminal?.type === "tool.call.completed" && terminal.durationMs !== undefined) {
+      span.setAttribute("gen_ai.execute_tool.duration", terminal.durationMs / 1000);
+    }
     if (failure !== undefined) {
       recordError(span, failure.error);
     } else if (terminal?.type === "tool.call.failed") {

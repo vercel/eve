@@ -809,6 +809,8 @@ export async function createProductionApplicationNitro(
     features: {
       websocket: manifestHasWebSocketChannel(preparedHost.compileResult.manifest),
     },
+    // Gzipping every output file only annotates the build log's file tree.
+    logging: { compressedSizes: false },
     output: { dir: options.outputDir },
     preset,
     plugins: nitroPlugins,

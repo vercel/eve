@@ -674,6 +674,7 @@ describe("createAiSdkHookBridge", () => {
       );
       expect(after).toHaveBeenCalledExactlyOnceWith(
         {
+          durationMs: 1,
           idempotencyKey: `tool:${scope.attemptId}:tool-1:0`,
           output: expected,
           scope,

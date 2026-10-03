@@ -4,7 +4,7 @@ import { equals } from "eve/evals/expect";
 const MARKER = "followup-dedup-H4K8";
 const TOOL_NAME = "gate";
 const FOLLOW_UP_QUESTIONS = [
-  "What is the current status of my request?",
+  "Is the gate call still waiting for my approval?",
   "Has the requested action executed yet?",
   "What are you waiting for before continuing?",
   "Can you summarize what remains blocked?",

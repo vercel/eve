@@ -1,5 +1,7 @@
 import { realpathSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { resolve } from "node:path";
+
+import { isExtensionModule } from "#internal/bundler/extension-mount-plugin.js";
 
 /**
  * One extension's on-disk source root paired with its logical mount identity.
@@ -31,10 +33,6 @@ function canonicalize(path: string): string {
 function importerPath(importer: string): string {
   const queryIndex = importer.indexOf("?");
   return canonicalize(queryIndex === -1 ? importer : importer.slice(0, queryIndex));
-}
-
-function isUnder(path: string, root: string): boolean {
-  return path === root || path.startsWith(`${root}${sep}`);
 }
 
 function shimSource(mountId: string): string {
@@ -103,10 +101,10 @@ export function createExtensionScopePlugin(
       const mountId = decodeURIComponent(importer.slice(mountQuery + "?eve-mount=".length));
       const owned = canonicalScopes.find((scope) => scope.mountId === mountId);
       if (owned === undefined) throw new Error(`Unknown extension mount "${mountId}".`);
-      return isUnder(importerPath(importer), owned.root) ? owned.mountId : undefined;
+      return isExtensionModule(importerPath(importer), owned.root) ? owned.mountId : undefined;
     }
     const path = importerPath(importer);
-    const matches = canonicalScopes.filter((scope) => isUnder(path, scope.root));
+    const matches = canonicalScopes.filter((scope) => isExtensionModule(path, scope.root));
     if (matches.length === 0) return undefined;
     if (matches.length > 1) {
       throw new Error(`Ambiguous extension scope for "${path}".`);

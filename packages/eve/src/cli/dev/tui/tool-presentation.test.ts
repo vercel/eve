@@ -13,7 +13,7 @@ describe("presentPreparingTool", () => {
 
   it("leads unknown tools with their name", () => {
     const presentation = presentPreparingTool("linear__list_issues");
-    expect(presentation.title).toBe("linear__list_issues …");
+    expect(presentation.title).toBe("List issues …");
     expect(presentation.subtitle).toBe("");
   });
 });
@@ -177,22 +177,22 @@ describe("presentTool", () => {
   it("falls back to the generic formatter for malformed input", () => {
     const presentation = presentTool("web_fetch", { format: "markdown" });
 
-    expect(presentation.title).toBe("web_fetch");
+    expect(presentation.title).toBe("Web fetch");
     expect(presentation.subtitle).toContain('format="markdown"');
   });
 
   it("does not retain semantic copy for the removed task_sleep tool", () => {
-    expect(presentTool("task_sleep", { seconds: 30 }).title).toBe("task_sleep");
+    expect(presentTool("task_sleep", { seconds: 30 }).title).toBe("Task sleep");
   });
 
   it("does not retain semantic copy for the removed task_update tool", () => {
     const presentation = presentTool("task_update", { message: "Checking the next region." });
-    expect(presentation.title).toBe("task_update");
+    expect(presentation.title).toBe("Task update");
     expect(presentation.subtitle).toContain('message="Checking the next region."');
     expect(presentation.group).toBeUndefined();
     expect(presentation.doneTitle).toBeUndefined();
     expect(presentPreparingTool("task_update")).toMatchObject({
-      title: "task_update …",
+      title: "Task update …",
       subtitle: "",
     });
   });
@@ -210,13 +210,20 @@ describe("presentTool", () => {
       { message: "Look up GOOG.\nDetails…" },
       { isSubagent: true },
     );
-    expect(parsed.title).toBe("Delegate subagent(stock-price)");
-    expect(parsed.doneTitle).toBe("Delegated subagent(stock-price)");
+    expect(parsed.title).toBe("Delegate subagent(stock price)");
+    expect(parsed.doneTitle).toBe("Delegated subagent(stock price)");
     expect(parsed.subtitle).toBe("Look up GOOG.");
 
     // The tool's name carries the target, so it shows before args parse.
     expect(presentPreparingTool("stock-price", { isSubagent: true }).title).toBe(
-      "Delegate subagent(stock-price) …",
+      "Delegate subagent(stock price) …",
+    );
+    // An extension's subagents go by their own name, and its `agent` by the extension's.
+    expect(presentTool("code__worker", {}, { isSubagent: true }).title).toBe(
+      "Delegate subagent(worker)",
+    );
+    expect(presentTool("code_review__agent", {}, { isSubagent: true }).title).toBe(
+      "Delegate subagent(code review)",
     );
     const selfModification = presentTool(
       "self-modification__agent",
@@ -226,7 +233,7 @@ describe("presentTool", () => {
     expect(selfModification.title).toBe("Delegate agent editor");
     expect(selfModification.doneTitle).toBe("Delegated agent editor");
     // Without roster knowledge the generic formatter keeps its shape.
-    expect(presentTool("stock-price", { message: "x" }).title).toBe("stock-price");
+    expect(presentTool("stock-price", { message: "x" }).title).toBe("Stock price");
   });
 
   it("names the self-modification subagent without its extension namespace", () => {
@@ -239,7 +246,7 @@ describe("presentTool", () => {
   it("keeps unknown tools on the generic formatter", () => {
     const presentation = presentTool("linear__list_issues", { teamId: "T1" });
 
-    expect(presentation.title).toBe("linear__list_issues");
+    expect(presentation.title).toBe("List issues");
     expect(presentation.subtitle).toContain('teamId="T1"');
     expect(presentation.group).toBeUndefined();
   });

@@ -218,8 +218,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const lines = screen.snapshot().trimEnd().split("\n");
-    expect(lines.at(-1)).toMatch(/^☰eve {2}v\d+\.\d+\.\d+/u);
-    expect(screen.rawOutput()).toContain(`\x1b[2m☰eve  v`);
+    expect(lines.at(-1)).toMatch(/^☰eve v\d+\.\d+\.\d+/u);
+    expect(screen.rawOutput()).toContain(`\x1b[2m☰eve v`);
     // Once, ever — repeated teardown must not repeat the tag.
     renderer.shutdown();
     expect(screen.snapshot().match(/☰eve/gu)).toHaveLength(1);
@@ -240,7 +240,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
 
     const lines = screen.snapshot().trimEnd().split("\n");
-    expect(lines.at(-1)).toMatch(/^☰eve {2}v\d+\.\d+\.\d+ · session ses_0123456789$/u);
+    expect(lines.at(-1)).toMatch(/^☰eve v\d+\.\d+\.\d+ · session ses_0123456789$/u);
 
     // Repeated reports keep the latest id; a renderer that never received
     // one prints the bare tag.
@@ -1838,6 +1838,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       approvalId: "a1",
       toolCallId: "c1",
       toolName: "random_color",
+      prompt: "Approve random_color?",
       input: {},
     });
 
@@ -1869,6 +1870,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       approvalId: "a2",
       toolCallId: "c2",
       toolName: "random_number",
+      prompt: "Approve random_number?",
       input: {},
       context: { position: { index: 2, total: 10 }, requester: "subagent(number_picker:13)" },
     });
@@ -1887,6 +1889,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       approvalId: "a1",
       toolCallId: "c1",
       toolName: "random_color",
+      prompt: "Approve random_color?",
       input: {},
     });
     expect(screen.snapshot()).toContain("Approve random_color?");
@@ -1910,6 +1913,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         approvalId: "a1",
         toolCallId: "c1",
         toolName: "read_file",
+        prompt: "Approve read_file?",
         input: { path: "README.md" },
       });
       input.type("y");
@@ -1931,6 +1935,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         approvalId: "a2",
         toolCallId: "c2",
         toolName: "write_file",
+        prompt: "Approve write_file?",
         input: { path: "README.md" },
       });
       const approvalOutputLength = screen.rawOutput().length;
@@ -1950,6 +1955,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
       approvalId: "a1",
       toolCallId: "c1",
       toolName: "delete_files",
+      prompt: "Approve delete_files?",
       input: { path: "/" },
     });
 
@@ -1968,6 +1974,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
         approvalId: "a1",
         toolCallId: "c1",
         toolName: "delete_files",
+        prompt: "Approve delete_files?",
         input: { path: "/" },
       });
 
@@ -1998,9 +2005,8 @@ describe("TerminalRenderer (inline scrollback)", () => {
     // Every runtime-artifacts change re-sends the header; an identical one
     // must not stack another banner under the transcript.
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.shutdown();
-
     expect(countOccurrences(screen.snapshot(), "☰eve v")).toBe(1);
+    renderer.shutdown();
   });
 
   it("reset clears committed transcript rows", () => {
@@ -3354,7 +3360,7 @@ describe("TerminalRenderer command typeahead", () => {
     expect(open).not.toMatch(/\b1\. \/model/);
     input.down();
     input.enter();
-    expect(await choice).toBe("/reset");
+    expect(await choice).toBe("/new");
     expect(screen.snapshot()).not.toContain("Choose a model, speed, and reasoning");
     renderer.shutdown();
   });
@@ -3474,9 +3480,9 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     input.down();
     input.enter();
-    // Down moved /model → /reset; history recall would have submitted the
+    // Down moved /model → /new; history recall would have submitted the
     // earlier prompt instead.
-    expect(await second).toBe("/reset");
+    expect(await second).toBe("/new");
     renderer.shutdown();
   });
 
@@ -3703,13 +3709,13 @@ describe("TerminalRenderer status line", () => {
       model: "xai/grok-4.5",
       reasoning: "xhigh" as const,
       providerOptions: { gateway: { serviceTier: "priority" } },
-      expected: "grok-4.5 · xhigh · ⚡︎",
+      expected: "grok-4.5 · xhigh · ↯",
     },
     {
       model: "openai/gpt-6-luna-fast",
       reasoning: "high" as const,
       providerOptions: {},
-      expected: "gpt-6-luna · high · ⚡︎",
+      expected: "gpt-6-luna · high · ↯",
     },
   ])("renders model metadata from the header: $expected", (selection) => {
     const { screen, renderer } = makeRenderer(100);
@@ -3751,7 +3757,7 @@ describe("TerminalRenderer status line", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("grok-4.5");
     expect(snapshot).not.toContain("provider-default");
-    expect(snapshot).not.toContain("⚡︎");
+    expect(snapshot).not.toContain("↯");
     renderer.shutdown();
   });
 });
@@ -3843,9 +3849,9 @@ describe("TerminalRenderer conversation", () => {
     ];
     renderer.renderConversation(conversationOf(working, { working: true }));
     const during = screen.snapshot();
-    expect(during).toContain("▪ Delegate subagent(number_picker)  Pick a number for Alice.");
-    expect(during).toMatch(/── Waiting · 1 task · \S+ ─+\n\n  subagent\(number_picker\) \S+/);
-    expect(during).toMatch(/subagent\(number_picker\) \S+\n\n─+\n❯/);
+    expect(during).toContain("▪ Delegate subagent(number picker)  Pick a number for Alice.");
+    expect(during).toMatch(/── Waiting · 1 task · \S+ ─+\n\n  subagent\(number picker\) \S+/);
+    expect(during).toMatch(/subagent\(number picker\) \S+\n\n─+\n❯/);
     expect(during).not.toContain("Starting");
     expect(countOccurrences(during, "Pick a number for Alice.")).toBe(1);
     expect(during).not.toContain("Waiting for");
@@ -3857,19 +3863,20 @@ describe("TerminalRenderer conversation", () => {
       approvalId: "approval_1",
       toolCallId: "child_tool",
       toolName: "wait_random_number",
+      prompt: "Approve wait_random_number?",
       input: {},
     });
     expect(screen.snapshot()).toContain("Approve wait_random_number?");
     expect(screen.snapshot()).toMatch(/── Waiting · 1 task/);
     expect(screen.snapshot()).toMatch(
-      /subagent\(number_picker\) \S+\n\n─+\n\n  Approve wait_random_number\?/,
+      /subagent\(number picker\) \S+\n\n─+\n\n  Approve wait_random_number\?/,
     );
-    expect(countOccurrences(screen.snapshot(), "  subagent(number_picker)")).toBe(1);
+    expect(countOccurrences(screen.snapshot(), "  subagent(number picker)")).toBe(1);
     input.enter();
     await expect(approval).resolves.toEqual({ approved: true });
     expect(screen.snapshot()).toContain("Waiting · 1 task");
     const prompt = readPrompt(renderer);
-    expect(screen.snapshot()).toMatch(/subagent\(number_picker\) \S+\n\n─+\n❯/);
+    expect(screen.snapshot()).toMatch(/subagent\(number picker\) \S+\n\n─+\n❯/);
 
     renderer.renderConversation(
       conversationOf(
@@ -3881,7 +3888,7 @@ describe("TerminalRenderer conversation", () => {
       ),
     );
     const after = screen.snapshot();
-    expect(after).toMatch(/✓ subagent\(number_picker\) +finished in/);
+    expect(after).toMatch(/✓ subagent\(number picker\) +finished in/);
     expect(after).not.toContain("Waiting · 1 task");
     renderer.requestInterrupt();
     await prompt.catch(() => {});
@@ -4057,7 +4064,7 @@ describe("TerminalRenderer conversation", () => {
     renderer.renderConversation(
       conversationOf([turn("turn_1")], { data: { modelId: "openai/gpt-6-luna-fast" } }),
     );
-    expect(screen.snapshot()).toContain("dynamic model · gpt-6-luna · ⚡︎");
+    expect(screen.snapshot()).toContain("dynamic model · gpt-6-luna · ↯");
     renderer.requestInterrupt();
     await prompt.catch(() => {});
   });

@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { finalizeSession } from "#execution/session/finalization.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { writeTaskTable } from "#execution/tasks/table.js";
+import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { setTurnUsageState, takeSessionUsageDelta } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
@@ -32,16 +34,38 @@ function withUsage(session: HarnessSession, inputTokens: number): HarnessSession
   return setTurnUsageState(session, { ...totals, session: totals, turnId: "current" });
 }
 
-function sessionWithUnreportedUsage() {
-  const session: HarnessSession = {
+function baseSession(): HarnessSession {
+  return {
     agent: { modelReference: { id: "unused" }, system: "", tools: [] },
     compaction: { recentWindowSize: 10, threshold: 100_000 },
     continuationToken: "detector",
     history: [],
     sessionId: "detector",
   };
+}
+
+function sessionWithUnreportedUsage() {
+  const session = baseSession();
   const previouslySettled = takeSessionUsageDelta(withUsage(session, 100)).session;
   return createDurableSessionState({ session: withUsage(previouslySettled, 250) });
+}
+
+function sessionWithTaskRun() {
+  return createDurableSessionState({
+    session: writeTaskTable(baseSession(), {
+      tasks: [
+        {
+          calls: [{ callId: "call-1", turnId: "turn_0" }],
+          id: "task-1",
+          kind: "agent",
+          name: "researcher",
+          resumable: false,
+          results: [],
+          run: { hookToken: "hook-1", runId: "run-1", started: true },
+        },
+      ],
+    }),
+  });
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -103,6 +127,19 @@ describe("session finalization with an unsettled caller", () => {
       inputTokens: 250,
       outputTokens: 0,
     });
+  });
+
+  it("terminates child sessions when a task run is live", async () => {
+    const sessionState = sessionWithTaskRun();
+    await finalizeSession(
+      { kind: "expired" },
+      {
+        caller: undefined,
+        cursor: { serializedContext: {}, sessionState },
+        sessionWritable: new WritableStream(),
+      },
+    );
+    expect(terminateChildSessionsStep).toHaveBeenCalledExactlyOnceWith({ sessionState });
   });
 
   it("does not notify again when an already settled conversation expires", async () => {

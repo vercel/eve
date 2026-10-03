@@ -1,4 +1,4 @@
-import { createElement, StrictMode, useState } from "react";
+import { createElement, StrictMode, useEffect, useRef, useState } from "react";
 import { act, create as createRenderer } from "react-test-renderer";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -458,6 +458,45 @@ describe("useEveAgent", () => {
     await act(async () => {
       await sendPromise;
     });
+  });
+
+  it("keeps a turn sent on mount through a Strict Mode effect replay", async () => {
+    let streamSignal: AbortSignal | null | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createStartedMessageResponse("session_1", "http:session_1");
+      }
+
+      streamSignal = init?.signal;
+      return new Response(new ReadableStream<Uint8Array>(), {
+        headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      });
+    });
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+
+    function TestComponent() {
+      const agent = useEveAgent({ prewarm: false });
+      const sent = useRef(false);
+      helpers = agent;
+      useEffect(() => {
+        if (sent.current) return;
+        sent.current = true;
+        void agent.send("Hello");
+      }, [agent]);
+      return null;
+    }
+
+    await act(async () => {
+      create(createElement(StrictMode, null, createElement(TestComponent)));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    expect(helpers?.status).toBe("submitted");
+    expect(helpers?.data).toEqual(optimisticUserData("Hello", "submitted"));
+    expect(streamSignal?.aborted).toBe(false);
   });
 
   it.each([undefined, false])("defers creation until send (prewarm=%s)", async (prewarm) => {

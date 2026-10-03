@@ -33,6 +33,16 @@ describe("live task panel", () => {
     expect(rows.join("\n")).not.toContain("Find Alice's notes");
   });
 
+  it("separates sibling tasks while keeping nested work under its owner", () => {
+    const rows = render([task("researcher", [task("download")]), task("writer")]);
+    expect(rows.slice(2, -2)).toEqual([
+      "  subagent(researcher) 12s",
+      "  └ subagent(download) 12s",
+      "",
+      "  subagent(writer) 12s",
+    ]);
+  });
+
   it("bounds fan-out and keeps nested approvals visible ahead of ordinary work", () => {
     const approval = task("reviewer");
     approval.childTools.set("approve", {
@@ -79,7 +89,7 @@ describe("live task panel", () => {
   });
 
   it("puts parent state and turn time in the header with breathing room around tasks", () => {
-    const rows = renderTaskPanelRows([task("self-modification__agent")], {
+    const rows = renderTaskPanelRows([task("agent editor")], {
       width: 80,
       maxRows: 6,
       theme,

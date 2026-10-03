@@ -21,6 +21,7 @@ import {
 } from "#protocol/message.js";
 import type { InputResponse } from "#shared/input.js";
 import { resolveTextToResponse } from "#channel/resolve-text.js";
+import { inputTextKey, readAnswerText } from "#internal/input-text.js";
 import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuation.js";
 
 // ---------------------------------------------------------------------------
@@ -47,7 +48,7 @@ export async function emitProxiedInputRequest(input: {
       turnId: input.hookPayload.event.turnId,
     }),
   );
-  await emitTurnWaiting(input.emit, input.session);
+  await input.emit(createTurnWaitingOnInputEvent(input.session));
   return toProxyInputRequestEntries(input.hookPayload);
 }
 
@@ -64,20 +65,19 @@ export async function emitProxiedAuthorizationEvent(input: {
 }): Promise<void> {
   await input.emit(input.hookPayload.event);
   if (input.hookPayload.event.type === "authorization.required") {
-    await emitTurnWaiting(input.emit, input.session);
+    await input.emit(createTurnWaitingOnInputEvent(input.session));
   }
 }
 
-async function emitTurnWaiting(emit: HarnessEmitFn, session: HarnessSessionBase): Promise<void> {
+/** The `turn.waiting` that parks the session's open turn while a person must act. */
+export function createTurnWaitingOnInputEvent(session: Pick<HarnessSessionBase, "state">) {
   const turn = getHarnessEmissionState(session.state);
-  await emit(
-    createTurnWaitingEvent({
-      on: "input",
-      sequence: turn.sequence,
-      turnId: turn.turnId,
-      usage: getSessionUsage(session),
-    }),
-  );
+  return createTurnWaitingEvent({
+    on: "input",
+    sequence: turn.sequence,
+    turnId: turn.turnId,
+    usage: getSessionUsage(session),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -132,13 +132,16 @@ interface ChildResponseBucket {
   readonly routes: ProxyInputRequest[];
 }
 
+/** Payload keys that describe the message, dropped with it when it answers a question. */
+const CONSUMED_MESSAGE_KEYS: ReadonlySet<string> = new Set(["context", "message", inputTextKey]);
+
 /**
  * Splits a deliver payload into parent-local and proxied-child buckets.
  *
  * With `resolveMessage`, a plain-text message is also resolved against pending
  * `ctx.ask()` questions: when exactly one question is pending, a matching option or
- * permitted free text answers it and consumes the message. Otherwise the
- * message stays with the parent.
+ * permitted free text answers it and consumes the message along with its
+ * `context`. Otherwise the message stays with the parent.
  */
 export function routeDeliverPayload(input: {
   readonly allowRoute?: (requestId: string, route: ProxyInputRequest) => boolean;
@@ -261,7 +264,9 @@ export function routeDeliverPayload(input: {
     if (key === "inputResponses" || value === undefined) {
       continue;
     }
-    if (key === "message" && message.consumed) continue;
+    // Channels attach per-message context, such as Telegram's sender block. Kept
+    // without its message, it would reach the model as a message of its own.
+    if (message.consumed && CONSUMED_MESSAGE_KEYS.has(key)) continue;
 
     remainder[key] = value;
   }
@@ -326,9 +331,10 @@ function resolveMessageAgainstQuestions(input: {
   if (questions.length === 0) return none;
 
   const [only] = questions;
+  const text = readAnswerText(input.payload);
   const answer =
-    pending.length === 1 && only !== undefined && typeof input.payload.message === "string"
-      ? resolveTextToResponse(input.payload.message, only)
+    pending.length === 1 && only !== undefined && text !== undefined
+      ? resolveTextToResponse(text, only)
       : undefined;
   if (answer !== undefined) return { consumed: true, responses: [answer] };
   return none;

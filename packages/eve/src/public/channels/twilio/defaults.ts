@@ -1,3 +1,4 @@
+import { renderTextInputRequest } from "#channel/resolve-text.js";
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
@@ -12,6 +13,7 @@ import type {
   TwilioInboundResult,
   TwilioVoiceResult,
 } from "#public/channels/twilio/twilioChannel.js";
+import type { InputRequest } from "#shared/input.js";
 
 /** Default phone-number auth projection for Twilio webhook actors. */
 function defaultTwilioAuth(input: {
@@ -74,6 +76,11 @@ export const defaultEvents: TwilioChannelEvents = {
     await channel.twilio.sendMessage(event.message);
   },
 
+  async "input.requested"(event, channel, _ctx) {
+    if (event.requests.length === 0) return;
+    await channel.twilio.sendMessage(renderTwilioInputRequests(event.requests));
+  },
+
   async "turn.failed"(event, channel, _ctx) {
     const hint = formatErrorHint(event);
     const errorId = extractErrorId(event.details);
@@ -100,3 +107,22 @@ export const defaultEvents: TwilioChannelEvents = {
     );
   },
 };
+
+// SMS has no buttons, so options are numbered. The batch goes out as one message
+// because a text reply resolves against every pending request at once.
+function renderTwilioInputRequests(requests: readonly InputRequest[]): string {
+  const sections = requests.map(renderTextInputRequest);
+  const hasOptions = requests.some((request) => (request.options ?? []).length > 0);
+  if (hasOptions) {
+    const freeform = requests.some((request) => request.allowFreeform === true);
+    sections.push(
+      [
+        freeform
+          ? "Reply with a number, or with your own answer."
+          : "Reply with a number to choose.",
+        ...(requests.length > 1 ? ["Your reply answers each of these."] : []),
+      ].join(" "),
+    );
+  }
+  return sections.join("\n\n");
+}

@@ -9,6 +9,8 @@ export function derivePendingState(session: HarnessSession): {
   readonly authorizationAttemptIds?: readonly string[];
   readonly hasPendingAuthorization: boolean;
   readonly hasPendingInputBatch: boolean;
+  /** The pending batch has workflow tool runs to start; task tool calls are answered by the session. */
+  readonly hasRunsToDispatch?: boolean;
   readonly pendingCoordinationCallIds?: readonly string[];
   readonly pendingTaskToolCalls?: readonly TaskToolCall[];
 } {
@@ -24,6 +26,7 @@ export function derivePendingState(session: HarnessSession): {
   if (batch === undefined) return base;
   return {
     ...base,
+    hasRunsToDispatch: batch.tasks.length > 0,
     pendingCoordinationCallIds: pendingCoordinationCallIds(batch),
     pendingTaskToolCalls: pendingTaskToolCalls(batch.responseMessages),
   };

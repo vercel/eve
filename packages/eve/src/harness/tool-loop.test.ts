@@ -31,6 +31,7 @@ import {
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { attachClientContext } from "#internal/client-context.js";
+import { pngBytes } from "#internal/testing/media-fixtures.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
@@ -10747,7 +10748,7 @@ describe("createToolLoopHarness", () => {
       const historyRef = decodeSandboxRef(historyFilePart.data as URL);
       expect(historyRef.mediaType).toBe("image/png");
       expect(historyRef.size).toBe(imageBytes.byteLength);
-      expect(historyRef.path).toMatch(/^\/workspace\/attachments\/[0-9a-f]{16}\/logo\.png$/);
+      expect(historyRef.path).toMatch(/^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/logo\.png$/);
 
       // --- Invariant 3: the mocked ToolLoopAgent.generate saw hydrated bytes.
       //
@@ -10773,6 +10774,160 @@ describe("createToolLoopHarness", () => {
       expect(Buffer.isBuffer(streamFilePart!.data)).toBe(true);
       expect((streamFilePart!.data as Buffer).equals(imageBytes)).toBe(true);
       expect(streamFilePart!.mediaType).toBe("image/png");
+    });
+
+    it("keeps tool-result files out of history and hydrates identical bytes on every later call", async () => {
+      const base64 = pngBytes(64, 64, 2048).toString("base64");
+      const file = {
+        data: { data: base64, type: "data" as const },
+        filename: "chart.png",
+        mediaType: "image/png",
+        type: "file" as const,
+      };
+      const toolCall = {
+        input: {},
+        toolCallId: "render-1",
+        toolName: "render_chart",
+        type: "tool-call" as const,
+      };
+      const toolResult = {
+        output: { type: "content" as const, value: [file] },
+        toolCallId: "render-1",
+        toolName: "render_chart",
+        type: "tool-result" as const,
+      };
+      const reply = (text: string) => ({
+        finishReason: "stop",
+        response: { messages: [{ content: text, role: "assistant" }] },
+        text,
+        toolCalls: [],
+        toolResults: [],
+      });
+      setupMockAgentSequence([
+        {
+          finishReason: "tool-calls",
+          response: {
+            messages: [
+              { content: [toolCall], role: "assistant" },
+              { content: [toolResult], role: "tool" },
+            ],
+          },
+          text: "",
+          toolCalls: [toolCall],
+          toolResults: [toolResult],
+        },
+        reply("A bar chart."),
+        reply("Still a bar chart."),
+      ]);
+      const sandbox = mockSandbox({ id: "sbx_tool_media" });
+      const ctx = new ContextContainer();
+      ctx.set(SandboxKey, sandbox.access);
+      const runStep = createToolLoopHarness(createTestConfig());
+
+      const first = await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "Render the chart." }),
+      );
+      if (typeof first.next !== "function") throw new Error("Expected a tool continuation.");
+      const next = first.next;
+      const second = await contextStorage.run(ctx, () => next(first.session));
+      const third = await contextStorage.run(ctx, () =>
+        runStep(second.session, { message: "Describe it again." }),
+      );
+
+      expect(sandbox.writes).toHaveLength(1);
+      expect(JSON.stringify(third.session.history)).not.toContain(base64);
+      // The next step and the next turn both render the file exactly as the
+      // tool returned it, so the provider sees a stable prompt prefix.
+      const laterCalls = vi
+        .mocked(ToolLoopAgent)
+        .mock.results.slice(1)
+        .map(
+          (result) =>
+            (result.value as { generate: ReturnType<typeof vi.fn> }).generate.mock
+              .calls[0]?.[0] as {
+              messages: ModelMessage[];
+            },
+        );
+      expect(laterCalls).toHaveLength(2);
+      for (const call of laterCalls) {
+        expect(call.messages.find((message) => message.role === "tool")?.content).toEqual([
+          toolResult,
+        ]);
+      }
+    });
+
+    it("keeps files a workflow tool projects for the model out of history", async () => {
+      const { setPendingCoordinationBatch } = await import("#harness/coordination.js");
+      const { toolOutput, toolOutputPart } = await import("#tools/model-output.js");
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Captured.", role: "assistant" }] },
+        text: "Captured.",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const base64 = pngBytes(32, 32, 512).toString("base64");
+      const tools: ToolLoopHarnessConfig["tools"] = new Map([
+        [
+          "screenshot",
+          {
+            description: "Capture a screenshot.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "screenshot",
+            toModelOutput: (output: unknown) =>
+              toolOutput.content([
+                toolOutputPart.file((output as { png: string }).png, { mediaType: "image/png" }),
+              ]),
+            workflowId: "workflow//./agent/tools/screenshot//execute",
+          },
+        ],
+      ]);
+      const parked = setPendingCoordinationBatch({
+        event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+        responseMessages: [
+          {
+            content: [
+              { input: {}, toolCallId: "shot-1", toolName: "screenshot", type: "tool-call" },
+            ],
+            role: "assistant",
+          },
+        ],
+        session: createTestSession(),
+        tasks: [
+          {
+            callId: "shot-1",
+            entry: { entryPoint: "execute" },
+            input: {},
+            kind: "workflow-task",
+            toolName: "screenshot",
+            workflowId: "workflow//./agent/tools/screenshot//execute",
+          },
+        ],
+      });
+      const sandbox = mockSandbox({ id: "sbx_workflow_media" });
+      const ctx = new ContextContainer();
+      ctx.set(SandboxKey, sandbox.access);
+
+      const result = await contextStorage.run(ctx, () =>
+        createToolLoopHarness(createTestConfig(undefined, { tools }))(parked, {
+          runtimeActionResults: [
+            {
+              callId: "shot-1",
+              kind: "tool-result",
+              output: { png: base64 },
+              toolName: "screenshot",
+            },
+          ],
+        }),
+      );
+
+      expect(sandbox.writes).toHaveLength(1);
+      expect(JSON.stringify(result.session.history)).not.toContain(base64);
+      const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as
+        | { generate: ReturnType<typeof vi.fn> }
+        | undefined;
+      const modelCall = agent?.generate.mock.calls[0]?.[0] as { messages: ModelMessage[] };
+      expect(JSON.stringify(modelCall.messages)).toContain(base64);
     });
 
     it("stages non-inlinable FilePart bytes into the sandbox and hands the model a text reference instead of bytes", async () => {

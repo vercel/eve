@@ -16,6 +16,7 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 
 import { createLogger, logError } from "#internal/logging.js";
+import { attachInputText } from "#internal/input-text.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
   InputRequest,
@@ -62,6 +63,7 @@ import {
   type SlackTaskCardState,
   withTaskCards,
 } from "#public/channels/slack/task-card.js";
+import type { SlackThreadStatus } from "#public/channels/slack/thread-status.js";
 import {
   parseMessageEvent,
   type SlackEvent,
@@ -237,12 +239,10 @@ export interface SlackChannelState {
    */
   pendingToolCallMessage?: string | null;
   /**
-   * Last reasoning-derived typing indicator sent by the default
-   * `reasoning.appended` handler. Used to surface substantial progressive
-   * extensions immediately while throttling smaller streamed deltas.
+   * The thread status the default renderer last set. A later model step shows
+   * it again, as does a new task card, which Slack clears the status for.
    */
-  lastReasoningTypingAtMs?: number | null;
-  lastReasoningTypingStatus?: string | null;
+  threadStatus?: SlackThreadStatus | null;
   /**
    * Connection name to Slack message ts. Each entry is the public
    * link-free status post created by the default
@@ -258,11 +258,14 @@ export interface SlackChannelState {
    */
   taskCards?: Record<string, SlackTaskCardState> | null;
   /**
-   * The turn with a task that settled since its last model step. The default
-   * `step.started` handler shows `Reviewing results...` for the step that reads
-   * the results.
+   * Tasks that settled since the turn's last model step: each named agent, or
+   * `null` for another task. The default `step.started` handler shows
+   * `Reviewing results...` for the step that reads them.
    */
-  pendingTaskResultsTurnId?: string | null;
+  pendingTaskResults?: {
+    readonly names: readonly (string | null)[];
+    readonly turnId: string;
+  } | null;
   /**
    * Principal id to Slack user id, recorded as each message or input response
    * is delivered. Default handlers use it to address the principal named on
@@ -869,8 +872,6 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       triggeringUserId: null,
       triggeringMessageTs: null,
       pendingToolCallMessage: null,
-      lastReasoningTypingAtMs: null,
-      lastReasoningTypingStatus: null,
       pendingAuthMessageTs: {},
       pendingApprovalCards: {},
       slackUsersByPrincipal: {},
@@ -1115,6 +1116,10 @@ async function handleEventPost(input: {
         kind,
         message,
         received: input.received,
+        // A typed reply would bypass a custom `onInputResponse` and could answer
+        // a request `approvalChannel` sent privately, so either one disables it.
+        resolvesTypedInput:
+          config.onInputResponse === undefined && config.approvalChannel === undefined,
         threadContext: config.threadContext,
         uploadPolicy: input.uploadPolicy,
       });
@@ -1205,6 +1210,7 @@ async function dispatchSlackMessage(input: {
   readonly kind: "app_mention" | "channel_message" | "direct_message";
   readonly message: SlackMessage;
   readonly received: SlackRenderChain["received"];
+  readonly resolvesTypedInput: boolean;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
   readonly uploadPolicy: UploadPolicy;
 }): Promise<void> {
@@ -1300,6 +1306,7 @@ async function dispatchSlackMessage(input: {
     isPrivateConversation,
     isMentioned: isBotMentioned,
     message: input.message,
+    resolvesTypedInput: input.resolvesTypedInput,
     result,
     sessionOperations,
     thread,
@@ -1424,6 +1431,7 @@ async function deliverSlackMessage(input: {
   readonly isMentioned: boolean;
   readonly kind: string;
   readonly message: SlackMessage;
+  readonly resolvesTypedInput: boolean;
   readonly result: Exclude<SlackInboundResult, null>;
   readonly thread: SlackThread;
   readonly threadContext: LoadThreadContextMessagesOptions | undefined;
@@ -1463,15 +1471,25 @@ async function deliverSlackMessage(input: {
     const title = input.isPrivateConversation
       ? PRIVATE_SLACK_RUN_TITLE
       : (input.result.title ?? message.markdown);
-    const sendOptions: SlackSendOptions =
+    const sendOptions: SlackSendOptions = attachInputText(
       channelContext.length === 0
         ? { auth: input.result.auth, title }
-        : { auth: input.result.auth, context: channelContext, title };
+        : { auth: input.result.auth, context: channelContext, title },
+      // The envelope stays model-visible; pending input matches what the person typed.
+      input.resolvesTypedInput && fileParts.length === 0
+        ? slackTypedText(message.text, input.botUserId)
+        : undefined,
+    );
 
     await input.sessionOperations.send(turnMessage, sendOptions);
   } catch (error) {
     logError(log, `${input.kind} delivery failed`, error, { channelId: message.channelId });
   }
+}
+
+function slackTypedText(text: string, botUserId: string | undefined): string {
+  if (botUserId === undefined) return text;
+  return text.replace(new RegExp(`<@${botUserId}(?:\\|[^>]*)?>`, "gu"), "").trim();
 }
 
 /**

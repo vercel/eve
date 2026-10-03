@@ -75,7 +75,9 @@ import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { InputRequest } from "#shared/input.js";
 import {
   hydrateSandboxAttachments,
+  moveToolResultFilesToUserMessages,
   stageAttachmentsToSandbox,
+  stageToolResultMedia,
 } from "#harness/attachment-staging.js";
 import {
   compactMessages,
@@ -177,6 +179,7 @@ import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
   createMessageCompletedEvent,
+  createStepCompletedEvent,
   createStepStartedEvent,
 } from "#protocol/message.js";
 import {
@@ -650,12 +653,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? consumeDeferredStepInput({ input, session })
         : { input, session };
     session = stepInput.session;
-    const resolvedCoordination = await resolvePendingCoordination({
+    const coordination = await resolvePendingCoordination({
       emit,
       session,
       stepInput: stepInput.input,
       tools: config.tools,
     });
+    // Workflow tool results join history here, so their files leave as refs too.
+    const resolvedCoordination =
+      coordination.outcome === "resolved"
+        ? { ...coordination, messages: await stageToolResultMedia(coordination.messages) }
+        : coordination;
     if (resolvedCoordination.outcome === "unresolved") {
       return { next: null, session: resolvedCoordination.session };
     }
@@ -1255,7 +1263,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     };
     let currentMessages = createRequestMessages();
     let interruptedUsage: TokenUsageDelta | undefined;
-    const finishSteeredStep = (): StepResult => {
+    const finishSteeredStep = async (): Promise<StepResult> => {
       throwIfTurnAborted(config.abortSignal);
       ctx?.set(HistoryStateKey, currentMessages.historyState);
       if (interruptedUsage !== undefined) {
@@ -1268,6 +1276,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           }),
         );
       }
+      // The superseded step already published `step.started`. `emit` refuses
+      // events once generation is interrupted, so close the step directly.
+      await instrumentedEmit?.(
+        createStepCompletedEvent({
+          finishReason: "other",
+          sequence: emissionState.sequence,
+          stepIndex: emissionState.stepIndex,
+          turnId: emissionState.turnId,
+          usage: interruptedUsage,
+        }),
+      );
       return {
         steered: true,
         next: runStep,
@@ -1525,6 +1544,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       );
       generation.begin();
       modelMessages = await hydrateSandboxAttachments(currentMessages.nonSystemMessages);
+      if (sendsToolResultFilesAsText(model)) {
+        modelMessages = moveToolResultFilesToUserMessages(modelMessages);
+      }
       const { instructions, telemetryRuntimeContext = {} } = prepareModelCallInput(
         opts.extraSystemNote,
       );
@@ -1637,13 +1659,28 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           ) {
             throw new EmptyModelResponseError();
           }
-          await emitStepActions(emit, emissionState, stepResult, {
-            emittedActionCallIds,
-            excludedActionCallIds: invalidInputToolCallIds,
-            excludedActionToolNames,
-            handledInlineToolResultCallIds,
-            tools: presentationTools,
-          });
+          const skippedToolResults = answerSkippedToolCalls(stepResult, effectiveTools);
+          // Settle skipped calls with the step's other results, before step.completed.
+          await emitStepActions(
+            emit,
+            emissionState,
+            skippedToolResults.length === 0
+              ? stepResult
+              : withAccumulatedResponseMessages({
+                  responseMessages: appendMissingToolResultMessages({
+                    append: skippedToolResults,
+                    responseMessages: stepResult.response.messages,
+                  }),
+                  stepResult,
+                }),
+            {
+              emittedActionCallIds,
+              excludedActionCallIds: invalidInputToolCallIds,
+              excludedActionToolNames,
+              handledInlineToolResultCallIds,
+              tools: presentationTools,
+            },
+          );
           const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
           const toolResultsByCallId = new Map(
             existingToolResults.map((toolResult) => [toolResult.toolCallId, toolResult]),
@@ -1654,7 +1691,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           return withAccumulatedResponseMessages({
             invalidInputToolCallIds,
             responseMessages: appendMissingToolResultMessages({
-              append: trailingInlineToolResultParts,
+              append: [...trailingInlineToolResultParts, ...skippedToolResults],
               responseMessages: accumulatedResponseMessages,
             }),
             stepResult,
@@ -1680,7 +1717,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           throw new EmptyModelResponseError();
         }
         return withAccumulatedResponseMessages({
-          responseMessages: generateResult.responseMessages,
+          responseMessages: appendMissingToolResultMessages({
+            append: answerSkippedToolCalls(stepResult, effectiveTools),
+            responseMessages: generateResult.responseMessages,
+          }),
           stepResult,
         });
       };
@@ -2281,6 +2321,44 @@ function getInvalidToolCallInputErrors(input: {
 }
 
 /**
+ * The AI SDK runs tools only when a step finishes with `stop` or `tool-calls`.
+ * A step cut short, such as at the output token limit, leaves the calls it
+ * would have run unanswered, and the next model call rejects that history.
+ * Answer each with an error so the model can call the tool again. Calls the
+ * SDK never runs (deferred tools, `final_output`) keep their usual handling.
+ */
+function answerSkippedToolCalls(step: HarnessStepResult, tools: ToolSet): ToolResultPart[] {
+  const { finishReason } = step;
+  if (finishReason === "stop" || finishReason === "tool-calls") return [];
+
+  const answeredCallIds = extractToolResultCallIds(step.response.messages);
+  const pendingApprovalCallIds = new Set(
+    (step.content ?? []).flatMap((part) =>
+      part.type === "tool-approval-request" && part.isAutomatic !== true
+        ? [part.toolCall.toolCallId]
+        : [],
+    ),
+  );
+  const value = `The tool did not run because the model response ended early (finish reason: ${finishReason}). Call the tool again if you still need its result.`;
+  return ((step.toolCalls ?? []) as TypedToolCall<ToolSet>[])
+    .filter(
+      (toolCall) =>
+        tools[toolCall.toolName]?.execute !== undefined &&
+        toolCall.providerExecuted !== true &&
+        !isInvalidToolCall(toolCall) &&
+        getInvalidToolCallInputError({ toolCall }) === undefined &&
+        !answeredCallIds.has(toolCall.toolCallId) &&
+        !pendingApprovalCallIds.has(toolCall.toolCallId),
+    )
+    .map((toolCall) => ({
+      output: { type: "error-text", value },
+      toolCallId: toolCall.toolCallId,
+      toolName: toolCall.toolName,
+      type: "tool-result",
+    }));
+}
+
+/**
  * CallIds answered anywhere in the response messages. Scans every message
  * role: provider-executed tool results arrive inline in the *assistant*
  * message (the SDK only moves them to a `tool` message during provider
@@ -2546,7 +2624,7 @@ async function handleStepResult(input: {
     messages: rawResponseMessages,
     providerExecutedOutcomeIds,
   });
-  const responseMessages = normalizedProviderHistory.messages;
+  const responseMessages = await stageToolResultMedia(normalizedProviderHistory.messages);
 
   const baseSession = setRequestEnvelopeTokens(
     {
@@ -3070,6 +3148,15 @@ async function finishTurn(input: {
   }
   const settledTurn = { output: structured } satisfies SettledTurn;
   return { next: null, session, settledTurn };
+}
+
+/** Chat Completions models receive `content` tool outputs as JSON text. */
+function sendsToolResultFilesAsText(model: LanguageModel): boolean {
+  return (
+    typeof model !== "string" &&
+    typeof model.provider === "string" &&
+    model.provider.endsWith(".chat")
+  );
 }
 
 function createNextCompactionConfig(

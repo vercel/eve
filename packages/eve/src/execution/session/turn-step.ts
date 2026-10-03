@@ -49,7 +49,7 @@ import {
   type UserModelMessage,
 } from "#harness/messages.js";
 import { consumeDeferredStepInput } from "#harness/pending-input-batches.js";
-import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
+import type { HandleEventFn, HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import type {
   DurableStepResult,
   TurnStepInput,
@@ -80,6 +80,7 @@ import {
 } from "#execution/durable-session-store.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
+import { bindTurnCallerContext } from "#subagents/parent-notification.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession, refreshSessionFromTurnAgent } from "#execution/session.js";
@@ -105,7 +106,12 @@ export type { TurnStepInput };
 /** Runs a bounded batch of harness model steps inside one durable `"use step"` boundary. */
 export async function turnStep(input: TurnStepInput): Promise<TurnStepResult> {
   "use step";
-  return await withSessionStateDelta(input, runSessionStep);
+  return await withSessionStateDelta(input, (state) =>
+    runSessionStep({
+      ...state,
+      serializedContext: bindTurnCallerContext(state.caller, state.serializedContext),
+    }),
+  );
 }
 
 async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> {
@@ -256,7 +262,8 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
   try {
     const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
     const effectiveNode = { ...bundle.graph.root, turnAgent: effectiveAgent.turnAgent };
-    const handleEvent = createTurnEventHandler({
+    let compacted = false;
+    const emitTurnEvent = createTurnEventHandler({
       abortSignal,
       bundle,
       canCancelTurn: input.input?.control === undefined,
@@ -268,6 +275,10 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
       instrumentation,
       publisher,
     });
+    const handleEvent: HandleEventFn = async (event, messages) => {
+      if (event.type === "compaction.completed") compacted = true;
+      await emitTurnEvent(event, messages);
+    };
     const previousAdapterState =
       delivery !== undefined && !isHarnessBetweenTurns(initialSession)
         ? structuredClone(adapterCtx.state)
@@ -565,7 +576,7 @@ async function runSessionStep(input: TurnStepInput): Promise<DurableStepResult> 
 
     const durableResult = resolveSessionStepResult(stepResult, nextSerializedContext);
     if (durableResult.action === "done") await publisher.writer.close();
-    return durableResult;
+    return compacted ? { ...durableResult, compacted: true } : durableResult;
   } finally {
     publisher.writer.release();
   }

@@ -23,6 +23,7 @@ import {
   agentTaskLabel,
   presentPreparingTool,
   presentTool,
+  toolDisplayTitle,
   type ToolPresentationContext,
 } from "./tool-presentation.js";
 
@@ -32,9 +33,16 @@ export type ToolState = {
   readonly errorText?: string;
 };
 
-/** A task whose start line is written, named once and never renamed. */
+/**
+ * A task whose start line is written, named once and never renamed. Calls that reach the task
+ * while it works join this record rather than reading as tasks of their own.
+ */
 export interface TaskRecord {
+  /** The call that started this stretch of the task. */
   readonly callId: string;
+  readonly taskId: string;
+  /** Every call this record answers, the starting call first. */
+  readonly callIds: string[];
   readonly kind: "agent" | "tool";
   readonly name: string;
   readonly toolName: string;
@@ -80,17 +88,6 @@ export function taskNeedsApproval(
   );
 }
 
-export function uniqueTaskName(baseName: string, records: Iterable<TaskRecord>): string {
-  const taken = new Set(
-    [...records].filter((record) => !record.ended).map((record) => record.name),
-  );
-  if (!taken.has(baseName)) return baseName;
-  for (let ordinal = 2; ; ordinal += 1) {
-    const candidate = `${baseName}:${ordinal}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
-
 export function startLine(record: TaskRecord): Block {
   const presentation = presentTool(record.toolName, record.input, {
     ...labelContext(record.label),
@@ -105,26 +102,54 @@ export function startLine(record: TaskRecord): Block {
   };
 }
 
+/** A later call that reached a working task: a message to it, not a new delegation. */
+export function followUpLine(
+  record: TaskRecord,
+  part: EveDynamicToolPart,
+  label: string | undefined,
+): Block {
+  if (record.kind === "agent") {
+    return {
+      kind: "task",
+      taskKind: "agent",
+      title: `Message ${agentTaskLabel(record.name)}`,
+      subtitle: agentTaskSummary(part.input),
+      live: false,
+    };
+  }
+  const presentation = presentTool(part.toolName, part.input, labelContext(label));
+  return {
+    kind: "task",
+    taskKind: "tool",
+    title: stripTerminalControls(presentation.title),
+    subtitle: stripTerminalControls(presentation.subtitle),
+    live: false,
+  };
+}
+
 export function nestedTaskRecord(
   callId: string,
   part: EveDynamicToolPart,
   task: ConversationTask,
   block: Block,
 ): TaskRecord {
+  const name =
+    task.kind === "agent"
+      ? agentDisplayName(stripTerminalControls(part.toolName))
+      : stripTerminalControls(toolDisplayTitle(part.toolName));
   return {
     callId,
+    taskId: task.taskId,
+    callIds: [part.toolCallId],
     kind: task.kind,
-    name:
-      task.kind === "agent"
-        ? agentDisplayName(stripTerminalControls(part.toolName))
-        : stripTerminalControls(part.toolName),
+    name,
     toolName: part.toolName,
     input: part.input,
     label: undefined,
     purpose:
       task.kind === "agent"
         ? agentTaskSummary(part.input)
-        : block.subtitle || (block.title === part.toolName ? undefined : block.title),
+        : block.subtitle || (block.title === name ? undefined : block.title),
     startedAtMs: Date.now(),
     ended: false,
   };

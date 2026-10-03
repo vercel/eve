@@ -33,6 +33,7 @@ import {
   expectHookClaims,
   expectSingleTurn,
   listCallerStepNames,
+  listConditionalStepNames,
   withTimeout,
 } from "#internal/testing/entry-test-helpers.js";
 import { captureConsoleOutput, workflowSdkNotice } from "#internal/testing/log-records.js";
@@ -270,6 +271,8 @@ describe("workflowEntry integration", () => {
         await expect(run.returnValue).resolves.toEqual({ output: "" });
         completed = true;
         expect(await listCallerStepNames(run.runId)).toEqual([]);
+        // Two ordinary turns and a reset have no runs, tasks, or caller to act on.
+        expect(await listConditionalStepNames(run.runId)).toEqual([]);
       } finally {
         stream.dispose();
         if (!completed) await run.cancel();
@@ -577,8 +580,6 @@ describe("workflowEntry integration", () => {
           ],
         });
         expect(await listCallerStepNames(child.runId)).toEqual([
-          "bindTurnCallerContextStep",
-          "bindTurnCallerContextStep",
           "notifyTurnCallerStep",
           "notifyTurnCallerStep",
           "resolveInitialTurnCallerStep",

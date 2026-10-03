@@ -1,6 +1,7 @@
 import { sleep } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload, SessionCapabilities, TurnCaller } from "#channel/types.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { SessionInputQueue } from "#execution/session/input-queue.js";
@@ -39,6 +40,7 @@ import { turnStep } from "#execution/session/turn-step.js";
 import { ActiveTurn } from "#execution/session/active-turn.js";
 import {
   findBlockingWorkflowToolRun,
+  getBlockingWorkflowToolRuns,
   isInboxToolResultFromRecordedWorkflowToolRun,
 } from "#harness/workflow-tool-runs.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
@@ -86,8 +88,8 @@ export class SessionExecution {
     delivery: TurnStepPayload | undefined,
     options: {
       /**
-       * The delegated caller the turn answers. The session binds it before the
-       * turn, including for a first turn whose input carries no caller.
+       * The delegated caller the turn answers, including for a first turn whose
+       * input carries no caller. The turn's first step binds it into the context.
        */
       readonly caller?: TurnCaller;
     } = {},
@@ -106,7 +108,11 @@ export class SessionExecution {
       if (outcome.kind === "park" && outcome.settled !== undefined) {
         await cancelWorkingTasks(this.input.cursor, "turn_ended");
       }
-      return turn.caller === undefined ? outcome : { ...outcome, caller: turn.caller };
+      return {
+        ...outcome,
+        ...(turn.caller !== undefined && { caller: turn.caller }),
+        ...(turn.compacted && { compacted: true }),
+      };
     } finally {
       turn.dispose();
     }
@@ -138,17 +144,25 @@ export class SessionExecution {
     delivery: TurnStepPayload | undefined,
   ): Promise<TurnOutcome> {
     let nextStepInput: TurnStepPayload | undefined = delivery;
+    // Only the first step binds the caller. A caller that steers in mid-turn is
+    // replied to at its own address (`TurnOutcome.caller`) and is bound by the
+    // next turn, so this turn's forwarding keeps its original caller.
+    let bindCaller = turn.caller;
 
     while (true) {
       const { cursor } = this.input;
+      const caller = bindCaller;
+      bindCaller = undefined;
       const result = await cursor.advanceWithHistory((state) =>
         turnStep({
           ...state,
           abortSignal: turn.signal,
+          caller,
           input: nextStepInput,
           steeringSignal: turn.steeringSignal,
         }),
       );
+      if (result.compacted === true) turn.compacted = true;
       const pendingCallIds =
         result.action === "park" ? result.pendingCoordinationCallIds : undefined;
       const turnCompleted = result.action === "park" && result.settled !== undefined;
@@ -194,20 +208,12 @@ export class SessionExecution {
       }
 
       if (pendingCallIds !== undefined && result.action === "park") {
-        const dispatchResult = await cursor.advance((state) =>
-          dispatchCoordinationStep({
-            action: result.action,
-            workflowToolRunOwner: {
-              inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
-            },
-            ...state,
-          }),
-        );
-        const initialAcceptedAtMs = dispatchResult.results.length === 0 ? undefined : Date.now();
+        const dispatchResults = result.hasRunsToDispatch === false ? [] : await this.dispatchRuns();
+        const initialAcceptedAtMs = dispatchResults.length === 0 ? undefined : Date.now();
 
         const runtimeResults = await this.waitForRuntimeActionResults({
           initialAcceptedAtMs,
-          initialResults: dispatchResult.results,
+          initialResults: dispatchResults,
           taskToolCalls: result.pendingTaskToolCalls ?? [],
           pendingCallIds,
           turn,
@@ -226,6 +232,24 @@ export class SessionExecution {
     }
   }
 
+  /**
+   * Starts the workflow tool runs a parked step requested, and returns the
+   * results of any that settled at once. Task tool calls need no dispatch: the
+   * session answers them itself.
+   */
+  private async dispatchRuns(): Promise<readonly RuntimeActionResult[]> {
+    const dispatched = await this.input.cursor.advance((state) =>
+      dispatchCoordinationStep({
+        action: "park",
+        workflowToolRunOwner: {
+          inbox: sessionInboxHookToken(sessionCommandHookToken(this.input.sessionId)),
+        },
+        ...state,
+      }),
+    );
+    return dispatched.results;
+  }
+
   async handleWorkflowMessage(
     message: WorkflowToolRunMessage,
   ): Promise<RuntimeActionResult | undefined> {
@@ -239,15 +263,24 @@ export class SessionExecution {
     });
   }
 
+  /**
+   * Stops the work a cancelled turn leaves behind: the workflow tool runs it
+   * waits on and every working task. A turn that waits on no run, the common
+   * case, skips that durable step.
+   */
+  async cancelTurnWork(): Promise<void> {
+    const { cursor } = this.input;
+    if (mayWaitOnWorkflowToolRuns(cursor.sessionState)) {
+      await cancelDescendantTurnsStep({ sessionState: cursor.sessionState });
+    }
+    await cancelWorkingTasks(cursor, "turn_cancelled");
+  }
+
   /** `session.cancel()` stops the turn, the calls it waits on, and every working task. */
   private async finishCancelledTurn(turn: ActiveTurn): Promise<TurnOutcome> {
-    const { cursor } = this.input;
     // A child a run opened before the cancel appears before its task settles as cancelled.
     await this.handleBoundaryMessages(turn.takeBoundaryMessages("agent-started"));
-    await cancelDescendantTurnsStep({
-      sessionState: cursor.sessionState,
-    });
-    await cancelWorkingTasks(cursor, "turn_cancelled");
+    await this.cancelTurnWork();
     return { cancelled: true, kind: "park" };
   }
 
@@ -297,7 +330,7 @@ export class SessionExecution {
     while (true) {
       const callbacks = this.input.queue.takeAuthorizations(attemptIds);
       if (callbacks !== undefined) return { kind: "deliver", payloads: callbacks };
-      const answer = turn.takeInputResponses(requestIds);
+      const answer = await turn.takeInputResponses(requestIds);
       if (answer !== undefined) return answer;
       const steering = await turn.takeSteering({ heldOnPerson: true });
       if (steering !== undefined) return steering;
@@ -465,4 +498,13 @@ function startTaskWait(call: Extract<TaskToolCall, { readonly kind: "task_wait" 
   const { callId, timeoutMs } = call;
   const timer = timeoutMs === undefined ? undefined : sleep(timeoutMs).then(() => callId);
   return { callId, startedAtMs: Date.now(), timedOut: false, timer };
+}
+
+/** An unreadable run registry counts as waiting, so the step runs and logs it. */
+function mayWaitOnWorkflowToolRuns(sessionState: DurableSessionState): boolean {
+  try {
+    return getBlockingWorkflowToolRuns(sessionState.snapshot?.session?.state).length > 0;
+  } catch {
+    return true;
+  }
 }

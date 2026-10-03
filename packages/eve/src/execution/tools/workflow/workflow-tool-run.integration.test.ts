@@ -16,6 +16,7 @@ import {
   askThenRaceWorkflow,
   answerWithResponderWorkflow,
   confirmDeployWorkflow,
+  confirmTwoStepsWorkflow,
   deployServiceWorkflow,
   failingDeployWorkflow,
   reportingDeployWorkflow,
@@ -312,6 +313,72 @@ describe("workflow tools", () => {
             status: "answered",
           },
           runStartPrincipal: "alice",
+        });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  it("parks the open turn again when one of two pending ctx.ask questions is answered", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-two-asks",
+      execute: confirmTwoStepsWorkflow,
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "http:workflow-tool-two-asks",
+            requestInput: true,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      const answer = async (requestId: string) =>
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId }] },
+        });
+      const requestIds = (events: readonly MessageStreamEvent[]) =>
+        filterEventsByType(events, "input.requested").flatMap((event) =>
+          event.data.requests.map((request) => request.requestId),
+        );
+      try {
+        const asked: MessageStreamEvent[] = [];
+        await stream.nextUntil((event) => {
+          asked.push(event);
+          return event.type === "turn.waiting" && requestIds(asked).length === 2;
+        });
+        const [first, second] = requestIds(asked);
+        const parked = filterEventsByType(asked, "turn.waiting").at(-1)!;
+
+        await answer(first!);
+        const answeredFirst = await stream.nextUntil((event) => event.type === "input.resolved");
+        await answer(second!);
+        const answeredSecond = await stream.nextUntil((event) => event.type === "turn.completed");
+
+        // The second question still holds the turn, so the first answer ends
+        // at a new rest point, as a partial answer to two approvals does.
+        const events = [...answeredFirst, ...answeredSecond];
+        const resolvedSecond = events.findIndex(
+          (event) =>
+            event.type === "input.resolved" &&
+            event.data.resolutions.some((resolution) => resolution.requestId === second),
+        );
+        expect(events.slice(0, resolvedSecond).map((event) => event.type)).toEqual([
+          "input.resolved",
+          "turn.waiting",
+        ]);
+        expect(filterEventsByType(events, "turn.waiting")[0]?.data).toMatchObject({
+          on: "input",
+          turnId: parked.data.turnId,
         });
       } finally {
         stream.dispose();

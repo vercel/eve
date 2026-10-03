@@ -96,7 +96,10 @@ function turnStep(
   }
   return runSessionStateStep({ history: [], ...input, input: payload }, runTurnStep);
 }
-import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
+import {
+  mapHeldInputResponsesStep,
+  routeProxiedDeliverStep,
+} from "#execution/proxied-deliver-step.js";
 import { captureLogRecords } from "#internal/testing/log-records.js";
 import { runSessionStateStep } from "#internal/testing/session-state-step.js";
 
@@ -659,6 +662,75 @@ describe("routeProxiedDeliverStep", () => {
         turnPolicy: "queue",
       },
     });
+  });
+});
+
+describe("mapHeldInputResponsesStep", () => {
+  it("keeps the channel mapping of an answer the held turn does not wait on", async () => {
+    // Resolves `button:N` ids against channel state and consumes the mapping,
+    // as Telegram's compact callback buttons do.
+    const buttonAdapter: ChannelAdapter = {
+      kind: "buttons",
+      deliver(payload: DeliverPayload, adapterCtx: ChannelAdapterContext) {
+        const buttons = adapterCtx.state.buttons as Record<string, string>;
+        return {
+          inputResponses: (payload.inputResponses ?? []).flatMap((response) => {
+            const button = response.requestId.slice("button:".length);
+            const requestId = buttons[button];
+            if (requestId === undefined) return [];
+            delete buttons[button];
+            return [{ optionId: "approve", requestId }];
+          }),
+        };
+      },
+    };
+    const bundle = createStubBundle();
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      ...bundle,
+      adapterRegistry: {
+        adaptersByKind: new Map([
+          [threadContextAdapter.kind, threadContextAdapter],
+          [buttonAdapter.kind, buttonAdapter],
+        ]),
+      },
+    } as never);
+    const ctx = await deserializeContext(createSerializedContext());
+    ctx.set(ChannelKey, {
+      ...buttonAdapter,
+      state: { buttons: { "1": "held-request", "2": "child-request" } },
+    });
+
+    const result = await runSessionStateStep(
+      {
+        delivery: {
+          kind: "deliver",
+          payloads: [
+            {
+              inputResponses: [
+                { optionId: "approve", requestId: "button:1" },
+                { optionId: "approve", requestId: "button:2" },
+              ],
+            },
+          ],
+        },
+        requestIds: ["held-request"],
+        serializedContext: serializeContext(ctx),
+        sessionState: createStubSessionState(),
+        sessionWritable: createTestWritable(),
+      },
+      mapHeldInputResponsesStep,
+    );
+
+    expect(result.delivery?.payloads).toEqual([
+      {
+        inputResponses: [
+          { optionId: "approve", requestId: "held-request" },
+          { optionId: "approve", requestId: "button:2" },
+        ],
+      },
+    ]);
+    const next = await deserializeContext(result.serializedContext);
+    expect(next.require(ChannelKey).state).toEqual({ buttons: { "2": "child-request" } });
   });
 });
 

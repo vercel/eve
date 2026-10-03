@@ -268,6 +268,54 @@ describe("generation steering with the real AI SDK", () => {
     expect(JSON.stringify(doStream.mock.calls[1]?.[0].prompt)).not.toContain("Stale");
   });
 
+  it("ends the superseded step with a terminal step event before the next step starts", async () => {
+    const steering = new AbortController();
+    const pending = Promise.withResolvers<void>();
+    const events: UnstampedMessageStreamEvent[] = [];
+    const doStream = vi
+      .fn<MockLanguageModelV3["doStream"]>()
+      .mockImplementationOnce(async () => {
+        pending.resolve();
+        return { stream: new ReadableStream<Part>() };
+      })
+      .mockImplementationOnce(async () => ({
+        stream: new ReadableStream<Part>({
+          start(controller) {
+            finish(controller, "Corrected 2025 report");
+          },
+        }),
+      }));
+    const model = new MockLanguageModelV3({ doStream });
+    const createStep = (signal?: AbortSignal) =>
+      createToolLoopHarness({
+        resolveModel: async () => model,
+        tools: new Map(),
+        steeringSignal: signal,
+        handleEvent: async (event) => {
+          events.push(event);
+        },
+      });
+    const running = createStep(steering.signal)(session(), {
+      message: "Alice is preparing the 2026 report.",
+    });
+    await pending.promise;
+    steering.abort();
+    const interrupted = await running;
+    expect(interrupted.steered).toBe(true);
+    await createStep()(interrupted.session, {
+      message: "Alice corrected the report year to 2025.",
+    });
+    const stepEvents = events
+      .filter((event) => ["step.started", "step.completed", "step.failed"].includes(event.type))
+      .map((event) => `${event.type}:${(event.data as { stepIndex: number }).stepIndex}`);
+    expect(stepEvents).toEqual([
+      "step.started:0",
+      expect.stringMatching(/^step\.(completed|failed):0$/),
+      "step.started:1",
+      "step.completed:1",
+    ]);
+  });
+
   it("finishes a local tool once and preserves its result for the corrected model call", async () => {
     const steering = new AbortController();
     const executing = Promise.withResolvers<void>();

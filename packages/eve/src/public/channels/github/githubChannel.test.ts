@@ -932,57 +932,6 @@ describe("githubChannel", () => {
     );
   });
 
-  it("posts input requests through the issue comments API", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 77 })));
-    const adapter = withState(
-      getAdapter(
-        githubChannel({
-          api: { apiBaseUrl: "https://github.test", fetch: fetchMock },
-          botName: "testbot",
-          credentials: {
-            installationToken: "ghs_test",
-            webhookSecret: SECRET,
-          },
-        }),
-      ),
-      {
-        conversationKind: "issue",
-        installationId: 55,
-        issueNumber: 5,
-        owner: "vercel",
-        repo: "eve",
-        repositoryId: 123,
-      },
-    );
-    const ctx = buildAdapterContext(adapter, stubAccessor());
-
-    await callEvent(
-      adapter,
-      makeEvent("input.requested", {
-        requests: [
-          {
-            action: { callId: "call_1", input: {}, kind: "tool-call", toolName: "deploy" },
-            options: [
-              { id: "approve", label: "Yes" },
-              { id: "deny", label: "No" },
-            ],
-            prompt: "Approve this change?",
-            requestId: "call_1",
-          },
-        ],
-        sequence: 0,
-        stepIndex: 0,
-        turnId: "t1",
-      }),
-      ctx,
-    );
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
-      body: "Approve this change?\n\n1. Yes\n2. No\n\nAnswer by mentioning me in a reply, e.g. `@testbot Yes`.",
-    });
-  });
-
   it("renders the mention instruction from a lazy botName resolver", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 79 })));
     const adapter = withState(

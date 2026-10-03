@@ -307,9 +307,11 @@ export default defineTool({
 
 The `toolOutput.text` and `toolOutput.json` builders construct the other two output shapes; hand-written literals remain valid everywhere.
 
-File payloads must be base64 strings — raw bytes (`Uint8Array`, `Buffer`) are rejected because they do not survive eve's durable JSON boundary. Keep payloads small: a content-part image is persisted in session history and re-sent on every subsequent model call, and eve warns above 3 MiB. Sending image parts to a model without vision support fails with that provider's error, the same as image parts in user messages.
+File payloads must be base64 strings — raw bytes (`Uint8Array`, `Buffer`) are rejected because they do not survive eve's durable JSON boundary. eve warns above 3 MiB. Sending image parts to a model without vision support fails with that provider's error, the same as image parts in user messages.
 
-When older turns are compacted, file payloads are dropped from the summary and replaced with a text stub naming the file and media type — the model cannot re-see a compacted image. Content parts are for "look at this now"; if the agent may need an artifact again later, write it to the [sandbox](/docs/sandbox) and return its path.
+eve writes each returned file to the session sandbox and keeps only a reference in session history, so the file's bytes are not stored again on every workflow step. Every later model call sends the same file, which keeps it visible on later turns and keeps the provider's prompt cache valid. See [Inbound attachments](/docs/sandbox#inbound-attachments). Compaction counts an image at roughly what providers bill for it rather than its base64 length.
+
+When compaction drops older tool results, each file becomes a text reference such as `Attached file /workspace/.eve/attachments/<hash>/chart.png (image/png)`. The built-in `read_file` tool shows PNG, JPEG, GIF, and WebP files up to 3 MiB to the model as images, so the agent can open a compacted image again.
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before returning them.
 

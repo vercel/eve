@@ -1,6 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { estimateTokens } from "#harness/token-estimate.js";
+import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 
 export const COMPACTION_CHECKPOINT_MARKER = "Summary of our conversation so far:";
 
@@ -78,7 +79,7 @@ export function createCompactionPrompt(input: {
  * Re-renders the oldest entries with degraded (capped) conversational text
  * until the estimated prompt fits the budget. Mutates `entries` in place.
  * Savings are tracked per entry instead of re-estimating the whole prompt per
- * iteration; the char-length delta divided by 4 matches the
+ * iteration; the UTF-8 byte delta divided by 4 matches the
  * {@link estimateTokens} ruler closely enough for a soft budget.
  */
 function degradeOversizedTranscript(
@@ -112,7 +113,7 @@ function degradeOversizedTranscript(
       continue;
     }
 
-    excessTokens -= (entry.content.length - degraded.length) / 4;
+    excessTokens -= (Buffer.byteLength(entry.content) - Buffer.byteLength(degraded)) / 4;
     entries[index] = { content: degraded, role: entry.role };
   }
 }
@@ -245,14 +246,13 @@ export function stubContentOutputFileParts(output: unknown): unknown {
     if (part === null || typeof part !== "object") return part;
     const candidate = part as {
       readonly type?: unknown;
-      readonly filename?: unknown;
       readonly mediaType?: unknown;
     };
     if (candidate.type !== "file" && candidate.type !== "media") return part;
     changed = true;
     return {
       text: renderAttachedFileStub(
-        typeof candidate.filename === "string" ? candidate.filename : undefined,
+        contentFileName(part),
         typeof candidate.mediaType === "string" ? candidate.mediaType : "unknown",
       ),
       type: "text",
@@ -276,11 +276,24 @@ function renderContentToolOutputPart(part: unknown, limit: number): string {
   // an inline payload the summarizer cannot read.
   if (candidate.type === "file" || candidate.type === "media") {
     return renderAttachedFileStub(
-      typeof candidate.filename === "string" ? candidate.filename : undefined,
+      contentFileName(part),
       typeof candidate.mediaType === "string" ? candidate.mediaType : "unknown",
     );
   }
   return renderPayload(part, limit);
+}
+
+/**
+ * Names a content file part in its stub. A staged file names its sandbox
+ * path, so the agent can open it again after compaction drops the bytes.
+ */
+function contentFileName(part: object): string | undefined {
+  const { data, filename } = part as { readonly data?: unknown; readonly filename?: unknown };
+  const tagged = data as { readonly type?: unknown; readonly url?: unknown } | undefined;
+  if (tagged?.type === "url" && isSandboxRefUrl(tagged.url)) {
+    return decodeSandboxRef(tagged.url).path;
+  }
+  return typeof filename === "string" ? filename : undefined;
 }
 
 function renderToolCall(part: { toolName: string; input?: unknown }, limit: number): string {

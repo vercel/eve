@@ -6,7 +6,10 @@ import { extensionOverridePaths } from "#compiler/extension-mount-bindings.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
-import { createExtensionMountPlugin } from "#internal/bundler/extension-mount-plugin.js";
+import {
+  createExtensionMountPlugin,
+  EXTENSION_CHUNK_DIRECTORY,
+} from "#internal/bundler/extension-mount-plugin.js";
 import { authoredModuleConditions } from "#internal/authored-module-conditions.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
 import { createAuthoredModuleEvaluationError } from "#internal/authored-module-evaluation-error.js";
@@ -270,7 +273,7 @@ export async function bundleExtensionDistributionGraph(input: {
       tsconfig: resolveAuthoredTsConfigPath(input.packageRoot),
       write: false,
       output: {
-        chunkFileNames: "_chunks/[name]-[hash].mjs",
+        chunkFileNames: `${EXTENSION_CHUNK_DIRECTORY}/[name]-[hash].mjs`,
         codeSplitting: true,
         comments: false,
         entryFileNames: "[name].mjs",

@@ -822,7 +822,7 @@ describe("defaultEvents turn.completed", () => {
     await defaultEvents["turn.started"]!(turn, channel, sessionCtx);
     await defaultEvents["turn.completed"]!({ ...turn, sequence: 1 }, channel, sessionCtx);
 
-    expect(startTyping.mock.calls).toEqual([["Working..."], []]);
+    expect(startTyping.mock.calls).toEqual([["Thinking..."], []]);
     expect(post).not.toHaveBeenCalled();
   });
 });

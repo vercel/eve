@@ -19,12 +19,12 @@ import type { Block } from "./blocks.js";
 import type { AgentTUIConversationView, AgentTUIFailure, ToolLabels } from "./conversation-view.js";
 import { FileContentCache } from "./file-content-cache.js";
 import { signInLabel, waitingLabel, type TaskEntry } from "./task-activity.js";
+import { TaskRecords } from "./task-records.js";
 import { isTerminalToolCallPart } from "./terminal-tool-part.js";
 import {
   agentDisplayName,
   agentTaskLabel,
   isPanelRoutedTool,
-  presentTool,
   readWriteFileInput,
   toolBaseName,
   type ToolPresentationContext,
@@ -32,17 +32,15 @@ import {
 import {
   activeToolSteps,
   taskNeedsApproval,
-  uniqueTaskName,
   type AgentActivity,
-  agentTaskSummary,
   authorizationTerminalMessage,
   childToolCallIds,
   endLine,
   firstLine,
+  followUpLine,
   formatAuthorization,
   isActive,
   isToolCallRow,
-  labelContext,
   nestedTaskRecord,
   startLine,
   subagentSteps,
@@ -102,7 +100,7 @@ export class ConversationTranscript {
   readonly #aliases = new Map<string, string>();
   #optimistic = new Map<string, string>();
   readonly #confirmed = new Set<string>();
-  readonly #tasks = new Map<string, TaskRecord>();
+  readonly #tasks = new TaskRecords();
   readonly #nestedTasks = new Map<string, TaskRecord>();
   #placed: PlacedBlock[] = [];
   readonly #placedIds = new Set<string>();
@@ -254,7 +252,7 @@ export class ConversationTranscript {
     return placed;
   }
 
-  /** A call became a task: its row is now the task's start line, written once. */
+  /** A call became a task: its row is now the task's start line, or a message to a working one. */
   #taskStartLine(
     part: EveDynamicToolPart,
     task: ConversationTask,
@@ -265,31 +263,13 @@ export class ConversationTranscript {
     const visible =
       task.kind === "agent" ? options.subagents !== "hidden" : options.tools !== "hidden";
     if (!visible) return undefined;
-    const callId = part.toolCallId;
-    const label = labels[callId]?.start;
-    let record = this.#tasks.get(callId);
-    let summary = agentTaskSummary(part.input);
-    let baseName = agentDisplayName(stripTerminalControls(part.toolName));
-    if (task.kind === "tool") {
-      const presentation = presentTool(part.toolName, part.input, labelContext(label));
-      baseName = stripTerminalControls(presentation.title);
-      summary = stripTerminalControls(presentation.subtitle);
-    }
-    if (record === undefined) {
-      record = {
-        callId,
-        kind: task.kind,
-        name: uniqueTaskName(baseName, this.#tasks.values()),
-        toolName: part.toolName,
-        input: part.input,
-        label,
-        purpose: summary || label,
-        startedAtMs: now,
-        ended: false,
-      };
-      this.#tasks.set(callId, record);
-    }
-    return this.#memoize(`task:${callId}:start`, [record], () => startLine(record));
+    const label = labels[part.toolCallId]?.start;
+    const record = this.#tasks.record(part, task, label, now);
+    return record.callId === part.toolCallId
+      ? this.#memoize(`task:${record.callId}:start`, [record], () => startLine(record))
+      : this.#memoize(`task:${part.toolCallId}:message`, [record], () =>
+          followUpLine(record, part, label),
+        );
   }
 
   /**
@@ -315,16 +295,21 @@ export class ConversationTranscript {
     const traversal = { remaining: 128 };
     for (const record of this.#tasks.values()) {
       if (record.ended) continue;
-      const taskCall = taskCalls.get(record.callId);
-      if (taskCall === undefined) continue;
-      const { task, call } = taskCall;
-      const activity = this.#agentActivity(record, task, call, conversation, options, traversal);
+      const task = taskCalls.get(record.callId)?.task;
+      if (task === undefined) continue;
+      const calls = record.callIds.flatMap((id) => {
+        const call = taskCalls.get(id)?.call;
+        return call === undefined ? [] : [call];
+      });
+      // The last call carries the task's latest outcome; one reply settles every call it answered.
+      const call = calls.at(-1)!;
+      const activity = this.#agentActivity(record, task, calls, conversation, options, traversal);
       if (options.subagents === "full") {
         for (const row of activity.rows) {
           if (!this.#placedIds.has(row.id!)) arrivals.push(row);
         }
       }
-      const settled = call.status !== "working";
+      const settled = calls.every((candidate) => candidate.status !== "working");
       if (settled) record.settledAtMs ??= now;
       const finishing =
         settled &&
@@ -365,11 +350,11 @@ export class ConversationTranscript {
     return arrivals;
   }
 
-  /** What an agent task has done for this call: its tool calls, latest words, and finished rows. */
+  /** What an agent task has done for these calls: its tool calls, latest words, and finished rows. */
   #agentActivity(
     record: TaskRecord,
     task: ConversationTask,
-    call: ConversationTaskCall,
+    calls: readonly ConversationTaskCall[],
     conversation: ConversationState,
     options: TranscriptOptions,
     traversal: { remaining: number },
@@ -382,19 +367,23 @@ export class ConversationTranscript {
         : agent.observation.conversation;
     if (agent === undefined || child === undefined) return { tools: [], rows: [], pending: false };
     const pending =
-      agent.observation.status === "following" && isAgentCallContentPending(task, call, child);
-    const turnIds = new Set(agentCallTurns(task, child).get(call.callId) ?? []);
+      agent.observation.status === "following" &&
+      calls.some((call) => isAgentCallContentPending(task, call, child));
+    const callTurns = agentCallTurns(task, child);
+    const turnIds = new Set(calls.flatMap((call) => callTurns.get(call.callId) ?? []));
     const messages = child.messages.filter(
       (message) =>
         message.role === "assistant" &&
         message.metadata?.turnId !== undefined &&
         turnIds.has(message.metadata.turnId),
     );
-    const running = call.status === "working" || pending;
+    const running = calls.some((call) => call.status === "working") || pending;
     const childTasks = taskCallsById(child);
     const ordered: Array<{ order: number; block: Block; settled: boolean }> = [];
     const tools: Block[] = [];
     const children: TaskEntry[] = [];
+    // A child task's later calls join its first working call's entry.
+    const shownChildTasks = new Set<string>();
     let omittedTasks = 0;
     let omittedAttention = false;
     let order = 0;
@@ -423,6 +412,8 @@ export class ConversationTranscript {
             ? options.subagents !== "hidden"
             : options.tools !== "hidden";
         if (childTask?.call.status === "working" && childVisible) {
+          if (shownChildTasks.has(childTask.task.taskId)) continue;
+          shownChildTasks.add(childTask.task.taskId);
           if (depth >= 8 || traversal.remaining <= 0) {
             omittedTasks += 1;
             omittedAttention ||=
@@ -439,7 +430,7 @@ export class ConversationTranscript {
           const activity = this.#agentActivity(
             nested,
             childTask.task,
-            childTask.call,
+            Object.values(childTask.task.calls).filter((call) => call.status === "working"),
             child,
             options,
             traversal,

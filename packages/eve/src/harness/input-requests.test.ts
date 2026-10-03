@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
+import { attachInputText } from "#internal/input-text.js";
 import { once } from "#tools/approval/policies.js";
 import type { InputRequest } from "#shared/input.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -248,7 +249,13 @@ describe("resolvePendingInput", () => {
     expect(getDeferredStepInput(deferred.session)).toBeUndefined();
   });
 
-  it("resolves approval when follow-up text matches an option", () => {
+  it.each([
+    ["a plain message", { message: "approve" }],
+    [
+      "typed text inside a channel envelope",
+      attachInputText({ message: "<slack_message>\n<content>\napprove\n</content>" }, "approve"),
+    ],
+  ])("resolves approval when follow-up text matches an option: %s", (_, stepInput) => {
     const session = appendPendingInputBatch({
       requests: [
         {
@@ -290,10 +297,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
-      stepInput: { message: "approve" },
-      session,
-    });
+    const result = resolvePendingInput({ stepInput, session });
 
     expect(result.outcome).toBe("resolved");
     expect(result.deferredMessage).toBeUndefined();

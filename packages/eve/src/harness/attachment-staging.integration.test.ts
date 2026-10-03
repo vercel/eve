@@ -151,7 +151,7 @@ describe("stageAttachmentsToSandbox (integration)", () => {
     expect(staged).toHaveLength(2);
     const filePart = staged[1] as FilePart;
     expect(filePart.filename).toMatch(
-      new RegExp(`^${ATTACHMENTS_ROOT}/[0-9a-f]{16}/report\\.csv$`),
+      new RegExp(`^${ATTACHMENTS_ROOT.replaceAll(".", "\\.")}/[0-9a-f]{16}/report\\.csv$`),
     );
     // `data` is replaced with an eve-sandbox: ref — the bytes live in
     // the sandbox and are rehydrated at the model call site. The
@@ -453,7 +453,7 @@ describe("hydrateSandboxAttachments (integration)", () => {
     expect((hydratedFilePart.data as Buffer).equals(smallImageBytes)).toBe(true);
     expect(hydratedFilePart.mediaType).toBe("image/png");
     expect(hydratedFilePart.filename).toMatch(
-      /^\/workspace\/attachments\/[0-9a-f]{16}\/logo\.png$/,
+      /^\/workspace\/\.eve\/attachments\/[0-9a-f]{16}\/logo\.png$/,
     );
   });
 
@@ -731,6 +731,38 @@ describe("hydrateSandboxAttachments (integration)", () => {
         message: "sandbox-ref attachment bytes missing on hydration — degrading to text reference",
       }),
     );
+  });
+
+  it("does not inline a staged attachment that sandbox code overwrote (#4284)", async () => {
+    const sandbox = mockSandbox({ id: "sbx_overwritten" });
+    const runtime = await createTestRuntime();
+
+    const stagedContent = (await runtime.runAsSession({ sandbox }, async () =>
+      stageAttachmentsToSandbox([
+        {
+          data: Buffer.from("original"),
+          filename: "logo.png",
+          mediaType: "image/png",
+          type: "file",
+        },
+      ] as UserContent),
+    )) as UserContent;
+    const stagedPath = (stagedContent[0] as FilePart).filename as string;
+
+    // Same size, different bytes: only the content address can tell them apart.
+    await sandbox.session.writeBinaryFile({ content: Buffer.from("replaced"), path: stagedPath });
+
+    const messages = [{ content: stagedContent, role: "user" as const }];
+    const hydrated = await runtime.runAsSession({ sandbox }, async () =>
+      hydrateSandboxAttachments(messages),
+    );
+
+    expect(hydrated[0]?.content).toEqual([
+      {
+        text: `FileNotFound: Current snapshot may be newer and does not contain ${stagedPath}.`,
+        type: "text",
+      },
+    ]);
   });
 
   it("does not touch the sandbox when every ref is non-inlinable — text references carry all the info", async () => {

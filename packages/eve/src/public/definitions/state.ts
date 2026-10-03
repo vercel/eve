@@ -56,10 +56,12 @@ export function defineMountedState<T>(
   name: string,
   initial: () => T,
 ): StateHandle<T> {
-  return createStateHandle(
-    `eve:mount.v1:${encodeURIComponent(mountId)}:${encodeURIComponent(name)}`,
-    initial,
-  );
+  return createStateHandle(mountedStateKeyName(mountId, name), initial);
+}
+
+/** Durable context key name of one mount's state slot. */
+export function mountedStateKeyName(mountId: string, name: string): string {
+  return `eve:mount.v1:${encodeURIComponent(mountId)}:${encodeURIComponent(name)}`;
 }
 
 function createStateHandle<T>(name: string, initial: () => T): StateHandle<T> {

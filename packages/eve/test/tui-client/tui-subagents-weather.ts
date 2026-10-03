@@ -17,13 +17,13 @@ import { theme } from "./lib/theme.ts";
  * landing under `stepIndex: 0` and collapsing into one box.
  *
  * Pass conditions:
- *   1. A `Delegate subagent(stock-price)` start line exists.
+ *   1. A `Delegate subagent(stock price)` start line exists.
  *   2. The task panel asks for approval of the child's `get_stock_price`
  *      call, and the approval prompt accepts it.
  *   3. NO parent-level `get_stock_price` tool row exists (proves the
  *      parent-tool suppression for child tool calls removes the stale
  *      block, not just blocks future renders).
- *   4. The task ends on a `✓ stock-price` line.
+ *   4. The task ends on a `✓ subagent(stock price)` line.
  *   5. The parent's final assistant reply (a top-level `▲` section)
  *      contains the price.
  */
@@ -70,7 +70,7 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   input.enter();
 
   // The task's start line appears once the parent delegates.
-  await waitForCondition(() => screen.snapshot().includes("Delegate subagent(stock-price)"), {
+  await waitForCondition(() => screen.snapshot().includes("Delegate subagent(stock price)"), {
     timeoutMs: 120_000,
     label: "task start line",
     onTimeout: () => screen.snapshot(),
@@ -80,21 +80,16 @@ run(WEATHER_SMOKE_TARGET, async (target) => {
   // The task panel names the approval the child waits on, and the TUI
   // parks on a y/n prompt. Match the question smoke's handshake delay so
   // the server's resume hook is registered before we reply.
-  await waitForCondition(
-    () =>
-      screen.snapshot().includes("Approve get_stock_price?") ||
-      screen.snapshot().includes("Approve get stock price?"),
-    {
-      timeoutMs: 120_000,
-      label: "approval prompt for get_stock_price",
-      onTimeout: () => screen.snapshot(),
-    },
-  );
+  await waitForCondition(() => screen.snapshot().includes("Approve Get stock price?"), {
+    timeoutMs: 120_000,
+    label: "approval prompt for get_stock_price",
+    onTimeout: () => screen.snapshot(),
+  });
   await sleep(500);
   input.emit("data", Buffer.from("y"));
   console.log(theme.muted("[tui-weather] approved get_stock_price"));
 
-  await waitForCondition(() => screen.snapshot().includes("✓ subagent(stock-price)"), {
+  await waitForCondition(() => screen.snapshot().includes("✓ subagent(stock price)"), {
     timeoutMs: 120_000,
     label: "task end line",
     onTimeout: () => screen.snapshot(),

@@ -78,9 +78,17 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
   rows: number;
   #rawOutput = "";
   #lines: string[] = [];
+  /** Parallel to `#lines`: `d` marks a cell drawn dim (SGR 2), a space any other cell. */
+  #dimCells: string[] = [];
+  #dim = false;
   #cursorLine = 0;
   #cursorColumn = 0;
-  #mainScreen?: { lines: string[]; cursorLine: number; cursorColumn: number };
+  #mainScreen?: {
+    lines: string[];
+    dimCells: string[];
+    cursorLine: number;
+    cursorColumn: number;
+  };
   #waiters: Array<{
     text: string;
     resolve: () => void;
@@ -118,8 +126,21 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     this.emit("resize");
   }
 
-  snapshot() {
-    return this.#lines.join("\n");
+  /**
+   * The visible grid as text. `hideDim` blanks dim cells, leaving what the
+   * screen draws at full weight, such as option labels without descriptions.
+   */
+  snapshot({ hideDim = false }: { readonly hideDim?: boolean } = {}) {
+    if (!hideDim) return this.#lines.join("\n");
+    return this.#lines
+      .map((line, index) => {
+        const dim = this.#dimCells[index] ?? "";
+        // Index by UTF-16 unit: a cell's marks repeat for each unit it occupies.
+        return line.replace(/./gsu, (cell, column: number) =>
+          dim[column] === "d" ? " ".repeat(cell.length) : cell,
+        );
+      })
+      .join("\n");
   }
 
   rawOutput() {
@@ -249,14 +270,17 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
         if (command === "h") {
           this.#mainScreen = {
             lines: this.#lines,
+            dimCells: this.#dimCells,
             cursorLine: this.#cursorLine,
             cursorColumn: this.#cursorColumn,
           };
           this.#lines = [];
+          this.#dimCells = [];
           this.#cursorLine = 0;
           this.#cursorColumn = 0;
         } else if (this.#mainScreen !== undefined) {
           this.#lines = this.#mainScreen.lines;
+          this.#dimCells = this.#mainScreen.dimCells;
           this.#cursorLine = this.#mainScreen.cursorLine;
           this.#cursorColumn = this.#mainScreen.cursorColumn;
           this.#mainScreen = undefined;
@@ -300,6 +324,9 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
       case "K":
         this.#eraseInLine(first(0));
         break;
+      case "m":
+        this.#applySgr(parameters);
+        break;
       default:
         break;
     }
@@ -307,9 +334,32 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     return startIndex + sequence.length;
   }
 
+  /**
+   * Tracks only intensity: 2 starts dim; 0 and 22 end it, as in a real terminal
+   * where bold (1) leaves faint on. Extended colors (38, 48, 58) carry a
+   * `5;n` or `2;r;g;b` payload whose numbers are not SGR codes.
+   */
+  #applySgr(parameters: readonly string[]) {
+    const codes = (parameters.length === 0 ? [""] : parameters).map((parameter) =>
+      parameter === "" ? 0 : Number(parameter),
+    );
+    for (let index = 0; index < codes.length; index += 1) {
+      const code = codes[index];
+      if (code === 38 || code === 48 || code === 58) {
+        const mode = codes[index + 1];
+        index += mode === 5 ? 2 : mode === 2 ? 4 : 1;
+      } else if (code === 2) {
+        this.#dim = true;
+      } else if (code === 0 || code === 22) {
+        this.#dim = false;
+      }
+    }
+  }
+
   #eraseInDisplay(mode: number) {
     if (mode === 2 || mode === 3) {
       this.#lines = [];
+      this.#dimCells = [];
       this.#cursorLine = 0;
       this.#cursorColumn = 0;
       return;
@@ -319,6 +369,7 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
       // Cursor to start of screen.
       for (let line = 0; line < this.#cursorLine; line += 1) {
         this.#lines[line] = "";
+        this.#dimCells[line] = "";
       }
       this.#eraseInLine(1);
       return;
@@ -328,33 +379,31 @@ export class MockScreen extends EventEmitter implements TerminalOutput {
     // and drop every line below it.
     this.#eraseInLine(0);
     this.#lines.length = Math.min(this.#lines.length, this.#cursorLine + 1);
+    this.#dimCells.length = Math.min(this.#dimCells.length, this.#cursorLine + 1);
   }
 
   #eraseInLine(mode: number) {
-    const line = this.#lines[this.#cursorLine] ?? "";
-
-    if (mode === 2) {
-      this.#lines[this.#cursorLine] = "";
-      return;
+    for (const grid of [this.#lines, this.#dimCells]) {
+      const line = grid[this.#cursorLine] ?? "";
+      if (mode === 2) {
+        grid[this.#cursorLine] = "";
+      } else if (mode === 1) {
+        grid[this.#cursorLine] = " ".repeat(this.#cursorColumn) + line.slice(this.#cursorColumn);
+      } else {
+        // mode 0: clear from cursor to end of line.
+        grid[this.#cursorLine] = line.slice(0, this.#cursorColumn);
+      }
     }
-
-    if (mode === 1) {
-      this.#lines[this.#cursorLine] =
-        " ".repeat(this.#cursorColumn) + line.slice(this.#cursorColumn);
-      return;
-    }
-
-    // mode 0: clear from cursor to end of line.
-    this.#lines[this.#cursorLine] = line.slice(0, this.#cursorColumn);
   }
 
   #writeCharacter(character: string) {
-    const line = (this.#lines[this.#cursorLine] ?? "").padEnd(this.#cursorColumn, " ");
-    const nextLine =
-      line.slice(0, this.#cursorColumn) +
-      character +
-      line.slice(this.#cursorColumn + character.length);
-    this.#lines[this.#cursorLine] = nextLine;
+    const write = (grid: string[], cell: string) => {
+      const line = (grid[this.#cursorLine] ?? "").padEnd(this.#cursorColumn, " ");
+      grid[this.#cursorLine] =
+        line.slice(0, this.#cursorColumn) + cell + line.slice(this.#cursorColumn + cell.length);
+    };
+    write(this.#lines, character);
+    write(this.#dimCells, (this.#dim ? "d" : " ").repeat(character.length));
     this.#cursorColumn += character.length;
   }
 }

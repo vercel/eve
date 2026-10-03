@@ -17,6 +17,7 @@ import type { SlackHandle } from "#public/channels/slack/api.js";
 import type { BlockKitBlock } from "#public/channels/slack/blocks.js";
 import { truncateMessageText } from "#public/channels/slack/limits.js";
 import type { SlackTaskCard } from "#public/channels/slack/renderers.js";
+import { restoreStatus } from "#public/channels/slack/thread-status.js";
 import type {
   SlackChannelInternalEvents,
   SlackChannelState,
@@ -406,6 +407,8 @@ async function writeTaskCard(
         ...channel.state.taskCards,
         [turnId]: { fingerprint, ts, turn: current.turn },
       };
+      // Slack clears the thread status when the app posts, but the turn works on.
+      if (ts !== current.ts && view.state === "working") await restoreStatus(channel);
     }
   }
   if (view.state === "finished") forgetTurn(channel.state, turnId);

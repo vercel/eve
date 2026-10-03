@@ -20,6 +20,7 @@ import {
   type StrictInputResponses,
 } from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 
 interface BaseChannelSendOptions {
   readonly auth: SessionAuthContext | null;
@@ -95,12 +96,15 @@ export function createChannelOperations<TState = undefined>(input: {
           // Deliver hooks read per-delivery state (such as the message author)
           // from the payload, as they do for `respond()`.
           return await bound.deliver(
-            {
-              context: options.context,
-              message,
-              outputSchema: options.outputSchema,
-              state: (options as { readonly state?: TState }).state,
-            },
+            attachInputText(
+              {
+                context: options.context,
+                message,
+                outputSchema: options.outputSchema,
+                state: (options as { readonly state?: TState }).state,
+              },
+              readInputText(options),
+            ),
             options,
           );
         },

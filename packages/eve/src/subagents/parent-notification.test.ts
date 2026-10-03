@@ -6,11 +6,10 @@ import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
-  bindTurnCallerContextStep,
+  bindTurnCallerContext,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
-import { runSessionStateStep } from "#internal/testing/session-state-step.js";
 import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
 import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
@@ -344,69 +343,59 @@ describe("turn caller notification", () => {
 });
 
 describe("turn caller binding", () => {
-  it("rebinds local adapter forwarding to a continuation caller", async () => {
-    await expect(
-      runSessionStateStep(
+  it("rebinds local adapter forwarding to a continuation caller", () => {
+    expect(
+      bindTurnCallerContext(
         {
-          caller: {
-            callId: "call-new",
-            replyTo: { kind: "hook", token: "turn-new" },
-            subagentName: "research",
-          },
-          serializedContext: {
-            [ChannelKey.name]: {
-              kind: SUBAGENT_ADAPTER_KIND,
-              state: {
-                callId: "call-old",
-                parentContinuationToken: "turn-old",
-                parentSessionId: "parent",
-                subagentName: "research",
-              },
+          callId: "call-new",
+          replyTo: { kind: "hook", token: "turn-new" },
+          subagentName: "research",
+        },
+        {
+          [ChannelKey.name]: {
+            kind: SUBAGENT_ADAPTER_KIND,
+            state: {
+              callId: "call-old",
+              parentContinuationToken: "turn-old",
+              parentSessionId: "parent",
+              subagentName: "research",
             },
           },
         },
-        bindTurnCallerContextStep,
       ),
-    ).resolves.toEqual({
-      serializedContext: {
-        [ChannelKey.name]: {
-          kind: SUBAGENT_ADAPTER_KIND,
-          state: {
-            callId: "call-new",
-            parentContinuationToken: "turn-new",
-            parentSessionId: "parent",
-            subagentName: "research",
-          },
+    ).toEqual({
+      [ChannelKey.name]: {
+        kind: SUBAGENT_ADAPTER_KIND,
+        state: {
+          callId: "call-new",
+          parentContinuationToken: "turn-new",
+          parentSessionId: "parent",
+          subagentName: "research",
         },
       },
     });
   });
 
-  it("rebinds remote callback forwarding to a continuation caller", async () => {
-    await expect(
-      runSessionStateStep(
+  it("rebinds remote callback forwarding to a continuation caller", () => {
+    expect(
+      bindTurnCallerContext(
         {
-          caller: {
-            callId: "call-new",
-            replyTo: {
-              kind: "callback",
-              token: "turn-new",
-              url: "https://parent.example/eve/v1/callback/turn-new",
-            },
-            subagentName: "research",
-          },
-          serializedContext: {},
-        },
-        bindTurnCallerContextStep,
-      ),
-    ).resolves.toEqual({
-      serializedContext: {
-        [SessionCallbackKey.name]: {
           callId: "call-new",
+          replyTo: {
+            kind: "callback",
+            token: "turn-new",
+            url: "https://parent.example/eve/v1/callback/turn-new",
+          },
           subagentName: "research",
-          token: "turn-new",
-          url: "https://parent.example/eve/v1/callback/turn-new",
         },
+        {},
+      ),
+    ).toEqual({
+      [SessionCallbackKey.name]: {
+        callId: "call-new",
+        subagentName: "research",
+        token: "turn-new",
+        url: "https://parent.example/eve/v1/callback/turn-new",
       },
     });
   });

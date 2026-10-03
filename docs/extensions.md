@@ -210,10 +210,13 @@ Extension state belongs to the logical mount path (for example, `extensions/crm`
 
 ### Upgrade from package-scoped extension state
 
-Deployments before this release stored extension state under package-prefixed keys. eve does not migrate that state to mount-owned keys or reset it during restore.
+Deployments before eve 0.69 stored extension state under package-prefixed keys, such as `acme-crm.requests`. When a session from one of those deployments hands off to a newer deployment, eve moves each package-prefixed value to the mount that uses that package.
 
-- Session handoffs across this upgrade boundary are rejected in both directions, including for agents without extensions. Keep each session's owning deployment available until the session finishes, or start a new session on the deployment you want to use.
-- Local context snapshots use a separate state-layout check. Older snapshots for agents with extensions are incompatible; snapshots for agents without extensions can restore if they contain no unrecognized state keys.
+- The value moves when exactly one mount of that package defines that state name.
+- When no mount of that package defines that state name, for example because the extension removed it or the package was renamed, eve drops the value. The target deployment's runtime logs show a `dropping unknown context key during deserialization` warning with the key.
+- When two or more mounts use the package and define that state name, eve cannot tell which mount owns the value, so the handoff is rejected and the session stays on its current deployment. Keep that deployment available until the session finishes, or start a new session on the deployment you want to use.
+- Older deployments cannot read sessions saved by a newer release, so a session that already moved does not hand back after a rollback.
+- Local context snapshots follow the same rules.
 
 ### Use an extension in a workspace
 
@@ -367,6 +370,7 @@ At build time, eve checks the extension's generated capability metadata. If the 
 ## What to read next
 
 - [Integrations](/integrations): browse ready-to-install extensions using the Extensions filter
+- [Code extension](/docs/code-extension): mount eve-code, the coding extension that ships in `eve`, and see its benchmark results
 - [Tools](/docs/tools): static tools, approval, and tool output
 - [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic connections, tools, skills, and instructions
 - [Instructions](/docs/instructions): static and TypeScript instructions

@@ -1,6 +1,7 @@
 import type { ContextAccessor } from "#context/key.js";
 import type { StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { attachInputText, readInputText } from "#internal/input-text.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
@@ -197,12 +198,15 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
 export function defaultDeliverResult(payload: DeliverPayload): StepInput | undefined {
   if (payload.message !== undefined) {
     return attachClientContext(
-      {
-        inputResponses: payload.inputResponses,
-        message: payload.message,
-        context: payload.context,
-        outputSchema: payload.outputSchema,
-      },
+      attachInputText(
+        {
+          inputResponses: payload.inputResponses,
+          message: payload.message,
+          context: payload.context,
+          outputSchema: payload.outputSchema,
+        },
+        readInputText(payload),
+      ),
       readClientContext(payload),
     );
   }

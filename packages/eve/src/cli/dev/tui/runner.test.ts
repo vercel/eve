@@ -133,8 +133,9 @@ describe("parsePromptCommand", () => {
     });
   });
 
-  it("recognizes /reset, /cancel, /clear, /compact, /exit, and /quit", () => {
-    expect(parsePromptCommand("/reset")).toEqual({ type: "reset" });
+  it("recognizes /new, /reset, /cancel, /clear, /compact, /exit, and /quit", () => {
+    expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+    expect(parsePromptCommand("/reset")).toEqual({ type: "new" });
     expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
     expect(parsePromptCommand("/clear")).toEqual({ type: "clear" });
     expect(parsePromptCommand("/compact")).toEqual({ type: "compact" });
@@ -386,8 +387,9 @@ describe("EveTUIRunner initial input", () => {
 
 describe("parsePromptCommand", () => {
   it.each([
-    ["/reset", { type: "reset" }],
-    ["/new", { type: "clear" }],
+    ["/new", { type: "new" }],
+    ["/reset", { type: "new" }],
+    ["/clear", { type: "clear" }],
     ["/exit", { type: "exit" }],
     ["/quit", { type: "exit" }],
     ["/deploy", { type: "extension", name: "deploy", argument: "" }],
@@ -1428,7 +1430,7 @@ describe("EveTUIRunner session commands", () => {
       renderer: turnTaking(["Hello.", "/compact", "/clear", undefined], { finishCommand }).renderer,
     }).run();
 
-    expect(outcomes).toEqual(["Compaction requested", "dismissed"]);
+    expect(outcomes).toEqual(["Compaction requested", "Session context cleared"]);
     expect(server.requestsTo("POST", "/session_1/compact")).toHaveLength(1);
     expect(server.requestsTo("POST", "/session_1/clear")).toHaveLength(1);
     expect(server.requestsTo("POST", "/session_1")).toHaveLength(0);

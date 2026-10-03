@@ -123,3 +123,47 @@ jobs:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-team-id: ${{ secrets.VERCEL_ORG_ID }}
           vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+
+  docs-snapshot:
+    name: Refresh docs benchmark results
+    needs: [request, benchmark]
+    # The docs report deepswe-lean only, which runs from manual dispatches on main;
+    # only trusted main runs publish to the result store.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      needs.request.outputs.dataset == 'deepswe-lean'
+    concurrency:
+      group: eve-code-docs-snapshot
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download benchmark report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT: ${{ needs.request.outputs.dataset }}-${{ needs.request.outputs.slug }}
+        run: gh run download "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" -n "$ARTIFACT" -D "$RUNNER_TEMP/bench"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # Merge onto the newest main so a concurrent refresh of the other dataset
+      # is never overwritten. createCommitOnBranch commits are signed by GitHub,
+      # which satisfies the signed-commit requirement without a bot signing key.
+      - name: Commit snapshot to main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILE: apps/docs/lib/evals/eve-code-benchmark.json
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" -q .object.sha)
+          gh api "repos/$GITHUB_REPOSITORY/contents/$FILE?ref=$head" -H "Accept: application/vnd.github.raw" > "$FILE"
+          cp "$FILE" "$RUNNER_TEMP/before.json"
+          node .github/scripts/eve-code-docs-snapshot.mjs "$RUNNER_TEMP/bench/report.json" "$FILE"
+          if cmp -s "$FILE" "$RUNNER_TEMP/before.json"; then exit 0; fi
+          HEAD_OID="$head" node .github/scripts/eve-code-docs-snapshot.mjs --commit-payload "$FILE" > "$RUNNER_TEMP/commit.json"
+          gh api graphql --input "$RUNNER_TEMP/commit.json" -q .data.createCommitOnBranch.commit.url

@@ -326,6 +326,12 @@ interface EveEvalSessionDriver {
   readonly sessionId: string;
   /** Request cooperative cancellation of this session's active turn. */
   cancel(): Promise<CancelSessionResult>;
+  /**
+   * Compact this session's history between turns and wait for it to finish.
+   * Returns the compaction events through `session.waiting`; throws when the
+   * session is no longer active.
+   */
+  compact(): Promise<EveEvalTurn>;
   /** Require exactly one pending input request matching `filter`, or abort dependent control flow. */
   requireInputRequest(filter?: EveEvalInputRequestMatchOptions): InputRequest;
   /** Resolve specific pending requests and run the resumed turn. */

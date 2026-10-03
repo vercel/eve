@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import pc from "#compiled/picocolors/index.js";
 
+import { eveCliBanner } from "#cli/banner.js";
+
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { findEveProjectContext } from "#internal/project-context.js";
 import { resolveInitAgentSettings } from "#shared/default-agent-model.js";
@@ -97,6 +99,7 @@ export async function addAgentsToWorkspace(
 ): Promise<boolean> {
   const context = await findEveProjectContext(workspaceRoot);
   if (context?.kind !== "workspace") return false;
+  logger.log(eveCliBanner());
   if (options.channelWebNextjs === true) {
     throw new InitTargetError(
       "workspace_input",

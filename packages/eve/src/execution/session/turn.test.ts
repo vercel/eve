@@ -100,18 +100,7 @@ const routeWork = stepWork<Parameters<typeof routeDeliverToChildren>[0], RoutedD
 
 describe("SessionExecution checkpoints", () => {
   it("retains the durable steering signal across steps until a correction uses it", async () => {
-    const inbox: SessionInbox = {
-      claimedTokens: [],
-      claimSessionHook: vi.fn(),
-      claimSessionHooks: vi.fn(),
-      drain: () => [],
-      hasPending: () => false,
-      whenPending: () => new Promise<void>(() => {}),
-      next: vi.fn(),
-      restore: vi.fn(),
-      onDelivery: () => () => {},
-      onInterrupt: () => () => {},
-    };
+    const inbox = idleInbox();
     let signal: AbortSignal | undefined;
     vi.mocked(turnStep)
       .mockReset()
@@ -137,6 +126,66 @@ describe("SessionExecution checkpoints", () => {
       );
     await createExecution({ inbox, sessionState: state("") }).runTurn(undefined);
     expect(turnStep).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a compaction from an earlier step when the turn settles", async () => {
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "continue",
+          compacted: true,
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+        })),
+      )
+      .mockImplementationOnce(
+        turnStepWork(async (input) => ({
+          action: "park",
+          serializedContext: input.serializedContext,
+          sessionState: input.sessionState,
+          settled: { output: "Alice's plan is ready." },
+        })),
+      );
+    const outcome = await createExecution({
+      inbox: idleInbox(),
+      sessionState: state(""),
+    }).runTurn(undefined);
+    expect(outcome).toMatchObject({ compacted: true, kind: "park" });
+  });
+  it("binds the delegated caller on the turn's first step only", async () => {
+    const inbox: SessionInbox = {
+      claimedTokens: [],
+      claimSessionHook: vi.fn(),
+      claimSessionHooks: vi.fn(),
+      drain: () => [],
+      hasPending: () => false,
+      whenPending: () => new Promise<void>(() => {}),
+      next: vi.fn(),
+      restore: vi.fn(),
+      onDelivery: () => () => {},
+      onInterrupt: () => () => {},
+    };
+    const caller: TurnCaller = {
+      callId: "call-1",
+      replyTo: { kind: "hook", token: "parent" },
+      subagentName: "researcher",
+    };
+    const callers: (TurnCaller | undefined)[] = [];
+    vi.mocked(turnStep)
+      .mockReset()
+      .mockImplementation(
+        turnStepWork(async (input) => {
+          callers.push(input.caller);
+          return {
+            action: callers.length === 1 ? "continue" : "done",
+            serializedContext: input.serializedContext,
+            sessionState: input.sessionState,
+          };
+        }),
+      );
+    await createExecution({ inbox, sessionState: state("") }).runTurn(undefined, { caller });
+    expect(callers).toEqual([caller, undefined]);
   });
   it.each(["cancel", "reset"] as const)(
     "gives %s precedence over generation steering",
@@ -427,7 +476,7 @@ describe("SessionExecution checkpoints", () => {
     },
   );
   it("cancels an admitted workflow action when cancellation already arrived at the step boundary", async () => {
-    const sessionState = state("");
+    const sessionState = stateWithBlockingRun();
     const inbox: SessionInbox = {
       claimedTokens: [],
       claimSessionHook: vi.fn(),
@@ -927,19 +976,15 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementation(
         turnStepWork(async () => ({
           action: "park",
+          hasRunsToDispatch: false,
           pendingCoordinationCallIds: ["wait-call"],
           pendingTaskToolCalls: [{ callId: "wait-call", kind: "task_wait" }],
           serializedContext: {},
           sessionState,
         })),
       );
-    vi.mocked(dispatchCoordinationStep).mockImplementation(
-      dispatchWork(async () => ({
-        results: [],
-        serializedContext: {},
-        sessionState,
-      })),
-    );
+    vi.mocked(dispatchCoordinationStep).mockClear();
+    vi.mocked(cancelDescendantTurnsStep).mockClear();
 
     await expect(
       createExecution({ inbox, sessionState }).runTurn({
@@ -949,6 +994,10 @@ describe("SessionExecution checkpoints", () => {
 
     expect(publishTurnWaitingStep).toHaveBeenCalledTimes(1);
     expect(publishTurnWaitingStep).toHaveBeenCalledWith(expect.objectContaining({ sessionState }));
+    // Only a task tool call is pending: nothing is dispatched, and the cancel has
+    // no workflow tool run to stop.
+    expect(dispatchCoordinationStep).not.toHaveBeenCalled();
+    expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
   });
 
   it("admits an idle agent task's usage report while the turn waits and counts it", async () => {
@@ -1185,6 +1234,7 @@ describe("SessionExecution checkpoints", () => {
       .mockImplementationOnce(
         turnStepWork(async () => ({
           action: "park",
+          hasRunsToDispatch: false,
           pendingCoordinationCallIds: ["wait-call"],
           pendingTaskToolCalls: [{ callId: "wait-call", kind: "task_wait" }],
           serializedContext: {},
@@ -1263,7 +1313,7 @@ describe("SessionExecution checkpoints", () => {
 
   it("announces a child opened before a cancel ahead of cancelling the turn's work", async () => {
     const { inbox, planner } = boundaryRunMessages();
-    const sessionState = state("");
+    const sessionState = stateWithBlockingRun();
     let interrupt: (payload: SessionInboxPayload) => void = () => {};
     inbox.onInterrupt = (handler) => {
       interrupt = handler;
@@ -1389,6 +1439,21 @@ function createCursor(input: {
   });
 }
 
+function idleInbox(): SessionInbox {
+  return {
+    claimedTokens: [],
+    claimSessionHook: vi.fn(),
+    claimSessionHooks: vi.fn(),
+    drain: () => [],
+    hasPending: () => false,
+    whenPending: () => new Promise<void>(() => {}),
+    next: vi.fn(),
+    restore: vi.fn(),
+    onDelivery: () => () => {},
+    onInterrupt: () => () => {},
+  };
+}
+
 function createExecution(input: {
   readonly capabilities?: SessionCapabilities;
   readonly cursor?: SessionStateCursor;
@@ -1405,6 +1470,22 @@ function createExecution(input: {
     queue: input.queue ?? new SessionInputQueue(),
     sessionId: input.sessionState.sessionId,
   });
+}
+
+/** A session whose turn waits on a workflow tool run, so cancelling it has a run to cancel. */
+function stateWithBlockingRun(): DurableSessionState {
+  const base = state("");
+  return {
+    ...base,
+    snapshot: {
+      session: registerWorkflowToolRun(base.snapshot.session, {
+        address: { hookToken: "hold-control", runId: "hold-run" },
+        callId: "hold-call",
+        origin: { stepIndex: 0, turnId: "turn_0" },
+        toolName: "hold",
+      }),
+    },
+  };
 }
 
 function state(continuationToken: string): DurableSessionState {

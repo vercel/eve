@@ -1,32 +1,36 @@
 import { createHash } from "node:crypto";
-import { basename } from "node:path";
-import type { FilePart, ModelMessage, TextPart, UserContent } from "ai";
+import { basename, dirname, extname } from "node:path";
+import type { FilePart, ModelMessage, TextPart, ToolResultPart, UserContent } from "ai";
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import type { ChannelAdapterContext, FetchFileResult } from "#channel/adapter.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import { buildSessionHandle } from "#channel/session.js";
-import { loadContext } from "#context/container.js";
+import { contextStorage, loadContext } from "#context/container.js";
 import { SandboxKey } from "#context/keys.js";
+import { createFrameworkUserMessage } from "#harness/messages.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { fileDataToBytes } from "#internal/attachments/data.js";
 import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
+import { readMediaMetadata } from "#internal/attachments/media-metadata.js";
 import { deserializeUrlFilePart, isSerializedUrlFilePart } from "#internal/attachments/url-refs.js";
 import {
   decodeSandboxRef,
   encodeSandboxRef,
+  inlinesSandboxRefAsBytes,
   isSandboxRefUrl,
   type SandboxRef,
 } from "#internal/attachments/sandbox-refs.js";
 import type { SandboxSession } from "#public/definitions/sandbox.js";
 
 /**
- * Sandbox directory where inbound file attachments are staged before the
- * model call. Authored canonical path — {@link SandboxSession.writeFile}
- * translates to the backend-native location.
+ * Sandbox directory where eve stages message attachments and tool-result
+ * files. It sits under eve's own dot-directory so it never collides with an
+ * agent's `/workspace/attachments`. Authored canonical path —
+ * {@link SandboxSession.writeFile} translates to the backend-native location.
  */
-export const ATTACHMENTS_ROOT = "/workspace/attachments";
+export const ATTACHMENTS_ROOT = "/workspace/.eve/attachments";
 
 const log = createLogger("harness.attachment-staging");
 
@@ -35,22 +39,19 @@ const SHA_PREFIX_LENGTH = 16;
 
 const DEFAULT_MEDIA_TYPE = "application/octet-stream";
 
-/**
- * Upper bound, in bytes, on image payloads that hydrate as inline bytes
- * on the model call. Larger images are substituted for a text reference
- * pointing at the staged sandbox path so the agent can read the file
- * through its normal filesystem tools (`read_file`, `bash`, etc.).
- */
-const HYDRATE_IMAGE_INLINE_MAX_BYTES = 3 * 1024 * 1024;
+// A staged name keeps or gains the extension its media type implies, so a
+// nameless file (an MCP image, say) can still be opened by path later.
+const MEDIA_TYPE_EXTENSIONS: Readonly<Record<string, string>> = {
+  "application/pdf": ".pdf",
+  "image/gif": ".gif",
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+};
 
-/**
- * Upper bound, in bytes, on PDF payloads that hydrate as inline bytes.
- * Matches provider-side caps for native document understanding.
- */
-const HYDRATE_PDF_INLINE_MAX_BYTES = 20 * 1024 * 1024;
-
-const PDF_MEDIA_TYPE = "application/pdf";
-const IMAGE_MEDIA_TYPE_PREFIX = "image/";
+type ToolResultOutput = ToolResultPart["output"];
+type ToolOutputContentPart = Extract<ToolResultOutput, { type: "content" }>["value"][number];
+type ToolOutputFilePart = Extract<ToolOutputContentPart, { type: "file" }>;
 
 /**
  * Writes inbound `FilePart` bytes into the sandbox and rewrites each
@@ -127,11 +128,48 @@ export async function stageAttachmentsToSandbox(
 }
 
 /**
+ * Moves inline file payloads in `content` tool outputs into the sandbox and
+ * leaves `eve-sandbox:` refs in their place, so durable history never
+ * carries tool-result bytes. {@link hydrateSandboxAttachments} restores the
+ * bytes on every model call. Without an active sandbox, messages pass
+ * through unchanged.
+ */
+export async function stageToolResultMedia<T extends ModelMessage>(
+  messages: readonly T[],
+): Promise<T[]> {
+  if (!messages.some(hasInlineToolResultFile)) {
+    return [...messages];
+  }
+  const sandbox = await contextStorage.getStore()?.get(SandboxKey)?.get();
+  if (sandbox === undefined || sandbox === null) {
+    return [...messages];
+  }
+  return Promise.all(
+    messages.map(async (message) => {
+      if (message.role !== "tool" || !hasInlineToolResultFile(message)) {
+        return message;
+      }
+      const content = await Promise.all(
+        message.content.map(async (part) =>
+          part.type === "tool-result"
+            ? { ...part, output: await stageToolOutputFiles(part.output, sandbox) }
+            : part,
+        ),
+      );
+      return { ...message, content };
+    }),
+  );
+}
+
+/**
  * Hydrates `eve-sandbox:` file refs for a single model call.
  *
- * Small images and PDFs are inlined as bytes; larger or unsupported files
- * become text references to their sandbox path. The returned messages must
- * not be written back to session history, which stays ref-only across steps.
+ * Tool-result refs always hydrate as bytes: the tool chose to show them to
+ * the model. Inbound attachments inline small images and PDFs; larger or
+ * unsupported files become text references to their sandbox path. Every
+ * decision is pure in the ref, so each message renders identically on every
+ * call and the provider's prompt cache stays valid. The returned messages
+ * must not be written back to session history, which stays ref-only.
  */
 export async function hydrateSandboxAttachments(
   messages: readonly ModelMessage[],
@@ -193,8 +231,52 @@ function messageContainsSandboxRef(message: ModelMessage): boolean {
     if (isSandboxRefFilePart(part)) {
       return true;
     }
+    if (part.type === "tool-result" && contentOutputParts(part.output).some(isToolOutputRefFile)) {
+      return true;
+    }
   }
   return false;
+}
+
+function contentOutputParts(output: ToolResultOutput): readonly ToolOutputContentPart[] {
+  return output.type === "content" ? output.value : [];
+}
+
+function hasInlineToolResultFile(message: ModelMessage): boolean {
+  return (
+    message.role === "tool" &&
+    message.content.some(
+      (part) =>
+        part.type === "tool-result" && contentOutputParts(part.output).some(isInlineToolOutputFile),
+    )
+  );
+}
+
+function isInlineToolOutputFile(part: ToolOutputContentPart): part is ToolOutputFilePart {
+  return part.type === "file" && part.data.type === "data";
+}
+
+function isToolOutputRefFile(part: ToolOutputContentPart): part is ToolOutputFilePart {
+  return part.type === "file" && part.data.type === "url" && isSandboxRefUrl(part.data.url);
+}
+
+async function stageToolOutputFiles(
+  output: ToolResultOutput,
+  sandbox: SandboxSession,
+): Promise<ToolResultOutput> {
+  if (output.type !== "content" || !output.value.some(isInlineToolOutputFile)) {
+    return output;
+  }
+  const value = await Promise.all(
+    output.value.map(async (part) => {
+      if (!isInlineToolOutputFile(part) || part.data.type !== "data") return part;
+      const bytes = await fileDataToBytes(part.data.data);
+      if (bytes === null) return part;
+      const ref = await writeSandboxRef(bytes, part.mediaType, part.filename, sandbox);
+      return { ...part, data: { type: "url" as const, url: encodeSandboxRef(ref) } };
+    }),
+  );
+  return { ...output, value };
 }
 
 /**
@@ -221,55 +303,128 @@ async function hydrateMessageContent(content: unknown, sandbox: SandboxSession):
   }
   return Promise.all(
     content.map(async (part) => {
-      if (!isSandboxRefFilePart(part)) {
-        return part;
+      if (isSandboxRefFilePart(part)) {
+        const ref = decodeSandboxRef(part.data as URL);
+        if (!inlinesSandboxRefAsBytes(ref)) {
+          return renderSandboxRefAsTextPart(ref);
+        }
+        const bytes = await readSandboxRefBytes(ref, sandbox);
+        return bytes === null
+          ? renderMissingSandboxRef(ref)
+          : { ...part, data: bytes, mediaType: ref.mediaType };
       }
-      const filePart = part;
-      const ref = decodeSandboxRef(filePart.data as URL);
-      if (!shouldInlineSandboxRefAsBytes(ref)) {
-        return renderSandboxRefAsTextPart(ref);
+      if ((part as { type?: unknown }).type === "tool-result") {
+        const toolResult = part as ToolResultPart;
+        return { ...toolResult, output: await hydrateToolOutput(toolResult.output, sandbox) };
       }
-      const bytes = await sandbox.readBinaryFile({ path: ref.path });
-      if (bytes === null) {
-        // #325: sandbox snapshots can change during a session lifecycle
-        // as they are deployment bounded.
-        log.warn(
-          "sandbox-ref attachment bytes missing on hydration — degrading to text reference",
-          {
-            mediaType: ref.mediaType,
-            path: ref.path,
-            size: ref.size,
-          },
-        );
-        return {
-          text: `FileNotFound: Current snapshot may be newer and does not contain ${ref.path}.`,
-          type: "text",
-        } satisfies TextPart;
-      }
-      return { ...filePart, data: bytes, mediaType: ref.mediaType };
+      return part;
     }),
   );
 }
 
+async function hydrateToolOutput(
+  output: ToolResultOutput,
+  sandbox: SandboxSession,
+): Promise<ToolResultOutput> {
+  if (output.type !== "content" || !output.value.some(isToolOutputRefFile)) {
+    return output;
+  }
+  const value = await Promise.all(
+    output.value.map(async (part): Promise<ToolOutputContentPart> => {
+      if (!isToolOutputRefFile(part) || part.data.type !== "url") return part;
+      const ref = decodeSandboxRef(part.data.url);
+      const bytes = await readSandboxRefBytes(ref, sandbox);
+      if (bytes === null) return renderMissingSandboxRef(ref);
+      return {
+        ...part,
+        data: { data: Buffer.from(bytes).toString("base64"), type: "data" },
+      };
+    }),
+  );
+  return { ...output, value };
+}
+
+async function readSandboxRefBytes(
+  ref: SandboxRef,
+  sandbox: SandboxSession,
+): Promise<Uint8Array | null> {
+  const bytes = await sandbox.readBinaryFile({ path: ref.path });
+  if (bytes === null) {
+    // #325: sandbox snapshots can change during a session lifecycle
+    // as they are deployment bounded.
+    log.warn("sandbox-ref attachment bytes missing on hydration — degrading to text reference", {
+      mediaType: ref.mediaType,
+      path: ref.path,
+      size: ref.size,
+    });
+    return null;
+  }
+  // Sandbox code can overwrite a staged file; only the bytes eve staged may
+  // reach the model as the original attachment.
+  if (bytes.byteLength !== ref.size || sha256Prefix(bytes) !== basename(dirname(ref.path))) {
+    log.warn("sandbox-ref attachment bytes changed since staging — degrading to text reference", {
+      mediaType: ref.mediaType,
+      path: ref.path,
+      size: ref.size,
+    });
+    return null;
+  }
+  return bytes;
+}
+
+function renderMissingSandboxRef(ref: SandboxRef): TextPart {
+  return {
+    text: `FileNotFound: Current snapshot may be newer and does not contain ${ref.path}.`,
+    type: "text",
+  };
+}
+
 /**
- * Decides whether a sandbox-resident attachment should flow to the
- * model as inline bytes at the hydration step, or be substituted for a
- * text reference pointing at the staged sandbox path.
- *
- * Keep this decision narrow: only the shapes every major provider
- * supports natively qualify for byte inlining. Everything else — raw
- * documents, archives, source code, oversized images/PDFs — reaches
- * the model as a text reference so the agent's filesystem tools do
- * the reading.
+ * Chat Completions-style providers (`*.chat`) serialize `content` tool
+ * outputs as JSON text, so a file would reach the model as base64
+ * characters. Moves the files of each run of tool messages into one user
+ * message right after it, leaving a text stub in the tool result. The move
+ * is deterministic, so the prompt prefix stays cache-stable.
  */
-function shouldInlineSandboxRefAsBytes(ref: SandboxRef): boolean {
-  if (ref.mediaType.startsWith(IMAGE_MEDIA_TYPE_PREFIX)) {
-    return ref.size <= HYDRATE_IMAGE_INLINE_MAX_BYTES;
+export function moveToolResultFilesToUserMessages(
+  messages: readonly ModelMessage[],
+): ModelMessage[] {
+  const moved: ModelMessage[] = [];
+  let files: FilePart[] = [];
+  for (const message of messages) {
+    if (message.role !== "tool" && files.length > 0) {
+      moved.push(createReturnedFilesMessage(files));
+      files = [];
+    }
+    if (message.role !== "tool") {
+      moved.push(message);
+      continue;
+    }
+    const content = message.content.map((part) => {
+      if (part.type !== "tool-result" || part.output.type !== "content") return part;
+      const value = part.output.value.map((entry): ToolOutputContentPart => {
+        if (entry.type !== "file") return entry;
+        const file = { data: entry.data, mediaType: entry.mediaType, type: "file" } as FilePart;
+        if (entry.filename !== undefined) file.filename = entry.filename;
+        files.push(file);
+        return {
+          text: `Attached file ${entry.filename ?? "file"} (${entry.mediaType}) follows this tool result.`,
+          type: "text",
+        };
+      });
+      return { ...part, output: { ...part.output, value } };
+    });
+    moved.push({ ...message, content });
   }
-  if (ref.mediaType === PDF_MEDIA_TYPE) {
-    return ref.size <= HYDRATE_PDF_INLINE_MAX_BYTES;
-  }
-  return false;
+  if (files.length > 0) moved.push(createReturnedFilesMessage(files));
+  return moved;
+}
+
+function createReturnedFilesMessage(files: readonly FilePart[]): ModelMessage {
+  return createFrameworkUserMessage("context.state", [
+    { text: "Files returned by the preceding tool results:", type: "text" },
+    ...files,
+  ]);
 }
 
 /**
@@ -332,20 +487,27 @@ async function stageResolvedBytes(
   resolved: FetchFileResult,
   sandbox: SandboxSession,
 ): Promise<FilePart> {
-  const bytes = resolved.bytes;
-  const sha = sha256Prefix(bytes);
   const mediaType = resolved.mediaType ?? part.mediaType ?? DEFAULT_MEDIA_TYPE;
-  const name = safeFilename(resolved.filename ?? part.filename, sha);
-  const authored = `${ATTACHMENTS_ROOT}/${sha}/${name}`;
-
-  await sandbox.writeBinaryFile({ content: bytes, path: authored });
-  const resolvedPath = sandbox.resolvePath(authored);
-  return {
-    ...part,
-    data: encodeSandboxRef({ mediaType, path: resolvedPath, size: bytes.byteLength }),
-    filename: resolvedPath,
+  const ref = await writeSandboxRef(
+    resolved.bytes,
     mediaType,
-  };
+    resolved.filename ?? part.filename,
+    sandbox,
+  );
+  return { ...part, data: encodeSandboxRef(ref), filename: ref.path, mediaType };
+}
+
+/** Writes content-addressed bytes under {@link ATTACHMENTS_ROOT} and describes them as a ref. */
+async function writeSandboxRef(
+  bytes: Buffer,
+  mediaType: string,
+  filename: string | undefined,
+  sandbox: SandboxSession,
+): Promise<SandboxRef> {
+  const sha = sha256Prefix(bytes);
+  const authored = `${ATTACHMENTS_ROOT}/${sha}/${safeFilename(filename, sha, mediaType)}`;
+  await sandbox.writeBinaryFile({ content: bytes, path: authored });
+  return { ...readMediaMetadata(bytes, mediaType), path: sandbox.resolvePath(authored) };
 }
 
 async function tryFetchFile(
@@ -398,14 +560,13 @@ function reconstitueFilePartUrls(
   return changed ? result : content;
 }
 
-function sha256Prefix(bytes: Buffer): string {
+function sha256Prefix(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex").slice(0, SHA_PREFIX_LENGTH);
 }
 
-function safeFilename(provided: string | undefined, sha: string): string {
-  if (provided === undefined) {
-    return `file-${sha}`;
-  }
-  const base = basename(provided).replace(UNSAFE_FILENAME_CHARS, "_");
-  return base.length > 0 ? base : `file-${sha}`;
+function safeFilename(provided: string | undefined, sha: string, mediaType: string): string {
+  const base = provided === undefined ? "" : basename(provided).replace(UNSAFE_FILENAME_CHARS, "_");
+  const name = base.length > 0 ? base : `file-${sha}`;
+  const extension = MEDIA_TYPE_EXTENSIONS[mediaType];
+  return extension === undefined || extname(name) !== "" ? name : `${name}${extension}`;
 }

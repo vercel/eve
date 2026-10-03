@@ -8,18 +8,23 @@ import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
 import { sessionHookTokens } from "#execution/session/hook-tokens.js";
 import type { SessionInboxHandle, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import type { TurnSelection } from "#execution/session/input-queue.js";
-import type { WorkflowEntryResult } from "#execution/session/entry-input.js";
+import type { SessionHandoffStart, WorkflowEntryResult } from "#execution/session/entry-input.js";
 import { startSessionOwnerStep } from "#execution/workflow-runtime.js";
 import { sessionHandoffMarkerToken } from "#execution/session-inbox/address.js";
-import { isSessionIdleForHandoffStep } from "#execution/session/handoff-steps.js";
+import {
+  isSessionIdleForHandoffStep,
+  reportSessionHandoffRetainedStep,
+} from "#execution/session/handoff-steps.js";
 import type { AgentWorkflowRetentionDefinition } from "#shared/agent-definition.js";
+import { isObject } from "#shared/guards.js";
 
 /**
  * Cross-deployment checkpoint contract. The successor may run a different eve
  * build than the owner that produced it; bump when any field changes shape so
- * an incompatible successor rejects the handoff instead of misreading state.
- * Mount-owned state requires a new version so older readers reject it rather
- * than dropping unrecognized state keys during reverse handoff.
+ * an older successor rejects the handoff instead of misreading state.
+ *
+ * A newer successor must always accept older checkpoints: every bump adds the
+ * upgrade from the previous version in `checkpoint-migrations.ts`.
  */
 export const SESSION_CHECKPOINT_VERSION = 11;
 
@@ -51,21 +56,6 @@ export type SessionOwnerActivation =
       readonly payloads: readonly SessionInboxPayload[];
     };
 
-type SessionTransferOutcome =
-  | { readonly kind: "transferred" }
-  | {
-      readonly kind: "retained";
-      readonly reason:
-        | "same-deployment"
-        | "missing-deployment"
-        | "not-idle"
-        | "busy"
-        | "accepted-during-release"
-        | "activation-failed"
-        | "checkpoint-incompatible"
-        | "known-incompatible";
-    };
-
 interface SessionHandoffInput {
   readonly checkpoint: Omit<
     SessionCheckpoint,
@@ -81,9 +71,35 @@ export function sessionAnchorToken(sessionId: string): string {
   return `${sessionId}:anchor`;
 }
 
+type SessionTransferOutcome =
+  | { readonly kind: "transferred" }
+  | { readonly kind: "retained"; readonly reason: SessionRetainedReason };
+
+type SessionRetainedReason =
+  | "same-deployment"
+  | "missing-deployment"
+  | "not-idle"
+  | "busy"
+  | "accepted-during-release"
+  | "activation-failed"
+  | "checkpoint-incompatible"
+  | "known-incompatible";
+
+/** A compaction handoff the owner owes; the successor keeps this deadline. */
+export interface CompactionHandoff {
+  readonly sessionTimeoutDeadline: Date | undefined;
+}
+
+type SessionTransferState = Pick<
+  SessionCheckpoint,
+  "history" | "serializedContext" | "sessionState"
+>;
+
 /**
- * The sole boundary for moving an idle session to another exact deployment.
- * Constructed once per owner; `tryTransfer()` is attempted per eligible selection.
+ * The sole boundary for moving an idle session to a successor run: on another
+ * exact deployment when newer code accepts a delivery, or on this deployment
+ * after compaction so no single run's event log grows with the session.
+ * Constructed once per owner; each `try*` method attempts one transfer.
  * When the upstream atomic hook-handoff primitive lands, only this class changes.
  *
  * Skipping known-incompatible targets requires this owner run to execute the
@@ -103,21 +119,56 @@ export class SessionHandoff {
   }
 
   /**
-   * Attempts to move the session to the selected delivery's deployment. The
-   * outcome states whether the successor activated or this owner retained the
-   * session. Candidate failures recover locally rather than escaping.
+   * Attempts to move the session to the selected delivery's deployment. When a
+   * compaction handoff is due and that deployment is this one or unknown, the
+   * session moves to a fresh run here instead. The outcome states whether the
+   * successor activated or this owner retained the session. Candidate failures
+   * recover locally rather than escaping.
    */
   async tryTransfer(
     selection: TurnSelection,
-    state: Pick<SessionCheckpoint, "history" | "serializedContext" | "sessionState">,
+    state: SessionTransferState,
+    options: { readonly compaction?: CompactionHandoff } = {},
   ): Promise<SessionTransferOutcome> {
-    const { deploymentId, inbox } = this.input;
-    const targetDeploymentId = readAcceptedDeploymentId(selection.delivery);
+    const { delivery } = selection;
+    const targetDeploymentId = readAcceptedDeploymentId(delivery);
+    const sameDeployment =
+      targetDeploymentId === undefined || targetDeploymentId === this.input.deploymentId;
+    if (sameDeployment && options.compaction !== undefined) {
+      if (!selection.handoffEligible) return { kind: "retained", reason: "busy" };
+      return await this.tryCompactionTransfer(state, { ...options.compaction, delivery });
+    }
     if (targetDeploymentId === undefined) return { kind: "retained", reason: "missing-deployment" };
-    if (targetDeploymentId === deploymentId) return { kind: "retained", reason: "same-deployment" };
+    if (targetDeploymentId === this.input.deploymentId)
+      return { kind: "retained", reason: "same-deployment" };
     if (this.incompatibleTargetDeploymentIds.has(targetDeploymentId))
       return { kind: "retained", reason: "known-incompatible" };
     if (!selection.handoffEligible) return { kind: "retained", reason: "busy" };
+    return await this.transfer(state, targetDeploymentId, { delivery });
+  }
+
+  /**
+   * Attempts to move a session that compacted to a fresh run on this
+   * deployment. Without a delivery the caller guarantees no input is waiting,
+   * and the successor parks until the next one arrives. The successor keeps
+   * the session's deadline.
+   */
+  async tryCompactionTransfer(
+    state: SessionTransferState,
+    compaction: CompactionHandoff & { readonly delivery?: DeliverHookPayload },
+  ): Promise<SessionTransferOutcome> {
+    const { deploymentId } = this.input;
+    if (this.incompatibleTargetDeploymentIds.has(deploymentId))
+      return { kind: "retained", reason: "known-incompatible" };
+    return await this.transfer(state, deploymentId, { ...compaction, reason: "compaction" });
+  }
+
+  private async transfer(
+    state: SessionTransferState,
+    targetDeploymentId: string,
+    start: SessionHandoffStart,
+  ): Promise<SessionTransferOutcome> {
+    const { inbox } = this.input;
     if (!(await isSessionIdleForHandoffStep({ sessionState: state.sessionState })))
       return { kind: "retained", reason: "not-idle" };
 
@@ -136,6 +187,10 @@ export class SessionHandoff {
       createHook<never>({ token: sessionHandoffMarkerToken(token) }),
     );
     await Promise.all(markers.map((marker) => claimHookOwnership(marker)));
+    let retained: {
+      readonly error?: unknown;
+      readonly reason: "activation-failed" | "checkpoint-incompatible";
+    };
     try {
       const acceptedDuringRelease = await inbox.release();
       if (acceptedDuringRelease.length > 0) {
@@ -144,26 +199,25 @@ export class SessionHandoff {
       }
       let acceptedByFailedCandidate: readonly SessionInboxPayload[] = [];
       try {
-        const activation = await this.startAndActivate(
-          checkpoint,
-          selection.delivery,
-          targetDeploymentId,
-        );
+        const activation = await this.startAndActivate(checkpoint, start, targetDeploymentId);
         if (activation.kind === "active") return { kind: "transferred" };
+        acceptedByFailedCandidate = activation.payloads;
         if (activation.kind === "incompatible") {
           this.incompatibleTargetDeploymentIds.add(targetDeploymentId);
-          await this.recover(tokens, activation.payloads);
-          return { kind: "retained", reason: "checkpoint-incompatible" };
+          retained = { reason: "checkpoint-incompatible" };
+        } else {
+          retained = { error: activation.error, reason: "activation-failed" };
         }
-        acceptedByFailedCandidate = activation.payloads;
-      } catch {
+      } catch (error) {
         // The current owner remains authoritative until activation.
+        retained = { error, reason: "activation-failed" };
       }
       await this.recover(tokens, acceptedByFailedCandidate);
-      return { kind: "retained", reason: "activation-failed" };
     } finally {
       await Promise.all(markers.map((marker) => disposeHook(marker)));
     }
+    await this.reportRetained(retained.reason, targetDeploymentId, retained.error);
+    return { kind: "retained", reason: retained.reason };
   }
 
   /** After a transfer, the original run parks until the final owner reports the session result. */
@@ -186,7 +240,7 @@ export class SessionHandoff {
   /** Starts the candidate and waits for it to activate or fail. */
   private async startAndActivate(
     checkpoint: SessionCheckpoint,
-    delivery: DeliverHookPayload,
+    start: SessionHandoffStart,
     targetDeploymentId: string,
   ): Promise<SessionOwnerActivation> {
     const activation = createHook<SessionOwnerActivation>({
@@ -195,10 +249,10 @@ export class SessionHandoff {
     await claimHookOwnership(activation);
     try {
       await startSessionOwnerStep({
+        ...start,
         activationToken: activation.token,
         anchorRunId: this.input.sessionId,
         checkpoint,
-        delivery,
         targetDeploymentId,
       });
       return await activation;
@@ -214,6 +268,22 @@ export class SessionHandoff {
   ): Promise<void> {
     await this.input.inbox.claimSessionHooks(tokens);
     this.input.inbox.restore(payloads);
+  }
+
+  private async reportRetained(
+    reason: "activation-failed" | "checkpoint-incompatible",
+    targetDeploymentId: string,
+    error?: unknown,
+  ): Promise<void> {
+    const message =
+      isObject(error) && typeof error.message === "string" ? error.message : undefined;
+    await reportSessionHandoffRetainedStep({
+      error: message,
+      reason,
+      sessionId: this.input.sessionId,
+      sourceDeploymentId: this.input.deploymentId,
+      targetDeploymentId,
+    });
   }
 
   private async ensureAnchor(): Promise<void> {

@@ -28,6 +28,7 @@ import {
 } from "#harness/hitl/session-limit-input-requests.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
+import { readAnswerText } from "#internal/input-text.js";
 
 export { getApprovedTools, clearPendingSessionLimitPrompt };
 export type { RejectedActionBatch };
@@ -194,7 +195,8 @@ function resolveTextMessageInput(
   pendingBatch: PendingInputBatch,
   stepInput: StepInput | undefined,
 ): ResolvedStepInput | undefined {
-  if (typeof stepInput?.message !== "string") return stepInput;
+  const text = readAnswerText(stepInput);
+  if (stepInput === undefined || text === undefined) return stepInput;
 
   const batchRequestIds = new Set(pendingBatch.requests.map((request) => request.requestId));
   if (stepInput.inputResponses?.some((response) => batchRequestIds.has(response.requestId))) {
@@ -205,7 +207,7 @@ function resolveTextMessageInput(
   const textRequests = pendingBatch.requests.filter(
     (request) => !responseAuthRequired.has(request.requestId),
   );
-  const responses = resolveTextToResponses(stepInput.message, textRequests);
+  const responses = resolveTextToResponses(text, textRequests);
   if (responses.length === 0) return stepInput;
 
   return compactStepInput({

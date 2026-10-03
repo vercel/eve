@@ -155,6 +155,18 @@ describe("createNodeEsmCompatBannerPlugin", () => {
     expect(result?.code).toContain("const __dirname =");
   });
 
+  it("does not parse chunks that only declare bundler-suffixed bindings", () => {
+    const parse = vi.fn(() => EMPTY_PROGRAM);
+    const code =
+      "const require$1 = createRequire$1(import.meta.url);\nconst __filename$1 = fileURLToPath$1(import.meta.url), __dirname$1 = dirname$1(__filename$1);";
+    const result = createNodeEsmCompatBannerPlugin({ includeRequire: true }).renderChunk.call(
+      { parse },
+      code,
+    );
+    expect(parse).not.toHaveBeenCalled();
+    expect(result?.code).toContain("const __dirname =");
+  });
+
   it.each([
     String.raw`const separators = /[\u2028,\u2029]/; export const value = __dirname;`,
     String.raw`const label = "caf\u00e9", other\u0041 = 1; export const value = __dirname;`,

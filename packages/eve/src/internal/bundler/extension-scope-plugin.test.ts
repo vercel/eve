@@ -42,6 +42,19 @@ describe("createExtensionScopePlugin (path containment)", () => {
     );
   });
 
+  it("scopes a shared chunk emitted beside the source root to its tagged mount", () => {
+    const plugin = createExtensionScopePlugin([
+      ...SCOPES,
+      { ...SCOPES[0]!, mountId: "subagents/research/extensions/crm" },
+    ])!;
+    expect(
+      plugin.resolveId(
+        "eve/context",
+        "/pkg/crm/_chunks/budget-abc123.mjs?eve-mount=subagents%2Fresearch%2Fextensions%2Fcrm",
+      ),
+    ).toBe("\0eve-ext-scope:context:subagents%2Fresearch%2Fextensions%2Fcrm");
+  });
+
   it("leaves eve/extension unscoped for extension-owned importers", () => {
     const id = pathPlugin().resolveId("eve/extension", "/pkg/crm/extension/config.ts");
     expect(id).toBeUndefined();

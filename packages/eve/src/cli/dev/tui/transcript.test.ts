@@ -459,7 +459,7 @@ describe("ConversationTranscript", () => {
     transcript.project(view(started, true), options);
     expect(transcript.tasks[0]).toMatchObject({
       name: "research",
-      children: [{ name: "download", kind: "tool", startedAtMs: 0 }],
+      children: [{ name: "Download", kind: "tool", startedAtMs: 0 }],
     });
     expect(transcript.tasks[0]!.childTools.size).toBe(0);
     vi.setSystemTime(12_000);
@@ -568,6 +568,69 @@ describe("ConversationTranscript", () => {
     expect(transcript.tasks.map((task) => task.children?.length)).toEqual([80, 48]);
     expect(transcript.tasks.map((task) => task.omittedTasks)).toEqual([0, 32]);
     expect(transcript.tasks[1]!.omittedAttention).toBe(true);
+  });
+
+  it("folds a message steering a working agent into its task, apart from a real second task", () => {
+    const delegate = (callId: string, message: string) =>
+      event(
+        createActionsRequestedEvent({
+          actions: [{ callId, input: { message }, kind: "tool-call", toolName: "agent" }],
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        }),
+      );
+    const childTurn = "child_turn_1";
+    const steered = conversation([
+      turn,
+      delegate("call_1", "Research Zeit for Alice."),
+      taskStarted("call_1", "agent"),
+      agentStarted("call_1"),
+      { type: "client.agent.following", data: { sessionId: "child_1" } },
+      ...observe([
+        createTurnStartedEvent({ sequence: 0, turnId: childTurn }),
+        createMessageReceivedEvent({ message: "Research Zeit", sequence: 0, turnId: childTurn }),
+      ]),
+      delegate("call_2", "Alice means Vercel, formerly Zeit."),
+      taskStarted("call_2", "agent"),
+      // The steering message joins the agent's running turn.
+      ...observe([
+        createMessageReceivedEvent({ message: "Vercel", sequence: 1, turnId: childTurn }),
+      ]),
+      delegate("call_3", "Summarize Bob's notes."),
+      taskStarted("call_3", "agent", "task_2"),
+    ]);
+    const transcript = new ConversationTranscript();
+    const starts = transcript.project(view(steered, true), options);
+    expect(starts.map((block) => [block.title, block.subtitle])).toEqual([
+      ["Delegate subagent", "Research Zeit for Alice."],
+      ["Message subagent", "Alice means Vercel, formerly Zeit."],
+      ["Delegate subagent:2", "Summarize Bob's notes."],
+    ]);
+    expect(transcript.tasks.map((task) => task.name)).toEqual(["subagent", "subagent:2"]);
+
+    // One reply settles both of the task's calls, so the task ends once.
+    const replied = conversation(
+      [
+        ...observe([
+          createMessageCompletedEvent({
+            message: "Vercel's profile is ready.",
+            sequence: 2,
+            stepIndex: 0,
+            turnId: childTurn,
+          }),
+          createTurnCompletedEvent({ sequence: 3, turnId: childTurn }),
+        ]),
+        settled("call_1"),
+        settled("call_2"),
+      ],
+      steered,
+    );
+    const ends = transcript
+      .project(view(replied, true), options)
+      .filter((block) => block.id?.endsWith(":end"));
+    expect(ends.map((block) => [block.title, block.status])).toEqual([["subagent", "done"]]);
+    expect(transcript.tasks.map((task) => task.name)).toEqual(["subagent:2"]);
   });
 
   it("names parallel calls apart, stops tasks a cancelled turn leaves working, and hides hidden ones", () => {

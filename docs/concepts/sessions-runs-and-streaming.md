@@ -12,8 +12,8 @@ controls, and streams. Every operation targets that exact session; none follows
 or creates a replacement implicitly.
 
 The session ID currently identifies the original Workflow run that owns the
-event stream. A deployment handoff changes the executing run, not the session
-ID or stream. Stream namespaces belong to a run; eve does not support
+event stream. A deployment or compaction handoff changes the executing run, not
+the session ID or stream. Stream namespaces belong to a run; eve does not support
 caller-assigned session IDs or globally addressed streams.
 
 Authored channels also have channel-local continuation tokens. A token addresses
@@ -24,7 +24,7 @@ by the eve HTTP session API. See [Custom channels](../channels/custom#channel-op
 Sessions last 30 days by default; configure `limits.sessionTimeoutMs` in
 `agent.ts`, or set it to `false` to disable the deadline. A successful deployment
 handoff or legacy-session import restarts the original configured duration.
-Ordinary messages and process restarts keep the existing deadline. At expiration, eve
+Ordinary messages, compaction handoffs, and process restarts keep the existing deadline. At expiration, eve
 lets an active turn settle, emits `session.completed`, and releases the
 session's continuation addresses so the next qualifying channel message starts fresh. Stored
 session data is not deleted. See [Agent config](../agent-config#runtime-limits).
@@ -123,7 +123,7 @@ Note: consider the privacy, confidentiality, and user-experience implications fo
 
 A delegated subagent publishes progress on its own child-session stream. When a subagent tool call or a workflow tool's `ctx.agent` opens a session, the parent emits `agent.started` with the call's `callId` and `turnId`, its `taskId` when the call runs as a task, the child's `sessionId`, and a `streamPath` that a client follows with `session.agent(started).stream()`. A subagent tool call is a [task](#task-events) whose `task.started` has `kind: "agent"`: its `task.started` and `task.settled` carry the call, and `task.settled.data.output` is the child's reply. A call that fails before the child session opens has no `agent.started`. A settled call does not end the child session; later calls with the same `taskId` reach it.
 
-A question or sign-in from inside a running call does not end the turn. This covers a workflow tool's `ctx.ask()`, including the built-in `ask_question` tool, and a delegated subagent's question or sign-in. The stream emits `input.requested` or `authorization.required`, then `turn.waiting` with `on: "input"` and the open turn's `turnId`. After the answer or sign-in, the turn resumes with the next `step.started` for the same `turnId`, and only `turn.completed`, `turn.failed`, or `turn.cancelled` ends it. When you answer a question that belongs to a workflow tool or a subagent, the session you answer on emits `input.resolved` for it as it routes the answer down. If the workflow tool run that relayed a question or approval ends before anyone answers, that session emits `input.resolved` with `outcome: "cancelled"` for it. This covers the run's own `ctx.ask()` questions and requests from sessions it opened with `ctx.agent`. A cancelled turn does the same for every question or approval the session relays. A sign-in or tool approval the turn raises itself holds it the same way, also with `on: "input"`. A message from the same person steers the turn and cancels the request: a sign-in reports `authorization.completed` with `outcome: "declined"`, and an approval reports `input.resolved` with `outcome: "ignored"`. Messages from other people wait until the turn ends. Cancelling the turn ends both: a held sign-in reports `authorization.completed` with `outcome: "declined"`, and a held approval reports `input.resolved` with `outcome: "cancelled"`.
+A question or sign-in from inside a running call does not end the turn. This covers a workflow tool's `ctx.ask()`, including the built-in `ask_question` tool, and a delegated subagent's question or sign-in. The stream emits `input.requested` or `authorization.required`, then `turn.waiting` with `on: "input"` and the open turn's `turnId`. After the answer or sign-in, the turn resumes with the next `step.started` for the same `turnId`, and only `turn.completed`, `turn.failed`, or `turn.cancelled` ends it. When you answer a question that belongs to a workflow tool or a subagent, the session you answer on emits `input.resolved` for it as it routes the answer down. While other relayed questions are still pending, it then emits `turn.waiting` with `on: "input"` again. If the workflow tool run that relayed a question or approval ends before anyone answers, that session emits `input.resolved` with `outcome: "cancelled"` for it. This covers the run's own `ctx.ask()` questions and requests from sessions it opened with `ctx.agent`. A cancelled turn does the same for every question or approval the session relays. A sign-in or tool approval the turn raises itself holds it the same way, also with `on: "input"`. A message from the same person steers the turn and cancels the request: a sign-in reports `authorization.completed` with `outcome: "declined"`, and an approval reports `input.resolved` with `outcome: "ignored"`. Messages from other people wait until the turn ends. Cancelling the turn ends both: a held sign-in reports `authorization.completed` with `outcome: "declined"`, and a held approval reports `input.resolved` with `outcome: "cancelled"`.
 
 ### Task events
 
@@ -224,6 +224,8 @@ A pending `ctx.ask()` question from a tool, such as `ask_question`, can be answe
 A structured response matches any currently pending request by ID, not only the newest batch. It becomes stale only after that request was answered, cleared, or cancelled. eve delivers a stale response to the model as a new user message, and the model decides whether the old selection still matters. A stale approval never authorizes the earlier tool call; the model must request the action and approval again if they are still needed.
 
 One delivery can answer requests from several batches. eve resumes approval-bearing batches in durable order and carries later answers forward until each batch can resume. If you answer only some approvals in a batch, eve saves those responses until the remaining approvals are answered. Meanwhile, unrelated messages can run tools and receive a completed reply. The saved partial responses neither block that reply nor trigger another model call after it.
+
+When steering interrupts pending model generation, the interrupted step still ends with `step.completed`, carrying `finishReason: "other"` and any usage the provider reported. The correction's `message.received` and the next `step.started` for the same `turnId` follow.
 
 Multiple steering messages retain their durable arrival order and may be folded into one input at the next boundary. A message accepted after turn settlement starts the next turn. See [message delivery and steering](./execution-model-and-durability#message-delivery-and-steering).
 

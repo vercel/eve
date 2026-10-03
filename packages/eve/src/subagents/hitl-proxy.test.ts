@@ -307,6 +307,23 @@ describe("routeDeliverPayload message resolution", () => {
     ]);
   });
 
+  it("drops a consumed message's context but keeps its channel state", () => {
+    const routed = routeDeliverPayload({
+      payload: {
+        context: ["<telegram_context>\nmessage_id: 7\n</telegram_context>"],
+        message: "production",
+        state: { messageId: "7" },
+      },
+      resolveMessage: true,
+      state: askSession([["ask-1", {}]]).state,
+    });
+
+    expect(routed.forSelf).toEqual({ state: { messageId: "7" } });
+    expect(routed.forChildren[0]?.payload.inputResponses).toEqual([
+      { optionId: "2", requestId: "ask-1" },
+    ]);
+  });
+
   it("answers the only pending question with free text when it allows it", () => {
     const routed = routeDeliverPayload({
       payload: { message: "Use the canary pool" },

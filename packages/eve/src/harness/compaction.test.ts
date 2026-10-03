@@ -11,6 +11,8 @@ import {
 import { createFrameworkUserMessage } from "#harness/messages.js";
 import { estimateTokens } from "#harness/token-estimate.js";
 import type { CompactionConfig } from "#harness/types.js";
+import { encodeSandboxRef } from "#internal/attachments/sandbox-refs.js";
+import { pngBytes } from "#internal/testing/media-fixtures.js";
 
 vi.mock("ai", () => ({
   generateText: vi.fn(),
@@ -24,6 +26,23 @@ const config: CompactionConfig = {
   recentWindowSize: 2,
   threshold: 100,
 };
+
+function toolFileMessage(data: unknown, mediaType = "image/png"): ModelMessage {
+  return {
+    content: [
+      {
+        output: {
+          type: "content",
+          value: [{ data, mediaType, type: "file" }],
+        } as never,
+        toolCallId: "call-image",
+        toolName: "render",
+        type: "tool-result",
+      },
+    ],
+    role: "tool",
+  };
+}
 
 describe("estimateTokens", () => {
   it("estimates based on serialized character length", () => {
@@ -121,9 +140,72 @@ describe("estimateTokens", () => {
     expect(estimateTokens(base)).toBeGreaterThan(0);
     expect(estimateTokens(withReasoning)).toBeGreaterThan(estimateTokens(base));
   });
+
+  it("counts an inline image by its pixel patches instead of its base64 length", () => {
+    const base64 = pngBytes(1000, 1000, 300_000).toString("base64");
+    const estimate = estimateTokens([toolFileMessage({ data: base64, type: "data" })]);
+
+    expect(estimate).toBeGreaterThan(1296);
+    expect(estimate).toBeLessThan(1296 + 100);
+  });
+
+  it("counts a staged image from its ref metadata without the bytes", () => {
+    const ref = encodeSandboxRef({
+      height: 1080,
+      mediaType: "image/png",
+      path: "/workspace/.eve/attachments/abc/screen.png",
+      size: 2_000_000,
+      width: 1920,
+    });
+    const estimate = estimateTokens([toolFileMessage({ type: "url", url: ref })]);
+
+    expect(estimate).toBeGreaterThan(2691);
+    expect(estimate).toBeLessThan(2691 + 100);
+  });
+
+  it("counts an inbound attachment that renders as a path reference as text", () => {
+    const message: ModelMessage = {
+      content: [
+        {
+          data: encodeSandboxRef({
+            mediaType: "text/csv",
+            path: "/workspace/.eve/attachments/abc/report.csv",
+            size: 3_000_000,
+          }),
+          mediaType: "text/csv",
+          type: "file",
+        },
+      ],
+      role: "user",
+    };
+
+    expect(estimateTokens([message])).toBeLessThan(100);
+  });
 });
 
 describe("getInputTokenCount", () => {
+  // #3799: two page scans returned by a vision tool counted as ~160k tokens
+  // of base64 text and forced compaction against a 43,895-token prompt.
+  it("does not count tool-result image bytes as text before provider usage arrives", () => {
+    const page = pngBytes(1000, 1000, 240_000).toString("base64");
+    const prompt: ModelMessage[] = [{ content: "Read both scanned pages.", role: "user" }];
+    const messages = [
+      ...prompt,
+      toolFileMessage({ data: page, type: "data" }),
+      toolFileMessage({ data: page, type: "data" }),
+    ];
+
+    const result = getInputTokenCount(messages, {
+      lastKnownInputTokens: 43_895,
+      lastKnownPromptMessageCount: prompt.length,
+      recentWindowSize: 2,
+      threshold: 200_000,
+    });
+
+    expect(result).toBeGreaterThan(43_895 + 2 * 1296);
+    expect(result).toBeLessThan(43_895 + 2 * 1296 + 200);
+  });
+
   it("prefers the last known exact token count when available", () => {
     const messages: ModelMessage[] = [{ content: "a".repeat(400), role: "user" }];
 
@@ -225,6 +307,38 @@ describe("shouldCompact", () => {
 
   it("does not compact an empty history based on prompt overhead alone", () => {
     expect(shouldCompact([], { ...config, threshold: 0 })).toBe(false);
+  });
+
+  // #4292: a 40,000-character Chinese tool result costs about 30k o200k and
+  // 40k cl100k tokens, but serialized length / 4 counted it as about 10k, so a
+  // measured 165k prompt reached the 200k window without compacting.
+  it("compacts when a large CJK tool result pushes a measured prompt over the threshold", () => {
+    const prompt: ModelMessage[] = [
+      { content: "Summarize the attached Chinese report.", role: "user" },
+    ];
+    const report: ModelMessage = {
+      content: [
+        {
+          output: {
+            type: "text",
+            value: "大型语言模型在长上下文任务中的表现取决于其对检索证据的整合能力。".repeat(1_250),
+          },
+          toolCallId: "call-1",
+          toolName: "read_document",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    };
+
+    expect(
+      shouldCompact([...prompt, report], {
+        lastKnownInputTokens: 165_000,
+        lastKnownPromptMessageCount: prompt.length,
+        recentWindowSize: 4,
+        threshold: 180_000,
+      }),
+    ).toBe(true);
   });
 });
 
@@ -622,6 +736,52 @@ describe("compactMessages: tool-result cap heuristic", () => {
         { text: "Chart summary: revenue up.", type: "text" },
         { text: "Attached file chart.png (image/png)", type: "text" },
       ],
+    });
+  });
+
+  it("stubs a staged tool file with its sandbox path so the agent can reopen it", async () => {
+    const path = "/workspace/.eve/attachments/0123456789abcdef/chart.png";
+    const messages: ModelMessage[] = [
+      user("render the chart"),
+      {
+        content: [{ input: {}, toolCallId: "call-0", toolName: "render_chart", type: "tool-call" }],
+        role: "assistant",
+      },
+      {
+        content: [
+          {
+            output: {
+              type: "content",
+              value: [
+                {
+                  data: {
+                    type: "url",
+                    url: encodeSandboxRef({ mediaType: "image/png", path, size: 4096 }),
+                  },
+                  filename: "chart.png",
+                  mediaType: "image/png",
+                  type: "file",
+                },
+                { text: "x".repeat(800), type: "text" },
+              ],
+            },
+            toolCallId: "call-0",
+            toolName: "render_chart",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+      user("what does it show?"),
+    ];
+
+    const { result } = await compact(messages, { recentWindowSize: 1 });
+
+    const cappedPart = Array.isArray(result[2]?.content) ? result[2].content[0] : undefined;
+    const output = cappedPart?.type === "tool-result" ? cappedPart.output : undefined;
+    expect(output).toMatchObject({
+      type: "content",
+      value: [{ text: `Attached file ${path} (image/png)`, type: "text" }, { type: "text" }],
     });
   });
 

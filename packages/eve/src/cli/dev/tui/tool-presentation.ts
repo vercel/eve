@@ -1,5 +1,6 @@
 import { diffWriteDetail, type ToolDetailLine } from "./line-diff.js";
 import { stripTerminalControls } from "#cli/ui/terminal-text.js";
+import { displayName, displayTitle } from "#shared/display-name.js";
 import { summarizeToolArgs, summarizeToolResult } from "./tool-format.js";
 
 /** Renderer-ready copy derived from a tool call without owning its lifecycle. */
@@ -27,7 +28,7 @@ export interface ToolPresentationContext {
   /**
    * True when the tool dispatches a named subagent (each subagent exposes a
    * tool bearing its own name). The presentation reads as a delegation —
-   * `Delegate stock-price` — instead of a generic tool call.
+   * `Delegate subagent(stock price)` — instead of a generic tool call.
    */
   readonly isSubagent?: boolean;
   /** The tool's own `label.start` copy, used when eve has no copy of its own for the tool. */
@@ -178,7 +179,7 @@ function presentWriteFileTool(
   const write = readWriteFileInput(toolName, input);
   if (write === undefined) {
     return {
-      title: toolName,
+      title: toolDisplayTitle(toolName),
       subtitle: summarizeToolArgs(input),
       summarizeResult: summarizeToolResult,
     };
@@ -285,10 +286,18 @@ export function presentTool(
   }
 
   return {
-    title: toolName,
+    title: toolDisplayTitle(toolName),
     subtitle: summarizeToolArgs(input),
     summarizeResult: summarizeToolResult,
   };
+}
+
+/**
+ * A person's name for a tool with no copy of its own: `linear__list_issues` →
+ * `List issues`.
+ */
+export function toolDisplayTitle(toolName: string): string {
+  return displayTitle(toolBaseName(toolName));
 }
 
 /**
@@ -312,18 +321,24 @@ export function isSelfModificationAgent(toolName: string): boolean {
   return toolBaseName(toolName) === SELF_MODIFICATION_AGENT_NAME;
 }
 
-/** The name an agent task goes by in the delegate row, task line, and task panel. */
+/**
+ * The name an agent task goes by in the delegate row, task line, and task
+ * panel, from its {@link agentDisplayName} and any `:N` ordinal.
+ */
 export function agentTaskLabel(name: string): string {
-  const readable = name
-    .replace(/^self-modification__agent(?=:\d+$|$)/u, "agent editor")
-    .replace(/__agent(?=:\d+$|$)/u, "");
-  return readable === "subagent" || readable.startsWith("agent editor")
-    ? readable
-    : `subagent(${readable})`;
+  return /^subagent(?::\d+)?$/u.test(name) || name.startsWith("agent editor")
+    ? name
+    : `subagent(${name})`;
 }
+
+/**
+ * A person's name for the agent a tool dispatches: `code__worker` →
+ * `worker`. An extension's own subagent compiles to `<extension>__agent`, so
+ * the extension names it.
+ */
 export function agentDisplayName(toolName: string): string {
   const baseName = toolBaseName(toolName);
-  return AGENT_DISPLAY_NAMES.get(baseName) ?? baseName;
+  return AGENT_DISPLAY_NAMES.get(baseName) ?? displayName(baseName.replace(/(?<=.)__agent$/u, ""));
 }
 
 /**
@@ -351,7 +366,7 @@ export function presentPreparingTool(
   }
   const verb = baseName === "write_file" ? WRITE_FILE_VERB : BUILTIN_TOOL_COPY[baseName]?.verb;
   return {
-    title: `${verb ?? toolName} …`,
+    title: `${verb ?? toolDisplayTitle(toolName)} …`,
     subtitle: "",
     summarizeResult: () => undefined,
   };

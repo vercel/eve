@@ -44,6 +44,7 @@ import {
   createDiskProjectSource,
   type ProjectSource,
   type ProjectSourceEntry,
+  readPackageJsonName,
 } from "#discover/project-source.js";
 import { discoverSandboxSource } from "#discover/sandbox.js";
 import { discoverScheduleSources } from "#discover/schedules.js";
@@ -553,19 +554,6 @@ async function tryReadPackageJsonName(
   source: ProjectSource,
   appRoot: string,
 ): Promise<string | undefined> {
-  try {
-    const packageJsonPath = join(appRoot, "package.json");
-    const content = JSON.parse(await source.readTextFile(packageJsonPath)) as {
-      name?: unknown;
-    };
-    const name = content.name;
-
-    if (typeof name !== "string" || name.length === 0) {
-      return undefined;
-    }
-
-    return stripNpmPackageScope(name);
-  } catch {
-    return undefined;
-  }
+  const name = await readPackageJsonName(source, appRoot);
+  return name === undefined ? undefined : stripNpmPackageScope(name);
 }

@@ -4,7 +4,7 @@ import { requestFrom } from "./continuation/helpers.ts";
 
 const MARKER = "draft-status-3494";
 const READ_STATUS =
-  `Alice is checking her draft. Call the read-status tool exactly once with marker "${MARKER}". ` +
+  `Alice is checking her draft. Call the read-draft-status tool exactly once with marker "${MARKER}". ` +
   "After the tool returns, tell Alice the status and marker from its result.";
 
 export default [
@@ -23,7 +23,7 @@ export default [
 
       // Then the tool executes once and the completed reply includes its status and marker.
       turn.expectOk();
-      turn.calledTool("read-status", { status: "completed", count: 1 });
+      turn.calledTool("read-draft-status", { status: "completed", count: 1 });
       turn.event("turn.completed", { count: 1 });
       turn.messageIncludes(MARKER);
       turn.messageIncludes("ready");
@@ -34,7 +34,7 @@ export default [
           data: {
             turnId: received.data.turnId,
             status: "completed",
-            result: { toolName: "read-status" },
+            result: { toolName: "read-draft-status" },
           },
           count: 1,
         },
@@ -74,14 +74,14 @@ export default [
       );
       // Then the tool result reaches a completed reply without executing the account change.
       const result = await live.waitForEvent("action.result", {
-        data: { status: "completed", result: { toolName: "read-status" } },
+        data: { status: "completed", result: { toolName: "read-draft-status" } },
       });
       t.log(`Follow-up tool completed before waiting for its reply: ${JSON.stringify(result)}`);
       const received = await live.waitForEvent("message.received");
       await live.waitForEvent("turn.completed", { data: { turnId: received.data.turnId } });
       const followup = await live.result();
       followup.expectOk();
-      followup.calledTool("read-status", { status: "completed", count: 1 });
+      followup.calledTool("read-draft-status", { status: "completed", count: 1 });
       followup.messageIncludes(MARKER);
       followup.messageIncludes("ready");
       followup.eventOrder([
@@ -96,7 +96,7 @@ export default [
           data: {
             turnId: received.data.turnId,
             status: "completed",
-            result: { toolName: "read-status" },
+            result: { toolName: "read-draft-status" },
           },
           count: 1,
         },

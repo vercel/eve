@@ -28,6 +28,7 @@ Important naming note:
 | Delegate work to a specialist child agent                | [Subagents](./subagents/index.mdx)                                                     |
 | Run work on a recurring schedule                         | [Schedules](./schedules.mdx)                                                           |
 | Install an existing integration instead of writing one   | [Add Integrations](./install-integrations.mdx)                                         |
+| Build a coding agent, or compare eve-code benchmarks     | [Code Extension](./code-extension.mdx)                                                 |
 | Link a Vercel project and deploy to production           | [Deploy to Vercel](./guides/deployment/vercel.mdx)                                     |
 | Self-host, or compare hosting strategies                 | [Deployment](./guides/deployment/overview.md)                                          |
 | Authorize routes, sessions, and per-user access          | [Authentication](./guides/auth-and-route-protection.md)                                |
