@@ -38,6 +38,17 @@ eve add tool/bash
 export { default } from "eve/tools/bash";
 ```
 
+`bash` waits up to 30 seconds for a command. A command that finishes in time returns `status: "completed"` with `exitCode`, `stdout`, `stderr`, and `truncated`. A command that is still running keeps running in the sandbox as a job and returns `status: "running"` with a `jobId`, the output so far, and a `message` that tells the model how to continue. The model checks on or stops the job with later `bash` calls:
+
+```sh
+eve-job wait job-3f9a1c2e      # wait up to 10 seconds, then print new output and the job's status
+eve-job wait job-3f9a1c2e 25   # wait up to 25 seconds, the maximum
+eve-job stop job-3f9a1c2e      # send SIGTERM to the job's process group, then SIGKILL after 5 seconds
+eve-job list                   # list jobs and their status
+```
+
+A job keeps running across turns until it exits, the model stops it, or the sandbox stops. Cancelling a `bash` call before it returns stops its command. `eve-job` commands are ordinary `bash` calls, so the tool's approval policy applies to them. The `just-bash` provider has no background processes, so it runs every command to completion.
+
 Override its description, approval policy, or executor by wrapping the exported definition:
 
 ```ts title="agent/tools/bash.ts"

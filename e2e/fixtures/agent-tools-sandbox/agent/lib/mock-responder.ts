@@ -22,6 +22,9 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
           })),
         };
   }
+  if (message.includes("EVE_SANDBOX_BASH_JOB")) {
+    return respondToBashJob(message, request);
+  }
   if (message.includes("DYNAMIC-TURN-REPLAY-START")) {
     const gate = request.toolResults.find((result) => result.name === "dynamic-turn-replay-gate");
     if (gate === undefined) {
@@ -75,6 +78,26 @@ export function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   return `Mock reply: ${message}`;
+}
+
+/** Starts the slow command, waits on its job once, stops it, then replies. */
+function respondToBashJob(message: string, request: MockModelRequest): MockModelResponse | string {
+  const outputs = request.toolResults
+    .filter((result) => result.name === "bash")
+    .map((result) => result.output as { readonly jobId?: unknown });
+  if (outputs.length === 0) {
+    const command = /by running: `([^`]+)`/u.exec(message)?.[1] ?? "";
+    return { toolCalls: [{ input: { command }, name: "bash" }] };
+  }
+  const jobId = outputs[0]?.jobId;
+  if (typeof jobId !== "string") return formatOutput(outputs[0]);
+  if (outputs.length === 1) {
+    return { toolCalls: [{ input: { command: `eve-job wait ${jobId} 2` }, name: "bash" }] };
+  }
+  if (outputs.length === 2) {
+    return { toolCalls: [{ input: { command: `eve-job stop ${jobId}` }, name: "bash" }] };
+  }
+  return "index job stopped";
 }
 
 /** The `[Tasks]` note and `<task_result>` messages are eve's, not the user's. */

@@ -9,6 +9,7 @@ import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roo
 import { createJustBashSandboxProvider } from "#execution/sandbox/bindings/just-bash.js";
 import { createSandboxProviderHarness } from "#internal/testing/sandbox-provider-harness.js";
 import type { JustBashSandboxCreateOptions } from "#public/sandbox/just-bash-sandbox.js";
+import { executeBashOnSandbox } from "#execution/sandbox/bash.js";
 import { executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
 import { executeGrepOnSandbox } from "#execution/sandbox/grep-tool.js";
 
@@ -172,6 +173,26 @@ describe("just-bash sandbox file API", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("staging");
+  });
+
+  it("runs bash tool commands directly because just-bash cannot host background jobs", async () => {
+    const cacheDirectory = await createTemporaryCacheDirectory("bash-tool");
+    const handle = await createPrewarmedLocalHandle({
+      appRoot: cacheDirectory,
+      sandboxName: "session-bash-tool",
+    });
+
+    const result = await executeBashOnSandbox(handle.sandbox, {
+      command: "echo out; echo err >&2; exit 3",
+    });
+
+    expect(result).toEqual({
+      exitCode: 3,
+      status: "completed",
+      stderr: "err\n",
+      stdout: "out\n",
+      truncated: false,
+    });
   });
 
   it("passes env vars to a process spawned via the public session", async () => {
