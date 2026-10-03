@@ -148,7 +148,12 @@ export function createAgentActionInstrumentation(input: {
     await scope?.complete({
       outcome:
         event.type === "action.failed" || event.output.type === "error" ? "failed" : "completed",
-      errorType: event.type === "action.failed" ? (event.errorCode ?? "Error") : "Error",
+      errorType:
+        event.type === "action.failed"
+          ? (event.errorCode ?? "Error")
+          : event.output.type === "error"
+            ? "Error"
+            : undefined,
       error,
       output:
         input.recordOutputs && event.type === "action.completed" && event.output.type === "result"
