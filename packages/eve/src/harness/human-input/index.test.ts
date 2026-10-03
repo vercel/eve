@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  AT,
   BOB,
   NOW,
   Turn,
@@ -45,6 +44,18 @@ const ACTIONS: Readonly<Record<string, (turn: Turn) => Turn>> = {
     });
   },
   "ten minutes pass": (turn) => turn.intake({ now: NOW + 10 * 60_000, type: "time" }),
+  "Bob's child asks to deploy": (turn) =>
+    turn.interrupt({
+      at: { sequence: 4, stepIndex: 2, turnId: "child_turn_0" },
+      requests: [approval("deploy", "child-deploy")],
+      route: { childContinuationToken: "bob-token" },
+      type: "relayed.requested",
+    }),
+  "Alice's answer for Bob's child arrives": (turn) =>
+    turn.intake({
+      responses: [{ optionId: "approve", requestId: "child-deploy" }],
+      type: "delivered",
+    }),
 };
 
 /** Every sequence of up to `length` actions, by name. */
@@ -65,27 +76,6 @@ describe("HumanInput", () => {
 
     expect(humanInput.next()).toEqual({ run: "model" });
     expect(humanInput.write({ other: 1 })).toEqual({ other: 1 });
-  });
-
-  it("a request eve cannot ask for yet fails the turn instead of holding it", () => {
-    const turn = Turn.idle().interrupt({
-      at: AT,
-      requests: [
-        {
-          action: { callId: "call-ask", input: {}, kind: "tool-call", toolName: "ask" },
-          kind: "question",
-          prompt: "Where should Bob deploy?",
-          requestId: "ask",
-        },
-      ],
-      route: { childContinuationToken: "bob-token" },
-      type: "relayed.requested",
-    });
-
-    expect(turn.reported("turn.failed")).toEqual([
-      expect.objectContaining({ code: "HUMAN_INPUT_UNAVAILABLE" }),
-    ]);
-    expect(turn.next()).toEqual({ run: "model" });
   });
 
   it("the model never runs while a request of the turn's own is open", () => {

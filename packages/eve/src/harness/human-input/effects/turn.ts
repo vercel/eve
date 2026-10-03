@@ -8,7 +8,7 @@ import {
   ReceivedAuthorizationCallbacksKey,
 } from "#harness/authorization.js";
 import { setPendingCoordinationBatch } from "#harness/coordination.js";
-import { advanceStep, emitFailedStep, setHarnessEmissionState } from "#harness/emission.js";
+import { advanceStep, setHarnessEmissionState } from "#harness/emission.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import { HumanInput, type Transition } from "#harness/human-input/index.js";
 import { createFrameworkUserMessage, validateHarnessModelMessages } from "#harness/messages.js";
@@ -49,9 +49,6 @@ interface Applied {
 export async function applyHumanInput(input: {
   readonly effects?: StepEffects;
   readonly emit?: Emit;
-  /** Where the step stands, should human input fail the turn. */
-  readonly emissionState: HarnessEmissionState;
-  readonly hasDelegatedCaller: boolean;
   readonly session: HarnessSession;
   readonly transition: Transition;
 }): Promise<Applied> {
@@ -64,7 +61,7 @@ export async function applyHumanInput(input: {
   let runtimeCalls: ApprovedRuntimeCalls | undefined;
   let dispatched: readonly ModelMessage[] | undefined;
   const applyNested = async (nested: Transition) => {
-    const applied = await applyHumanInput({ ...input, session, transition: nested });
+    const applied = await applyHumanInput({ effects, emit, session, transition: nested });
     session = applied.session;
     runtimeCalls ??= applied.runtimeCalls;
     dispatched ??= applied.dispatched;
@@ -171,21 +168,10 @@ export async function applyHumanInput(input: {
         continue;
       case "budget.declined":
         throw new SessionLimitDeclinedError(event.requestId, transition.humanInput);
-      case "turn.failed": {
-        // Callers without an emit fn get the raw throw, as for model failures.
-        if (!emit) throw new Error(event.message);
-        await emitFailedStep(emit, input.emissionState, {
-          code: event.code,
-          message: event.message,
-          sessionId: session.sessionId,
-          usage: getSessionUsage(session),
-        });
-        const next = input.hasDelegatedCaller
-          ? { done: true as const, isError: true, output: event.message }
-          : { done: true as const, output: "" };
-        return { ended: { next, session }, messageAnswered, session };
-      }
+      // Relayed requests never reach the turn: steps around it apply these.
       case "answer.forwarded":
+      case "question.withdrawn":
+      case "turn.held":
         throw new Error(`Human input event "${event.type}" is not implemented.`);
     }
   }
@@ -202,7 +188,6 @@ export async function applyStepArrivals(input: {
   readonly effects: StepEffects;
   readonly emit?: Emit;
   readonly emissionState: HarnessEmissionState;
-  readonly hasDelegatedCaller: boolean;
   readonly session: HarnessSession;
   readonly stepInput: StepInput | undefined;
 }): Promise<
@@ -224,8 +209,6 @@ export async function applyStepArrivals(input: {
     const applied = await applyHumanInput({
       effects,
       emit,
-      emissionState,
-      hasDelegatedCaller: input.hasDelegatedCaller,
       session,
       transition: HumanInput.read(session.state).intake(intake),
     });

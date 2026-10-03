@@ -1,6 +1,8 @@
 import type { ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import type { RemoteAgentBinding } from "#eve-channel/support.js";
+import type { SessionInboxAddress } from "#execution/session-inbox/address.js";
 import type { AuthorizationChallenge, AuthorizationResult } from "#harness/authorization.js";
 import {
   answerBudget,
@@ -41,6 +43,15 @@ import {
   requireSignIns,
   type OpenSignIn,
 } from "./sign-ins.js";
+import {
+  deliverToRelayed,
+  isOpenRelayed,
+  relay,
+  relayedRequestIds,
+  withdrawAsk,
+  withdrawRelayed,
+  type OpenRelayed,
+} from "./relayed.js";
 import { staleAnswersAsText } from "./stale-answers.js";
 import type { SuspendedStep } from "./suspended-step.js";
 import { arrivalsOf } from "./arrivals.js";
@@ -89,10 +100,13 @@ export class HumanInput {
 
   /**
    * What the turn does now: run its next model step, or wait. The model never
-   * runs while a request is open.
+   * runs while a request of its own is open, sign-ins included; a relayed
+   * request waits on the call that asked, not on the model.
    */
   next(): Next {
-    return Object.keys(this.#state.requests).length === 0 ? { run: "model" } : { held: "input" };
+    return Object.values(this.#state.requests).some((open) => !isOpenRelayed(open))
+      ? { held: "input" }
+      : { run: "model" };
   }
 
   /**
@@ -138,15 +152,21 @@ export class HumanInput {
   }
 
   /**
-   * The ids of every open request an answer can resolve, for routing an
-   * answer to this session. Sign-ins are closed by their callbacks instead.
+   * The ids of the open requests of this session's own that an answer can
+   * resolve, for routing an answer to its turn. Sign-ins are closed by their
+   * callbacks instead, and relayed requests belong to whoever asked.
    */
   openRequestIds(): ReadonlySet<string> {
     return new Set(
       Object.entries(this.#state.requests).flatMap(([requestId, open]) =>
-        open.kind === "authorization" ? [] : [requestId],
+        open.kind === "authorization" || isOpenRelayed(open) ? [] : [requestId],
       ),
     );
+  }
+
+  /** The ids of the open relayed requests, whose answers a delivery may carry to who asked. */
+  relayedRequestIds(): ReadonlySet<string> {
+    return relayedRequestIds(this.#state);
   }
 }
 
@@ -197,12 +217,17 @@ export type Interrupt =
       readonly at: RequestAt;
       readonly request: InputRequest;
     }
-  /** A child session or workflow run asks a person, through this session. */
+  /**
+   * A child session, remote agent, or workflow run asks a person, through this
+   * session. `at` is the child batch's coordinates.
+   */
   | {
       readonly type: "relayed.requested";
       readonly at: RequestAt;
       readonly requests: readonly InputRequest[];
       readonly route: RelayRoute;
+      /** The task whose run asked, so readers attach the batch to it. */
+      readonly taskId?: string;
     };
 
 /** What may arrive for the turn. */
@@ -249,7 +274,25 @@ export type Intake =
     }
   | { readonly type: "time"; readonly now: number }
   /** A workflow run or child session ended; nobody can answer what it relayed. */
-  | { readonly type: "run.ended"; readonly runId: string };
+  | { readonly type: "run.ended"; readonly runId: string }
+  /**
+   * A delivery reached the session outside its turn's model steps: while the
+   * turn waits on the calls that asked, or between turns. Only relayed
+   * requests take from it; the runtime keeps the rest for the turn.
+   */
+  | {
+      readonly type: "delivered";
+      readonly responses: readonly InputResponse[];
+      /** Its message as text, and whether a delegating caller sent it rather than a person. */
+      readonly message?: { readonly text: string; readonly delegated: boolean };
+    }
+  /** A workflow run asks to withdraw its `ctx.ask()` question `requestId`. */
+  | {
+      readonly type: "withdraw.requested";
+      readonly control: string;
+      readonly requestId: string;
+      readonly runId: string;
+    };
 
 /**
  * What happened. Each has one meaning for the runtime, which applies it and
@@ -257,7 +300,12 @@ export type Intake =
  * back through `intake`, or end the turn.
  */
 export type HumanInputEvent =
-  | { readonly type: "publish"; readonly event: UnstampedMessageStreamEvent }
+  | {
+      readonly type: "publish";
+      readonly event: UnstampedMessageStreamEvent;
+      /** It belongs to an exchange this session relays for a child or run: publish it as relayed. */
+      readonly relayed?: true;
+    }
   | { readonly type: "history.appended"; readonly message: ModelMessage }
   /**
    * Run these approved calls with the tools of the step that asked, at its
@@ -301,20 +349,23 @@ export type HumanInputEvent =
       readonly result: AuthorizationResult & { readonly name: string };
       readonly requester: SessionAuthContext | null;
     }
-  /** Deliver an answer to the child session or run that asked. */
+  /** Deliver these answers to the child session, remote agent, or run that asked. */
   | {
       readonly type: "answer.forwarded";
       readonly route: RelayRoute;
-      readonly response: InputResponse;
+      readonly responses: readonly InputResponse[];
     }
+  /** Tell a run, on its control hook, that its `ctx.ask()` question is withdrawn. */
+  | { readonly type: "question.withdrawn"; readonly control: string; readonly requestId: string }
+  /** The turn waits on a person while the call that asked keeps running: publish `turn.waiting`. */
+  | { readonly type: "turn.held" }
   /** Grant a fresh budget window: the person chose to continue. */
   | { readonly type: "budget.granted" }
   /** The person chose to stop: the budget question is resolved; cancel the turn. */
   | { readonly type: "budget.declined"; readonly requestId: string }
   /** Tell the model something with the turn's next input. */
   | { readonly type: "note"; readonly text: string }
-  | { readonly type: "turn.cancelled" }
-  | { readonly type: "turn.failed"; readonly code: string; readonly message: string };
+  | { readonly type: "turn.cancelled" };
 
 export interface Transition {
   readonly humanInput: HumanInput;
@@ -336,8 +387,17 @@ export type PolicyRun =
 
 /** Where a relayed request's answer goes. */
 export interface RelayRoute {
+  /** The child's continuation token, which names its session inbox unless `childSessionInbox` does. */
   readonly childContinuationToken: string;
+  readonly childSessionInbox?: SessionInboxAddress;
+  /** A remote agent's session, answered over its own protocol. */
+  readonly remote?: RemoteAgentBinding & { readonly sessionId: string };
+  /** Where in the child the batch came from; its fresh batch from one source replaces the last. */
+  readonly inputSource?: string;
+  /** The workflow run that relayed it: nobody can answer it once that run ends. */
   readonly runId?: string;
+  /** The run's control hook, for its own `ctx.ask()` question. */
+  readonly control?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -364,12 +424,7 @@ type OpenRequest =
   | OpenApproval
   | OpenSignIn
   | { readonly kind: "session-limit"; readonly at: RequestAt; readonly request: InputRequest }
-  | {
-      readonly kind: "relayed";
-      readonly at: RequestAt;
-      readonly request: InputRequest;
-      readonly route: RelayRoute;
-    };
+  | OpenRelayed;
 
 const EMPTY: HumanInputState = { grants: [], requests: {} };
 
@@ -434,12 +489,22 @@ function reduce(state: HumanInputState, input: Interrupt | Intake): Reduced {
       );
     case "cancelled":
       // Candidates go first: their events report at their approval's coordinates.
+      // The cancel stops every child and run, so nobody can answer what they relayed.
       return then(
         staleCandidates(state, CANCELLED_REASON),
+        (next) => withdrawRelayed(next),
         withdrawBudget,
         cancelApprovals,
         (next) => closeSignIns(next, { outcome: "declined", reason: CANCELLED_REASON }),
       );
+    case "relayed.requested":
+      return relay(state, input);
+    case "delivered":
+      return deliverToRelayed(state, input);
+    case "run.ended":
+      return withdrawRelayed(state, (open) => open.route.runId === input.runId);
+    case "withdraw.requested":
+      return withdrawAsk(state, input);
     case "calls.settled":
       return settleCalls(state, input.results, input.running, input.stopped);
     case "authorization.completed": {
@@ -460,15 +525,6 @@ function reduce(state: HumanInputState, input: Interrupt | Intake): Reduced {
     }
     case "time":
       return expireCandidates(state, input.now);
-    // Human input is being rebuilt case by case. Until a case exists, a turn
-    // that needs a person fails with a clear error instead of hanging.
-    case "relayed.requested":
-      return unavailable(
-        state,
-        `This turn needs a person (${input.type}), which eve cannot ask for yet.`,
-      );
-    case "run.ended":
-      return { events: [], state };
     default: {
       const unhandled: never = input;
       throw new TypeError(`Unhandled human input: ${JSON.stringify(unhandled)}`);
@@ -504,8 +560,4 @@ function then(first: Reduced, ...rest: ((state: HumanInputState) => Reduced)[]):
     state = reduced.state;
   }
   return { events, state };
-}
-
-function unavailable(state: HumanInputState, message: string): Reduced {
-  return { events: [{ code: "HUMAN_INPUT_UNAVAILABLE", message, type: "turn.failed" }], state };
 }

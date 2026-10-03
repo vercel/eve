@@ -620,8 +620,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       "held" in HumanInput.read(session.state).next();
     if (settlesBesideApprovals) {
       const settled = await applyHumanInput({
-        emissionState,
-        hasDelegatedCaller,
         session,
         transition: HumanInput.read(session.state).intake({
           results: resolvedCoordination.messages.slice(session.history.length),
@@ -646,7 +644,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       effects: humanInputEffects,
       emit,
       emissionState,
-      hasDelegatedCaller,
       session,
       stepInput: accepted.input,
     });
@@ -1393,8 +1390,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const applied = await applyHumanInput({
         effects: humanInputEffects,
         emit,
-        emissionState,
-        hasDelegatedCaller,
         session,
         transition: HumanInput.read(session.state).interrupt({
           at: requestAt(emissionState),
@@ -1655,7 +1650,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         auth,
         coordinationTools: modelCallCoordinationTools,
         endsTurnTools: modelCallEndsTurnTools,
-        hasDelegatedCaller,
       });
     } catch (error) {
       throwIfTurnAborted(config.abortSignal);
@@ -2228,7 +2222,6 @@ async function handleStepResult(input: {
   readonly coordinationTools: HarnessToolMap;
   /** Tools that can end the turn in this step, with their `endsTurn` option. */
   readonly endsTurnTools: EndsTurnTools;
-  readonly hasDelegatedCaller: boolean;
   readonly session: HarnessSession;
 }): Promise<StepResult> {
   const { config, emit, promptMessages, result, runStep } = input;
@@ -2318,8 +2311,6 @@ async function handleStepResult(input: {
   if (approvalRequests.length > 0) {
     const applied = await applyHumanInput({
       emit,
-      emissionState,
-      hasDelegatedCaller: input.hasDelegatedCaller,
       session: baseSession,
       transition: HumanInput.read(baseSession.state).interrupt(
         approvalsRequested({
@@ -2346,8 +2337,6 @@ async function handleStepResult(input: {
     // joins history without them.
     const applied = await applyHumanInput({
       emit,
-      emissionState,
-      hasDelegatedCaller: input.hasDelegatedCaller,
       session: { ...baseSession, history: validateHarnessModelMessages(promptMessages) },
       transition: HumanInput.read(baseSession.state).interrupt({
         at: requestAt(emissionState),

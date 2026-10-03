@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { DeliverHookPayload, SessionAuthContext } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/session/next-input.js";
 import { SessionInputQueue } from "#execution/session/input-queue.js";
+import { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { createTestSessionState } from "#internal/testing/session-state.js";
 import type { SessionInbox, SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
@@ -75,6 +77,13 @@ type WaitInput = {
 
 function waitInput(inbox: SessionInbox): WaitInput {
   return {
+    cursor: new SessionStateCursor({
+      history: [],
+      inbox,
+      serializedContext: {},
+      sessionState: createTestSessionState({ sessionId: "ses-parked-wait" }),
+      sessionWritable: new WritableStream<Uint8Array>(),
+    }),
     hasWorkingTasks: () => false,
     inbox: inbox,
     queue: new SessionInputQueue(),

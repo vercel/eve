@@ -12,8 +12,8 @@ import type { InputResponse } from "#shared/input.js";
  * channel state, such as Telegram's compact button callbacks. Maps each
  * answer the session can't route as sent through that hook, and keeps what
  * maps to a `routable` request, which human input names (one the held turn
- * waits on). Every other answer stays as sent for the turn's own `deliver`
- * call.
+ * waits on, or one the session relays). Every other answer stays as sent for
+ * the turn's own `deliver` call.
  */
 export async function deliverChannelInputResponses(
   input: SessionStepState & {

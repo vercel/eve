@@ -2,10 +2,7 @@ import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import {
-  applyHumanInputEvents,
-  type HumanInputEnding,
-} from "#harness/human-input/effects/index.js";
+import { applyHumanInputEvents } from "#harness/human-input/effects/index.js";
 import {
   publishFromSessionStep,
   restoreSessionStep,
@@ -15,7 +12,7 @@ import {
 } from "#execution/publish-session-events.js";
 import {
   withSessionStateDelta,
-  type WithSessionStateDelta,
+  type SessionStateTransition,
 } from "#execution/session/state-delta.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import { HumanInput, type Transition } from "#harness/human-input/index.js";
@@ -26,41 +23,39 @@ type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
   | SubagentInputRequestHookPayload;
 
-type ProxiedSubagentEvent = PublishedSessionEvents & { readonly ending?: HumanInputEnding };
-
 /** Proxies one child event through its parent channel across a durable step boundary. */
 export async function runProxySubagentEventStep(
-  input: SessionStepState & {
-    readonly runId?: string;
-    readonly hookPayload: SubagentEventHookPayload;
-  },
-): Promise<WithSessionStateDelta<ProxiedSubagentEvent>> {
+  input: SessionStepState & RelayedBy & { readonly hookPayload: SubagentEventHookPayload },
+): Promise<SessionStateTransition> {
   "use step";
 
   return await withSessionStateDelta(input, async (target) =>
     emitProxiedSubagentEvent({
       ...(await restoreSessionStep(target)),
+      control: target.control,
       runId: target.runId,
       hookPayload: target.hookPayload,
     }),
   );
 }
 
+/** The workflow tool run that relayed a question, and its control hook when the question is its own `ctx.ask()`. */
+interface RelayedBy {
+  readonly control?: string;
+  readonly runId?: string;
+}
+
 /**
  * Relays one child event through the parent session. A child's sign-in
  * completes on its own callback, so its events only reach the channel; a
- * child's question is human input. `runId` names the workflow tool run that
- * relayed the question.
+ * child's question is human input.
  */
 export async function emitProxiedSubagentEvent(
-  input: RestoredSessionStep & {
-    readonly runId?: string;
-    readonly hookPayload: SubagentEventHookPayload;
-  },
-): Promise<ProxiedSubagentEvent> {
-  const { hookPayload, runId } = input;
+  input: RestoredSessionStep & RelayedBy & { readonly hookPayload: SubagentEventHookPayload },
+): Promise<PublishedSessionEvents> {
+  const { control, hookPayload, runId } = input;
   let transition: Transition | undefined;
-  const { published, result } = await publishFromSessionStep(input, {
+  const { published } = await publishFromSessionStep(input, {
     origin: "relayed",
     inputSource:
       hookPayload.kind === "subagent-input-request"
@@ -80,7 +75,7 @@ export async function emitProxiedSubagentEvent(
             }),
           );
         }
-        return undefined;
+        return;
       }
       const { event } = hookPayload;
       transition = HumanInput.read(session.state).interrupt({
@@ -88,19 +83,24 @@ export async function emitProxiedSubagentEvent(
         requests: event.requests,
         route: {
           childContinuationToken: hookPayload.childContinuationToken,
+          // The address names the child only when it is the child's own inbox.
+          ...(hookPayload.childSessionInbox?.sessionId === hookPayload.childSessionId && {
+            childSessionInbox: hookPayload.childSessionInbox,
+          }),
+          ...(hookPayload.remote !== undefined && { remote: hookPayload.remote }),
+          ...(hookPayload.inputSource !== undefined && { inputSource: hookPayload.inputSource }),
           ...(runId !== undefined && { runId }),
+          ...(control !== undefined && { control }),
         },
+        ...(event.taskId !== undefined && { taskId: event.taskId }),
         type: "relayed.requested",
       });
-      return (await applyHumanInputEvents(emit, transition.events)).ending;
+      await applyHumanInputEvents(emit, transition.events, session);
     },
-    updateSession(session, ending) {
+    updateSession(session) {
       if (transition === undefined) return { session };
-      return {
-        result: ending,
-        session: { ...session, state: transition.humanInput.write(session.state) },
-      };
+      return { session: { ...session, state: transition.humanInput.write(session.state) } };
     },
   });
-  return result === undefined ? published : { ...published, ending: result };
+  return published;
 }

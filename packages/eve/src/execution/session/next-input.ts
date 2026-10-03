@@ -1,3 +1,4 @@
+import { forwardRelayedAnswers } from "#harness/human-input/effects/workflow.js";
 import type {
   SessionControl,
   SessionInputQueue,
@@ -5,18 +6,26 @@ import type {
 } from "#execution/session/input-queue.js";
 import type { SessionInboxReader } from "#execution/session-inbox/inbox.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
+import type { SessionStateCursor } from "#execution/session/state-cursor.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 
 export type NextTurnInstruction =
   | { readonly kind: "workflow"; readonly message: WorkflowToolRunMessage }
   | { readonly kind: SessionControl }
   | { readonly kind: "closed" }
+  /** A relayed budget Stop: the open turn, if any, is cancelled. */
+  | { readonly kind: "cancel-turn" }
   /** `session.cancel()` while no turn runs, but tasks are working. */
   | { readonly kind: "cancel-working-tasks" }
   | TurnSelection;
 
-/** Waits for the next input the parked owner must act on. */
+/**
+ * Waits for the next input the parked owner must act on. A delivery that only
+ * answers relayed requests leaves nothing for the session, so the wait
+ * continues.
+ */
 export async function nextTurnDelivery(input: {
+  readonly cursor: SessionStateCursor;
   readonly inbox: SessionInboxReader;
   readonly hasWorkingTasks: () => boolean;
   readonly queue: SessionInputQueue;
@@ -30,7 +39,12 @@ export async function nextTurnDelivery(input: {
       freshSequence: inbox.hasPending() ? undefined : freshSequence,
     });
     if (selected?.kind === "control") return { kind: selected.control };
-    if (selected?.kind === "turn") return selected;
+    if (selected?.kind === "turn") {
+      const forwarded = await forwardRelayedAnswers(selected.delivery, input.cursor);
+      if (forwarded.kind === "cancel-turn") return forwarded;
+      if (forwarded.remainder === undefined) continue;
+      return { ...selected, delivery: forwarded.remainder };
+    }
 
     // A delivery may already be in the pump queue by the time the owner exits
     // its committed waiting step. It is still an idle arrival when no earlier

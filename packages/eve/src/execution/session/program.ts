@@ -225,6 +225,7 @@ async function runSessionLoop(
   > => {
     while (true) {
       const next = await nextTurnDelivery({
+        cursor,
         hasWorkingTasks: () => workingTasks(sessionTaskTable(cursor)).length > 0,
         inbox,
         queue,
@@ -302,6 +303,7 @@ async function runSessionLoop(
           return { kind: "terminal", outcome: { kind: "expired" } };
         case "clear":
         case "compact":
+        case "cancel-turn":
           continue;
         case "turn":
           return await runDeliveredTurn(next);
@@ -372,6 +374,12 @@ async function runSessionLoop(
         case "clear":
         case "compact":
           action = await runTurn({ control: next.kind });
+          continue;
+        case "cancel-turn":
+          await execution.cancelTurnWork();
+          await settleCancelledTurn(false);
+          // Cancellation consumes any outstanding caller; do not report the prior turn.
+          action = { ...action, settled: undefined };
           continue;
         case "turn": {
           const result = await runDeliveredTurn(next);

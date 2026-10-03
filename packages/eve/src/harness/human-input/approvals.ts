@@ -365,7 +365,8 @@ function resolveApprovals<S extends ApprovalState>(state: S): Reduced<S> {
   return { events, state: suspended === undefined ? resolved : { ...resolved, suspended } };
 }
 
-function outcomeOf(answer: InputResponse | undefined): Outcome {
+/** An approval's outcome from its answer; a relayed approval resolves the same way. */
+export function outcomeOf(answer: InputResponse | undefined): Outcome {
   if (answer === undefined) return "ignored";
   if (answer.optionId === "approve") return "approved";
   // ACP answers with "deny"; eve's own approval prompts offer "cancel".

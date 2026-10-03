@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { HumanInput, type RelayRoute } from "#harness/human-input/index.js";
 import type { SessionStateMap } from "#harness/types.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
+import { filterEventsByType } from "#internal/testing/events.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import type { InputRequest } from "#shared/input.js";
 import {
   accumulateTurnUsage,
   getTurnUsageState,
@@ -89,4 +92,70 @@ describe("settleCancelledTurnStep", () => {
       );
     },
   );
+
+  it("withdraws every request the session relays before it reports the turn cancelled", async () => {
+    const base = createTestSessionState({
+      emissionState: { sequence: 3, sessionStarted: true, stepIndex: 1, turnId: "turn_1" },
+      sessionId: "support-session",
+    });
+    // Alice's turn relays a question from Bob's deploy task and an approval
+    // from the reviewer subagent when she cancels it.
+    const state = relay(
+      relay(base.snapshot.session.state, request("deploy-run-ask-1", "question"), {
+        childContinuationToken: "deploy-run-ask-1",
+        control: "deploy-run-control",
+        runId: "deploy-run",
+      }),
+      request("reviewer-approval-1", "tool-approval"),
+      { childContinuationToken: "reviewer-token" },
+    );
+
+    const result = await settleCancelledTurn({
+      history: [],
+      reportUsage: false,
+      serializedContext,
+      sessionState: { ...base, snapshot: { session: { ...base.snapshot.session, state } } },
+    });
+
+    expect(result.events.map((event) => event.type)).toEqual([
+      "input.resolved",
+      "input.resolved",
+      "turn.cancelled",
+      "session.waiting",
+    ]);
+    expect(
+      filterEventsByType(result.events, "input.resolved").map((event) => event.data.resolutions),
+    ).toEqual([
+      [{ kind: "question", outcome: "cancelled", requestId: "deploy-run-ask-1" }],
+      [{ kind: "tool-approval", outcome: "cancelled", requestId: "reviewer-approval-1" }],
+    ]);
+    expect(
+      HumanInput.read(readDurableSession(result.sessionState).state).relayedRequestIds(),
+    ).toEqual(new Set());
+  });
 });
+
+function request(requestId: string, kind: "question" | "tool-approval"): InputRequest {
+  return {
+    action: { callId: requestId, input: {}, kind: "tool-call", toolName: "deploy" },
+    kind,
+    options: [{ id: "approve", label: "Approve" }],
+    prompt: "Ship it?",
+    requestId,
+  };
+}
+
+function relay(
+  state: SessionStateMap | undefined,
+  asked: InputRequest,
+  route: RelayRoute,
+): SessionStateMap | undefined {
+  return HumanInput.read(state)
+    .interrupt({
+      at: { sequence: 2, stepIndex: 0, turnId: "turn_1" },
+      requests: [asked],
+      route,
+      type: "relayed.requested",
+    })
+    .humanInput.write(state);
+}

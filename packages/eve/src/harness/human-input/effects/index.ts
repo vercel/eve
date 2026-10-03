@@ -4,4 +4,10 @@
 // instead, since they cannot load these step-side modules.
 
 export { applyHumanInput, applyStepArrivals, holdForInput, type StepEffects } from "./turn.js";
-export { applyHumanInputEvents, type HumanInputEnding } from "./session.js";
+export {
+  applyHumanInputEvents,
+  partitionRelayed,
+  relayHumanInputEvents,
+  type ForwardedRelayedAnswers,
+  type HumanInputEnding,
+} from "./session.js";

@@ -1,5 +1,8 @@
 import type { DeliverHookPayload, TurnCaller } from "#channel/types.js";
-import { mapHeldInputResponses } from "#harness/human-input/effects/workflow.js";
+import {
+  forwardRelayedAnswers,
+  mapHeldInputResponses,
+} from "#harness/human-input/effects/workflow.js";
 import { admitSessionInboxPayload } from "#execution/session/admission.js";
 import {
   isSteeringMessage,
@@ -11,6 +14,7 @@ import type { SessionInboxPayload } from "#execution/session-inbox/inbox.js";
 import { decodeSessionInboxPayload } from "#execution/session-inbox/protocol.js";
 import type { WorkflowToolRunMessage } from "#execution/tools/workflow/messages.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
+import { HumanInput } from "#harness/human-input/index.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
@@ -30,7 +34,8 @@ export type RuntimeEvent =
  * Admission policy, cancellation, and steering for one active turn.
  * Deliveries admitted while a model step runs stay in the shared queue until
  * the turn reaches a committed boundary; a runtime-action wait reads them as
- * they arrive, so a message can steer it.
+ * they arrive, so a message can steer it and a child blocked on an answer it
+ * relayed receives it.
  *
  * The pump signals cancellation and eligible steering immediately. Cancellation
  * aborts the turn; steering only interrupts generation before assistant output
@@ -38,7 +43,7 @@ export type RuntimeEvent =
  */
 export class ActiveTurn {
   private readonly admitted = new Set<number>();
-  /** Admitted deliveries a runtime wait already checked for steering. */
+  /** Admitted deliveries a runtime wait already forwarded and checked for steering. */
   private readonly inspected = new Set<number>();
   /** Admitted deliveries the channel already mapped for a held turn's requests. */
   private readonly mappedForHeldRequest = new Set<number>();
@@ -77,7 +82,14 @@ export class ActiveTurn {
     } catch {
       return;
     }
-    if (delivery.kind === "deliver" && isSteeringMessage(delivery, this.identity))
+    // A message may answer a relayed question, so it can't interrupt generation
+    // before the boundary forwards it.
+    if (
+      delivery.kind === "deliver" &&
+      isSteeringMessage(delivery, this.identity) &&
+      HumanInput.read(this.input.cursor.sessionState.snapshot.session.state).relayedRequestIds()
+        .size === 0
+    )
       this.steeringController.abort();
   };
 
@@ -110,9 +122,10 @@ export class ActiveTurn {
   }
 
   /**
-   * Steering admitted during this turn, coalesced.
-   * The next step reads it as input, so its signal must not interrupt that
-   * step; only deliveries still unread re-signal the next generation.
+   * Steering admitted during this turn, with relayed answers forwarded first,
+   * coalesced. The next step reads it as input, so its signal must not
+   * interrupt that step; only deliveries still unread re-signal the next
+   * generation.
    */
   async takeSteering(options?: SteeringOptions): Promise<DeliverHookPayload | undefined> {
     const steering: DeliverHookPayload[] = [];
@@ -120,7 +133,12 @@ export class ActiveTurn {
       const selection = this.input.queue.takeSteering(this.admitted, this.identity, options);
       if (selection === undefined) break;
       for (const sequence of selection.sequences) this.admitted.delete(sequence);
-      steering.push(selection.delivery);
+      const forwarded = await forwardRelayedAnswers(selection.delivery, this.input.cursor);
+      if (forwarded.kind === "cancel-turn") {
+        this.abort();
+        break;
+      }
+      if (forwarded.remainder !== undefined) steering.push(forwarded.remainder);
     }
     this.resetSteering();
     if (steering.length === 0) return undefined;
@@ -153,7 +171,7 @@ export class ActiveTurn {
    */
   async nextRuntimeEvent(timers: readonly Promise<string>[]): Promise<RuntimeEvent> {
     while (true) {
-      const steered = this.checkAdmittedSteering();
+      const steered = await this.forwardAdmitted();
       if (this.signal.aborted) return "cancelled";
       if (steered) return { kind: "steering" };
       const event = this.runtimeResults.shift();
@@ -191,7 +209,12 @@ export class ActiveTurn {
       }
       this.admitted.delete(sequence);
       this.input.queue.replaceDelivery(sequence, undefined);
-      return delivery;
+      const forwarded = await forwardRelayedAnswers(delivery, this.input.cursor);
+      if (forwarded.kind === "cancel-turn") {
+        this.abort();
+        return undefined;
+      }
+      if (forwarded.remainder !== undefined) return forwarded.remainder;
     }
     return undefined;
   }
@@ -245,10 +268,11 @@ export class ActiveTurn {
   }
 
   /**
-   * Returns whether a delivery admitted since the last check steers: its
-   * message is for the model.
+   * During a runtime wait, a child blocked on an answer it relayed can't wait
+   * for the boundary. Forwards each delivery admitted since the last check,
+   * and returns whether what is left steers: its message is for the model.
    */
-  private checkAdmittedSteering(): boolean {
+  private async forwardAdmitted(): Promise<boolean> {
     let steered = false;
     for (const sequence of this.admitted) {
       if (this.inspected.has(sequence)) continue;
@@ -258,7 +282,20 @@ export class ActiveTurn {
         continue;
       }
       this.inspected.add(sequence);
-      if (isSteeringMessage(delivery, this.identity)) steered = true;
+      const forwarded = await forwardRelayedAnswers(delivery, this.input.cursor);
+      if (forwarded.kind === "cancel-turn") {
+        this.input.queue.replaceDelivery(sequence, undefined);
+        this.admitted.delete(sequence);
+        this.abort();
+        return false;
+      }
+      const { remainder } = forwarded;
+      this.input.queue.replaceDelivery(sequence, remainder);
+      if (remainder === undefined) {
+        this.admitted.delete(sequence);
+        continue;
+      }
+      if (isSteeringMessage(remainder, this.identity)) steered = true;
     }
     return steered;
   }

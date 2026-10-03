@@ -3,14 +3,15 @@ import {
   emitAgentStartedStep,
   emitWorkflowToolRunReportStep,
 } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
-import { HumanInputFailure } from "#harness/human-input/effects/workflow.js";
 import type {
   WorkflowToolRunAgentStartedMessage,
   WorkflowToolRunMessage,
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunRequestMessage,
+  WorkflowToolRunWithdrawMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { SessionStateCursor } from "#execution/session/state-cursor.js";
+import { withdrawRelayedRequests } from "#harness/human-input/effects/workflow.js";
 import {
   workflowToolRunOutcomeToToolResult,
   workflowToolRunRequestToInputRequestPayload,
@@ -42,8 +43,8 @@ export async function handleWorkflowToolRunMessage(
     case "request":
       await handleWorkflowToolRunRequest({ ...input, message });
       return undefined;
-    // Nothing the session relays stays open, so there is nothing to withdraw.
     case "withdraw":
+      await handleWorkflowToolRunWithdraw({ ...input, message });
       return undefined;
     case "report":
       await input.cursor.advance((state) =>
@@ -78,7 +79,8 @@ export function batchAgentStarts(messages: readonly WorkflowToolRunMessage[]): B
 /**
  * Settles a workflow tool run outcome against the turn's recorded runs and
  * returns the runtime action result the turn should accept, or `undefined`
- * when the outcome does not bind to a run this turn owns.
+ * when the outcome does not bind to a run this turn owns. Requests the run
+ * relayed are withdrawn first, since nobody can answer them anymore.
  */
 async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
@@ -90,6 +92,7 @@ async function handleWorkflowToolRunOutcome(
 
   const result = workflowToolRunOutcomeToToolResult(message);
   if (!isInboxToolResultFromRecordedWorkflowToolRun(state, result)) return undefined;
+  await withdrawRelayedRequests(cursor, { runId: message.from.runId, type: "run.ended" });
   return result;
 }
 
@@ -106,15 +109,29 @@ async function handleWorkflowToolRunRequest(
     });
     return;
   }
-  const relayed = await cursor.advance((state) =>
+  await cursor.advance((state) =>
     runProxySubagentEventStep({
+      ...(message.request.kind === "ask" && { control: message.request.control }),
       hookPayload: workflowToolRunRequestToInputRequestPayload(message),
       runId: message.from.runId,
       ...state,
     }),
   );
-  if (relayed.ending?.kind === "failed") throw new HumanInputFailure(relayed.ending);
-  if (relayed.ending !== undefined) {
-    throw new Error("Cancelling a turn from a relayed request is not implemented.");
-  }
+}
+
+/**
+ * A run asks to withdraw a `ctx.ask()` question. The session decides: it
+ * withdraws the question unless it already accepted an answer or stopped
+ * offering it, and tells the run either way.
+ */
+async function handleWorkflowToolRunWithdraw(
+  input: HandlerInput<WorkflowToolRunWithdrawMessage>,
+): Promise<void> {
+  const { cursor, message } = input;
+  await withdrawRelayedRequests(cursor, {
+    control: message.control,
+    requestId: message.replyTo,
+    runId: message.from.runId,
+    type: "withdraw.requested",
+  });
 }

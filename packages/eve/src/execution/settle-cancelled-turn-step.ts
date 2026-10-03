@@ -4,7 +4,7 @@ import {
   commitCancelledCoordinationBatch,
   getPendingCoordinationBatch,
 } from "#harness/coordination.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import {
   publishFromSessionStep,
   restoreSessionStep,
@@ -15,9 +15,13 @@ import {
   type WithSessionStateDelta,
 } from "#execution/session/state-delta.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
-import { HumanInput, type Transition } from "#harness/human-input/index.js";
+import { HumanInput } from "#harness/human-input/index.js";
 import { type HarnessModelMessage, validateHarnessModelMessages } from "#harness/messages.js";
-import { applyHumanInputEvents } from "#harness/human-input/effects/index.js";
+import {
+  applyHumanInputEvents,
+  partitionRelayed,
+  relayHumanInputEvents,
+} from "#harness/human-input/effects/index.js";
 import { getHarnessEmissionState, setHarnessEmissionState } from "#harness/emission.js";
 import { removeBlockingWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import {
@@ -61,20 +65,22 @@ export async function settleCancelledTurnStep(
 export async function settleCancelledTurn(
   input: CancelledTurnSettleInput,
 ): Promise<CancelledTurnSettleResult> {
+  const transition = HumanInput.read(readDurableSession(input.sessionState).state).intake({
+    type: "cancelled",
+  });
+  const { own, relayed } = partitionRelayed(transition.events);
+  // The cancel stopped every child and run, so channels stop offering what they asked.
+  const withdrawn = await relayHumanInputEvents(input, relayed);
   const step = {
-    ...(await restoreSessionStep(input)),
+    ...(await restoreSessionStep({ ...withdrawn, sessionWritable: input.sessionWritable })),
     history: input.history,
   };
   const durableState = step.durableSession.state;
-  let transition: Transition | undefined;
   let cancelledResults: readonly ModelMessage[] = [];
   const { published, result: usage } = await publishFromSessionStep(step, {
     origin: "own",
     async publish(emit) {
-      transition = HumanInput.read(durableState).intake({ type: "cancelled" });
-      const { ending, history } = await applyHumanInputEvents(emit, transition.events);
-      // The turn already ends as cancelled; a failure here has no turn left to fail.
-      if (ending?.kind === "failed") throw new Error(ending.message);
+      const { history } = await applyHumanInputEvents(emit, own);
       cancelledResults = history;
       const emissionState = getHarnessEmissionState(durableState);
       return await emitCancelledTurn(emit, emissionState, getSessionUsage(step.durableSession));
@@ -82,7 +88,7 @@ export async function settleCancelledTurn(
     updateSession(baseSession, emissionState) {
       const session = {
         ...baseSession,
-        state: transition?.humanInput.write(baseSession.state) ?? baseSession.state,
+        state: transition.humanInput.write(baseSession.state),
       };
       const owningTurnId =
         getPendingCoordinationBatch(session.state)?.event.turnId ??

@@ -3,6 +3,7 @@ import { hydrateStepArguments } from "#compiled/@workflow/core/serialization.js"
 import { getWorld, start } from "#internal/workflow/runtime.js";
 import {
   captureTurnEvents,
+  containsEventSequence,
   filterEventsByType,
   readFirstTurnReply,
 } from "#internal/testing/events.js";
@@ -12,12 +13,16 @@ import { SLEEP_INPUT_SCHEMA } from "#tools/provided/sleep.js";
 import { executeSleepTool } from "#tools/provided/sleep-workflow.js";
 import { resumeSessionInbox } from "#execution/session-inbox/resume.js";
 import {
+  askThenRaceWorkflow,
+  answerWithResponderWorkflow,
+  confirmDeployWorkflow,
   deployServiceWorkflow,
   failingDeployWorkflow,
   reportingDeployWorkflow,
   stepReferenceWorkflow,
   workflowContextMisuseWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
+import type { InputRequestedStreamEvent, MessageStreamEvent } from "#protocol/message.js";
 import {
   buildWorkflowToolSerializedContext,
   createWorkflowToolRuntime,
@@ -154,6 +159,224 @@ describe("workflow tools", () => {
 
     expect(output).toContain("deploy of api exploded");
   });
+
+  it("routes workflow reports, human input, and outcome through the session owner", async () => {
+    const output = captureConsoleOutput();
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-hitl",
+      execute: confirmDeployWorkflow,
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            acceptedDeploymentId: "dpl_inline",
+            continuationToken: "http:workflow-tool-hitl",
+            requestInput: true,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const asked = await stream.nextTurn();
+        expect(
+          filterEventsByType(asked, "action.partial").map((event) => event.data.result.output),
+        ).toEqual(["awaiting approval"]);
+        const requested = filterEventsByType(asked, "input.requested");
+        expect(requested).toHaveLength(1);
+        const request = (requested[0] as InputRequestedStreamEvent).data.requests[0]!;
+        expect(request).toMatchObject({
+          action: { input: { service: "api" }, kind: "tool-call", toolName: "confirm_deploy" },
+          display: "confirmation",
+          kind: "question",
+          prompt: "Apply plan:api?",
+        });
+        expect(request.options?.map((option) => option.id)).toEqual(["approve", "cancel"]);
+        // The call is still running, so the question parks the open turn.
+        const [parked] = filterEventsByType(asked, "turn.waiting");
+        expect(asked.at(-1)).toBe(parked);
+        expect(filterEventsByType(asked, "turn.completed")).toHaveLength(0);
+
+        const commandToken = sessionCommandHookToken(run.runId);
+        await resumeSessionInbox(commandToken, {
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request.requestId }] },
+        });
+
+        const answered = await stream.nextTurn();
+        expect(filterEventsByType(answered, "input.resolved")).toMatchObject([
+          { data: { resolutions: [{ outcome: "answered", requestId: request.requestId }] } },
+        ]);
+        const progress = answered.findIndex(
+          (event) =>
+            event.type === "action.partial" && event.data.result.output === "approval received",
+        );
+        const resultIndex = answered.findIndex(
+          (event) =>
+            event.type === "action.result" &&
+            event.data.result.kind === "tool-result" &&
+            event.data.result.toolName === "confirm_deploy",
+        );
+        expect(progress, JSON.stringify(answered)).toBeGreaterThanOrEqual(0);
+        expect(resultIndex).toBeGreaterThan(progress);
+        const results = filterEventsByType(answered, "action.result");
+        expect(results.map((event) => JSON.stringify(event.data.result.output))).toContainEqual(
+          JSON.stringify({ approved: true, service: "api" }),
+        );
+        expect(filterEventsByType(answered, "turn.failed")).toHaveLength(0);
+        // The answer resumes the same turn, which completes once.
+        const turnIds = new Set(
+          answered.flatMap((event) =>
+            "data" in event && event.data !== undefined && "turnId" in event.data
+              ? [event.data.turnId]
+              : [],
+          ),
+        );
+        expect([...turnIds]).toEqual([parked!.data.turnId]);
+        expect(filterEventsByType(answered, "turn.started")).toHaveLength(0);
+        expect(filterEventsByType(answered, "turn.completed")).toHaveLength(1);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+    expect(output.unexpected(workflowSdkNotice.unpinnedDelivery)).toEqual([]);
+  }, 60_000);
+
+  it("exposes the principal that answered ctx.ask", async () => {
+    const alice = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "alice",
+      principalType: "user",
+    };
+    const bob = {
+      ...alice,
+      attributes: { private: "channel-only" },
+      principalId: "bob",
+    };
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-ask-responder",
+      execute: answerWithResponderWorkflow,
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: {
+            ...buildWorkflowToolSerializedContext({
+              continuationToken: "http:workflow-tool-ask-responder",
+              requestInput: true,
+            }),
+            "eve.auth": alice,
+          },
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const requested = await stream.nextTurn();
+        const request = (
+          filterEventsByType(requested, "input.requested")[0] as InputRequestedStreamEvent
+        ).data.requests[0]!;
+        await resumeSessionInbox(sessionCommandHookToken(run.runId), {
+          auth: bob,
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: request.requestId }] },
+        });
+
+        const answered = await stream.nextTurn();
+        const result = filterEventsByType(answered, "action.result").find(
+          (event) =>
+            event.data.result.kind === "tool-result" &&
+            event.data.result.toolName === "confirm_deploy",
+        );
+        expect(JSON.parse(String(result?.data.result.output))).toEqual({
+          answer: {
+            optionId: "approve",
+            responder: {
+              authenticator: "test",
+              principalId: "bob",
+              principalType: "user",
+            },
+            status: "answered",
+          },
+          runStartPrincipal: "alice",
+        });
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  it("lets a deadline win a race against an unanswered ask and withdraws the ask", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-ask-deadline",
+      execute: askThenRaceWorkflow,
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          kind: "initial",
+          ownerDeploymentId: "dpl_inline",
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: buildWorkflowToolSerializedContext({
+            continuationToken: "http:workflow-tool-ask-deadline",
+            requestInput: true,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        // Asking parks the turn; the sleep then wins and the same turn resumes.
+        const asked = await stream.nextTurn();
+        const requested = filterEventsByType(asked, "input.requested");
+        expect(requested).toHaveLength(1);
+        const requestId = requested[0]!.data.requests[0]!.requestId;
+
+        const outputs: string[] = [];
+        const resumedEvents: MessageStreamEvent[] = [];
+        // A replayed parked boundary may arrive before the deadline result.
+        for (let attempt = 0; attempt < 5 && outputs.length === 0; attempt += 1) {
+          const resumed = await stream.nextTurn();
+          resumedEvents.push(...resumed);
+          expect(filterEventsByType(resumed, "turn.failed")).toHaveLength(0);
+          expect(filterEventsByType(resumed, "session.failed")).toHaveLength(0);
+          outputs.push(
+            ...filterEventsByType(resumed, "action.result").map((event) =>
+              JSON.stringify(event.data.result.output),
+            ),
+          );
+        }
+        expect(outputs.some((output) => output.includes('"decided":"timed out"'))).toBe(true);
+        // The run returned without the answer, so channels must stop offering its question.
+        expect(
+          filterEventsByType(resumedEvents, "input.resolved").map(
+            (event) => event.data.resolutions,
+          ),
+        ).toEqual([[{ kind: "question", outcome: "cancelled", requestId }]]);
+        expect(containsEventSequence(resumedEvents, ["input.resolved", "action.result"])).toBe(
+          true,
+        );
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 30_000);
 
   it("streams a waiting tool's yields as action.partial and settles with its return", async () => {
     const runtime = await createWorkflowToolRuntime({
