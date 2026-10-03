@@ -2,6 +2,7 @@ import type { UserContent } from "ai";
 
 import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
+import type { InvokeToolFn } from "#channel/invoke-tool.js";
 import type { InputResponse } from "#shared/input.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
@@ -39,6 +40,8 @@ export interface RouteHandlerArgs<TState = undefined> {
    * inspection detail of `GET /eve/v1/info`.
    */
   describe(): Promise<AgentDescription>;
+  /** Runs one of the agent's tools as `auth`, outside any conversation. */
+  readonly invokeTool: InvokeToolFn;
 }
 
 export interface SendPayload {

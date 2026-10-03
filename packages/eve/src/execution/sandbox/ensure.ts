@@ -5,7 +5,10 @@ import {
   buildCallbackContext,
   withRuntimeSandboxLifecycle,
 } from "#context/build-callback-context.js";
-import { trackActiveSandboxHandle } from "#execution/sandbox/active-handles.js";
+import {
+  trackActiveSandboxHandle,
+  untrackActiveSandboxHandle,
+} from "#execution/sandbox/active-handles.js";
 import { createSandboxProviderHost } from "#execution/sandbox/provider-host.js";
 import { resolveSandboxCacheDirectory } from "#internal/application/paths.js";
 import {
@@ -320,7 +323,11 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       if (input.ownsSandbox === false)
         throw new Error("Only the owning session can delete this sandbox.");
       const current = await requireHandle();
+      const providerName = opened?.providerName;
       await current.onSessionDelete(deleteOptions);
+      if (providerName !== undefined) {
+        untrackActiveSandboxHandle({ handle: current, providerName, sessionId: input.sessionId });
+      }
       opened = undefined;
       opening = undefined;
       persisted = null;
