@@ -91,7 +91,10 @@ export function clearPendingCoordinationBatch(session: HarnessSession): HarnessS
   }
   const state = { ...session.state };
   delete state[PENDING_COORDINATION_BATCH_KEY];
-  return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
+  return {
+    ...session,
+    state: Object.keys(state).length > 0 ? state : undefined,
+  };
 }
 
 /** What the model reads for a call its turn's cancellation stopped before the call settled. */
@@ -107,7 +110,10 @@ export function commitCancelledCoordinationBatch(session: HarnessSession): Harne
   if (batch === undefined) return session;
   const cancelledCalls = [
     ...approvedSiblingCalls(session.history, batch),
-    ...batch.tasks.map((task) => ({ callId: task.callId, toolName: task.toolName })),
+    ...batch.tasks.map((task) => ({
+      callId: task.callId,
+      toolName: task.toolName,
+    })),
     ...pendingTaskToolCalls(batch.responseMessages).map((call) => ({
       callId: call.callId,
       toolName: call.kind,
@@ -324,7 +330,10 @@ export async function resolvePendingCoordination(input: {
     // message, so results join a trailing tool response instead of hiding it.
     const tail = batch.responseMessages.at(-1);
     if (tail?.role === "tool") {
-      messages[messages.length - 1] = { content: [...tail.content, ...toolResults], role: "tool" };
+      messages[messages.length - 1] = {
+        content: [...tail.content, ...toolResults],
+        role: "tool",
+      };
     } else {
       messages.push({ content: toolResults, role: "tool" });
     }
@@ -356,7 +365,11 @@ export function createRuntimeActionRequestFromToolCall(input: {
     toolName: input.toolCall.toolName,
   });
   if (definition?.frameworkAction === "load-skill") {
-    return { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill" };
+    return {
+      callId: input.toolCall.toolCallId,
+      input: toolInput,
+      kind: "load-skill",
+    };
   }
   const action: RuntimeActionRequest = {
     callId: input.toolCall.toolCallId,
@@ -479,7 +492,7 @@ function toToolResultOutput(result: RuntimeActionResult): ToolResultPart["output
   };
 }
 
-function toMutableJsonValue(value: RuntimeActionResult["output"]): MutableJsonValue {
+export function toMutableJsonValue(value: unknown): MutableJsonValue {
   if (
     value === null ||
     typeof value === "string" ||
@@ -489,20 +502,31 @@ function toMutableJsonValue(value: RuntimeActionResult["output"]): MutableJsonVa
     return value;
   }
 
+  if (value === undefined) {
+    return null;
+  }
+
   if (Array.isArray(value)) {
     return value.map((item) => toMutableJsonValue(item));
+  }
+
+  if (typeof value !== "object") {
+    return null;
   }
 
   const next: Record<string, MutableJsonValue> = {};
 
   for (const [key, item] of Object.entries(value)) {
+    if (item === undefined) {
+      continue;
+    }
     next[key] = toMutableJsonValue(item);
   }
 
   return next;
 }
 
-type MutableJsonValue =
+export type MutableJsonValue =
   | null
   | boolean
   | number

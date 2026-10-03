@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { jsonSchema } from "ai";
 import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
 import {
   createCoordinationRequestFromToolCall,
@@ -6,6 +7,7 @@ import {
   resolvePendingCoordination,
   resolveToolCallInputObject,
   setPendingCoordinationBatch,
+  toMutableJsonValue,
 } from "#harness/coordination.js";
 import {
   getBlockingWorkflowToolRuns,
@@ -129,7 +131,10 @@ describe("createRuntimeActionRequestFromToolCall", () => {
           {
             label: {
               start: (input) => {
-                const mutable = input as { nested: { value: string }; self?: unknown };
+                const mutable = input as {
+                  nested: { value: string };
+                  self?: unknown;
+                };
                 mutable.nested.value = "changed";
                 mutable.self = mutable;
                 throw new Error("presentation failed");
@@ -179,7 +184,12 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         ]),
       }),
     ).toEqual({
-      action: { callId: "call-deploy", input: {}, kind: "tool-call", toolName: "deploy" },
+      action: {
+        callId: "call-deploy",
+        input: {},
+        kind: "tool-call",
+        toolName: "deploy",
+      },
     });
   });
 
@@ -328,7 +338,12 @@ describe("resolvePendingCoordination", () => {
       session,
       stepInput: {
         runtimeActionResults: [
-          { callId: "call-1", kind: "tool-result", output: { deployed: true }, toolName: "deploy" },
+          {
+            callId: "call-1",
+            kind: "tool-result",
+            output: { deployed: true },
+            toolName: "deploy",
+          },
         ],
       },
     });
@@ -386,13 +401,64 @@ describe("resolvePendingCoordination", () => {
     expect(JSON.stringify(toolMessage?.content)).toContain("deployed to https://api.example");
     expect(JSON.stringify(toolMessage?.content)).not.toContain('"deployed":true');
   });
+
+  it("serializes a tool result with undefined properties", async () => {
+    const parked = setPendingCoordinationBatch({
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createParkedSession(),
+      tasks: [
+        {
+          callId: "call-1",
+          input: {},
+          entry: { entryPoint: "execute" },
+          kind: "workflow-task",
+          toolName: "ask",
+          workflowId: "workflow//./agent/tools/ask//execute",
+        },
+      ],
+    });
+
+    const resolved = await resolvePendingCoordination({
+      session: parked,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            kind: "tool-result",
+            output: {
+              status: "answered",
+              optionId: "yes",
+              freeform: undefined,
+            } as never,
+            toolName: "ask",
+          },
+        ],
+      },
+    });
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(resolved.messages.at(-1)?.content).toEqual([
+      {
+        output: {
+          type: "json",
+          value: { status: "answered", optionId: "yes" },
+        },
+        toolCallId: "call-1",
+        toolName: "ask",
+        type: "tool-result",
+      },
+    ]);
+  });
 });
 
 describe("resolveToolCallInputObject", () => {
   const context = { callId: "call-1", toolName: "web_search" };
 
   it("passes plain objects through", () => {
-    expect(resolveToolCallInputObject({ query: "eve" }, context)).toEqual({ query: "eve" });
+    expect(resolveToolCallInputObject({ query: "eve" }, context)).toEqual({
+      query: "eve",
+    });
   });
 
   it("treats undefined, null, and empty-string inputs as empty arguments", () => {
@@ -403,7 +469,9 @@ describe("resolveToolCallInputObject", () => {
   });
 
   it("parses raw JSON-string inputs from provider-executed tool calls", () => {
-    expect(resolveToolCallInputObject('{"query":"eve"}', context)).toEqual({ query: "eve" });
+    expect(resolveToolCallInputObject('{"query":"eve"}', context)).toEqual({
+      query: "eve",
+    });
   });
 
   it("rejects strings that are not JSON objects, naming the tool and call", () => {
@@ -432,4 +500,23 @@ describe("resolveToolCallInputObject", () => {
     );
   });
 });
-import { jsonSchema } from "ai";
+
+describe("toMutableJsonValue", () => {
+  it("omits undefined object properties", () => {
+    expect(toMutableJsonValue({ a: 1, b: undefined })).toStrictEqual({ a: 1 });
+  });
+
+  it("converts undefined array items to null", () => {
+    expect(toMutableJsonValue([1, undefined, 2])).toEqual([1, null, 2]);
+  });
+
+  it("converts a bare undefined value to null", () => {
+    expect(toMutableJsonValue(undefined)).toBe(null);
+  });
+
+  it("recurses into nested objects with undefined properties", () => {
+    expect(toMutableJsonValue({ a: { b: undefined, c: 1 } })).toStrictEqual({
+      a: { c: 1 },
+    });
+  });
+});
