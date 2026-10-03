@@ -658,7 +658,9 @@ export function createTraceRecorder(input: {
       );
     },
     resumeTool(snapshot: unknown, context?: ExecutionContext) {
-      return resume(snapshot, { context });
+      return validSnapshot(snapshot) && snapshot.data.type === "tool"
+        ? resume(snapshot, { context })
+        : Promise.resolve(undefined);
     },
     run<T>(
       reference: TraceReference,

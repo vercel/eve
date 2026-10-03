@@ -31,6 +31,8 @@ export function validSnapshot(
       return false;
     if (record.version !== 1) return false;
     if (record.finished !== undefined && typeof record.finished !== "boolean") return false;
+    if (record.pendingParent !== undefined && typeof record.pendingParent !== "boolean")
+      return false;
     if (
       record.childSequence !== undefined &&
       (!Number.isSafeInteger(record.childSequence) || record.childSequence < 0)
@@ -73,6 +75,12 @@ export function validSnapshot(
     if (!fields[record.data.type].every((key) => typeof options[key] === "string")) return false;
     if (record.data.type === "activation" && !Number.isSafeInteger(options.sequence)) return false;
     if (record.data.type === "step" && !Number.isSafeInteger(options.index)) return false;
+    if (
+      record.data.type === "memory" &&
+      options.operation !== "search_memory" &&
+      options.operation !== "upsert_memory"
+    )
+      return false;
     if (
       !/^[a-f0-9]{32}$/u.test(record.reference.traceId) ||
       !/^[a-f0-9]{16}$/u.test(record.reference.spanId) ||
