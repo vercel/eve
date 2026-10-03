@@ -4,10 +4,16 @@ import {
   createCompiledSkillFileSource,
   readSkillFile,
   type SkillFileSource,
+  SkillReadError,
 } from "#channel/skill-files.js";
 import { isInvocableCompiledTool } from "#channel/tool-eligibility.js";
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache-key.js";
+import {
+  getRuntimeCompiledArtifactsCacheKey,
+  type RuntimeCompiledArtifactsSource,
+} from "#runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "#runtime/loaders/manifest.js";
+import { getActiveRuntimeSession } from "#runtime/sessions/runtime-session.js";
 import type { JsonObject } from "#shared/json.js";
 
 /** One compiled tool a caller can invoke outside a turn. */
@@ -20,7 +26,7 @@ export interface AgentToolDescription {
   readonly approval: boolean;
 }
 
-/** One file of a skill. `readSkill` rejects files over 512 KiB. */
+/** One file of a skill, as `listSkillFiles` returns it. `readSkill` rejects files over 512 KiB. */
 export interface AgentSkillFileDescription {
   /** `/`-separated path under the skill root, e.g. `references/api.md`. */
   readonly path: string;
@@ -28,12 +34,10 @@ export interface AgentSkillFileDescription {
   readonly size: number;
 }
 
-/** One compiled skill and its files. */
+/** One compiled skill. `listSkillFiles` enumerates its files. */
 export interface AgentSkillDescription {
   readonly name: string;
   readonly description: string;
-  /** Every regular file of the skill, sorted by path, including its `SKILL.md`. */
-  readonly files: readonly AgentSkillFileDescription[];
 }
 
 /**
@@ -50,82 +54,101 @@ export interface AgentDescription {
   readonly skills: readonly AgentSkillDescription[];
 }
 
-interface LoadedAgent {
-  readonly manifest: CompiledAgentManifest;
-  readonly files: SkillFileSource;
-  description?: Promise<AgentDescription>;
-}
-
-/** Bundled artifacts cannot change while the process runs, so they load once. */
-let bundledAgent: LoadedAgent | undefined;
-
-async function loadAgent(
-  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
-): Promise<LoadedAgent> {
-  if (compiledArtifactsSource.kind !== "disk" && bundledAgent !== undefined) return bundledAgent;
-  const manifest = await loadCompiledManifest({ compiledArtifactsSource });
-  const files = createCompiledSkillFileSource({
-    compiledArtifactsSource,
-    workspaceResourceRoot: manifest.workspaceResourceRoot,
-  });
-  const agent: LoadedAgent = { files, manifest };
-  if (compiledArtifactsSource.kind !== "disk") bundledAgent = agent;
-  return agent;
+/** The `describe`, `listSkillFiles`, and `readSkill` route handler args. */
+export interface AgentDescriptionRouteArgs {
+  describe(): Promise<AgentDescription>;
+  listSkillFiles(skill: string): Promise<readonly AgentSkillFileDescription[]>;
+  readSkill(skill: string, path?: string): Promise<Uint8Array>;
 }
 
 /**
- * The `describe` and `readSkill` route handler args for one compiled agent.
- * The artifacts source resolves on first use, so routes that never call
- * either pay nothing. A production build describes itself once, and every
- * `describe()` call returns that same object; during `eve dev` each call
- * reads the compile output again.
+ * One compiled agent as its routes see it: the description projected from
+ * its manifest, and the source of its skill files. Loading it reads the
+ * manifest only; no skill file is touched until one is listed or read.
+ */
+export interface DescribedAgent {
+  readonly description: AgentDescription;
+  readonly files: SkillFileSource;
+}
+
+/**
+ * Loads the agent of a compiled artifacts source once per artifact version
+ * on the active runtime session, as `getCompiledRuntimeAgentBundle` does for
+ * the execution graph, without resolving that graph. A production build
+ * loads once per process; `eve dev` reloads after each recompile. A failed
+ * load is retried on the next call rather than cached.
+ */
+export async function loadDescribedAgent(
+  compiledArtifactsSource: RuntimeCompiledArtifactsSource,
+): Promise<DescribedAgent> {
+  const session = getActiveRuntimeSession();
+  const sourceKey = getRuntimeCompiledArtifactsCacheKey(compiledArtifactsSource);
+  const version = await resolveRuntimeCompiledArtifactsVersionedCacheKey(compiledArtifactsSource);
+  const cached = session.describedAgents.get(sourceKey);
+  if (cached?.version === version) return await cached.agent;
+  const agent = loadCompiledManifest({ compiledArtifactsSource }).then(
+    (manifest): DescribedAgent => ({
+      description: describeCompiledAgent(manifest),
+      files: createCompiledSkillFileSource({
+        compiledArtifactsSource,
+        workspaceResourceRoot: manifest.workspaceResourceRoot,
+      }),
+    }),
+  );
+  agent.catch(() => {
+    if (session.describedAgents.get(sourceKey)?.agent === agent) {
+      session.describedAgents.delete(sourceKey);
+    }
+  });
+  session.describedAgents.set(sourceKey, { agent, version });
+  return await agent;
+}
+
+/**
+ * The agent route handler args for one compiled artifacts source, which
+ * resolves on first use so routes that never call them pay nothing. Also
+ * returns the agent's skill files, so a channel that already holds listed
+ * paths reads them without the listing `readSkill` repeats per call.
  */
 export function createAgentDescriptionRouteArgs(
   resolveCompiledArtifactsSource: () => RuntimeCompiledArtifactsSource,
-): {
-  describe(): Promise<AgentDescription>;
-  readSkill(skill: string, path?: string): Promise<Uint8Array>;
-} {
+): { readonly args: AgentDescriptionRouteArgs; readonly skillFiles: SkillFileSource } {
+  const load = () => loadDescribedAgent(resolveCompiledArtifactsSource());
+  const skillFiles: SkillFileSource = {
+    listFiles: async (skill) => await (await load()).files.listFiles(skill),
+    readFile: async (skill, path) => await (await load()).files.readFile(skill, path),
+  };
+  const assertSkill = async (skill: string) => {
+    const { description } = await load();
+    if (!description.skills.some((entry) => entry.name === skill)) {
+      throw new SkillReadError("unknown-skill", `Unknown skill "${skill}".`);
+    }
+  };
   return {
-    async describe() {
-      const agent = await loadAgent(resolveCompiledArtifactsSource());
-      agent.description ??= describeCompiledAgent(agent.manifest, agent.files);
-      // A failed description is retried on the next call rather than cached.
-      agent.description.catch(() => {
-        agent.description = undefined;
-      });
-      return await agent.description;
+    args: {
+      describe: async () => (await load()).description,
+      async listSkillFiles(skill) {
+        await assertSkill(skill);
+        return await skillFiles.listFiles(skill);
+      },
+      async readSkill(skill, path) {
+        await assertSkill(skill);
+        return await readSkillFile({ path, skill, source: skillFiles });
+      },
     },
-    async readSkill(skill, path) {
-      const { files, manifest } = await loadAgent(resolveCompiledArtifactsSource());
-      return await readSkillFile({
-        path,
-        skill,
-        skills: manifest.skills.map((entry) => entry.name),
-        source: files,
-      });
-    },
+    skillFiles,
   };
 }
 
 /** Projects the root node of a compiled manifest onto {@link AgentDescription}. */
-export async function describeCompiledAgent(
-  manifest: CompiledAgentManifest,
-  files: SkillFileSource,
-): Promise<AgentDescription> {
+export function describeCompiledAgent(manifest: CompiledAgentManifest): AgentDescription {
   const tools = manifest.tools
     .filter((tool) => isInvocableCompiledTool(manifest, tool))
     .sort((left, right) => comparePaths(left.name, right.name))
     .map(describeTool);
-  const skills = await Promise.all(
-    [...manifest.skills]
-      .sort((left, right) => comparePaths(left.name, right.name))
-      .map(async (skill) => ({
-        name: skill.name,
-        description: skill.description,
-        files: await files.listFiles(skill.name),
-      })),
-  );
+  const skills = [...manifest.skills]
+    .sort((left, right) => comparePaths(left.name, right.name))
+    .map(({ name, description }) => ({ name, description }));
   const description: { -readonly [K in keyof AgentDescription]: AgentDescription[K] } = {
     name: manifest.config.name,
     tools,

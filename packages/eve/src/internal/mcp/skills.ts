@@ -1,12 +1,14 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
-import type { AgentDescription, AgentSkillDescription } from "#channel/agent-description.js";
+import type { AgentSkillDescription } from "#channel/agent-description.js";
 import {
   comparePaths,
   isSkillEntryFileName,
   MAX_SKILL_FILE_BYTES,
   SKILL_ENTRY_FILE_NAME,
+  type SkillFileEntry,
+  type SkillFileSource,
   SkillReadError,
 } from "#channel/skill-files.js";
 import {
@@ -46,10 +48,11 @@ function warnOnce(message: string): void {
   log.warn(message);
 }
 
-/** The agent operations the skills feature adapts: `describe` and `readSkill` route args. */
+/** The skills the feature serves and where their files are. */
 export interface McpSkillSource {
-  describe(): Promise<AgentDescription>;
-  readSkill(skill: string, path?: string): Promise<Uint8Array>;
+  /** The agent's skills as `describe()` lists them. */
+  readonly skills: readonly AgentSkillDescription[];
+  readonly files: SkillFileSource;
 }
 
 /** One `skills/list` entry. */
@@ -79,7 +82,7 @@ interface McpSkillEntry {
  * - its name and every file path are valid `skill://` segments, and exactly
  *   one top-level file is its entry (`SKILL.md` in any case, served as
  *   `SKILL.md`);
- * - it has at most 512 files, none over the 512 KiB `readSkill` cap, and at
+ * - it has at most 512 files, none over the 512 KiB skill file cap, and at
  *   most 16 MiB in total;
  * - every file reads, and the served `SKILL.md` frontmatter meets the Agent
  *   Skills format (name rules, description of 1-1024 characters).
@@ -90,9 +93,10 @@ interface McpSkillEntry {
  * differs from its directory) the served document carries rewritten
  * frontmatter, and `frontmatter` and the digest describe that document.
  *
- * Snapshots are keyed by the `skills` array `describe()` returns. A
- * production build returns the same array on every call, so it reads its
- * skill files once per process; `eve dev` builds them per request.
+ * Snapshots are keyed by the `skills` array, which `describe()` keeps for
+ * as long as the compiled artifacts stay the same, so a skill's files are
+ * listed and read once per build: once per process in production, once per
+ * recompile under `eve dev`.
  */
 export function createMcpSkillsFeature(source: McpSkillSource): McpServerFeature {
   return {
@@ -101,7 +105,7 @@ export function createMcpSkillsFeature(source: McpSkillSource): McpServerFeature
       extensions: { [MCP_SKILLS_EXTENSION]: { directoryRead: true } },
     },
     register(server) {
-      registerSkillHandlers(server, source, createSkillCatalog(source));
+      registerSkillHandlers(server, source.files, createSkillCatalog(source));
     },
   };
 }
@@ -131,33 +135,24 @@ const snapshotCache = new WeakMap<
   Map<string, Promise<SkillSnapshot | undefined>>
 >();
 
-function createSkillCatalog(source: McpSkillSource): SkillCatalog {
-  let described: Promise<AgentDescription> | undefined;
-  const load = async () => {
-    const { skills } = await (described ??= source.describe());
-    let snapshots = snapshotCache.get(skills);
-    if (snapshots === undefined) {
-      snapshots = new Map();
-      snapshotCache.set(skills, snapshots);
-    }
-    return { skills, snapshots };
-  };
+function createSkillCatalog({ files, skills }: McpSkillSource): SkillCatalog {
+  const snapshots =
+    snapshotCache.get(skills) ?? new Map<string, Promise<SkillSnapshot | undefined>>();
+  snapshotCache.set(skills, snapshots);
   const snapshot = async (name: string) => {
-    const { skills, snapshots } = await load();
     const skill = skills.find((entry) => entry.name === name);
     if (skill === undefined) return undefined;
     let pending = snapshots.get(name);
     if (pending === undefined) {
-      pending = snapshotSkill(source, skill);
+      pending = snapshotSkill(files, skill);
       snapshots.set(name, pending);
-      // A thrown read is retried on the next request rather than cached.
+      // A thrown listing or read is retried on the next request rather than cached.
       pending.catch(() => snapshots.delete(name));
     }
     return await pending;
   };
   return {
     async served() {
-      const { skills } = await load();
       const names = skills.map((skill) => skill.name).sort(comparePaths);
       const result: SkillSnapshot[] = [];
       for (const name of names) {
@@ -172,7 +167,7 @@ function createSkillCatalog(source: McpSkillSource): SkillCatalog {
 
 function registerSkillHandlers(
   server: McpServer,
-  source: McpSkillSource,
+  files: SkillFileSource,
   catalog: SkillCatalog,
 ): void {
   const low = server.server;
@@ -249,7 +244,7 @@ function registerSkillHandlers(
     const served =
       parsed.path === SKILL_ENTRY_FILE_NAME
         ? snapshot.document
-        : toServedFile(await source.readSkill(snapshot.name, parsed.path));
+        : toServedFile(await files.readFile(snapshot.name, parsed.path));
     const contents =
       served.text === undefined
         ? { uri, mimeType: file.mimeType, blob: Buffer.from(served.bytes).toString("base64") }
@@ -283,16 +278,19 @@ function decodeText(bytes: Uint8Array): string | undefined {
 
 /**
  * The authored paths of a skill keyed by served path, or why it is not
- * served. Decided from `describe()` alone, before any file is read.
+ * served. Decided from the listing alone, before any file is read.
  */
-function servedPaths(skill: AgentSkillDescription): Map<string, string> | string {
-  if (!isSafeSegment(skill.name)) return "its name is not a valid skill:// segment";
-  if (skill.files.length > MCP_SKILL_MAX_RESOURCES) {
+function servedPaths(
+  skill: string,
+  files: readonly SkillFileEntry[],
+): Map<string, string> | string {
+  if (!isSafeSegment(skill)) return "its name is not a valid skill:// segment";
+  if (files.length > MCP_SKILL_MAX_RESOURCES) {
     return `it has more than ${MCP_SKILL_MAX_RESOURCES} files`;
   }
   const paths = new Map<string, string>();
   let total = 0;
-  for (const { path, size } of skill.files) {
+  for (const { path, size } of files) {
     if (!path.split("/").every(isSafeSegment)) {
       return `its file "${path}" is not a valid skill:// path`;
     }
@@ -311,16 +309,19 @@ function servedPaths(skill: AgentSkillDescription): Map<string, string> | string
   return paths;
 }
 
-/** Reads every file of a skill to build its entry. `undefined` when it is not served. */
+/**
+ * Lists a skill once and reads every file to build its entry. `undefined`
+ * when it is not served.
+ */
 async function snapshotSkill(
-  source: McpSkillSource,
+  source: SkillFileSource,
   skill: AgentSkillDescription,
 ): Promise<SkillSnapshot | undefined> {
   const unserved = (reason: string) => {
     warnOnce(`mcpChannel does not serve the skill "${skill.name}": ${reason}.`);
     return undefined;
   };
-  const paths = servedPaths(skill);
+  const paths = servedPaths(skill.name, await source.listFiles(skill.name));
   if (typeof paths === "string") return unserved(paths);
 
   const entries = [...paths.entries()].sort(([left], [right]) => comparePaths(left, right));
@@ -329,7 +330,7 @@ async function snapshotSkill(
   // the pending snapshot and retries on the next request.
   const read = await mapWithConcurrency(entries, READ_CONCURRENCY, async ([, authored]) => {
     try {
-      return toServedFile(await source.readSkill(skill.name, authored));
+      return toServedFile(await source.readFile(skill.name, authored));
     } catch (error) {
       if (error instanceof SkillReadError) return error.message;
       throw error;
@@ -347,9 +348,14 @@ async function snapshotSkill(
     );
   }
   files[entryIndex] = document;
+  // Sizes are checked again on the bytes read: a file can change between
+  // the listing and the read, and the rewritten `SKILL.md` can grow.
   const total = files.reduce((sum, file) => sum + file.bytes.byteLength, 0);
-  if (total > MCP_SKILL_MAX_TOTAL_BYTES || document.bytes.byteLength > MAX_SKILL_FILE_BYTES) {
-    return unserved("its rewritten SKILL.md takes it over the size limits");
+  if (
+    total > MCP_SKILL_MAX_TOTAL_BYTES ||
+    files.some((file) => file.bytes.byteLength > MAX_SKILL_FILE_BYTES)
+  ) {
+    return unserved("its files as read are over the size limits");
   }
 
   const served = new Map<string, SnapshotFile>();

@@ -316,7 +316,7 @@ function tooLarge(skill: string, path: string, size: number): SkillReadError {
 }
 
 /**
- * Reads one file of one compiled skill, byte for byte.
+ * Reads one file of one skill, byte for byte, given any caller-supplied path.
  *
  * With no `path`, reads the skill's entry markdown under whatever case variant
  * of `SKILL.md` it was authored with. An explicit top-level `SKILL.md` matches
@@ -326,14 +326,10 @@ function tooLarge(skill: string, path: string, size: number): SkillReadError {
 export async function readSkillFile(input: {
   readonly path?: string;
   readonly skill: string;
-  readonly skills: readonly string[];
   readonly source: SkillFileSource;
 }): Promise<Uint8Array> {
   const requested = input.path ?? SKILL_ENTRY_FILE_NAME;
   assertRelativeSkillPath(requested);
-  if (!input.skills.includes(input.skill)) {
-    throw new SkillReadError("unknown-skill", `Unknown skill "${input.skill}".`);
-  }
   const files = await input.source.listFiles(input.skill);
   const file =
     files.find((entry) => entry.path === requested) ??

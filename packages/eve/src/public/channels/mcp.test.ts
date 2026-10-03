@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { AgentToolDescription } from "#channel/agent-description.js";
+import type { AgentDescription, AgentToolDescription } from "#channel/agent-description.js";
 import type { InvokeToolFn, InvokeToolResult } from "#channel/invoke-tool.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
+import type { SkillFileSource } from "#channel/skill-files.js";
 import {
   attachAgentInfoRouteResponse,
   attachRouteChannelName,
   attachRouteSessionCreator,
+  attachSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
 import { MCP_PROTOCOL_VERSION } from "#internal/mcp/streamable-http-server.js";
 import { ForbiddenError, none, oauthResource, withAuthChallenges } from "#public/channels/auth.js";
@@ -563,6 +565,46 @@ describe("mcpChannel tools", () => {
     expect(() => mcpChannel({ agent: false, auth: none() })).toThrow(
       "mcpChannel publishes nothing with agent, tools, and skills all false. Enable one.",
     );
+  });
+
+  it("describes once per request, and serves skills only from the route's skill files", async () => {
+    const describe = vi.fn<() => Promise<AgentDescription>>(async () => ({
+      name: "compiled-agent",
+      skills: [{ description: "Runs the kennel.", name: "handbook" }],
+      tools: [lookup],
+    }));
+    const files: SkillFileSource = {
+      listFiles: async () => [{ path: "SKILL.md", size: 5 }],
+      readFile: async () => new TextEncoder().encode("Body\n"),
+    };
+    const channel = mcpChannel({ agent: false, auth: () => principal, skills: true, tools: true });
+    const post = channel.routes[1]!;
+    if (post.transport === "websocket") throw new Error("expected HTTP route");
+    const rpc = async (method: string, args: RouteHandlerArgs) =>
+      (await jsonRpcResponse(
+        await post.handler(mcpRequest({ id: 1, jsonrpc: "2.0", method }), args),
+      )) as { result?: Record<string, any>; error?: object };
+
+    const args = attachSkillFileSource(routeArgs(vi.fn(), { describe }), files);
+    expect(
+      (await rpc("tools/list", args)).result!.tools.map((t: { name: string }) => t.name),
+    ).toEqual(["lookup"]);
+    expect(describe).toHaveBeenCalledTimes(1);
+    expect((await rpc("skills/list", args)).result!.skills).toEqual([
+      expect.objectContaining({ uri: "skill://handbook/SKILL.md" }),
+    ]);
+    expect(describe).toHaveBeenCalledTimes(2);
+
+    // Without the route's skill files the channel cannot serve skills; a
+    // tools-only channel never needs them and never touches skill storage.
+    const bare = routeArgs(vi.fn(), { describe });
+    const response = await post.handler(
+      mcpRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      bare,
+    );
+    expect(response.status).toBe(500);
+    const toolsOnly = serve({ agent: false, tools: true });
+    expect((await toolsOnly("tools/list")).result!.tools).toHaveLength(3);
   });
 
   it("returns non-object output as structured content when the tool declares a schema", async () => {

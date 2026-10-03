@@ -69,17 +69,11 @@ describe("readSkillFile", () => {
     ["references/api.md", memory, files["references/api.md"]],
     [undefined, bundled, shipped],
   ] as const)("reads %j", async (path, source, expected) => {
-    const read = readSkillFile({ path, skill: "triage", skills: ["triage"], source });
+    const read = readSkillFile({ path, skill: "triage", source });
     if (typeof expected === "string") {
       await expect(read).rejects.toMatchObject({ code: expected });
     } else {
       await expect(read).resolves.toEqual(expected);
     }
-  });
-
-  it("rejects a skill the agent does not have", async () => {
-    await expect(
-      readSkillFile({ skill: "other", skills: ["triage"], source: memory }),
-    ).rejects.toMatchObject({ code: "unknown-skill" });
   });
 });

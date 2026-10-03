@@ -7,7 +7,7 @@ import type { InputResponse } from "#shared/input.js";
 import type { Session } from "#channel/session.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ChannelMethod } from "#public/definitions/channel.js";
-import type { AgentDescription } from "#channel/agent-description.js";
+import type { AgentDescription, AgentSkillFileDescription } from "#channel/agent-description.js";
 
 type WebSocketHeaders = Headers | readonly (readonly [string, string])[] | Record<string, string>;
 
@@ -36,11 +36,17 @@ export interface RouteHandlerArgs<TState = undefined> {
   requestIp: string | null;
   /**
    * Describes the agent for callers: its name, description, the compiled
-   * tools that can run outside a turn, and its compiled skills with each
-   * file's path and size, sorted by name. Carries none of the inspection
-   * detail of `GET /eve/v1/info`.
+   * tools that can run outside a turn, and the name and description of each
+   * compiled skill, sorted by name. Reads the compiled manifest only, no
+   * skill file, and carries none of the inspection detail of `GET /eve/v1/info`.
    */
   describe(): Promise<AgentDescription>;
+  /**
+   * Lists the regular files of one compiled skill, each with its path under
+   * the skill root and its size in bytes, sorted by path. Rejects a skill
+   * the agent does not have.
+   */
+  listSkillFiles(skill: string): Promise<readonly AgentSkillFileDescription[]>;
   /**
    * Reads one file of a compiled skill as raw bytes. `path` is relative to
    * the skill root and defaults to its `SKILL.md`. Rejects paths that are

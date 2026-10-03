@@ -30,6 +30,7 @@ import {
   defineMcpTool,
   McpToolOperationError,
   type McpCallToolResult,
+  type McpServerFeature,
   type McpServerTool,
 } from "#internal/mcp/streamable-http-server.js";
 import {
@@ -48,6 +49,7 @@ import {
   readAgentInfoRouteResponse,
   readRouteChannelName,
   readRouteSessionCreator,
+  readSkillFileSource,
 } from "#internal/nitro/routes/channel-route-context.js";
 export interface McpChannelInput {
   /** Existing eve route-auth policy. Use `none()` for explicit public access. */
@@ -95,7 +97,7 @@ export type McpChannel = Channel;
  * This channel owns MCP transport, durable eve invocation through the
  * `agent_*` tools (unless `agent: false`), with `tools: true` the agent's
  * invocable tools, each call run through `invokeTool`, and with
- * `skills: true` the agent's skills, read through `readSkill`. It reuses
+ * `skills: true` the agent's skills and their files. It reuses
  * eve's inbound auth strategies and recognizes `oauthResource(...)` metadata
  * when OAuth discovery is needed.
  * The file containing this channel must be `agent/channels/mcp.ts`.
@@ -423,17 +425,28 @@ async function handleMcpRequest(
         auth.authenticator === "none" && auth.principalType === "anonymous",
       )
     : [];
-  const publishedTools = publish.tools
-    ? createPublishedTools({
-        invokeTool: args.invokeTool,
-        principals,
-        reserved: new Set(agentTools.map((tool) => tool.name)),
-        tools: (await args.describe()).tools,
-      })
-    : [];
+  // One `describe()` serves both the published tools and the skill catalog.
+  const described = publish.tools || publish.skills ? await args.describe() : undefined;
+  const publishedTools =
+    publish.tools && described !== undefined
+      ? createPublishedTools({
+          invokeTool: args.invokeTool,
+          principals,
+          reserved: new Set(agentTools.map((tool) => tool.name)),
+          tools: described.tools,
+        })
+      : [];
+  const features: McpServerFeature[] = [];
+  if (publish.skills && described !== undefined) {
+    const files = readSkillFileSource(args);
+    if (files === undefined) {
+      return Response.json({ error: "MCP requires agent route context." }, { status: 500 });
+    }
+    features.push(createMcpSkillsFeature({ files, skills: described.skills }));
+  }
   return await createMcpStreamableHttpServer({
     authenticate: async () => auth,
-    features: publish.skills ? [createMcpSkillsFeature(args)] : [],
+    features,
     instructions: publish.agent ? MCP_SERVER_INSTRUCTIONS : undefined,
     name: agentInfo.agent.name,
     tools: publish.agent || publish.tools ? [...agentTools, ...publishedTools] : undefined,

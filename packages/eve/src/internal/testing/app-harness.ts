@@ -265,6 +265,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     session.bundleCache.clear();
     session.bundleCacheKeyBySourceKey.clear();
     sandboxes.clear();
+    session.describedAgents.clear();
   }
 
   async function executeTool(
