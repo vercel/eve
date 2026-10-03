@@ -6,7 +6,8 @@ export { activeOperation, intersectCapture } from "./core/activation.js";
 export { runTraceContext } from "./core/context.js";
 export { withoutDeclinedContent, type ResolvedContentOptions } from "./core/content-policy.js";
 export { mcpLifecycle, type McpLifecycle, type McpUpdate } from "./core/mcp.js";
-export * from "./core/contract.js";
+export { invocationName } from "./core/span-kinds.js";
+export { USAGE_FIELDS } from "./core/attributes.js";
 export type {
   AttributeValue,
   Attributes,

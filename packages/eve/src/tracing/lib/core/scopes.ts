@@ -1,7 +1,6 @@
 import type { ExecutionContext } from "./types.js";
 import { createSpanWriter, type TraceOperation } from "./writer.js";
 import { usageAttributes } from "./attributes.js";
-import { applyAttributes } from "./contract.js";
 import type { ContentSerializer } from "./types.js";
 import type { Attributes, CaptureDecision, TraceBackend, TraceReference } from "./types.js";
 import {
@@ -9,6 +8,7 @@ import {
   capturedScopeData as capturedData,
   prepareScope,
   parentKinds,
+  applyAttributes,
 } from "./span-kinds.js";
 import { mcpLifecycle } from "./mcp.js";
 import { intersectCapture } from "./activation.js";

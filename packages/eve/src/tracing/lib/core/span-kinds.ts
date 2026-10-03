@@ -5,17 +5,29 @@ import {
   namingAttributes,
   runtimeContextAttributes,
 } from "./attributes.js";
-import {
-  invocationName,
-  modelName,
-  toolName,
-  SPAN_NAMES,
-  CONTENT_FIELDS,
-  applyAttributes,
-  terminalAttributes,
-  actionErrorAttributes,
-  memoryCountAttributes,
-} from "./contract.js";
+export const invocationName = (name?: string) =>
+  name === undefined ? "invoke_agent" : `invoke_agent ${name}`;
+const modelName = (name: string) => `chat ${name}`;
+const toolName = (name: string) => `execute_tool ${name}`;
+const SPAN_NAMES = {
+  action: "agent.action",
+  approval: "agent.approval",
+  step: "agent.step",
+} as const;
+const CONTENT_FIELDS = {
+  toolArguments: "gen_ai.tool.call.arguments",
+  toolResult: "gen_ai.tool.call.result",
+  approvalRequest: "agent.approval.request",
+  approvalResponse: "agent.approval.response",
+  memoryRecords: "gen_ai.memory.records",
+} as const;
+export function applyAttributes(
+  span: { setAttribute(key: string, value: Exclude<Attributes[string], undefined>): unknown },
+  attributes: Attributes,
+): void {
+  for (const [key, value] of Object.entries(attributes))
+    if (value !== undefined) span.setAttribute(key, value);
+}
 import type { ContentSerializer, ModelResult } from "./types.js";
 import { withoutDeclinedContent } from "./content-policy.js";
 import type { ScopeData, ScopeIdentity, ScopeRecord, ScopeTerminal } from "./types.js";
@@ -203,7 +215,7 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
     complete(span, data, result, context) {
       if (result.errorCode !== undefined)
-        applyAttributes(span, actionErrorAttributes(result.errorCode));
+        applyAttributes(span, { "agent.action.error.code": result.errorCode });
       if (data.options.kind !== "subagent-call" && data.options.kind !== "remote-agent-call")
         toolOutput(span, result, context);
     },
@@ -290,7 +302,7 @@ const kinds: { [K in ScopeData["type"]]: Kind<K> } = {
     },
     complete(span, _data, result, context) {
       if (result.recordCount !== undefined)
-        applyAttributes(span, memoryCountAttributes(result.recordCount));
+        applyAttributes(span, { "gen_ai.memory.record.count": result.recordCount });
       if (context.capture.recordInputs)
         applyAttributes(span, {
           [CONTENT_FIELDS.memoryRecords]: context.serializer.json(result.records),
@@ -339,7 +351,10 @@ export function completeScope(
   serializer: ContentSerializer,
 ): void {
   const outcome = result.outcome ?? (result.failed ? "failed" : "completed");
-  applyAttributes(span, terminalAttributes(data.type, outcome));
+  if (data.type === "activation" || data.type === "action" || data.type === "approval")
+    applyAttributes(span, {
+      [data.type === "activation" ? "agent.turn.outcome" : `agent.${data.type}.outcome`]: outcome,
+    });
   if (result.usage !== undefined)
     applyAttributes(
       span,

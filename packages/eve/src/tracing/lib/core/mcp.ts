@@ -1,10 +1,4 @@
 import type { Attributes } from "./types.js";
-import {
-  mcpAttributes,
-  mcpSessionAttributes,
-  rpcStatusAttributes,
-  CONTENT_FIELDS,
-} from "./contract.js";
 import type { ContentSerializer } from "./types.js";
 
 export interface McpUpdate {
@@ -34,17 +28,19 @@ export function mcpLifecycle(input: {
   return {
     update(update) {
       if (update.connectionName !== undefined && update.method !== undefined)
-        input.write(
-          mcpAttributes({
-            connectionName: update.connectionName,
-            method: update.method,
-            toolName: update.toolName,
-            protocolVersion: update.protocolVersion,
-            requestId: update.requestId,
-          }),
-        );
-      if (update.sessionId !== undefined) input.write(mcpSessionAttributes(update.sessionId));
-      if (update.statusCode !== undefined) input.write(rpcStatusAttributes(update.statusCode));
+        input.write({
+          "agent.connection.name": update.connectionName,
+          "mcp.method.name": update.method,
+          "network.protocol.name": "http",
+          "network.transport": "tcp",
+          "mcp.protocol.version": update.protocolVersion,
+          "jsonrpc.request.id": update.requestId,
+          "gen_ai.operation.name": update.method === "tools/call" ? "execute_tool" : undefined,
+          "gen_ai.tool.name": update.method === "tools/call" ? update.toolName : undefined,
+        });
+      if (update.sessionId !== undefined) input.write({ "mcp.session.id": update.sessionId });
+      if (update.statusCode !== undefined)
+        input.write({ "rpc.response.status_code": update.statusCode });
     },
     error(error, type) {
       input.error(
@@ -54,11 +50,11 @@ export function mcpLifecycle(input: {
     },
     arguments(value) {
       if (input.recordInputs)
-        input.write({ [CONTENT_FIELDS.toolArguments]: input.serializer.json(value) });
+        input.write({ "gen_ai.tool.call.arguments": input.serializer.json(value) });
     },
     result(value) {
       if (input.recordOutputs)
-        input.write({ [CONTENT_FIELDS.toolResult]: input.serializer.json(value) });
+        input.write({ "gen_ai.tool.call.result": input.serializer.json(value) });
     },
   };
 }

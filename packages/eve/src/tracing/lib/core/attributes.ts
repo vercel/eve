@@ -1,5 +1,12 @@
 import type { AttributeValue, Attributes, FrameworkIdentity, RunIdentity, Usage } from "./types.js";
 const TRACE_SCHEMA_VERSION = 4;
+export const USAGE_FIELDS = {
+  costUsd: "agent.usage.cost_usd",
+  inputTokens: "agent.usage.input_tokens",
+  outputTokens: "agent.usage.output_tokens",
+  cacheReadTokens: "agent.usage.cache_read_tokens",
+  cacheWriteTokens: "agent.usage.cache_write_tokens",
+} as const;
 
 export function identityAttributes(
   identity: Pick<RunIdentity, "runId" | "conversationId">,
@@ -24,11 +31,11 @@ export function frameworkAttributes(framework?: FrameworkIdentity): Attributes {
 
 export function usageAttributes(usage: Usage, genAi = false): Attributes {
   const attributes: Record<string, number | undefined> = {
-    "agent.usage.cost_usd": usage.costUsd,
-    "agent.usage.input_tokens": usage.inputTokens,
-    "agent.usage.output_tokens": usage.outputTokens,
-    "agent.usage.cache_read_tokens": usage.inputTokenDetails?.cacheReadTokens,
-    "agent.usage.cache_write_tokens": usage.inputTokenDetails?.cacheWriteTokens,
+    [USAGE_FIELDS.costUsd]: usage.costUsd,
+    [USAGE_FIELDS.inputTokens]: usage.inputTokens,
+    [USAGE_FIELDS.outputTokens]: usage.outputTokens,
+    [USAGE_FIELDS.cacheReadTokens]: usage.inputTokenDetails?.cacheReadTokens,
+    [USAGE_FIELDS.cacheWriteTokens]: usage.inputTokenDetails?.cacheWriteTokens,
   };
   if (genAi)
     Object.assign(attributes, {
