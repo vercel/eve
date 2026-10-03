@@ -539,6 +539,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       failureState: ReturnType<typeof getHarnessEmissionState>,
     ): Promise<StepResult> => {
       throwIfTurnAborted(config.abortSignal);
+      if (isTurnCancellation(error)) throw error;
       stepInstrumentation?.recordError(error);
       if (!emit) {
         throw error;
@@ -572,7 +573,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       failureState: ReturnType<typeof getHarnessEmissionState>,
     ): Promise<StepResult> => {
       throwIfTurnAborted(config.abortSignal);
-      if (isTurnCancellation(error)) throw error;
       if (isDynamicModelSelectionError(error)) return failModelSelection(error, failureState);
       throw error;
     };
