@@ -7,12 +7,6 @@ export interface InvokeToolOptions {
   readonly auth: SessionAuthContext;
   /** Becomes `ctx.session.auth.initiator`. Defaults to `auth`. */
   readonly initiator?: SessionAuthContext;
-  /**
-   * The route-authenticated caller that vouched for `auth`, when the channel
-   * accepted a forwarded principal. Its `principalId` is recorded on `auth` and
-   * `initiator` as the `eve:forwarded-by` attribute, as eveChannel does.
-   */
-  readonly forwarder?: SessionAuthContext;
   readonly signal?: AbortSignal;
 }
 

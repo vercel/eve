@@ -117,6 +117,23 @@ function runtimeWith(
 }
 
 describe("invokeTool", () => {
+  it("runs as auth, with initiator defaulting to auth", async () => {
+    const bob: SessionAuthContext = { ...alice, principalId: "bob" };
+    const seen: unknown[] = [];
+    const runtime = runtimeWith([
+      tool("whoami", (_input, ctx) => {
+        seen.push({ ...ctx.session.auth });
+        return "ok";
+      }),
+    ]);
+    await invokeTool(runtime, "whoami", {}, { auth: alice });
+    await invokeTool(runtime, "whoami", {}, { auth: alice, initiator: bob });
+    expect(seen).toEqual([
+      { current: alice, initiator: alice },
+      { current: alice, initiator: bob },
+    ]);
+  });
+
   it("evaluates the approval policy and never asks anyone", async () => {
     const policies: Array<[ApprovalPolicy, object, boolean]> = [
       [() => "user-approval", { status: "approval-required" }, false],
