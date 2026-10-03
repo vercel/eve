@@ -6,6 +6,7 @@ import { AuthKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
+  type DurableSession,
   type DurableSessionState,
   readDurableSession,
   replaceDurableSessionSnapshot,
@@ -31,10 +32,13 @@ import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
 import type { WorkflowAskRoute } from "#harness/proxy-input-requests.js";
 import {
   createInputResolvedEvent,
+  createTurnWaitingEvent,
   type InputResolution,
+  type TurnWaitingStreamEvent,
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import { getProxyInputRequests, retireProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getSessionUsage } from "#harness/turn-tag-state.js";
 import type { InputResponse } from "#shared/input.js";
 
 export type RoutedDeliverResult =
@@ -196,6 +200,13 @@ async function routeProxiedDeliver(
     retired = true;
   }
 
+  // A delivery that only answered some of the open turn's questions leaves the
+  // turn waiting on the rest, so it parks again, as after a partial approval.
+  if (resolvedEvents.length > 0 && parentAction === undefined && parentPayloads.size === 0) {
+    const waiting = turnWaitingOnRemainingRequests(input.sessionState, durableSession);
+    if (waiting !== undefined) resolvedEvents.push(waiting);
+  }
+
   const context = await relaySessionEvents(
     {
       serializedContext,
@@ -222,6 +233,22 @@ async function routeProxiedDeliver(
           payloads: orderedParentPayloads.map(([, payload]) => payload),
         };
   return { ...context, kind: "continue", remainder };
+}
+
+/**
+ * The `turn.waiting` for the open turn while a request it relayed is still
+ * unanswered, or `undefined` when no request of the open turn is pending.
+ */
+function turnWaitingOnRemainingRequests(
+  sessionState: DurableSessionState,
+  session: DurableSession,
+): TurnWaitingStreamEvent | undefined {
+  const { sequence, turnId } = sessionState.emissionState;
+  const pending = [...getProxyInputRequests(session.state).values()].some(
+    (route) => route.event.turnId === turnId,
+  );
+  if (turnId === "" || !pending) return undefined;
+  return createTurnWaitingEvent({ on: "input", sequence, turnId, usage: getSessionUsage(session) });
 }
 
 /**
