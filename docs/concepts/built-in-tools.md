@@ -47,7 +47,7 @@ eve-job stop job-3f9a1c2e      # send SIGTERM to the job's process group, then S
 eve-job list                   # list jobs and their status
 ```
 
-A job keeps running across turns until it exits, the model stops it, or the sandbox stops. Cancelling a `bash` call before it returns stops its command. `eve-job` commands are ordinary `bash` calls, so the tool's approval policy applies to them. The `just-bash` provider has no background processes, so it runs every command to completion.
+Each `eve-job wait` prints only output the model has not seen yet, and exits with the job's exit code once the job has exited. After a job's final status is reported, eve removes the job from the sandbox. A job keeps running across turns until it exits, the model stops it, or the sandbox stops. `eve-job` commands are ordinary `bash` calls, so the tool's approval policy applies to them. The `just-bash` provider has no background processes, so it runs every command to completion.
 
 Override its description, approval policy, or executor by wrapping the exported definition:
 

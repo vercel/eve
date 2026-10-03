@@ -3,9 +3,9 @@ import {
   BASH_JOB_MAX_WAIT_SECONDS,
   BASH_JOB_ROOT,
   BASH_JOB_YIELD_SECONDS,
-  buildBashJobLaunchCommand,
   createBashJobId,
-  parseBashJobLaunchOutput,
+  createBashJobLaunch,
+  type BashJobLaunchOutput,
 } from "#execution/sandbox/bash-jobs.js";
 import { truncateTail } from "#execution/sandbox/truncate-output.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
@@ -30,8 +30,9 @@ export interface BashExecutionOptions {
   /**
    * Identifies this tool call within the sandbox, such as the session id and
    * call id. A command that outlives the yield becomes a job named after it,
-   * so a retried call reattaches to its job instead of starting the command
-   * twice. Calls without a key get a random job id.
+   * so a retried call reattaches to a job its earlier attempt already
+   * reported instead of starting the command again. Calls without a key get
+   * a random job id.
    */
   readonly jobKey?: string;
 }
@@ -98,23 +99,21 @@ export async function executeBashOnSandbox(
   args: BashInput,
   options: BashExecutionOptions = {},
 ): Promise<BashResult> {
-  const jobId = createBashJobId(options.jobKey);
+  const launch = createBashJobLaunch({
+    command: args.command,
+    jobId: createBashJobId(options.jobKey),
+    root: BASH_JOB_ROOT,
+    yieldSeconds: BASH_JOB_YIELD_SECONDS,
+  });
   const command = formatCommand(args.command);
   logDevelopmentSandboxCommand(`eve: starting sandbox command: ${command}`);
   const result = await withDevelopmentSandboxProgress(command, async () => {
-    const raw = await sandbox.run({
-      command: buildBashJobLaunchCommand({
-        command: args.command,
-        jobId,
-        root: BASH_JOB_ROOT,
-        yieldSeconds: BASH_JOB_YIELD_SECONDS,
-      }),
-    });
-    return await toBashResult(sandbox, args.command, jobId, raw);
+    const raw = await sandbox.run({ command: launch.command });
+    return await toBashResult(sandbox, args.command, launch.parse(raw), raw);
   });
   logDevelopmentSandboxCommand(
     result.status === "running"
-      ? `eve: sandbox command still running as ${jobId}: ${command}`
+      ? `eve: sandbox command still running as ${result.jobId}: ${command}`
       : `eve: sandbox command finished (exit ${result.exitCode}): ${command}`,
   );
   return result;
@@ -123,10 +122,9 @@ export async function executeBashOnSandbox(
 async function toBashResult(
   sandbox: SandboxSession,
   command: string,
-  jobId: string,
+  launched: BashJobLaunchOutput | undefined,
   raw: SandboxCommandResult,
 ): Promise<BashResult> {
-  const launched = parseBashJobLaunchOutput(raw);
   if (launched === undefined) {
     // The launcher failed before it reported a job; its own output says why.
     return completed(raw.exitCode, raw, NOTHING_SKIPPED);
@@ -137,6 +135,7 @@ async function toBashResult(
   }
   const skipped = { stderr: launched.stderrSkippedBytes, stdout: launched.stdoutSkippedBytes };
   if (launched.state === "running") {
+    const { jobId } = launched;
     return {
       ...formatStreams(launched, skipped),
       jobId,

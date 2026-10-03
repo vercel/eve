@@ -47,18 +47,33 @@ export const BASH_INPUT_SCHEMA = defineJsonSchema<BashToolInput>({
  * Output schema for the provided `bash` tool.
  */
 export const BASH_OUTPUT_SCHEMA = defineJsonSchema<BashToolOutput>({
-  type: "object",
-  properties: {
-    status: { type: "string", enum: ["completed", "running"] },
-    exitCode: { type: "number" },
-    jobId: { type: "string" },
-    message: { type: "string" },
-    stderr: { type: "string" },
-    stdout: { type: "string" },
-    truncated: { type: "boolean" },
-  },
-  required: ["status", "stderr", "stdout", "truncated"],
-  additionalProperties: false,
+  oneOf: [
+    {
+      type: "object",
+      properties: {
+        status: { const: "completed" },
+        exitCode: { type: "number" },
+        stderr: { type: "string" },
+        stdout: { type: "string" },
+        truncated: { type: "boolean" },
+      },
+      required: ["status", "exitCode", "stderr", "stdout", "truncated"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        status: { const: "running" },
+        jobId: { type: "string" },
+        message: { type: "string" },
+        stderr: { type: "string" },
+        stdout: { type: "string" },
+        truncated: { type: "boolean" },
+      },
+      required: ["status", "jobId", "message", "stderr", "stdout", "truncated"],
+      additionalProperties: false,
+    },
+  ],
 });
 
 /**
